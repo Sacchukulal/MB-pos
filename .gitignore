@@ -1,0 +1,82 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependency directories
+node_modules
+jspm_packages
+
+# Build outputs
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Operating System Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.Spotlight-V100
+.Trashes
+
+# Environment Variables (Security)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database Files (Local dev data)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Tauri Specific
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# TypeScript
+*.tsbuildinfo
+
+# One-off migration/debug scripts and backups (kept locally, not versioned)
+fix_*.cjs
+stitch.cjs
+original_account.tsx
+*.css_debug
+
+# Signing keys / secret material ? NEVER commit
+*.key
+*.key.pub
+temp_priv*.txt
+extract.txt
+
+# One-off local helper scripts and backups (not versioned)
+set_secret.cjs
+set_new_secret.cjs
+swap.cjs
+swap.js
+bump_styles.cjs
+replace_css.cjs
+update_fg_colors.cjs
+easy_bill_backup.patch
+
+# Local session files
+.claude/settings.local.json
+PHASE2_REPORT.md

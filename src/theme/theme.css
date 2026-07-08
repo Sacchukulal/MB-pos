@@ -1,0 +1,632 @@
+/* ============================================================
+ * MAGIC BILL — Centralized Theme System
+ * ============================================================
+ * This file is the SINGLE SOURCE OF TRUTH for all visual tokens.
+ *
+ * HOW IT WORKS
+ * ------------
+ * 1. Every colour / shadow / border used anywhere in the app is
+ *    defined here as a CSS custom property (variable).
+ * 2. Themes are activated by setting  data-theme="dark|light|blue"
+ *    on <html>.  The value is persisted in localStorage under the
+ *    key "magicbill_theme".
+ * 3. Components consume variables like  var(--bg-primary)  and
+ *    NEVER hard-code hex / rgba values.
+ *
+ * ADDING A NEW THEME
+ * ------------------
+ * Copy one of the existing [data-theme="..."] blocks, give it a
+ * new name, and adjust the variable values.  That's it — every
+ * component will pick it up automatically.
+ * ============================================================ */
+
+/* ---------- DEFAULT / DARK THEME ---------- */
+:root {
+  /* ==== CORE UI/UX INFRASTRUCTURE ==== */
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  /* Sizes are rem-based — the app-wide scale is the html font-size in styles/base.css.
+     xs/sm sit higher than the classic scale so dense UI text stays easily readable. */
+  --text-xs: 0.8125rem;
+  --text-sm: 0.9375rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Borders & Radius */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --border-thin: 1px;
+  --border-thick: 2px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.25s ease;
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Opacity */
+  --opacity-disabled: 0.5;
+  --opacity-hover: 0.8;
+
+  --receipt-bg: #ffffff;
+  --receipt-text: #000000;
+}
+
+:root,
+[data-theme="dark"] {
+  /* ---- Backgrounds ---- */
+  --bg-primary:   #0a0a0f;
+  --bg-secondary: #111827;
+  --bg-tertiary:  #1a1f2e;
+  --bg-hover:     #1f2937;
+  --bg-elevated:  #1e2535;
+  --bg-inset:     rgba(0, 0, 0, 0.25);
+
+  /* ---- Text (brightened for high legibility) ---- */
+  --text-primary:   #ffffff;
+  --text-secondary: #d8dfe9;
+  --text-tertiary:  #aab6c6;
+  --text-inverse:   #0a0a0f;
+
+  /* ---- Borders (brighter, clearly visible divisions) ---- */
+  --border-color:   #4a596e;
+  --border-hover:   #607089;
+  --border-subtle:  rgba(255, 255, 255, 0.18);
+
+  /* ---- Accent (Primary brand colour) — white in Dark theme ---- */
+  --accent:         #ffffff;
+  --accent-hover:   #e2e8f0;
+  --accent-fg:      #0a0a0f;
+  --accent-subtle:  rgba(255, 255, 255, 0.12);
+  --accent-muted:   rgba(255, 255, 255, 0.30);
+
+  /* ---- Semantic colours ---- */
+  --success:        #34d399;
+  --success-subtle: rgba(52, 211, 153, 0.12);
+  --success-fg:     #022c22;
+
+  --warning:        #fbbf24;
+  --warning-subtle: rgba(251, 191, 36, 0.12);
+  --warning-fg:     #422006;
+
+  --danger:         #f87171;
+  --danger-subtle:  rgba(248, 113, 113, 0.12);
+  --danger-fg:      #450a0a;
+
+  --info:           #60a5fa;
+  --info-subtle:    rgba(96, 165, 250, 0.12);
+  --info-fg:        #172554;
+
+  /* ---- Chart / Data-viz palette ---- */
+  --chart-1: #34d399;
+  --chart-2: #60a5fa;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #f87171;
+  --chart-6: #f472b6;
+  --chart-7: #22d3ee;
+  --chart-8: #2dd4bf;
+
+  /* ---- Shadows ---- */
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg:  0 10px 25px rgba(0, 0, 0, 0.45);
+  --shadow-xl:  0 20px 40px rgba(0, 0, 0, 0.55);
+
+  /* ---- Overlays ---- */
+  --overlay:        rgba(0, 0, 0, 0.65);
+  --overlay-heavy:  rgba(0, 0, 0, 0.85);
+
+  /* ---- Sidebar ---- */
+  --sidebar-bg:         #0f1115;
+  --sidebar-text:       #ccd4e0;
+  --sidebar-active-text: #ffffff;
+  --sidebar-active-bg:  rgba(255, 255, 255, 0.14);
+  --sidebar-hover-bg:   rgba(255, 255, 255, 0.08);
+  --sidebar-border:     rgba(255, 255, 255, 0.12);
+
+
+
+  /* ---- Legacy compatibility aliases ---- */
+  /* These map old variable names used in existing CSS to the new system */
+  --primary:        var(--accent);
+  --primary-fg:     var(--accent-fg);
+  --primary-hover:  var(--accent-hover);
+  --bg-light:       var(--bg-primary);
+  --bg-white:       var(--bg-secondary);
+  --active-bg:      var(--bg-hover);
+  --tab-active-bg:  var(--bg-primary);
+  --tab-hover-bg:   var(--bg-hover);
+  --sb-text:        var(--sidebar-text);
+  --sb-active-text: var(--sidebar-active-text);
+  --sb-active-bg:   var(--sidebar-active-bg);
+
+  /* ---- Color scheme for native controls ---- */
+  color-scheme: dark;
+}
+
+/* ---------- LIGHT THEME ---------- */
+[data-theme="light"] {
+  /* ---- Backgrounds ----
+   * Main area is a warm off-white so white panels stand out clearly.
+   * bg-inset is used for inputs/code blocks — must be visibly distinct.
+   * bg-hover gives a clear rollover signal on list rows. */
+  --bg-primary:   #eef0f4;
+  --bg-secondary: #ffffff;
+  --bg-tertiary:  #e4e7ed;
+  --bg-hover:     #d8dce5;
+  --bg-elevated:  #ffffff;
+  --bg-inset:     #f0f2f6;
+
+  /* ---- Text ----
+   * Primary: near-black for maximum readability.
+   * Secondary: dark slate — readable but clearly subordinate.
+   * Tertiary: medium slate — labels & placeholders, still legible. */
+  --text-primary:   #0b1120;
+  --text-secondary: #26334a;
+  --text-tertiary:  #3d4a5f;
+  --text-inverse:   #f8fafc;
+
+  /* ---- Borders ----
+   * Strengthened so divisions are clearly visible on light backgrounds. */
+  --border-color:   #94a3b8;
+  --border-hover:   #64748b;
+  --border-subtle:  #aeb9c8;
+
+  /* ---- Accent ---- */
+  --accent:         #000000;
+  --accent-hover:   #1a1a1a;
+  --accent-fg:      #ffffff;
+  --accent-subtle:  rgba(0, 0, 0, 0.08);
+  --accent-muted:   rgba(0, 0, 0, 0.15);
+
+  /* ---- Semantic colours ----
+   * All "subtle" variants raised to ≥12% so they're visibly tinted. */
+  --success:        #047857;
+  --success-subtle: rgba(4, 120, 87, 0.12);
+  --success-fg:     #ffffff;
+
+  --warning:        #b45309;
+  --warning-subtle: rgba(180, 83, 9, 0.12);
+  --warning-fg:     #ffffff;
+
+  --danger:         #b91c1c;
+  --danger-subtle:  rgba(185, 28, 28, 0.12);
+  --danger-fg:      #ffffff;
+
+  --info:           #1d4ed8;
+  --info-subtle:    rgba(29, 78, 216, 0.12);
+  --info-fg:        #ffffff;
+
+  /* ---- Chart palette ---- */
+  --chart-1: #047857;
+  --chart-2: #1d4ed8;
+  --chart-3: #b45309;
+  --chart-4: #6d28d9;
+  --chart-5: #b91c1c;
+  --chart-6: #be185d;
+  --chart-7: #0369a1;
+  --chart-8: #334155;
+
+  /* ---- Shadows ----
+   * Noticeably stronger so cards lift off the background. */
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md:  0 4px 14px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --shadow-lg:  0 10px 28px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.08);
+  --shadow-xl:  0 20px 48px rgba(0, 0, 0, 0.18), 0 8px 20px rgba(0, 0, 0, 0.10);
+
+  /* ---- Overlays ---- */
+  --overlay:        rgba(15, 23, 42, 0.45);
+  --overlay-heavy:  rgba(15, 23, 42, 0.70);
+
+  /* ---- Sidebar ----
+   * Slightly off-white so it contrasts the main bg. */
+  --sidebar-bg:          #f5f7fa;
+  --sidebar-text:        #2f3d52;
+  --sidebar-active-text: #000000;
+  --sidebar-active-bg:   rgba(0, 0, 0, 0.08);
+  --sidebar-hover-bg:    rgba(15, 23, 42, 0.07);
+  --sidebar-border:      rgba(15, 23, 42, 0.12);
+
+  /* ---- Legacy aliases ---- */
+  --primary:        var(--accent);
+  --primary-fg:     var(--accent-fg);
+  --primary-hover:  var(--accent-hover);
+  --bg-light:       var(--bg-primary);
+  --bg-white:       var(--bg-secondary);
+  --active-bg:      var(--bg-hover);
+  --tab-active-bg:  var(--bg-primary);
+  --tab-hover-bg:   var(--bg-hover);
+  --sb-text:        var(--sidebar-text);
+  --sb-active-text: var(--sidebar-active-text);
+  --sb-active-bg:   var(--sidebar-active-bg);
+
+  color-scheme: light;
+}
+
+/* ---------- BLUE THEME ---------- */
+[data-theme="blue"] {
+  /* ---- Backgrounds ---- */
+  --bg-primary:   #0c1222;
+  --bg-secondary: #111a2e;
+  --bg-tertiary:  #162040;
+  --bg-hover:     #1a2744;
+  --bg-elevated:  #192338;
+  --bg-inset:     rgba(0, 0, 0, 0.3);
+
+  /* ---- Text (brightened) ---- */
+  --text-primary:   #f2f6fc;
+  --text-secondary: #c2cddf;
+  --text-tertiary:  #9aa9c2;
+  --text-inverse:   #0c1222;
+
+  /* ---- Borders (brighter divisions) ---- */
+  --border-color:   #38496c;
+  --border-hover:   #4a5c80;
+  --border-subtle:  rgba(150, 180, 230, 0.20);
+
+  /* ---- Accent (Blue brand) ---- */
+  --accent:         #3b82f6;
+  --accent-hover:   #2563eb;
+  --accent-fg:      #ffffff;
+  --accent-subtle:  rgba(59, 130, 246, 0.12);
+  --accent-muted:   rgba(59, 130, 246, 0.25);
+
+  /* ---- Semantic colours ---- */
+  --success:        #34d399;
+  --success-subtle: rgba(52, 211, 153, 0.12);
+  --success-fg:     #022c22;
+
+  --warning:        #fbbf24;
+  --warning-subtle: rgba(251, 191, 36, 0.12);
+  --warning-fg:     #422006;
+
+  --danger:         #f87171;
+  --danger-subtle:  rgba(248, 113, 113, 0.12);
+  --danger-fg:      #450a0a;
+
+  --info:           #93c5fd;
+  --info-subtle:    rgba(147, 197, 253, 0.12);
+  --info-fg:        #172554;
+
+  /* ---- Chart palette ---- */
+  --chart-1: #34d399;
+  --chart-2: #60a5fa;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #f87171;
+  --chart-6: #f472b6;
+  --chart-7: #22d3ee;
+  --chart-8: #38bdf8;
+
+  /* ---- Shadows ---- */
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg:  0 10px 25px rgba(0, 0, 0, 0.5);
+  --shadow-xl:  0 20px 40px rgba(0, 0, 0, 0.6);
+
+  /* ---- Overlays ---- */
+  --overlay:        rgba(0, 0, 0, 0.7);
+  --overlay-heavy:  rgba(0, 0, 0, 0.85);
+
+  /* ---- Sidebar ---- */
+  --sidebar-bg:         #0a1020;
+  --sidebar-text:       #bcc8dc;
+  --sidebar-active-text: #60a5fa;
+  --sidebar-active-bg:  rgba(59, 130, 246, 0.16);
+  --sidebar-hover-bg:   rgba(255, 255, 255, 0.08);
+  --sidebar-border:     rgba(150, 180, 230, 0.16);
+
+  /* ---- Legacy aliases ---- */
+  --primary:        var(--accent);
+  --primary-fg:     var(--accent-fg);
+  --primary-hover:  var(--accent-hover);
+  --bg-light:       var(--bg-primary);
+  --bg-white:       var(--bg-secondary);
+  --active-bg:      var(--bg-hover);
+  --tab-active-bg:  var(--bg-primary);
+  --tab-hover-bg:   var(--bg-hover);
+  --sb-text:        var(--sidebar-text);
+  --sb-active-text: var(--sidebar-active-text);
+  --sb-active-bg:   var(--sidebar-active-bg);
+
+  color-scheme: dark;
+}
+
+
+/* ============================================================
+ * REUSABLE UTILITY CLASSES (consumed by all components)
+ * ============================================================ */
+
+/* --- Toast Notification (single definition) --- */
+.toast-notification {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  background-color: var(--accent);
+  color: var(--accent-fg);
+  padding: 0.85rem 1.25rem;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 9999;
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  animation: toastSlideIn 0.3s ease-out;
+  max-width: 400px;
+}
+
+@keyframes toastSlideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* --- Inset Panel (dark grouped background) --- */
+.inset-panel {
+  background: var(--bg-inset);
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.inset-panel--lg {
+  padding: 1.5rem;
+}
+
+/* --- Section Divider --- */
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 1rem 0;
+}
+
+.section-divider--dashed {
+  border-top-style: dashed;
+}
+
+/* --- Ghost Button (transparent bg, border) --- */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+/* --- Danger Button --- */
+.btn-danger {
+  background: var(--danger);
+  color: var(--danger-fg);
+  border: none;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+}
+
+.btn-danger:hover {
+  filter: brightness(1.1);
+}
+
+/* --- Badge --- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.badge--success {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.badge--warning {
+  background: var(--warning-subtle);
+  color: var(--warning);
+}
+
+.badge--danger {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.badge--info {
+  background: var(--info-subtle);
+  color: var(--info);
+}
+
+/* --- Expired Plan Overlay (shared between Dashboard/Reports) --- */
+.expired-plan-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 2rem;
+  border-radius: var(--radius-lg);
+}
+
+.expired-plan-card {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  padding: 3rem;
+  border-radius: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 500px;
+  text-align: center;
+  box-shadow: var(--shadow-xl);
+}
+
+.expired-plan-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--danger-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+  border: 2px solid color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+@keyframes pulseRed {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 40%, transparent); }
+  70%  { box-shadow: 0 0 0 20px color-mix(in srgb, var(--danger) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 0%, transparent); }
+}
+
+.upgrade-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--danger) 0%, color-mix(in srgb, var(--danger) 70%, #000) 100%);
+  color: var(--danger-fg);
+  font-weight: 600;
+  font-size: 1.1rem;
+  padding: 0.875rem 2rem;
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 15px -3px color-mix(in srgb, var(--danger) 50%, transparent);
+  border: 1px solid var(--border-subtle);
+  animation: pulseRed 2s infinite;
+}
+
+.upgrade-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px color-mix(in srgb, var(--danger) 60%, transparent);
+  filter: brightness(1.1);
+}
+
+/* --- Modal Overlay --- */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+  backdrop-filter: blur(4px);
+}
+
+.modal-overlay--heavy {
+  background: var(--overlay-heavy);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card {
+  background: var(--bg-secondary);
+  padding: 2rem;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  max-width: 480px;
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+}
+
+/* --- Icon Button --- */
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.icon-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.icon-btn--danger:hover {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+/* --- Loading States --- */
+.loading-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* --- Text Blink Animation --- */
+@keyframes text-blink-animation {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+.text-blink {
+  animation: text-blink-animation 1.5s ease-in-out infinite;
+}
+
+/* --- Smooth body transition for theme changes --- */
+body,
+body * {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: 0s; /* set to 0.2s for smooth transition on toggle */
+}
+

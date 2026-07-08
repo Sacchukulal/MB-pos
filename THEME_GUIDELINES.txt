@@ -1,0 +1,77 @@
+======================================================
+MAGIC BILL - UI & THEME GUIDELINES
+======================================================
+
+1. SINGLE SOURCE OF TRUTH
+All colour, sizing, radius, shadow and typography tokens are defined in
+`src/theme/theme.css`. Components must NEVER hardcode hex (`#FFFFFF`) or
+rgb/rgba colour values. The ONLY allowed exceptions are:
+  - The printed Bill/KOT preview (always white paper / black ink).
+  - Pure-black drop shadows / overlays, e.g. `rgba(0,0,0,0.3)` for depth.
+Everything else MUST consume a token via `var(--token)`.
+
+2. HOW THEMING WORKS
+Themes are activated by setting `data-theme="dark|light|blue|indigo|custom"`
+on `<html>` (see `src/theme/ThemeContext.tsx`). Each theme block in
+theme.css redefines the SAME set of tokens. Because every component reads
+tokens (never raw colours), switching the attribute re-skins the whole app.
+
+3. THE TOKEN CONTRACT  (use these — nothing else)
+Backgrounds (lightest surface a user sits on → deepest):
+  --bg-primary    app window background
+  --bg-secondary  panels / cards / inputs   (alias: --bg-white)
+  --bg-tertiary   table headers / chips / raised strips
+  --bg-elevated   popovers / elevated cards
+  --bg-hover      row / control hover state
+  --bg-inset      sunken wells inside panels
+Text (ALWAYS pick by role, never by colour):
+  --text-primary    headings & main copy
+  --text-secondary  labels & supporting copy
+  --text-tertiary   hints, placeholders, meta
+  --text-inverse    text on an --accent / solid fill
+Borders:
+  --border-color   default divisions
+  --border-hover   hovered control borders
+  --border-subtle  faint hairlines on panels
+Accent / brand (alias: --primary, --primary-fg, --primary-hover):
+  --accent, --accent-hover, --accent-fg, --accent-subtle, --accent-muted
+Semantic (each has -subtle bg + -fg foreground):
+  --success / --warning / --danger / --info
+Shadows:   --shadow-sm | -md | -lg | -xl
+Radius:    --radius-xs … --radius-2xl, --radius-full
+Spacing:   --space-1 … --space-12
+Type:      --font-sans, --font-mono, --text-xs…3xl, --font-normal…bold
+Charts:    --chart-1 … --chart-8  (read in JS via getComputedStyle)
+
+CONTRAST RULE: text on --bg-* uses --text-*; text on --accent uses
+--accent-fg or --text-inverse; text on a semantic fill uses its -fg.
+Follow this and contrast is guaranteed in every theme.
+
+Example (React inline style):
+  DO:  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+  DON'T: style={{ background: '#111827', color: '#999' }}
+
+4. COMPONENT CSS
+Keyframes / :hover / :focus rules go in `src/theme/components.css` or
+`App.css` — not in inline <style> tags. Structural layout (flex/grid,
+sizing) lives in App.css; it may use spacing/radius tokens but should not
+introduce new colour values.
+
+5. THE "CUSTOM" THEME  (contrast-safe by construction)
+The custom theme does NOT let the user paint individual elements. Instead
+the user picks only:  Mode (Dark/Light) + Base tint + Accent.
+`deriveCustomVars()` in ThemeContext.tsx then GENERATES the full token set
+as one coherent tonal ramp (backgrounds, text, borders, sidebar, semantics)
+at fixed lightness steps, and writes them as inline CSS variables on <html>.
+Because all surfaces share one hue/lightness family and text steps are
+fixed against that family, ANY base+accent choice stays readable.
+=> To change how custom themes look, edit deriveCustomVars (one place).
+=> Do NOT reintroduce per-element colour pickers; it breaks contrast.
+
+6. ADDING A NEW FIXED THEME
+A. theme.css: copy a `[data-theme="x"]` block, set every token.
+B. ThemeContext.tsx: add an entry to the THEMES array (id, label,
+   description, 4-swatch preview). The picker renders it automatically.
+
+By adhering to this contract, any new component inherits the active theme
+seamlessly and every present/future theme — including custom — looks right.
