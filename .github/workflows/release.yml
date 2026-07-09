@@ -1,5 +1,11 @@
 name: Release
 
+# Windows-only signed release, triggered by pushing a v* tag on MB-pos.
+# Builds the NSIS installer + updater artifacts and publishes them to the
+# PUBLIC repo Sacchukulal/MB-pos-releases (this code repo stays private —
+# installed apps fetch latest.json anonymously from the public repo).
+# RELEASES_TOKEN: PAT with write access to MB-pos-releases.
+
 on:
   push:
     tags:
@@ -9,14 +15,7 @@ jobs:
   release:
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'windows-latest'
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -27,19 +26,22 @@ jobs:
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
 
       - name: install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: app-v__VERSION__
+          owner: Sacchukulal
+          repo: MB-pos-releases
+          tagName: v__VERSION__
           releaseName: 'Magic Bill v__VERSION__'
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}

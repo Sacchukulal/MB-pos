@@ -80,3 +80,5 @@ easy_bill_backup.patch
 # Local session files
 .claude/settings.local.json
 PHASE2_REPORT.md
+PHASE3_REPORT.md
+POS_RELEASE_REPORT.md
