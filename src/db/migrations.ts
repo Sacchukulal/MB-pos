@@ -205,6 +205,11 @@ async function baseSchema(db: Database) {
     await addColumn(db, table, "token_number", "INTEGER", "NULL");
     await addColumn(db, table, "bill_number", "TEXT", "NULL");
   }
+  // Cloud sync bookkeeping (outbox pattern): rows start unsynced and are pushed
+  // to Supabase in batches by src/services/sync/billSync.ts.
+  await addColumn(db, "finalized_orders", "synced", "INTEGER", "0");
+  await addColumn(db, "finalized_orders", "sync_attempts", "INTEGER", "0");
+  await addColumn(db, "finalized_orders", "last_sync_error", "TEXT", "''");
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS customers (

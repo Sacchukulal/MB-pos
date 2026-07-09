@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { STORAGE_KEYS } from "../config/constants";
 import { openDatabase } from "../db/client";
 import { syncSubscriptionFromRemote } from "../services/license/licenseService";
+import { startBillSync, stopBillSync } from "../services/sync/billSync";
 import { SettingsProvider, useSettings } from "../hooks/useSettings";
 import { ToastProvider } from "../hooks/useToast";
 import { UnsavedGuardContext, type SaveFn } from "../hooks/useUnsavedGuard";
@@ -162,6 +163,8 @@ export default function App() {
         setDbReady(true);
         // Refresh the license snapshot in the background (silent when offline).
         syncSubscriptionFromRemote().catch(() => {});
+        // Periodic cloud bill sync (no-op until a license is active; never blocks UI).
+        startBillSync();
       } catch (error) {
         console.error("Failed to initialize database:", error);
         if (!cancelled) setDbError(String(error));
@@ -169,6 +172,7 @@ export default function App() {
     })();
     return () => {
       cancelled = true;
+      stopBillSync();
     };
   }, [dbFolderPath]);
 
