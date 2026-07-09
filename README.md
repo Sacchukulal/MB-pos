@@ -17,7 +17,7 @@ A lightweight, offline-first desktop POS for restaurants, built with **Tauri v2 
 *   **Credit customers (khata):** balances, partial payments, settlements, printable statements.
 *   **Expenses & Staff** management.
 *   **Theming:** Dark / Light / Ocean Blue / fully custom palette (auto-balanced for contrast).
-*   **Licensing:** one-device hardware-bound license via Firebase, offline grace period.
+*   **Licensing:** one-device hardware-bound license via Supabase Edge Functions (MB-backend repo), offline grace period.
 *   **Auto-update:** signed updates from GitHub Releases.
 *   **Local database:** SQLite in a user-chosen folder — works fully offline.
 
@@ -45,11 +45,11 @@ npm run tauri build   # production installers → src-tauri/target/release/bundl
 src/
 ├── app/            App shell: navigation, sidebar, onboarding, auto-update UI
 ├── components/ui/  Reusable UI kit (Modal, ConfirmDialog, Toast, StatCard, …)
-├── config/         Constants, defaults, Firebase config
+├── config/         Constants, defaults, Supabase config
 ├── db/             SQLite client, migrations, repositories (the only SQL layer)
 ├── features/       One folder per screen (billing, reports, dashboard, settings, …)
 ├── hooks/          useSettings, useToast, usePlanGate, useUnsavedGuard
-├── services/       printing/ (ESC/POS toolkit + templates), license/
+├── services/       printing/ (ESC/POS toolkit + templates), license/, sync/ (cloud bill sync)
 ├── styles/         base.css, ui.css, features.css
 ├── theme/          Design tokens + ThemeContext (custom palette derivation)
 ├── types/          Domain & settings types

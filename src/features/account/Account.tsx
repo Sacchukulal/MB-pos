@@ -26,6 +26,7 @@ import {
   getStoredLicenseKey,
 } from "../../services/license/licenseService";
 import { evaluatePlan, type PlanStatus } from "../../services/license/planStatus";
+import { pushUnsyncedBills } from "../../services/sync/billSync";
 import * as subscriptionRepo from "../../db/repositories/subscriptionRepo";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import type { SubscriptionState, UserDetails } from "../../types";
@@ -87,6 +88,8 @@ export default function Account({ dbReady }: AccountProps) {
         setLicenseKey(key);
         setUserDetails(result.user);
         await loadLocal();
+        // Kick the outbox immediately so back-fill starts now, not next interval.
+        pushUnsyncedBills().catch(() => {});
       } else {
         setError(result.message);
         // A key that is invalid or moved to another device de-authorizes this one.

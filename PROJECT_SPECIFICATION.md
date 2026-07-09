@@ -15,8 +15,9 @@ built with **Tauri v2 (Rust) + React 19 + TypeScript + SQLite** (via
 bills and KOTs, GST, UPI QR payments, token numbers, table/parcel/self-service orders,
 credit (khata) customers, expenses, and sales analytics.
 
-Cloud pieces: **Firebase Firestore** for license/subscription verification (one device
-per license, hardware-bound), and the **Tauri updater** pulling from GitHub Releases.
+Cloud pieces: **Supabase** (Edge Functions in the MB-backend repo) for
+license/subscription verification (one device per license, hardware-bound) and
+periodic bill sync, and the **Tauri updater** pulling from GitHub Releases.
 
 ### Tech stack (current)
 
@@ -27,7 +28,7 @@ per license, hardware-bound), and the **Tauri updater** pulling from GitHub Rele
 | DB | SQLite file `restaurant.db` in a user-chosen folder |
 | Charts | Recharts |
 | Icons | lucide-react (+ Tabler icons webfont — barely used) |
-| Cloud | Firebase (Firestore only in practice) |
+| Cloud | Supabase (Edge Functions: activate-license, license-status, sync-bills) |
 | Printing | Raw ESC/POS bytes → Win32 spooler (`WritePrinter`), text fallback via PowerShell `Out-Printer` |
 | Updates | `@tauri-apps/plugin-updater` → GitHub Releases `latest.json` |
 
@@ -195,12 +196,14 @@ per license, hardware-bound), and the **Tauri updater** pulling from GitHub Rele
   start, current, print size), bill numbering (daily reset, prefix, start, current).
 
 ### 2.10 Account / Licensing
-- Activation screen: enter license key (Firestore `users/{key}` doc) with
+- Activation screen: enter license key (row in the Supabase `licenses` table,
+  verified via the `activate-license` Edge Function) with
   “Restore previous key” shortcut.
 - **One-device enforcement**: license binds to a hardware ID (SMBIOS UUID, fallback
   MAC, from a Rust command); already-bound-elsewhere → hard block with device name;
-  heartbeat `device.lastSeen` refresh; App-level sync also detects a transferred
-  binding and locks the device back to activation.
+  heartbeat `device_last_seen` refresh (server-side); App-level sync also detects a
+  transferred binding (`license-status` → `unbound`) and locks the device back to
+  activation.
 - Logged-in view: hero card with initials avatar, status chip
   (ACTIVE / GRACE PERIOD / EXPIRED / LOCKED), plan chip, Sync and Deactivate buttons,
   identity panel (name/business/mobile/email), plan panel (next billing date, days
@@ -250,7 +253,7 @@ All tables live in one SQLite file. Singleton tables use `id INTEGER PRIMARY KEY
 
 **localStorage keys**: `dbFolderPath`, `orderTypeLocked`, `lockedOrderType`, `dashboardTimeRange`, `magicbill_license_key`, `magicbill_license_key_history`, `magicbill_theme`, `magicbill_custom_colors`.
 
-**Firestore** (`users/{licenseKey}`): `displayName, email, mobileNumber, restaurantName, subscription{status, planId, id, nextBillingDate, updatedAt}, device{id, name, platform, boundAt, lastSeen}`. Rules file `firestore.rules` in repo.
+**Supabase** (`licenses` row, via MB-backend Edge Functions): `display_name, email, mobile_number, restaurant_name, status, plan_id, subscription_id, next_billing_date, updated_at, device_id, device_name, device_platform, device_bound_at, device_last_seen`. Bills sync to the `bills` table (jsonb `items`) via `sync-bills`. Schema lives in the MB-backend repo.
 
 ---
 
@@ -276,14 +279,14 @@ All tables live in one SQLite file. Singleton tables use `id INTEGER PRIMARY KEY
 17. **Global click handler steals focus** to the search input on any non-input click on the Billing page — interferes with text selection/buttons in edge cases (it does check selection, but not e.g. focusable custom controls).
 
 ### Security / hygiene issues
-18. **Tauri updater signing private key committed** — in `package.json` (`tauri` script env), `.env`, `tauri.key`, `temp_priv.txt`, `temp_priv_no_bom.txt`, `test_key.key`. Anyone with repo access can sign malicious updates. **Rotate the key and purge from history.**
+18. ~~Tauri updater signing private key committed~~ — **RESOLVED (Phase 3, 2026-07):** key rotated (password-protected), secrets moved to `.env`/CI secrets, leaked key purged from git history, old key files deleted.
 19. **CSP is `null`** in `tauri.conf.json`.
-20. Firebase config hardcoded in source (acceptable for Firebase web keys, but should live in one config module / env).
+20. ~~Firebase config hardcoded in source~~ — **RESOLVED (Phase 2, 2026-07):** Firebase removed entirely; Supabase endpoints in `src/config/supabase.ts`, anon key via `.env`.
 21. Legacy branding: Rust prints doc name “EasyBill Receipt”, temp file `easy_bill_receipt.txt`.
 
 ### Dead code / repo cruft
 - `src/components/Settings.tsx` — entire tabbed settings screen, never imported by App.
-- `greet` Rust command; `auth` export in `firebase.ts` (Firebase Auth initialized, never used).
+- `greet` Rust command. (~~`auth` export in `firebase.ts`~~ — removed with Firebase in Phase 2.)
 - `bill_settings.bill_font_size`, `logo_opacity` (UI removed, column remains), `kot_settings.body_font_family/size` (superseded by per-section sizes), `logo_position` values `bottom`/`watermark` handled in `buildPrintData` but not offered by UI.
 - `Reports.tsx` prop `onRequireAuth` never used.
 - Repo root litter: `original_account.tsx`, `easy_bill_backup.patch` (974 KB), `extract.txt`, `bump_styles.cjs`, `fix_bill_settings.cjs`, `fix_panels.cjs`, `fix_printer_settings.cjs`, `fix_staff_menu.cjs`, `replace_css.cjs`, `set_secret.cjs`, `set_new_secret.cjs`, `stitch.cjs`, `swap.cjs`, `swap.js`, `update_fg_colors.cjs`, key/temp files, `src/theme/components.css_debug`.

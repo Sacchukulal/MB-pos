@@ -10,7 +10,7 @@ behavior changes (bug fixes), and anything a future maintainer should know.
 src/
 ├── app/           App shell: App, Sidebar, Onboarding, UpdateUI, useUpdater, screens
 ├── components/ui/ Modal, ConfirmDialog, PlanGate, Spinner, EmptyState, StatCard
-├── config/        constants.ts, defaults.ts, firebase.ts
+├── config/        constants.ts, defaults.ts, supabase.ts
 ├── db/            client.ts, migrations.ts (schema_version), repositories/*
 ├── features/      billing/ dashboard/ reports/ expenses/ menu/ staff/ settings/ account/
 ├── hooks/         useToast, useSettings, usePlanGate, useUnsavedGuard

@@ -118,7 +118,8 @@ export async function listRecentFinalizedOrders(dateFilterSql: string): Promise<
 }
 
 export async function updateOrderPaymentMode(id: number, mode: string): Promise<void> {
-  await getDb().execute("UPDATE finalized_orders SET payment_mode = $1 WHERE id = $2", [mode, id]);
+  // synced=0 re-queues the bill so the cloud copy picks up the edit (upsert-safe).
+  await getDb().execute("UPDATE finalized_orders SET payment_mode = $1, synced = 0 WHERE id = $2", [mode, id]);
 }
 
 /** Parse an order's cart JSON defensively (older rows may be corrupted). */
