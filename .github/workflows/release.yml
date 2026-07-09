@@ -1,10 +1,9 @@
 name: Release
 
-# Windows-only signed release, triggered by pushing a v* tag on MB-pos.
-# Builds the NSIS installer + updater artifacts and publishes them to the
-# PUBLIC repo Sacchukulal/MB-pos-releases (this code repo stays private —
-# installed apps fetch latest.json anonymously from the public repo).
-# RELEASES_TOKEN: PAT with write access to MB-pos-releases.
+# Windows-only signed release, triggered by pushing a v* tag.
+# Publishes the NSIS installer, its .sig, and the updater manifest
+# (latest.json) as a GitHub Release on THIS repo, using the automatic
+# GITHUB_TOKEN — no personal tokens, no cross-repo publishing.
 
 on:
   push:
@@ -34,12 +33,10 @@ jobs:
 
       - uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          owner: Sacchukulal
-          repo: MB-pos-releases
           tagName: v__VERSION__
           releaseName: 'Magic Bill v__VERSION__'
           releaseBody: 'See the assets to download this version and install.'

@@ -38,7 +38,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/Sacchukulal/MB-pos-releases/releases/latest/download/latest.json"
+        "https://github.com/Sacchukulal/MB-pos/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwNzAwQjIzNUE5RkU5MkYKUldRdjZaOWFJd3R3c0I0ZlFWWE5CNXhjUTRLT2cyd2VvWENRVDFlMDEvcWxYVFNIRzF2OEdqTVgK"
     }
