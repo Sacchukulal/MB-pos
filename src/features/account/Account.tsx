@@ -268,6 +268,7 @@ export default function Account({ dbReady }: AccountProps) {
             <UserCircle size={15} /> Identity
           </div>
           <div>
+            <InfoRow icon={<KeyRound size={15} />} label="License Key" value={licenseKey} />
             <InfoRow icon={<UserCircle size={15} />} label="Name" value={userDetails?.displayName} />
             <InfoRow icon={<Building2 size={15} />} label="Business" value={userDetails?.restaurantName} />
             <InfoRow icon={<Phone size={15} />} label="Mobile" value={userDetails?.mobileNumber} />

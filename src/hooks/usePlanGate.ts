@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getSubscription, touchLastChecked } from "../db/repositories/subscriptionRepo";
 import { evaluatePlan, type PlanInfo } from "../services/license/planStatus";
+import { getStoredLicenseKey } from "../services/license/licenseService";
 
 interface PlanGateState {
   checking: boolean;
@@ -22,6 +23,12 @@ export function usePlanGate(dbReady: boolean): PlanGateState {
     let cancelled = false;
     (async () => {
       try {
+        // No license activated on THIS install → locked, regardless of any
+        // subscription snapshot cached in the shared DB from a prior activation.
+        if (!getStoredLicenseKey()) {
+          if (!cancelled) setState({ checking: false, plan: { status: "expired", remainingDays: 0, usable: false } });
+          return;
+        }
         const sub = await getSubscription();
         const plan = evaluatePlan(sub);
         if (plan.usable) await touchLastChecked();
