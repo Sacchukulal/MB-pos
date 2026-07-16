@@ -18,6 +18,7 @@ import { useToast } from "../../hooks/useToast";
 import { todayISO } from "../../utils/format";
 import * as menuRepo from "../../db/repositories/menuRepo";
 import * as ordersRepo from "../../db/repositories/ordersRepo";
+import { requestBillSync } from "../../services/sync/billSync";
 import * as expensesRepo from "../../db/repositories/expensesRepo";
 import * as customersRepo from "../../db/repositories/customersRepo";
 import { printReport } from "../../services/printing/printService";
@@ -110,6 +111,7 @@ export default function Reports({ dbReady }: ReportsProps) {
   const handleUpdatePaymentMode = async (orderId: number) => {
     try {
       await ordersRepo.updateOrderPaymentMode(orderId, newPaymentMode);
+      requestBillSync(); // re-sync the edited bill to the cloud right away
       setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, payment_mode: newPaymentMode } : o)));
       setEditingPaymentModeId(null);
       toast("Payment mode updated successfully.", "success");

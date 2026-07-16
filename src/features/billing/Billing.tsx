@@ -11,6 +11,7 @@ import * as ordersRepo from "../../db/repositories/ordersRepo";
 import * as customersRepo from "../../db/repositories/customersRepo";
 import { claimOrderNumbers } from "../../db/repositories/settingsRepo";
 import { printBill, printKot } from "../../services/printing/printService";
+import { requestBillSync } from "../../services/sync/billSync";
 import { findTableOrder, occupiedOrdersForTable } from "./tableUtils";
 import { AddCustomerPopup, AlphabetPopup, PrintConfirmPopup, QtyPopup, TablePopup } from "./popups";
 import { CartPanel, PaymentPanel, ProcessingOrdersPanel } from "./panels";
@@ -410,6 +411,7 @@ export default function Billing({ dbReady }: BillingProps) {
         }
         await ordersRepo.insertFinalizedOrder(draft, billNumber, tokenNumber, createdAt);
       }
+      requestBillSync(); // instant cloud upload (debounced, fire-and-forget)
 
       if (skipPrint) {
         toast(`Checkout successful! Total: Rs. ${total.toFixed(2)}`, "success");
