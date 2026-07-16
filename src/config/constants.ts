@@ -49,3 +49,7 @@ export const STORAGE_KEYS = {
 } as const;
 
 export const RENEW_URL = "https://magicbill.in";
+
+/** Latest Android app APK — each MB-android release attaches magic-bill.apk. */
+export const MOBILE_APK_URL =
+  "https://github.com/Sacchukulal/MB-android/releases/latest/download/magic-bill.apk";

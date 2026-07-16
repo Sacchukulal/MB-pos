@@ -17,7 +17,8 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import { RENEW_URL } from "../../config/constants";
+import { QRCodeSVG } from "qrcode.react";
+import { MOBILE_APK_URL, RENEW_URL } from "../../config/constants";
 import { getDeviceInfo, type DeviceInfo } from "../../services/license/device";
 import {
   activateLicense,
@@ -386,6 +387,28 @@ export default function Account({ dbReady }: AccountProps) {
         </div>
         <div className="device-id-chip" title={deviceInfo?.id || licenseKey}>
           {(deviceInfo?.id || licenseKey).slice(0, 24)}…
+        </div>
+      </div>
+
+      {/* Mobile app QR */}
+      <div className="section" style={{ flexDirection: "row", alignItems: "center", gap: "var(--space-4)" }}>
+        <div
+          style={{
+            background: "#ffffff",
+            borderRadius: "var(--radius-lg)",
+            padding: 10,
+            flexShrink: 0,
+            lineHeight: 0,
+          }}
+        >
+          <QRCodeSVG value={MOBILE_APK_URL} size={116} marginSize={1} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Magic Bill Mobile App</div>
+          <div className="text-secondary" style={{ fontSize: "var(--text-sm)" }}>
+            Scan this QR code with your phone to download the Magic Bill mobile app.
+            View reports, manage staff, and check your subscription — all from your phone.
+          </div>
         </div>
       </div>
 
