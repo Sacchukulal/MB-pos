@@ -170,18 +170,7 @@ export default function Account({ dbReady }: AccountProps) {
 
         <div className="section" style={{ gap: "var(--space-4)" }}>
           {error && (
-            <div
-              style={{
-                color: "var(--danger)",
-                padding: "var(--space-3) var(--space-4)",
-                background: "var(--danger-subtle)",
-                borderRadius: "var(--radius-md)",
-                fontSize: "var(--text-sm)",
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--space-2)",
-              }}
-            >
+            <div className="account-error">
               <XCircle size={16} />
               {error}
             </div>
@@ -248,41 +237,46 @@ export default function Account({ dbReady }: AccountProps) {
         </div>
       </div>
 
-      {error && (
-        <div
-          style={{
-            color: "var(--danger)",
-            padding: "var(--space-3) var(--space-4)",
-            background: "var(--danger-subtle)",
-            borderRadius: "var(--radius-md)",
-            fontSize: "var(--text-sm)",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {error && <div className="account-error">{error}</div>}
 
       <div className="account-grid">
-        {/* Identity */}
-        <div className="section">
-          <div className="section-head">
-            <UserCircle size={15} /> Identity
+        <div className="account-col">
+          {/* Identity */}
+          <div className="section">
+            <div className="section-head">
+              <UserCircle size={15} /> Identity
+            </div>
+            <div>
+              <InfoRow icon={<KeyRound size={15} />} label="License Key" value={licenseKey} />
+              <InfoRow icon={<UserCircle size={15} />} label="Name" value={userDetails?.displayName} />
+              <InfoRow icon={<Building2 size={15} />} label="Business" value={userDetails?.restaurantName} />
+              <InfoRow icon={<Phone size={15} />} label="Mobile" value={userDetails?.mobileNumber} />
+              <InfoRow icon={<Mail size={15} />} label="Email" value={userDetails?.email} />
+            </div>
           </div>
-          <div>
-            <InfoRow icon={<KeyRound size={15} />} label="License Key" value={licenseKey} />
-            <InfoRow icon={<UserCircle size={15} />} label="Name" value={userDetails?.displayName} />
-            <InfoRow icon={<Building2 size={15} />} label="Business" value={userDetails?.restaurantName} />
-            <InfoRow icon={<Phone size={15} />} label="Mobile" value={userDetails?.mobileNumber} />
-            <InfoRow icon={<Mail size={15} />} label="Email" value={userDetails?.email} />
+
+          {/* Mobile app QR */}
+          <div className="section qr-panel">
+            <div className="qr-code-box">
+              <QRCodeSVG value={MOBILE_APK_URL} size={92} marginSize={1} />
+            </div>
+            <div className="panel-body">
+              <div className="panel-title">Magic Bill Mobile App</div>
+              <div className="panel-desc">
+                Scan with your phone to download the Magic Bill mobile app.
+                View reports, manage staff, and check your subscription on the go.
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Plan status */}
-        <div className="section">
-          <div className="section-head">
-            <Activity size={15} /> Plan Status
-          </div>
-          {subscription ? (
+        <div className="account-col">
+          {/* Plan status */}
+          <div className="section">
+            <div className="section-head">
+              <Activity size={15} /> Plan Status
+            </div>
+            {subscription ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -355,59 +349,27 @@ export default function Account({ dbReady }: AccountProps) {
                 </a>
               )}
             </div>
-          ) : (
-            <div className="text-secondary" style={{ fontSize: "var(--text-sm)", padding: "var(--space-4) 0" }}>
-              No subscription data found. Try syncing.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Device panel */}
-      <div className="section device-panel" style={{ flexDirection: "row", alignItems: "center" }}>
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: "var(--radius-lg)",
-            flexShrink: 0,
-            background: "var(--success-subtle)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <ShieldCheck size={22} color="var(--success)" />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Device Locked {deviceInfo?.name ? `· ${deviceInfo.name}` : ""}</div>
-          <div className="text-secondary" style={{ fontSize: "var(--text-sm)" }}>
-            This license is locked to this desktop only. One key works on a single device at a time.
+            ) : (
+              <div className="text-secondary" style={{ fontSize: "var(--text-sm)", padding: "var(--space-4) 0" }}>
+                No subscription data found. Try syncing.
+              </div>
+            )}
           </div>
-        </div>
-        <div className="device-id-chip" title={deviceInfo?.id || licenseKey}>
-          {(deviceInfo?.id || licenseKey).slice(0, 24)}…
-        </div>
-      </div>
 
-      {/* Mobile app QR */}
-      <div className="section" style={{ flexDirection: "row", alignItems: "center", gap: "var(--space-4)" }}>
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: "var(--radius-lg)",
-            padding: 10,
-            flexShrink: 0,
-            lineHeight: 0,
-          }}
-        >
-          <QRCodeSVG value={MOBILE_APK_URL} size={116} marginSize={1} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Magic Bill Mobile App</div>
-          <div className="text-secondary" style={{ fontSize: "var(--text-sm)" }}>
-            Scan this QR code with your phone to download the Magic Bill mobile app.
-            View reports, manage staff, and check your subscription — all from your phone.
+          {/* Device panel */}
+          <div className="section device-panel">
+            <div className="panel-icon">
+              <ShieldCheck size={20} color="var(--success)" />
+            </div>
+            <div className="panel-body">
+              <div className="panel-title">Device Locked{deviceInfo?.name ? ` · ${deviceInfo.name}` : ""}</div>
+              <div className="panel-desc">
+                This license is locked to this desktop only. One key works on a single device at a time.
+              </div>
+            </div>
+            <div className="device-id-chip" title={deviceInfo?.id || licenseKey}>
+              {(deviceInfo?.id || licenseKey).slice(0, 24)}…
+            </div>
           </div>
         </div>
       </div>
