@@ -1,5 +1,5 @@
 import { PAPER } from "../../config/constants";
-import type { PaperSize, TokenPrintSize } from "../../types";
+import type { LinePattern, PaperSize, TokenPrintSize } from "../../types";
 
 /**
  * ESC/POS text-mode toolkit — the only place raw printer command bytes live.
@@ -22,6 +22,20 @@ export const CMD = {
 /** Character columns for a paper size. */
 export function lineWidth(paperSize: PaperSize): number {
   return PAPER[paperSize]?.columns ?? PAPER["3inch"].columns;
+}
+
+/** Closest text-mode stand-in for each separator style. */
+const SEPARATOR_CHARS: Record<LinePattern, string> = {
+  dashed: "-",
+  dotted: ".",
+  solid: "_",
+  bold: "=",
+  double: "=",
+};
+
+/** A full-width separator line in the configured style. */
+export function separatorLine(pattern: LinePattern, width: number): string {
+  return (SEPARATOR_CHARS[pattern] ?? "-").repeat(width);
 }
 
 export function padRight(text: unknown, width: number): string {
@@ -54,6 +68,66 @@ export function sizeCmd(size?: string, allowWidth = true): string {
 /** Wrap an already-padded line with size + bold codes (codes are non-printing). */
 export function styled(line: string, size?: string, bold?: boolean, allowWidth = true): string {
   return `${sizeCmd(size, allowWidth)}${bold ? CMD.BOLD_ON : ""}${line}${bold ? CMD.BOLD_OFF : ""}${CMD.SIZE_NORMAL}`;
+}
+
+/**
+ * Character-cell multiplier for a px font-size setting, applied to width and
+ * height alike so bigger text grows in both directions.
+ */
+export function sizeScale(size?: string): number {
+  const px = parseInt(String(size || "12"), 10) || 12;
+  if (px >= 24) return 3;
+  if (px >= 16) return 2;
+  return 1;
+}
+
+/** GS ! command for an equal width/height multiplier (clamped to 1..3). */
+export function scaleCmd(scale: number): string {
+  const n = Math.min(3, Math.max(1, Math.floor(scale))) - 1;
+  return `\x1D\x21${String.fromCharCode((n << 4) | n)}`;
+}
+
+/**
+ * Wrap an already-padded line so both width and height scale with the size
+ * setting. Callers must lay the line out in scaledWidth() columns.
+ */
+export function scaled(line: string, size?: string, bold?: boolean): string {
+  return `${scaleCmd(sizeScale(size))}${bold ? CMD.BOLD_ON : ""}${line}${bold ? CMD.BOLD_OFF : ""}${CMD.SIZE_NORMAL}`;
+}
+
+/** Columns available on `width`-column paper once a size setting is scaled up. */
+export function scaledWidth(width: number, size?: string): number {
+  return Math.max(1, Math.floor(width / sizeScale(size)));
+}
+
+/** Break text into lines of at most `width` chars, splitting on spaces where possible. */
+export function wrapText(text: string, width: number): string[] {
+  const source = String(text ?? "").trim();
+  if (width < 1) return [source];
+  if (source.length <= width) return [source];
+
+  const lines: string[] = [];
+  let current = "";
+  source.split(/\s+/).forEach((word) => {
+    let w = word;
+    // A single word longer than the column has to be hard-split.
+    while (w.length > width) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      lines.push(w.substring(0, width));
+      w = w.substring(width);
+    }
+    if (!current) current = w;
+    else if (current.length + 1 + w.length <= width) current += ` ${w}`;
+    else {
+      lines.push(current);
+      current = w;
+    }
+  });
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
 }
 
 /** ESC/POS size command for the token line per the configured print size. */

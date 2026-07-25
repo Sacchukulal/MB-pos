@@ -9,6 +9,14 @@ export type PrinterMode = "Single Printer" | "Multiple Printers";
 export type KotStyle = "Single KOT" | "Category-wise KOTs";
 export type GstType = "Inclusive" | "Exclusive";
 export type SearchMatchMode = "starts" | "contains";
+/** Separator line style, shared by the bill and the KOT. */
+export type LinePattern = "dashed" | "dotted" | "solid" | "bold" | "double";
+/**
+ * How receipts are sent to the printer.
+ * "graphics" rasterizes the exact preview (font family, size, bold) as a bitmap;
+ * "text" uses the printer's built-in font and ESC/POS size multipliers.
+ */
+export type PrintEngine = "graphics" | "text";
 
 export interface Category {
   id: number;
@@ -124,10 +132,13 @@ export interface BillDesign {
   showCashier: boolean;
   showToken: boolean;
   fontFamily: string;
+  linePattern: LinePattern;
   storeName: SectionStyle;
   addressMeta: SectionStyle;
   table: SectionStyle;
-  totals: SectionStyle;
+  /** Subtotal + GST lines. */
+  subtotals: SectionStyle;
+  grandTotal: SectionStyle;
   footer: SectionStyle;
   separators: {
     header: boolean;
@@ -179,6 +190,7 @@ export interface PrinterConfig {
   defaultPrinter: string;
   kotStyle: KotStyle;
   paperSize: PaperSize;
+  printEngine: PrintEngine;
   printBold: boolean;
   kotConfirmation: boolean;
   billConfirmation: boolean;

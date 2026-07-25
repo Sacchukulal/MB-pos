@@ -1,22 +1,49 @@
 import { QrCode, UtensilsCrossed } from "lucide-react";
 import { PAPER } from "../../config/constants";
-import type { BillDesign, KotDesign, PaperSize, StoreProfile } from "../../types";
+import { clampSize } from "../../services/printing/fit";
+import { TOKEN_SCALE } from "../../services/printing/templates/billCanvas";
+import type { BillDesign, KotDesign, LinePattern, PaperSize, StoreProfile, TokenPrintSize } from "../../types";
 
 /**
- * On-screen approximations of the printed bill and KOT. Always white paper /
- * black ink (the only sanctioned hardcoded colors — real receipts don't theme).
+ * On-screen mirror of the printed bill and KOT. With the graphics print engine
+ * these are drawn to paper from the same measurements, so the preview is the
+ * contract — keep any layout change here in sync with templates/*Canvas.ts.
+ * Always white paper / black ink (the only sanctioned hardcoded colors).
  */
 
-const dashed = { borderTop: "1px dashed #000", margin: "8px 0" } as const;
+/** CSS border for each separator style. */
+const LINE_CSS: Record<LinePattern, string> = {
+  dashed: "1px dashed #000",
+  dotted: "2px dotted #000",
+  solid: "1px solid #000",
+  bold: "2px solid #000",
+  double: "3px double #000",
+};
+
+function Sep({ pattern }: { pattern: LinePattern }) {
+  return <div style={{ borderTop: LINE_CSS[pattern] ?? LINE_CSS.dashed, margin: "8px 0" }} />;
+}
+
+/** Token line size, matching TOKEN_SCALE used by the printer. */
+function tokenFontSize(baseSize: string, printSize: TokenPrintSize): string {
+  const base = parseInt(baseSize, 10) || 12;
+  return `${Math.round(base * (TOKEN_SCALE[printSize] ?? TOKEN_SCALE.Large))}px`;
+}
 
 interface BillPreviewProps {
   bill: BillDesign;
   store: StoreProfile;
   paperSize: PaperSize;
+  tokenPrintSize: TokenPrintSize;
 }
 
-export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
+export function BillPreview({ bill, store, paperSize, tokenPrintSize }: BillPreviewProps) {
   const width = PAPER[paperSize]?.previewPx ?? 320;
+  const line = bill.linePattern;
+  const metaSize = clampSize(bill.addressMeta.size, "billMeta", bill.fontFamily, paperSize);
+  const tableSize = clampSize(bill.table.size, "billTable", bill.fontFamily, paperSize);
+  const subSize = clampSize(bill.subtotals.size, "billTotals", bill.fontFamily, paperSize);
+  const grandSize = clampSize(bill.grandTotal.size, "billTotals", bill.fontFamily, paperSize);
   const gstRate = bill.gst.percentage;
   const exclusive = bill.gst.type === "Exclusive";
   const SAMPLE_SUBTOTAL = 510;
@@ -40,7 +67,7 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
         <div style={{ fontWeight: bill.storeName.bold ? "bold" : "normal", fontSize: bill.storeName.size }}>
           {store.hotelName || "YOUR HOTEL NAME"}
         </div>
-        <div style={{ fontSize: bill.addressMeta.size, marginTop: 4, fontWeight: bill.addressMeta.bold ? "bold" : "normal" }}>
+        <div style={{ fontSize: metaSize, marginTop: 4, fontWeight: bill.addressMeta.bold ? "bold" : "normal" }}>
           {bill.showAddress && <div>{store.address || "123, Street Name, City"}</div>}
           {bill.showPhone && <div>Tel: {store.phoneNumber || "9876543210"}</div>}
           {bill.showGstin && store.gstNumber && <div>GSTIN: {store.gstNumber}</div>}
@@ -48,10 +75,10 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
         </div>
       </div>
 
-      {bill.separators.header && <div style={dashed} />}
+      {bill.separators.header && <Sep pattern={line} />}
 
       {/* Meta */}
-      <div style={{ fontSize: bill.addressMeta.size, fontWeight: bill.addressMeta.bold ? "bold" : "normal" }}>
+      <div style={{ fontSize: metaSize, fontWeight: bill.addressMeta.bold ? "bold" : "normal" }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <div>Bill No: 1234</div>
           <div>Date: 26-Feb-2026</div>
@@ -62,12 +89,21 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
         </div>
       </div>
 
-      {bill.separators.meta && <div style={dashed} />}
+      {bill.separators.meta && <Sep pattern={line} />}
 
       {bill.showToken && (
         <>
-          <div style={{ textAlign: "center", fontWeight: "bold", margin: "8px 0", fontSize: "1.2em" }}>TOKEN: 105</div>
-          {bill.separators.token && <div style={dashed} />}
+          <div
+            style={{
+              textAlign: "center",
+              fontWeight: "bold",
+              margin: "8px 0",
+              fontSize: tokenFontSize(metaSize, tokenPrintSize),
+            }}
+          >
+            TOKEN: 105
+          </div>
+          {bill.separators.token && <Sep pattern={line} />}
         </>
       )}
 
@@ -77,12 +113,12 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
           width: "100%",
           borderCollapse: "collapse",
           margin: "5px 0",
-          fontSize: bill.table.size,
+          fontSize: tableSize,
           fontWeight: bill.table.bold ? "bold" : "normal",
         }}
       >
         <thead>
-          <tr style={{ borderBottom: bill.separators.tableHeader ? "1px dashed #000" : "none" }}>
+          <tr style={{ borderBottom: bill.separators.tableHeader ? LINE_CSS[line] : "none" }}>
             <th style={{ textAlign: "left", padding: bill.rowHeight, fontWeight: "inherit" }}>Item</th>
             <th style={{ textAlign: "right", padding: bill.rowHeight, fontWeight: "inherit" }}>Qty</th>
             <th style={{ textAlign: "right", padding: bill.rowHeight, fontWeight: "inherit" }}>Price</th>
@@ -105,10 +141,10 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
         </tbody>
       </table>
 
-      {bill.separators.tableBody && <div style={dashed} />}
+      {bill.separators.tableBody && <Sep pattern={line} />}
 
       {/* Totals */}
-      <div style={{ fontSize: bill.totals.size, fontWeight: bill.totals.bold ? "bold" : "normal" }}>
+      <div style={{ fontSize: subSize, fontWeight: bill.subtotals.bold ? "bold" : "normal" }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span>Subtotal:</span>
           <span>{SAMPLE_SUBTOTAL.toFixed(2)}</span>
@@ -132,9 +168,16 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
           ))}
       </div>
 
-      {bill.separators.subtotals && <div style={dashed} />}
+      {bill.separators.subtotals && <Sep pattern={line} />}
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: bill.totals.size }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontWeight: bill.grandTotal.bold ? "bold" : "normal",
+          fontSize: grandSize,
+        }}
+      >
         <span>GRAND TOTAL:</span>
         <span>
           {bill.gst.enabled && exclusive
@@ -143,7 +186,7 @@ export function BillPreview({ bill, store, paperSize }: BillPreviewProps) {
         </span>
       </div>
 
-      {bill.separators.grandTotal && <div style={{ borderBottom: "1px dashed #000", margin: "8px 0" }} />}
+      {bill.separators.grandTotal && <Sep pattern={line} />}
 
       {/* Footer */}
       <div
@@ -183,10 +226,14 @@ interface KotPreviewProps {
   kot: KotDesign;
   fontFamily: string;
   paperSize: PaperSize;
+  linePattern: LinePattern;
+  tokenPrintSize: TokenPrintSize;
 }
 
-export function KotPreview({ kot, fontFamily, paperSize }: KotPreviewProps) {
+export function KotPreview({ kot, fontFamily, paperSize, linePattern, tokenPrintSize }: KotPreviewProps) {
   const width = PAPER[paperSize]?.previewPx ?? 320;
+  const metaSize = clampSize(kot.meta.size, "kotMeta", fontFamily, paperSize);
+  const itemSize = clampSize(kot.items.size, "kotItems", fontFamily, paperSize);
   const meta: string[] = [];
   if (kot.showBillNo) meta.push("Bill No: 1234");
   if (kot.showOrderType) meta.push("Order: Dining");
@@ -198,19 +245,21 @@ export function KotPreview({ kot, fontFamily, paperSize }: KotPreviewProps) {
       <div style={{ textAlign: "center", marginBottom: 10 }}>
         {kot.showToken && (
           <>
-            <div style={{ margin: "8px 0", fontWeight: "bold", fontSize: "1.4em" }}>TOKEN: 105</div>
-            {kot.separators.token && <div style={dashed} />}
+            <div style={{ margin: "8px 0", fontWeight: "bold", fontSize: tokenFontSize(metaSize, tokenPrintSize) }}>
+              TOKEN: 105
+            </div>
+            {kot.separators.token && <Sep pattern={linePattern} />}
           </>
         )}
         {kot.showTitle && (
           <>
             <div style={{ fontWeight: kot.title.bold ? "bold" : "normal", fontSize: kot.title.size }}>--- KOT ---</div>
-            {kot.separators.header && <div style={dashed} />}
+            {kot.separators.header && <Sep pattern={linePattern} />}
           </>
         )}
       </div>
 
-      <div style={{ fontSize: kot.meta.size, fontWeight: kot.meta.bold ? "bold" : "normal" }}>
+      <div style={{ fontSize: metaSize, fontWeight: kot.meta.bold ? "bold" : "normal" }}>
         {meta.length > 0 &&
           (kot.metaTwoColumn
             ? Array.from({ length: Math.ceil(meta.length / 2) }, (_, i) => (
@@ -221,19 +270,19 @@ export function KotPreview({ kot, fontFamily, paperSize }: KotPreviewProps) {
               ))
             : meta.map((m, i) => <div key={i}>{m}</div>))}
 
-        {meta.length > 0 && kot.separators.meta && <div style={dashed} />}
+        {meta.length > 0 && kot.separators.meta && <Sep pattern={linePattern} />}
 
         <table
           style={{
             width: "100%",
             borderCollapse: "collapse",
             margin: "5px 0",
-            fontSize: kot.items.size,
+            fontSize: itemSize,
             fontWeight: kot.items.bold ? "bold" : "normal",
           }}
         >
           <thead>
-            <tr style={{ borderBottom: kot.separators.tableHeader ? "1px dashed #000" : "none" }}>
+            <tr style={{ borderBottom: kot.separators.tableHeader ? LINE_CSS[linePattern] : "none" }}>
               <th style={{ textAlign: "left", padding: kot.rowHeight, fontWeight: "inherit" }}>Item</th>
               <th style={{ textAlign: "right", padding: kot.rowHeight, fontWeight: "inherit" }}>Qty</th>
             </tr>
@@ -252,7 +301,7 @@ export function KotPreview({ kot, fontFamily, paperSize }: KotPreviewProps) {
           </tbody>
         </table>
 
-        {kot.separators.tableBody && <div style={dashed} />}
+        {kot.separators.tableBody && <Sep pattern={linePattern} />}
       </div>
     </div>
   );

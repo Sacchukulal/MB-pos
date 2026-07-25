@@ -1,4 +1,4 @@
-import type { OrderType, PaperSize, PaymentMode } from "../types";
+import type { LinePattern, OrderType, PaperSize, PaymentMode } from "../types";
 
 /** Thermal paper geometry: character columns for text layout, dot width for images. */
 export const PAPER: Record<PaperSize, { columns: number; dots: number; previewPx: number }> = {
@@ -6,6 +6,33 @@ export const PAPER: Record<PaperSize, { columns: number; dots: number; previewPx
   "3inch": { columns: 48, dots: 576, previewPx: 320 },
   "4inch": { columns: 64, dots: 800, previewPx: 380 },
 };
+
+/** Padding inside .paper-preview — the preview's usable content width is previewPx - 2x this. */
+export const PREVIEW_PADDING_PX = 20;
+/** Unprinted margin kept at each edge of the paper, in printer dots. */
+export const PRINT_MARGIN_DOTS = 8;
+
+/**
+ * Preview-pixel → printer-dot scale. Derived from the two content widths so a
+ * layout that fits the on-screen preview always fits the paper, and vice versa.
+ */
+export function printScale(paperSize: PaperSize): number {
+  const paper = PAPER[paperSize] ?? PAPER["3inch"];
+  return (paper.dots - 2 * PRINT_MARGIN_DOTS) / (paper.previewPx - 2 * PREVIEW_PADDING_PX);
+}
+
+/** Usable width of the preview paper, in CSS px — the layout budget for both preview and print. */
+export function contentWidthPx(paperSize: PaperSize): number {
+  return (PAPER[paperSize] ?? PAPER["3inch"]).previewPx - 2 * PREVIEW_PADDING_PX;
+}
+
+export const LINE_PATTERNS: { value: LinePattern; label: string }[] = [
+  { value: "dashed", label: "Dashed  – – – –" },
+  { value: "dotted", label: "Dotted  · · · ·" },
+  { value: "solid", label: "Solid  ————" },
+  { value: "bold", label: "Bold Solid  ▬▬▬▬" },
+  { value: "double", label: "Double  ═══" },
+];
 
 export const ORDER_TYPES: OrderType[] = ["Self Service", "Table", "Parcel"];
 export const PAYMENT_MODES: PaymentMode[] = ["Cash", "Card", "UPI", "Credit"];

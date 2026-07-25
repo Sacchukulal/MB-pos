@@ -7,7 +7,7 @@ import { useUnsavedGuard } from "../../hooks/useUnsavedGuard";
 import { savePrinterConfig } from "../../db/repositories/settingsRepo";
 import * as menuRepo from "../../db/repositories/menuRepo";
 import { listPrinters, printTestSlip } from "../../services/printing/printService";
-import type { Category, KotStyle, PaperSize, PrinterConfig, PrinterMode, TokenPrintSize } from "../../types";
+import type { Category, KotStyle, PaperSize, PrintEngine, PrinterConfig, PrinterMode, TokenPrintSize } from "../../types";
 
 interface PrinterSettingsProps {
   dbReady: boolean;
@@ -162,8 +162,23 @@ export default function PrinterSettings({ dbReady }: PrinterSettingsProps) {
             <label>Print Options</label>
             <label className="check">
               <input type="checkbox" checked={form.printBold} onChange={(e) => setForm({ ...form, printBold: e.target.checked })} />
-              Bold &amp; Dark (ESC/POS)
+              Bold &amp; Dark (all sections)
             </label>
+          </div>
+          <div className="field">
+            <label>Print Engine</label>
+            <select
+              className="select"
+              value={form.printEngine}
+              onChange={(e) => setForm({ ...form, printEngine: e.target.value as PrintEngine })}
+            >
+              <option value="graphics">Graphics — exact match with the preview</option>
+              <option value="text">Text — printer's built-in font (fastest)</option>
+            </select>
+            <p className="field-hint">
+              Graphics prints the receipt as an image, so your chosen font, size and bold come out exactly as previewed.
+              Text is faster but limited to the printer's built-in font and 1x/2x/3x sizes.
+            </p>
           </div>
         </div>
 

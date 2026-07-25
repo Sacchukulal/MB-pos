@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildDocument, stripEscCodes } from "./escpos";
+import { docToRaster } from "./canvas";
 import { rasterizeImage, upiQrBytes } from "./image";
 import { renderBillText, type BillPrintData } from "./templates/bill";
+import { renderBillDoc } from "./templates/billCanvas";
 import { renderKotText, type KotPrintData } from "./templates/kot";
+import { renderKotDoc } from "./templates/kotCanvas";
 import type { AppSettings, CartItem, Category } from "../../types";
 
 const INVOKE_TIMEOUT_MS = 15_000;
@@ -46,15 +49,23 @@ function toError(e: unknown): string {
 
 /* ------------------------------- bill ------------------------------ */
 
-/** Prints the customer bill: template text + optional logo + optional UPI QR trailer. */
+/**
+ * Prints the customer bill.
+ * Graphics engine: the receipt is drawn on a canvas in the configured font and
+ * sent as a bitmap, so the paper matches the preview. Text engine (and the
+ * automatic fallback) uses the printer's built-in font.
+ */
 export async function printBill(settings: AppSettings, data: BillPrintData): Promise<PrintResult> {
   const { printer, bill, store } = settings;
   if (!printer.defaultPrinter) return { ok: false, error: "NO_PRINTER" };
 
   const text = renderBillText(settings, data);
+  const graphics = printer.printEngine !== "text";
 
+  // The logo is drawn into the canvas in graphics mode; only the text path
+  // needs it as a separate raster block.
   let logoBytes: number[] = [];
-  if (bill.logo.base64 && bill.logo.position === "top") {
+  if (!graphics && bill.logo.base64 && bill.logo.position === "top") {
     try {
       logoBytes = await rasterizeImage(bill.logo.base64, bill.logo.sizePct, printer.paperSize);
     } catch (e) {
@@ -84,12 +95,18 @@ export async function printBill(settings: AppSettings, data: BillPrintData): Pro
     }
   }
 
-  const doc = buildDocument(text, {
-    printBold: printer.printBold,
-    imageBytes: logoBytes,
-    imagePosition: bill.logo.position === "top" ? "top" : "none",
-    trailer,
-  });
+  let doc: number[];
+  if (graphics) {
+    const canvasDoc = await renderBillDoc(settings, data);
+    doc = buildDocument("", { imageBytes: docToRaster(canvasDoc), imagePosition: "top", trailer });
+  } else {
+    doc = buildDocument(text, {
+      printBold: printer.printBold,
+      imageBytes: logoBytes,
+      imagePosition: bill.logo.position === "top" ? "top" : "none",
+      trailer,
+    });
+  }
 
   try {
     await printWithFallback(printer.defaultPrinter, doc, text);
@@ -142,7 +159,10 @@ export async function printKot(
 
   const printTicket = async (target: string, data: KotPrintData) => {
     const text = renderKotText(settings, data);
-    const doc = buildDocument(text, { printBold: printer.printBold });
+    const doc =
+      printer.printEngine !== "text"
+        ? buildDocument("", { imageBytes: docToRaster(renderKotDoc(settings, data)), imagePosition: "top" })
+        : buildDocument(text, { printBold: printer.printBold });
     try {
       await printWithFallback(target, doc, text);
     } catch (e) {

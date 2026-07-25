@@ -1,21 +1,23 @@
-import { useEffect, useState } from "react";
-import { Eye, QrCode, Save, Scissors, Search, Settings2, Type } from "lucide-react";
-import { FONT_FAMILIES, FONT_SIZES, GST_PERCENTAGES } from "../../config/constants";
+import { useEffect, useMemo, useState } from "react";
+import { Eye, Minus, QrCode, Save, Scissors, Search, Settings2, Type } from "lucide-react";
+import { FONT_FAMILIES, FONT_SIZES, GST_PERCENTAGES, LINE_PATTERNS } from "../../config/constants";
+import { clampSize, maxFontSize } from "../../services/printing/fit";
 import { DEFAULT_BILL_DESIGN, DEFAULT_KOT_DESIGN } from "../../config/defaults";
 import { useSettings } from "../../hooks/useSettings";
 import { useToast } from "../../hooks/useToast";
 import { useUnsavedGuard } from "../../hooks/useUnsavedGuard";
 import { saveBillDesign, saveKotDesign } from "../../db/repositories/settingsRepo";
 import { BillPreview, KotPreview } from "./previews";
-import type { BillDesign, GstType, KotDesign, QrMode, SearchMatchMode, SectionStyle } from "../../types";
+import type { BillDesign, GstType, KotDesign, LinePattern, QrMode, SearchMatchMode, SectionStyle } from "../../types";
 
 interface BillSettingsProps {
   dbReady: boolean;
 }
 
-/* Compact -/+ stepper that walks the FONT_SIZES scale. */
-function SizeStepper({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/* Compact -/+ stepper that walks the FONT_SIZES scale, up to an optional ceiling. */
+function SizeStepper({ value, onChange, max }: { value: string; onChange: (v: string) => void; max?: string }) {
   const idx = Math.max(0, FONT_SIZES.indexOf(value));
+  const maxIdx = max ? Math.max(0, FONT_SIZES.indexOf(max)) : FONT_SIZES.length - 1;
   return (
     <div className="stepper">
       <button type="button" onClick={() => onChange(FONT_SIZES[Math.max(0, idx - 1)])} disabled={idx <= 0} aria-label="Decrease size">
@@ -24,8 +26,8 @@ function SizeStepper({ value, onChange }: { value: string; onChange: (v: string)
       <span>{value.replace("px", "")}px</span>
       <button
         type="button"
-        onClick={() => onChange(FONT_SIZES[Math.min(FONT_SIZES.length - 1, idx + 1)])}
-        disabled={idx >= FONT_SIZES.length - 1}
+        onClick={() => onChange(FONT_SIZES[Math.min(maxIdx, idx + 1)])}
+        disabled={idx >= maxIdx}
         aria-label="Increase size"
       >
         +
@@ -34,12 +36,30 @@ function SizeStepper({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
-/* One row: section label + size stepper + bold toggle. */
-function StyleRow({ label, style, onChange }: { label: string; style: SectionStyle; onChange: (s: SectionStyle) => void }) {
+/*
+ * One row: section label + size stepper + bold toggle.
+ * `max` caps sections laid out in columns so Item / Qty / Price / Amt can never
+ * overflow the paper and lose their alignment.
+ */
+function StyleRow({
+  label,
+  style,
+  onChange,
+  max,
+}: {
+  label: string;
+  style: SectionStyle;
+  onChange: (s: SectionStyle) => void;
+  max?: string;
+}) {
+  const capped = max !== undefined && FONT_SIZES.indexOf(style.size) >= FONT_SIZES.indexOf(max);
   return (
     <div className="style-row">
-      <span className="style-row-label">{label}</span>
-      <SizeStepper value={style.size} onChange={(size) => onChange({ ...style, size })} />
+      <span className="style-row-label">
+        {label}
+        {capped && <span className="check-hint"> max {max} for this paper &amp; font</span>}
+      </span>
+      <SizeStepper value={style.size} onChange={(size) => onChange({ ...style, size })} max={max} />
       <label className="check check--inline">
         <input type="checkbox" checked={style.bold} onChange={(e) => onChange({ ...style, bold: e.target.checked })} /> Bold
       </label>
@@ -102,6 +122,36 @@ export default function BillSettings({ dbReady }: BillSettingsProps) {
   const setQrMode = (qrMode: QrMode) => setBill((prev) => ({ ...prev, qrMode }));
 
   const paperSize = settings?.printer.paperSize ?? "3inch";
+  const tokenPrintSize = settings?.printer.token.printSize ?? "Large";
+
+  // Ceilings depend on both the chosen font and the paper, so they are measured live.
+  const caps = useMemo(
+    () => ({
+      billTable: maxFontSize("billTable", bill.fontFamily, paperSize),
+      billMeta: maxFontSize("billMeta", bill.fontFamily, paperSize),
+      billTotals: maxFontSize("billTotals", bill.fontFamily, paperSize),
+      kotItems: maxFontSize("kotItems", bill.fontFamily, paperSize),
+      kotMeta: maxFontSize("kotMeta", bill.fontFamily, paperSize),
+    }),
+    [bill.fontFamily, paperSize]
+  );
+
+  // A font or paper change can invalidate a stored size — pull it back in range.
+  useEffect(() => {
+    setBill((prev) => ({
+      ...prev,
+      addressMeta: { ...prev.addressMeta, size: clampSize(prev.addressMeta.size, "billMeta", prev.fontFamily, paperSize) },
+      table: { ...prev.table, size: clampSize(prev.table.size, "billTable", prev.fontFamily, paperSize) },
+      subtotals: { ...prev.subtotals, size: clampSize(prev.subtotals.size, "billTotals", prev.fontFamily, paperSize) },
+      grandTotal: { ...prev.grandTotal, size: clampSize(prev.grandTotal.size, "billTotals", prev.fontFamily, paperSize) },
+    }));
+    setKot((prev) => ({
+      ...prev,
+      meta: { ...prev.meta, size: clampSize(prev.meta.size, "kotMeta", bill.fontFamily, paperSize) },
+      items: { ...prev.items, size: clampSize(prev.items.size, "kotItems", bill.fontFamily, paperSize) },
+    }));
+  }, [bill.fontFamily, paperSize]);
+
   const store = settings?.store ?? {
     hotelName: "", address: "", phoneNumber: "", gstNumber: "", fssaiNumber: "", upiId: "", merchantName: "", paymentReference: "",
   };
@@ -176,6 +226,28 @@ export default function BillSettings({ dbReady }: BillSettingsProps) {
           </div>
         </div>
 
+        {/* Global separator style */}
+        <div className="section">
+          <div className="section-head">
+            <Minus size={14} /> Line Style (Bill &amp; KOT)
+          </div>
+          <div className="field">
+            <label>Separator Line Pattern</label>
+            <select
+              className="select"
+              value={bill.linePattern}
+              onChange={(e) => setBill({ ...bill, linePattern: e.target.value as LinePattern })}
+            >
+              {LINE_PATTERNS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <p className="field-hint">Applies to every separator line on both the receipt and the kitchen ticket.</p>
+          </div>
+        </div>
+
         {/* Receipt section sizes */}
         <div className="section">
           <div className="section-head">
@@ -183,9 +255,30 @@ export default function BillSettings({ dbReady }: BillSettingsProps) {
           </div>
           <div className="style-rows">
             <StyleRow label="Hotel Name" style={bill.storeName} onChange={(s) => setBill({ ...bill, storeName: s })} />
-            <StyleRow label="Address / Meta" style={bill.addressMeta} onChange={(s) => setBill({ ...bill, addressMeta: s })} />
-            <StyleRow label="Table Items" style={bill.table} onChange={(s) => setBill({ ...bill, table: s })} />
-            <StyleRow label="Totals" style={bill.totals} onChange={(s) => setBill({ ...bill, totals: s })} />
+            <StyleRow
+              label="Address / Meta"
+              style={bill.addressMeta}
+              onChange={(s) => setBill({ ...bill, addressMeta: s })}
+              max={caps.billMeta}
+            />
+            <StyleRow
+              label="Table Items"
+              style={bill.table}
+              onChange={(s) => setBill({ ...bill, table: s })}
+              max={caps.billTable}
+            />
+            <StyleRow
+              label="Subtotal &amp; GST"
+              style={bill.subtotals}
+              onChange={(s) => setBill({ ...bill, subtotals: s })}
+              max={caps.billTotals}
+            />
+            <StyleRow
+              label="Grand Total"
+              style={bill.grandTotal}
+              onChange={(s) => setBill({ ...bill, grandTotal: s })}
+              max={caps.billTotals}
+            />
             <StyleRow label="Footer" style={bill.footer} onChange={(s) => setBill({ ...bill, footer: s })} />
           </div>
         </div>
@@ -366,8 +459,13 @@ export default function BillSettings({ dbReady }: BillSettingsProps) {
           </div>
           <div className="style-rows">
             <StyleRow label="KOT Title" style={kot.title} onChange={(s) => setKot({ ...kot, title: s })} />
-            <StyleRow label="Details (Bill / Order / Table / Date)" style={kot.meta} onChange={(s) => setKot({ ...kot, meta: s })} />
-            <StyleRow label="Items" style={kot.items} onChange={(s) => setKot({ ...kot, items: s })} />
+            <StyleRow
+              label="Details (Bill / Order / Table / Date)"
+              style={kot.meta}
+              onChange={(s) => setKot({ ...kot, meta: s })}
+              max={caps.kotMeta}
+            />
+            <StyleRow label="Items" style={kot.items} onChange={(s) => setKot({ ...kot, items: s })} max={caps.kotItems} />
           </div>
           <div className="field" style={{ maxWidth: 360 }}>
             <label>Row Height (Item Spacing)</label>
@@ -407,12 +505,22 @@ export default function BillSettings({ dbReady }: BillSettingsProps) {
         <div className="preview-caption">
           <Eye size={16} /> Bill Preview
         </div>
-        <BillPreview bill={bill} store={store} paperSize={paperSize} />
+        <BillPreview bill={bill} store={store} paperSize={paperSize} tokenPrintSize={tokenPrintSize} />
         <div className="preview-caption">
           <Eye size={16} /> KOT Preview
         </div>
-        <KotPreview kot={kot} fontFamily={bill.fontFamily} paperSize={paperSize} />
-        <p className="preview-note">Note: This is a digital preview. Actual print may vary depending on your printer hardware.</p>
+        <KotPreview
+          kot={kot}
+          fontFamily={bill.fontFamily}
+          paperSize={paperSize}
+          linePattern={bill.linePattern}
+          tokenPrintSize={tokenPrintSize}
+        />
+        <p className="preview-note">
+          {settings?.printer.printEngine === "text"
+            ? "Note: Printer Settings is set to the Text engine, so the printer's built-in font is used — sizes print in 1x / 2x / 3x steps and the font family is ignored. Switch to Graphics for an exact match."
+            : "Note: printed with the Graphics engine, so the paper matches this preview — font, size and bold included."}
+        </p>
       </div>
     </div>
   );

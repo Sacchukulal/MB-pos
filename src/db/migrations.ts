@@ -63,6 +63,7 @@ async function baseSchema(db: Database) {
   await addColumn(db, "printer_settings", "kot_print_confirmation", "BOOLEAN", "0");
   await addColumn(db, "printer_settings", "bill_print_confirmation", "BOOLEAN", "0");
   await addColumn(db, "printer_settings", "disable_kot", "BOOLEAN", "0");
+  await addColumn(db, "printer_settings", "print_engine", "TEXT", "'graphics'");
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS categories (
@@ -140,6 +141,13 @@ async function baseSchema(db: Database) {
     ["table_bold", "BOOLEAN", "0"],
     ["total_bold", "BOOLEAN", "1"],
     ["footer_bold", "BOOLEAN", "0"],
+    // Totals split into two independently styled sections; NULL means
+    // "inherit the legacy total_* value" (handled in settingsRepo).
+    ["subtotal_font_size", "TEXT", "NULL"],
+    ["subtotal_bold", "BOOLEAN", "NULL"],
+    ["grand_total_font_size", "TEXT", "NULL"],
+    ["grand_total_bold", "BOOLEAN", "NULL"],
+    ["line_pattern", "TEXT", "'dashed'"],
   ];
   for (const [c, t, d] of billCols) await addColumn(db, "bill_settings", c, t, d);
 

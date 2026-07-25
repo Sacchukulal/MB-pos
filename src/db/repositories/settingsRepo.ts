@@ -1,6 +1,7 @@
 import { getDb } from "../client";
 import { toBool, toNum, toStr, toBit } from "../../utils/sqlite";
 import { todayISO } from "../../utils/format";
+import { LINE_PATTERNS } from "../../config/constants";
 import {
   DEFAULT_BILL_DESIGN,
   DEFAULT_KOT_DESIGN,
@@ -12,7 +13,9 @@ import type {
   BillDesign,
   KotDesign,
   KotStyle,
+  LinePattern,
   PaperSize,
+  PrintEngine,
   PrinterConfig,
   PrinterMode,
   QrMode,
@@ -61,8 +64,20 @@ function mapBill(row: any): BillDesign {
     storeName: { size: toStr(row.store_name_size, d.storeName.size), bold: toBool(row.store_name_bold, d.storeName.bold) },
     addressMeta: { size: toStr(row.address_size, d.addressMeta.size), bold: toBool(row.address_bold, d.addressMeta.bold) },
     table: { size: toStr(row.table_font_size, d.table.size), bold: toBool(row.table_bold, d.table.bold) },
-    totals: { size: toStr(row.total_font_size, d.totals.size), bold: toBool(row.total_bold, d.totals.bold) },
+    // Subtotal / Grand Total were one "Totals" section before — fall back to it
+    // so an upgraded database keeps the look the shop already had.
+    subtotals: {
+      size: toStr(row.subtotal_font_size, "") || toStr(row.total_font_size, d.subtotals.size),
+      bold: row.subtotal_bold == null ? toBool(row.total_bold, d.subtotals.bold) : toBool(row.subtotal_bold),
+    },
+    grandTotal: {
+      size: toStr(row.grand_total_font_size, "") || toStr(row.total_font_size, d.grandTotal.size),
+      bold: row.grand_total_bold == null ? toBool(row.total_bold, d.grandTotal.bold) : toBool(row.grand_total_bold),
+    },
     footer: { size: toStr(row.footer_font_size, d.footer.size), bold: toBool(row.footer_bold, d.footer.bold) },
+    linePattern: LINE_PATTERNS.some((p) => p.value === row.line_pattern)
+      ? (row.line_pattern as LinePattern)
+      : d.linePattern,
     separators: {
       header: toBool(row.sep_header, true),
       meta: toBool(row.sep_meta, true),
@@ -122,6 +137,7 @@ function mapPrinter(row: any): PrinterConfig {
     defaultPrinter: toStr(row.default_printer, ""),
     kotStyle: (toStr(row.kot_printing_style, d.kotStyle) as KotStyle) || d.kotStyle,
     paperSize: (["2inch", "3inch", "4inch"].includes(paper) ? paper : d.paperSize) as PaperSize,
+    printEngine: (toStr(row.print_engine, d.printEngine) === "text" ? "text" : "graphics") as PrintEngine,
     printBold: toBool(row.print_bold, d.printBold),
     kotConfirmation: toBool(row.kot_print_confirmation, d.kotConfirmation),
     billConfirmation: toBool(row.bill_print_confirmation, d.billConfirmation),
@@ -198,14 +214,17 @@ export async function saveBillDesign(b: BillDesign): Promise<void> {
        gst_enabled=$26, gst_type=$27, gst_percentage=$28,
        logo_position=$29, logo_base64=$30, logo_size=$31,
        dynamic_upi_qr=$32, static_upi_qr=$33, no_qr_print=$34,
-       row_height=$35, search_match_mode=$36
+       row_height=$35, search_match_mode=$36,
+       subtotal_font_size=$37, subtotal_bold=$38, grand_total_font_size=$39, grand_total_bold=$40,
+       line_pattern=$41
      WHERE id=1`,
     [
       b.footerMessage, toBit(b.showGstin), toBit(b.showFssai), toBit(b.showAddress), toBit(b.showPhone),
       toBit(b.showCashier), toBit(b.showToken),
       b.fontFamily,
       b.storeName.size, toBit(b.storeName.bold), b.addressMeta.size, toBit(b.addressMeta.bold),
-      b.table.size, toBit(b.table.bold), b.totals.size, toBit(b.totals.bold),
+      // Legacy total_* columns keep the subtotal styling so an older build still renders.
+      b.table.size, toBit(b.table.bold), b.subtotals.size, toBit(b.subtotals.bold),
       b.footer.size, toBit(b.footer.bold),
       toBit(b.separators.header), toBit(b.separators.meta), toBit(b.separators.token), toBit(b.separators.tableHeader),
       toBit(b.separators.tableBody), toBit(b.separators.subtotals), toBit(b.separators.grandTotal),
@@ -213,6 +232,8 @@ export async function saveBillDesign(b: BillDesign): Promise<void> {
       b.logo.position, b.logo.base64, b.logo.sizePct,
       toBit(b.qrMode === "dynamic"), toBit(b.qrMode === "static"), toBit(b.qrMode === "none"),
       b.rowHeight, b.searchMatchMode,
+      b.subtotals.size, toBit(b.subtotals.bold), b.grandTotal.size, toBit(b.grandTotal.bold),
+      b.linePattern,
     ]
   );
 }
@@ -246,14 +267,14 @@ export async function savePrinterConfig(p: PrinterConfig, categoryPrinters: Reco
        kot_print_confirmation=$6, bill_print_confirmation=$7, disable_kot=$8,
        token_reset_daily=$9, token_starting_number=$10, token_current_number=$11, token_print_size=$12,
        bill_reset_daily=$13, bill_prefix=$14, bill_starting_number=$15, bill_current_number=$16,
-       last_reset_date=$17
+       last_reset_date=$17, print_engine=$18
      WHERE id=1`,
     [
       p.printerMode, p.defaultPrinter, p.kotStyle, p.paperSize, toBit(p.printBold),
       toBit(p.kotConfirmation), toBit(p.billConfirmation), toBit(p.disableKot),
       toBit(p.token.resetDaily), p.token.startingNumber, p.token.currentNumber, p.token.printSize,
       toBit(p.bill.resetDaily), p.bill.prefix, p.bill.startingNumber, p.bill.currentNumber,
-      p.lastResetDate,
+      p.lastResetDate, p.printEngine,
     ]
   );
 

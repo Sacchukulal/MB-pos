@@ -1,4 +1,4 @@
-import { CMD, lineWidth, padLeft, padRight, styled, tokenBlock, twoColumns } from "../escpos";
+import { CMD, lineWidth, padLeft, padRight, separatorLine, styled, tokenBlock, twoColumns } from "../escpos";
 import { receiptDate, receiptTime, formatAmount } from "../../../utils/format";
 import type { AppSettings, CartItem } from "../../../types";
 
@@ -26,7 +26,7 @@ export interface BillPrintData {
 export function renderBillText(settings: AppSettings, data: BillPrintData): string {
   const { bill, store, printer } = settings;
   const width = lineWidth(printer.paperSize);
-  const sep = "-".repeat(width);
+  const sep = separatorLine(bill.linePattern, width);
   let text = "";
 
   // --- Header ---
@@ -84,23 +84,25 @@ export function renderBillText(settings: AppSettings, data: BillPrintData): stri
   });
   if (bill.separators.tableBody) text += `${sep}\n`;
 
-  // --- Totals ---
-  const totals = bill.totals;
-  const totalLine = (line: string, forceBold = false) =>
-    `${styled(line, totals.size, forceBold || totals.bold, false)}\n`;
-  text += totalLine(`${padRight("Subtotal:", width - 12)}${padLeft(formatAmount(data.subtotal), 12)}`);
+  // --- Totals (subtotal block and grand total are styled independently) ---
+  const subLine = (line: string) => `${styled(line, bill.subtotals.size, bill.subtotals.bold, false)}\n`;
+  text += subLine(`${padRight("Subtotal:", width - 12)}${padLeft(formatAmount(data.subtotal), 12)}`);
   if (data.gst > 0) {
     if (data.gstInclusive) {
-      text += totalLine(`(Includes Rs. ${formatAmount(data.gst)} GST)`);
+      text += subLine(`(Includes Rs. ${formatAmount(data.gst)} GST)`);
     } else {
       const label = data.gstPercentage !== undefined ? `GST (${data.gstPercentage}%):` : "GST:";
-      text += totalLine(`${padRight(label, width - 12)}${padLeft(formatAmount(data.gst), 12)}`);
+      text += subLine(`${padRight(label, width - 12)}${padLeft(formatAmount(data.gst), 12)}`);
     }
   }
   if (bill.separators.subtotals) text += `${sep}\n`;
 
-  // Grand total is always bold.
-  text += totalLine(`${padRight("GRAND TOTAL:", width - 14)}${padLeft(`Rs. ${formatAmount(data.total)}`, 14)}`, true);
+  text += `${styled(
+    `${padRight("GRAND TOTAL:", width - 14)}${padLeft(`Rs. ${formatAmount(data.total)}`, 14)}`,
+    bill.grandTotal.size,
+    bill.grandTotal.bold,
+    false
+  )}\n`;
   if (bill.separators.grandTotal) text += `${sep}\n`;
   text += "\n";
 
