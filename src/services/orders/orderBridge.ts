@@ -191,20 +191,29 @@ async function ensureRemoteUuids(): Promise<void> {
 
 let pushing = false;
 let pushRerun = false;
+let pushForceRerun = false;
 
-async function pushOrdersNow(): Promise<void> {
+/**
+ * @param force republish EVERY open order, not just the dirty ones. Used by
+ * reconcile so the cloud converges on the counter's truth even if a dirty
+ * flag was lost (crash, or an edit racing an in-flight push).
+ */
+async function pushOrdersNow(force = false): Promise<void> {
   if (!live) return;
   if (pushing) {
     pushRerun = true;
+    if (force) pushForceRerun = true;
     return;
   }
   pushing = true;
   try {
     await ensureRemoteUuids();
     const open = await ordersRepo.listProcessingOrders();
-    const dirtyOpen = open.filter((o) => o.cloud_dirty === 1 && o.remote_uuid);
+    const dirtyOpen = open.filter((o) => o.remote_uuid && (force || o.cloud_dirty === 1));
     const dirtyBilled = await ordersRepo.listDirtyFinalizedRemote();
-    const extras = pendingCloudOrders;
+    // Snapshot: anything queued while this request is in flight must survive
+    // the cleanup below and go out on the next push.
+    const extras = pendingCloudOrders.slice();
 
     const orders: WireOrder[] = [
       ...dirtyOpen.map((o) => processingRowToWire(o, printErrors.get(o.remote_uuid!) ?? "")),
@@ -214,7 +223,7 @@ async function pushOrdersNow(): Promise<void> {
     if (orders.length === 0) return;
 
     await api("push_orders", { orders });
-    await ordersRepo.clearProcessingCloudDirty(dirtyOpen.map((o) => o.id));
+    await ordersRepo.clearProcessingCloudDirty(dirtyOpen);
     await ordersRepo.clearFinalizedCloudDirty(dirtyBilled.map((o) => o.id));
     pendingCloudOrders = pendingCloudOrders.filter((o) => !extras.includes(o));
     // Closed orders don't need their print note any more.
@@ -229,7 +238,9 @@ async function pushOrdersNow(): Promise<void> {
     pushing = false;
     if (pushRerun) {
       pushRerun = false;
-      void pushOrdersNow();
+      const rerunForce = pushForceRerun;
+      pushForceRerun = false;
+      void pushOrdersNow(rerunForce);
     }
   }
 }
@@ -251,6 +262,9 @@ async function reconcileNow(): Promise<void> {
     const openClientUuids = open.map((o) => o.remote_uuid).filter(Boolean);
     await api("reconcile_orders", { openClientUuids });
     await setLastReconcileAt(new Date().toISOString());
+    // Republish the full open set: reconcile closes cloud rows the counter no
+    // longer has, this repairs any open order whose cloud copy drifted.
+    await pushOrdersNow(true);
   } catch (e) {
     console.info("[orders] reconcile failed (will retry):", e);
   }

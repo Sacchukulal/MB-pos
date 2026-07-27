@@ -106,13 +106,29 @@ export async function setOrderBridgeFields(
   );
 }
 
-export async function clearProcessingCloudDirty(ids: number[]): Promise<void> {
-  if (ids.length === 0) return;
-  const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
-  await getDb().execute(
-    `UPDATE processing_orders SET cloud_dirty = 0 WHERE id IN (${placeholders})`,
-    ids
-  );
+/**
+ * Clears the dirty flag ONLY for rows that have not changed since they were
+ * read for the push. A blanket clear loses any edit made while the request
+ * was in flight — the row would then never be republished and the phones
+ * would keep showing stale items.
+ */
+export async function clearProcessingCloudDirty(
+  rows: { id: number; updated_at?: string | null }[]
+): Promise<void> {
+  const db = getDb();
+  for (const row of rows) {
+    if (row.updated_at == null) {
+      await db.execute(
+        "UPDATE processing_orders SET cloud_dirty = 0 WHERE id = $1 AND updated_at IS NULL",
+        [row.id]
+      );
+    } else {
+      await db.execute(
+        "UPDATE processing_orders SET cloud_dirty = 0 WHERE id = $1 AND updated_at = $2",
+        [row.id, row.updated_at]
+      );
+    }
+  }
 }
 
 /** Settled bills that still owe the cloud a status='billed' live-order update. */
