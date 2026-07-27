@@ -3,6 +3,7 @@ import { STORAGE_KEYS } from "../config/constants";
 import { openDatabase } from "../db/client";
 import { syncSubscriptionFromRemote } from "../services/license/licenseService";
 import { startBillSync, stopBillSync } from "../services/sync/billSync";
+import { startOrderBridge, stopOrderBridge } from "../services/orders/orderBridge";
 import { SettingsProvider, useSettings } from "../hooks/useSettings";
 import { ToastProvider } from "../hooks/useToast";
 import { UnsavedGuardContext, type SaveFn } from "../hooks/useUnsavedGuard";
@@ -22,6 +23,7 @@ import GeneralSettings from "../features/settings/GeneralSettings";
 import BillSettings from "../features/settings/BillSettings";
 import PrinterSettings from "../features/settings/PrinterSettings";
 import MenuManagement from "../features/menu/MenuManagement";
+import MobileOrders from "../features/settings/MobileOrders";
 import StaffManagement from "../features/staff/StaffManagement";
 
 function Screen({ id, dbReady }: { id: ScreenId; dbReady: boolean }) {
@@ -44,6 +46,8 @@ function Screen({ id, dbReady }: { id: ScreenId; dbReady: boolean }) {
       return <PrinterSettings dbReady={dbReady} />;
     case "settings-menu":
       return <MenuManagement dbReady={dbReady} />;
+    case "settings-tables":
+      return <MobileOrders dbReady={dbReady} />;
     case "settings-staff":
       return <StaffManagement dbReady={dbReady} />;
   }
@@ -165,6 +169,8 @@ export default function App() {
         syncSubscriptionFromRemote().catch(() => {});
         // Periodic cloud bill sync (no-op until a license is active; never blocks UI).
         startBillSync();
+        // Mobile-orders bridge (idles until the owner enables mobile ordering).
+        startOrderBridge();
       } catch (error) {
         console.error("Failed to initialize database:", error);
         if (!cancelled) setDbError(String(error));
@@ -173,6 +179,7 @@ export default function App() {
     return () => {
       cancelled = true;
       stopBillSync();
+      stopOrderBridge();
     };
   }, [dbFolderPath]);
 

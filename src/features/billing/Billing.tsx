@@ -12,6 +12,16 @@ import * as customersRepo from "../../db/repositories/customersRepo";
 import { claimOrderNumbers } from "../../db/repositories/settingsRepo";
 import { printBill, printKot } from "../../services/printing/printService";
 import { requestBillSync } from "../../services/sync/billSync";
+import {
+  discardStaleOrders,
+  getOrderBridgeStatus,
+  printStaleOrders,
+  subscribeNewOrderAlerts,
+  subscribeOrderBridge,
+  subscribeOrdersChanged,
+  type OrderBridgeStatus,
+} from "../../services/orders/orderBridge";
+import { mergeCartLines, subtractCart } from "../../services/orders/wire";
 import { findTableOrder, occupiedOrdersForTable } from "./tableUtils";
 import { AddCustomerPopup, AlphabetPopup, PrintConfirmPopup, QtyPopup, TablePopup } from "./popups";
 import { CartPanel, PaymentPanel, ProcessingOrdersPanel } from "./panels";
@@ -51,6 +61,10 @@ export default function Billing({ dbReady }: BillingProps) {
   const [isPaymentOpen, setIsPaymentOpen] = useState(true);
 
   const [processingOrders, setProcessingOrders] = useState<ProcessingOrder[]>([]);
+  const [bridgeStatus, setBridgeStatus] = useState<OrderBridgeStatus>(() => getOrderBridgeStatus());
+  const [mobileBadge, setMobileBadge] = useState(0);
+  /** A phone changed the LOADED order while the cashier has unsaved edits. */
+  const [remoteUpdate, setRemoteUpdate] = useState<null | "updated" | "gone">(null);
   const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
   const [activeTokenNumber, setActiveTokenNumber] = useState<number | null>(null);
   const [activeBillNumber, setActiveBillNumber] = useState<string | null>(null);
@@ -164,9 +178,10 @@ export default function Billing({ dbReady }: BillingProps) {
 
   const addToCart = (item: MenuItem, quantity: number) => {
     setCart((prev) => {
-      const existing = prev.find((i) => i.id === item.id);
+      // Counter additions have no note; a noted line (from a phone) stays its own line.
+      const existing = prev.find((i) => i.id === item.id && !i.note);
       if (existing) {
-        return prev.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + quantity } : i));
+        return prev.map((i) => (i.id === item.id && !i.note ? { ...i, quantity: i.quantity + quantity } : i));
       }
       return [...prev, { ...item, quantity }];
     });
@@ -175,17 +190,21 @@ export default function Billing({ dbReady }: BillingProps) {
     searchInputRef.current?.focus();
   };
 
-  const changeCartQuantity = (id: number, quantity: number) => {
-    setCart((prev) => prev.map((i) => (i.id === id ? { ...i, quantity } : i)));
+  // Cart rows are addressed by index: two lines of the same item with
+  // different notes are distinct lines (line identity = id + note).
+  const changeCartQuantity = (index: number, quantity: number) => {
+    setCart((prev) => prev.map((i, idx) => (idx === index ? { ...i, quantity } : i)));
     if (quantity > 0) setIsKOTPrinted(false);
   };
 
-  const fixCartQuantity = (id: number) => {
-    setCart((prev) => prev.map((i) => (i.id === id && (!i.quantity || isNaN(i.quantity)) ? { ...i, quantity: 1 } : i)));
+  const fixCartQuantity = (index: number) => {
+    setCart((prev) =>
+      prev.map((i, idx) => (idx === index && (!i.quantity || isNaN(i.quantity)) ? { ...i, quantity: 1 } : i))
+    );
   };
 
-  const removeFromCart = (id: number) => {
-    setCart((prev) => prev.filter((i) => i.id !== id));
+  const removeFromCart = (index: number) => {
+    setCart((prev) => prev.filter((_, idx) => idx !== index));
     setIsKOTPrinted(false);
   };
 
@@ -202,6 +221,8 @@ export default function Billing({ dbReady }: BillingProps) {
     setActiveTokenNumber(null);
     setActiveBillNumber(null);
     setIsKOTPrinted(false);
+    setRemoteUpdate(null);
+    setMobileBadge(0);
     // While locked, new orders always return to the pinned order type.
     if (orderTypeLocked) setOrderType(lockedOrderType);
     setTimeout(() => searchInputRef.current?.focus(), 0);
@@ -228,8 +249,88 @@ export default function Billing({ dbReady }: BillingProps) {
     setActiveTokenNumber(order.token_number ?? null);
     setActiveBillNumber(order.bill_number ?? null);
     setIsKOTPrinted(true);
+    setRemoteUpdate(null);
+    setMobileBadge(0);
     setTimeout(() => searchInputRef.current?.focus(), 0);
   }, []);
+
+  /* -------------------- mobile-orders live wiring -------------------- */
+
+  // Refs so the one-time subscriptions below never read stale state.
+  const bridgeRef = useRef({ cart, originalCart, activeOrderId });
+  bridgeRef.current = { cart, originalCart, activeOrderId };
+  const actionsRef = useRef({ loadProcessingOrder, startNewOrder, fetchProcessingOrders });
+  actionsRef.current = { loadProcessingOrder, startNewOrder, fetchProcessingOrders };
+
+  useEffect(() => {
+    const unsubStatus = subscribeOrderBridge(setBridgeStatus);
+    const unsubAlerts = subscribeNewOrderAlerts((a) => {
+      if (a.isNewOrder) {
+        const where = a.orderType === "Table" && a.tableNumber ? `Table ${a.tableNumber}` : a.orderType;
+        toast(
+          a.printError
+            ? `New order · ${where} — saved, but ${a.printError.toLowerCase()}`
+            : `New order · ${where}${a.waiterName ? ` · from ${a.waiterName}` : ""}`,
+          a.printError ? "danger" : "success"
+        );
+        setMobileBadge((n) => n + 1);
+      } else if (a.printError) {
+        toast(`Mobile order saved, but ${a.printError.toLowerCase()}`, "danger");
+      }
+    });
+    // THE CLOBBER GUARD: the bridge changed local orders. Refresh the list;
+    // touch the loaded cart ONLY when the cashier has no unsaved edits.
+    const unsubOrders = subscribeOrdersChanged(() => {
+      void (async () => {
+        const { cart, originalCart, activeOrderId } = bridgeRef.current;
+        await actionsRef.current.fetchProcessingOrders();
+        if (activeOrderId == null) return;
+        const row = await ordersRepo.getProcessingOrder(activeOrderId);
+        const hasUnsavedEdits = JSON.stringify(cart) !== JSON.stringify(originalCart);
+        if (!row) {
+          if (!hasUnsavedEdits) {
+            actionsRef.current.startNewOrder();
+            toast("The loaded order was settled from a phone.", "warning");
+          } else {
+            setRemoteUpdate("gone");
+          }
+          return;
+        }
+        const dbCart = ordersRepo.parseCart(row.cart_data);
+        if (JSON.stringify(dbCart) === JSON.stringify(originalCart)) return; // loaded order unchanged remotely
+        if (!hasUnsavedEdits) {
+          actionsRef.current.loadProcessingOrder(row); // silent reload — no keystrokes lost
+        } else {
+          setRemoteUpdate("updated"); // never clear the cart out from under the cashier
+        }
+      })();
+    });
+    return () => {
+      unsubStatus();
+      unsubAlerts();
+      unsubOrders();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** [Merge]: the cashier's unsaved additions land on top of the new DB truth. */
+  const mergeRemoteUpdate = async () => {
+    const { cart, originalCart, activeOrderId } = bridgeRef.current;
+    setRemoteUpdate(null);
+    if (activeOrderId == null) return;
+    const row = await ordersRepo.getProcessingOrder(activeOrderId);
+    if (!row) {
+      actionsRef.current.startNewOrder();
+      return;
+    }
+    const dbCart = ordersRepo.parseCart(row.cart_data);
+    const unsavedAdditions = subtractCart(cart, originalCart);
+    setCart(mergeCartLines(dbCart, unsavedAdditions));
+    setOriginalCart(dbCart);
+    setActiveTokenNumber(row.token_number ?? null);
+    setActiveBillNumber(row.bill_number ?? null);
+    setTableNumber(row.table_number || "");
+  };
 
   /* --------------------------- order drafts --------------------------- */
 
@@ -295,6 +396,7 @@ export default function Billing({ dbReady }: BillingProps) {
       let billNumber = activeBillNumber;
       const itemsToPrint = computeKotDelta();
 
+      let savedOrderId = activeOrderId;
       if (activeOrderId) {
         await ordersRepo.updateProcessingOrder(activeOrderId, draft);
       } else {
@@ -303,9 +405,15 @@ export default function Billing({ dbReady }: BillingProps) {
         tokenNumber = claimed.tokenNumber;
         billNumber = claimed.billNumber;
         const newId = await ordersRepo.insertProcessingOrder(draft, tokenNumber, billNumber);
+        savedOrderId = newId;
         setActiveOrderId(newId);
         setActiveTokenNumber(tokenNumber);
         setActiveBillNumber(billNumber);
+      }
+      // Persist the kitchen ledger alongside the originalCart snapshot — the
+      // mobile side computes its delta KOTs from printed_items.
+      if (savedOrderId != null) {
+        await ordersRepo.setOrderBridgeFields(savedOrderId, { printedItems: draft.cart });
       }
       await fetchProcessingOrders();
 
@@ -387,15 +495,24 @@ export default function Billing({ dbReady }: BillingProps) {
       let billNumber = "";
       let tokenNumber = activeTokenNumber;
       let createdAt = new Date().toISOString();
+      let waiterName = "";
 
       if (activeOrderId) {
         const order = await ordersRepo.getProcessingOrder(activeOrderId);
+        let bridgeInfo: { remoteUuid?: string | null; source?: string; waiterName?: string } | undefined;
         if (order) {
           billNumber = order.bill_number ?? "";
           if (!tokenNumber && order.token_number) tokenNumber = order.token_number;
           createdAt = order.created_at;
+          waiterName = order.waiter_name ?? "";
+          // Carry the cloud identity so the phone sees this order become 'billed'.
+          bridgeInfo = {
+            remoteUuid: order.remote_uuid ?? undefined,
+            source: order.source ?? "pos",
+            waiterName,
+          };
         }
-        await ordersRepo.insertFinalizedOrder(draft, billNumber, tokenNumber, createdAt);
+        await ordersRepo.insertFinalizedOrder(draft, billNumber, tokenNumber, createdAt, bridgeInfo);
         if (draft.paymentMode === "Credit" && draft.customerId) {
           await customersRepo.addToCreditBalance(draft.customerId, total);
         }
@@ -428,6 +545,7 @@ export default function Billing({ dbReady }: BillingProps) {
         tokenNumber,
         orderType,
         tableNumber,
+        cashierName: waiterName || undefined,
         date: new Date(),
         gstPercentage: gstConfig.enabled ? gstConfig.percentage : undefined,
         gstInclusive: gstConfig.enabled && gstConfig.type === "Inclusive",
@@ -724,6 +842,22 @@ export default function Billing({ dbReady }: BillingProps) {
     <div className="billing-page">
       {/* Center: search */}
       <div className="billing-center">
+        {bridgeStatus.staleCount > 0 && (
+          <div className="mo-banner mo-banner--warning">
+            <span>
+              {bridgeStatus.staleCount} order{bridgeStatus.staleCount === 1 ? "" : "s"} arrived while
+              you were offline
+            </span>
+            <div className="mo-banner-actions">
+              <button className="btn btn--sm btn--primary" onClick={() => void printStaleOrders()}>
+                Print now
+              </button>
+              <button className="btn btn--sm btn--ghost" onClick={() => void discardStaleOrders()}>
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
         <div className="search-bar">
           <Search className="search-icon" size={20} />
           <input
@@ -753,7 +887,10 @@ export default function Billing({ dbReady }: BillingProps) {
                   onClick={() => setQtyItem(item)}
                   onMouseEnter={() => setSelectedSuggestionIndex(index)}
                 >
-                  <span className="item-name">{item.name}</span>
+                  <span className="item-name">
+                    {item.name}
+                    {item.is_available === 0 && <span className="mo-unavailable">(unavailable)</span>}
+                  </span>
                   <span className="item-price">{formatCurrency(item.price)}</span>
                 </div>
               ))}
@@ -778,10 +915,38 @@ export default function Billing({ dbReady }: BillingProps) {
         onNewOrder={startNewOrder}
         onToggleLock={toggleOrderTypeLock}
         onSelectOrderType={selectOrderType}
+        bridge={bridgeStatus}
+        mobileBadge={mobileBadge}
       />
 
       {/* Right: cart + payment + totals + actions */}
       <div className="billing-cart">
+        {remoteUpdate && (
+          <div className="mo-banner mo-banner--warning">
+            <span>
+              {remoteUpdate === "updated"
+                ? `${orderType === "Table" && tableNumber ? `Table ${tableNumber}` : "This order"} was updated from a phone`
+                : "This order was settled or removed from a phone"}
+            </span>
+            <div className="mo-banner-actions">
+              {remoteUpdate === "updated" ? (
+                <button className="btn btn--sm btn--primary" onClick={() => void mergeRemoteUpdate()}>
+                  Merge
+                </button>
+              ) : (
+                <button
+                  className="btn btn--sm btn--primary"
+                  onClick={() => {
+                    setRemoteUpdate(null);
+                    startNewOrder();
+                  }}
+                >
+                  OK
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <CartPanel
           cart={cart}
           onQuantityChange={changeCartQuantity}

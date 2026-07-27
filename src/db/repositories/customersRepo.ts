@@ -1,4 +1,5 @@
 import { getDb } from "../client";
+import { requestCatalogPush } from "../../services/orders/signals";
 import type { Customer, CustomerPayment } from "../../types";
 
 export async function listCustomers(): Promise<Customer[]> {
@@ -15,11 +16,13 @@ export async function addCustomer(name: string, phone: string): Promise<number |
     "INSERT INTO customers (name, phone, created_at) VALUES ($1, $2, $3)",
     [name, phone, new Date().toISOString()]
   );
+  requestCatalogPush();
   return result.lastInsertId ?? null;
 }
 
 export async function renameCustomer(id: number, name: string): Promise<void> {
   await getDb().execute("UPDATE customers SET name = $1 WHERE id = $2", [name, id]);
+  requestCatalogPush();
 }
 
 /** Deletes a customer, their payments, and detaches their bills (matches existing behavior). */
@@ -28,10 +31,12 @@ export async function deleteCustomer(id: number): Promise<void> {
   await db.execute("UPDATE finalized_orders SET customer_id = NULL WHERE customer_id = $1", [id]);
   await db.execute("DELETE FROM customer_payments WHERE customer_id = $1", [id]);
   await db.execute("DELETE FROM customers WHERE id = $1", [id]);
+  requestCatalogPush();
 }
 
 export async function addToCreditBalance(id: number, amount: number): Promise<void> {
   await getDb().execute("UPDATE customers SET credit_balance = credit_balance + $1 WHERE id = $2", [amount, id]);
+  requestCatalogPush();
 }
 
 /** Records a repayment and reduces the balance. */
@@ -42,6 +47,7 @@ export async function recordPayment(customerId: number, amount: number, mode: st
     "INSERT INTO customer_payments (customer_id, amount, payment_mode, date) VALUES ($1, $2, $3, $4)",
     [customerId, amount, mode, new Date().toISOString()]
   );
+  requestCatalogPush();
 }
 
 /** Clears the full outstanding balance, recording it as a settlement payment. */
@@ -52,6 +58,7 @@ export async function settleAllDue(customerId: number, amount: number): Promise<
     "INSERT INTO customer_payments (customer_id, amount, payment_mode, date) VALUES ($1, $2, $3, $4)",
     [customerId, amount, "Full Settlement", new Date().toISOString()]
   );
+  requestCatalogPush();
 }
 
 export async function listPayments(customerId: number, startDate: string, endDate: string): Promise<CustomerPayment[]> {

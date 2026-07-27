@@ -181,6 +181,7 @@ async function baseSchema(db: Database) {
     ["meta_bold", "BOOLEAN", "0"],
     ["items_bold", "BOOLEAN", "1"],
     ["meta_two_column", "BOOLEAN", "1"],
+    ["show_waiter", "BOOLEAN", "1"],
   ];
   for (const [c, t, d] of kotCols) await addColumn(db, "kot_settings", c, t, d);
 
@@ -237,6 +238,63 @@ async function baseSchema(db: Database) {
       FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE
     );
   `);
+
+  // ---- Mobile Orders (see MB-backend/ORDERS_CONTRACT.md) ----
+
+  // Table master: sections + tables the phone shows as a tappable grid. The
+  // billing screen's free-text table popup stays unchanged.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS restaurant_tables (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      section TEXT DEFAULT '',
+      label TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT 1
+    );
+  `);
+
+  // Idempotency ledger: order_events already applied locally. Guarantees a
+  // re-pulled event (network died between apply and ack) never re-applies.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS applied_order_events (
+      event_id TEXT PRIMARY KEY,
+      kind TEXT,
+      applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Order-bridge bookkeeping (single row, like the settings tables).
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS order_sync_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      catalog_hash TEXT DEFAULT '',
+      room_id TEXT DEFAULT '',
+      last_orders_seq INTEGER DEFAULT 0,
+      last_reconcile_at TEXT DEFAULT ''
+    );
+  `);
+  await db.execute(`INSERT OR IGNORE INTO order_sync_state (id) VALUES (1)`);
+  // Owner-facing switches, kept locally so the bridge reacts immediately; the
+  // enabled flag is also mirrored to licenses.mobile_ordering_enabled via the
+  // bridge's next "hello".
+  await addColumn(db, "order_sync_state", "mobile_ordering_enabled", "INTEGER", "0");
+  await addColumn(db, "order_sync_state", "sound_on_new_order", "INTEGER", "1");
+
+  // Item availability ("86" an item): unavailable items are hidden on the
+  // phone; the billing screen still shows them, suffixed "(unavailable)".
+  await addColumn(db, "items", "is_available", "BOOLEAN", "1");
+
+  // Live-order bridge columns. printed_items persists what the kitchen has
+  // already seen (NULL = legacy row -> fall back to the old delta-vs-loaded
+  // behaviour). cloud_dirty flags rows needing a republish to live_orders.
+  for (const table of ["processing_orders", "finalized_orders"]) {
+    await addColumn(db, table, "remote_uuid", "TEXT", "NULL");
+    await addColumn(db, table, "source", "TEXT", "'pos'");
+    await addColumn(db, table, "waiter_name", "TEXT", "''");
+    await addColumn(db, table, "updated_at", "TEXT", "NULL");
+    await addColumn(db, table, "cloud_dirty", "INTEGER", "0");
+    await addColumn(db, table, "printed_items", "TEXT", "NULL");
+  }
 }
 
 /** One-time ordered migrations, tracked in schema_version. */

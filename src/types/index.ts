@@ -28,11 +28,24 @@ export interface MenuItem {
   category_id: number;
   name: string;
   price: number;
+  /** 0 = "86"-ed (hidden on phones, flagged in billing search). Missing = available. */
+  is_available?: number;
 }
 
 /** Denormalized snapshot stored in order `cart_data` JSON — prices frozen at sale time. */
 export interface CartItem extends MenuItem {
   quantity: number;
+  /** Per-line note ("no onion"). Line identity for merging = (id, note). */
+  note?: string;
+}
+
+/** Table master row (Tables & Mobile Ordering settings). Mirrors SQLite restaurant_tables. */
+export interface RestaurantTable {
+  id: number;
+  section: string;
+  label: string;
+  sort_order: number;
+  is_active: number;
 }
 
 interface OrderBase {
@@ -50,6 +63,14 @@ interface OrderBase {
   token_number: number | null;
   bill_number: string | null;
   created_at: string;
+  /* Mobile-orders bridge columns (nullable adds; absent on legacy rows). */
+  remote_uuid?: string | null;
+  source?: string | null; // 'pos' | 'mobile'
+  waiter_name?: string | null;
+  updated_at?: string | null;
+  cloud_dirty?: number | null;
+  /** JSON CartItem[]: what the kitchen has seen. NULL = legacy delta behaviour. */
+  printed_items?: string | null;
 }
 
 export type ProcessingOrder = OrderBase;
@@ -171,6 +192,8 @@ export interface KotDesign {
   showOrderType: boolean;
   showTable: boolean;
   showDate: boolean;
+  /** "Waiter: <name>" in the KOT meta block for mobile orders. */
+  showWaiter: boolean;
   metaTwoColumn: boolean;
   title: SectionStyle;
   meta: SectionStyle;

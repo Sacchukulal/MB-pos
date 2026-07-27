@@ -123,6 +123,11 @@ export interface KotJobMeta {
   billNumber: string;
   orderType: string;
   tableNumber: string;
+  /** Mobile orders: waiter attribution + cancellation/reprint tickets. */
+  waiterName?: string;
+  variant?: "cancel" | "reprint";
+  cancelReason?: string;
+  cancelledBy?: string;
 }
 
 /**

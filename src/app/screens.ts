@@ -8,6 +8,7 @@ export type ScreenId =
   | "settings-bill"
   | "settings-printer"
   | "settings-menu"
+  | "settings-tables"
   | "settings-staff";
 
 export const SETTINGS_SCREENS: ScreenId[] = [
@@ -15,5 +16,6 @@ export const SETTINGS_SCREENS: ScreenId[] = [
   "settings-bill",
   "settings-printer",
   "settings-menu",
+  "settings-tables",
   "settings-staff",
 ];

@@ -1,6 +1,7 @@
 import {
   DownloadCloud,
   LayoutDashboard,
+  LayoutGrid,
   Printer,
   Receipt,
   ReceiptText,
@@ -27,6 +28,7 @@ export const SETTINGS_ITEMS: { id: ScreenId; icon: typeof Settings; label: strin
   { id: "settings-bill", icon: Receipt, label: "Bill Settings" },
   { id: "settings-printer", icon: Printer, label: "Printer Settings" },
   { id: "settings-menu", icon: UtensilsCrossed, label: "Menu Management" },
+  { id: "settings-tables", icon: LayoutGrid, label: "Tables & Mobile Ordering" },
   { id: "settings-staff", icon: Users, label: "Staff Management" },
 ];
 

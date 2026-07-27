@@ -5,7 +5,8 @@
 // The anon key is a public, RLS-restricted key and is safe to ship in the app.
 // The service_role key must NEVER appear in this codebase.
 
-export const SUPABASE_FUNCTIONS_URL =
-  "https://rlvygwituwywofwcwjsf.supabase.co/functions/v1";
+export const SUPABASE_URL = "https://rlvygwituwywofwcwjsf.supabase.co";
+
+export const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;

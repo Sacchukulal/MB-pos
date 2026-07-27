@@ -25,8 +25,12 @@ export function renderKotDoc(settings: AppSettings, data: KotPrintData): Doc {
     if (kot.separators.token) separator(doc, line);
   }
 
-  if (kot.showTitle) {
-    text(doc, "--- KOT ---", { size: kot.title.size, bold: kot.title.bold, align: "center" });
+  // Cancellation/reprint tickets always carry their marker, even when the
+  // normal KOT title is hidden — the kitchen must never mistake them.
+  const title =
+    data.variant === "cancel" ? "*** CANCELLED ***" : data.variant === "reprint" ? "*** REPRINT ***" : "--- KOT ---";
+  if (kot.showTitle || data.variant) {
+    text(doc, title, { size: kot.title.size, bold: kot.title.bold, align: "center" });
     if (data.categoryName) {
       text(doc, `[ ${data.categoryName} ]`, { size: kot.title.size, bold: kot.title.bold, align: "center" });
     }
@@ -40,6 +44,7 @@ export function renderKotDoc(settings: AppSettings, data: KotPrintData): Doc {
   if (kot.showOrderType) metaParts.push(`Order: ${data.orderType}`);
   if (kot.showTable && data.tableNumber) metaParts.push(`Table: ${data.tableNumber}`);
   if (kot.showDate) metaParts.push(`Date: ${data.date.toLocaleString()}`);
+  if (kot.showWaiter && data.waiterName) metaParts.push(`Waiter: ${data.waiterName}`);
 
   if (metaParts.length > 0) {
     if (kot.metaTwoColumn) {
@@ -80,9 +85,20 @@ export function renderKotDoc(settings: AppSettings, data: KotPrintData): Doc {
   data.items.forEach((item) => {
     space(doc, pad);
     columns(doc, [{ text: item.name }, { text: String(item.quantity), align: "right", width: qtyW }], style);
+    // Per-line note ("no onion") — indented so it reads as part of the item.
+    if (item.note) {
+      columns(doc, [{ text: `  >> ${item.note}` }, { text: "", align: "right", width: qtyW }], style);
+    }
     space(doc, pad);
   });
   if (kot.separators.tableBody) separator(doc, line);
+
+  // Cancellation footer: why + who, so the kitchen slip is self-explaining.
+  if (data.variant === "cancel") {
+    space(doc, pad);
+    if (data.cancelReason) text(doc, `Reason: ${data.cancelReason}`, metaStyle);
+    if (data.cancelledBy) text(doc, `By: ${data.cancelledBy}`, metaStyle);
+  }
 
   space(doc, 12);
   return doc;

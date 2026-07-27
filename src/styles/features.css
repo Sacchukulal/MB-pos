@@ -1490,3 +1490,110 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------------- Mobile ordering (order bridge) ---------------- */
+
+.mo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-2);
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  border: var(--border-thin) solid var(--border-subtle);
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  width: fit-content;
+}
+.mo-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.mo-pill.connected {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.mo-pill.connected .mo-pill-dot {
+  background: var(--accent);
+}
+.mo-pill.degraded {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+.mo-pill.degraded .mo-pill-dot {
+  background: var(--warning);
+  animation: mo-pulse 1.2s ease-in-out infinite;
+}
+
+.mo-badge {
+  margin-left: 6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mo-glyph {
+  color: var(--accent);
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+/* Items added from a phone but not printed yet — a subtle "syncing" pulse. */
+.po-card.mo-syncing {
+  animation: mo-card-pulse 1.6s ease-in-out infinite;
+}
+
+.mo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--border-thin) solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-2);
+}
+.mo-banner--warning {
+  border-color: var(--warning);
+}
+.mo-banner-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.mo-unavailable {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  margin-left: 6px;
+}
+
+.cart-item-note {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  margin-top: 2px;
+}
+
+@keyframes mo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes mo-card-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}

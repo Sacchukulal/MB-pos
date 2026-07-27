@@ -113,6 +113,7 @@ function mapKot(row: any): KotDesign {
     showOrderType: toBool(row.show_order_type, d.showOrderType),
     showTable: toBool(row.show_table, d.showTable),
     showDate: toBool(row.show_date, d.showDate),
+    showWaiter: toBool(row.show_waiter, d.showWaiter),
     metaTwoColumn: toBool(row.meta_two_column, d.metaTwoColumn),
     title: { size: toStr(row.header_font_size, d.title.size), bold: toBool(row.title_bold, d.title.bold) },
     meta: { size: toStr(row.meta_font_size, d.meta.size), bold: toBool(row.meta_bold, d.meta.bold) },
@@ -246,7 +247,8 @@ export async function saveKotDesign(k: KotDesign): Promise<void> {
        show_date=$6, meta_two_column=$7,
        header_font_size=$8, title_bold=$9, meta_font_size=$10, meta_bold=$11,
        table_font_size=$12, items_bold=$13, row_height=$14,
-       sep_token=$15, sep_header=$16, sep_meta=$17, sep_table_header=$18, sep_table_body=$19
+       sep_token=$15, sep_header=$16, sep_meta=$17, sep_table_header=$18, sep_table_body=$19,
+       show_waiter=$20
      WHERE id=1`,
     [
       toBit(k.showTitle), toBit(k.showToken), toBit(k.showBillNo), toBit(k.showOrderType), toBit(k.showTable),
@@ -255,6 +257,7 @@ export async function saveKotDesign(k: KotDesign): Promise<void> {
       k.items.size, toBit(k.items.bold), k.rowHeight,
       toBit(k.separators.token), toBit(k.separators.header), toBit(k.separators.meta),
       toBit(k.separators.tableHeader), toBit(k.separators.tableBody),
+      toBit(k.showWaiter),
     ]
   );
 }

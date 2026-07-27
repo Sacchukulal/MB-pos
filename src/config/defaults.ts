@@ -50,6 +50,7 @@ export const DEFAULT_KOT_DESIGN: KotDesign = {
   showOrderType: true,
   showTable: true,
   showDate: true,
+  showWaiter: true,
   metaTwoColumn: true,
   title: { size: "16px", bold: true },
   meta: { size: "12px", bold: false },

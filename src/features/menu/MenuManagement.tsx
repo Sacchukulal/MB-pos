@@ -58,6 +58,17 @@ export default function MenuManagement({ dbReady }: MenuManagementProps) {
     }
   };
 
+  /** Availability toggle ("86" an item) — instant save, like every other mutation here. */
+  const toggleItemAvailable = async (item: MenuItem) => {
+    try {
+      await menuRepo.setItemAvailable(item.id, item.is_available === 0);
+      if (selectedCategoryId) await fetchItems(selectedCategoryId);
+    } catch (error) {
+      console.error("Failed to toggle item availability:", error);
+      toast("Failed to update item availability.", "danger");
+    }
+  };
+
   useEffect(() => {
     if (dbReady) fetchCategories(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -360,9 +371,10 @@ export default function MenuManagement({ dbReady }: MenuManagementProps) {
                 <EmptyState icon={<Tag size={24} />} title="No items yet" message="Use the form above to add your first item." />
               ) : (
                 <div className="data-list">
-                  <div className="data-list-head" style={{ gridTemplateColumns: "1fr 140px 96px" }}>
+                  <div className="data-list-head" style={{ gridTemplateColumns: "1fr 120px 90px 96px" }}>
                     <div>Name</div>
                     <div style={{ textAlign: "right" }}>Price</div>
+                    <div style={{ textAlign: "center" }}>Available</div>
                     <div style={{ textAlign: "right" }}>Actions</div>
                   </div>
                   {items.map((item) =>
@@ -404,9 +416,26 @@ export default function MenuManagement({ dbReady }: MenuManagementProps) {
                         </button>
                       </div>
                     ) : (
-                      <div key={item.id} className="data-row" style={{ gridTemplateColumns: "1fr 140px 96px" }}>
-                        <div style={{ fontWeight: "var(--font-medium)" }}>{item.name}</div>
+                      <div key={item.id} className="data-row" style={{ gridTemplateColumns: "1fr 120px 90px 96px" }}>
+                        <div
+                          style={{
+                            fontWeight: "var(--font-medium)",
+                            color: item.is_available === 0 ? "var(--text-tertiary)" : undefined,
+                          }}
+                        >
+                          {item.name}
+                          {item.is_available === 0 && <span className="mo-unavailable">(unavailable)</span>}
+                        </div>
                         <div className="strong" style={{ textAlign: "right" }}>{formatCurrency(item.price)}</div>
+                        <div style={{ textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={item.is_available !== 0}
+                            onChange={() => toggleItemAvailable(item)}
+                            title={item.is_available !== 0 ? "In stock — shown on phones" : "Out of stock — hidden on phones"}
+                            style={{ accentColor: "var(--accent)" }}
+                          />
+                        </div>
                         <div className="data-row-actions">
                           <button className="row-action-btn" onClick={() => startItemEdit(item)} title="Edit item">
                             <Edit2 size={17} />

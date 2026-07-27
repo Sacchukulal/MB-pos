@@ -1,9 +1,17 @@
 import { Banknote, ChevronDown, ChevronUp, CreditCard, ListTodo, Plus, Smartphone, Trash2 } from "lucide-react";
 import { ORDER_TYPES } from "../../config/constants";
 import { formatCurrency } from "../../utils/format";
+import { parseCartJson, subtractCart } from "../../services/orders/wire";
+import type { OrderBridgeStatus } from "../../services/orders/orderBridge";
 import type { CartItem, Customer, OrderType, ProcessingOrder } from "../../types";
 
 /* --------------------- Processing orders panel --------------------- */
+
+/** Items added but not yet printed (mobile add in flight) — shown as a pulse. */
+function hasPendingKot(order: ProcessingOrder): boolean {
+  if (order.printed_items == null) return false;
+  return subtractCart(parseCartJson(order.cart_data), parseCartJson(order.printed_items)).length > 0;
+}
 
 interface ProcessingOrdersPanelProps {
   orders: ProcessingOrder[];
@@ -15,6 +23,8 @@ interface ProcessingOrdersPanelProps {
   onToggleLock: () => void;
   onSelectOrderType: (type: OrderType) => void;
   lockedOrderType: OrderType;
+  bridge: OrderBridgeStatus;
+  mobileBadge: number;
 }
 
 export function ProcessingOrdersPanel({
@@ -27,6 +37,8 @@ export function ProcessingOrdersPanel({
   onToggleLock,
   onSelectOrderType,
   lockedOrderType,
+  bridge,
+  mobileBadge,
 }: ProcessingOrdersPanelProps) {
   return (
     <div className="po-panel">
@@ -34,6 +46,7 @@ export function ProcessingOrdersPanel({
         <div className="po-title-row">
           <span className="po-title">
             <ListTodo size={15} /> Processing Orders
+            {mobileBadge > 0 && <span className="mo-badge">{mobileBadge}</span>}
           </span>
           <div className="po-title-actions">
             <button
@@ -67,6 +80,18 @@ export function ProcessingOrdersPanel({
             </button>
           ))}
         </div>
+
+        {/* Hidden entirely until the owner enables mobile ordering. */}
+        {bridge.featureEnabled && (
+          <div className={`mo-pill ${bridge.channel}`}>
+            <span className="mo-pill-dot" />
+            {bridge.channel === "connected"
+              ? `Mobile ordering · On · ${bridge.phones} phone${bridge.phones === 1 ? "" : "s"}`
+              : bridge.channel === "degraded"
+                ? "Mobile ordering · Reconnecting"
+                : "Mobile ordering · Off"}
+          </div>
+        )}
       </div>
 
       <div className="po-list">
@@ -76,11 +101,14 @@ export function ProcessingOrdersPanel({
           orders.map((order) => (
             <div
               key={order.id}
-              className={`po-card ${activeOrderId === order.id ? "active" : ""}`}
+              className={`po-card ${activeOrderId === order.id ? "active" : ""} ${hasPendingKot(order) ? "mo-syncing" : ""}`}
               onClick={() => onSelectOrder(order)}
             >
               <div className="po-card-title">
-                <span>{order.bill_number ? `Order ${order.bill_number}` : `Order #${order.id}`}</span>
+                <span>
+                  {order.source === "mobile" && <Smartphone size={12} className="mo-glyph" />}
+                  {order.bill_number ? `Order ${order.bill_number}` : `Order #${order.id}`}
+                </span>
                 {order.order_type === "Table" && order.table_number ? (
                   <span className="po-table-badge">
                     <span className="text-blink">{String(order.table_number).replace(/([A-Za-z]+)/g, "-$1")}</span>
@@ -90,7 +118,10 @@ export function ProcessingOrdersPanel({
                 )}
               </div>
               <div className="po-card-sub">
-                <span>{order.order_type}</span>
+                <span>
+                  {order.order_type}
+                  {order.source === "mobile" && order.waiter_name ? ` · ${order.waiter_name}` : ""}
+                </span>
                 {order.order_type === "Table" && order.table_number && (
                   <span style={{ fontWeight: "var(--font-semibold)" }}>{formatCurrency(order.total)}</span>
                 )}
@@ -107,9 +138,10 @@ export function ProcessingOrdersPanel({
 
 interface CartPanelProps {
   cart: CartItem[];
-  onQuantityChange: (id: number, quantity: number) => void;
-  onQuantityBlur: (id: number) => void;
-  onRemove: (id: number) => void;
+  /** Rows are addressed by index — (id, note) lines are distinct rows. */
+  onQuantityChange: (index: number, quantity: number) => void;
+  onQuantityBlur: (index: number) => void;
+  onRemove: (index: number) => void;
 }
 
 export function CartPanel({ cart, onQuantityChange, onQuantityBlur, onRemove }: CartPanelProps) {
@@ -133,12 +165,13 @@ export function CartPanel({ cart, onQuantityChange, onQuantityBlur, onRemove }: 
           </tr>
         </thead>
         <tbody>
-          {cart.map((item) => (
-            <tr key={item.id}>
+          {cart.map((item, index) => (
+            <tr key={`${item.id}-${index}`}>
               <td>
                 <div className="cart-item-name" title={item.name}>
                   {item.name}
                 </div>
+                {item.note && <div className="cart-item-note">{item.note}</div>}
               </td>
               <td className="text-right text-secondary">{formatCurrency(item.price)}</td>
               <td className="text-center">
@@ -150,13 +183,13 @@ export function CartPanel({ cart, onQuantityChange, onQuantityBlur, onRemove }: 
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === "") {
-                      onQuantityChange(item.id, 0);
+                      onQuantityChange(index, 0);
                     } else {
                       const qty = parseInt(val);
-                      if (!isNaN(qty)) onQuantityChange(item.id, qty);
+                      if (!isNaN(qty)) onQuantityChange(index, qty);
                     }
                   }}
-                  onBlur={() => onQuantityBlur(item.id)}
+                  onBlur={() => onQuantityBlur(index)}
                   onFocus={(e) => e.target.select()}
                 />
               </td>
@@ -164,7 +197,7 @@ export function CartPanel({ cart, onQuantityChange, onQuantityBlur, onRemove }: 
                 {formatCurrency(item.price * item.quantity)}
               </td>
               <td className="text-center">
-                <button className="row-action-btn danger" onClick={() => onRemove(item.id)}>
+                <button className="row-action-btn danger" onClick={() => onRemove(index)}>
                   <Trash2 size={14} />
                 </button>
               </td>
