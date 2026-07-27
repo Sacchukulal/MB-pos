@@ -25,6 +25,7 @@ import {
   tableLabelExists,
   updateTable,
 } from "../../db/repositories/tablesRepo";
+import { composeTableName } from "../billing/tableUtils";
 import { describeBridge, isLastSyncStale } from "../../services/orders/statusCopy";
 import { useToast } from "../../hooks/useToast";
 import { useUnsavedGuard } from "../../hooks/useUnsavedGuard";
@@ -40,7 +41,7 @@ interface SwitchForm {
   sound: boolean;
 }
 
-const TABLE_GRID = "110px 1fr 90px 90px 96px";
+const TABLE_GRID = "1fr 150px 90px 90px 96px";
 
 export default function MobileOrders({ dbReady }: MobileOrdersProps) {
   const { toast } = useToast();
@@ -122,6 +123,33 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
 
   // ---- table master actions (each saves immediately and toasts on failure)
 
+  /**
+   * Two rows can be different in the master and still be the SAME table to the
+   * kitchen: a table literally named "AC 1" with no section prints exactly
+   * what label "1" in section "AC" prints, and the counter would merge their
+   * orders (the second one silently becoming "AC 1B"). Reject that up front.
+   */
+  const composedClash = (
+    section: string,
+    label: string,
+    excludeId?: number
+  ): RestaurantTable | undefined => {
+    const target = composeTableName(section, label).toUpperCase();
+    if (!target) return undefined;
+    return tables.find(
+      (t) => t.id !== excludeId && composeTableName(t.section, t.label).toUpperCase() === target
+    );
+  };
+
+  const clashToast = (section: string, label: string, clash: RestaurantTable) => {
+    const where = clash.section ? `in ${clash.section}` : "with no section";
+    toast(
+      `That table would print as "${composeTableName(section, label)}", exactly like the ` +
+        `existing table "${clash.label}" ${where}. Give it a different name or section.`,
+      "warning"
+    );
+  };
+
   const handleBulkAdd = async () => {
     const from = parseInt(bulkFrom, 10);
     const to = parseInt(bulkTo, 10);
@@ -133,6 +161,15 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
     if (to - from >= 200) {
       toast("That range is too large — add at most 200 tables at once.", "warning");
       return;
+    }
+    // Reject the whole range rather than creating half of it: a partial add is
+    // harder for the owner to reason about than a single clear message.
+    for (let n = from; n <= to; n++) {
+      const clash = composedClash(section, String(n));
+      if (clash && !(clash.section === section && clash.label === String(n))) {
+        clashToast(section, String(n), clash);
+        return;
+      }
     }
     try {
       const created = await bulkAddTables(section, from, to);
@@ -159,6 +196,11 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
     try {
       if (await tableLabelExists(section, label)) {
         toast(`Table "${label}" already exists${section ? ` in ${section}` : ""}.`, "warning");
+        return;
+      }
+      const clash = composedClash(section, label);
+      if (clash) {
+        clashToast(section, label, clash);
         return;
       }
       const maxSort = tables
@@ -193,6 +235,11 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
         toast(`Table "${label}" already exists${section ? ` in ${section}` : ""}.`, "warning");
         return;
       }
+      const clash = composedClash(section, label, id);
+      if (clash) {
+        clashToast(section, label, clash);
+        return;
+      }
       await updateTable(id, section, label, sortOrder);
       setEditingId(null);
       await refreshTables();
@@ -215,8 +262,11 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
   const requestDelete = async (t: RestaurantTable) => {
     try {
       const open = await openTableNumbers();
-      if (labelInUse(t.label, open)) {
-        toast(`Table ${t.label} has an open order — settle or move it first.`, "danger");
+      // Orders are stored under the composed name, so that is what "in use"
+      // means — checking the bare label would flag the wrong section's table.
+      const name = composeTableName(t.section, t.label);
+      if (labelInUse(name, open)) {
+        toast(`Table ${name} has an open order — settle or move it first.`, "danger");
         return;
       }
       setDeleteTarget(t);
@@ -456,7 +506,7 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
         ) : (
           <div style={{ marginTop: "var(--space-4)" }}>
             <div className="data-list-head" style={{ gridTemplateColumns: TABLE_GRID }}>
-              <div>Table</div>
+              <div>Prints as</div>
               <div>Section</div>
               <div style={{ textAlign: "right" }}>Order</div>
               <div style={{ textAlign: "center" }}>Active</div>
@@ -503,7 +553,11 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
                 </div>
               ) : (
                 <div key={t.id} className="data-row" style={{ gridTemplateColumns: TABLE_GRID }}>
-                  <div style={{ fontWeight: "var(--font-medium)" }}>{t.label}</div>
+                  {/* The composed name IS the identity: it is what the phone
+                      sends and what the KOT and the bill say. */}
+                  <div style={{ fontWeight: "var(--font-medium)" }}>
+                    {composeTableName(t.section, t.label)}
+                  </div>
                   <div style={{ color: "var(--text-secondary)" }}>{t.section || "—"}</div>
                   <div style={{ textAlign: "right", color: "var(--text-tertiary)" }}>{t.sort_order}</div>
                   <div style={{ textAlign: "center" }}>
@@ -541,7 +595,8 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
             <Eye size={14} /> Phone preview
           </div>
           <p className="field-hint" style={{ marginTop: 0 }}>
-            How the table grid appears in the staff app. Inactive tables are hidden.
+            How the table grid appears in the staff app. Inactive tables are hidden. The name
+            shown on each tile is exactly what the kitchen slip and the bill will say.
           </p>
           {previewSections.map((s) => (
             <div key={s.name || "(none)"} style={{ marginTop: "var(--space-3)" }}>
@@ -564,17 +619,30 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
                   <div
                     key={t.id}
                     style={{
-                      minWidth: "56px",
+                      minWidth: "64px",
                       padding: "var(--space-3)",
                       textAlign: "center",
                       background: "var(--bg-tertiary)",
                       border: "var(--border-thin) solid var(--border-subtle)",
                       borderRadius: "var(--radius-md)",
-                      fontWeight: "var(--font-semibold)",
                       color: "var(--text-primary)",
                     }}
+                    title={`Prints as "Table: ${composeTableName(t.section, t.label)}"`}
                   >
-                    {t.label}
+                    {/* Mirrors the phone tile: section caption over the number. */}
+                    {t.section !== "" && (
+                      <div
+                        style={{
+                          fontSize: "var(--text-xs)",
+                          color: "var(--text-tertiary)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        {t.section}
+                      </div>
+                    )}
+                    <div style={{ fontWeight: "var(--font-semibold)" }}>{t.label}</div>
                   </div>
                 ))}
               </div>

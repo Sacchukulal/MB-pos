@@ -3,6 +3,7 @@ import { ORDER_TYPES } from "../../config/constants";
 import { formatCurrency } from "../../utils/format";
 import { parseCartJson, subtractCart } from "../../services/orders/wire";
 import { describeBridge } from "../../services/orders/statusCopy";
+import { formatTableBadge } from "./tableUtils";
 import type { OrderBridgeStatus } from "../../services/orders/orderBridge";
 import type { CartItem, Customer, OrderType, ProcessingOrder } from "../../types";
 
@@ -112,7 +113,7 @@ export function ProcessingOrdersPanel({
                 </span>
                 {order.order_type === "Table" && order.table_number ? (
                   <span className="po-table-badge">
-                    <span className="text-blink">{String(order.table_number).replace(/([A-Za-z]+)/g, "-$1")}</span>
+                    <span className="text-blink">{formatTableBadge(order.table_number)}</span>
                   </span>
                 ) : (
                   <span>{formatCurrency(order.total)}</span>
