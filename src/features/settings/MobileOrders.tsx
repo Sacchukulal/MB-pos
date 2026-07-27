@@ -25,6 +25,7 @@ import {
   tableLabelExists,
   updateTable,
 } from "../../db/repositories/tablesRepo";
+import { describeBridge, isLastSyncStale } from "../../services/orders/statusCopy";
 import { useToast } from "../../hooks/useToast";
 import { useUnsavedGuard } from "../../hooks/useUnsavedGuard";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
@@ -52,6 +53,16 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
   const [resyncing, setResyncing] = useState(false);
 
   useEffect(() => subscribeOrderBridge(setBridge), []);
+
+  // A dead heartbeat emits nothing, so "Last sync" would silently freeze with
+  // no way to tell. This tick re-evaluates the staleness line on its own.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 10_000);
+    return () => clearInterval(t);
+  }, []);
+  const bridgeCopy = describeBridge(bridge);
+  const syncStale = isLastSyncStale(bridge.lastSyncAt, nowTick);
 
   // -- Table master (immediate CRUD, like Menu Management)
   const [tables, setTables] = useState<RestaurantTable[]>([]);
@@ -274,19 +285,19 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
 
         {/* Live status + connected phones (only meaningful once enabled). */}
         <div style={{ marginTop: "var(--space-4)", display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
-          <div className={`mo-pill ${bridge.channel}`}>
+          <div className={`mo-pill ${bridgeCopy.tone}`}>
             <span className="mo-pill-dot" />
-            {!bridge.featureEnabled
-              ? "Off — enable and save to go live"
-              : bridge.channel === "connected"
-                ? `Connected · ${bridge.phones} phone${bridge.phones === 1 ? "" : "s"} online`
-                : bridge.channel === "degraded"
-                  ? "Reconnecting…"
-                  : "Offline"}
+            {bridgeCopy.label}
           </div>
           {bridge.lastSyncAt && (
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+            <span
+              style={{
+                fontSize: "var(--text-xs)",
+                color: syncStale ? "var(--warning)" : "var(--text-tertiary)",
+              }}
+            >
               Last sync: {new Date(bridge.lastSyncAt).toLocaleTimeString()}
+              {syncStale ? " — not updating" : ""}
             </span>
           )}
           <button
@@ -308,6 +319,13 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
             <RefreshCw size={14} /> {resyncing ? "Resyncing…" : "Resync menu & tables now"}
           </button>
         </div>
+
+        {/* Never make the owner guess what a status word means. */}
+        {bridgeCopy.detail !== "" && (
+          <p className="field-hint" style={{ marginTop: "var(--space-2)", maxWidth: "62ch" }}>
+            {bridgeCopy.detail}
+          </p>
+        )}
 
         {bridge.installs.length > 0 && (
           <div style={{ marginTop: "var(--space-4)" }}>

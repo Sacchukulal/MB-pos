@@ -36,6 +36,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # .env is gitignored, so CI has no other source for this. Without it
+          # the frontend bundle ships `undefined` as the Supabase key,
+          # createClient() throws, and mobile ordering is dead in the installer
+          # while licensing still works — the exact v1.3.0 bug. The build now
+          # fails loudly if it is missing (see vite.config.ts).
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         with:
           tagName: v__VERSION__
           releaseName: 'Magic Bill v__VERSION__'

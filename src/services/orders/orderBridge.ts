@@ -38,10 +38,21 @@ export interface InstallInfo {
   blocked: boolean;
 }
 
+/**
+ * Why the channel is not fully connected. "" means nothing is wrong.
+ *  - misconfigured: this build has no Supabase anon key, so realtime can never
+ *    start. Backup polling still works; the owner needs a newer installer.
+ *  - realtime-down: the socket failed or dropped; backup polling covers it.
+ */
+export type OrderBridgeFault = "" | "misconfigured" | "realtime-down";
+
 export interface OrderBridgeStatus {
   /** The owner's master switch (order_sync_state.mobile_ordering_enabled). */
   featureEnabled: boolean;
   channel: "connected" | "degraded" | "off";
+  fault: OrderBridgeFault;
+  /** False when the counter cannot reach the cloud at all (no internet). */
+  cloudReachable: boolean;
   phones: number;
   installs: InstallInfo[];
   maxMobileDevices: number;
@@ -67,6 +78,18 @@ const DEGRADED_POLL_MS = 3_000;
 const PUSH_DEBOUNCE_MS = 300;
 const CATALOG_DEBOUNCE_MS = 2_000;
 const STALE_EVENT_MS = 2 * 60 * 60_000;
+/** Retry a failed realtime connect without needing an app restart. */
+const REALTIME_RETRY_MS = 60_000;
+
+/**
+ * v1.3.0's installer was built without VITE_SUPABASE_ANON_KEY, so
+ * createClient() threw "supabaseKey is required." on the very first connect
+ * and killed the whole bridge. The build now refuses to produce a keyless
+ * bundle (vite.config.ts), but the running app must still cope: with no key
+ * realtime can never work, so we skip it entirely, say so in the UI, and run
+ * on backup polling instead of dying.
+ */
+const ANON_KEY_MISSING = !SUPABASE_ANON_KEY || String(SUPABASE_ANON_KEY).trim().length < 20;
 
 /* ------------------------------- state ------------------------------- */
 
@@ -81,6 +104,8 @@ let appVersion = "";
 const status: OrderBridgeStatus = {
   featureEnabled: false,
   channel: "off",
+  fault: "",
+  cloudReachable: true,
   phones: 0,
   installs: [],
   maxMobileDevices: 1,
@@ -98,6 +123,7 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 let degradedTimer: ReturnType<typeof setInterval> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let realtimeRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -143,20 +169,36 @@ export function subscribeNewOrderAlerts(cb: (a: NewOrderAlert) => void): Unsubsc
 
 /* ------------------------------ cloud API ------------------------------ */
 
+/** Reaching the cloud at all is a different failure from being told "no". */
+function setCloudReachable(next: boolean): void {
+  if (status.cloudReachable === next) return;
+  status.cloudReachable = next;
+  if (!next) console.error("[orders] cannot reach the Magic Bill cloud — check this PC's internet");
+  emitStatus();
+}
+
 async function api<T = any>(action: string, args: Record<string, unknown> = {}): Promise<T> {
   const key = getStoredLicenseKey();
   if (!key) throw new Error("no-license");
   const device = await getDeviceInfo();
-  const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/pos-orders`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      apikey: SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({ key, deviceId: device.id, action, ...args }),
-  });
-  const data = await res.json();
+  let res: Response;
+  let data: any;
+  try {
+    res = await fetch(`${SUPABASE_FUNCTIONS_URL}/pos-orders`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ key, deviceId: device.id, action, ...args }),
+    });
+    data = await res.json();
+  } catch (e) {
+    setCloudReachable(false);
+    throw e;
+  }
+  setCloudReachable(true);
   if (!data?.ok) throw new Error(String(data?.reason ?? `http-${res.status}`));
   status.lastSyncAt = new Date().toISOString();
   return data as T;
@@ -437,9 +479,10 @@ function clearTimers(): void {
   for (const t of [heartbeatTimer, reconcileTimer, degradedTimer]) if (t) clearInterval(t);
   heartbeatTimer = reconcileTimer = degradedTimer = null;
   if (retryTimer) clearTimeout(retryTimer);
+  if (realtimeRetryTimer) clearTimeout(realtimeRetryTimer);
   if (pushTimer) clearTimeout(pushTimer);
   if (catalogTimer) clearTimeout(catalogTimer);
-  retryTimer = pushTimer = catalogTimer = null;
+  retryTimer = realtimeRetryTimer = pushTimer = catalogTimer = null;
 }
 
 function setDegradedPolling(on: boolean): void {
@@ -451,55 +494,121 @@ function setDegradedPolling(on: boolean): void {
   }
 }
 
+/**
+ * Bring the realtime doorbell up. NEVER throws: a socket that cannot start is
+ * a slower feature, not a dead one, so the caller keeps its heartbeat and its
+ * 3s backup polling either way. Retries on its own — no app restart needed.
+ */
+function startRealtime(device: { id: string; name: string }): void {
+  if (realtimeRetryTimer) {
+    clearTimeout(realtimeRetryTimer);
+    realtimeRetryTimer = null;
+  }
+  if (!live) return;
+
+  if (ANON_KEY_MISSING) {
+    // Permanent for this installer — retrying would only spam the log.
+    console.error(
+      "[orders] this build has no Supabase anon key: realtime is unavailable, " +
+        "running on backup polling. Install the latest version of Magic Bill."
+    );
+    status.fault = "misconfigured";
+    status.channel = "degraded";
+    setDegradedPolling(true);
+    emitStatus();
+    return;
+  }
+
+  try {
+    connectRealtime({
+      roomId,
+      deviceId: device.id,
+      deviceName: device.name,
+      appVersion,
+      callbacks: {
+        onDoorbell: (payload) => {
+          if (payload.kind === "events") void drainEvents();
+          // 'orders'/'catalog' pings originate from this POS — nothing to fetch.
+        },
+        onPhonesChange: (phones) => {
+          status.phones = phones;
+          emitStatus();
+        },
+        onStatusChange: (s) => {
+          status.channel = s;
+          status.fault = s === "connected" ? "" : "realtime-down";
+          setDegradedPolling(s === "degraded");
+          if (s === "connected") void drainEvents(); // catch anything missed
+          emitStatus();
+        },
+      },
+    });
+    status.channel = "degraded"; // until SUBSCRIBED lands
+    setDegradedPolling(true);
+    emitStatus();
+  } catch (e) {
+    console.error("[orders] realtime failed to start — running on backup polling:", e);
+    status.fault = "realtime-down";
+    status.channel = "degraded";
+    setDegradedPolling(true);
+    status.phones = 0;
+    emitStatus();
+    realtimeRetryTimer = setTimeout(() => {
+      realtimeRetryTimer = null;
+      startRealtime(device);
+    }, REALTIME_RETRY_MS);
+  }
+}
+
 async function goLive(): Promise<void> {
   if (live) return;
   live = true;
-  const device = await getDeviceInfo();
+  try {
+    const device = await getDeviceInfo();
 
-  connectRealtime({
-    roomId,
-    deviceId: device.id,
-    deviceName: device.name,
-    appVersion,
-    callbacks: {
-      onDoorbell: (payload) => {
-        if (payload.kind === "events") void drainEvents();
-        // 'orders'/'catalog' pings originate from this POS — nothing to fetch.
-      },
-      onPhonesChange: (phones) => {
-        status.phones = phones;
-        emitStatus();
-      },
-      onStatusChange: (s) => {
-        status.channel = s;
-        setDegradedPolling(s === "degraded");
-        if (s === "connected") void drainEvents(); // catch anything missed
-        emitStatus();
-      },
-    },
-  });
-  status.channel = "degraded"; // until SUBSCRIBED lands
-  setDegradedPolling(true);
+    // The backup path is armed FIRST, on purpose. In v1.3.0 these three
+    // timers were started only after connectRealtime() returned, so the one
+    // throw out of createClient() left the bridge with live = true, no
+    // heartbeat, no polling and no way back — the feature looked dead while
+    // the app happily kept billing. Whatever happens to the socket now, the
+    // counter still tells the server it is alive every 30s and still pulls
+    // phone events every 3s.
+    status.channel = "degraded";
+    status.fault = "realtime-down"; // until the socket says otherwise
+    setDegradedPolling(true);
+    heartbeatTimer = setInterval(
+      () =>
+        sendHello().catch((e) => {
+          const reason = String((e as Error)?.message ?? e);
+          // License deleted / moved to another machine -> stop cleanly.
+          if (reason === "invalid-key" || reason === "unbound" || reason === "no-license") {
+            console.info("[orders] bridge stopping:", reason);
+            goIdle();
+          }
+        }),
+      HEARTBEAT_MS
+    );
+    reconcileTimer = setInterval(() => void reconcileNow(), RECONCILE_MS);
 
-  heartbeatTimer = setInterval(
-    () =>
-      sendHello().catch((e) => {
-        const reason = String((e as Error)?.message ?? e);
-        // License deleted / moved to another machine -> stop cleanly.
-        if (reason === "invalid-key" || reason === "unbound" || reason === "no-license") {
-          console.info("[orders] bridge stopping:", reason);
-          goIdle();
-        }
-      }),
-    HEARTBEAT_MS
-  );
-  reconcileTimer = setInterval(() => void reconcileNow(), RECONCILE_MS);
+    startRealtime(device);
 
-  await reconcileNow();
-  void pushOrdersNow();
-  void catalogPushNow();
-  void drainEvents();
-  emitStatus();
+    await reconcileNow();
+    void pushOrdersNow();
+    void catalogPushNow();
+    void drainEvents();
+    emitStatus();
+  } catch (e) {
+    // Never leave `live = true` behind a failed start-up: initialize()'s
+    // retry calls goLive() again and must be able to genuinely retry.
+    console.error("[orders] bridge failed to go live (will retry):", e);
+    live = false;
+    disconnectRealtime();
+    clearTimers();
+    status.channel = "off";
+    status.phones = 0;
+    emitStatus();
+    throw e;
+  }
 }
 
 function goIdle(): void {
@@ -507,6 +616,7 @@ function goIdle(): void {
   disconnectRealtime();
   clearTimers();
   status.channel = "off";
+  status.fault = "";
   status.phones = 0;
   emitStatus();
 }

@@ -2,6 +2,7 @@ import { Banknote, ChevronDown, ChevronUp, CreditCard, ListTodo, Plus, Smartphon
 import { ORDER_TYPES } from "../../config/constants";
 import { formatCurrency } from "../../utils/format";
 import { parseCartJson, subtractCart } from "../../services/orders/wire";
+import { describeBridge } from "../../services/orders/statusCopy";
 import type { OrderBridgeStatus } from "../../services/orders/orderBridge";
 import type { CartItem, Customer, OrderType, ProcessingOrder } from "../../types";
 
@@ -40,6 +41,7 @@ export function ProcessingOrdersPanel({
   bridge,
   mobileBadge,
 }: ProcessingOrdersPanelProps) {
+  const bridgeCopy = describeBridge(bridge);
   return (
     <div className="po-panel">
       <div className="po-head">
@@ -83,13 +85,12 @@ export function ProcessingOrdersPanel({
 
         {/* Hidden entirely until the owner enables mobile ordering. */}
         {bridge.featureEnabled && (
-          <div className={`mo-pill ${bridge.channel}`}>
+          <div
+            className={`mo-pill ${bridgeCopy.tone}`}
+            title={bridgeCopy.detail || bridgeCopy.label}
+          >
             <span className="mo-pill-dot" />
-            {bridge.channel === "connected"
-              ? `Mobile ordering · On · ${bridge.phones} phone${bridge.phones === 1 ? "" : "s"}`
-              : bridge.channel === "degraded"
-                ? "Mobile ordering · Reconnecting"
-                : "Mobile ordering · Off"}
+            {bridgeCopy.short}
           </div>
         )}
       </div>
