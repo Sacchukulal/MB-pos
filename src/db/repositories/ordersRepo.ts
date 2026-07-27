@@ -29,19 +29,25 @@ export async function getProcessingOrder(id: number): Promise<ProcessingOrder | 
 export async function insertProcessingOrder(
   draft: OrderDraft,
   tokenNumber: number,
-  billNumber: string
+  billNumber: string,
+  // Mobile-originated orders MUST carry their identity from the INSERT
+  // itself: a concurrent bridge push stamps a random remote_uuid on any
+  // open row that lacks one, so setting it after the fact races and can
+  // publish the same order under two uuids.
+  bridge?: { remoteUuid: string; source: string; waiterName: string }
 ): Promise<number | null> {
   const result = await getDb().execute(
     `INSERT INTO processing_orders
        (cart_data, customer_name, customer_phone, payment_mode, subtotal, gst, total,
         order_type, table_number, customer_id, token_number, bill_number, created_at,
-        updated_at, cloud_dirty)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1)`,
+        updated_at, cloud_dirty, remote_uuid, source, waiter_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1, $15, $16, $17)`,
     [
       JSON.stringify(draft.cart), draft.customerName, draft.customerPhone, draft.paymentMode,
       draft.subtotal, draft.gst, draft.total, draft.orderType, draft.tableNumber,
       draft.customerId, tokenNumber, billNumber, new Date().toISOString(),
       new Date().toISOString(),
+      bridge?.remoteUuid ?? null, bridge?.source ?? "pos", bridge?.waiterName ?? "",
     ]
   );
   requestOrdersPush(); // fire-and-forget cloud republish (no-op when bridge idle)

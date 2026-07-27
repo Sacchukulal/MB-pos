@@ -164,7 +164,11 @@ export async function applyOrderEvent(ev: WireEvent, ctx: ApplyContext): Promise
         tableNumber,
         customerId: null,
       };
-      const newId = await ordersRepo.insertProcessingOrder(draft, claimed.tokenNumber, claimed.billNumber);
+      const newId = await ordersRepo.insertProcessingOrder(draft, claimed.tokenNumber, claimed.billNumber, {
+        remoteUuid: uuid,
+        source: "mobile",
+        waiterName: ev.actorName,
+      });
       if (newId == null) return rejected("server");
 
       const printError = await printDelta(items, {
@@ -177,9 +181,6 @@ export async function applyOrderEvent(ev: WireEvent, ctx: ApplyContext): Promise
       // With KOT printing disabled the kitchen never sees tickets; mark the
       // items "seen" so enabling the setting later doesn't dump old orders.
       await ordersRepo.setOrderBridgeFields(newId, {
-        remoteUuid: uuid,
-        source: "mobile",
-        waiterName: ev.actorName,
         printedItems: printError ? [] : items,
         cloudDirty: true,
       });
