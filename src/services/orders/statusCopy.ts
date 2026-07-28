@@ -1,10 +1,10 @@
 import type { OrderBridgeStatus } from "./orderBridge";
 
 /**
- * The ONE place the bridge's internal state is turned into words a shop owner
- * understands. v1.3.0 rendered a bare "Offline" for four completely different
- * situations, which cost the owner an evening — every state here says what is
- * happening and, when something is wrong, what to do about it.
+ * The ONE place the bridge's internal state is turned into words a shop
+ * owner understands. v1.3.0 rendered a bare "Offline" for four completely
+ * different situations, which cost the owner an evening — every state here
+ * says what is happening and, when something is wrong, what to do about it.
  *
  * `tone` reuses the existing .mo-pill classes, so no new colours are needed.
  */
@@ -21,8 +21,11 @@ export interface BridgeStatusCopy {
   detail: string;
 }
 
-/** The heartbeat is 30s, so nothing newer than this is worth worrying about. */
-const LAST_SYNC_STALE_MS = 90_000;
+/**
+ * The counter proves it is alive with a 60-second beat, so nothing newer
+ * than this is worth worrying about.
+ */
+const LAST_SYNC_STALE_MS = 180_000;
 
 export function describeBridge(s: OrderBridgeStatus): BridgeStatusCopy {
   if (!s.featureEnabled) {
@@ -53,8 +56,34 @@ export function describeBridge(s: OrderBridgeStatus): BridgeStatusCopy {
       short: "Mobile ordering · Update needed",
       detail:
         "Install the latest version of Magic Bill using the update button at the " +
-        "bottom-left of the sidebar. Until then orders from phones still arrive and " +
-        "still print, about 3 seconds slower than normal.",
+        "bottom-left of the sidebar. Until then phones cannot send orders to this " +
+        "counter.",
+    };
+  }
+
+  if (s.fault === "budget") {
+    return {
+      tone: "degraded",
+      label: "Paused a background task (safety limit)",
+      short: "Mobile ordering · Safety limit",
+      detail:
+        "Magic Bill stopped a background task that was repeating far more often " +
+        "than it should. Orders from phones still arrive and still print. This " +
+        "clears by itself; if the message keeps coming back, send a screenshot to " +
+        "support.",
+    };
+  }
+
+  if (s.fault === "flapping") {
+    return {
+      tone: "degraded",
+      label: "Live connection keeps dropping",
+      short: "Mobile ordering · Unstable connection",
+      detail:
+        "The connection to Magic Bill keeps dropping and reconnecting, which usually " +
+        "means an unreliable internet line at the counter. Magic Bill has stopped " +
+        "retrying every second and will settle on its own. Orders from phones still " +
+        "arrive — they may take up to a minute while this lasts.",
     };
   }
 
@@ -74,9 +103,9 @@ export function describeBridge(s: OrderBridgeStatus): BridgeStatusCopy {
       label: "Connected (backup mode)",
       short: "Mobile ordering · Backup mode",
       detail:
-        "Orders from phones still arrive and still print — about 3 seconds slower " +
-        "than usual. Nothing is lost. This clears by itself when the live " +
-        "connection comes back.",
+        "The instant connection is down, so orders from phones arrive within about " +
+        "a minute instead of straight away. They still arrive and still print, and " +
+        "nothing is lost. This clears by itself.",
     };
   }
 
@@ -91,9 +120,24 @@ export function describeBridge(s: OrderBridgeStatus): BridgeStatusCopy {
   };
 }
 
-/** True when "Last sync" has stopped advancing — the heartbeat is not running. */
+/** True when "Last sync" has stopped advancing — the counter is not talking. */
 export function isLastSyncStale(lastSyncAt: string | null, now: number = Date.now()): boolean {
   if (!lastSyncAt) return false;
   const t = Date.parse(lastSyncAt);
   return Number.isFinite(t) && now - t > LAST_SYNC_STALE_MS;
+}
+
+/**
+ * 5.4 — the owner's own usage readout, so he never has to log in to
+ * Supabase to know whether Magic Bill is behaving.
+ */
+export function describeUsage(s: OrderBridgeStatus): string {
+  const { lastHour, last24h } = s.usage;
+  if (lastHour === 0 && last24h === 0) {
+    return "Cloud usage: nothing in the last 24 hours (normal — the counter only " +
+      "registers with Magic Bill once).";
+  }
+  const h = `${lastHour} in the last hour`;
+  const d = `${last24h} in the last 24 hours`;
+  return `Cloud usage: ${h}, ${d}.`;
 }

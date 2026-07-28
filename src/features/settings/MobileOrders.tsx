@@ -26,7 +26,7 @@ import {
   updateTable,
 } from "../../db/repositories/tablesRepo";
 import { composeTableName } from "../billing/tableUtils";
-import { describeBridge, isLastSyncStale } from "../../services/orders/statusCopy";
+import { describeBridge, describeUsage, isLastSyncStale } from "../../services/orders/statusCopy";
 import { useToast } from "../../hooks/useToast";
 import { useUnsavedGuard } from "../../hooks/useUnsavedGuard";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
@@ -370,11 +370,27 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
           </button>
         </div>
 
-        {/* Never make the owner guess what a status word means. */}
-        {bridgeCopy.detail !== "" && (
-          <p className="field-hint" style={{ marginTop: "var(--space-2)", maxWidth: "62ch" }}>
-            {bridgeCopy.detail}
-          </p>
+        {/* Never make the owner guess what a status word means.
+
+            The block below keeps a FIXED height while mobile ordering is on,
+            so an explanation appearing or clearing can never shove the rest
+            of the page down and back — that reflow was the "blinking" the
+            owner reported. The 10-second debounce in the bridge stops the
+            state oscillating; this stops the layout moving even if it does. */}
+        {form.enabled && (
+          <div style={{ minHeight: "68px", marginTop: "var(--space-2)" }}>
+            {bridgeCopy.detail !== "" && (
+              <p className="field-hint" style={{ marginTop: 0, maxWidth: "62ch" }}>
+                {bridgeCopy.detail}
+              </p>
+            )}
+            <p
+              className="field-hint"
+              style={{ marginTop: "var(--space-1)", color: "var(--text-tertiary)" }}
+            >
+              {describeUsage(bridge)}
+            </p>
+          </div>
         )}
 
         {bridge.installs.length > 0 && (

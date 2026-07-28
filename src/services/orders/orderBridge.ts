@@ -1,11 +1,12 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { SUPABASE_ANON_KEY, SUPABASE_FUNCTIONS_URL } from "../../config/supabase";
+import { SUPABASE_ANON_KEY } from "../../config/supabase";
 import { isDbOpen } from "../../db/client";
 import * as ordersRepo from "../../db/repositories/ordersRepo";
 import * as menuRepo from "../../db/repositories/menuRepo";
 import {
   getOrderSyncState,
   setCatalogHash,
+  setLastOrdersSeq,
   setLastReconcileAt,
   setRoomId,
 } from "../../db/repositories/orderSyncRepo";
@@ -13,20 +14,37 @@ import { pruneAppliedEvents } from "../../db/repositories/appliedEventsRepo";
 import { loadSettings } from "../../db/repositories/settingsRepo";
 import { getStoredLicenseKey } from "../license/licenseService";
 import { getDeviceInfo } from "../license/device";
-import { connectRealtime, disconnectRealtime } from "../realtime/client";
+import { connectRealtime, disconnectRealtime, type Bell } from "../realtime/client";
+import {
+  clearSession,
+  currentRoomId,
+  EdgeBudgetExceeded,
+  ensureSession,
+  getEdgeUsage,
+  rpc,
+  table,
+  type EdgeUsage,
+} from "./cloud";
 import { buildCatalogPayload } from "./catalogSync";
 import { applyOrderEvent, type WireEvent } from "./eventApplier";
 import { registerCatalogPushHandler, registerOrdersPushHandler } from "./signals";
-import { finalizedRowToWire, processingRowToWire, type WireOrder } from "./wire";
+import { finalizedRowToWire, processingRowToWire, wireOrderToRow, type WireOrder } from "./wire";
 
 /**
- * The mobile-orders bridge. Owns the whole cloud lifecycle: hello heartbeat,
- * realtime doorbell + presence, catalog push, live-order publishing, and
- * applying phone intents through eventApplier — one at a time, in order.
+ * The mobile-orders bridge. Owns the whole cloud lifecycle for live orders.
  *
- * Everything is fire-and-forget: a network failure must NEVER block billing,
- * throw into the UI, or lose a local write. Started from App.tsx next to
- * startBillSync() so it runs regardless of which screen is open.
+ * WHAT CHANGED IN THE REBUILD:
+ *  - Nothing asks "anything new?" on a timer. Phone intents arrive ON THE
+ *    BELL, carrying the intent itself; the counter applies it without a
+ *    fetch. An idle counter makes no data calls at all.
+ *  - Reads and writes are PostgREST (unmetered), not Edge Functions. The
+ *    only Edge call in the feature is enrolment, once per install.
+ *  - The 30-second `hello` heartbeat is gone. Liveness is a side effect of
+ *    the counter's ordinary writes, plus one unmetered 60-second beat while
+ *    the counter is idle (decision D8).
+ *
+ * Everything is still fire-and-forget: a network failure must NEVER block
+ * billing, throw into the UI, or lose a local write.
  */
 
 export interface InstallInfo {
@@ -40,14 +58,15 @@ export interface InstallInfo {
 
 /**
  * Why the channel is not fully connected. "" means nothing is wrong.
- *  - misconfigured: this build has no Supabase anon key, so realtime can never
- *    start. Backup polling still works; the owner needs a newer installer.
- *  - realtime-down: the socket failed or dropped; backup polling covers it.
+ *  - misconfigured: this build has no Supabase anon key, so the cloud can
+ *    never be reached. The owner needs a newer installer.
+ *  - realtime-down: the socket failed or dropped.
+ *  - flapping: the socket keeps dropping; we have backed off deliberately.
+ *  - budget: the invocation ceiling was reached (a safety limit, not normal).
  */
-export type OrderBridgeFault = "" | "misconfigured" | "realtime-down";
+export type OrderBridgeFault = "" | "misconfigured" | "realtime-down" | "flapping" | "budget";
 
 export interface OrderBridgeStatus {
-  /** The owner's master switch (order_sync_state.mobile_ordering_enabled). */
   featureEnabled: boolean;
   channel: "connected" | "degraded" | "off";
   fault: OrderBridgeFault;
@@ -57,39 +76,65 @@ export interface OrderBridgeStatus {
   installs: InstallInfo[];
   maxMobileDevices: number;
   lastSyncAt: string | null;
-  /** Events older than 2h held back from auto-printing (B8). */
+  /** Events older than 2h held back from auto-printing. */
   staleCount: number;
+  /** Plain-English cloud usage for the owner (5.4). */
+  usage: EdgeUsage;
 }
 
 export interface NewOrderAlert {
-  /** False for pure print-failure notices on existing orders. */
   isNewOrder: boolean;
   tableNumber: string;
   orderType: string;
   waiterName: string;
   total: number;
-  /** Set when the order saved but the counter printer failed. */
   printError?: string;
 }
 
-const HEARTBEAT_MS = 30_000;
+/* ------------------------------ intervals ------------------------------ */
+
+/**
+ * The counter proves it is alive by doing its job: every order push and
+ * every event ack stamps licenses.pos_last_seen_at (migration 0013). This
+ * beat covers an IDLE counter only — it is skipped entirely whenever the
+ * counter has written something recently.
+ *
+ * It is a PostgREST call, which is not metered by count, and it carries
+ * about 200 bytes. The server accepts phone intents while pos_last_seen_at
+ * is within 150s (mb_pos_live_window), i.e. 2.5 beats, so a single lost
+ * beat can never refuse a waiter, and a counter that has genuinely died
+ * stops accepting orders within 150 seconds.
+ */
+const POS_ALIVE_MS = 60_000;
+const POS_ALIVE_SKIP_MS = 45_000;
+
 const RECONCILE_MS = 5 * 60_000;
-const DEGRADED_POLL_MS = 3_000;
 const PUSH_DEBOUNCE_MS = 300;
 const CATALOG_DEBOUNCE_MS = 2_000;
 const STALE_EVENT_MS = 2 * 60 * 60_000;
-/** Retry a failed realtime connect without needing an app restart. */
-const REALTIME_RETRY_MS = 60_000;
 
 /**
- * v1.3.0's installer was built without VITE_SUPABASE_ANON_KEY, so
- * createClient() threw "supabaseKey is required." on the very first connect
- * and killed the whole bridge. The build now refuses to produce a keyless
- * bundle (vite.config.ts), but the running app must still cope: with no key
- * realtime can never work, so we skip it entirely, say so in the UI, and run
- * on backup polling instead of dying.
+ * 5.1 — a fallback read may arm only after the socket has been continuously
+ * down for this long, and stops the instant it recovers. It is a PostgREST
+ * read, so even this costs nothing against the invocation quota.
+ */
+const FALLBACK_ARM_AFTER_MS = 30_000;
+const FALLBACK_POLL_MS = 45_000;
+
+/** 5.5 — the UI only admits to being degraded after this long, so a blink
+ *  can never move the page. Recovery is instant. */
+const DEGRADED_UI_DEBOUNCE_MS = 10_000;
+
+/**
+ * v1.3.0's installer was built without VITE_SUPABASE_ANON_KEY. The build now
+ * refuses to produce a keyless bundle (vite.config.ts), but a running app
+ * must still cope: with no key nothing cloud-side can work, so we say so
+ * plainly instead of failing in the dark.
  */
 const ANON_KEY_MISSING = !SUPABASE_ANON_KEY || String(SUPABASE_ANON_KEY).trim().length < 20;
+const ANON_KEY_MISSING_MSG =
+  "[orders] this build has no Supabase anon key: mobile ordering cannot run. " +
+  "Install the latest version of Magic Bill.";
 
 /* ------------------------------- state ------------------------------- */
 
@@ -100,6 +145,10 @@ let roomId = "";
 let serverOffsetMs = 0;
 let soundOnNewOrder = true;
 let appVersion = "";
+let lastOrdersSeq = 0;
+let lastPosWriteAt = 0;
+let socketUp = false;
+let socketDownSince = 0;
 
 const status: OrderBridgeStatus = {
   featureEnabled: false,
@@ -111,19 +160,19 @@ const status: OrderBridgeStatus = {
   maxMobileDevices: 1,
   lastSyncAt: null,
   staleCount: 0,
+  usage: getEdgeUsage(),
 };
 
 const staleHeld = new Map<string, WireEvent>();
-/** remote_uuid -> latest print failure note, carried on the pushed order. */
 const printErrors = new Map<string, string>();
-/** Final truths (cancelled orders) whose local rows are already gone. */
 let pendingCloudOrders: WireOrder[] = [];
 
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let aliveTimer: ReturnType<typeof setInterval> | null = null;
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
-let degradedTimer: ReturnType<typeof setInterval> | null = null;
+let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+let fallbackArmTimer: ReturnType<typeof setTimeout> | null = null;
+let degradedUiTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let realtimeRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -137,6 +186,7 @@ const alertSubs = new Set<(a: NewOrderAlert) => void>();
 function emitStatus(): void {
   status.featureEnabled = enabled;
   status.staleCount = staleHeld.size;
+  status.usage = getEdgeUsage();
   const snapshot = { ...status, installs: [...status.installs] };
   statusSubs.forEach((cb) => cb(snapshot));
 }
@@ -148,6 +198,7 @@ function emitOrdersChanged(): void {
 export function getOrderBridgeStatus(): OrderBridgeStatus {
   status.featureEnabled = enabled;
   status.staleCount = staleHeld.size;
+  status.usage = getEdgeUsage();
   return { ...status, installs: [...status.installs] };
 }
 
@@ -167,54 +218,46 @@ export function subscribeNewOrderAlerts(cb: (a: NewOrderAlert) => void): Unsubsc
   return () => alertSubs.delete(cb);
 }
 
-/* ------------------------------ cloud API ------------------------------ */
+/* ------------------------------ plumbing ------------------------------ */
 
-/** Reaching the cloud at all is a different failure from being told "no". */
 function setCloudReachable(next: boolean): void {
   if (status.cloudReachable === next) return;
   status.cloudReachable = next;
-  if (!next) console.error("[orders] cannot reach the Magic Bill cloud — check this PC's internet");
+  if (!next) {
+    console.error("[orders] cannot reach the Magic Bill cloud — check this PC's internet");
+  }
   emitStatus();
 }
 
-async function api<T = any>(action: string, args: Record<string, unknown> = {}): Promise<T> {
-  const key = getStoredLicenseKey();
-  if (!key) throw new Error("no-license");
-  const device = await getDeviceInfo();
-  let res: Response;
-  let data: any;
+/** Wraps every cloud call so one failure can never reach billing. */
+async function guarded<T>(what: string, fn: () => Promise<T>): Promise<T | null> {
   try {
-    res = await fetch(`${SUPABASE_FUNCTIONS_URL}/pos-orders`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        apikey: SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ key, deviceId: device.id, action, ...args }),
-    });
-    data = await res.json();
+    const result = await fn();
+    setCloudReachable(true);
+    status.lastSyncAt = new Date().toISOString();
+    if (status.fault === "budget") status.fault = "";
+    return result;
   } catch (e) {
-    setCloudReachable(false);
-    throw e;
+    if (e instanceof EdgeBudgetExceeded) {
+      status.fault = "budget";
+      emitStatus();
+      return null;
+    }
+    const reason = String((e as Error)?.message ?? e);
+    if (reason === "invalid-key" || reason === "unbound" || reason === "no-license") {
+      console.info("[orders] bridge stopping:", reason);
+      void clearSession();
+      goIdle();
+      return null;
+    }
+    if (/fetch|network|Failed to fetch/i.test(reason)) setCloudReachable(false);
+    console.info(`[orders] ${what} failed (will retry):`, reason);
+    return null;
   }
-  setCloudReachable(true);
-  if (!data?.ok) throw new Error(String(data?.reason ?? `http-${res.status}`));
-  status.lastSyncAt = new Date().toISOString();
-  return data as T;
 }
 
-async function sendHello(): Promise<any> {
-  const data = await api("hello", { appVersion, mobileOrderingEnabled: enabled });
-  serverOffsetMs = Date.parse(data.serverTime) - Date.now();
-  status.installs = Array.isArray(data.installs) ? data.installs : [];
-  status.maxMobileDevices = Number(data.maxMobileDevices ?? 1);
-  if (data.roomId && data.roomId !== roomId) {
-    roomId = data.roomId;
-    await setRoomId(roomId);
-  }
-  emitStatus();
-  return data;
+function markPosWrite(): void {
+  lastPosWriteAt = Date.now();
 }
 
 /* ------------------------------ push side ------------------------------ */
@@ -253,8 +296,6 @@ async function pushOrdersNow(force = false): Promise<void> {
     const open = await ordersRepo.listProcessingOrders();
     const dirtyOpen = open.filter((o) => o.remote_uuid && (force || o.cloud_dirty === 1));
     const dirtyBilled = await ordersRepo.listDirtyFinalizedRemote();
-    // Snapshot: anything queued while this request is in flight must survive
-    // the cleanup below and go out on the next push.
     const extras = pendingCloudOrders.slice();
 
     const orders: WireOrder[] = [
@@ -264,18 +305,29 @@ async function pushOrdersNow(force = false): Promise<void> {
     ];
     if (orders.length === 0) return;
 
-    await api("push_orders", { orders });
+    const licenseKey = getStoredLicenseKey();
+    if (!licenseKey) return;
+
+    const ok = await guarded("push orders", async () => {
+      const t = await table("live_orders");
+      const { error } = await t.upsert(
+        orders.map((o) => wireOrderToRow(o, licenseKey)),
+        { onConflict: "license_key,client_uuid" },
+      );
+      if (error) throw new Error(error.message);
+      return true;
+    });
+    if (!ok) return;
+
+    markPosWrite();
     await ordersRepo.clearProcessingCloudDirty(dirtyOpen);
     await ordersRepo.clearFinalizedCloudDirty(dirtyBilled.map((o) => o.id));
     pendingCloudOrders = pendingCloudOrders.filter((o) => !extras.includes(o));
-    // Closed orders don't need their print note any more.
     [...dirtyBilled, ...extras].forEach((o) => {
       const uuid = "clientUuid" in o ? (o as WireOrder).clientUuid : (o as any).remote_uuid;
       if (uuid) printErrors.delete(uuid);
     });
     emitStatus();
-  } catch (e) {
-    console.info("[orders] push_orders failed (will retry):", e);
   } finally {
     pushing = false;
     if (pushRerun) {
@@ -296,34 +348,44 @@ function requestPushDebounced(): void {
   }, PUSH_DEBOUNCE_MS);
 }
 
+/**
+ * Reconcile, then republish the FULL open set. Reconcile closes cloud rows
+ * the counter no longer has; the republish repairs any open order whose
+ * cloud copy drifted, so the cloud converges on the counter's truth within
+ * one cycle even if a write was lost.
+ */
 async function reconcileNow(): Promise<void> {
   if (!live) return;
-  try {
-    await ensureRemoteUuids();
-    const open = await ordersRepo.listProcessingOrders();
-    const openClientUuids = open.map((o) => o.remote_uuid).filter(Boolean);
-    await api("reconcile_orders", { openClientUuids });
-    await setLastReconcileAt(new Date().toISOString());
-    // Republish the full open set: reconcile closes cloud rows the counter no
-    // longer has, this repairs any open order whose cloud copy drifted.
-    await pushOrdersNow(true);
-  } catch (e) {
-    console.info("[orders] reconcile failed (will retry):", e);
-  }
+  await ensureRemoteUuids();
+  const open = await ordersRepo.listProcessingOrders();
+  const openClientUuids = open.map((o) => o.remote_uuid).filter(Boolean) as string[];
+  const result = await guarded("reconcile", () =>
+    rpc("mb_reconcile_orders", { p_open_client_uuids: openClientUuids }),
+  );
+  if (result === null) return;
+  markPosWrite();
+  await setLastReconcileAt(new Date().toISOString());
+  await pushOrdersNow(true);
 }
 
 async function catalogPushNow(force = false): Promise<void> {
   if (!live) return;
-  try {
-    const payload = await buildCatalogPayload();
-    const state = await getOrderSyncState();
-    if (!force && state.catalogHash === payload.catalogHash) return;
-    await api("push_catalog", { ...payload });
-    await setCatalogHash(payload.catalogHash);
-    console.info("[orders] catalog pushed");
-  } catch (e) {
-    console.info("[orders] push_catalog failed (will retry):", e);
-  }
+  const payload = await buildCatalogPayload();
+  const state = await getOrderSyncState();
+  if (!force && state.catalogHash === payload.catalogHash) return;
+  const result = await guarded("push catalog", () =>
+    rpc("mb_push_catalog", {
+      p_categories: payload.categories,
+      p_items: payload.items,
+      p_tables: payload.tables,
+      p_customers: payload.customers,
+      p_catalog_hash: payload.catalogHash,
+    }),
+  );
+  if (result === null) return;
+  markPosWrite();
+  await setCatalogHash(payload.catalogHash);
+  console.info("[orders] catalog pushed");
 }
 
 function requestCatalogDebounced(): void {
@@ -352,8 +414,17 @@ function playNewOrderChime(): void {
   }
 }
 
-let draining = false;
-let drainRerun = false;
+/**
+ * Intents are applied ONE AT A TIME, in arrival order. The bell can deliver
+ * two intents in the same millisecond and the applier is not reentrant —
+ * it claims token numbers and drives printers.
+ */
+let applyChain: Promise<void> = Promise.resolve();
+function enqueue(fn: () => Promise<void>): void {
+  applyChain = applyChain.then(fn).catch((e) => {
+    console.error("[orders] apply queue error:", e);
+  });
+}
 
 async function applyEventList(events: WireEvent[], ignoreStaleness: boolean): Promise<void> {
   if (events.length === 0) return;
@@ -362,7 +433,13 @@ async function applyEventList(events: WireEvent[], ignoreStaleness: boolean): Pr
   const state = await getOrderSyncState();
   soundOnNewOrder = state.soundOnNewOrder;
 
-  const acks: { eventId: string; status: "applied" | "rejected"; reason?: string }[] = [];
+  const acks: {
+    eventId: string;
+    status: "applied" | "rejected";
+    reason?: string;
+    /** The order this event changed, so the ack and the push are one call. */
+    orderClientUuid?: string | null;
+  }[] = [];
   let anyApplied = false;
   const alerts: NewOrderAlert[] = [];
 
@@ -378,7 +455,12 @@ async function applyEventList(events: WireEvent[], ignoreStaleness: boolean): Pr
     }
     try {
       const result = await applyOrderEvent(ev, { settings, categories });
-      acks.push({ eventId: ev.eventId, status: result.status, reason: result.reason });
+      acks.push({
+        eventId: ev.eventId,
+        status: result.status,
+        reason: result.reason,
+        orderClientUuid: ev.orderClientUuid,
+      });
       if (result.status === "applied") {
         anyApplied = true;
         if (ev.orderClientUuid) {
@@ -389,7 +471,6 @@ async function applyEventList(events: WireEvent[], ignoreStaleness: boolean): Pr
         if (result.alert) {
           alerts.push({ isNewOrder: true, ...result.alert, printError: result.printError });
         } else if (result.printError) {
-          // Saved, but the counter printer failed — the cashier must know.
           alerts.push({
             isNewOrder: false,
             tableNumber: "",
@@ -406,15 +487,13 @@ async function applyEventList(events: WireEvent[], ignoreStaleness: boolean): Pr
     }
   }
 
-  if (acks.length > 0) {
-    try {
-      await api("ack_events", { acks });
-    } catch (e) {
-      // The local applied_order_events ledger makes a re-pull harmless.
-      console.info("[orders] ack failed (ledger prevents double-apply):", e);
-    }
-  }
+  // Acking is what resolves the phone's "Sending…" — including a REJECTION,
+  // which must reach the phone or a waiter sits on "Sending…" forever.
+  await ackEvents(acks);
+
   if (anyApplied || acks.length > 0) {
+    // Any order the ack did not already carry (a counter-side edit that
+    // happened while we were applying) still goes out here.
     void pushOrdersNow();
     emitOrdersChanged();
   }
@@ -425,29 +504,110 @@ async function applyEventList(events: WireEvent[], ignoreStaleness: boolean): Pr
   emitStatus();
 }
 
-async function drainEvents(): Promise<void> {
-  if (!live || !isDbOpen()) return;
-  if (draining) {
-    drainRerun = true;
-    return;
+/**
+ * Ack an applied (or rejected) intent AND publish the resulting order truth
+ * in ONE call. `mb_apply_event` does both inside one transaction and rings
+ * the bell once, so:
+ *   - a phone can never see a new order before it learns its "Sending…"
+ *     resolved, and
+ *   - a rejection always reaches the phone — the failure that used to leave
+ *     a waiter stuck on "Sending…" once the phone stopped polling.
+ *
+ * It also halved the realtime traffic: this used to be two writes and
+ * therefore two broadcasts, milliseconds apart, to the same audience.
+ *
+ * The local applied_order_events ledger makes a failed call harmless: the
+ * event is re-applied-and-acked later without reprinting anything.
+ */
+async function ackEvents(
+  acks: {
+    eventId: string;
+    status: "applied" | "rejected";
+    reason?: string;
+    orderClientUuid?: string | null;
+  }[],
+): Promise<void> {
+  if (acks.length === 0) return;
+  const open = await ordersRepo.listProcessingOrders();
+
+  for (const a of acks) {
+    let orderJson: Record<string, unknown> | null = null;
+    if (a.orderClientUuid) {
+      const row = open.find((o) => o.remote_uuid === a.orderClientUuid);
+      if (row) {
+        orderJson = processingRowToWire(row, printErrors.get(a.orderClientUuid) ?? "") as
+          unknown as Record<string, unknown>;
+      } else {
+        // The order closed as part of applying this event (settled or
+        // cancelled). Its final truth is queued in pendingCloudOrders.
+        const closed = pendingCloudOrders.find((o) => o.clientUuid === a.orderClientUuid);
+        if (closed) {
+          orderJson = closed as unknown as Record<string, unknown>;
+          pendingCloudOrders = pendingCloudOrders.filter((o) => o !== closed);
+        }
+      }
+    }
+
+    const ok = await guarded("apply event", () =>
+      rpc("mb_apply_event", {
+        p_event_id: a.eventId,
+        p_status: a.status,
+        p_reason: a.reason ?? null,
+        p_order: orderJson,
+      }),
+    );
+    if (ok && a.orderClientUuid) {
+      // Published — no need for the debounced push to send it again.
+      const row = open.find((o) => o.remote_uuid === a.orderClientUuid);
+      if (row) await ordersRepo.clearProcessingCloudDirty([row]);
+      printErrors.delete(a.orderClientUuid);
+    }
   }
-  draining = true;
+  markPosWrite();
+}
+
+/**
+ * The catch-up read. Runs on startup, and only otherwise when the bridge
+ * has REASON to think it missed something (a sequence gap, or the socket
+ * having been down). It is never on a timer while the socket is healthy.
+ */
+let catchingUp = false;
+async function catchUpEvents(): Promise<void> {
+  if (!live || !isDbOpen() || catchingUp) return;
+  catchingUp = true;
   try {
-    for (let round = 0; round < 10; round++) {
-      const data = await api<{ events: WireEvent[] }>("pull_events", { limit: 50 });
-      const events = (data.events ?? []).filter((e) => !staleHeld.has(e.eventId));
-      if (events.length === 0) break;
-      await applyEventList(events, false);
-      if ((data.events ?? []).length < 50) break;
-    }
-  } catch (e) {
-    console.info("[orders] pull_events failed (will retry):", e);
+    const rows = await guarded("read pending intents", async () => {
+      const t = await table("order_events");
+      const { data, error } = await t
+        .select(
+          "id, client_event_id, kind, order_id, order_client_uuid, payload, " +
+            "actor_kind, actor_id, actor_name, created_at",
+        )
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(100);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    });
+    if (!rows || rows.length === 0) return;
+
+    const events: WireEvent[] = rows
+      .map((e: any) => ({
+        eventId: e.id,
+        clientEventId: e.client_event_id,
+        kind: e.kind,
+        orderId: e.order_id,
+        orderClientUuid: e.order_client_uuid,
+        payload: e.payload ?? {},
+        actorKind: e.actor_kind,
+        actorId: e.actor_id,
+        actorName: e.actor_name ?? "",
+        createdAt: e.created_at,
+      }))
+      .filter((e) => !staleHeld.has(e.eventId));
+    await applyEventList(events, false);
   } finally {
-    draining = false;
-    if (drainRerun) {
-      drainRerun = false;
-      void drainEvents();
-    }
+    catchingUp = false;
   }
 }
 
@@ -455,109 +615,199 @@ async function drainEvents(): Promise<void> {
 export async function printStaleOrders(): Promise<void> {
   const held = [...staleHeld.values()];
   staleHeld.clear();
-  await applyEventList(held, true);
+  enqueue(() => applyEventList(held, true));
 }
 
 /** "… — Discard": reject the held events; reconcile cancels their cloud rows. */
 export async function discardStaleOrders(): Promise<void> {
   const held = [...staleHeld.values()];
   staleHeld.clear();
-  try {
-    await api("ack_events", {
-      acks: held.map((ev) => ({ eventId: ev.eventId, status: "rejected", reason: "order-gone" })),
-    });
-  } catch (e) {
-    console.info("[orders] discard ack failed:", e);
-  }
+  await ackEvents(
+    held.map((ev) => ({
+      eventId: ev.eventId,
+      status: "rejected" as const,
+      reason: "order-gone",
+      orderClientUuid: ev.orderClientUuid,
+    })),
+  );
   await reconcileNow();
   emitStatus();
+}
+
+/* ------------------------------- the bell ------------------------------- */
+
+function onBell(bell: Bell): void {
+  const seq = Number(bell.seq ?? 0);
+
+  if (bell.kind === "event") {
+    const e = bell.event as Record<string, any> | undefined;
+    if (!e?.eventId) return;
+    const ev: WireEvent = {
+      eventId: String(e.eventId),
+      clientEventId: String(e.clientEventId ?? ""),
+      kind: String(e.kind ?? ""),
+      orderId: e.orderId ?? null,
+      orderClientUuid: e.orderClientUuid ?? null,
+      payload: (e.payload ?? {}) as Record<string, unknown>,
+      actorKind: String(e.actorKind ?? "staff"),
+      actorId: e.actorId ?? null,
+      actorName: String(e.actorName ?? ""),
+      createdAt: String(e.createdAt ?? new Date().toISOString()),
+    };
+    // The intent arrives WITH the bell — no fetch, no fan-out. The ledger in
+    // eventApplier makes a duplicate bell (or a bell plus a catch-up read)
+    // completely harmless.
+    enqueue(() => applyEventList([ev], false));
+    return;
+  }
+
+  if (bell.kind === "order") {
+    // Authored by this counter. The only thing worth acting on is a gap,
+    // which means we were away while something changed.
+    if (seq > 0) {
+      if (lastOrdersSeq > 0 && seq > lastOrdersSeq + 1) {
+        enqueue(catchUpEvents);
+      }
+      lastOrdersSeq = seq;
+      void setLastOrdersSeq(seq).catch(() => {});
+    }
+    return;
+  }
+
+  // 'event_status' and 'catalog' bells are echoes of this counter's own
+  // writes. Nothing to do.
 }
 
 /* ---------------------------- lifecycle ---------------------------- */
 
 function clearTimers(): void {
-  for (const t of [heartbeatTimer, reconcileTimer, degradedTimer]) if (t) clearInterval(t);
-  heartbeatTimer = reconcileTimer = degradedTimer = null;
-  if (retryTimer) clearTimeout(retryTimer);
-  if (realtimeRetryTimer) clearTimeout(realtimeRetryTimer);
-  if (pushTimer) clearTimeout(pushTimer);
-  if (catalogTimer) clearTimeout(catalogTimer);
-  retryTimer = realtimeRetryTimer = pushTimer = catalogTimer = null;
+  for (const t of [aliveTimer, reconcileTimer, fallbackTimer]) if (t) clearInterval(t);
+  aliveTimer = reconcileTimer = fallbackTimer = null;
+  for (const t of [retryTimer, pushTimer, catalogTimer, fallbackArmTimer, degradedUiTimer]) {
+    if (t) clearTimeout(t);
+  }
+  retryTimer = pushTimer = catalogTimer = fallbackArmTimer = degradedUiTimer = null;
 }
 
-function setDegradedPolling(on: boolean): void {
-  if (on && !degradedTimer) {
-    degradedTimer = setInterval(() => void drainEvents(), DEGRADED_POLL_MS);
-  } else if (!on && degradedTimer) {
-    clearInterval(degradedTimer);
-    degradedTimer = null;
+/**
+ * 5.1 — the fallback arms only after the socket has been continuously down
+ * for 30s, then reads at 45s, and stops the instant the socket recovers.
+ */
+function setFallback(on: boolean): void {
+  if (on) {
+    if (fallbackTimer || fallbackArmTimer) return;
+    fallbackArmTimer = setTimeout(() => {
+      fallbackArmTimer = null;
+      if (socketUp || !live) return;
+      console.info("[orders] live connection down for 30s — reading intents every 45s instead");
+      fallbackTimer = setInterval(() => enqueue(catchUpEvents), FALLBACK_POLL_MS);
+      enqueue(catchUpEvents);
+    }, FALLBACK_ARM_AFTER_MS);
+  } else {
+    if (fallbackArmTimer) {
+      clearTimeout(fallbackArmTimer);
+      fallbackArmTimer = null;
+    }
+    if (fallbackTimer) {
+      clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    }
   }
 }
 
 /**
- * Bring the realtime doorbell up. NEVER throws: a socket that cannot start is
- * a slower feature, not a dead one, so the caller keeps its heartbeat and its
- * 3s backup polling either way. Retries on its own — no app restart needed.
+ * 5.5 — entering the degraded state is debounced by 10s so a momentary
+ * reconnect can never move the page; recovery is instant.
  */
-function startRealtime(device: { id: string; name: string }): void {
-  if (realtimeRetryTimer) {
-    clearTimeout(realtimeRetryTimer);
-    realtimeRetryTimer = null;
-  }
-  if (!live) return;
-
-  if (ANON_KEY_MISSING) {
-    // Permanent for this installer — retrying would only spam the log.
-    console.error(
-      "[orders] this build has no Supabase anon key: realtime is unavailable, " +
-        "running on backup polling. Install the latest version of Magic Bill."
-    );
-    status.fault = "misconfigured";
-    status.channel = "degraded";
-    setDegradedPolling(true);
-    emitStatus();
+function setChannelStatus(next: "connected" | "degraded"): void {
+  if (next === "connected") {
+    socketUp = true;
+    socketDownSince = 0;
+    if (degradedUiTimer) {
+      clearTimeout(degradedUiTimer);
+      degradedUiTimer = null;
+    }
+    setFallback(false);
+    if (status.channel !== "connected" || status.fault !== "") {
+      status.channel = "connected";
+      status.fault = "";
+      emitStatus();
+    }
     return;
   }
 
-  try {
-    connectRealtime({
-      roomId,
-      deviceId: device.id,
-      deviceName: device.name,
-      appVersion,
-      callbacks: {
-        onDoorbell: (payload) => {
-          if (payload.kind === "events") void drainEvents();
-          // 'orders'/'catalog' pings originate from this POS — nothing to fetch.
-        },
-        onPhonesChange: (phones) => {
-          status.phones = phones;
-          emitStatus();
-        },
-        onStatusChange: (s) => {
-          status.channel = s;
-          status.fault = s === "connected" ? "" : "realtime-down";
-          setDegradedPolling(s === "degraded");
-          if (s === "connected") void drainEvents(); // catch anything missed
-          emitStatus();
-        },
-      },
-    });
-    status.channel = "degraded"; // until SUBSCRIBED lands
-    setDegradedPolling(true);
-    emitStatus();
-  } catch (e) {
-    console.error("[orders] realtime failed to start — running on backup polling:", e);
-    status.fault = "realtime-down";
+  socketUp = false;
+  if (socketDownSince === 0) socketDownSince = Date.now();
+  setFallback(true);
+  if (status.channel === "degraded") return;
+  if (degradedUiTimer) return;
+  degradedUiTimer = setTimeout(() => {
+    degradedUiTimer = null;
+    if (socketUp) return;
     status.channel = "degraded";
-    setDegradedPolling(true);
-    status.phones = 0;
+    if (status.fault === "") status.fault = "realtime-down";
     emitStatus();
-    realtimeRetryTimer = setTimeout(() => {
-      realtimeRetryTimer = null;
-      startRealtime(device);
-    }, REALTIME_RETRY_MS);
+  }, DEGRADED_UI_DEBOUNCE_MS);
+}
+
+async function sendHello(mobileOrderingEnabled?: boolean): Promise<void> {
+  const data = await guarded<any>("hello", () =>
+    rpc("mb_pos_hello", {
+      p_app_version: appVersion,
+      p_mobile_ordering_enabled: mobileOrderingEnabled ?? null,
+    }),
+  );
+  if (!data?.ok) return;
+  markPosWrite();
+  serverOffsetMs = Date.parse(data.serverTime) - Date.now();
+  status.installs = Array.isArray(data.installs)
+    ? data.installs.map((i: any) => ({
+        installId: i.installId,
+        label: i.label ?? "",
+        actorKind: i.actorKind ?? "",
+        actorName: i.actorName ?? "",
+        lastSeen: i.lastSeen,
+        blocked: i.blocked === true,
+      }))
+    : [];
+  status.maxMobileDevices = Number(data.maxMobileDevices ?? 1);
+  lastOrdersSeq = Number(data.ordersSeq ?? 0);
+  if (data.roomId && data.roomId !== roomId) {
+    roomId = data.roomId;
+    await setRoomId(roomId);
   }
+  emitStatus();
+}
+
+/** The idle-counter liveness beat (D8). Skipped whenever we wrote recently. */
+async function posAliveBeat(): Promise<void> {
+  if (!live) return;
+  if (Date.now() - lastPosWriteAt < POS_ALIVE_SKIP_MS) return;
+  const data = await guarded<any>("liveness beat", () => rpc("mb_pos_alive"));
+  if (data?.ok) markPosWrite();
+}
+
+function startRealtime(device: { id: string; name: string }): void {
+  if (!live || !roomId) return;
+  connectRealtime({
+    roomId,
+    deviceId: device.id,
+    deviceName: device.name,
+    appVersion,
+    callbacks: {
+      onBell,
+      onPhonesChange: (phones) => {
+        status.phones = phones;
+        emitStatus();
+      },
+      onStatusChange: setChannelStatus,
+      onFlapping: () => {
+        status.fault = "flapping";
+        status.channel = "degraded";
+        emitStatus();
+      },
+    },
+  });
 }
 
 async function goLive(): Promise<void> {
@@ -566,46 +816,32 @@ async function goLive(): Promise<void> {
   try {
     const device = await getDeviceInfo();
 
-    // The backup path is armed FIRST, on purpose. In v1.3.0 these three
-    // timers were started only after connectRealtime() returned, so the one
-    // throw out of createClient() left the bridge with live = true, no
-    // heartbeat, no polling and no way back — the feature looked dead while
-    // the app happily kept billing. Whatever happens to the socket now, the
-    // counter still tells the server it is alive every 30s and still pulls
-    // phone events every 3s.
-    status.channel = "degraded";
-    status.fault = "realtime-down"; // until the socket says otherwise
-    setDegradedPolling(true);
-    heartbeatTimer = setInterval(
-      () =>
-        sendHello().catch((e) => {
-          const reason = String((e as Error)?.message ?? e);
-          // License deleted / moved to another machine -> stop cleanly.
-          if (reason === "invalid-key" || reason === "unbound" || reason === "no-license") {
-            console.info("[orders] bridge stopping:", reason);
-            goIdle();
-          }
-        }),
-      HEARTBEAT_MS
-    );
-    reconcileTimer = setInterval(() => void reconcileNow(), RECONCILE_MS);
+    // The credential first: everything below needs it, and it is the only
+    // step that can call an Edge Function.
+    await ensureSession();
+    if (!roomId) roomId = currentRoomId();
 
+    await sendHello(enabled);
     startRealtime(device);
+
+    aliveTimer = setInterval(() => void posAliveBeat(), POS_ALIVE_MS);
+    reconcileTimer = setInterval(() => void reconcileNow(), RECONCILE_MS);
 
     await reconcileNow();
     void pushOrdersNow();
     void catalogPushNow();
-    void drainEvents();
+    enqueue(catchUpEvents);
     emitStatus();
   } catch (e) {
     // Never leave `live = true` behind a failed start-up: initialize()'s
     // retry calls goLive() again and must be able to genuinely retry.
     console.error("[orders] bridge failed to go live (will retry):", e);
     live = false;
-    disconnectRealtime();
+    void disconnectRealtime();
     clearTimers();
     status.channel = "off";
     status.phones = 0;
+    if (e instanceof EdgeBudgetExceeded) status.fault = "budget";
     emitStatus();
     throw e;
   }
@@ -613,11 +849,12 @@ async function goLive(): Promise<void> {
 
 function goIdle(): void {
   live = false;
-  disconnectRealtime();
+  void disconnectRealtime();
   clearTimers();
   status.channel = "off";
   status.fault = "";
   status.phones = 0;
+  socketUp = false;
   emitStatus();
 }
 
@@ -628,12 +865,19 @@ async function initialize(): Promise<void> {
       retryTimer = setTimeout(() => void initialize(), 60_000);
       return;
     }
+    if (ANON_KEY_MISSING) {
+      console.error(ANON_KEY_MISSING_MSG);
+      status.fault = "misconfigured";
+      status.channel = "off";
+      emitStatus();
+      return;
+    }
     const state = await getOrderSyncState();
     enabled = state.mobileOrderingEnabled;
     soundOnNewOrder = state.soundOnNewOrder;
     roomId = state.roomId;
+    lastOrdersSeq = state.lastOrdersSeq;
 
-    await sendHello(); // also informs the server of the current flag state
     void pruneAppliedEvents().catch(() => {});
 
     if (enabled) await goLive();
@@ -648,14 +892,16 @@ async function initialize(): Promise<void> {
 export async function setMobileOrderingEnabledLive(next: boolean): Promise<void> {
   enabled = next;
   emitStatus();
-  try {
-    await sendHello();
-  } catch (e) {
-    console.info("[orders] hello after toggle failed:", e);
-  }
   if (!started) return;
-  if (next && !live) await goLive();
-  else if (!next && live) goIdle();
+  if (next) {
+    if (!live) await goLive().catch(() => {});
+    else await sendHello(true);
+  } else {
+    // Tell the server BEFORE going idle, or phones keep ordering into a
+    // counter that has stopped listening.
+    await sendHello(false);
+    goIdle();
+  }
 }
 
 /** Settings screen: refresh sound preference without a restart. */
@@ -664,8 +910,11 @@ export function setNewOrderSound(on: boolean): void {
 }
 
 export async function blockInstallRemote(installId: string, blocked: boolean): Promise<void> {
-  await api("block_install", { installId, blocked });
-  await sendHello(); // refresh the installs list
+  const t = await table("mobile_installs");
+  const { error } = await t.update({ blocked }).eq("install_id", installId);
+  if (error) throw new Error(error.message);
+  markPosWrite();
+  await sendHello();
 }
 
 export function startOrderBridge(): void {

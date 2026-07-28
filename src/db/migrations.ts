@@ -280,6 +280,14 @@ async function baseSchema(db: Database) {
   await addColumn(db, "order_sync_state", "mobile_ordering_enabled", "INTEGER", "0");
   await addColumn(db, "order_sync_state", "sound_on_new_order", "INTEGER", "1");
 
+  // The counter's cloud credential (minted once by the orders-enroll Edge
+  // Function, then refreshed for free) and the rolling log of Edge Function
+  // calls that enforces the invocation ceiling across restarts.
+  await addColumn(db, "order_sync_state", "orders_access_token", "TEXT", "''");
+  await addColumn(db, "order_sync_state", "orders_refresh_token", "TEXT", "''");
+  await addColumn(db, "order_sync_state", "orders_token_expires_at", "INTEGER", "0");
+  await addColumn(db, "order_sync_state", "edge_call_log", "TEXT", "''");
+
   // Item availability ("86" an item): unavailable items are hidden on the
   // phone; the billing screen still shows them, suffixed "(unavailable)".
   await addColumn(db, "items", "is_available", "BOOLEAN", "1");

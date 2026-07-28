@@ -89,6 +89,10 @@ export function ProcessingOrdersPanel({
           <div
             className={`mo-pill ${bridgeCopy.tone}`}
             title={bridgeCopy.detail || bridgeCopy.label}
+            /* Fixed width: the wording changes with the connection, and a
+               pill that resizes nudges the row next to the busiest screen in
+               the product. Colour and words change; geometry never does. */
+            style={{ minWidth: "230px" }}
           >
             <span className="mo-pill-dot" />
             {bridgeCopy.short}
