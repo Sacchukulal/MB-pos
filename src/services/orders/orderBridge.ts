@@ -229,13 +229,25 @@ function setCloudReachable(next: boolean): void {
   emitStatus();
 }
 
-/** Wraps every cloud call so one failure can never reach billing. */
+/**
+ * Wraps every cloud call so one failure can never reach billing.
+ *
+ * It also EMITS on success. That is not cosmetic: while a restaurant is idle
+ * the only thing talking to the cloud is the 60-second liveness beat, and
+ * without an emission the settings screen keeps rendering the last snapshot
+ * it was given. "Last sync" then freezes and, after 3 minutes, turns orange
+ * with "— not updating" on a counter that is working perfectly. Caught on
+ * real hardware during a 15-minute idle watch: the beat was landing (the
+ * server's pos_last_seen_at was 33s old) while the screen claimed it had
+ * stopped.
+ */
 async function guarded<T>(what: string, fn: () => Promise<T>): Promise<T | null> {
   try {
     const result = await fn();
     setCloudReachable(true);
     status.lastSyncAt = new Date().toISOString();
     if (status.fault === "budget") status.fault = "";
+    emitStatus();
     return result;
   } catch (e) {
     if (e instanceof EdgeBudgetExceeded) {
