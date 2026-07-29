@@ -289,8 +289,3 @@ export async function disconnectRealtime(): Promise<void> {
   presence = intents = null;
   for (const c of previous) if (c) await c.stop();
 }
-
-/** True while both channels are subscribed — used by the bridge's fallback. */
-export function isChannelUp(): boolean {
-  return up.presence && up.intents;
-}

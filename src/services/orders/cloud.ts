@@ -284,10 +284,6 @@ export function currentRoomId(): string {
   return session?.roomId ?? "";
 }
 
-export function currentAccessToken(): string {
-  return session?.accessToken ?? "";
-}
-
 /* ------------------------------ call helpers ------------------------------ */
 
 /** A Postgres RPC under the counter's credential. Unmetered. */
