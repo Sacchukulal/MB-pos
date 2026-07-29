@@ -101,9 +101,15 @@ export interface NewOrderAlert {
  *
  * It is a PostgREST call, which is not metered by count, and it carries
  * about 200 bytes. The server accepts phone intents while pos_last_seen_at
- * is within 150s (mb_pos_live_window), i.e. 2.5 beats, so a single lost
- * beat can never refuse a waiter, and a counter that has genuinely died
- * stops accepting orders within 150 seconds.
+ * is within 300s (mb_pos_live_window, migration 0019), i.e. FIVE beats, so
+ * a run of lost beats can never refuse a waiter, and a counter that has
+ * genuinely died stops accepting orders within five minutes.
+ *
+ * The window is 300s because it is deliberately equal to the phone's trust
+ * window: the phone checks the counter on an event and then believes the
+ * answer for five minutes, so any shorter server window would let the badge
+ * and the server disagree. THIS BEAT IS WHAT MAKES THAT SAFE — do not
+ * lengthen it without revisiting mb_pos_live_window().
  */
 const POS_ALIVE_MS = 60_000;
 const POS_ALIVE_SKIP_MS = 45_000;
