@@ -12,11 +12,19 @@ import {
   Phone,
   QrCode,
   RotateCcw,
+  RefreshCw,
   Save,
   Store,
   Sun,
+  UploadCloud,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  getBillSyncStatus,
+  retryStuckBills,
+  subscribeBillSync,
+  type BillSyncStatus,
+} from "../../services/sync/billSync";
 import { STORAGE_KEYS } from "../../config/constants";
 import { DEFAULT_STORE_PROFILE } from "../../config/defaults";
 import { useSettings } from "../../hooks/useSettings";
@@ -39,6 +47,13 @@ export default function GeneralSettings({ dbReady }: GeneralSettingsProps) {
   const [initial, setInitial] = useState<StoreProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [dbFolderPath] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.dbFolderPath));
+
+  // Bill sync, so a bill the cloud refuses is visible rather than silently
+  // retried forever. Before PART E a refused bill was retried 1,440 times a
+  // day, permanently, and nothing on screen ever said so.
+  const [billSync, setBillSync] = useState<BillSyncStatus>(() => getBillSyncStatus());
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => subscribeBillSync(setBillSync), []);
 
   useEffect(() => {
     if (settings) {
@@ -243,6 +258,63 @@ export default function GeneralSettings({ dbReady }: GeneralSettingsProps) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Cloud backup of bills */}
+      <div className="section">
+        <div className="section-head">
+          <UploadCloud size={14} /> Cloud Backup of Bills
+        </div>
+        <p className="field-hint" style={{ marginTop: 0, maxWidth: "68ch" }}>
+          Every finalised bill is copied to Magic Bill's cloud so your reports work
+          from your phone. Billing at this counter never waits for it, and a bill is
+          only ticked off once the cloud has confirmed it.
+        </p>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-3)",
+            flexWrap: "wrap",
+            marginTop: "var(--space-3)",
+          }}
+        >
+          <span className="readonly-box">
+            {billSync.pending === 0 && billSync.stuck === 0
+              ? "All bills are backed up."
+              : `${billSync.pending} waiting to upload`}
+          </span>
+          {billSync.stuck > 0 && (
+            <>
+              <span className="readonly-box" style={{ color: "var(--warning)" }}>
+                {billSync.stuck} bill{billSync.stuck === 1 ? "" : "s"} set aside
+                {billSync.lastError ? ` (${billSync.lastError})` : ""}
+              </span>
+              <button
+                className="btn btn--ghost"
+                disabled={retrying}
+                onClick={async () => {
+                  try {
+                    setRetrying(true);
+                    await retryStuckBills();
+                    toast("Trying those bills again…", "success");
+                  } finally {
+                    setRetrying(false);
+                  }
+                }}
+              >
+                <RefreshCw size={16} /> {retrying ? "Retrying…" : "Try these again"}
+              </button>
+            </>
+          )}
+        </div>
+        {billSync.stuck > 0 && (
+          <p className="field-hint" style={{ maxWidth: "68ch" }}>
+            Magic Bill stopped retrying these on its own so a single bad bill cannot
+            repeat forever in the background. Nothing has been lost — they are still
+            on this computer and still on your reports here.
+          </p>
+        )}
       </div>
 
       <div className="save-bar">
