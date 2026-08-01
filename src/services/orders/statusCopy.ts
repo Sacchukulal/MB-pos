@@ -89,9 +89,16 @@ export function describeBridge(s: OrderBridgeStatus): BridgeStatusCopy {
 
   if (s.channel === "connected") {
     const n = s.phones;
+    // "connected", not "online". From 2.4.5 a phone holds its presence for
+    // as long as Magic Bill is open in the foreground, not only while a
+    // waiter is looking at the Orders screen — that is what stopped the
+    // count flickering between 1 and 0 on every table tap. The number is
+    // still true; the word "online" was the part that would have become a
+    // lie, because a phone in this count is not necessarily taking orders
+    // this second.
     return {
       tone: "connected",
-      label: `Connected · ${n} phone${n === 1 ? "" : "s"} online`,
+      label: `Connected · ${n} phone${n === 1 ? "" : "s"} connected`,
       short: `Mobile ordering · On · ${n} phone${n === 1 ? "" : "s"}`,
       detail: "",
     };

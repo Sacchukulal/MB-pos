@@ -1,5 +1,6 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { ensureSession, supabase } from "../orders/cloud";
+import { ManagedChannel, type RealtimeStatus } from "./managedChannel";
 
 /**
  * The counter's end of the private orders channels.
@@ -12,21 +13,14 @@ import { ensureSession, supabase } from "../orders/cloud";
  * The mechanism, from @supabase/realtime-js: `subscribe()` registers
  * `_onClose(() => callback(CLOSED))`. So calling `removeChannel(old)` inside
  * a rejoin makes the REMOVED channel's own callback fire CLOSED, which the
- * old code treated as a fault and answered with another rejoin. Every
+ * old code treated as a fault and answered with another reconnect. Every
  * deliberate rejoin scheduled the next one. `backoffMs` was reset on every
  * SUBSCRIBED, so the backoff could never grow past the first step and the
  * loop pinned at exactly 2 seconds.
  *
- * Four structural rules make that impossible here, whatever the cause:
- *
- *   R1. Channel removal is AWAITED before a new join, and a status event
- *       from a channel we have already replaced is ignored by identity.
- *   R2. The backoff resets only after a subscription has been STABLE for
- *       30 seconds — never on the SUBSCRIBED event itself.
- *   R3. A flap detector: more than 3 subscribe/drop cycles in 60 seconds
- *       drops to a long backoff, logs ONE clear error, and reports an
- *       honest fault to the UI.
- *   R4. A reconnect never triggers a data fetch by itself.
+ * The five structural rules that make that impossible live in
+ * ./managedChannel.ts, in their own file so the suite can drive them
+ * directly. Read the header there before changing anything here.
  *
  * TWO TOPICS, one socket:
  *   orders-<room>       presence only — how the phones know the counter is
@@ -38,7 +32,7 @@ import { ensureSession, supabase } from "../orders/cloud";
  * project's realtime budget.
  */
 
-export type RealtimeStatus = "connected" | "degraded";
+export type { RealtimeStatus } from "./managedChannel";
 
 export interface Bell {
   kind: "order" | "event" | "catalog";
@@ -65,165 +59,32 @@ interface ConnectOptions {
   callbacks: RealtimeCallbacks;
 }
 
-/** R2: how long a subscription must hold before we trust it. */
-const STABLE_MS = 30_000;
-/** R3: more than this many cycles inside FLAP_WINDOW_MS means something is wrong. */
-const FLAP_LIMIT = 3;
-const FLAP_WINDOW_MS = 60_000;
-const FLAP_BACKOFF_MS = 5 * 60_000;
-
-const BACKOFF_START_MS = 1_000;
-const BACKOFF_MAX_MS = 30_000;
-
 /**
- * One managed subscription. All four structural rules live here, so both
- * topics get them and neither can regress independently.
+ * How long the phone count holds its last non-zero reading when the channel
+ * reports degraded.
+ *
+ * WHY. `phones` used to be slammed to 0 the instant the presence channel
+ * blinked, so the owner's settings screen flickered between "1 phone" and
+ * "0 phones" for a connection that recovered a second later. Same idea as
+ * DEGRADED_UI_DEBOUNCE_MS in orderBridge: entering a bad state is debounced,
+ * recovery is instant.
  */
-class ManagedChannel {
-  private channel: RealtimeChannel | null = null;
-  private backoffMs = BACKOFF_START_MS;
-  private rejoinTimer: ReturnType<typeof setTimeout> | null = null;
-  private stableTimer: ReturnType<typeof setTimeout> | null = null;
-  private joining = false;
-  private joinAt: number[] = [];
-  private flagged = false;
-  private stopped = true;
+const PHONES_ZERO_DEBOUNCE_MS = 10_000;
 
-  constructor(
-    private readonly topic: string,
-    private readonly channelConfig: Record<string, unknown>,
-    private readonly configure: (ch: RealtimeChannel) => void,
-    private readonly onSubscribed: (ch: RealtimeChannel) => Promise<void>,
-    private readonly onStatus: (status: RealtimeStatus) => void,
-    private readonly onFlapping: () => void,
-  ) {}
-
-  start(): void {
-    this.stopped = false;
-    this.backoffMs = BACKOFF_START_MS;
-    this.joinAt = [];
-    this.flagged = false;
-    void this.join();
-  }
-
-  async stop(): Promise<void> {
-    this.stopped = true;
-    this.clearTimers();
-    const previous = this.channel;
-    this.channel = null;
-    if (previous) {
-      try {
-        await supabase().removeChannel(previous);
-      } catch {
-        /* best effort */
-      }
-    }
-  }
-
-  isUp(): boolean {
-    return !this.stopped && this.channel !== null;
-  }
-
-  private clearTimers(): void {
-    if (this.rejoinTimer) clearTimeout(this.rejoinTimer);
-    if (this.stableTimer) clearTimeout(this.stableTimer);
-    this.rejoinTimer = this.stableTimer = null;
-  }
-
-  private scheduleRejoin(why: string): void {
-    if (this.stopped || this.rejoinTimer || this.joining) return;
-    this.onStatus("degraded");
-
-    // R3 — flap detection.
-    const now = Date.now();
-    this.joinAt = this.joinAt.filter((t) => now - t < FLAP_WINDOW_MS);
-    if (this.joinAt.length > FLAP_LIMIT) {
-      if (!this.flagged) {
-        this.flagged = true;
-        console.error(
-          `[orders] the live connection is flapping (${this.joinAt.length} reconnects in a ` +
-            `minute, last cause: ${why}). Backing off for 5 minutes. Orders still arrive — ` +
-            `the counter reads them when the connection settles.`,
-        );
-        this.onFlapping();
-      }
-      this.backoffMs = FLAP_BACKOFF_MS;
-    }
-
-    const delay = this.backoffMs;
-    this.rejoinTimer = setTimeout(() => {
-      this.rejoinTimer = null;
-      this.backoffMs = Math.min(this.backoffMs * 2, BACKOFF_MAX_MS);
-      void this.join();
-    }, delay);
-  }
-
-  private async join(): Promise<void> {
-    if (this.stopped || this.joining) return;
-    this.joining = true;
-    try {
-      // R1 — the previous channel is fully gone before a new one exists, and
-      // its dying CLOSED can no longer be mistaken for a fresh fault.
-      if (this.channel) {
-        const previous = this.channel;
-        this.channel = null;
-        try {
-          await supabase().removeChannel(previous);
-        } catch {
-          /* already gone */
-        }
-      }
-
-      // The credential must be current before the socket authenticates, or
-      // the server closes the join on a private topic.
-      await ensureSession();
-      if (this.stopped) return;
-
-      const ch = supabase().channel(this.topic, {
-        config: { private: true, ...this.channelConfig },
-      });
-      this.channel = ch;
-      this.joinAt.push(Date.now());
-      this.configure(ch);
-
-      ch.subscribe(async (status) => {
-        // R1 — a status event from a channel we have already replaced says
-        // nothing about the connection we currently care about.
-        if (this.stopped || ch !== this.channel) return;
-
-        if (status === "SUBSCRIBED") {
-          this.onStatus("connected");
-          // R2 — the backoff resets only once this subscription has HELD.
-          if (this.stableTimer) clearTimeout(this.stableTimer);
-          this.stableTimer = setTimeout(() => {
-            this.stableTimer = null;
-            this.backoffMs = BACKOFF_START_MS;
-            this.joinAt = [];
-            this.flagged = false;
-          }, STABLE_MS);
-          try {
-            await this.onSubscribed(ch);
-          } catch (e) {
-            console.error("[orders] channel setup failed:", e);
-          }
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          if (this.stableTimer) {
-            clearTimeout(this.stableTimer);
-            this.stableTimer = null;
-          }
-          this.scheduleRejoin(status);
-        }
-      });
-    } finally {
-      this.joining = false;
-    }
-  }
-}
-
-let presence: ManagedChannel | null = null;
-let intents: ManagedChannel | null = null;
+let presence: ManagedChannel<RealtimeChannel> | null = null;
+let intents: ManagedChannel<RealtimeChannel> | null = null;
 /** Both must be up before the UI says "connected". */
 const up = { presence: false, intents: false };
+
+let phonesZeroTimer: ReturnType<typeof setTimeout> | null = null;
+let lastPhones = 0;
+
+function clearPhonesTimer(): void {
+  if (phonesZeroTimer) {
+    clearTimeout(phonesZeroTimer);
+    phonesZeroTimer = null;
+  }
+}
 
 export function connectRealtime(options: ConnectOptions): void {
   void disconnectRealtime().then(async () => {
@@ -233,18 +94,29 @@ export function connectRealtime(options: ConnectOptions): void {
       callbacks.onStatusChange(up.presence && up.intents ? "connected" : "degraded");
     };
 
-    presence = new ManagedChannel(
-      `orders-${roomId}`,
-      { presence: { key: `pos:${deviceId}` } },
-      (ch) => {
+    /** A real reading. Cancels any pending "drop to zero". */
+    const reportPhones = (n: number) => {
+      clearPhonesTimer();
+      lastPhones = n;
+      callbacks.onPhonesChange(n);
+    };
+
+    presence = new ManagedChannel<RealtimeChannel>({
+      topic: `orders-${roomId}`,
+      channelConfig: { presence: { key: `pos:${deviceId}` } },
+      createChannel: (topic, config) => supabase().channel(topic, { config }),
+      removeChannel: (ch) => supabase().removeChannel(ch),
+      ensureSession: () => ensureSession(),
+      configure: (ch) => {
         ch.on("presence", { event: "sync" }, () => {
           const state = ch.presenceState();
-          callbacks.onPhonesChange(
-            Object.keys(state).filter((k) => k.startsWith("mob:")).length,
-          );
+          reportPhones(Object.keys(state).filter((k) => k.startsWith("mob:")).length);
         });
       },
-      async (ch) => {
+      subscribe: (ch, onStatus) => {
+        ch.subscribe((status) => onStatus(status));
+      },
+      onSubscribed: async (ch) => {
         await ch.track({
           kind: "pos",
           name: deviceName,
@@ -252,39 +124,69 @@ export function connectRealtime(options: ConnectOptions): void {
           at: Date.now(),
         });
       },
-      (s) => {
+      onStatus: (s) => {
         up.presence = s === "connected";
-        if (s === "degraded") callbacks.onPhonesChange(0);
+        if (s === "degraded") {
+          // A blink is not an empty restaurant. Hold the last real reading
+          // for ten seconds; if the channel is genuinely gone by then, say
+          // zero. Recovery cancels it.
+          if (lastPhones > 0 && !phonesZeroTimer) {
+            phonesZeroTimer = setTimeout(() => {
+              phonesZeroTimer = null;
+              lastPhones = 0;
+              callbacks.onPhonesChange(0);
+            }, PHONES_ZERO_DEBOUNCE_MS);
+          }
+        }
         report();
       },
-      callbacks.onFlapping,
-    );
+      onFlapping: callbacks.onFlapping,
+    });
 
-    intents = new ManagedChannel(
-      `orders-${roomId}-pos`,
-      {},
-      (ch) => {
+    intents = new ManagedChannel<RealtimeChannel>({
+      topic: `orders-${roomId}-pos`,
+      channelConfig: {},
+      createChannel: (topic, config) => supabase().channel(topic, { config }),
+      removeChannel: (ch) => supabase().removeChannel(ch),
+      ensureSession: () => ensureSession(),
+      configure: (ch) => {
         ch.on("broadcast", { event: "mb" }, (msg) => {
           const p = (msg as { payload?: Bell }).payload;
           if (p && typeof p.kind === "string") callbacks.onBell(p);
         });
       },
-      async () => {},
-      (s) => {
+      subscribe: (ch, onStatus) => {
+        ch.subscribe((status) => onStatus(status));
+      },
+      onSubscribed: async () => {},
+      onStatus: (s) => {
         up.intents = s === "connected";
         report();
       },
-      callbacks.onFlapping,
-    );
+      onFlapping: callbacks.onFlapping,
+    });
 
     presence.start();
     intents.start();
   });
 }
 
+/**
+ * PART D — the wake path. After a machine suspend a WebSocket is commonly
+ * half-open: it reports healthy and will never deliver another message. So
+ * this does NOT ask the socket how it is; it drops both channels and
+ * rebuilds them unconditionally.
+ */
+export async function forceRejoinRealtime(): Promise<void> {
+  const both = [presence, intents];
+  for (const c of both) if (c) await c.forceRejoin();
+}
+
 export async function disconnectRealtime(): Promise<void> {
   up.presence = false;
   up.intents = false;
+  clearPhonesTimer();
+  lastPhones = 0;
   const previous = [presence, intents];
   presence = intents = null;
   for (const c of previous) if (c) await c.stop();

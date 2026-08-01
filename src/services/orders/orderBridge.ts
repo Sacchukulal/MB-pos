@@ -14,7 +14,14 @@ import { pruneAppliedEvents } from "../../db/repositories/appliedEventsRepo";
 import { loadSettings } from "../../db/repositories/settingsRepo";
 import { getStoredLicenseKey } from "../license/licenseService";
 import { getDeviceInfo } from "../license/device";
-import { connectRealtime, disconnectRealtime, type Bell } from "../realtime/client";
+import {
+  connectRealtime,
+  disconnectRealtime,
+  forceRejoinRealtime,
+  type Bell,
+} from "../realtime/client";
+import { pushUnsyncedBills } from "../sync/billSync";
+import { WakeWatchdog } from "./wakeWatchdog";
 import {
   clearSession,
   currentRoomId,
@@ -268,7 +275,12 @@ async function guarded<T>(what: string, fn: () => Promise<T>): Promise<T | null>
       goIdle();
       return null;
     }
-    if (/fetch|network|Failed to fetch/i.test(reason)) setCloudReachable(false);
+    // A timed-out request is exactly as much of a "cannot reach the cloud"
+    // as a refused one. Before PART D it could not even get this far — the
+    // call simply never came back.
+    if (/fetch|network|Failed to fetch|timed out|timeout|abort/i.test(reason)) {
+      setCloudReachable(false);
+    }
     console.info(`[orders] ${what} failed (will retry):`, reason);
     return null;
   }
@@ -297,6 +309,36 @@ let pushRerun = false;
 let pushForceRerun = false;
 
 /**
+ * PART F5 — belt and braces on top of the database's own no-op guard.
+ *
+ * Migration 0021 stops the bell ringing when a write produces an identical
+ * wire payload. This stops the write happening at all: the last payload
+ * SUCCESSFULLY pushed for each order is remembered, and an unchanged one is
+ * not sent again.
+ *
+ * IT DELIBERATELY DOES NOT APPLY TO A FORCED PUSH. The five-minute reconcile
+ * republishes the full open set precisely so a cloud row that drifted gets
+ * repaired — and drift is invisible from here, because our copy is exactly
+ * what it always was. Skipping on force would turn the self-heal off, which
+ * is a far worse bug than the one being fixed.
+ *
+ * In memory only. A restart re-pushes everything once, which is correct: we
+ * have no idea what the cloud holds until we have written to it.
+ */
+const pushedHashes = new Map<string, number>();
+
+/** FNV-1a, 32-bit. Cheap, stable, and small enough to hold for every order. */
+function payloadHash(o: WireOrder): number {
+  const s = JSON.stringify(o);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
  * @param force republish EVERY open order, not just the dirty ones. Used by
  * reconcile so the cloud converges on the counter's truth even if a dirty
  * flag was lost (crash, or an edit racing an in-flight push).
@@ -316,15 +358,38 @@ async function pushOrdersNow(force = false): Promise<void> {
     const dirtyBilled = await ordersRepo.listDirtyFinalizedRemote();
     const extras = pendingCloudOrders.slice();
 
-    const orders: WireOrder[] = [
+    const candidates: WireOrder[] = [
       ...dirtyOpen.map((o) => processingRowToWire(o, printErrors.get(o.remote_uuid!) ?? "")),
       ...dirtyBilled.map(finalizedRowToWire),
       ...extras,
     ];
-    if (orders.length === 0) return;
+    if (candidates.length === 0) return;
 
     const licenseKey = getStoredLicenseKey();
     if (!licenseKey) return;
+
+    /** Clears the local bookkeeping for everything this cycle considered. */
+    const settleLocalState = async () => {
+      await ordersRepo.clearProcessingCloudDirty(dirtyOpen);
+      await ordersRepo.clearFinalizedCloudDirty(dirtyBilled.map((o) => o.id));
+      pendingCloudOrders = pendingCloudOrders.filter((o) => !extras.includes(o));
+      [...dirtyBilled, ...extras].forEach((o) => {
+        const uuid = "clientUuid" in o ? (o as WireOrder).clientUuid : (o as any).remote_uuid;
+        if (uuid) printErrors.delete(uuid);
+      });
+    };
+
+    // F5. On a FORCED push everything goes, because force is the self-heal.
+    const orders = force
+      ? candidates
+      : candidates.filter((o) => pushedHashes.get(o.clientUuid) !== payloadHash(o));
+
+    if (orders.length === 0) {
+      // Every dirty row turned out to be byte-for-byte what we last sent.
+      // Nothing to say to the cloud; just stop flagging them as dirty.
+      await settleLocalState();
+      return;
+    }
 
     const ok = await guarded("push orders", async () => {
       const t = await table("live_orders");
@@ -338,13 +403,9 @@ async function pushOrdersNow(force = false): Promise<void> {
     if (!ok) return;
 
     markPosWrite();
-    await ordersRepo.clearProcessingCloudDirty(dirtyOpen);
-    await ordersRepo.clearFinalizedCloudDirty(dirtyBilled.map((o) => o.id));
-    pendingCloudOrders = pendingCloudOrders.filter((o) => !extras.includes(o));
-    [...dirtyBilled, ...extras].forEach((o) => {
-      const uuid = "clientUuid" in o ? (o as WireOrder).clientUuid : (o as any).remote_uuid;
-      if (uuid) printErrors.delete(uuid);
-    });
+    // Only ever recorded AFTER the cloud confirmed the write.
+    orders.forEach((o) => pushedHashes.set(o.clientUuid, payloadHash(o)));
+    await settleLocalState();
     emitStatus();
   } finally {
     pushing = false;
@@ -384,6 +445,13 @@ async function reconcileNow(): Promise<void> {
   markPosWrite();
   await setLastReconcileAt(new Date().toISOString());
   await pushOrdersNow(true);
+  // Keep the F5 memory bounded: an order that has left the open set will
+  // never be pushed again from a dirty flag, and if it somehow is, sending
+  // it once more is the safe direction to be wrong in.
+  const stillOpen = new Set(openClientUuids);
+  for (const uuid of [...pushedHashes.keys()]) {
+    if (!stillOpen.has(uuid)) pushedHashes.delete(uuid);
+  }
 }
 
 async function catalogPushNow(force = false): Promise<void> {
@@ -797,12 +865,78 @@ async function sendHello(mobileOrderingEnabled?: boolean): Promise<void> {
   emitStatus();
 }
 
-/** The idle-counter liveness beat (D8). Skipped whenever we wrote recently. */
-async function posAliveBeat(): Promise<void> {
+/**
+ * The idle-counter liveness beat (D8). Skipped whenever we wrote recently.
+ *
+ * @param force ignore the skip window. The wake path uses this: after a
+ * sleep, proving the counter is alive is the single most urgent thing to do,
+ * because the phone is sitting there reading a pos_last_seen_at that stopped
+ * advancing when the machine suspended.
+ */
+async function posAliveBeat(force = false): Promise<void> {
   if (!live) return;
-  if (Date.now() - lastPosWriteAt < POS_ALIVE_SKIP_MS) return;
+  if (!force && Date.now() - lastPosWriteAt < POS_ALIVE_SKIP_MS) return;
   const data = await guarded<any>("liveness beat", () => rpc("mb_pos_alive"));
   if (data?.ok) markPosWrite();
+}
+
+/* ------------------------------ waking up ------------------------------ */
+
+let wakeWatchdog: WakeWatchdog | null = null;
+let resumeHintHandler: (() => void) | null = null;
+
+/**
+ * PART D. Everything the counter must do after the PC has been asleep, in
+ * the order that matters:
+ *
+ *  1. rebuild both channels WITHOUT asking the socket how it is — after a
+ *     suspend it is commonly half-open and answers confidently wrong;
+ *  2. beat once, so the phone stops reading a stale "the counter was last
+ *     seen before the machine slept";
+ *  3. reconcile once, so any order that changed at either end converges;
+ *  4. flush the bill outbox, because anything finalised just before the
+ *     sleep is still sitting there unsynced.
+ *
+ * Each step is independently guarded: a failure in one must not stop the
+ * rest, and the watchdog will simply try again on its next tick.
+ */
+async function recoverFromWake(): Promise<void> {
+  if (!live) return;
+  await forceRejoinRealtime().catch((e) =>
+    console.info("[orders] wake: channel rebuild failed (will retry):", e),
+  );
+  await posAliveBeat(true);
+  await reconcileNow().catch(() => {});
+  await pushUnsyncedBills().catch(() => {});
+  enqueue(catchUpEvents);
+  emitStatus();
+}
+
+function startWakeWatchdog(): void {
+  if (wakeWatchdog) return;
+  wakeWatchdog = new WakeWatchdog({
+    onWake: () => recoverFromWake(),
+    log: (m) => console.info(m),
+  });
+  wakeWatchdog.start();
+
+  // Platform resume signals are an EXTRA trigger, never the only one — they
+  // differ between Windows builds and webview versions, and the clock
+  // comparison above is the part that is reliable everywhere. These are free:
+  // resumeHint() returns immediately unless real time actually jumped.
+  resumeHintHandler = () => void wakeWatchdog?.resumeHint();
+  window.addEventListener("focus", resumeHintHandler);
+  document.addEventListener("visibilitychange", resumeHintHandler);
+}
+
+function stopWakeWatchdog(): void {
+  if (resumeHintHandler) {
+    window.removeEventListener("focus", resumeHintHandler);
+    document.removeEventListener("visibilitychange", resumeHintHandler);
+    resumeHintHandler = null;
+  }
+  wakeWatchdog?.stop();
+  wakeWatchdog = null;
 }
 
 function startRealtime(device: { id: string; name: string }): void {
@@ -844,6 +978,7 @@ async function goLive(): Promise<void> {
 
     aliveTimer = setInterval(() => void posAliveBeat(), POS_ALIVE_MS);
     reconcileTimer = setInterval(() => void reconcileNow(), RECONCILE_MS);
+    startWakeWatchdog();
 
     await reconcileNow();
     void pushOrdersNow();
@@ -856,6 +991,7 @@ async function goLive(): Promise<void> {
     console.error("[orders] bridge failed to go live (will retry):", e);
     live = false;
     void disconnectRealtime();
+    stopWakeWatchdog();
     clearTimers();
     status.channel = "off";
     status.phones = 0;
@@ -868,11 +1004,15 @@ async function goLive(): Promise<void> {
 function goIdle(): void {
   live = false;
   void disconnectRealtime();
+  stopWakeWatchdog();
   clearTimers();
   status.channel = "off";
   status.fault = "";
   status.phones = 0;
   socketUp = false;
+  // We know nothing about what the cloud holds until we have written to it
+  // again, so the F5 memory must not survive a lifecycle.
+  pushedHashes.clear();
   emitStatus();
 }
 
