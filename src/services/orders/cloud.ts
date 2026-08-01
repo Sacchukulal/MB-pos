@@ -7,6 +7,8 @@ import {
   setEdgeCallLog,
   setOrdersSession,
 } from "../../db/repositories/orderSyncRepo";
+import { CLOUD_TIMEOUT_MS, timeoutFetch } from "../net/timeout";
+import { SessionKeeper, type OrdersSession } from "./sessionKeeper";
 
 /**
  * The ONE seam between the counter and the cloud (decision D10). Everything
@@ -14,17 +16,25 @@ import {
  * that the transport happens to be Supabase. A future LAN server replaces
  * this module and nothing else.
  *
- * Two rules define the whole design:
+ * Three rules define the whole design:
  *
  *  1. EDGE FUNCTION INVOCATIONS ARE THE ONLY METERED CALL. Exactly one
  *     Edge Function is ever called from here — `orders-enroll`, which mints
  *     this counter's credential. It runs once per install, and again only
  *     if the refresh token is lost or rejected. Everything else is
  *     PostgREST (reads, writes, RPCs), which is not metered by count.
+ *     Since August that includes BILL SYNC, which used to be one metered
+ *     call per bill and is now mb_push_bills (migration 0020).
  *
  *  2. A HARD CEILING NO BUG CAN BREACH (P5). Every Edge call is recorded in
  *     a rolling log that survives restarts, and the ceilings below are
  *     enforced before the call is made, not after.
+ *
+ *  3. NOTHING HERE MAY HANG (August, PART D). Every request has a 15-second
+ *     deadline and no shared promise can become permanent. A PC that sleeps
+ *     leaves its sockets half-open, and before this the counter deadlocked
+ *     behind one of them until the process was restarted. See
+ *     ../net/timeout.ts for the full account.
  */
 
 /* -------------------------- the invocation ceiling -------------------------- */
@@ -133,51 +143,48 @@ async function spendEdgeCall(essential: boolean): Promise<void> {
 
 let client: SupabaseClient | null = null;
 
-/** The shared Supabase client. Sessions are held in SQLite, not localStorage. */
+/**
+ * The shared Supabase client. Sessions are held in SQLite, not localStorage.
+ *
+ * The custom fetch is the single most important line in this file: it gives
+ * EVERY request a deadline — auth refresh, PostgREST and RPC alike — so no
+ * call site can forget one and a socket that died in the machine's sleep can
+ * never hold the counter open indefinitely.
+ */
 export function supabase(): SupabaseClient {
   if (!client) {
     client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: timeoutFetch(CLOUD_TIMEOUT_MS) },
     });
   }
   return client;
 }
 
-export interface OrdersSession {
-  accessToken: string;
-  refreshToken: string;
-  /** Epoch seconds. */
-  expiresAt: number;
-  roomId: string;
-}
+export type { OrdersSession } from "./sessionKeeper";
 
-let session: OrdersSession | null = null;
-let sessionLoaded = false;
-let inFlight: Promise<OrdersSession> | null = null;
+/**
+ * The room id survives a token refresh: Supabase's refresh reply carries a
+ * new access token and nothing about which restaurant this counter is. Held
+ * here rather than read back off the keeper, which would make the keeper's
+ * own definition circular.
+ */
+let roomIdHint = "";
 
-/** Seconds of headroom before expiry at which we refresh. */
-const REFRESH_SKEW_S = 120;
-
-async function loadStoredSession(): Promise<void> {
-  if (sessionLoaded) return;
-  sessionLoaded = true;
-  try {
-    const state = await getOrderSyncState();
-    if (state.ordersRefreshToken) {
-      session = {
-        accessToken: state.ordersAccessToken,
-        refreshToken: state.ordersRefreshToken,
-        expiresAt: state.ordersTokenExpiresAt,
-        roomId: state.roomId,
-      };
-    }
-  } catch {
-    /* no DB yet — enrolment will run when there is one */
-  }
+async function loadStoredSession(): Promise<OrdersSession | null> {
+  const state = await getOrderSyncState();
+  if (!state.ordersRefreshToken) return null;
+  roomIdHint = state.roomId;
+  return {
+    accessToken: state.ordersAccessToken,
+    refreshToken: state.ordersRefreshToken,
+    expiresAt: state.ordersTokenExpiresAt,
+    roomId: state.roomId,
+  };
 }
 
 async function persist(s: OrdersSession): Promise<void> {
-  session = s;
+  roomIdHint = s.roomId || roomIdHint;
   await supabase().auth.setSession({
     access_token: s.accessToken,
     refresh_token: s.refreshToken,
@@ -194,6 +201,10 @@ async function persist(s: OrdersSession): Promise<void> {
 /**
  * Enrol this counter. THE ONLY EDGE FUNCTION CALL IN THE WHOLE FEATURE.
  * Runs once per install; after that the session refreshes itself for free.
+ *
+ * The raw fetch is wrapped too — it is outside the Supabase client, so the
+ * client's custom fetch does not cover it, and an unbounded call here would
+ * reopen exactly the hole PART D closed.
  */
 async function enroll(essential: boolean): Promise<OrdersSession> {
   const key = getStoredLicenseKey();
@@ -202,7 +213,7 @@ async function enroll(essential: boolean): Promise<OrdersSession> {
 
   await spendEdgeCall(essential);
 
-  const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/orders-enroll`, {
+  const res = await timeoutFetch(CLOUD_TIMEOUT_MS)(`${SUPABASE_FUNCTIONS_URL}/orders-enroll`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -219,69 +230,61 @@ async function enroll(essential: boolean): Promise<OrdersSession> {
   const data = await res.json();
   if (!data?.ok) throw new Error(String(data?.reason ?? `http-${res.status}`));
 
-  const next: OrdersSession = {
+  return {
     accessToken: data.accessToken,
     refreshToken: data.refreshToken,
     expiresAt: Number(data.expiresAt ?? 0),
     roomId: String(data.roomId ?? ""),
   };
-  await persist(next);
-  return next;
 }
+
+/**
+ * The credential state machine lives in sessionKeeper.ts so the suite can
+ * drive it against a fetch that never resolves (test DA). Everything this
+ * module knows about storage, Tauri and Vite stays on this side of the line.
+ */
+const keeper = new SessionKeeper({
+  loadStored: loadStoredSession,
+  refresh: async (refreshToken): Promise<OrdersSession | null> => {
+    const { data, error } = await supabase().auth.refreshSession({ refresh_token: refreshToken });
+    if (error || !data?.session) return null;
+    return {
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresAt: Number(data.session.expires_at ?? 0),
+      roomId: roomIdHint,
+    };
+  },
+  enroll,
+  persist,
+});
 
 /**
  * A valid session, refreshing or enrolling as needed. Refresh is a Supabase
  * Auth call, not an Edge Function — it costs nothing against the quota.
+ *
+ * REJECTS rather than hangs. Callers already treat a throw as "could not
+ * reach the cloud, try later", which is the honest reading.
  */
-export async function ensureSession(opts: { essential?: boolean } = {}): Promise<OrdersSession> {
-  if (inFlight) return inFlight;
-  inFlight = (async () => {
-    await loadStoredSession();
-    const nowS = Math.floor(Date.now() / 1000);
-
-    if (session && session.expiresAt - REFRESH_SKEW_S > nowS) {
-      // Still valid — make sure the client is carrying it (first call after
-      // a restart reads it out of SQLite).
-      await persist(session);
-      return session;
-    }
-
-    if (session?.refreshToken) {
-      const { data, error } = await supabase().auth.refreshSession({
-        refresh_token: session.refreshToken,
-      });
-      if (!error && data?.session) {
-        const next: OrdersSession = {
-          accessToken: data.session.access_token,
-          refreshToken: data.session.refresh_token,
-          expiresAt: Number(data.session.expires_at ?? 0),
-          roomId: session.roomId,
-        };
-        await persist(next);
-        return next;
-      }
-      console.info("[orders] session refresh rejected — re-enrolling");
-    }
-
-    return await enroll(opts.essential === true);
-  })();
-  try {
-    return await inFlight;
-  } finally {
-    inFlight = null;
-  }
+export function ensureSession(opts: { essential?: boolean } = {}): Promise<OrdersSession> {
+  return keeper.ensure(opts);
 }
 
 /** Drop the stored credential (licence moved to another machine, etc). */
 export async function clearSession(): Promise<void> {
-  session = null;
-  sessionLoaded = true;
+  keeper.forget();
+  roomIdHint = "";
   await setOrdersSession({ accessToken: "", refreshToken: "", expiresAt: 0, roomId: "" })
     .catch(() => {});
 }
 
 export function currentRoomId(): string {
-  return session?.roomId ?? "";
+  return keeper.current()?.roomId ?? "";
+}
+
+/** True while a credential attempt is genuinely outstanding. Diagnostics only. */
+export function credentialBusy(): boolean {
+  return keeper.busy;
 }
 
 /* ------------------------------ call helpers ------------------------------ */

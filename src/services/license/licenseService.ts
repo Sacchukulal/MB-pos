@@ -2,6 +2,7 @@ import { SUPABASE_FUNCTIONS_URL, SUPABASE_ANON_KEY } from "../../config/supabase
 import { STORAGE_KEYS } from "../../config/constants";
 import { getDeviceInfo } from "./device";
 import * as subscriptionRepo from "../../db/repositories/subscriptionRepo";
+import { CLOUD_TIMEOUT_MS, timeoutFetch } from "../net/timeout";
 import type { UserDetails } from "../../types";
 
 /**
@@ -42,8 +43,15 @@ interface FnResponse {
   user?: UserDetails;
 }
 
+/**
+ * These two Edge calls are outside the Supabase client, so the client's own
+ * custom fetch does not cover them. Bounded here for the same reason
+ * everything else is (PART D): after a PC sleep an unbounded request does
+ * not fail, it hangs — and this one runs at app startup, where a hang means
+ * the counter never finishes waking up.
+ */
 async function callFn(path: string, body: unknown): Promise<FnResponse> {
-  const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/${path}`, {
+  const res = await timeoutFetch(CLOUD_TIMEOUT_MS)(`${SUPABASE_FUNCTIONS_URL}/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
