@@ -9,6 +9,7 @@ export async function getSubscription(): Promise<SubscriptionState | null> {
   return {
     status: toStr(r.status),
     planId: toStr(r.planId),
+    planName: toStr(r.planName),
     subscriptionId: toStr(r.subscriptionId),
     nextBillingDate: toStr(r.nextBillingDate),
     updatedAt: toStr(r.updatedAt),
@@ -19,19 +20,20 @@ export async function getSubscription(): Promise<SubscriptionState | null> {
 export async function saveSubscription(sub: {
   status: string;
   planId: string;
+  planName: string;
   subscriptionId: string;
   nextBillingDate: string;
   updatedAt: string;
 }): Promise<void> {
   await getDb().execute(
-    "UPDATE subscription SET status=$1, planId=$2, subscriptionId=$3, nextBillingDate=$4, updatedAt=$5 WHERE id=1",
-    [sub.status, sub.planId, sub.subscriptionId, sub.nextBillingDate, sub.updatedAt]
+    "UPDATE subscription SET status=$1, planId=$2, planName=$3, subscriptionId=$4, nextBillingDate=$5, updatedAt=$6 WHERE id=1",
+    [sub.status, sub.planId, sub.planName, sub.subscriptionId, sub.nextBillingDate, sub.updatedAt]
   );
 }
 
 export async function clearSubscription(): Promise<void> {
   await getDb().execute(
-    `UPDATE subscription SET status='', planId='', subscriptionId='', nextBillingDate='', updatedAt='' WHERE id=1`
+    `UPDATE subscription SET status='', planId='', planName='', subscriptionId='', nextBillingDate='', updatedAt='' WHERE id=1`
   );
 }
 

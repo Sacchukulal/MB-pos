@@ -44,6 +44,15 @@
   border-color: var(--border-hover);
 }
 
+/* A destructive action that is not the point of the dialog — reads as a
+   quiet option until you reach for it. */
+.btn--ghost.danger {
+  color: var(--danger);
+}
+.btn--ghost.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
 .btn--danger {
   background: var(--danger);
   color: var(--danger-fg);

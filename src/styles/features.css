@@ -1583,6 +1583,138 @@
   margin-left: 6px;
 }
 
+/* Table layout grid — the phone preview IS the editor: every tile opens the
+   table editor, so there is no separate list of the same tables. */
+.mo-tile-group {
+  margin-top: var(--space-4);
+}
+.mo-tile-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-2);
+}
+/* Stays quiet until the section is hovered — it is a power tool, not a
+   thing the owner should have to read past on every visit. */
+.mo-select-all {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.mo-tile-group:hover .mo-select-all,
+.mo-select-all:focus-visible {
+  opacity: 1;
+}
+.mo-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.mo-tile-wrap {
+  position: relative;
+}
+.mo-tile {
+  position: relative;
+  min-width: 68px;
+  padding: var(--space-3);
+  text-align: center;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: var(--border-thin) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.mo-tile:hover,
+.mo-tile:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  outline: none;
+}
+.mo-tile-section {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mo-tile-label {
+  font-weight: var(--font-semibold);
+}
+/* Hidden tables have to stay reachable here even though the phone drops
+   them, so they are dimmed and dashed rather than removed. */
+.mo-tile--off {
+  border-style: dashed;
+  opacity: 0.5;
+}
+.mo-tile-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  color: var(--text-tertiary);
+}
+
+/* Tick box for bulk delete. Hidden until you go looking for it, then it
+   stays out for as long as anything in the grid is ticked. */
+.mo-tile-check {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: var(--border-thin) solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--accent-fg);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.mo-tile-wrap:hover .mo-tile-check,
+.mo-tile-check:focus-visible,
+.mo-tile-wrap.is-selected .mo-tile-check {
+  opacity: 1;
+}
+.mo-tile-wrap.is-selected .mo-tile-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.mo-tile-wrap.is-selected .mo-tile {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  opacity: 1;
+}
+
+.mo-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--border-thin) solid var(--accent);
+  background: var(--accent-subtle);
+  font-size: var(--text-sm);
+}
+.mo-bulk-bar strong {
+  margin-right: auto;
+}
+
 .cart-item-note {
   color: var(--text-tertiary);
   font-size: var(--text-xs);

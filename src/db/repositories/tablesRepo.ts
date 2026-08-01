@@ -48,6 +48,14 @@ export async function deleteTable(id: number): Promise<void> {
   requestCatalogPush();
 }
 
+/** Bulk delete — one statement and ONE catalog push, not one per table. */
+export async function deleteTables(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const params = ids.map((_, i) => `$${i + 1}`).join(", ");
+  await getDb().execute(`DELETE FROM restaurant_tables WHERE id IN (${params})`, ids);
+  requestCatalogPush();
+}
+
 export async function tableLabelExists(
   section: string,
   label: string,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Ban, Check, Edit2, Eye, LayoutGrid, Plus, RefreshCw, Save, Smartphone, Trash2, X } from "lucide-react";
+import { Ban, Check, EyeOff, LayoutGrid, Plus, RefreshCw, Save, Smartphone, Trash2 } from "lucide-react";
 import {
   getOrderSyncState,
   setMobileOrderingEnabled,
@@ -18,6 +18,7 @@ import {
   addTable,
   bulkAddTables,
   deleteTable,
+  deleteTables,
   labelInUse,
   listTables,
   openTableNumbers,
@@ -30,6 +31,7 @@ import { describeBridge, describeUsage, isLastSyncStale } from "../../services/o
 import { useToast } from "../../hooks/useToast";
 import { useUnsavedGuard } from "../../hooks/useUnsavedGuard";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
+import Modal from "../../components/ui/Modal";
 import type { RestaurantTable } from "../../types";
 
 interface MobileOrdersProps {
@@ -40,8 +42,6 @@ interface SwitchForm {
   enabled: boolean;
   sound: boolean;
 }
-
-const TABLE_GRID = "1fr 150px 90px 90px 96px";
 
 export default function MobileOrders({ dbReady }: MobileOrdersProps) {
   const { toast } = useToast();
@@ -72,14 +72,29 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
   const [bulkTo, setBulkTo] = useState("10");
   const [addLabel, setAddLabel] = useState("");
   const [addSection, setAddSection] = useState("");
-  const [editingId, setEditingId] = useState<number | null>(null);
+  // The grid tile IS the row: clicking one opens this editor.
+  const [editing, setEditing] = useState<RestaurantTable | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editSection, setEditSection] = useState("");
   const [editSort, setEditSort] = useState("0");
+  const [editActive, setEditActive] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<RestaurantTable | null>(null);
 
+  // Tick-and-delete: ids ticked in the grid, plus the bulk confirm's payload.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkDelete, setBulkDelete] = useState<{ doomed: RestaurantTable[]; busy: string[] } | null>(
+    null
+  );
+
   const refreshTables = async () => {
-    setTables(await listTables());
+    const rows = await listTables();
+    setTables(rows);
+    // Deleted tables must not linger in the selection and re-arm the toolbar.
+    setSelected((prev) => {
+      const live = new Set(rows.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
   };
 
   useEffect(() => {
@@ -216,13 +231,16 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
   };
 
   const startEdit = (t: RestaurantTable) => {
-    setEditingId(t.id);
+    setEditing(t);
     setEditLabel(t.label);
     setEditSection(t.section);
     setEditSort(String(t.sort_order));
+    setEditActive(t.is_active === 1);
   };
 
-  const saveEdit = async (id: number) => {
+  const saveEdit = async () => {
+    if (!editing) return;
+    const id = editing.id;
     const label = editLabel.trim();
     const section = editSection.trim();
     const sortOrder = parseInt(editSort, 10) || 0;
@@ -241,20 +259,13 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
         return;
       }
       await updateTable(id, section, label, sortOrder);
-      setEditingId(null);
+      if (editActive !== (editing.is_active === 1)) {
+        await setTableActive(id, editActive);
+      }
+      setEditing(null);
       await refreshTables();
     } catch (error) {
       console.error("Update table failed:", error);
-      toast(`Error updating table: ${error}`, "danger");
-    }
-  };
-
-  const handleToggleActive = async (t: RestaurantTable) => {
-    try {
-      await setTableActive(t.id, t.is_active !== 1);
-      await refreshTables();
-    } catch (error) {
-      console.error("Toggle table failed:", error);
       toast(`Error updating table: ${error}`, "danger");
     }
   };
@@ -269,6 +280,8 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
         toast(`Table ${name} has an open order — settle or move it first.`, "danger");
         return;
       }
+      // The editor and the confirm are never on screen together.
+      setEditing(null);
       setDeleteTarget(t);
     } catch (error) {
       console.error("Delete check failed:", error);
@@ -288,14 +301,86 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
     }
   };
 
-  // Preview groups: active tables per section, in the order the phone shows.
+  // ---- ticking tables for a bulk delete
+
+  const toggleSelected = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  /** Header tick: all on unless every one is already ticked, then all off. */
+  const toggleMany = (group: RestaurantTable[]) => {
+    const allOn = group.every((t) => selected.has(t.id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      group.forEach((t) => (allOn ? next.delete(t.id) : next.add(t.id)));
+      return next;
+    });
+  };
+
+  /**
+   * A table holding an open order is never deleted — but one busy table must
+   * not block the other nineteen either, so the busy ones are set aside and
+   * named in the confirm rather than aborting the whole batch.
+   */
+  const requestBulkDelete = async () => {
+    const chosen = tables.filter((t) => selected.has(t.id));
+    if (chosen.length === 0) return;
+    try {
+      const open = await openTableNumbers();
+      const busy: string[] = [];
+      const doomed: RestaurantTable[] = [];
+      for (const t of chosen) {
+        const name = composeTableName(t.section, t.label);
+        if (labelInUse(name, open)) busy.push(name);
+        else doomed.push(t);
+      }
+      if (doomed.length === 0) {
+        toast(
+          `${busy.length === 1 ? "That table has" : "All the selected tables have"} open orders — ` +
+            `settle or move them first.`,
+          "danger"
+        );
+        return;
+      }
+      setEditing(null);
+      setBulkDelete({ doomed, busy });
+    } catch (error) {
+      console.error("Bulk delete check failed:", error);
+      toast(`Error checking tables: ${error}`, "danger");
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    if (!bulkDelete) return;
+    const n = bulkDelete.doomed.length;
+    try {
+      await deleteTables(bulkDelete.doomed.map((t) => t.id));
+      setBulkDelete(null);
+      await refreshTables();
+      toast(`Deleted ${n} table${n === 1 ? "" : "s"}.`, "success");
+    } catch (error) {
+      console.error("Bulk delete failed:", error);
+      toast(`Error deleting tables: ${error}`, "danger");
+    }
+  };
+
+  /**
+   * The grid is both the preview and the editor, so unlike the phone it must
+   * also show hidden tables — otherwise a table switched off could never be
+   * switched back on. They are rendered dimmed so the preview still reads
+   * like the phone at a glance.
+   */
   const sections = [...new Set(tables.map((t) => t.section))];
-  const previewSections = sections
-    .map((s) => ({
-      name: s,
-      tables: tables.filter((t) => t.section === s && t.is_active === 1),
-    }))
-    .filter((s) => s.tables.length > 0);
+  const tableGroups = sections.map((s) => ({
+    name: s,
+    tables: tables.filter((t) => t.section === s),
+  }));
+  const onlyUnsectioned = tableGroups.length === 1 && tableGroups[0].name === "";
+  const hiddenCount = tables.filter((t) => t.is_active !== 1).length;
 
   return (
     <div className="page settings-page">
@@ -520,151 +605,164 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
             No tables yet. Add your tables above to show a tappable grid on staff phones.
           </p>
         ) : (
-          <div style={{ marginTop: "var(--space-4)" }}>
-            <div className="data-list-head" style={{ gridTemplateColumns: TABLE_GRID }}>
-              <div>Prints as</div>
-              <div>Section</div>
-              <div style={{ textAlign: "right" }}>Order</div>
-              <div style={{ textAlign: "center" }}>Active</div>
-              <div style={{ textAlign: "right" }}>Actions</div>
-            </div>
-            {tables.map((t) =>
-              editingId === t.id ? (
-                <div
-                  key={t.id}
-                  className="data-row"
-                  style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}
-                >
-                  <input
-                    className="input"
-                    value={editLabel}
-                    onChange={(e) => setEditLabel(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && saveEdit(t.id)}
-                    style={{ width: "110px" }}
-                    autoFocus
-                  />
-                  <input
-                    className="input"
-                    value={editSection}
-                    onChange={(e) => setEditSection(e.target.value)}
-                    placeholder="Section"
-                    style={{ flex: 1 }}
-                  />
-                  <input
-                    className="input"
-                    type="number"
-                    value={editSort}
-                    onChange={(e) => setEditSort(e.target.value)}
-                    style={{ width: "80px" }}
-                    title="Sort order"
-                  />
-                  <div className="data-row-actions">
-                    <button className="row-action-btn" onClick={() => saveEdit(t.id)} title="Save">
-                      <Check size={17} />
-                    </button>
-                    <button className="row-action-btn" onClick={() => setEditingId(null)} title="Cancel">
-                      <X size={17} />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div key={t.id} className="data-row" style={{ gridTemplateColumns: TABLE_GRID }}>
-                  {/* The composed name IS the identity: it is what the phone
-                      sends and what the KOT and the bill say. */}
-                  <div style={{ fontWeight: "var(--font-medium)" }}>
-                    {composeTableName(t.section, t.label)}
-                  </div>
-                  <div style={{ color: "var(--text-secondary)" }}>{t.section || "—"}</div>
-                  <div style={{ textAlign: "right", color: "var(--text-tertiary)" }}>{t.sort_order}</div>
-                  <div style={{ textAlign: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={t.is_active === 1}
-                      onChange={() => handleToggleActive(t)}
-                      title={t.is_active === 1 ? "Shown on phones" : "Hidden on phones"}
-                      style={{ accentColor: "var(--accent)" }}
-                    />
-                  </div>
-                  <div className="data-row-actions">
-                    <button className="row-action-btn" onClick={() => startEdit(t)} title="Edit table">
-                      <Edit2 size={17} />
-                    </button>
-                    <button
-                      className="row-action-btn danger"
-                      onClick={() => requestDelete(t)}
-                      title="Delete table"
-                    >
-                      <Trash2 size={17} />
-                    </button>
-                  </div>
-                </div>
-              )
+          <div style={{ marginTop: "var(--space-5)" }}>
+            <p className="field-hint" style={{ marginTop: 0 }}>
+              This is exactly how the grid appears in the staff app, and the name on each tile is
+              what the kitchen slip and the bill will say. Click a table to rename, move, reorder,
+              hide or delete it — or tick the boxes to delete several at once.
+              {hiddenCount > 0 && ` ${hiddenCount} hidden table${hiddenCount === 1 ? " is" : "s are"} shown dimmed — the phone does not show ${hiddenCount === 1 ? "it" : "them"}.`}
+            </p>
+
+            {/* Bulk bar — only once something is ticked, so the grid stays calm. */}
+            {selected.size > 0 && (
+              <div className="mo-bulk-bar">
+                <strong>
+                  {selected.size} table{selected.size === 1 ? "" : "s"} selected
+                </strong>
+                <button className="btn btn--ghost btn--sm" onClick={() => toggleMany(tables)}>
+                  {selected.size === tables.length ? "Unselect all" : `Select all ${tables.length}`}
+                </button>
+                <button className="btn btn--ghost btn--sm" onClick={() => setSelected(new Set())}>
+                  Clear
+                </button>
+                <button className="btn btn--danger btn--sm" onClick={requestBulkDelete}>
+                  <Trash2 size={14} /> Delete selected
+                </button>
+              </div>
             )}
+
+            {tableGroups.map((g) => {
+              const allTicked = g.tables.every((t) => selected.has(t.id));
+              return (
+                <div key={g.name || "(none)"} className="mo-tile-group">
+                  <div className="mo-tile-group-head">
+                    {!(onlyUnsectioned && g.name === "") && <span>{g.name || "No section"}</span>}
+                    <button
+                      type="button"
+                      className="mo-select-all"
+                      onClick={() => toggleMany(g.tables)}
+                    >
+                      {allTicked ? "Unselect" : "Select"} all {g.tables.length}
+                    </button>
+                  </div>
+                  <div className="mo-tiles">
+                    {g.tables.map((t) => {
+                      const ticked = selected.has(t.id);
+                      return (
+                        <div
+                          key={t.id}
+                          className={`mo-tile-wrap ${ticked ? "is-selected" : ""}`}
+                        >
+                          <button
+                            type="button"
+                            className={`mo-tile ${t.is_active === 1 ? "" : "mo-tile--off"}`}
+                            onClick={() => startEdit(t)}
+                            title={
+                              t.is_active === 1
+                                ? `Prints as "Table: ${composeTableName(t.section, t.label)}" — click to edit`
+                                : `Hidden on phones — click to edit`
+                            }
+                          >
+                            {/* Mirrors the phone tile: section caption over the number. */}
+                            {t.section !== "" && <div className="mo-tile-section">{t.section}</div>}
+                            <div className="mo-tile-label">{t.label}</div>
+                            {t.is_active !== 1 && <EyeOff className="mo-tile-badge" size={12} />}
+                          </button>
+                          {/* A sibling, not a child: nesting it inside the tile
+                              button would be invalid and unreachable by keyboard. */}
+                          <button
+                            type="button"
+                            className="mo-tile-check"
+                            role="checkbox"
+                            aria-checked={ticked}
+                            aria-label={`Select ${composeTableName(t.section, t.label)}`}
+                            title="Select for bulk delete"
+                            onClick={() => toggleSelected(t.id)}
+                          >
+                            {ticked && <Check size={12} strokeWidth={3} />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Phone preview */}
-      {previewSections.length > 0 && (
-        <div className="section">
-          <div className="section-head">
-            <Eye size={14} /> Phone preview
-          </div>
-          <p className="field-hint" style={{ marginTop: 0 }}>
-            How the table grid appears in the staff app. Inactive tables are hidden. The name
-            shown on each tile is exactly what the kitchen slip and the bill will say.
-          </p>
-          {previewSections.map((s) => (
-            <div key={s.name || "(none)"} style={{ marginTop: "var(--space-3)" }}>
-              {s.name !== "" && (
-                <div
-                  style={{
-                    fontSize: "var(--text-xs)",
-                    fontWeight: "var(--font-semibold)",
-                    color: "var(--text-tertiary)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: "var(--space-2)",
-                  }}
-                >
-                  {s.name}
-                </div>
-              )}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-                {s.tables.map((t) => (
-                  <div
-                    key={t.id}
-                    style={{
-                      minWidth: "64px",
-                      padding: "var(--space-3)",
-                      textAlign: "center",
-                      background: "var(--bg-tertiary)",
-                      border: "var(--border-thin) solid var(--border-subtle)",
-                      borderRadius: "var(--radius-md)",
-                      color: "var(--text-primary)",
-                    }}
-                    title={`Prints as "Table: ${composeTableName(t.section, t.label)}"`}
-                  >
-                    {/* Mirrors the phone tile: section caption over the number. */}
-                    {t.section !== "" && (
-                      <div
-                        style={{
-                          fontSize: "var(--text-xs)",
-                          color: "var(--text-tertiary)",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                        }}
-                      >
-                        {t.section}
-                      </div>
-                    )}
-                    <div style={{ fontWeight: "var(--font-semibold)" }}>{t.label}</div>
-                  </div>
-                ))}
-              </div>
+      {/* Table editor — opened from a tile in the grid above. */}
+      {editing && (
+        <Modal onClose={() => setEditing(null)} width="460px">
+          <div className="ui-modal-title">Edit table</div>
+          <div className="form-grid cols-2">
+            <div className="field">
+              <label>Table name</label>
+              <input
+                className="input"
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                autoFocus
+              />
             </div>
-          ))}
-        </div>
+            <div className="field">
+              <label>Section</label>
+              <input
+                className="input"
+                placeholder="optional"
+                value={editSection}
+                onChange={(e) => setEditSection(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+              />
+            </div>
+          </div>
+          <div className="form-grid cols-2" style={{ marginTop: "var(--space-3)" }}>
+            <div className="field">
+              <label>Order</label>
+              <input
+                className="input"
+                type="number"
+                value={editSort}
+                onChange={(e) => setEditSort(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+              />
+              <p className="field-hint">Position within the section.</p>
+            </div>
+            <div className="field">
+              <label>Prints as</label>
+              <div style={{ fontWeight: "var(--font-semibold)", paddingTop: "10px" }}>
+                {composeTableName(editSection.trim(), editLabel.trim()) || "—"}
+              </div>
+              <p className="field-hint">What the kitchen slip and the bill say.</p>
+            </div>
+          </div>
+          <label className="check" style={{ marginTop: "var(--space-3)" }}>
+            <input
+              type="checkbox"
+              checked={editActive}
+              onChange={(e) => setEditActive(e.target.checked)}
+            />
+            Show on phones
+            <span className="check-hint">
+              A hidden table stays here in the grid, dimmed, but the staff app does not show it.
+            </span>
+          </label>
+          <div className="ui-modal-actions" style={{ marginTop: "var(--space-5)", justifyContent: "space-between" }}>
+            <button className="btn btn--ghost danger" onClick={() => requestDelete(editing)}>
+              <Trash2 size={16} /> Delete
+            </button>
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
+              <button className="btn btn--ghost" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+              <button className="btn btn--primary" onClick={saveEdit}>
+                <Save size={16} /> Save table
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       <div className="save-bar">
@@ -689,6 +787,37 @@ export default function MobileOrders({ dbReady }: MobileOrdersProps) {
           danger
           onConfirm={confirmDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {bulkDelete && (
+        <ConfirmDialog
+          title={`Delete ${bulkDelete.doomed.length} table${bulkDelete.doomed.length === 1 ? "" : "s"}?`}
+          message={
+            <>
+              Deleting{" "}
+              <strong>
+                {bulkDelete.doomed
+                  .slice(0, 8)
+                  .map((t) => composeTableName(t.section, t.label))
+                  .join(", ")}
+                {bulkDelete.doomed.length > 8 && ` and ${bulkDelete.doomed.length - 8} more`}
+              </strong>
+              . Phones will no longer show them. Past orders are not affected.
+              {bulkDelete.busy.length > 0 && (
+                <>
+                  <br />
+                  <br />
+                  Keeping <strong>{bulkDelete.busy.join(", ")}</strong> — {bulkDelete.busy.length === 1 ? "it has" : "they have"}{" "}
+                  an open order right now.
+                </>
+              )}
+            </>
+          }
+          confirmLabel={`Delete ${bulkDelete.doomed.length}`}
+          danger
+          onConfirm={confirmBulkDelete}
+          onCancel={() => setBulkDelete(null)}
         />
       )}
     </div>

@@ -110,6 +110,9 @@ export interface StaffMember {
 export interface SubscriptionState {
   status: string;
   planId: string;
+  /** Human plan name from the Razorpay catalogue ("Yearly Pro"). May be
+   *  empty on snapshots cached before the server started sending it. */
+  planName: string;
   subscriptionId: string;
   nextBillingDate: string;
   updatedAt: string;

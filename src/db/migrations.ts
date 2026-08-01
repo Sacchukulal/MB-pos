@@ -25,6 +25,10 @@ async function baseSchema(db: Database) {
     );
   `);
   await db.execute(`INSERT OR IGNORE INTO subscription (id) VALUES (1)`);
+  // The human plan name, resolved server-side from the Razorpay plan catalogue.
+  // Older DBs only cached the plan_XXXX id, which is what the account screen
+  // then had to show.
+  await addColumn(db, "subscription", "planName", "TEXT", "''");
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS user_details (

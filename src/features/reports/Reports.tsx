@@ -51,7 +51,9 @@ export default function Reports({ dbReady }: ReportsProps) {
   const { toast } = useToast();
 
   const [mainTab, setMainTab] = useState<MainTab>("Sales Overview");
-  const [salesReport, setSalesReport] = useState<SalesReport>("Sales Summary");
+  // Opens on Recent Bills: the reason the counter reaches for Reports mid-service
+  // is almost always "find that bill and reprint it", not read the analytics.
+  const [salesReport, setSalesReport] = useState<SalesReport>("Recent Bills");
   const [dateRange, setDateRange] = useState(() => ({ start: todayISO(), end: todayISO() }));
   const [customerDateRange, setCustomerDateRange] = useState(() => {
     const start = new Date();

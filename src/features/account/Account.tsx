@@ -132,6 +132,13 @@ export default function Account({ dbReady }: AccountProps) {
   const status = STATUS_CONFIG[planInfo.status];
   const StatusIcon = status.icon;
 
+  /**
+   * What the owner bought, in the words they bought it in. The plan_XXXX id is
+   * a Razorpay internal and means nothing to them — it is only the fallback for
+   * a snapshot cached before the server started sending the name.
+   */
+  const planLabel = subscription?.planName || subscription?.planId || "";
+
   const initials = (() => {
     const name = userDetails?.displayName || userDetails?.restaurantName || "";
     return (
@@ -222,7 +229,9 @@ export default function Account({ dbReady }: AccountProps) {
             </span>
             <span className="account-chip">
               <Crown size={12} />
-              {subscription?.planId ? `${subscription.planId} Plan` : "Free Plan"}
+              {/* Not "<name> Plan" — the names already read as plans
+                  ("Yearly Pro", "MONTHLY PLAN") and would double up. */}
+              {planLabel || "Free Plan"}
             </span>
           </div>
         </div>
@@ -281,8 +290,10 @@ export default function Account({ dbReady }: AccountProps) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div className="stat-card-label">Current Plan</div>
-                  <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, textTransform: "capitalize" }}>
-                    {subscription.planId || "Free"} Plan
+                  {/* No capitalize: the name arrives cased the way it was set
+                      in Razorpay, and forcing it mangled the id fallback. */}
+                  <div style={{ fontSize: "var(--text-xl)", fontWeight: 700 }}>
+                    {planLabel || "Free Plan"}
                   </div>
                 </div>
                 <span className="account-chip" style={{ background: status.bg, color: status.color }}>

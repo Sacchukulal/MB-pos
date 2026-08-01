@@ -15,6 +15,8 @@ import type { UserDetails } from "../../types";
 export interface RemoteSubscription {
   status: string;
   planId: string;
+  /** Human plan name resolved server-side from the Razorpay plan catalogue. */
+  planName: string;
   subscriptionId: string;
   nextBillingDate: string;
   updatedAt: string;
@@ -57,6 +59,7 @@ function mapRemoteSubscription(sub: Partial<RemoteSubscription> | undefined): Re
   return {
     status: sub?.status || "",
     planId: sub?.planId || "",
+    planName: sub?.planName || "",
     subscriptionId: sub?.subscriptionId || "",
     nextBillingDate: sub?.nextBillingDate || "",
     updatedAt: sub?.updatedAt || "",
