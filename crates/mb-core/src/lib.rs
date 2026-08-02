@@ -29,27 +29,35 @@
 //! | [`qty`] | quantity in thousandths, and price × quantity |
 //! | [`ids`] | the identity newtypes |
 //! | [`item`] | the frozen item snapshot, modifiers, order type |
-//! | [`discount`] | discounts, and the proportional spread across lines |
+//! | [`discount`] | discounts, their policy, and the spread across lines |
+//! | [`charge`] | service / packing / delivery, each with its own rate |
 //! | [`cart`] | the lines as typed, and the rule that merges them |
 //! | [`bill`] | the D4 pipeline, in one place, with the steps numbered |
+//! | [`payment`] | split payment, change, tips — after the bill, not in it |
 
 #![deny(missing_debug_implementations)]
 
 pub mod bill;
 pub mod cart;
+pub mod charge;
 pub mod discount;
 pub mod ids;
 pub mod item;
 pub mod money;
+pub mod payment;
 pub mod qty;
 pub mod tax;
 
 pub use bill::{Bill, BillError, BillInput, BillLine, compute_bill};
 pub use cart::{Cart, CartError, CartLine};
-pub use discount::{Discount, DiscountOutcome};
-pub use ids::{CategoryId, ItemId, ModifierId};
+pub use charge::{BillCharge, Charge, ChargeBasis, ChargeKind};
+pub use discount::{
+    Discount, DiscountEntry, DiscountOutcome, DiscountPolicy, DiscountPolicyError,
+};
+pub use ids::{CategoryId, CustomerId, ItemId, ModifierId, StaffId};
 pub use item::{ItemSnapshot, Modifier, OrderType};
-pub use money::{Money, MoneyError};
+pub use money::{Money, MoneyError, RoundingMode};
+pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
 pub use qty::{Qty, QtyError};
 pub use tax::{
     PlaceOfSupply, RateSummaryRow, TaxAmounts, TaxOutcome, TaxRate, TaxSummary, TaxTreatment,

@@ -34,8 +34,8 @@
 )]
 
 use mb_core::{
-    Cart, Discount, ItemId, ItemSnapshot, Modifier, ModifierId, Money, PlaceOfSupply, Qty, TaxRate,
-    TaxTreatment, bill::BillInput, compute_bill,
+    Cart, Charge, ChargeKind, Discount, DiscountEntry, ItemId, ItemSnapshot, Modifier, ModifierId,
+    Money, PlaceOfSupply, Qty, RoundingMode, TaxRate, TaxTreatment, bill::BillInput, compute_bill,
 };
 use std::time::Instant;
 
@@ -88,22 +88,39 @@ fn busy_cart() -> Cart {
             .expect("adds");
 
         if i % 4 == 0 {
-            cart.set_line_discount(index, Discount::percent_bp(500))
+            cart.set_line_discount(index, Discount::percent_bp(500).map(DiscountEntry::new))
                 .expect("sets");
         }
     }
     cart
 }
 
+/// The three charges a real bill carries, each with its own rate — which is
+/// what budget B4 actually describes ("50 lines, mixed rates, discounts,
+/// charges"). Until P02 there were no charges, so the P01 figure measured less
+/// than the budget claimed.
+fn charges() -> Vec<Charge> {
+    vec![
+        Charge::percent(ChargeKind::Service, "Service Charge", 1_000, TaxRate::GST_18),
+        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(2_000), TaxRate::GST_5),
+        Charge::flat(ChargeKind::Delivery, "Delivery", Money::from_paise(4_000), TaxRate::GST_18),
+    ]
+}
+
 #[test]
 fn compute_bill_stays_within_budget_b4() {
     let cart = busy_cart();
     assert_eq!(cart.len(), 50, "the budget is written against 50 lines");
+    let charges = charges();
 
     let input = || {
         BillInput::new(&cart)
             .with_place_of_supply(PlaceOfSupply::Intra)
-            .with_bill_discount(Discount::percent_bp(1_000).expect("valid"))
+            .with_charges(&charges)
+            .with_rounding(RoundingMode::NearestRupee)
+            .with_bill_discount(DiscountEntry::new(
+                Discount::percent_bp(1_000).expect("valid"),
+            ))
     };
 
     // Warm up: first call pays for page faults and branch prediction, and

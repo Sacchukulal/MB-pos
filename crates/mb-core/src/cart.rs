@@ -5,7 +5,7 @@
 //! [`crate::bill::compute_bill`]'s job, and keeping that split is what stops
 //! the totals from being calculated in two places that can disagree.
 
-use crate::discount::Discount;
+use crate::discount::DiscountEntry;
 use crate::ids::ModifierId;
 use crate::item::{ItemSnapshot, Modifier};
 use crate::qty::Qty;
@@ -29,7 +29,9 @@ pub struct CartLine {
     pub qty: Qty,
     pub note: Option<String>,
     pub modifiers: Vec<Modifier>,
-    pub line_discount: Option<Discount>,
+    /// The discount as given, with its reason and who authorised it (P02,
+    /// scope 1.12). The cart carries it; `compute_bill` applies it.
+    pub line_discount: Option<DiscountEntry>,
 }
 
 impl CartLine {
@@ -147,7 +149,7 @@ impl Cart {
         Ok(())
     }
 
-    pub fn set_line_discount(&mut self, index: usize, discount: Option<Discount>) -> Result<()> {
+    pub fn set_line_discount(&mut self, index: usize, discount: Option<DiscountEntry>) -> Result<()> {
         self.check(index)?;
         self.lines[index].line_discount = discount;
         Ok(())

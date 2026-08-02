@@ -11,6 +11,7 @@
 //! for every rate, the rate-wise summary does not tie, and a CA cannot file
 //! from the bill (audit B11).
 
+use crate::ids::StaffId;
 use crate::money::{Money, MoneyError};
 use serde::{Deserialize, Serialize};
 
@@ -87,6 +88,174 @@ pub struct DiscountOutcome {
     pub requested: Money,
     /// `applied` is less than `requested`.
     pub was_capped: bool,
+}
+
+/// A discount as it was actually given: the value, why, and by whom.
+///
+/// Scope 1.12 — the audit's B7 fix says "with a permission and a reason". The
+/// metadata is a wrapper rather than three more fields inside [`Discount`]
+/// because `Discount` is `Copy`, is used inside the per-line loop, and has no
+/// business carrying a `String`. Keeping the reason beside the value rather
+/// than inside it is also what lets P11 add an approval flow without touching
+/// any arithmetic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscountEntry {
+    pub discount: Discount,
+    /// Compulsory above a [`DiscountPolicy`] threshold.
+    pub reason: Option<String>,
+    /// Filled by the app layer at P11. `None` means "not wired yet", never
+    /// "nobody authorised it".
+    pub authorised_by: Option<StaffId>,
+}
+
+impl DiscountEntry {
+    #[must_use]
+    pub const fn new(discount: Discount) -> Self {
+        DiscountEntry { discount, reason: None, authorised_by: None }
+    }
+
+    #[must_use]
+    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = Some(reason.into());
+        self
+    }
+
+    #[must_use]
+    pub fn authorised_by(mut self, staff: StaffId) -> Self {
+        self.authorised_by = Some(staff);
+        self
+    }
+}
+
+/// What a staff member is allowed to give away.
+///
+/// **Deliberately not enforced inside `compute_bill`.** The pipeline computes;
+/// it does not judge. The caller checks the policy before it accepts the
+/// discount (P10's billing screen, over P08's IPC), and P11 attaches a real
+/// policy to each role.
+///
+/// The reason that split matters: a bill printed in March must still recompute
+/// to the same total in December, even if the cashier who gave the discount
+/// has since had their permission reduced. Enforcement belongs at the moment of
+/// the decision, not at the moment of the arithmetic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscountPolicy {
+    /// The largest percentage this staff member may give. Zero means they may
+    /// not discount at all.
+    pub max_percent_bp: u32,
+    /// The largest flat amount. `None` means flat discounts are not allowed.
+    pub max_amount: Option<Money>,
+    /// Above this percentage a reason is compulsory. `None` means never.
+    pub reason_required_above_bp: Option<u32>,
+    /// Above this amount a reason is compulsory. `None` means never.
+    pub reason_required_above_amount: Option<Money>,
+}
+
+/// Why a discount was refused. Every message is a sentence a cashier can act
+/// on — "a discount over 20% needs a reason", not "policy violation".
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DiscountPolicyError {
+    #[error("that is {asked}% — you can give up to {allowed}%")]
+    PercentTooLarge { asked: String, allowed: String },
+    #[error("that is more than the ₹{allowed} you can give off a bill")]
+    AmountTooLarge { asked: Money, allowed: Money },
+    #[error("you can give a percentage discount, not a rupee amount")]
+    FlatNotAllowed,
+    #[error("a discount this large needs a reason")]
+    ReasonRequired,
+}
+
+impl DiscountPolicy {
+    /// Wide open. The default until P11 attaches real roles, and what the
+    /// owner's own login gets.
+    #[must_use]
+    pub const fn unrestricted() -> Self {
+        DiscountPolicy {
+            max_percent_bp: 10_000,
+            max_amount: Some(Money::from_paise(i64::MAX)),
+            reason_required_above_bp: None,
+            reason_required_above_amount: None,
+        }
+    }
+
+    /// Nothing at all — a role that may not discount.
+    #[must_use]
+    pub const fn none() -> Self {
+        DiscountPolicy {
+            max_percent_bp: 0,
+            max_amount: None,
+            reason_required_above_bp: None,
+            reason_required_above_amount: None,
+        }
+    }
+
+    /// Is this discount allowed, and does it need a reason it does not have?
+    ///
+    /// `base` is what the discount would apply to, so a percentage can be
+    /// judged against a flat limit and the other way round.
+    pub fn check(
+        &self,
+        entry: &DiscountEntry,
+        base: Money,
+    ) -> std::result::Result<(), DiscountPolicyError> {
+        let has_reason = entry.reason.as_ref().is_some_and(|r| !r.trim().is_empty());
+
+        match entry.discount {
+            Discount::Percent(bp) => {
+                if bp > self.max_percent_bp {
+                    return Err(DiscountPolicyError::PercentTooLarge {
+                        asked: bp_label(bp),
+                        allowed: bp_label(self.max_percent_bp),
+                    });
+                }
+                // A percentage of a large bill can exceed a flat limit, so the
+                // amount limit applies to it too — otherwise "10% max" on a
+                // ₹50,000 banquet bill quietly gives away ₹5,000.
+                if let Some(max) = self.max_amount {
+                    let asked = base.percent_bp(bp).unwrap_or(Money::ZERO);
+                    if asked > max {
+                        return Err(DiscountPolicyError::AmountTooLarge { asked, allowed: max });
+                    }
+                }
+                if let Some(threshold) = self.reason_required_above_bp
+                    && bp > threshold
+                    && !has_reason
+                {
+                    return Err(DiscountPolicyError::ReasonRequired);
+                }
+            }
+            Discount::Amount(amount) => {
+                let Some(max) = self.max_amount else {
+                    return Err(DiscountPolicyError::FlatNotAllowed);
+                };
+                if amount > max {
+                    return Err(DiscountPolicyError::AmountTooLarge { asked: amount, allowed: max });
+                }
+                if let Some(threshold) = self.reason_required_above_amount
+                    && amount > threshold
+                    && !has_reason
+                {
+                    return Err(DiscountPolicyError::ReasonRequired);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `1000` -> `"10"`, `250` -> `"2.5"`. For the error messages above, which a
+/// cashier reads.
+#[allow(clippy::integer_division, reason = "splitting basis points for display")]
+fn bp_label(bp: u32) -> String {
+    let whole = bp / 100;
+    let frac = bp % 100;
+    if frac == 0 {
+        format!("{whole}")
+    } else if frac.is_multiple_of(10) {
+        format!("{whole}.{}", frac / 10)
+    } else {
+        format!("{whole}.{frac:02}")
+    }
 }
 
 /// Spread `total` across the lines in proportion to `line_nets`.
@@ -222,6 +391,102 @@ mod tests {
         assert!(Discount::amount(Money::from_paise(-1)).is_none());
         assert!(Discount::percent_bp(10_000).is_some()); // 100% off is legitimate
         assert!(Discount::amount(Money::ZERO).is_some());
+    }
+
+    #[test]
+    fn a_policy_refuses_what_it_should_and_says_why() {
+        // Scope 1.12. A waiter who may give up to 10%, up to ₹200, and must
+        // give a reason above 5%.
+        let waiter = DiscountPolicy {
+            max_percent_bp: 1_000,
+            max_amount: Some(rs(200)),
+            reason_required_above_bp: Some(500),
+            reason_required_above_amount: Some(rs(100)),
+        };
+
+        let ok = DiscountEntry::new(Discount::percent_bp(500).expect("valid"));
+        assert_eq!(waiter.check(&ok, rs(1_000)), Ok(()));
+
+        // Over the percentage limit.
+        let too_much = DiscountEntry::new(Discount::percent_bp(2_000).expect("valid"))
+            .with_reason("manager said so");
+        assert!(matches!(
+            waiter.check(&too_much, rs(1_000)),
+            Err(DiscountPolicyError::PercentTooLarge { .. })
+        ));
+
+        // Inside the percentage limit but over the money limit — 10% of a
+        // ₹50,000 banquet is ₹5,000, which is the hole a percentage-only check
+        // leaves open.
+        let banquet = DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))
+            .with_reason("bulk booking");
+        assert!(matches!(
+            waiter.check(&banquet, rs(50_000)),
+            Err(DiscountPolicyError::AmountTooLarge { .. })
+        ));
+
+        // Over the reason threshold with no reason.
+        let no_reason = DiscountEntry::new(Discount::percent_bp(800).expect("valid"));
+        assert_eq!(
+            waiter.check(&no_reason, rs(1_000)),
+            Err(DiscountPolicyError::ReasonRequired)
+        );
+        // A blank reason is not a reason.
+        let blank = no_reason.clone().with_reason("   ");
+        assert_eq!(waiter.check(&blank, rs(1_000)), Err(DiscountPolicyError::ReasonRequired));
+        // With one, it passes.
+        let with_reason = no_reason.with_reason("spilled the curry");
+        assert_eq!(waiter.check(&with_reason, rs(1_000)), Ok(()));
+
+        // Flat discounts, over the limit and over the reason threshold.
+        let flat_big = DiscountEntry::new(Discount::amount(rs(500)).expect("valid"));
+        assert!(matches!(
+            waiter.check(&flat_big, rs(1_000)),
+            Err(DiscountPolicyError::AmountTooLarge { .. })
+        ));
+        let flat_no_reason = DiscountEntry::new(Discount::amount(rs(150)).expect("valid"));
+        assert_eq!(
+            waiter.check(&flat_no_reason, rs(1_000)),
+            Err(DiscountPolicyError::ReasonRequired)
+        );
+    }
+
+    #[test]
+    fn a_role_that_may_not_discount_is_refused_a_rupee() {
+        let trainee = DiscountPolicy::none();
+        assert!(matches!(
+            trainee.check(
+                &DiscountEntry::new(Discount::percent_bp(100).expect("valid")),
+                rs(1_000)
+            ),
+            Err(DiscountPolicyError::PercentTooLarge { .. })
+        ));
+        assert_eq!(
+            trainee.check(
+                &DiscountEntry::new(Discount::amount(Money::from_paise(1)).expect("valid")),
+                rs(1_000)
+            ),
+            Err(DiscountPolicyError::FlatNotAllowed)
+        );
+    }
+
+    #[test]
+    fn an_unrestricted_policy_allows_everything() {
+        let owner = DiscountPolicy::unrestricted();
+        for entry in [
+            DiscountEntry::new(Discount::percent_bp(10_000).expect("valid")),
+            DiscountEntry::new(Discount::amount(rs(100_000)).expect("valid")),
+        ] {
+            assert_eq!(owner.check(&entry, rs(50_000)), Ok(()), "the owner may do as they like");
+        }
+    }
+
+    #[test]
+    fn policy_messages_read_like_something_a_cashier_can_act_on() {
+        let waiter = DiscountPolicy { max_percent_bp: 1_050, ..DiscountPolicy::none() };
+        let asked = DiscountEntry::new(Discount::percent_bp(2_000).expect("valid"));
+        let message = waiter.check(&asked, rs(1_000)).expect_err("refused").to_string();
+        assert_eq!(message, "that is 20% — you can give up to 10.5%");
     }
 
     #[test]

@@ -36,6 +36,28 @@ pub enum MoneyError {
 
 type Result<T> = std::result::Result<T, MoneyError>;
 
+/// How a grand total is brought to a whole rupee.
+///
+/// Audit B8: v1 had no round-off at all and printed bills like ₹487.35. Indian
+/// counters round to the rupee, and which way is a shop's own choice — some
+/// always round down as a courtesy, some always up.
+///
+/// This lives in `money.rs` rather than with the bill because it describes an
+/// arithmetic operation, and the arithmetic has to have exactly one home.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoundingMode {
+    /// Print the paise. No adjustment.
+    None,
+    /// To the nearest rupee, ties away from zero. The Indian default.
+    #[default]
+    NearestRupee,
+    /// Always to the rupee above — ceiling, including for negatives.
+    Up,
+    /// Always to the rupee below — floor, including for negatives.
+    Down,
+}
+
 /// A rupee amount, held as a whole number of paise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -193,8 +215,49 @@ impl Money {
     /// line so the printed bill reconciles exactly (decision D4, step 7-8).
     #[must_use]
     pub fn round_off_adjustment(self) -> Money {
-        let rounded = self.mul_ratio(1, 100).unwrap_or(Money::ZERO).0.saturating_mul(100);
-        Money(rounded.saturating_sub(self.0))
+        self.round_adjustment(RoundingMode::NearestRupee)
+    }
+
+    /// The adjustment that reaches a whole rupee under `mode`.
+    ///
+    /// **`Up` and `Down` are ceiling and floor**, not "away from zero" and
+    /// "toward zero". A bill is never negative, but a refund line (P12) will
+    /// be, and "round up" has to keep meaning the same thing when it is.
+    ///
+    /// An amount that is already on a whole rupee is left alone by every mode.
+    /// That sounds obvious and it is where an off-by-one would quietly add a
+    /// rupee to every round bill in the shop.
+    #[must_use]
+    #[allow(
+        clippy::integer_division,
+        reason = "flooring to a whole rupee IS the operation; the remainder is \
+                  what the adjustment is computed from"
+    )]
+    pub fn round_adjustment(self, mode: RoundingMode) -> Money {
+        // Euclidean remainder, so it is never negative and `floor` below is a
+        // true floor for negative amounts too.
+        let remainder = self.0.rem_euclid(100);
+        if remainder == 0 {
+            return Money::ZERO;
+        }
+        let floor = self.0 - remainder;
+        match mode {
+            RoundingMode::None => Money::ZERO,
+            RoundingMode::Down => Money(floor - self.0),
+            RoundingMode::Up => Money(floor + 100 - self.0),
+            // Ties go AWAY FROM ZERO, matching the rule in the module doc and
+            // `mul_ratio`: ₹487.50 becomes ₹488, and −₹487.50 becomes −₹488.
+            // That is why this arm works on the magnitude instead of reusing
+            // the Euclidean floor above — flooring would send a negative tie
+            // toward zero and give this module two rounding rules.
+            RoundingMode::NearestRupee => {
+                let magnitude = self.0.saturating_abs();
+                let rem = magnitude % 100;
+                let target = if rem >= 50 { magnitude - rem + 100 } else { magnitude - rem };
+                let signed = if self.0 < 0 { -target } else { target };
+                Money(signed - self.0)
+            }
+        }
     }
 
     /// Parse a human amount: `"1234"`, `"12.5"`, `"₹1,234.50"`, `"-3.25"`.
@@ -429,6 +492,83 @@ mod tests {
         // A half-rupee tie goes up (away from zero).
         let m = Money::from_paise(48_750);
         assert_eq!(m.add(m.round_off_adjustment()), Ok(Money::from_paise(48_800)));
+    }
+
+    #[test]
+    fn every_rounding_mode_reaches_its_rupee() {
+        // The audit's B8 bill, through all four modes.
+        let m = Money::from_paise(48_735); // ₹487.35
+        let after = |mode| m.add(m.round_adjustment(mode)).expect("adds");
+        assert_eq!(after(RoundingMode::NearestRupee), Money::from_paise(48_700));
+        assert_eq!(after(RoundingMode::Up), Money::from_paise(48_800));
+        assert_eq!(after(RoundingMode::Down), Money::from_paise(48_700));
+        assert_eq!(after(RoundingMode::None), m);
+
+        let m = Money::from_paise(48_765); // ₹487.65
+        let after = |mode| m.add(m.round_adjustment(mode)).expect("adds");
+        assert_eq!(after(RoundingMode::NearestRupee), Money::from_paise(48_800));
+        assert_eq!(after(RoundingMode::Up), Money::from_paise(48_800));
+        assert_eq!(after(RoundingMode::Down), Money::from_paise(48_700));
+
+        // A tie goes away from zero.
+        let m = Money::from_paise(48_750);
+        assert_eq!(
+            m.add(m.round_adjustment(RoundingMode::NearestRupee)),
+            Ok(Money::from_paise(48_800))
+        );
+    }
+
+    #[test]
+    fn an_amount_already_on_a_rupee_is_left_alone_by_every_mode() {
+        // An off-by-one here would silently add a rupee to every round bill in
+        // the shop, on every mode, forever.
+        for paise in [0_i64, 100, 48_700, -100, -48_700] {
+            let m = Money::from_paise(paise);
+            for mode in [
+                RoundingMode::None,
+                RoundingMode::NearestRupee,
+                RoundingMode::Up,
+                RoundingMode::Down,
+            ] {
+                assert_eq!(
+                    m.round_adjustment(mode),
+                    Money::ZERO,
+                    "{paise} paise moved under {mode:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn up_and_down_are_ceiling_and_floor_even_below_zero() {
+        // Pinned deliberately: a refund line (P12) is negative, and "round up"
+        // has to keep meaning the same thing when it is.
+        let m = Money::from_paise(-48_735); // −₹487.35
+        let after = |mode| m.add(m.round_adjustment(mode)).expect("adds");
+        assert_eq!(after(RoundingMode::Up), Money::from_paise(-48_700), "ceiling");
+        assert_eq!(after(RoundingMode::Down), Money::from_paise(-48_800), "floor");
+        // Nearest still goes away from zero, matching mul_ratio.
+        assert_eq!(after(RoundingMode::NearestRupee), Money::from_paise(-48_700));
+
+        let m = Money::from_paise(-48_750); // an exact negative tie
+        assert_eq!(
+            m.add(m.round_adjustment(RoundingMode::NearestRupee)),
+            Ok(Money::from_paise(-48_800)),
+            "a negative tie rounds away from zero, like every other rounding here"
+        );
+    }
+
+    #[test]
+    fn rounding_always_lands_on_a_whole_rupee() {
+        for paise in -400..400_i64 {
+            let m = Money::from_paise(paise);
+            for mode in [RoundingMode::NearestRupee, RoundingMode::Up, RoundingMode::Down] {
+                let landed = m.add(m.round_adjustment(mode)).expect("adds");
+                assert_eq!(landed.paise() % 100, 0, "{paise} under {mode:?} kept paise");
+                // And it never moves by a whole rupee or more.
+                assert!(m.round_adjustment(mode).abs().paise() < 100);
+            }
+        }
     }
 
     #[test]

@@ -71,6 +71,8 @@ macro_rules! id_type {
 id_type!(ItemId, "Identifies a menu item.");
 id_type!(ModifierId, "Identifies a modifier (`extra cheese`, `no onion`).");
 id_type!(CategoryId, "Identifies a menu category.");
+id_type!(StaffId, "Identifies a staff member. P11 gives them roles and PINs.");
+id_type!(CustomerId, "Identifies a customer. P15 gives them a khata ledger.");
 
 #[cfg(test)]
 mod tests {
