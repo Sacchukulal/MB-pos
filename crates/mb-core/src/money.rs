@@ -84,10 +84,17 @@ impl Money {
         Money(-self.0)
     }
 
+    /// Deliberately NOT `std::ops::Add`. That trait returns `Self` and cannot
+    /// fail, so implementing it would mean either wrapping or saturating on
+    /// overflow — both of which are exactly what D7 forbids in the money path.
+    /// The name stays `add` because `a.add(b)?` is what the call sites read
+    /// like everywhere in this crate.
+    #[allow(clippy::should_implement_trait, reason = "addition here must be able to fail (D7)")]
     pub fn add(self, other: Self) -> Result<Self> {
         self.0.checked_add(other.0).map(Money).ok_or(MoneyError::Overflow)
     }
 
+    #[allow(clippy::should_implement_trait, reason = "see `add` — subtraction must be able to fail")]
     pub fn sub(self, other: Self) -> Result<Self> {
         self.0.checked_sub(other.0).map(Money).ok_or(MoneyError::Overflow)
     }
@@ -124,6 +131,34 @@ impl Money {
             product - den / 2
         };
         let quotient = biased / den;
+        i64::try_from(quotient).map(Money).map_err(|_| MoneyError::Overflow)
+    }
+
+    /// `self × numerator ÷ denominator`, rounded toward negative infinity.
+    ///
+    /// The proportional discount spread needs floor, not nearest: it hands out
+    /// the floors first and then distributes the leftover paise one at a time
+    /// to the largest remainders. That is what lets the shares add back to the
+    /// whole discount exactly AND keeps every share inside its own line. Round
+    /// to nearest here and the shares can overshoot both ways at once.
+    ///
+    /// Tax and percentages must NOT use this — they use `mul_ratio`.
+    #[allow(
+        clippy::integer_division,
+        reason = "flooring division IS the operation; div_euclid is exact"
+    )]
+    pub fn mul_ratio_floor(self, numerator: i64, denominator: i64) -> Result<Self> {
+        if denominator == 0 {
+            return Err(MoneyError::DivideByZero);
+        }
+        // i128 so the intermediate product of two i64 values cannot overflow.
+        let product = i128::from(self.0) * i128::from(numerator);
+        let den = i128::from(denominator);
+        // div_euclid floors toward negative infinity for a positive divisor.
+        // For a negative divisor it floors the other way, so normalise the
+        // signs first rather than leaving a trap for whoever passes one.
+        let (product, den) = if den < 0 { (-product, -den) } else { (product, den) };
+        let quotient = product.div_euclid(den);
         i64::try_from(quotient).map(Money).map_err(|_| MoneyError::Overflow)
     }
 
@@ -218,6 +253,11 @@ impl Money {
     /// `1234.50` — plain, two decimals, no symbol, no grouping.
     /// This is the receipt and CSV form.
     #[must_use]
+    #[allow(
+        clippy::integer_division,
+        reason = "splitting paise into rupees and paise for display; both parts \
+                  are kept, so nothing is lost"
+    )]
     pub fn to_plain_string(self) -> String {
         let negative = self.0 < 0;
         let abs = self.0.unsigned_abs();
@@ -229,6 +269,11 @@ impl Money {
     /// `₹1,23,456.78` — Indian digit grouping (last three, then twos).
     /// This is the on-screen form.
     #[must_use]
+    #[allow(
+        clippy::integer_division,
+        reason = "splitting paise into rupees and paise for display; both parts \
+                  are kept, so nothing is lost"
+    )]
     pub fn to_indian_string(self) -> String {
         let negative = self.0 < 0;
         let abs = self.0.unsigned_abs();
@@ -295,6 +340,48 @@ mod tests {
         assert_eq!(Money::from_paise(-1).mul_ratio(1, 3), Ok(Money::ZERO));
         // negative, over half
         assert_eq!(Money::from_paise(-2).mul_ratio(1, 3), Ok(Money::from_paise(-1)));
+    }
+
+    #[test]
+    fn flooring_always_rounds_down_never_to_nearest() {
+        // The difference from mul_ratio: 2/3 of a paisa is 0 here and 1 there.
+        assert_eq!(Money::from_paise(2).mul_ratio_floor(1, 3), Ok(Money::ZERO));
+        assert_eq!(Money::from_paise(2).mul_ratio(1, 3), Ok(Money::from_paise(1)));
+
+        assert_eq!(Money::from_paise(1).mul_ratio_floor(1, 2), Ok(Money::ZERO));
+        assert_eq!(Money::from_paise(3).mul_ratio_floor(1, 2), Ok(Money::from_paise(1)));
+        assert_eq!(Money::from_paise(100).mul_ratio_floor(1, 1), Ok(Money::from_paise(100)));
+
+        // Toward negative infinity, not toward zero: -1/2 floors to -1.
+        assert_eq!(Money::from_paise(-1).mul_ratio_floor(1, 2), Ok(Money::from_paise(-1)));
+        assert_eq!(Money::from_paise(-2).mul_ratio_floor(1, 3), Ok(Money::from_paise(-1)));
+
+        // A negative denominator must floor the same way, not the other way.
+        assert_eq!(Money::from_paise(1).mul_ratio_floor(1, -2), Ok(Money::from_paise(-1)));
+        assert_eq!(Money::from_paise(-1).mul_ratio_floor(1, -2), Ok(Money::ZERO));
+
+        assert_eq!(Money::from_paise(1).mul_ratio_floor(1, 0), Err(MoneyError::DivideByZero));
+    }
+
+    #[test]
+    fn flooring_never_hands_a_part_more_than_the_part_is_worth() {
+        // The invariant the discount spread rests on: while the amount being
+        // shared out is no bigger than the whole, a part's floored share can
+        // never exceed the part itself — so a discount cannot make a line
+        // negative. Rounding to nearest does NOT have this property.
+        for total_net in 1..120_i64 {
+            for part in 1..=total_net {
+                for total in 0..=total_net {
+                    let share = Money::from_paise(total)
+                        .mul_ratio_floor(part, total_net)
+                        .expect("in range");
+                    assert!(
+                        share.paise() <= part,
+                        "{total} shared over {total_net} gave {part} more than {part}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -383,8 +470,8 @@ mod tests {
 
     #[test]
     fn formats_for_receipt_and_for_screen() {
-        assert_eq!(Money::from_paise(123_456_78).to_plain_string(), "123456.78");
-        assert_eq!(Money::from_paise(123_456_78).to_indian_string(), "₹1,23,456.78");
+        assert_eq!(Money::from_paise(12_345_678).to_plain_string(), "123456.78");
+        assert_eq!(Money::from_paise(12_345_678).to_indian_string(), "₹1,23,456.78");
         assert_eq!(Money::from_paise(50).to_indian_string(), "₹0.50");
         assert_eq!(Money::from_paise(100_000).to_indian_string(), "₹1,000.00");
         assert_eq!(Money::from_paise(1_000_000).to_indian_string(), "₹10,000.00");

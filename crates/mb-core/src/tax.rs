@@ -72,7 +72,7 @@ impl TaxRate {
         let frac = self.0 % 100;
         if frac == 0 {
             format!("{whole}%")
-        } else if frac % 10 == 0 {
+        } else if frac.is_multiple_of(10) {
             format!("{whole}.{}%", frac / 10)
         } else {
             format!("{whole}.{frac:02}%")
@@ -129,6 +129,7 @@ impl TaxAmounts {
         Money::try_sum([self.cgst, self.sgst, self.igst])
     }
 
+    #[allow(clippy::should_implement_trait, reason = "addition here must be able to fail (D7)")]
     pub fn add(self, other: Self) -> Result<Self> {
         Ok(TaxAmounts {
             cgst: self.cgst.add(other.cgst)?,

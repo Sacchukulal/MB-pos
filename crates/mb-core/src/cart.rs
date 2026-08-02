@@ -1,0 +1,419 @@
+//! The cart: the lines the cashier has typed, before anything is computed.
+//!
+//! The cart holds *what was ordered*. It does no money arithmetic beyond
+//! carrying the discount the cashier asked for — computing a bill from it is
+//! [`crate::bill::compute_bill`]'s job, and keeping that split is what stops
+//! the totals from being calculated in two places that can disagree.
+
+use crate::discount::Discount;
+use crate::ids::ModifierId;
+use crate::item::{ItemSnapshot, Modifier};
+use crate::qty::Qty;
+use serde::{Deserialize, Serialize};
+
+/// Something that could not be done to the cart.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CartError {
+    #[error("there is no line {index} — the order has {len} line(s)")]
+    NoSuchLine { index: usize, len: usize },
+    #[error("a quantity must be more than zero")]
+    NonPositiveQty,
+}
+
+type Result<T> = std::result::Result<T, CartError>;
+
+/// One line of the order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartLine {
+    pub snapshot: ItemSnapshot,
+    pub qty: Qty,
+    pub note: Option<String>,
+    pub modifiers: Vec<Modifier>,
+    pub line_discount: Option<Discount>,
+}
+
+impl CartLine {
+    /// The rule that decides whether adding an item makes a new line or
+    /// increases an existing one: **item, note, and the set of modifiers**.
+    ///
+    /// It exists in exactly one place on purpose. Two copies of a merge rule is
+    /// how a duplicate-line bug is born.
+    fn key(&self) -> LineKey<'_> {
+        let mut modifier_ids: Vec<&ModifierId> =
+            self.modifiers.iter().map(|m| &m.modifier_id).collect();
+        // Sorted, so the order the waiter tapped the modifiers in cannot create
+        // a second line for the same dish.
+        modifier_ids.sort_unstable();
+        LineKey {
+            item_id: self.snapshot.item_id.as_str(),
+            note: self.note.as_deref(),
+            modifier_ids,
+        }
+    }
+}
+
+/// The comparable identity of a line. Borrowed, so building one to test a merge
+/// costs no allocation of the strings themselves.
+#[derive(Debug, PartialEq, Eq)]
+struct LineKey<'a> {
+    item_id: &'a str,
+    note: Option<&'a str>,
+    modifier_ids: Vec<&'a ModifierId>,
+}
+
+/// Normalise a note the way line identity expects it.
+///
+/// **Trimmed, but not case-folded.** Trimmed because `" no onion"` and
+/// `"no onion"` are the same instruction typed twice and splitting the line
+/// would confuse the kitchen. Not case-folded because the note is printed
+/// verbatim — quietly turning `"NO ONION"` into `"no onion"` would change what
+/// the cook reads.
+///
+/// An empty or whitespace-only note becomes `None`, never `Some("")`, or the
+/// same line splits in two for no reason a cashier could see.
+fn normalise_note(note: Option<String>) -> Option<String> {
+    note.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty())
+}
+
+/// The lines of one order, in the sequence they were called out.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Cart {
+    lines: Vec<CartLine>,
+}
+
+impl Cart {
+    #[must_use]
+    pub fn new() -> Self {
+        Cart::default()
+    }
+
+    /// Add an item, merging into an existing line of the same identity.
+    ///
+    /// Returns the index of the line that ended up holding it.
+    ///
+    /// A merge does **not** move the line to the end. The kitchen ticket has to
+    /// read in the order the waiter called the items out, because that is the
+    /// order a cook works down it.
+    pub fn add(
+        &mut self,
+        snapshot: ItemSnapshot,
+        qty: Qty,
+        note: Option<String>,
+        modifiers: Vec<Modifier>,
+    ) -> Result<usize> {
+        if !qty.is_positive() {
+            return Err(CartError::NonPositiveQty);
+        }
+
+        let candidate = CartLine {
+            snapshot,
+            qty,
+            note: normalise_note(note),
+            modifiers,
+            line_discount: None,
+        };
+
+        let key = candidate.key();
+        if let Some(index) = self.lines.iter().position(|line| line.key() == key) {
+            // Adding the same thing again increases the quantity. An overflow
+            // here means an absurd quantity was typed; refuse it rather than
+            // wrap the line into a negative (D7).
+            let merged = self.lines[index]
+                .qty
+                .add(candidate.qty)
+                .map_err(|_| CartError::NonPositiveQty)?;
+            self.lines[index].qty = merged;
+            return Ok(index);
+        }
+
+        self.lines.push(candidate);
+        Ok(self.lines.len() - 1)
+    }
+
+    /// Change a line's quantity. **Zero removes the line.**
+    ///
+    /// That is the cashier holding backspace until the number is gone, and it
+    /// must not leave a zero-quantity ghost on the kitchen ticket.
+    pub fn set_qty(&mut self, index: usize, qty: Qty) -> Result<()> {
+        self.check(index)?;
+        if qty.is_negative() {
+            return Err(CartError::NonPositiveQty);
+        }
+        if qty.is_zero() {
+            self.lines.remove(index);
+        } else {
+            self.lines[index].qty = qty;
+        }
+        Ok(())
+    }
+
+    pub fn set_line_discount(&mut self, index: usize, discount: Option<Discount>) -> Result<()> {
+        self.check(index)?;
+        self.lines[index].line_discount = discount;
+        Ok(())
+    }
+
+    /// Change a line's note.
+    ///
+    /// **A note is part of the line's identity**, so changing one can make this
+    /// line identical to another. When that happens the two are merged and the
+    /// surviving index is returned — otherwise the bill would show the same
+    /// dish, with the same note, on two lines.
+    pub fn set_note(&mut self, index: usize, note: Option<String>) -> Result<usize> {
+        self.check(index)?;
+        self.lines[index].note = normalise_note(note);
+
+        let key = self.lines[index].key();
+        let twin = self
+            .lines
+            .iter()
+            .position(|line| line.key() == key)
+            .filter(|found| *found != index);
+
+        match twin {
+            Some(target) => {
+                let moved = self.lines.remove(index);
+                // Removing a line before the target shifts it down by one.
+                let target = if index < target { target - 1 } else { target };
+                let merged = self.lines[target]
+                    .qty
+                    .add(moved.qty)
+                    .map_err(|_| CartError::NonPositiveQty)?;
+                self.lines[target].qty = merged;
+                Ok(target)
+            }
+            None => Ok(index),
+        }
+    }
+
+    pub fn remove(&mut self, index: usize) -> Result<CartLine> {
+        self.check(index)?;
+        Ok(self.lines.remove(index))
+    }
+
+    pub fn clear(&mut self) {
+        self.lines.clear();
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    #[must_use]
+    pub fn lines(&self) -> &[CartLine] {
+        &self.lines
+    }
+
+    /// A bad index is an error the caller must handle, never a silent no-op and
+    /// never a panic.
+    fn check(&self, index: usize) -> Result<()> {
+        if index >= self.lines.len() {
+            return Err(CartError::NoSuchLine { index, len: self.lines.len() });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::ItemId;
+    use crate::money::Money;
+    use crate::tax::TaxRate;
+
+    fn item(id: &str, name: &str, paise: i64) -> ItemSnapshot {
+        ItemSnapshot::new(ItemId::new(id), name, Money::from_paise(paise), TaxRate::GST_5)
+    }
+
+    fn modifier(id: &str) -> Modifier {
+        Modifier::new(ModifierId::new(id), id, Money::from_paise(1_000))
+    }
+
+    fn cart_with_one(note: Option<&str>, modifiers: Vec<Modifier>) -> Cart {
+        let mut cart = Cart::new();
+        cart.add(
+            item("itm_1", "Paneer Tikka", 22_000),
+            Qty::ONE,
+            note.map(str::to_owned),
+            modifiers,
+        )
+        .expect("adds");
+        cart
+    }
+
+    #[test]
+    fn the_same_dish_with_the_same_note_merges() {
+        let mut cart = cart_with_one(Some("extra spicy"), vec![]);
+        let index = cart
+            .add(
+                item("itm_1", "Paneer Tikka", 22_000),
+                Qty::from_whole(2).expect("in range"),
+                Some("extra spicy".to_owned()),
+                vec![],
+            )
+            .expect("adds");
+
+        assert_eq!(index, 0);
+        assert_eq!(cart.len(), 1);
+        assert_eq!(cart.lines()[0].qty, Qty::from_whole(3).expect("in range"));
+    }
+
+    #[test]
+    fn the_same_dish_with_a_different_note_does_not_merge() {
+        // The kitchen must see "extra spicy" as its own line.
+        let mut cart = cart_with_one(Some("extra spicy"), vec![]);
+        cart.add(item("itm_1", "Paneer Tikka", 22_000), Qty::ONE, None, vec![])
+            .expect("adds");
+        assert_eq!(cart.len(), 2);
+    }
+
+    #[test]
+    fn different_modifiers_do_not_merge_but_a_different_order_does() {
+        let a = vec![modifier("mod_cheese"), modifier("mod_olives")];
+        let b = vec![modifier("mod_olives"), modifier("mod_cheese")];
+        let c = vec![modifier("mod_cheese")];
+
+        let mut cart = cart_with_one(None, a);
+        // Same set, tapped in the other order — one line, quantity 2.
+        cart.add(item("itm_1", "Paneer Tikka", 22_000), Qty::ONE, None, b)
+            .expect("adds");
+        assert_eq!(cart.len(), 1);
+        assert_eq!(cart.lines()[0].qty, Qty::from_whole(2).expect("in range"));
+
+        // A different set — its own line.
+        cart.add(item("itm_1", "Paneer Tikka", 22_000), Qty::ONE, None, c)
+            .expect("adds");
+        assert_eq!(cart.len(), 2);
+    }
+
+    #[test]
+    fn notes_are_trimmed_but_not_case_folded() {
+        let mut cart = cart_with_one(Some("no onion"), vec![]);
+
+        // Trimmed: the same instruction typed with a stray space.
+        cart.add(
+            item("itm_1", "Paneer Tikka", 22_000),
+            Qty::ONE,
+            Some("  no onion  ".to_owned()),
+            vec![],
+        )
+        .expect("adds");
+        assert_eq!(cart.len(), 1, "a stray space must not split the line");
+
+        // Not case-folded: the note is printed verbatim.
+        cart.add(
+            item("itm_1", "Paneer Tikka", 22_000),
+            Qty::ONE,
+            Some("NO ONION".to_owned()),
+            vec![],
+        )
+        .expect("adds");
+        assert_eq!(cart.len(), 2, "case is part of what the cook reads");
+    }
+
+    #[test]
+    fn an_empty_note_is_the_same_as_no_note() {
+        let mut cart = cart_with_one(None, vec![]);
+        cart.add(
+            item("itm_1", "Paneer Tikka", 22_000),
+            Qty::ONE,
+            Some("   ".to_owned()),
+            vec![],
+        )
+        .expect("adds");
+        assert_eq!(cart.len(), 1);
+        assert_eq!(cart.lines()[0].note, None);
+    }
+
+    #[test]
+    fn insertion_order_survives_add_merge_and_remove() {
+        let mut cart = Cart::new();
+        cart.add(item("itm_a", "A", 100), Qty::ONE, None, vec![]).expect("adds");
+        cart.add(item("itm_b", "B", 200), Qty::ONE, None, vec![]).expect("adds");
+        cart.add(item("itm_c", "C", 300), Qty::ONE, None, vec![]).expect("adds");
+
+        // Re-adding A must increase A in place, not move it to the end.
+        cart.add(item("itm_a", "A", 100), Qty::ONE, None, vec![]).expect("adds");
+        cart.remove(1).expect("removes B");
+
+        let names: Vec<&str> = cart.lines().iter().map(|l| l.snapshot.name.as_str()).collect();
+        assert_eq!(names, ["A", "C"]);
+        assert_eq!(cart.lines()[0].qty, Qty::from_whole(2).expect("in range"));
+    }
+
+    #[test]
+    fn a_quantity_of_zero_removes_the_line() {
+        let mut cart = cart_with_one(None, vec![]);
+        cart.set_qty(0, Qty::ZERO).expect("sets");
+        assert!(cart.is_empty(), "a zero-quantity ghost must not reach the kitchen");
+    }
+
+    #[test]
+    fn changing_a_note_into_a_twin_merges_the_two_lines() {
+        let mut cart = Cart::new();
+        cart.add(item("itm_1", "Dosa", 8_000), Qty::ONE, None, vec![]).expect("adds");
+        cart.add(
+            item("itm_1", "Dosa", 8_000),
+            Qty::from_whole(2).expect("in range"),
+            Some("crispy".to_owned()),
+            vec![],
+        )
+        .expect("adds");
+        assert_eq!(cart.len(), 2);
+
+        // Clearing the note on line 1 makes it identical to line 0.
+        let survivor = cart.set_note(1, None).expect("sets");
+        assert_eq!(cart.len(), 1, "the bill must not show the same dish twice");
+        assert_eq!(survivor, 0);
+        assert_eq!(cart.lines()[0].qty, Qty::from_whole(3).expect("in range"));
+    }
+
+    #[test]
+    fn a_bad_index_is_an_error_not_a_panic() {
+        let mut cart = cart_with_one(None, vec![]);
+        assert_eq!(
+            cart.set_qty(5, Qty::ONE),
+            Err(CartError::NoSuchLine { index: 5, len: 1 })
+        );
+        assert!(matches!(cart.remove(9), Err(CartError::NoSuchLine { .. })));
+        assert!(matches!(cart.set_note(9, None), Err(CartError::NoSuchLine { .. })));
+        assert!(matches!(
+            cart.set_line_discount(9, None),
+            Err(CartError::NoSuchLine { .. })
+        ));
+    }
+
+    #[test]
+    fn a_line_cannot_start_with_no_quantity() {
+        let mut cart = Cart::new();
+        assert_eq!(
+            cart.add(item("itm_1", "Dosa", 8_000), Qty::ZERO, None, vec![]),
+            Err(CartError::NonPositiveQty)
+        );
+        assert_eq!(
+            cart.add(
+                item("itm_1", "Dosa", 8_000),
+                Qty::from_thousandths(-500),
+                None,
+                vec![]
+            ),
+            Err(CartError::NonPositiveQty)
+        );
+        assert!(cart.is_empty());
+    }
+
+    #[test]
+    fn clearing_empties_the_cart() {
+        let mut cart = cart_with_one(None, vec![]);
+        assert!(!cart.is_empty());
+        cart.clear();
+        assert!(cart.is_empty());
+        assert_eq!(cart.len(), 0);
+    }
+}

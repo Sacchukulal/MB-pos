@@ -12,3 +12,8 @@ workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+[dev-dependencies]
+# Test-only, never shipped: proves the id newtypes really do serialise as bare
+# strings, which P04's columns and P08's generated TypeScript both rely on.
+serde_json = "1"

@@ -1,0 +1,14 @@
+# The workspace denies unwrap / expect / panic because of decision D7:
+# nothing in the money path may be silently lossy, and `unwrap` on user data is
+# how a shop's counter dies mid-service.
+#
+# That rule is about SHIPPED code. In a test, `expect("computes")` is not a
+# hidden failure — it IS the assertion, and a panic there is the test doing its
+# job. Denying it in tests only teaches people to write `if let ... else
+# unreachable`, which is longer and says less.
+#
+# Added at P01. Without it `cargo clippy --all-targets -- -D warnings` — which
+# every prompt's rule R7 requires — fails on P00's own test files.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
