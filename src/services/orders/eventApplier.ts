@@ -7,9 +7,11 @@ import { printBill, printKot } from "../../services/printing/printService";
 import { requestBillSync } from "../sync/billSync";
 import { isSlotOccupied } from "../../features/billing/tableUtils";
 import {
+  cartToWire,
   finalizedRowToWire,
   mergeCartLines,
   parseCartJson,
+  processingRowToWire,
   subtractCart,
   wireToCart,
   type WireItem,
@@ -352,6 +354,37 @@ export async function applyOrderEvent(ev: WireEvent, ctx: ApplyContext): Promise
       if (draft.paymentMode === "Credit" && draft.customerId) {
         await customersRepo.addToCreditBalance(draft.customerId, totals.total);
       }
+      // THE FINAL CLOUD TRUTH, built BEFORE the local row disappears —
+      // exactly as cancel_order does a few cases below.
+      //
+      // Without this, settling was the one path that told the cloud nothing.
+      // ackEvents() looks for the order in processing_orders (just deleted)
+      // and then in pendingCloudOrders (never filled), finds neither, and
+      // calls mb_apply_event with p_order = NULL. The event is acked, the
+      // bill prints, the bill syncs — and `live_orders` keeps saying
+      // 'placed'. Every phone goes on showing the table as occupied until
+      // the five-minute reconcile force-closes it as 'cancelled', which is
+      // also why settled orders were reaching the cloud as cancellations
+      // rather than as bills.
+      //
+      // Reported as "the old settled order also showing, even after page
+      // refresh" — and a refresh could not fix it, because the phone was
+      // faithfully reporting what the cloud actually held.
+      const cloudOrder: WireOrder = {
+        ...processingRowToWire(order),
+        status: "billed",
+        pendingKot: false,
+        paymentMode: draft.paymentMode,
+        customerName: draft.customerName ?? "",
+        customerPhone: draft.customerPhone ?? "",
+        customerLocalId: draft.customerId ?? null,
+        items: cartToWire(cart),
+        printedItems: cartToWire(cart),
+        subtotal: totals.subtotal,
+        gst: totals.gst,
+        total: totals.total,
+      };
+
       await ordersRepo.deleteProcessingOrder(order.id);
       requestBillSync();
 
@@ -379,7 +412,9 @@ export async function applyOrderEvent(ev: WireEvent, ctx: ApplyContext): Promise
       }
 
       await recordAppliedEvent(ev.eventId, ev.kind);
-      return { status: "applied", printError };
+      // printError is carried on the order too, so the phone learns about a
+      // printer problem from the order it is already being handed.
+      return { status: "applied", printError, cloudOrder: { ...cloudOrder, printError } };
     }
 
     /* --------------------------- cancel_order --------------------------- */
