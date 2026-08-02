@@ -34,31 +34,46 @@
 //! | [`cart`] | the lines as typed, and the rule that merges them |
 //! | [`bill`] | the D4 pipeline, in one place, with the steps numbered |
 //! | [`payment`] | split payment, change, tips — after the bill, not in it |
+//! | [`time`] | instants, the local offset, and calendar arithmetic |
+//! | [`businessday`] | the trading day, stamped once and stored (D5) |
+//! | [`numbering`] | token and bill numbers, claimed atomically (D6) |
+//! | [`order`] | the lifecycle, as types the compiler enforces |
 
 #![deny(missing_debug_implementations)]
 
 pub mod bill;
+pub mod businessday;
 pub mod cart;
 pub mod charge;
 pub mod discount;
 pub mod ids;
 pub mod item;
 pub mod money;
+pub mod numbering;
+pub mod order;
 pub mod payment;
 pub mod qty;
 pub mod tax;
+pub mod time;
 
 pub use bill::{Bill, BillError, BillInput, BillLine, compute_bill};
-pub use cart::{Cart, CartError, CartLine};
+pub use businessday::{BusinessDay, DayRule};
+pub use cart::{Cart, CartError, CartLine, LineIdentity};
 pub use charge::{BillCharge, Charge, ChargeBasis, ChargeKind};
 pub use discount::{
     Discount, DiscountEntry, DiscountOutcome, DiscountPolicy, DiscountPolicyError,
 };
-pub use ids::{CategoryId, CustomerId, ItemId, ModifierId, StaffId};
+pub use ids::{CategoryId, CustomerId, ItemId, ModifierId, OrderId, StaffId, TableId};
 pub use item::{ItemSnapshot, Modifier, OrderType};
 pub use money::{Money, MoneyError, RoundingMode};
+pub use numbering::{Claimed, Counter, Numbering};
+pub use order::{
+    AnyOrder, CancelledOrder, DraftOrder, KitchenLedger, OpenOrder, OrderCore, OrderError,
+    SettledOrder, VoidedOrder,
+};
 pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
 pub use qty::{Qty, QtyError};
+pub use time::{Timestamp, TimeError, UtcOffset};
 pub use tax::{
     PlaceOfSupply, RateSummaryRow, TaxAmounts, TaxOutcome, TaxRate, TaxSummary, TaxTreatment,
 };

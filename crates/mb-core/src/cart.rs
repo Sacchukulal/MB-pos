@@ -6,7 +6,7 @@
 //! the totals from being calculated in two places that can disagree.
 
 use crate::discount::DiscountEntry;
-use crate::ids::ModifierId;
+use crate::ids::{ItemId, ModifierId};
 use crate::item::{ItemSnapshot, Modifier};
 use crate::qty::Qty;
 use serde::{Deserialize, Serialize};
@@ -39,28 +39,35 @@ impl CartLine {
     /// increases an existing one: **item, note, and the set of modifiers**.
     ///
     /// It exists in exactly one place on purpose. Two copies of a merge rule is
-    /// how a duplicate-line bug is born.
-    fn key(&self) -> LineKey<'_> {
-        let mut modifier_ids: Vec<&ModifierId> =
-            self.modifiers.iter().map(|m| &m.modifier_id).collect();
+    /// how a duplicate-line bug is born — which is also why the kitchen ledger
+    /// (P03) keys off this same type rather than a lookalike of its own.
+    #[must_use]
+    pub fn identity(&self) -> LineIdentity {
+        let mut modifier_ids: Vec<ModifierId> =
+            self.modifiers.iter().map(|m| m.modifier_id.clone()).collect();
         // Sorted, so the order the waiter tapped the modifiers in cannot create
         // a second line for the same dish.
         modifier_ids.sort_unstable();
-        LineKey {
-            item_id: self.snapshot.item_id.as_str(),
-            note: self.note.as_deref(),
+        LineIdentity {
+            item_id: self.snapshot.item_id.clone(),
+            note: self.note.clone(),
             modifier_ids,
         }
     }
 }
 
-/// The comparable identity of a line. Borrowed, so building one to test a merge
-/// costs no allocation of the strings themselves.
-#[derive(Debug, PartialEq, Eq)]
-struct LineKey<'a> {
-    item_id: &'a str,
-    note: Option<&'a str>,
-    modifier_ids: Vec<&'a ModifierId>,
+/// What makes two lines "the same thing".
+///
+/// Owned and serialisable because the kitchen ledger stores it — audit crown
+/// jewel 2: what the kitchen was told is remembered *in the database*, not in
+/// the screen's memory.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LineIdentity {
+    pub item_id: ItemId,
+    pub note: Option<String>,
+    /// Sorted ascending, always. Built by [`CartLine::identity`], which is the
+    /// only thing that should build one.
+    pub modifier_ids: Vec<ModifierId>,
 }
 
 /// Normalise a note the way line identity expects it.
@@ -115,8 +122,8 @@ impl Cart {
             line_discount: None,
         };
 
-        let key = candidate.key();
-        if let Some(index) = self.lines.iter().position(|line| line.key() == key) {
+        let key = candidate.identity();
+        if let Some(index) = self.lines.iter().position(|line| line.identity() == key) {
             // Adding the same thing again increases the quantity. An overflow
             // here means an absurd quantity was typed; refuse it rather than
             // wrap the line into a negative (D7).
@@ -165,11 +172,11 @@ impl Cart {
         self.check(index)?;
         self.lines[index].note = normalise_note(note);
 
-        let key = self.lines[index].key();
+        let key = self.lines[index].identity();
         let twin = self
             .lines
             .iter()
-            .position(|line| line.key() == key)
+            .position(|line| line.identity() == key)
             .filter(|found| *found != index);
 
         match twin {

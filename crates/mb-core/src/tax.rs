@@ -17,7 +17,6 @@
 
 use crate::money::{Money, MoneyError};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 type Result<T> = std::result::Result<T, MoneyError>;
 
@@ -224,8 +223,17 @@ pub struct RateSummaryRow {
 /// no IGST and no separation of alcohol.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TaxSummary {
-    /// Keyed by rate so the rows always print in ascending rate order.
-    rows: BTreeMap<u32, RateSummaryRow>,
+    /// Kept sorted by rate, so the rows always print in ascending rate order.
+    ///
+    /// A `Vec` rather than a map keyed by rate, and the reason is
+    /// serialisation: a JSON object's keys are strings, so a `BTreeMap<u32, _>`
+    /// writes `"500"` and cannot be read back through serde's tag buffering —
+    /// which is what an internally-tagged enum like
+    /// [`AnyOrder`](crate::order::AnyOrder) uses. That failure only appears
+    /// once a bill is stored inside an order, which is P04, and it is far
+    /// cheaper to not have the map at all. A bill has at most a handful of
+    /// rates, so a sorted `Vec` is also the faster structure here.
+    rows: Vec<RateSummaryRow>,
     /// Value of supplies outside GST (alcohol). Never enters a GST return.
     pub non_gst_value: Money,
     /// Value of nil-rated supplies. Enters the return with zero tax.
@@ -247,9 +255,20 @@ impl TaxSummary {
                 self.exempt_value = self.exempt_value.add(outcome.taxable)?;
             }
             TaxTreatment::Exclusive | TaxTreatment::Inclusive => {
-                let row = self.rows.entry(outcome.rate.basis_points()).or_insert(
-                    RateSummaryRow { rate: outcome.rate, ..RateSummaryRow::default() },
-                );
+                let bp = outcome.rate.basis_points();
+                let index = match self.rows.binary_search_by_key(&bp, |r| r.rate.basis_points()) {
+                    Ok(found) => found,
+                    Err(insert_at) => {
+                        // Inserted in place, so `rows` stays in ascending rate
+                        // order without ever being sorted.
+                        self.rows.insert(
+                            insert_at,
+                            RateSummaryRow { rate: outcome.rate, ..RateSummaryRow::default() },
+                        );
+                        insert_at
+                    }
+                };
+                let row = &mut self.rows[index];
                 row.taxable = row.taxable.add(outcome.taxable)?;
                 row.tax = row.tax.add(outcome.tax)?;
             }
@@ -259,7 +278,7 @@ impl TaxSummary {
 
     /// Rows in ascending rate order.
     pub fn rows(&self) -> impl Iterator<Item = &RateSummaryRow> {
-        self.rows.values()
+        self.rows.iter()
     }
 
     #[must_use]
@@ -269,12 +288,12 @@ impl TaxSummary {
 
     /// Total taxable value across every taxed rate (excludes non-GST).
     pub fn total_taxable(&self) -> Result<Money> {
-        Money::try_sum(self.rows.values().map(|r| r.taxable))
+        Money::try_sum(self.rows.iter().map(|r| r.taxable))
     }
 
     pub fn total_tax(&self) -> Result<TaxAmounts> {
         self.rows
-            .values()
+            .iter()
             .try_fold(TaxAmounts::default(), |acc, row| acc.add(row.tax))
     }
 }

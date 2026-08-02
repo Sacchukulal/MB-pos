@@ -73,6 +73,8 @@ id_type!(ModifierId, "Identifies a modifier (`extra cheese`, `no onion`).");
 id_type!(CategoryId, "Identifies a menu category.");
 id_type!(StaffId, "Identifies a staff member. P11 gives them roles and PINs.");
 id_type!(CustomerId, "Identifies a customer. P15 gives them a khata ledger.");
+id_type!(OrderId, "Identifies one order, through every state it passes.");
+id_type!(TableId, "Identifies a table. P14 gives it a position on the floor.");
 
 #[cfg(test)]
 mod tests {
