@@ -1,0 +1,28 @@
+[package]
+name = "mb-db"
+description = "Magic Bill storage: the schema, the migration engine, and the connection."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mb-core = { path = "../mb-core" }
+thiserror = "2"
+
+# R6 / scope 16.15 — the one dependency this crate gets.
+#
+# `bundled` compiles SQLite into the binary. Two reasons: a Windows counter has
+# no system SQLite to link against, and bundling PINS the SQLite version, so
+# `RETURNING` (numbering.rs), WAL behaviour and DDL-inside-a-transaction are
+# known quantities rather than whatever the machine happened to have.
+#
+# Size cost: roughly 1.5 MB in the release binary, against S4's 20 MB installer
+# budget in docs/PERFORMANCE.md.
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+[dev-dependencies]
+serde_json = "1"
