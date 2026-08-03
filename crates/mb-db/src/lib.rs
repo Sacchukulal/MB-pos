@@ -37,6 +37,11 @@
 //! | [`conn`] | the pragmas, the single writer, the reader pool |
 //! | [`numbering`] | the one statement that claims a token or a bill number (D6) |
 //! | [`schema`] | introspection — what the tests assert against |
+//! | [`repo`] | the only way anything above this crate touches a row |
+//! | [`settle`] | the one function on the money path, in one transaction (B5) |
+//! | [`backup`] | take, verify, restore, retention — audit A1 |
+//! | [`locate`] | where the database lives, and finding it again — audit A5 |
+//! | [`export`] | "give me my whole shop's data" — audit A6, and the G7 CSV bug |
 //!
 //! # Where the database file lives
 //!
@@ -49,14 +54,22 @@
 
 #![deny(missing_debug_implementations)]
 
+pub mod backup;
 pub mod conn;
 pub mod encode;
 pub mod error;
+pub mod export;
+pub mod locate;
 pub mod migrate;
 pub mod numbering;
+pub mod repo;
 pub mod schema;
+pub mod settle;
 
+pub use backup::{Backup, RestoreReport, VerifyReport};
 pub use conn::{Db, DbConfig, Synchronous};
 pub use error::DbError;
 pub use migrate::{Applied, MIGRATIONS, Migration, checksum};
 pub use numbering::CounterKind;
+pub use repo::Repos;
+pub use settle::{Till, open_draft, settle};

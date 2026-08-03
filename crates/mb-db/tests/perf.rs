@@ -146,6 +146,134 @@ fn synchronous_full_costs_one_fsync_and_b5_can_afford_it() {
     );
 }
 
+/// Budgets **R5** and **R6** — P05.
+///
+/// `PERFORMANCE.md` §2.3: *R5, local backup of a one-year database, 20 s /
+/// 60 s. R6, restore and verify that backup, 60 s / 180 s.*
+///
+/// Building a real 317 MB database in a test would make the suite unrunnable,
+/// so this measures **throughput** on a realistic sample and projects to the
+/// 400 MB M5 budget — the same approach M5 itself takes above, and honest about
+/// being a projection rather than the thing.
+#[test]
+fn r5_and_r6_backup_and_restore_fit_their_budgets() {
+    const SAMPLE: u64 = 400;
+    const PROJECT_TO_BYTES: f64 = 400.0 * 1024.0 * 1024.0;
+
+    let scratch = Scratch::new("r5r6");
+    let dir = scratch.db_path().with_file_name("backups");
+    let backup_path = dir.join("measured.db");
+
+    {
+        let db = scratch.open();
+        seed_a_shop(&db);
+        for n in 0..SAMPLE {
+            write_one_bill(&db, n);
+        }
+        db.checkpoint().expect("checkpoint");
+
+        let live_bytes = file_bytes(&scratch);
+
+        let started = Instant::now();
+        mb_db::backup::take(&db, &backup_path, "perf").expect("take");
+        let backup_secs = started.elapsed().as_secs_f64();
+
+        let started = Instant::now();
+        let report = mb_db::backup::verify(&backup_path).expect("verify");
+        let verify_secs = started.elapsed().as_secs_f64();
+        assert!(report.is_ok(), "{}", report.summary());
+
+        let scale = PROJECT_TO_BYTES / mb(live_bytes).max(0.001) / (1024.0 * 1024.0);
+
+        println!("\n--- R5: back up a one-year database ---");
+        println!("  sample on disk       {:.2} MB", mb(live_bytes));
+        println!("  backed up in         {:.3} s", backup_secs);
+        println!("  verified in          {:.3} s", verify_secs);
+        println!("  projected at 400 MB  {:.1} s", backup_secs * scale);
+        println!("  budget / ceiling     20 s / 60 s");
+
+        if !cfg!(debug_assertions) {
+            let projected = backup_secs * scale;
+            assert!(
+                projected < 60.0,
+                "a one-year backup projects to {projected:.1} s, over R5's 60 s ceiling"
+            );
+        }
+    }
+
+    // The restore runs with no handle on the database, which is the only way it
+    // is allowed to run — see `backup::restore`.
+    let started = Instant::now();
+    let report = mb_db::backup::restore(&backup_path, &scratch.db_path()).expect("restore");
+    let restore_secs = started.elapsed().as_secs_f64();
+    assert!(!report.rolled_back, "the measured restore rolled back");
+
+    let live_bytes = file_bytes(&scratch);
+    let scale = PROJECT_TO_BYTES / mb(live_bytes).max(0.001) / (1024.0 * 1024.0);
+
+    println!("\n--- R6: restore and verify ---");
+    println!("  restored in          {:.3} s", restore_secs);
+    println!("  projected at 400 MB  {:.1} s", restore_secs * scale);
+    println!("  budget / ceiling     60 s / 180 s\n");
+
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let projected = restore_secs * scale;
+    assert!(
+        projected < 180.0,
+        "a one-year restore projects to {projected:.1} s, over R6's 180 s ceiling"
+    );
+}
+
+/// Budget **B5** — a whole settle, end to end, measured at p95.
+///
+/// *"Settle a bill: number claimed + written durably to disk — 150 ms, ceiling
+/// 400 ms."* One transaction, one fsync, and the number claimed inside it.
+///
+/// **p95, not the mean.** B5 is written as a p95 and a mean would hide the one
+/// flush in twenty that took 300 ms, which is the one the cashier notices.
+#[test]
+fn b5_a_whole_settle_is_one_durable_write() {
+    const SETTLES: usize = 200;
+
+    let scratch = Scratch::new("b5");
+    let db = scratch.open();
+    seed_a_shop(&db);
+
+    let mut samples = Vec::with_capacity(SETTLES);
+    for n in 0..SETTLES {
+        let started = Instant::now();
+        write_one_bill(&db, u64::try_from(n).expect("small"));
+        samples.push(started.elapsed().as_secs_f64() * 1_000.0);
+    }
+    samples.sort_by(f64::total_cmp);
+
+    let p95 = samples[samples.len() * 95 / 100];
+    let median = samples[samples.len() / 2];
+    let worst = samples[samples.len() - 1];
+
+    println!("\n--- B5: settle a bill, one transaction, synchronous = FULL ---");
+    println!("  settles              {SETTLES}");
+    println!("  median               {median:.2} ms");
+    println!("  p95                  {p95:.2} ms");
+    println!("  worst                {worst:.2} ms");
+    println!("  budget / ceiling     150 ms / 400 ms");
+    println!(
+        "  NOTE: an SSD. The reference machine is a 5400 rpm HDD where a single\n\
+         \x20       fsync is 5-15 ms, so expect the p95 there to be tens of\n\
+         \x20       milliseconds rather than this. Re-measure at P30.\n"
+    );
+
+    if cfg!(debug_assertions) {
+        return;
+    }
+    assert!(
+        p95 < 400.0,
+        "the p95 settle took {p95:.1} ms, over B5's 400 ms ceiling"
+    );
+}
+
 // ---------------------------------------------------------------------------
 
 fn mb(bytes: u64) -> f64 {

@@ -184,13 +184,48 @@ impl Db {
 
     /// Writes the WAL back into the main file.
     ///
-    /// Used by the size measurement (budget M5) and, later, by P05's backup —
+    /// Used by the size measurement (budget M5) and by P05's backup —
     /// copying the main file while a WAL is outstanding copies a database that
     /// is missing its most recent bills.
     pub fn checkpoint(&self) -> Result<(), DbError> {
         let writer = lock(&self.writer);
         writer.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
+    }
+
+    /// Write a consistent copy of the whole database to `to`, **while the shop
+    /// keeps billing**.
+    ///
+    /// `VACUUM INTO`, on a **reader** — so the writer is never held and a
+    /// cashier never waits behind a backup. In WAL mode the reader takes a
+    /// snapshot, so the copy is a single point in time even though bills are
+    /// being settled through it.
+    ///
+    /// **This reverses the call P05's prompt made**, which was to use SQLite's
+    /// online backup API for the sake of a page-by-page progress callback. The
+    /// prompt did not know what implementing it turned up: SQLite restarts a
+    /// backup whenever the source is written by another connection, so on a
+    /// busy counter — which is exactly when a scheduled backup fires — that API
+    /// can restart indefinitely and never finish. A progress bar is a nicety;
+    /// a backup that may never complete is a correctness bug, and correctness
+    /// wins. `VACUUM INTO` takes one read snapshot, cannot restart, and
+    /// defragments as it copies, so the file is smaller too.
+    ///
+    /// If a determinate progress bar is ever genuinely needed, the stepping API
+    /// is still there and the trade is now written down.
+    pub fn backup_to(&self, to: &Path) -> Result<(), DbError> {
+        // VACUUM INTO refuses to overwrite. Say so in our own words rather than
+        // letting SQLite's message reach an owner.
+        if to.exists() {
+            return Err(DbError::invariant(format!(
+                "there is already a file at {} — a backup never overwrites one",
+                to.display()
+            )));
+        }
+        self.read(|conn| {
+            conn.execute("VACUUM INTO ?1", [to.to_string_lossy().as_ref()])?;
+            Ok(())
+        })
     }
 }
 
