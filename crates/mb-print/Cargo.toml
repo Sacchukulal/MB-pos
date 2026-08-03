@@ -1,0 +1,23 @@
+[package]
+name = "mb-print"
+description = "Magic Bill printing: one document description, one traversal, several sinks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mb-core = { path = "../mb-core" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+# No font crate, no PDF crate, no raster crate (R6). The PDF writer here is
+# text-only over a base-14 font, which is about 150 lines; the raster sink and
+# the font that goes with it belong to P07, where the ESC/POS command and the
+# printer's dots-per-mm are decided. See src/pdf.rs and src/render.rs.
+
+[dev-dependencies]
+serde_json = "1"
