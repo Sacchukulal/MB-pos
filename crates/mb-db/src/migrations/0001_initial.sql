@@ -231,7 +231,24 @@ CREATE TABLE printers (
     address      TEXT,
     paper_mm     INTEGER NOT NULL DEFAULT 80,
     is_default   INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
-    can_kick_drawer INTEGER NOT NULL DEFAULT 0 CHECK (can_kick_drawer IN (0, 1))
+    can_kick_drawer INTEGER NOT NULL DEFAULT 0 CHECK (can_kick_drawer IN (0, 1)),
+    -- Scope 7.11. Thermal printers disagree about where the first dot sits
+    -- relative to the paper edge, so the same correct document comes out 2-3 mm
+    -- off-centre on one model and centred on another. This is NOT the same
+    -- problem as text overflowing: the columns can add up to exactly the paper
+    -- width and the whole bill still be shifted.
+    --
+    -- P06 applies the offset ONCE, at the layout boundary, so all three
+    -- renderers inherit it and cannot drift. P07 makes it adjustable from the
+    -- test print. P17 puts it on a screen.
+    --
+    -- Whole millimetres, signed, and they live here rather than arriving in a
+    -- later migration because D22 says a column added to a populated table is
+    -- the expensive kind. `printers` is empty today; at P07 it will not be.
+    -- Clamped in code rather than by a CHECK, because the sane range depends on
+    -- the paper width, which is the column next door.
+    offset_x_mm  INTEGER NOT NULL DEFAULT 0,
+    offset_y_mm  INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 -- Scope 3.1 — which printer a category's kitchen tickets go to.
