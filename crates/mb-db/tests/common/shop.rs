@@ -175,6 +175,11 @@ fn seed_masters(db: &Db) {
                 can_kick_drawer: true,
                 offset_x_mm: -2,
                 offset_y_mm: 1,
+                // P07's three columns: what this printer may receive, which
+                // sink draws for it, and v1's "Bold & Dark".
+                role: "both".to_owned(),
+                engine: "raster".to_owned(),
+                is_bold_dark: false,
             },
             at(0),
         )?;

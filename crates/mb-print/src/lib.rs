@@ -29,20 +29,40 @@
 //! | [`render`] | the one traversal, and the `Sink` trait |
 //! | [`text`] | the plain-text sink — the printer's own font path |
 //! | [`pdf`] | the A4 / PDF sink (scope 7.10), with no crate |
+//! | [`raster`] | the dot sink — crown jewel 17 (P07) |
+//! | [`font`] | the face those dots are drawn from, and what P23 inherits |
+//! | [`image`] | the one-bit logo format (P07, D37) |
 //! | [`settings`] | every receipt toggle v1 had (audit Part 3) |
 //! | [`template`] | the only place that knows what a bill looks like |
+//! | [`testprint`] | the test print, and the offset made adjustable (7.11) |
+//!
+//! And, added at P07, the half that talks to hardware:
+//!
+//! | module | owns |
+//! |---|---|
+//! | [`escpos`] | the typed command layer — every command named from the spec |
+//! | [`printer`] | what a printer is: paper, offset, engine, role, capabilities |
+//! | [`transport`] | spooler, network, serial, file (scopes 7.1–7.3) |
+//! | [`queue`] | the durable, parallel, retrying print queue (audit D3 and D4) |
+//! | [`drawer`] | when the cash drawer may open, and when it may not (7.4) |
+//! | [`routing`] | which printer gets which items (scopes 3.1 and 1.8) |
 //!
 //! # What is deliberately not here
 //!
-//! * **The raster sink is P07's.** It needs a rasterisable font, there is none
-//!   in this repository, and embedding one is a dependency, a licence decision
-//!   and several hundred kilobytes — and the right size and threshold depend on
-//!   the printer's dots-per-mm and its raster command, which are P07's to
-//!   decide. Adding it should change nothing outside its own file; see
-//!   [`render`] for what it inherits.
-//! * **Drivers, the queue, the cash drawer, ESC/POS bytes** — all P07. This
-//!   crate produces bytes and sends nothing anywhere.
-//! * **The database.** Settings arrive as a struct.
+//! * **No shaping.** [`layout`] wraps by counting characters, which is right for
+//!   Latin and wrong for Kannada. [`font`] says exactly what P23 will need and
+//!   names the one seam it will have to open.
+//! * **No screens.** The queue's indicator, the printer settings and the preview
+//!   are P08 and P17; this crate ships the events and the data they need.
+//! * **No image decoding, no QR encoder, no async runtime.** See [`image`]
+//!   (D37), [`escpos::EscPos::qr`] (D36) and [`queue`] respectively.
+//! * **The database — almost.** The layout, the templates and the sinks still
+//!   take structs and return bytes, and always will. Exactly one module,
+//!   [`queue::sqlite`], writes a row: a print queue that cannot survive a power
+//!   cut is not a queue, and that is audit D4 (decision D32).
+//! * **`unsafe`.** This crate forbids it. The two transports that need the
+//!   operating system go through `mb-winprint`, which is the only crate in the
+//!   workspace allowed to say the word (decision D34).
 //!
 //! # The rules this crate obeys
 //!
@@ -55,27 +75,49 @@
 //! * **Crown jewel 18 — font sizes are capped so text cannot overflow.**
 //! * **Scope 17.11 — a receipt raster never goes over the wire.** A 576 × 1800
 //!   bitmap is about 130 KB; thirteen bills would be the whole 10 MB monthly
-//!   egress budget. When P07 builds the raster sink, the bitmap lives between
-//!   the layout and the printer and nowhere else.
+//!   egress budget. The bitmap [`raster`] produces lives between the layout and
+//!   the printer and nowhere else — not in the outbox, not in a backup, not in
+//!   a log. Nor does a print job (D16): [`queue::sqlite`] is the one repository
+//!   in the product that deliberately raises no outbox row.
 
 #![deny(missing_debug_implementations)]
 
 pub mod doc;
+pub mod drawer;
 pub mod error;
+pub mod escpos;
+pub mod font;
+pub mod image;
 pub mod layout;
 pub mod paper;
 pub mod pdf;
+pub mod printer;
+pub mod queue;
+pub mod raster;
 pub mod render;
+pub mod routing;
 pub mod settings;
 pub mod template;
+pub mod testprint;
 pub mod text;
+pub mod transport;
 
 pub use doc::{Align, Block, Column, Document, FontFamily, Pattern, Style, Width};
+pub use drawer::{DrawerConfig, DrawerPin, should_kick};
 pub use error::PrintError;
+pub use escpos::{EscPos, JobOptions, encode_raster, encode_text};
+pub use font::Font;
+pub use image::Monochrome;
 pub use layout::{Laid, LaidContent, LaidLine, Note, layout};
 pub use paper::{Offset, Paper, PaperKind};
 pub use pdf::to_pdf;
+pub use printer::{Capabilities, Engine, PrinterConfig, Role, Target, nudge};
+pub use queue::{Job, JobKind, JobState, JobStatus, Queue, QueueConfig, QueueEvent};
+pub use raster::{Raster, to_raster};
 pub use render::{Call, Recorder, Sink, render};
+pub use routing::{PrinterMode, RoutingTable, TicketStyle, route};
 pub use settings::{KitchenSettings, ReceiptSettings};
 pub use template::{BillContext, Copy, KitchenContext, bill_document, kitchen_document};
+pub use testprint::test_document;
 pub use text::to_text;
+pub use transport::{Transport, TransportError};

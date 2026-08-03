@@ -112,6 +112,14 @@ pub struct Printer {
     /// until the text lands correctly on the paper (P07).
     pub offset_x_mm: i64,
     pub offset_y_mm: i64,
+    /// `bill`, `kitchen` or `both`. Text rather than an enum because the enum
+    /// belongs to mb-print and a second copy of it here would be two lists to
+    /// keep in step; the schema's CHECK is what stops a typo reaching the disk.
+    pub role: String,
+    /// `raster` or `text` — v1's "Print engine: Graphics or Text".
+    pub engine: String,
+    /// v1's "Bold & Dark".
+    pub is_bold_dark: bool,
 }
 
 #[derive(Debug)]
@@ -242,8 +250,9 @@ impl<'a> SettingsRepo<'a> {
     ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO printers (id, outlet_id, name, kind, address, paper_mm, is_default,
-                                   can_kick_drawer, offset_x_mm, offset_y_mm)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                   can_kick_drawer, offset_x_mm, offset_y_mm,
+                                   role, engine, is_bold_dark)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT (id) DO UPDATE SET name            = excluded.name,
                                             kind            = excluded.kind,
                                             address         = excluded.address,
@@ -251,7 +260,10 @@ impl<'a> SettingsRepo<'a> {
                                             is_default      = excluded.is_default,
                                             can_kick_drawer = excluded.can_kick_drawer,
                                             offset_x_mm     = excluded.offset_x_mm,
-                                            offset_y_mm     = excluded.offset_y_mm",
+                                            offset_y_mm     = excluded.offset_y_mm,
+                                            role            = excluded.role,
+                                            engine          = excluded.engine,
+                                            is_bold_dark    = excluded.is_bold_dark",
             rusqlite::params![
                 printer.id,
                 outlet,
@@ -263,6 +275,9 @@ impl<'a> SettingsRepo<'a> {
                 encode::bool_to_sql(printer.can_kick_drawer),
                 printer.offset_x_mm,
                 printer.offset_y_mm,
+                printer.role,
+                printer.engine,
+                encode::bool_to_sql(printer.is_bold_dark),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "printers", &printer.id, Op::Upsert, at)
@@ -271,7 +286,7 @@ impl<'a> SettingsRepo<'a> {
     pub fn list_printers(&self, outlet: &str) -> Result<Vec<Printer>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, name, kind, address, paper_mm, is_default, can_kick_drawer,
-                    offset_x_mm, offset_y_mm
+                    offset_x_mm, offset_y_mm, role, engine, is_bold_dark
                FROM printers WHERE outlet_id = ?1 ORDER BY name",
         )?;
         let rows = stmt.query_map([outlet], |row| {
@@ -285,11 +300,15 @@ impl<'a> SettingsRepo<'a> {
                 row.get::<_, i64>(6)?,
                 row.get::<_, i64>(7)?,
                 row.get::<_, i64>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, name, kind, address, paper_mm, is_default, drawer, x, y) = row?;
+            let (id, name, kind, address, paper_mm, is_default, drawer, x, y, role, engine, dark) =
+                row?;
             out.push(Printer {
                 id,
                 name,
@@ -300,6 +319,9 @@ impl<'a> SettingsRepo<'a> {
                 can_kick_drawer: encode::bool_from_sql(drawer, "printers.can_kick_drawer")?,
                 offset_x_mm: x,
                 offset_y_mm: y,
+                role,
+                engine,
+                is_bold_dark: encode::bool_from_sql(dark, "printers.is_bold_dark")?,
             });
         }
         Ok(out)

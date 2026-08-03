@@ -1,0 +1,36 @@
+[package]
+name = "mb-winprint"
+description = "The Windows printing edge: the only crate in Magic Bill that may say unsafe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# NOT `workspace = true`, and that is the whole point of this crate existing —
+# decision D34. The workspace sets `unsafe_code = "forbid"`, `forbid` cannot be
+# lifted locally, and talking to winspool.drv or configuring a COM port is FFI.
+# So the unsafe is confined to this one crate, at the operating-system edge,
+# behind a completely safe surface, and every other crate keeps `forbid`.
+#
+# What replaces it here is stricter than usual: every `unsafe` block needs a
+# SAFETY comment or the build fails.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+
+# One dependency, and it is the one every other crate here already has (R6).
+#
+# No `windows-sys`: it would be a large compile for nine functions, and its
+# calls are `unsafe` at the call site anyway — so it would buy declarations, not
+# safety. Nine `extern "system"` declarations are cheaper to read, cost nothing
+# to build, and sit next to the documentation page they came from.
+[dependencies]
+thiserror = "2"

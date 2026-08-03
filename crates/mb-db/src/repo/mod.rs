@@ -33,6 +33,7 @@ pub mod money;
 pub mod order;
 pub mod outbox;
 pub mod people;
+pub mod print_jobs;
 pub mod settings;
 
 pub use floor::FloorRepo;
@@ -41,6 +42,7 @@ pub use money::MoneyRepo;
 pub use order::OrderRepo;
 pub use outbox::{Op, OutboxRepo, OutboxRow};
 pub use people::{PeopleRepo, StaffMember};
+pub use print_jobs::{PrintJobRepo, PrintJobRow};
 pub use settings::{SettingValue, SettingsRepo};
 
 /// Every repository, over one transaction.
@@ -88,6 +90,13 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn outbox(&self) -> OutboxRepo<'a> {
         OutboxRepo::new(self.tx)
+    }
+
+    /// The print spool (P07). The one repository that deliberately does **not**
+    /// enqueue an outbox row — see its module documentation.
+    #[must_use]
+    pub fn print_jobs(&self) -> PrintJobRepo<'a> {
+        PrintJobRepo::new(self.tx)
     }
 
     /// Escape hatch for the perf harness and for `settle`, which needs the same

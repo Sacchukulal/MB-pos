@@ -13,6 +13,8 @@
     clippy::integer_division,
     reason = "tests: expect is the assertion, and the fixture splits a fake total three ways"
 )]
+// Shared by five test binaries, each of which uses a different subset.
+#![allow(dead_code)]
 
 use mb_core::{
     AnyOrder, Bill, BillInput, BusinessDay, Cart, Charge, ChargeKind, Claimed, CustomerId,
@@ -249,4 +251,89 @@ impl Default for Fixture {
     fn default() -> Self {
         Fixture::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// A scratch database, for the tests that need the queue to survive a restart.
+//
+// No `tempfile` dependency, for the same reason mb-db refuses one: a unique
+// directory under the OS temp folder is twenty lines, and every dependency —
+// even a dev one — is a line somebody has to justify (R6, scope 16.15).
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use mb_db::{Db, Repos};
+
+pub const OUTLET: &str = "outlet_default";
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A directory that deletes itself when the test ends.
+pub struct Scratch {
+    dir: PathBuf,
+}
+
+impl Scratch {
+    pub fn new(label: &str) -> Scratch {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "mb-print-{label}-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        Scratch { dir }
+    }
+
+    pub fn path(&self, name: &str) -> PathBuf {
+        self.dir.join(name)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// A printer row, so `print_jobs.printer_id` has something to reference.
+pub fn seed_printer(db: &Db, id: &str) {
+    db.transaction(|tx| {
+        Repos::new(tx).settings().save_printer(
+            OUTLET,
+            &mb_db::repo::settings::Printer {
+                id: id.to_owned(),
+                name: id.to_owned(),
+                kind: "none".to_owned(),
+                address: None,
+                paper_mm: 80,
+                is_default: true,
+                can_kick_drawer: false,
+                offset_x_mm: 0,
+                offset_y_mm: 0,
+                role: "both".to_owned(),
+                engine: "raster".to_owned(),
+                is_bold_dark: false,
+            },
+            mb_core::Timestamp::from_millis(1_770_000_000_000),
+        )
+    })
+    .expect("seeds a printer");
+}
+
+/// Wait for a condition, polling briefly.
+///
+/// Threads are involved once the queue is in the picture; a bare assert
+/// straight after `enqueue` would be a race, and a fixed sleep would be a slow
+/// test that still races.
+pub fn until(mut check: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if check() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    false
 }

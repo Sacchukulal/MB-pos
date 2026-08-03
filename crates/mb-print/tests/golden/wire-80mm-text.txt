@@ -1,0 +1,124 @@
+ESC @        initialise
+ESC t 0      code table
+ESC a 0      align
+GS ! 0x00     character size
+ESC E 0      emphasis
+GS ! 0x11     character size
+ESC E 1      emphasis
+TEXT "      Anna Kuteera"
+LF
+GS ! 0x00     character size
+ESC E 0      emphasis
+TEXT "    12 MG Road, Jayanagar, Bengaluru 560011"
+LF
+TEXT "                 Ph: 9880012345"
+LF
+TEXT "             GSTIN: 29ABCDE1234F1Z5"
+LF
+TEXT "             FSSAI: 11223344556677"
+LF
+TEXT "------------------------------------------------"
+LF
+TEXT "Bill No                                 BIR/1207"
+LF
+TEXT "Date                                  2026-08-03"
+LF
+TEXT "Type                                     Dine In"
+LF
+TEXT "Table                                          6"
+LF
+TEXT "Cashier                                     Ravi"
+LF
+TEXT "Customer                          Suresh Traders"
+LF
+TEXT "Cust GSTIN                       29ZYXWV9876K1Z2"
+LF
+TEXT "------------------------------------------------"
+LF
+GS ! 0x11     character size
+ESC E 1      emphasis
+TEXT "        TOKEN 42"
+LF
+GS ! 0x00     character size
+ESC E 0      emphasis
+TEXT "------------------------------------------------"
+LF
+TEXT "Item               HSN    Qty     Rate    Amount"
+LF
+TEXT "------------------------------------------------"
+LF
+TEXT "Paneer Butter      2106     2   240.00    478.80"
+LF
+TEXT "Masala (Half) -"
+LF
+TEXT "Extra Spicy"
+LF
+TEXT "(no onion)"
+LF
+TEXT "Water 1L           2201     3    20.00      0.00"
+LF
+TEXT "Beer 650ml                  2   220.00    418.00"
+LF
+TEXT "------------------------------------------------"
+LF
+TEXT "Subtotal                                  980.00"
+LF
+TEXT "Discount                                 -106.00"
+LF
+TEXT "Service Charge                             45.89"
+LF
+TEXT "Donation                                    5.00"
+LF
+TEXT "CGST                                       12.50"
+LF
+TEXT "SGST                                       12.49"
+LF
+TEXT "Non-GST value                             418.00"
+LF
+TEXT "Exempt value                                5.00"
+LF
+TEXT "Round off                                   0.31"
+LF
+TEXT "------------------------------------------------"
+LF
+GS ! 0x11     character size
+ESC E 1      emphasis
+TEXT "TOTAL             948.00"
+LF
+GS ! 0x00     character size
+ESC E 0      emphasis
+TEXT "------------------------------------------------"
+LF
+TEXT "Tax summary"
+LF
+TEXT "Rate                   Taxable     CGST     SGST"
+LF
+TEXT "5%                      499.70    12.50    12.49"
+LF
+TEXT "18%                       0.00     0.00     0.00"
+LF
+TEXT "------------------------------------------------"
+LF
+TEXT "Card                                      484.00"
+LF
+TEXT "Sodexo                                    242.00"
+LF
+TEXT "Khata                                     242.00"
+LF
+TEXT "Tip                                        20.00"
+LF
+TEXT "------------------------------------------------"
+LF
+ESC a 1      align
+GS ( k       QR model (4 bytes)
+GS ( k       QR module size (3 bytes)
+GS ( k       QR error correction (3 bytes)
+GS ( k       QR store (57 bytes)
+GS ( k       QR print (3 bytes)
+ESC a 0      align
+TEXT "             Thank you, visit again"
+LF
+LF
+LF
+ESC d 3      feed lines
+GS V 1       cut

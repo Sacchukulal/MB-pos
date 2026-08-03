@@ -38,6 +38,11 @@ use mb_print::layout::layout;
 use mb_print::paper::{Paper, PaperKind};
 use mb_print::settings::KitchenSettings;
 use mb_print::template::{Copy, KitchenContext, TicketKind, TicketLine, bill_document, kitchen_document};
+use mb_print::font::Font;
+use mb_print::printer::PrinterConfig;
+use mb_print::queue::sqlite::SqliteStore;
+use mb_print::queue::{Job, JobKind, Queue, QueueConfig};
+use mb_print::raster::{RasterOptions, to_raster};
 use mb_print::{pdf, text};
 
 const RUNS: u32 = 200;
@@ -183,4 +188,134 @@ fn p3_a_kitchen_ticket_renders_in_almost_no_time() {
         return;
     }
     assert!(p3 < 5.0, "P3 took {p3:.2} ms, over the 5 ms ceiling");
+}
+
+/// **P4 — the raster sink, and the row `PERFORMANCE.md` §4 already promised.**
+///
+/// That file says, in writing, *"the raster sink lands at P07 and will be the
+/// expensive one; it gets its own row then."* This is that row: lay out a
+/// forty-line bill and draw every dot of it.
+///
+/// | | budget | ceiling |
+/// |---|---|---|
+/// | P4 | 20 ms | 60 ms |
+///
+/// **P4 is not inside B6, and that matters.** Rasterising happens on the
+/// printer's worker thread, after the cashier has already been let go. If it
+/// ever ends up on the billing path, B6 is what will notice.
+#[test]
+fn p4_a_bill_becomes_dots_inside_its_budget() {
+    let fixture = big_fixture();
+    let paper = Paper::new(PaperKind::Mm80);
+    let font = Font::builtin().expect("the shipped face loads");
+    let doc = bill_document(paper, &fixture.context(Copy::Original)).expect("builds");
+    let laid = layout(&doc).expect("lays out");
+
+    // Warmed once: the glyph cache fills on the first bill of the day and never
+    // grows again, so the interesting number is the second bill and every one
+    // after it. Measuring the first would be measuring the cache.
+    let warm = to_raster(&laid, &font, RasterOptions::default()).expect("rasters");
+
+    let runs = 50;
+    let started = Instant::now();
+    for _ in 0..runs {
+        let doc = bill_document(paper, &fixture.context(Copy::Original)).expect("builds");
+        let laid = layout(&doc).expect("lays out");
+        std::hint::black_box(
+            to_raster(&laid, &font, RasterOptions::default()).expect("rasters"),
+        );
+    }
+    let p4 = started.elapsed().as_secs_f64() * 1_000.0 / f64::from(runs);
+
+    println!("\n--- P4: a bill becomes dots ---");
+    println!("  lines                {}", laid.lines.len());
+    println!("  dots                 576 x {}", warm.height());
+    println!("  bands                {}", warm.bands.len());
+    println!("  P4 build+lay+raster  {p4:.3} ms   budget 20 ms, ceiling 60 ms\n");
+
+    if cfg!(debug_assertions) {
+        return;
+    }
+    assert!(p4 < 60.0, "P4 took {p4:.2} ms, over the 60 ms ceiling");
+}
+
+/// **B6 — a kitchen ticket handed to the print queue.**
+///
+/// The one row in `PERFORMANCE.md` §2.2 that had nobody's measurement against
+/// it: *"kitchen ticket handed to the print queue (not printed — queued):
+/// 50 ms, ceiling 150 ms."*
+///
+/// Measured as it will really happen — against a **real SQLite file**, because
+/// the durable write is the whole point of the queue and on the reference
+/// machine's 5400 rpm disk the fsync *is* the measurement (§1: 5–15 ms an
+/// fsync). A `MemoryStore` figure would be a lie by omission.
+#[test]
+fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
+    let scratch = common::Scratch::new("b6");
+    let db = std::sync::Arc::new(
+        mb_db::Db::open(&mb_db::DbConfig::new(scratch.path("shop.db"))).expect("opens"),
+    );
+    common::seed_printer(&db, "prn_kitchen");
+
+    let store = std::sync::Arc::new(SqliteStore::new(std::sync::Arc::clone(&db), common::OUTLET));
+    let queue = Queue::start(
+        vec![PrinterConfig::new(
+            "prn_kitchen",
+            "Kitchen",
+            mb_print::printer::Target::None,
+        )],
+        store,
+        std::sync::Arc::new(Font::builtin().expect("the shipped face loads")),
+        QueueConfig::default(),
+    );
+
+    let settings = KitchenSettings::default();
+    let lines: Vec<TicketLine> = (0..20)
+        .map(|n| TicketLine {
+            name: format!("Menu Item Number {n}"),
+            qty: Qty::from_whole(1 + i64::from(n % 3)).expect("qty"),
+            note: None,
+            modifiers: vec![],
+        })
+        .collect();
+    let ctx = KitchenContext {
+        kind: TicketKind::New,
+        token: Some("42"),
+        bill_number: Some("BIR/1207"),
+        order_type: OrderType::DineIn,
+        table: Some("6"),
+        time: Some("21:40"),
+        station: None,
+        lines: &lines,
+        settings: &settings,
+    };
+    let paper = Paper::new(PaperKind::Mm80);
+    let day = mb_core::BusinessDay::from_ymd(2026, 8, 3);
+
+    let runs = 50_u32;
+    let mut worst = 0.0_f64;
+    let started = Instant::now();
+    for _ in 0..runs {
+        let one = Instant::now();
+        let doc = kitchen_document(paper, &ctx).expect("builds");
+        queue
+            .enqueue(
+                Job::new(JobKind::Kitchen, "prn_kitchen", doc, day).because("table 6"),
+            )
+            .expect("queued");
+        worst = worst.max(one.elapsed().as_secs_f64() * 1_000.0);
+    }
+    let b6 = started.elapsed().as_secs_f64() * 1_000.0 / f64::from(runs);
+
+    println!("\n--- B6: a kitchen ticket handed to the queue ---");
+    println!("  store                SQLite, synchronous = FULL");
+    println!("  B6 mean              {b6:.3} ms   budget 50 ms, ceiling 150 ms");
+    println!("  B6 worst             {worst:.3} ms\n");
+
+    queue.shutdown();
+
+    if cfg!(debug_assertions) {
+        return;
+    }
+    assert!(b6 < 150.0, "B6 took {b6:.2} ms, over the 150 ms ceiling");
 }

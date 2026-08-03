@@ -12,12 +12,34 @@ workspace = true
 [dependencies]
 mb-core = { path = "../mb-core" }
 serde = { version = "1", features = ["derive"] }
+# The queue stores a job as the document it will print, and JSON is what
+# crosses IPC to P08's preview anyway — one wire format, not two.
+serde_json = "1"
 thiserror = "2"
 
-# No font crate, no PDF crate, no raster crate (R6). The PDF writer here is
-# text-only over a base-14 font, which is about 150 lines; the raster sink and
-# the font that goes with it belong to P07, where the ESC/POS command and the
-# printer's dots-per-mm are decided. See src/pdf.rs and src/render.rs.
+# P05's storage, for ONE module: queue/sqlite.rs (D32). The layout, the
+# templates and the sinks still never touch a row — but a print queue that
+# cannot survive a power cut is not a print queue, and that is audit D4.
+mb-db = { path = "../mb-db" }
 
-[dev-dependencies]
-serde_json = "1"
+# R6 / PERFORMANCE.md §5 rule 8 — the one crate P07 adds, with its cost.
+#
+# fontdue rasterises a TrueType glyph to a coverage bitmap and does nothing
+# else: no image decoding, no font discovery, no shaping. `default-features =
+# false` drops its `hashbrown` and `simd` features — we cache glyphs ourselves
+# and rasterise about a hundred of them per boot, so neither pays for itself.
+#
+# Why a crate at all: the workspace forbids `unsafe_code`, which rules out
+# asking Windows to rasterise through GDI, and a hand-written TrueType
+# rasteriser is outline parsing, composite glyphs and scan-line filling — a
+# month of somebody's life to be worse at it.
+#
+# Size: roughly 60 KB of the release binary, plus the 133 KB font in assets/,
+# against S4's 20 MB installer budget.
+fontdue = { version = "0.9", default-features = false }
+
+# P07's two OS transports, and the only crate in this workspace that may say
+# `unsafe` (D34). Windows only; everything else here builds and tests without
+# it, which is why the queue tests all run against the File transport.
+[target.'cfg(windows)'.dependencies]
+mb-winprint = { path = "../mb-winprint" }

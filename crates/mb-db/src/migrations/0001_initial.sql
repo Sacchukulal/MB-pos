@@ -248,7 +248,25 @@ CREATE TABLE printers (
     -- Clamped in code rather than by a CHECK, because the sane range depends on
     -- the paper width, which is the column next door.
     offset_x_mm  INTEGER NOT NULL DEFAULT 0,
-    offset_y_mm  INTEGER NOT NULL DEFAULT 0
+    offset_y_mm  INTEGER NOT NULL DEFAULT 0,
+    -- Added at P07, in this file rather than in a migration 0002, for the same
+    -- reason the offset was: `printers` is empty on every disk that exists
+    -- (D11 — there are no customers), so the columns are free today and an
+    -- ALTER TABLE on a live shop tomorrow. This is the LAST cheap moment.
+    --
+    -- What may be sent here. Routing that ignores this is how a customer's bill
+    -- ends up in the tandoor.
+    role         TEXT    NOT NULL DEFAULT 'both'
+        CHECK (role IN ('bill', 'kitchen', 'both')),
+    -- v1's "Print engine: Graphics (prints exactly like the preview, as a
+    -- picture) or Text (the printer's own font, faster)" — audit Part 3. Kept,
+    -- because a shop that has chosen one should not have it chosen again for
+    -- them. 'raster' is P07's name for what v1 called graphics.
+    engine       TEXT    NOT NULL DEFAULT 'raster'
+        CHECK (engine IN ('raster', 'text')),
+    -- v1's "Bold & Dark" print option: emphasis and double-strike on
+    -- everything, for a head or a roll that has gone pale.
+    is_bold_dark INTEGER NOT NULL DEFAULT 0 CHECK (is_bold_dark IN (0, 1))
 ) STRICT;
 
 -- Scope 3.1 — which printer a category's kitchen tickets go to.
@@ -256,6 +274,56 @@ CREATE TABLE category_printers (
     category_id TEXT NOT NULL REFERENCES categories (id) ON DELETE CASCADE,
     printer_id  TEXT NOT NULL REFERENCES printers (id) ON DELETE CASCADE,
     PRIMARY KEY (category_id, printer_id)
+) STRICT;
+
+-- Scope 7.5, built at P07. THE FIX FOR AUDIT D4:
+--
+--   "A failed print is only a red message on screen. Nothing remembers it. In a
+--   rush the cashier misses the toast and the kitchen simply never gets the
+--   order."
+--
+-- A job is written here BEFORE the caller is let go, so a power cut in the
+-- middle of a rush loses no kitchen ticket.
+--
+-- *** THIS IS A SPOOL, NOT A LOG — decision D35, and it is a budget. ***
+-- A finished job's row is DELETED. `payload` is the whole document as JSON, two
+-- to four kilobytes of it; a bill and its ticket are two rows; 75,000 bills a
+-- year would be roughly 450 MB against M5's 400 MB for the ENTIRE database, of
+-- which P04 has already spent 318. Keeping print history here would cost more
+-- than every bill, line, payment and tax row in the shop put together.
+--
+-- If "was this bill's ticket printed?" is ever wanted, the answer belongs on
+-- `order_events` or in `reprints`, both of which already exist for it.
+--
+-- In a healthy shop this table holds between nought and three rows.
+CREATE TABLE print_jobs (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    printer_id   TEXT    NOT NULL REFERENCES printers (id),
+    kind         TEXT    NOT NULL
+        CHECK (kind IN ('bill', 'kitchen', 'label', 'test', 'drawer')),
+    -- 'done' is not a state a row can be in: a done job has no row.
+    state        TEXT    NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending', 'printing', 'failed', 'parked')),
+    copies       INTEGER NOT NULL DEFAULT 1,
+    -- Lower is sooner. A bill queued behind forty kitchen tickets is a customer
+    -- standing at the counter.
+    priority     INTEGER NOT NULL DEFAULT 100,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    -- The Document, as JSON. Stored rather than a callback, because the whole
+    -- point is that it survives the process that made it.
+    payload      TEXT    NOT NULL,
+    -- Why this was printed, for the queue the cashier looks at: "table 6",
+    -- "reprint by Ravi", "test print".
+    reason       TEXT,
+    last_error   TEXT,
+    -- Which sink actually drew it, once it has been tried: a shop whose receipt
+    -- suddenly looks different gets an answer instead of making a support call.
+    engine_used  TEXT    CHECK (engine_used IS NULL OR engine_used IN ('raster', 'text')),
+    -- D5: stamped by whoever created the job, never re-derived.
+    business_day INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
 ) STRICT;
 
 -- ===========================================================================
