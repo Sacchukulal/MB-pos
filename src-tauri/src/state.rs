@@ -30,6 +30,7 @@ use mb_print::queue::{JobStore, MemoryStore, Queue, QueueConfig};
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::billing::CartState;
 use crate::config::AppConfig;
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
@@ -48,6 +49,9 @@ pub struct App {
     /// window opens, and it offers to create a shop or restore a backup.
     shop: Mutex<Option<Shop>>,
     config: Mutex<AppConfig>,
+    /// **The cart lives in Rust** (P09). One counter, one cart, recomputed from
+    /// scratch on every change — see billing.rs for why it is not in React.
+    cart: Mutex<CartState>,
     /// One face for every printer, loaded once (P07/D33). Rasterising a
     /// receipt is 2 ms with a warm glyph cache and rather more with a cold one,
     /// so there is exactly one.
@@ -68,6 +72,7 @@ impl App {
         Ok(App {
             shop: Mutex::new(None),
             config: Mutex::new(config),
+            cart: Mutex::new(CartState::default()),
             font: Arc::new(font),
         })
     }
@@ -301,6 +306,46 @@ impl App {
     pub fn print_queue_snapshot(&self) -> Vec<PrintJobView> {
         lock(&self.shop).as_ref().map_or_else(Vec::new, |shop| {
             shop.queue.snapshot().iter().map(crate::ipc::to_view).collect()
+        })
+    }
+}
+
+impl App {
+    /// Read the cart.
+    pub fn with_cart<T>(&self, f: impl FnOnce(&CartState) -> UiResult<T>) -> UiResult<T> {
+        f(&lock(&self.cart))
+    }
+
+    /// Change the cart, and get the new view back.
+    ///
+    /// One lock for the whole change **and** the recompute, so two commands
+    /// arriving together can never interleave into a bill that reflects half of
+    /// each. The cart is one counter's work in progress; there is no contention
+    /// to optimise for.
+    pub fn with_cart_mut<T>(&self, f: impl FnOnce(&mut CartState) -> UiResult<T>) -> UiResult<T> {
+        f(&mut lock(&self.cart))
+    }
+
+    /// One menu row, by id.
+    ///
+    /// Read at the moment of adding, so the cart line is frozen from what the
+    /// menu says *now* — crown jewel 4: *"frozen item snapshots on every order;
+    /// old bills never change when you change a price."*
+    pub fn find_menu_item(&self, id: &str) -> UiResult<mb_db::repo::menu::MenuItem> {
+        self.with_shop(|shop| {
+            let items = shop
+                .db
+                .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
+                .map_err(|e| crate::words::from_db(&e))?;
+            items
+                .into_iter()
+                .find(|item| item.id.as_str() == id)
+                .ok_or_else(|| {
+                    UiError::new(
+                        "menu.unknown",
+                        "That item is not on the menu any more. Refresh and try again.",
+                    )
+                })
         })
     }
 }

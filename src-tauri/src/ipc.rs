@@ -385,6 +385,20 @@ macro_rules! commands {
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
             $crate::ipc::preview_test_page,
+            $crate::ipc::current_cart,
+            $crate::ipc::cart_add,
+            $crate::ipc::cart_set_qty,
+            $crate::ipc::cart_remove,
+            $crate::ipc::cart_clear,
+            $crate::ipc::cart_set_order_type,
+            $crate::ipc::cart_add_payment,
+            $crate::ipc::cart_clear_payments,
+            $crate::ipc::open_orders,
+            $crate::ipc::menu_items,
+            // Development only — see its own documentation. It does not exist
+            // in a release build.
+            #[cfg(debug_assertions)]
+            $crate::ipc::seed_demo_shop,
         ]
     };
 }
@@ -415,4 +429,337 @@ pub fn preview_test_page(
     let document = mb_print::testprint::test_document(&printer, None);
     let laid = mb_print::layout::layout(&document).map_err(|e| words::from_print(&e))?;
     Ok(crate::preview::to_preview(&laid))
+}
+
+// ---------------------------------------------------------------------------
+// The billing screen (P09).
+//
+// Every one of these returns the WHOLE new `CartView`. There is no partial
+// update and no delta: the bill is recomputed from the cart every time
+// (D4, and it costs 14 µs), so a screen that rendered a delta would be a
+// screen that could be stale.
+// ---------------------------------------------------------------------------
+
+use crate::billing::{
+    CartState, CartView, MenuItemView, TableView, cart_view, floor_view, menu_view,
+    order_type_from_label, snapshot_for,
+};
+
+/// What is in the cart right now.
+#[tauri::command]
+pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
+    app.with_cart(cart_view)
+}
+
+/// Put an item in. **`Cart::add` merges** by `LineIdentity` — same item, same
+/// note, same modifiers — which is P01's rule and the reason the cart is not
+/// in TypeScript.
+#[tauri::command]
+pub fn cart_add(
+    app: tauri::State<'_, App>,
+    item_id: String,
+    qty: Option<String>,
+    note: Option<String>,
+) -> UiResult<CartView> {
+    let item = app.find_menu_item(&item_id)?;
+    let qty = match qty {
+        Some(text) => mb_core::Qty::parse(&text).map_err(|e| {
+            UiError::new(
+                "cart.qty",
+                format!("\"{text}\" is not a quantity. Try 1, 2 or 0.5."),
+            )
+            .with_detail(e.to_string())
+        })?,
+        None => mb_core::Qty::from_whole(1).map_err(|e| {
+            UiError::new("cart.qty", "A quantity of one could not be made.")
+                .with_detail(e.to_string())
+        })?,
+    };
+
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .add(snapshot_for(&item), qty, note, vec![])
+            .map_err(|e| {
+                UiError::new("cart.add", "That item could not be added to the bill.")
+                    .with_detail(e.to_string())
+            })?;
+        cart_view(state)
+    })
+}
+
+#[tauri::command]
+pub fn cart_set_qty(
+    app: tauri::State<'_, App>,
+    index: usize,
+    qty: String,
+) -> UiResult<CartView> {
+    let parsed = mb_core::Qty::parse(&qty).map_err(|e| {
+        UiError::new(
+            "cart.qty",
+            format!("\"{qty}\" is not a quantity. Try 1, 2 or 0.5."),
+        )
+        .with_detail(e.to_string())
+    })?;
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(index, parsed).map_err(|e| {
+            UiError::new("cart.qty", "That quantity could not be set.")
+                .with_detail(e.to_string())
+        })?;
+        cart_view(state)
+    })
+}
+
+#[tauri::command]
+pub fn cart_remove(app: tauri::State<'_, App>, index: usize) -> UiResult<CartView> {
+    app.with_cart_mut(|state| {
+        state.cart.remove(index).map_err(|e| {
+            UiError::new("cart.remove", "That line could not be removed.")
+                .with_detail(e.to_string())
+        })?;
+        cart_view(state)
+    })
+}
+
+/// New order. Keeps the order type, because **the type lock** (crown jewel 1)
+/// is what stops a parcel counter re-selecting it forty times an hour.
+#[tauri::command]
+pub fn cart_clear(app: tauri::State<'_, App>, keep_type: bool) -> UiResult<CartView> {
+    app.with_cart_mut(|state| {
+        let kept = state.order_type;
+        *state = CartState::default();
+        if keep_type {
+            state.order_type = kept;
+        }
+        cart_view(state)
+    })
+}
+
+#[tauri::command]
+pub fn cart_set_order_type(
+    app: tauri::State<'_, App>,
+    order_type: String,
+) -> UiResult<CartView> {
+    let kind = order_type_from_label(&order_type).ok_or_else(|| {
+        UiError::new("cart.order_type", format!("\"{order_type}\" is not an order type."))
+    })?;
+    app.with_cart_mut(|state| {
+        state.order_type = kind;
+        // A parcel has no table, and leaving a stale one would settle the bill
+        // against a table nobody is sitting at.
+        if !matches!(kind, mb_core::OrderType::DineIn) {
+            state.table = None;
+        }
+        cart_view(state)
+    })
+}
+
+/// Take a payment. Split payment is simply calling this more than once (1.15).
+#[tauri::command]
+pub fn cart_add_payment(
+    app: tauri::State<'_, App>,
+    mode: String,
+    amount_paise: i64,
+) -> UiResult<CartView> {
+    let mode = match mode.as_str() {
+        "Cash" => mb_core::PaymentMode::Cash,
+        "Card" => mb_core::PaymentMode::Card,
+        "UPI" => mb_core::PaymentMode::Upi,
+        other => mb_core::PaymentMode::Other(other.to_owned()),
+    };
+    let payment = mb_core::Payment::new(mode, mb_core::Money::from_paise(amount_paise))
+        .map_err(|e| {
+            UiError::new("payment.invalid", "That payment could not be taken.")
+                .with_detail(e.to_string())
+        })?;
+    app.with_cart_mut(|state| {
+        state.settlement.add(payment).map_err(|e| {
+            UiError::new("payment.invalid", "That payment could not be taken.")
+                .with_detail(e.to_string())
+        })?;
+        cart_view(state)
+    })
+}
+
+#[tauri::command]
+pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
+    app.with_cart_mut(|state| {
+        state.settlement = mb_core::Settlement::new();
+        cart_view(state)
+    })
+}
+
+/// The floor — **the only view of open orders** (scope 1.4).
+#[tauri::command]
+pub fn open_orders(app: tauri::State<'_, App>) -> UiResult<Vec<TableView>> {
+    let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    app.with_shop(|shop| {
+        let (tables, sections, open) = shop
+            .db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                Ok((
+                    repos.floor().list_tables(OUTLET)?,
+                    repos.floor().list_sections(OUTLET)?,
+                    repos.orders().list_open(OUTLET)?,
+                ))
+            })
+            .map_err(|e| words::from_db(&e))?;
+        Ok(floor_view(
+            &tables,
+            &sections,
+            &open,
+            loaded.as_deref(),
+            Timestamp::from_millis(now_millis()),
+        ))
+    })
+}
+
+/// The menu, for putting something in the cart. P13 owns the menu screens.
+#[tauri::command]
+pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
+    app.with_shop(|shop| {
+        let items = shop
+            .db
+            .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
+            .map_err(|e| words::from_db(&e))?;
+        Ok(items.iter().map(menu_view).collect())
+    })
+}
+
+/// Put a small shop in the database so the billing screen has something to
+/// render — **development only, and it cannot ship.**
+///
+/// `#[cfg(debug_assertions)]`: the command does not exist in a release build,
+/// so there is no "demo data" button for a shop to press by accident and no
+/// feature invented outside `FEATURE_SCOPE.md`. P13 builds the real menu
+/// screens and P14 the real floor; this exists so that "run it and look at it"
+/// — which P08 added to the method after shipping two visible bugs — is
+/// possible at all before those sessions.
+///
+/// The items are deliberately awkward rather than tidy: a long name that must
+/// wrap, a 5% line, an 18% line, an inclusive-priced line and a **non-GST**
+/// one, because a bar that cannot bill is audit B10 and the totals block is
+/// where it shows.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
+    use mb_core::{CategoryId, ItemId, Money, TableId, TaxRate, TaxTreatment};
+    use mb_db::repo::floor::{DiningTable, Section};
+    use mb_db::repo::menu::MenuItem;
+
+    let at = Timestamp::from_millis(now_millis());
+
+    // A first run has no database at all, and the real "create a new shop"
+    // flow is P22's first-run wizard. Rather than invent a product feature
+    // here, the dev seeder makes one where the shop would go and records it
+    // the same way the wizard will — through mb-db's own locate, so there is
+    // still exactly one answer to "where is the shop?" (audit A5).
+    if !app.has_shop() {
+        let dir = crate::config::AppConfig::directory();
+        let path = dir.join("demo-shop.db");
+        let db = mb_db::Db::open(&mb_db::DbConfig::new(&path)).map_err(|e| words::from_db(&e))?;
+        mb_db::locate::write_config(&dir, &path).map_err(|e| words::from_db(&e))?;
+        crate::log_info!("dev: made a demo shop at {}", path.display());
+        app.open_shop(db, path);
+    }
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+
+                for (index, name) in ["Main Hall", "AC Section", "Terrace"].iter().enumerate() {
+                    repos.floor().save_section(
+                        OUTLET,
+                        &Section {
+                            id: format!("sec_{index}"),
+                            name: (*name).to_owned(),
+                            sort_order: index as i64,
+                            is_active: true,
+                        },
+                        at,
+                    )?;
+                }
+
+                // Twenty-two tables across three sections: enough that density
+                // is a real question at 1366x768 rather than a theoretical one.
+                let mut n = 0;
+                for (section, count) in [("sec_0", 10), ("sec_1", 8), ("sec_2", 4)] {
+                    for seat in 1..=count {
+                        n += 1;
+                        repos.floor().save_table(
+                            OUTLET,
+                            &DiningTable {
+                                id: TableId::new(format!("tbl_{n}")),
+                                section_id: Some(section.to_owned()),
+                                label: format!("{n}"),
+                                seats: if seat % 3 == 0 { 6 } else { 4 },
+                                pos: None,
+                                sort_order: n,
+                                is_active: true,
+                            },
+                            at,
+                        )?;
+                    }
+                }
+
+                // The category has to exist before an item can point at it —
+                // `items.category_id` references `categories(id)`, and the
+                // first run of this seeder hit that constraint. Which is the
+                // schema doing its job: P04 turned off nothing, so a dangling
+                // reference cannot be written even by a developer in a hurry.
+                repos.menu().save_category(
+                    OUTLET,
+                    &mb_db::repo::menu::Category {
+                        id: CategoryId::new("cat_food"),
+                        name: "Food".to_owned(),
+                        sort_order: 0,
+                        is_active: true,
+                    },
+                    at,
+                )?;
+
+                let menu: [(&str, &str, i64, TaxRate, TaxTreatment); 8] = [
+                    ("itm_dosa", "Masala Dosa", 12_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                    ("itm_idli", "Idli Vada", 8_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                    (
+                        "itm_pbm",
+                        "Paneer Butter Masala (Half) - Extra Spicy",
+                        31_500,
+                        TaxRate::GST_5,
+                        TaxTreatment::Exclusive,
+                    ),
+                    ("itm_water", "Water 1L", 2_000, TaxRate::GST_18, TaxTreatment::Inclusive),
+                    ("itm_cola", "Cola 300ml", 4_000, TaxRate::GST_18, TaxTreatment::Exclusive),
+                    ("itm_beer", "Beer 650ml", 22_000, TaxRate::ZERO, TaxTreatment::NonGst),
+                    ("itm_rice", "Curd Rice", 9_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                    ("itm_sweet", "Gulab Jamun (2 pc)", 6_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                ];
+                for (index, (id, name, paise, rate, treatment)) in menu.iter().enumerate() {
+                    repos.menu().save_item(
+                        OUTLET,
+                        &MenuItem {
+                            id: ItemId::new(*id),
+                            category_id: Some(CategoryId::new("cat_food")),
+                            name: (*name).to_owned(),
+                            unit_price: Money::from_paise(*paise),
+                            tax_rate: *rate,
+                            tax_treatment: *treatment,
+                            hsn: Some("2106".to_owned()),
+                            cost_price: None,
+                            short_code: None,
+                            prep_minutes: None,
+                            is_open_price: false,
+                            is_available: true,
+                            sort_order: index as i64,
+                        },
+                        at,
+                    )?;
+                }
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))?;
+        Ok("a demo shop is in place".to_owned())
+    })
 }

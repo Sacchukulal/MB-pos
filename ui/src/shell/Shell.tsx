@@ -21,6 +21,7 @@ import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import { useTheme } from '../theme/ThemeProvider';
+import { Billing } from '../billing/Billing';
 import { Gallery } from '../gallery/Gallery';
 
 import './shell.css';
@@ -41,6 +42,12 @@ export interface Screen {
  */
 const SCREENS: readonly Screen[] = [
   {
+    id: "billing",
+    label: "Billing",
+    icon: "₹",
+    render: () => <Billing />,
+  },
+  {
     id: 'gallery',
     label: 'Kit',
     icon: '◑',
@@ -49,7 +56,7 @@ const SCREENS: readonly Screen[] = [
 ];
 
 export function Shell() {
-  const [screen, setScreen] = useState<string>('gallery');
+  const [screen, setScreen] = useState<string>('billing');
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [jobs, setJobs] = useState<readonly PrintJobView[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);

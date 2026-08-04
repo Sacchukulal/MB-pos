@@ -152,9 +152,21 @@ export interface Toast {
   detail?: string;
 }
 
+/**
+ * **The actions only, and the list deliberately not.**
+ *
+ * The first version of this carried `toasts` as well, and it caused a real
+ * feedback loop found by running the app: the context value changed on every
+ * toast, so any `useCallback` that reported an error changed identity, so the
+ * effect depending on it re-ran, so it errored again — and the screen filled
+ * with hundreds of identical toasts in a few seconds.
+ *
+ * Keeping this value **stable for the life of the provider** makes that
+ * impossible rather than unlikely. A screen that needs the list can only be a
+ * screen re-implementing the toast display, and there is one of those.
+ */
 interface ToastApi {
   show: (tone: ToastTone, message: string, detail?: string) => void;
-  toasts: readonly Toast[];
   dismiss: (id: number) => void;
 }
 
@@ -186,10 +198,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  const value = useMemo<ToastApi>(
-    () => ({ show, toasts, dismiss }),
-    [show, toasts, dismiss],
-  );
+  // Depends only on the two callbacks, which are themselves stable — so this
+  // value never changes and nothing downstream re-renders because a toast
+  // appeared.
+  const value = useMemo<ToastApi>(() => ({ show, dismiss }), [show, dismiss]);
 
   return (
     <ToastContext.Provider value={value}>

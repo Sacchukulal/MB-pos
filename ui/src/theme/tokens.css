@@ -98,6 +98,8 @@
   --weight-medium: 500;
   --weight-bold: 650;
 
+  --tracking-caps: 0.06em;
+
   --line-tight: 1.25;
   --line-normal: 1.5;
 
@@ -123,6 +125,18 @@
   --panel-width: 22rem;
   --toast-width-min: 18rem;
   --toast-width-max: 26rem;
+
+  /* The billing screen (P09). The cart is permanent and never moves, so its
+     width is a look decision and belongs here — "the cart is too narrow" is
+     answered in this file, not in a component. The tile numbers ARE the
+     density solution: at 1366x768 the floor gets about 900px, so a 7.5rem
+     minimum packs seven columns; the dense step past 24 tables packs ten and
+     the tile drops its secondary line. */
+  --cart-width: 24rem;
+  --tile-min: 7.5rem;
+  --tile-min-dense: 5.5rem;
+  --tile-height: 4.5rem;
+  --tile-height-dense: 3.25rem;
 
   --focus-ring-width: 2px;
   --border-width: 1px;

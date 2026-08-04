@@ -67,6 +67,17 @@ describe('the money lint (R8)', () => {
  * a single ticking source, not one interval per tile."*
  */
 describe('nothing polls (M4)', () => {
+  /**
+   * **The one file allowed to tick, and it is allowed by name.**
+   *
+   * `src/clock.ts` is the single shared ticking source §5 rule 10 requires:
+   * *"table timers, KDS timers and elapsed displays share a single ticking
+   * source, not one interval per tile."* Adding a second entry to this list is
+   * the moment to stop and ask whether it is a poll (M4) or a second clock
+   * (B8) — because it will be one of the two.
+   */
+  const MAY_TICK = ['src/clock.ts'];
+
   it('has no setInterval in any screen', () => {
     const offenders: string[] = [];
 
@@ -79,7 +90,10 @@ describe('nothing polls (M4)', () => {
           const source = readFileSync(full, 'utf8');
           // Comments explain the rule constantly; they do not break it.
           const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
-          if (/setInterval\s*\(/.test(code)) offenders.push(full);
+          const path = full.split('\\').join('/');
+          if (/setInterval\s*\(/.test(code) && !MAY_TICK.includes(path)) {
+            offenders.push(path);
+          }
         }
       }
     };

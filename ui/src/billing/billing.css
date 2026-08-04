@@ -1,0 +1,340 @@
+/* The billing screen. Four regions that never move (UI_GUIDELINES §4).
+   Tokens only — `npm run lint:tokens` fails the build otherwise. */
+
+.mb-billing {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 0;
+}
+
+/* --- Top bar: order type, lock, search. Always in the same place (§1). --- */
+
+.mb-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.mb-segment {
+  display: inline-flex;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.mb-segment__option {
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  color: var(--text-muted);
+  border: none;
+  border-right: var(--border-width) solid var(--border);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mb-segment__option:last-child {
+  border-right: none;
+}
+
+.mb-segment__option[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.mb-topbar__search {
+  flex: 1;
+  min-width: var(--panel-width);
+}
+
+/* --- The two columns. The cart is PERMANENT: it never moves, never hides. -- */
+
+.mb-billing__body {
+  display: grid;
+  grid-template-columns: 1fr var(--cart-width);
+  gap: var(--space-4);
+  min-height: 0;
+}
+
+.mb-billing__floor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mb-billing__cart {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto auto;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* --- The table grid — the ONLY view of open orders (scope 1.4) -----------
+   DENSITY (§4): a busy shop has 40+ tables and 1366x768 leaves about 900px
+   for the floor. `auto-fill` with a minimum tile width means the grid packs
+   as many columns as fit rather than a fixed count, and `.mb-floor--dense`
+   (set by the screen past a threshold) shrinks the minimum and drops the
+   tile's secondary line. See TableGrid.tsx for the threshold and why.      */
+
+.mb-floor__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mb-floor__heading {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+}
+
+.mb-floor__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
+  gap: var(--space-2);
+}
+
+.mb-floor--dense .mb-floor__grid {
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min-dense), 1fr));
+  gap: var(--space-1);
+}
+
+/* --- A tile. State in FORM as well as colour (§2 rule 2) ----------------- */
+
+.mb-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: var(--tile-height);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-left: var(--space-1) solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-floor--dense .mb-tile {
+  min-height: var(--tile-height-dense);
+  padding: var(--space-1) var(--space-2);
+}
+
+/* FREE: dashed outline, no fill, quiet text — and no colour at all. */
+.mb-tile--free {
+  background: transparent;
+  border-style: dashed;
+  border-left-color: transparent;
+  color: var(--text-faint);
+}
+
+/* OCCUPIED: solid card, left stripe, amount in mono. */
+.mb-tile--occupied {
+  border-left-color: var(--accent);
+}
+
+/* LATE: the same stripe in danger, plus an emphasised timer. §4 calls this
+   "the single most useful thing a floor view can show". */
+.mb-tile--late {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* LOADED: border and a soft ring. */
+.mb-tile--loaded {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-line);
+}
+
+.mb-tile__label {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+}
+
+.mb-tile__amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+
+.mb-tile__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* The emphasised timer — form, not just colour. */
+.mb-tile__timer--late {
+  font-weight: var(--weight-bold);
+  color: var(--danger);
+}
+
+.mb-tile__kitchen {
+  font-size: var(--text-xs);
+}
+
+/* --- The cart region ---------------------------------------------------- */
+
+.mb-cart__lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mb-cartline {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.mb-cartline:hover {
+  background: var(--surface-2);
+}
+
+.mb-cartline__name {
+  /* Long names WRAP. They never ellipsise — R3, and it is the same rule the
+     printed bill obeys (D30). */
+  overflow-wrap: anywhere;
+}
+
+.mb-cartline__note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.mb-cartline__rate {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.mb-cartline__qty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.mb-cartline__qty-value {
+  min-width: var(--space-6);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.mb-cartline__amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+}
+
+/* --- Totals: a feature, not a footer ------------------------------------ */
+
+.mb-totals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border);
+}
+
+.mb-totals__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.mb-totals__row--muted {
+  color: var(--text-muted);
+}
+
+.mb-totals__row--grand {
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+  border-top: var(--border-width) solid var(--border-strong);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+.mb-totals__tax {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  margin: var(--space-1) 0;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.mb-totals__label {
+  overflow-wrap: anywhere;
+}
+
+.mb-totals__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The capped-discount flag (D15). Loud on purpose: it means the shop did not
+   get the discount it asked for. */
+.mb-totals__capped {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--warn);
+}
+
+/* --- Payment and actions ------------------------------------------------ */
+
+.mb-payment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border);
+}
+
+.mb-payment__modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--space-8), 1fr));
+  gap: var(--space-1);
+}
+
+.mb-payment__taken {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.mb-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border);
+}

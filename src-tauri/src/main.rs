@@ -31,6 +31,7 @@
 // this after the screens exist, remove this line and fix what it hides.**
 #![allow(dead_code, reason = "P08's Rust half landed before its React half")]
 
+mod billing;
 mod config;
 mod ipc;
 mod logging;

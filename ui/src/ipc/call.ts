@@ -22,7 +22,10 @@ import { listen } from '@tauri-apps/api/event';
 import type { AppStatus } from './generated/AppStatus';
 import type { PrintJobView } from './generated/PrintJobView';
 import type { PreviewDoc } from './generated/PreviewDoc';
+import type { CartView } from './generated/CartView';
+import type { MenuItemView } from './generated/MenuItemView';
 import type { PrinterView } from './generated/PrinterView';
+import type { TableView } from './generated/TableView';
 import type { Pushed } from './generated/Pushed';
 import type { UiError } from './generated/UiError';
 
@@ -50,6 +53,28 @@ export interface Commands {
     returns: PreviewDoc;
   };
   retry_print_job: { args: { id: string }; returns: void };
+
+  // The billing screen (P09). Every cart command returns the WHOLE new view:
+  // the bill is recomputed in Rust from the cart every time (D4, 14 us), so a
+  // delta would only be a way of being stale.
+  current_cart: { args: void; returns: CartView };
+  cart_add: {
+    args: { itemId: string; qty: string | null; note: string | null };
+    returns: CartView;
+  };
+  cart_set_qty: { args: { index: number; qty: string }; returns: CartView };
+  cart_remove: { args: { index: number }; returns: CartView };
+  cart_clear: { args: { keepType: boolean }; returns: CartView };
+  cart_set_order_type: { args: { orderType: string }; returns: CartView };
+  cart_add_payment: {
+    args: { mode: string; amountPaise: bigint };
+    returns: CartView;
+  };
+  cart_clear_payments: { args: void; returns: CartView };
+  open_orders: { args: void; returns: TableView[] };
+  menu_items: { args: void; returns: MenuItemView[] };
+  /** Development only — the command does not exist in a release build. */
+  seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
 }
 
