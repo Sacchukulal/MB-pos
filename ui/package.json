@@ -1,0 +1,36 @@
+{
+  "name": "magic-bill-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Magic Bill — the screens. Renders and collects input; every rule and every rupee lives in Rust (R8).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:tokens": "node scripts/check-tokens.mjs",
+    "lint:money": "node scripts/check-no-money.mjs",
+    "lint": "npm run lint:tokens && npm run lint:money",
+    "check": "npm run typecheck && npm run lint && npm run test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^29.1.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.10"
+  }
+}

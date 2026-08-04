@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Magic Bill",
+  "version": "0.1.0",
+  "identifier": "com.magicbill.counter",
+  "build": {
+    "frontendDist": "../ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ../ui run dev",
+    "beforeBuildCommand": "npm --prefix ../ui run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Magic Bill",
+        "width": 1366,
+        "height": 768,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "decorations": false,
+        "visible": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"]
+  }
+}

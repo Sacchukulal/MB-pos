@@ -1,0 +1,43 @@
+[package]
+name = "magic-bill"
+description = "Magic Bill — the counter. The shell, the IPC boundary, and the only crate that holds state for the life of the process."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mb-core = { path = "../crates/mb-core" }
+mb-db = { path = "../crates/mb-db" }
+mb-print = { path = "../crates/mb-print" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# D1 — "Rust core, React screens only". Tauri is that decision's runtime: a
+# WebView2 window (already on every Windows 10/11 machine, so it is not in the
+# installer) plus an IPC bridge, against Electron's ~150 MB of bundled Chromium.
+# S4 budgets 20 MB for the whole installer, which rules out the alternative.
+tauri = { version = "2", features = [] }
+
+# One instance per PC. Two counters on one machine fight over the database, the
+# licence and the numbering — and the second one must FOCUS the first window,
+# not die quietly, because "it won't open" is the bug report that follows.
+tauri-plugin-single-instance = "2"
+
+# R6 — the type generator. `cargo test` regenerates the TypeScript and diffs
+# it, so the two sides of the IPC boundary cannot drift apart. Build-time only:
+# it contributes nothing to the shipped binary.
+ts-rs = { version = "12", features = ["serde-compat"] }
+
+[features]
+# Tauri's own convention: `cargo test` and `cargo clippy` run without a
+# frontend build, and the bundler turns this on.
+custom-protocol = ["tauri/custom-protocol"]

@@ -1,0 +1,297 @@
+/* =========================================================================
+   MAGIC BILL — THE ONE FILE THAT DECIDES WHAT THE PRODUCT LOOKS LIKE.
+   =========================================================================
+
+   *** IF YOU ARE HERE TO CHANGE THE LOOK, YOU ARE IN THE RIGHT PLACE, AND
+   *** THIS IS THE ONLY PLACE. Nothing outside this file holds a colour, a
+   *** radius, a spacing value or a type size. A lint fails the build if it
+   *** does (scripts/check-tokens.mjs), and a test fails if changing a theme
+   *** moves a single element (kit/__tests__/theme.test.tsx).
+
+   The owner's ruling, 2026-08-04, given as the answer to all three questions
+   they were asked about the theme:
+
+       "Design a central theme system so that in future it can be changed
+        easily with my suggestion WITHOUT TOUCHING ANY FUNCTIONALITY OF THE
+        APP."
+
+   So: the values below are DEFAULTS the owner has pre-approved changing.
+   They are not the design. The system is the design.
+
+   ---------------------------------------------------------------------
+   HOW TO CHANGE THE ACCENT COLOUR  (the owner asked for this by name)
+   ---------------------------------------------------------------------
+   Edit `--accent` and `--accent-ink` in [data-theme="light"] and
+   [data-theme="dark"] below. Four lines, one file, nothing else. Do not
+   touch any component. If you find yourself having to, that is a bug in
+   the token layer and it is the bug to fix.
+
+   ---------------------------------------------------------------------
+   HOW TO ADD A WHOLE NEW THEME
+   ---------------------------------------------------------------------
+   1. copy a [data-theme="…"] block below, rename it, change the values;
+   2. add one line to themes.ts.
+   That is the entire procedure. No component, no layout, no test, no build
+   change — and there is a test that proves it stays that way.
+
+   ---------------------------------------------------------------------
+   TWO RULES THAT OUTRANK EVERY VALUE HERE  (UI_GUIDELINES §2)
+   ---------------------------------------------------------------------
+   1. SEMANTIC COLOURS ARE SEPARATE FROM THE ACCENT. Changing a shop's
+      accent must never make "paid" and "void" look alike. Never render a
+      semantic state with --accent.
+   2. COLOUR IS NEVER THE ONLY SIGNAL. Every state is also carried by
+      shape, weight, fill or a stripe — for bright rooms, cheap monitors,
+      tired eyes and colour-blind users. Grey-scale the screen: it must
+      still be readable.
+   ========================================================================= */
+
+:root {
+  /* -----------------------------------------------------------------------
+     THE SCALES. These do NOT change between themes — a theme is a palette,
+     not a different product. Density is "middle" per the owner's answer:
+     modest radii and a real rhythm, with 40+ tables still fitting at
+     1366x768 (UI_GUIDELINES §4).
+     ----------------------------------------------------------------------- */
+
+  /* Spacing. A rhythm, not ad-hoc values (§5) — everything lands on this. */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* Radius. "Middle": modest, not soft, not sharp. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Type.
+     The UI face is THE OPERATING SYSTEM'S OWN (§3): this is a native
+     Windows app, matching the OS is correct, and it removes a font-loading
+     failure mode. Not a web font.
+     Numbers are monospace with tabular-nums EVERYWHERE DIGITS ALIGN — a
+     column of rupees that does not line up looks broken to a shopkeeper. */
+  --font-ui: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+    Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New",
+    monospace;
+
+  /* The text-size setting (audit F9, scope 13.12) multiplies THIS and
+     nothing else, so it reaches every screen, every dialog and the receipt
+     preview at once. Set by ThemeProvider on <html>. */
+  --type-scale: 1;
+
+  --text-xs: calc(0.75rem * var(--type-scale));
+  --text-sm: calc(0.875rem * var(--type-scale));
+  --text-md: calc(1rem * var(--type-scale));
+  --text-lg: calc(1.125rem * var(--type-scale));
+  --text-xl: calc(1.375rem * var(--type-scale));
+  --text-2xl: calc(1.75rem * var(--type-scale));
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-bold: 650;
+
+  --line-tight: 1.25;
+  --line-normal: 1.5;
+
+  /* Motion: 120–200 ms, CSS only, and NOTHING on the billing path animates
+     (§5, budget B1 — one dropped frame per keystroke is the whole
+     advantage gone). Zeroed under prefers-reduced-motion, below. */
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* Touch targets. 44px minimum (§7) — this is a counter, and half the
+     shops that buy this run a touch monitor. */
+  --target-min: 44px;
+
+  /* Layout constants the shell needs. Here rather than in a component,
+     because "the rail is too narrow" is a look complaint and look
+     complaints are answered in this file. */
+  --rail-width: 76px;
+  --rail-width-open: 200px;
+  --titlebar-height: 36px;
+
+  --focus-ring-width: 2px;
+  --border-width: 1px;
+}
+
+/* ==========================================================================
+   LIGHT — the default. Ships with dark; the sun/moon toggle switches them
+   and the choice persists (owner's ruling: both ship, neither is "the" one).
+   ========================================================================== */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* ground */
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --surface-sunk: #eceef2;
+
+  /* line */
+  --border: #dcdfe5;
+  --border-strong: #b9bec9;
+
+  /* text */
+  --text: #14171f;
+  --text-muted: #545b68;
+  --text-faint: #858c99;
+
+  /* accent — PROVISIONAL DEFAULT, indigo.
+     Chosen so that green, amber and red stay free for paid / warning /
+     void (rule 1 above): an accent in any of those families makes a
+     semantic state ambiguous the first time they sit side by side.
+     THE OWNER WILL NAME A DIFFERENT ONE. Change these two lines. */
+  --accent: #3d55c8;
+  --accent-ink: #ffffff;
+  --accent-soft: #e7eaf9;
+  --accent-line: #b6c0ee;
+
+  /* semantic — never rendered with --accent, never the only signal */
+  --ok: #1a7f4b;
+  --ok-soft: #e2f4ea;
+  --warn: #9a6400;
+  --warn-soft: #fbf0d9;
+  --danger: #c02626;
+  --danger-soft: #fbe6e6;
+  --info: #1f6f8b;
+  --info-soft: #e2f0f5;
+
+  /* elevation */
+  --shadow: 0 1px 2px rgb(16 20 30 / 8%), 0 1px 3px rgb(16 20 30 / 6%);
+  --shadow-pop: 0 8px 24px rgb(16 20 30 / 14%);
+  --overlay: rgb(16 20 30 / 40%);
+}
+
+/* ==========================================================================
+   DARK
+   ========================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #14161c;
+  --surface: #1c1f27;
+  --surface-2: #232732;
+  --surface-sunk: #101219;
+
+  --border: #313745;
+  --border-strong: #4a5162;
+
+  --text: #eef0f5;
+  --text-muted: #a3abbb;
+  --text-faint: #767e8f;
+
+  /* The same indigo, lifted so it holds its contrast on a dark ground.
+     Change these two lines with the light ones above. */
+  --accent: #7d90ee;
+  --accent-ink: #10131c;
+  --accent-soft: #262c46;
+  --accent-line: #414d80;
+
+  --ok: #4cc98a;
+  --ok-soft: #16301f;
+  --warn: #e0a943;
+  --warn-soft: #332609;
+  --danger: #f2706c;
+  --danger-soft: #3a1414;
+  --info: #5fb8d6;
+  --info-soft: #102831;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 1px 3px rgb(0 0 0 / 30%);
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 55%);
+  --overlay: rgb(0 0 0 / 60%);
+}
+
+/* ==========================================================================
+   HIGH CONTRAST — and note that it is a THEME, not a mode.
+   That is the whole argument for this file's shape: the accessibility
+   requirement (audit F9) and the owner's "add more themes easily"
+   requirement turn out to be the same requirement, and it cost one block.
+   ========================================================================== */
+[data-theme="contrast"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #ffffff;
+  --surface-sunk: #f0f0f0;
+
+  --border: #000000;
+  --border-strong: #000000;
+
+  --text: #000000;
+  --text-muted: #1a1a1a;
+  --text-faint: #3d3d3d;
+
+  --accent: #0033b3;
+  --accent-ink: #ffffff;
+  --accent-soft: #dfe6fb;
+  --accent-line: #0033b3;
+
+  --ok: #005c2e;
+  --ok-soft: #d8f0e3;
+  --warn: #6b4200;
+  --warn-soft: #f7e9cd;
+  --danger: #98000f;
+  --danger-soft: #fadddd;
+  --info: #004b63;
+  --info-soft: #d9eef5;
+
+  --shadow: 0 0 0 1px #000000;
+  --shadow-pop: 0 0 0 2px #000000;
+  --overlay: rgb(0 0 0 / 65%);
+}
+
+/* ==========================================================================
+   The base. Small on purpose: everything else is a component.
+   ========================================================================== */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  /* A desktop app is not a document: nothing here should rubber-band or
+     select like prose. Inputs opt back in. */
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+  }
+}

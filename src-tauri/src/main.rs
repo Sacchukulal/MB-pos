@@ -1,0 +1,133 @@
+//! Magic Bill — the counter.
+//!
+//! **The first thing in this rebuild that runs.** Phases 1 to 3 are four
+//! library crates and 311 tests: a bill can be computed, numbered, settled,
+//! stored, backed up, restored, rendered and printed, and none of it has ever
+//! been on a screen. This is the shell that puts it there.
+//!
+//! # What lives here, and what deliberately does not
+//!
+//! This crate owns the window, the start-up order, the IPC boundary and the
+//! state that outlives a screen. It owns **no business rule at all** — D1 and
+//! audit E3: *"business rules live inside screen files… to answer 'what exactly
+//! happens when a bill is settled?' you must read four files at once."* Every
+//! rule is in mb-core, every row is in mb-db, every dot is in mb-print, and
+//! this file is a hundred lines of wiring.
+
+// A desktop app should not also open a console window behind itself. Debug
+// builds keep it, because that is where a developer's output goes.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// *** TEMPORARY, AND IT COMES OUT WHEN P08'S SCREENS LAND. ***
+//
+// This crate is half of P08. The Rust shell is finished; the React side — the
+// UI kit, the shell chrome, the gallery and the receipt preview — is not, and
+// several things here exist precisely for it: `MoneyView` (what the cart will
+// show), `startup::adopt` and `FoundCandidates::expected` (the "we found a
+// database here" screen), `App::font` (the preview), `logging::Level::Debug`
+// and `words::from_io`.
+//
+// Deleting them to satisfy the lint and writing them again in three hours is
+// worse than one allow with a note saying when it goes. **If you are reading
+// this after the screens exist, remove this line and fix what it hides.**
+#![allow(dead_code, reason = "P08's Rust half landed before its React half")]
+
+mod config;
+mod ipc;
+mod logging;
+mod startup;
+mod state;
+mod window;
+mod words;
+
+use tauri::Manager;
+
+use config::AppConfig;
+use startup::Startup;
+use state::App;
+
+fn main() {
+    // Step 1, before anything that can fail. Audit E7: when the owner reports a
+    // problem there must be something to read.
+    let config_dir = AppConfig::directory();
+    logging::start(&config_dir.join("logs"));
+    log_info!("Magic Bill {} starting", env!("CARGO_PKG_VERSION"));
+
+    // Step 2. The look, so the window is painted correctly the first time
+    // rather than flashing light and then going dark.
+    let app_config = AppConfig::load();
+
+    let app_state = match App::new(app_config.clone()) {
+        Ok(state) => state,
+        Err(e) => {
+            // The only way this fails is a font that will not load, which means
+            // a corrupted install. There is no window yet, so the log is the
+            // only place it can be said.
+            log_error!("Magic Bill cannot start: {e}");
+            return;
+        }
+    };
+
+    // Steps 3 to 6. The order is load-bearing and `startup.rs` explains why: a
+    // restore happens BEFORE anything opens the database (D27).
+    match startup::run(&config_dir) {
+        Startup::Ready { db, path, restored } => {
+            if restored {
+                log_info!("a backup was restored during start-up");
+            }
+            app_state.open_shop(*db, path);
+        }
+        Startup::FirstRun => log_info!("first run — the window opens to set-up"),
+        Startup::FoundCandidates { candidates, .. } => {
+            log_info!(
+                "{} possible data file(s) found — the window opens and asks",
+                candidates.len()
+            );
+        }
+        Startup::Failed { error } => {
+            // **The window still opens.** An error dialog on top of nothing is
+            // the worst thing to show somebody whose shop will not start.
+            log_error!("start-up failed: {error}");
+        }
+    }
+
+    let window_state = app_config.window.clone();
+
+    tauri::Builder::default()
+        // Two counters on one PC fight over the database, the licence and the
+        // numbering. The second one focuses the first rather than dying
+        // quietly, because "it won't open" is the bug report that follows.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            window::focus_existing(app);
+        }))
+        .manage(app_state)
+        .invoke_handler(commands!())
+        .setup(move |app| {
+            if let Some(main) = app.get_webview_window("main") {
+                // Step 8. Restored and THEN shown, so the 800x600 flash audit
+                // F7 describes cannot happen.
+                window::restore_and_show(&main, &window_state);
+                log_info!("the window is up");
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                if let Some(state) = window.app_handle().try_state::<App>()
+                    && let Some(main) = window.get_webview_window("main")
+                {
+                    state.update_config(|config| window::remember(&main, config));
+                }
+            }
+            tauri::WindowEvent::Destroyed => {
+                if let Some(state) = window.app_handle().try_state::<App>() {
+                    state.shutdown();
+                }
+                log_info!("Magic Bill is closing");
+            }
+            _ => {}
+        })
+        .run(tauri::generate_context!())
+        .unwrap_or_else(|e| {
+            log_error!("the window could not be created: {e}");
+        });
+}
