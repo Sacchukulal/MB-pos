@@ -20,7 +20,7 @@
  * rather than remembered.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import {
   Badge,
@@ -37,6 +37,18 @@ import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
+import { mark } from '../perf';
+import { BusyTable, HelpSheet, QuantityPopup, Suggestions, takenLetters } from './Keys';
+import {
+  initial as initialKeys,
+  reduce as reduceKeys,
+  type Command as KeyCommand,
+  type Event as KeyEvent,
+  type State as KeyboardState,
+} from './keyboard';
+
+/** The reducer's state, plus the commands it last asked for. */
+type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
 
@@ -49,7 +61,11 @@ export function Billing() {
   const [cart, setCart] = useState<CartView | null>(null);
   const [tables, setTables] = useState<readonly TableView[]>([]);
   const [menu, setMenu] = useState<readonly MenuItemView[]>([]);
-  const [filter, setFilter] = useState('');
+  // The grid is unfiltered: the search box is for the menu, and a table is
+  // reached by typing its number and pressing Enter (audit F5, one keystroke
+  // shorter than filtering). P14 may add a filter of its own for the floor
+  // plan; this session deliberately does not.
+  const filter = '';
   const [locked, setLocked] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,6 +73,32 @@ export function Billing() {
   // ONE shared clock (§5 rule 10). The tiles do not each own a timer; they
   // re-read the elapsed minutes the order already carries when this ticks.
   const tick = useTick();
+
+  // **The keyboard.** The reducer decides; this component performs. Every
+  // command it returns is one of the named functions below — which P09 wrote
+  // that way on purpose so this session binds keys rather than re-implementing
+  // behaviour.
+  //
+  const searchBox = useRef<HTMLInputElement>(null);
+
+  // **The reducer is PURE, and the commands ride in the state.**
+  //
+  // The first version pushed them into a ref from inside the reducer, and that
+  // is a side effect — which React's StrictMode double-invokes reducers
+  // specifically to catch. It caught it: every command ran twice, so a blank
+  // quantity added TWO of everything and `Cart::add` dutifully merged them
+  // into a line of quantity 2. One beer came out as 440.00.
+  //
+  // Carrying the commands in the state makes the reducer a function of its
+  // inputs again: invoking it twice produces the same state twice, and the
+  // effect below performs each batch exactly once, keyed on `seq`.
+  const [keys, dispatch] = useReducer(
+    (state: KeyState, event: KeyEvent): KeyState => {
+      const [next, commands] = reduceKeys(state, event);
+      return { ...next, outbox: commands, seq: state.seq + 1 };
+    },
+    { ...initialKeys(), outbox: [] as KeyCommand[], seq: 0 },
+  );
 
   const report = useCallback(
     (cause: unknown) => {
@@ -98,14 +140,27 @@ export function Billing() {
   // --- the actions. Named, so P10 can bind keys to them. -------------------
 
   const addItem = useCallback(
-    async (itemId: string) => {
+    async (itemId: string, qty: string | null = null) => {
       try {
-        setCart(await call('cart_add', { itemId, qty: null, note: null }));
+        setCart(await call('cart_add', { itemId, qty, note: null }));
       } catch (cause) {
         report(cause);
       }
     },
     [report],
+  );
+
+  /** Budget B7 — an existing table's order, into the cart. */
+  const openTableById = useCallback(
+    async (tableId: string) => {
+      try {
+        setCart(await call('open_table', { tableId }));
+        await refreshFloor();
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [refreshFloor, report],
   );
 
   const removeLine = useCallback(
@@ -168,17 +223,14 @@ export function Billing() {
     }
   }, [report]);
 
+  // A tap goes through the SAME reducer a key does, so touch and keyboard
+  // cannot drift apart (scope 1.28, and test T10).
   const openTable = useCallback(
     (table: TableView) => {
-      if (table.state === 'free') {
-        toast.show('info', `Table ${table.label} is free. Add items to start an order.`);
-        return;
-      }
-      // P10 opens the order into the cart (budget B7). The tile is wired now so
-      // the interaction exists and the next session is behaviour, not layout.
-      toast.show('info', `Opening table ${table.label} arrives with the keyboard (P10).`);
+      const index = tables.findIndex((t) => t.id === table.id);
+      if (index >= 0) dispatch({ kind: 'tap-tile', index });
     },
-    [toast],
+    [tables],
   );
 
   const seedDemo = useCallback(async () => {
@@ -194,6 +246,135 @@ export function Billing() {
       setBusy(false);
     }
   }, [refreshFloor, report, toast]);
+
+  // --- performing what the reducer asked for -----------------------------
+  //
+  // One place, so a command is a name rather than a closure, and so P11's
+  // permissions have exactly one gate to sit in front of later.
+  const perform = useCallback(
+    async (command: KeyCommand) => {
+      switch (command.do) {
+        case 'search': {
+          if (command.text.trim() === '') {
+            dispatch({ kind: 'suggestions', items: [] });
+            return;
+          }
+          try {
+            const items = await call('search_items', { text: command.text, mode: null });
+            dispatch({ kind: 'suggestions', items });
+          } catch {
+            dispatch({ kind: 'suggestions', items: [] });
+          }
+          return;
+        }
+        case 'add-item':
+          await addItem(command.itemId, command.qty);
+          return;
+        case 'open-table':
+          await openTableById(command.tableId);
+          return;
+        case 'set-order-type':
+          await setOrderType(command.value);
+          return;
+        case 'new-order':
+          await newOrder();
+          return;
+        case 'confirm-new-order':
+          setConfirmCancel(true);
+          return;
+        case 'focus-search':
+          searchBox.current?.focus();
+          return;
+        case 'print-kitchen':
+          toast.show('info', 'The kitchen ticket needs the settle flow — still to come.');
+          return;
+        case 'complete-bill':
+          toast.show('info', 'Completing the bill needs the settle flow — still to come.');
+          return;
+        case 'merge-into':
+          await openTableById(command.tableId);
+          toast.show('info', 'Merged. Only the new items will go to the kitchen.');
+          return;
+        case 'sub-table':
+          toast.show('info', `Sub-table ${command.letter} needs the settle flow — still to come.`);
+          return;
+      }
+    },
+    [addItem, newOrder, openTableById, setOrderType, toast],
+  );
+
+  // Perform one batch per committed dispatch. Keyed on `seq` rather than on
+  // the array, so a batch that happens to be identical to the last one still
+  // runs — pressing Enter twice really is two commands.
+  useEffect(() => {
+    for (const command of keys.outbox) void perform(command);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys.seq]);
+
+  // Keep the reducer's picture of the world in step. It never reads state
+  // itself — it is told, which is what keeps it testable with no browser.
+  useEffect(() => {
+    dispatch({ kind: 'tables', tables });
+  }, [tables]);
+
+  useEffect(() => {
+    dispatch({
+      kind: 'cart',
+      hasItems: cart ? !cart.isEmpty : false,
+      // Until the kitchen ledger is wired through the cart view, a non-empty
+      // cart counts as "the kitchen has not seen it" — which makes Enter print
+      // the ticket first, and that is the safe way round.
+      kitchenUpToDate: false,
+    });
+  }, [cart]);
+
+  useEffect(() => {
+    if (cart?.orderType) dispatch({ kind: 'order-type', value: cart.orderType });
+  }, [cart?.orderType]);
+
+  // **The search box has focus from the moment the screen opens.**
+  // v1's did, and a cashier who has to click before typing has already lost
+  // the advantage this whole session exists to keep. Found by running it: the
+  // first attempt typed into nothing at all.
+  useEffect(() => {
+    searchBox.current?.focus();
+  }, []);
+
+  // **Whatever took focus gives it back.** The quantity popup focuses its own
+  // panel; when it closes, the caret must return to the search box or the next
+  // thing a cashier types goes nowhere. Found by running it: the first item
+  // was added by keyboard and the second one silently was not.
+  useEffect(() => {
+    if (keys.mode.kind === 'searching') searchBox.current?.focus();
+  }, [keys.mode.kind]);
+
+  // Every key, in one listener, on the window — so a cashier never has to
+  // click into anything first.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      // Let the browser have the ordinary editing keys inside a field.
+      const editing =
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement;
+      const interesting = [
+        'Enter', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '?',
+      ];
+      if (!interesting.includes(event.key)) return;
+      if (editing && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        // Inside a box with text in it, left/right move the caret. With an
+        // empty box they cycle the order type, which is v1's behaviour.
+        const box = event.target as HTMLInputElement;
+        if (box.value !== '') return;
+      }
+      event.preventDefault();
+      // B1: mark the input, and let the hook report when the pixels changed.
+      const done = mark('keystroke');
+      dispatch({ kind: 'key', key: event.key });
+      done();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   if (!inApp()) {
     return (
@@ -234,9 +415,23 @@ export function Billing() {
           {/* P10 owns search behaviour (budget B2). It lives here now so the
               layout is not re-cut next session. */}
           <SearchField
-            what="Filter tables"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            what="Search the menu, or type a table number"
+            value={keys.text}
+            ref={searchBox}
+            // The box searches the MENU and accepts a table number. It does
+            // NOT filter the floor: typing "dos" was emptying the grid, which
+            // is the opposite of useful — a cashier searching for a dosa still
+            // wants to see their tables. Found by running it.
+            //
+            // Audit F5 asked for a way through twenty open tables; typing the
+            // table number and pressing Enter is that way, and it is one
+            // keystroke shorter than filtering.
+            onChange={(event) => dispatch({ kind: 'typed', text: event.target.value })}
+          />
+          <Suggestions
+            items={keys.suggestions}
+            highlighted={keys.highlighted}
+            onPick={(index) => dispatch({ kind: 'tap-suggestion', index })}
           />
         </div>
       </div>
@@ -286,7 +481,11 @@ export function Billing() {
         <div className="mb-billing__cart">
           <SectionHeader
             title={cart?.table ? `Table ${cart.table}` : (cart?.orderType ?? 'Order')}
-            note={cart?.isEmpty ? 'Empty' : `${cart?.lines.length ?? 0} lines`}
+            note={
+              cart?.isEmpty
+                ? 'Empty'
+                : `${cart?.lines.length ?? 0} ${cart?.lines.length === 1 ? 'line' : 'lines'}`
+            }
           />
 
           <div className="mb-cart__lines">
@@ -388,6 +587,35 @@ export function Billing() {
           </div>
         </div>
       </div>
+
+      {keys.mode.kind === 'quantity' ? (
+        <QuantityPopup
+          mode={keys.mode}
+          onType={(text) => dispatch({ kind: 'typed', text })}
+          onConfirm={() => dispatch({ kind: 'key', key: 'Enter' })}
+          onCancel={() => dispatch({ kind: 'key', key: 'Escape' })}
+        />
+      ) : null}
+
+      {keys.mode.kind === 'table-busy' ? (
+        <BusyTable
+          mode={keys.mode}
+          taken={takenLetters(tables, keys.mode.table.label)}
+          onChoose={(choice) => {
+            // Tap and key take the same road: move the highlight, then Enter.
+            const steps = choice - (keys.mode.kind === 'table-busy' ? keys.mode.choice : 0);
+            for (let n = 0; n < Math.abs(steps); n += 1) {
+              dispatch({ kind: 'key', key: steps > 0 ? 'ArrowRight' : 'ArrowLeft' });
+            }
+            dispatch({ kind: 'key', key: 'Enter' });
+          }}
+          onCancel={() => dispatch({ kind: 'key', key: 'Escape' })}
+        />
+      ) : null}
+
+      {keys.mode.kind === 'help' ? (
+        <HelpSheet onClose={() => dispatch({ kind: 'key', key: 'Escape' })} />
+      ) : null}
 
       <ConfirmDialog
         open={confirmCancel}

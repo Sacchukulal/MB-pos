@@ -338,3 +338,102 @@
   padding-top: var(--space-2);
   border-top: var(--border-width) solid var(--border);
 }
+
+/* --- The keyboard: suggestions, quantity, help (P10) --------------------- */
+
+.mb-suggestions {
+  position: absolute;
+  z-index: 50;
+  width: 100%;
+  max-height: var(--suggestions-height);
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  overflow-y: auto;
+}
+
+.mb-suggestion {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-3);
+  align-items: baseline;
+  width: 100%;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The highlight is a fill AND a stripe, so it survives grey-scale — §2 rule 2
+   applies to the thing a cashier is looking at most of all. */
+.mb-suggestion--on {
+  background: var(--accent-soft);
+  box-shadow: inset var(--space-1) 0 0 0 var(--accent);
+}
+
+.mb-topbar__search {
+  position: relative;
+}
+
+.mb-quantity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mb-quantity__value {
+  flex: 1;
+  /* A flex item will not shrink below its intrinsic width without this, and an
+     <input> claims about twenty characters — so the "+" button was pushed off
+     the edge of the dialog and the whole thing grew a scrollbar. Found by
+     running it and looking. */
+  min-width: 0;
+  font-size: var(--text-xl);
+  text-align: center;
+}
+
+.mb-busy__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mb-help {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--panel-width), 1fr));
+  gap: var(--space-4);
+}
+
+.mb-help__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mb-help__row {
+  display: grid;
+  grid-template-columns: var(--help-keys-width) 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--text-sm);
+}
+
+.mb-help__keys {
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+  white-space: nowrap;
+}

@@ -137,6 +137,8 @@
   --tile-min-dense: 5.5rem;
   --tile-height: 4.5rem;
   --tile-height-dense: 3.25rem;
+  --suggestions-height: 22rem;
+  --help-keys-width: 9rem;
 
   --focus-ring-width: 2px;
   --border-width: 1px;

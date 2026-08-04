@@ -395,6 +395,8 @@ macro_rules! commands {
             $crate::ipc::cart_clear_payments,
             $crate::ipc::open_orders,
             $crate::ipc::menu_items,
+            $crate::ipc::search_items,
+            $crate::ipc::open_table,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -761,5 +763,79 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
             })
             .map_err(|e| words::from_db(&e))?;
         Ok("a demo shop is in place".to_owned())
+    })
+}
+
+/// Ranked item search — audit 2.3, budget B2.
+///
+/// Runs here rather than in React because **ranking is a rule**: name-start
+/// beats word-start beats inside-word, and a second copy of that in TypeScript
+/// would disagree with this one the moment P13 adds short codes to the same
+/// box. See `search.rs`.
+#[tauri::command]
+pub fn search_items(
+    app: tauri::State<'_, App>,
+    text: String,
+    mode: Option<crate::search::MatchMode>,
+) -> UiResult<Vec<MenuItemView>> {
+    app.with_shop(|shop| {
+        let items = shop
+            .db
+            .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
+            .map_err(|e| words::from_db(&e))?;
+        Ok(crate::search::search(
+            &items,
+            &text,
+            mode.unwrap_or_default(),
+        ))
+    })
+}
+
+/// Load a table's running order into the cart — **budget B7**.
+///
+/// The order's own cart replaces the current one, and its `KitchenLedger`
+/// comes with it, which is what makes the kitchen delta right afterwards
+/// (crown jewel 2: *"what was printed is remembered in the database, not in
+/// the screen's memory"*).
+#[tauri::command]
+pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<CartView> {
+    let found = app.with_shop(|shop| {
+        let open = shop
+            .db
+            .transaction(|tx| mb_db::Repos::new(tx).orders().list_open(OUTLET))
+            .map_err(|e| words::from_db(&e))?;
+        Ok(open.into_iter().find(|order| {
+            order
+                .core()
+                .table
+                .as_ref()
+                .is_some_and(|t| t.as_str() == table_id)
+        }))
+    })?;
+
+    app.with_cart_mut(|state| {
+        match found {
+            Some(order) => {
+                let core = order.core();
+                // The whole order comes across: its cart, its type, its id.
+                // Nothing is re-derived, because a screen that re-derived it
+                // would be a second copy of the order.
+                state.cart = core.cart.clone();
+                state.order_type = core.order_type;
+                state.order_id = Some(core.id.as_str().to_owned());
+                state.table = Some(table_id.clone());
+                state.settlement = mb_core::Settlement::new();
+            }
+            None => {
+                // A free table: start a new order on it rather than refusing,
+                // because "press the table and start typing" is the flow.
+                *state = crate::billing::CartState {
+                    order_type: state.order_type,
+                    table: Some(table_id.clone()),
+                    ..crate::billing::CartState::default()
+                };
+            }
+        }
+        cart_view(state)
     })
 }

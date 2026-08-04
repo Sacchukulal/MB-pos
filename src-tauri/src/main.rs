@@ -37,6 +37,7 @@ mod ipc;
 mod logging;
 mod preview;
 mod push;
+mod search;
 mod startup;
 mod state;
 mod window;

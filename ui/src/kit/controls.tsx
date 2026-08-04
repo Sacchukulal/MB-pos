@@ -208,23 +208,26 @@ export interface SearchFieldProps extends InputProps {
  * Search lives in the same place on every screen (UI_GUIDELINES §1), so it is a
  * component rather than an input somebody styles again.
  */
-export function SearchField({ what = 'Search', ...rest }: SearchFieldProps) {
-  return (
-    <div className="mb-search">
-      <span className="mb-search__icon" aria-hidden="true">
-        ⌕
-      </span>
-      <input
-        type="search"
-        className="mb-input"
-        placeholder={what}
-        aria-label={what}
-        autoComplete="off"
-        {...rest}
-      />
-    </div>
-  );
-}
+export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
+  function SearchField({ what = 'Search', ...rest }, ref) {
+    return (
+      <div className="mb-search">
+        <span className="mb-search__icon" aria-hidden="true">
+          ⌕
+        </span>
+        <input
+          ref={ref}
+          type="search"
+          className="mb-input"
+          placeholder={what}
+          aria-label={what}
+          autoComplete="off"
+          {...rest}
+        />
+      </div>
+    );
+  },
+);
 
 export interface KeypadProps {
   onPress: (key: string) => void;

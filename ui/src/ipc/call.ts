@@ -73,6 +73,13 @@ export interface Commands {
   cart_clear_payments: { args: void; returns: CartView };
   open_orders: { args: void; returns: TableView[] };
   menu_items: { args: void; returns: MenuItemView[] };
+  /** Ranked search — the rule lives in Rust (P10, budget B2). */
+  search_items: {
+    args: { text: string; mode: 'starts_with' | 'contains' | null };
+    returns: MenuItemView[];
+  };
+  /** Budget B7 — an existing table's order into the cart. */
+  open_table: { args: { tableId: string }; returns: CartView };
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
