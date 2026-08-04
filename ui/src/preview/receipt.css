@@ -1,0 +1,60 @@
+/* The receipt preview. Monospace, exactly as wide as the paper, and it looks
+   like paper rather than like a text box — the point of a preview is that the
+   owner can tell at a glance whether the real thing will look right. */
+
+.mb-receipt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.mb-receipt__paper {
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  /* The character grid IS the model (P06): a monospace face with tabular
+     figures is the only way the preview and the paper agree column for
+     column. */
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  line-height: var(--line-tight);
+  white-space: pre;
+  /* Never wraps. If something is too wide for the box the box scrolls — the
+     layout already decided every break, and a preview that re-wrapped would be
+     a second layout engine (D1). */
+  overflow-x: auto;
+}
+
+.mb-receipt__line--bold {
+  font-weight: var(--weight-bold);
+}
+
+/* The ESC/POS size multipliers, shown as they will print. */
+.mb-receipt__line--x2 {
+  font-size: var(--text-lg);
+}
+
+.mb-receipt__line--x3 {
+  font-size: var(--text-2xl);
+}
+
+.mb-receipt__qr {
+  color: var(--text-muted);
+}
+
+.mb-receipt__logo {
+  color: var(--text-faint);
+}
+
+.mb-receipt__notes {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

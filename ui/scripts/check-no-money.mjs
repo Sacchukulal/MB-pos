@@ -35,10 +35,17 @@ const MONEY =
 const CHECKS = [
   {
     what: 'arithmetic on money',
-    // total + x, x * price, amount -= …
+    // `total + x`, `x * price`, `amount -= …`
+    //
+    // **Whitespace around the operator is required**, and that is not
+    // fussiness: the first version of this rule flagged `data-paise={…}` as a
+    // subtraction and an import path as a division. Real arithmetic in this
+    // codebase is spaced; a hyphenated JSX attribute and a `/` in a path are
+    // not. Compound assignment (`+=`) is caught either way.
     re: new RegExp(
-      `\\b\\w*${MONEY}\\w*\\s*(?:[+\\-*/]=|[+\\-*/](?!=))|` +
-        `(?:[+\\-*/])\\s*\\w*${MONEY}\\w*\\b`,
+      `\\b\\w*${MONEY}\\w*\\s*[+\\-*/]=|` +
+        `\\b\\w*${MONEY}\\w*\\s+[+\\-*/]\\s|` +
+        `[+\\-*/]\\s+\\w*${MONEY}\\w*\\b`,
       'i',
     ),
   },

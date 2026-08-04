@@ -384,6 +384,35 @@ macro_rules! commands {
             $crate::ipc::list_print_jobs,
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
+            $crate::ipc::preview_test_page,
         ]
     };
+}
+
+// ---------------------------------------------------------------------------
+// The preview — the fourth sink's input.
+// ---------------------------------------------------------------------------
+
+/// Lay out a sample bill and hand it to the screen.
+///
+/// The sample is **P07's test slip** rather than a second invented one: it is
+/// already a real-looking bill with real amounts, it already carries the
+/// alignment ruler and the print offset, and it needs no shop — which means the
+/// preview works on a first run, like everything else in this session.
+///
+/// P09 will add `preview_order(order_id)` beside this, against a real bill.
+/// That is audit **D6** — *"no bill preview before printing"* — and it costs
+/// one command, because the sink already exists.
+#[tauri::command]
+pub fn preview_test_page(
+    app: tauri::State<'_, App>,
+    printer_id: Option<String>,
+) -> UiResult<crate::preview::PreviewDoc> {
+    let printer = match printer_id {
+        Some(id) => find_printer(&app, &id)?,
+        None => PrinterConfig::new("prn_preview", "Preview", Target::None),
+    };
+    let document = mb_print::testprint::test_document(&printer, None);
+    let laid = mb_print::layout::layout(&document).map_err(|e| words::from_print(&e))?;
+    Ok(crate::preview::to_preview(&laid))
 }

@@ -1,0 +1,213 @@
+/* The shell: title bar, rail, and the print-queue indicator.
+   Tokens only, like everything else. */
+
+.mb-shell {
+  display: grid;
+  grid-template-rows: var(--titlebar-height) 1fr;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* --- Title bar — audit F7, "the plain Windows title bar" ----------------- */
+
+.mb-titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-3);
+  background: var(--surface);
+  border-bottom: var(--border-width) solid var(--border);
+  /* Tauri drags the window by anything carrying this attribute. */
+  -webkit-app-region: drag;
+}
+
+.mb-titlebar__name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.mb-titlebar__spacer {
+  flex: 1;
+}
+
+.mb-titlebar__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  -webkit-app-region: no-drag;
+}
+
+.mb-titlebar__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-7);
+  height: var(--titlebar-height);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.mb-titlebar__button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.mb-titlebar__button--close:hover {
+  background: var(--danger);
+  color: var(--accent-ink);
+}
+
+/* --- Body --------------------------------------------------------------- */
+
+.mb-body {
+  display: grid;
+  grid-template-columns: var(--rail-width) 1fr;
+  min-height: 0;
+}
+
+/* --- The left rail ------------------------------------------------------
+   §5: "icon-only is fast for a daily user and hostile to a new one. Solve
+   it — do not just ship bare icons." So: icon AND label, always. The rail is
+   76px because a label under an icon needs the room, and a counter has one
+   rail for its whole life — the pixels are cheaper than the confusion.     */
+
+.mb-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
+  background: var(--surface);
+  border-right: var(--border-width) solid var(--border);
+  overflow-y: auto;
+}
+
+.mb-rail__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-1);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  text-align: center;
+}
+
+.mb-rail__item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Selected is carried by the fill AND the weight, not by colour alone. */
+.mb-rail__item[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--weight-bold);
+}
+
+.mb-rail__icon {
+  font-size: var(--text-xl);
+  line-height: var(--line-tight);
+}
+
+.mb-rail__spacer {
+  flex: 1;
+}
+
+.mb-main {
+  padding: var(--space-5);
+  overflow: auto;
+}
+
+/* --- The print-queue indicator -----------------------------------------
+   Audit D4: "a failed print is only a red message on screen. Nothing
+   remembers it. In a rush the cashier misses the toast."
+   So this is PERSISTENT. It does not fade, and it does not go away until
+   somebody deals with the job.                                            */
+
+.mb-queue {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--space-6);
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  color: var(--text-muted);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.mb-queue:hover {
+  background: var(--surface-2);
+}
+
+/* The one that matters: a job nobody can print. Border, fill AND the word,
+   because colour alone would fail exactly the cashier this is aimed at. */
+.mb-queue--attention {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+  font-weight: var(--weight-bold);
+}
+
+.mb-queue__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: var(--panel-width);
+}
+
+.mb-queue__job {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  border-left: var(--space-1) solid var(--border-strong);
+}
+
+.mb-queue__job--attention {
+  border-left-color: var(--danger);
+}
+
+.mb-queue__what {
+  font-weight: var(--weight-medium);
+}
+
+.mb-queue__where {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* --- First run ---------------------------------------------------------- */
+
+.mb-firstrun {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  height: 100%;
+  text-align: center;
+}
+
+.mb-firstrun__title {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+}

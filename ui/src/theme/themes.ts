@@ -32,8 +32,17 @@ export interface Theme {
   readonly appearance: 'light' | 'dark';
 }
 
+/** The one theme that is guaranteed to exist, so nothing has to handle the
+    case where the registry is empty. */
+export const LIGHT: Theme = {
+  id: 'light',
+  name: 'Light',
+  icon: 'sun',
+  appearance: 'light',
+};
+
 export const THEMES: readonly Theme[] = [
-  { id: 'light', name: 'Light', icon: 'sun', appearance: 'light' },
+  LIGHT,
   { id: 'dark', name: 'Dark', icon: 'moon', appearance: 'dark' },
   {
     id: 'contrast',
@@ -43,7 +52,7 @@ export const THEMES: readonly Theme[] = [
   },
 ];
 
-export const DEFAULT_THEME: ThemeId = 'light';
+export const DEFAULT_THEME: ThemeId = LIGHT.id;
 
 /** Text size is a token too (`--type-scale`), so this is also just data. */
 export interface TextSize {
@@ -56,14 +65,17 @@ export interface TextSize {
  * Audit F9: *"no font scaling for older owners"*. UI_GUIDELINES §3: *"many
  * owners are 50+ and the counter screen is across a desk."*
  */
+/** The default, as a value rather than an index. */
+export const NORMAL_TEXT: TextSize = { id: 'normal', name: 'Normal', scale: 1 };
+
 export const TEXT_SIZES: readonly TextSize[] = [
   { id: 'small', name: 'Small', scale: 0.9 },
-  { id: 'normal', name: 'Normal', scale: 1 },
+  NORMAL_TEXT,
   { id: 'large', name: 'Large', scale: 1.15 },
   { id: 'xlarge', name: 'Extra large', scale: 1.3 },
 ];
 
-export const DEFAULT_TEXT_SIZE = 'normal';
+export const DEFAULT_TEXT_SIZE = NORMAL_TEXT.id;
 
 export function themeById(id: ThemeId): Theme | undefined {
   return THEMES.find((t) => t.id === id);

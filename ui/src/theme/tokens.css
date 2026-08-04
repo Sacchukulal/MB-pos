@@ -112,12 +112,17 @@
      shops that buy this run a touch monitor. */
   --target-min: 44px;
 
-  /* Layout constants the shell needs. Here rather than in a component,
-     because "the rail is too narrow" is a look complaint and look
+  /* Component widths. Here rather than in a component, because "the rail is
+     too narrow" and "that dialog is cramped" are look complaints, and look
      complaints are answered in this file. */
   --rail-width: 76px;
   --rail-width-open: 200px;
   --titlebar-height: 36px;
+  --modal-width: 26rem;
+  --modal-width-wide: 42rem;
+  --panel-width: 22rem;
+  --toast-width-min: 18rem;
+  --toast-width-max: 26rem;
 
   --focus-ring-width: 2px;
   --border-width: 1px;

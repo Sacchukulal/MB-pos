@@ -1,0 +1,240 @@
+/**
+ * Modals, confirmations and toasts — **audit F10, which is one component's
+ * worth of finding:**
+ *
+ * > *"Confirmation dialogs are inconsistent between screens — some styled, some
+ * > plain, some missing."*
+ * > Fix: *"one confirm component everywhere."*
+ *
+ * So there is exactly one `Modal`, exactly one `ConfirmDialog` and exactly one
+ * toast system. A screen that wants to ask a question uses these; there is
+ * nothing else to use.
+ *
+ * # And a toast is never the only place a failure is reported
+ *
+ * That is audit D4's whole lesson — *"in a rush the cashier misses the toast
+ * and the kitchen simply never gets the order"*. A toast says "that worked"; a
+ * failure that matters gets a **persistent** indicator (see `shell/`), and the
+ * print queue is the reason P07 built one.
+ */
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+
+import { Button } from './controls';
+
+export interface ModalProps {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children?: ReactNode;
+  actions?: ReactNode;
+  wide?: boolean;
+}
+
+export function Modal({
+  open,
+  title,
+  onClose,
+  children,
+  actions,
+  wide,
+}: ModalProps) {
+  const panel = useRef<HTMLDivElement>(null);
+
+  // Escape closes, and focus moves into the dialog when it opens — the
+  // keyboard-first rule (§1) does not stop at the edge of a modal.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    panel.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="mb-overlay"
+      // Touch closes it too: "every popup closes by touch" (§1).
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={panel}
+        className={['mb-modal', wide ? 'mb-modal--wide' : ''].filter(Boolean).join(' ')}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+      >
+        <h2 className="mb-modal__title">{title}</h2>
+        <div className="mb-modal__body">{children}</div>
+        {actions ? <div className="mb-modal__actions">{actions}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+export interface ConfirmDialogProps {
+  open: boolean;
+  title: string;
+  body?: string;
+  /** What the button says — and it says exactly what will happen (§6). */
+  confirmLabel: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * The one confirmation in the product.
+ *
+ * UI_GUIDELINES §6: *"a button says exactly what happens; the confirmation
+ * echoes it."* So `confirmLabel` is required and there is no default of "OK" —
+ * a dialog that says "OK" has not told anybody anything.
+ */
+export function ConfirmDialog({
+  open,
+  title,
+  body,
+  confirmLabel,
+  cancelLabel = 'Cancel',
+  destructive,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
+  return (
+    <Modal
+      open={open}
+      title={title}
+      onClose={onCancel}
+      actions={
+        <>
+          <Button onClick={onCancel}>{cancelLabel}</Button>
+          <Button
+            variant={destructive ? 'danger' : 'primary'}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      {body}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Toasts — one system, stacked.
+// ---------------------------------------------------------------------------
+
+export type ToastTone = 'ok' | 'warn' | 'danger' | 'info';
+
+export interface Toast {
+  id: number;
+  tone: ToastTone;
+  message: string;
+  detail?: string;
+}
+
+interface ToastApi {
+  show: (tone: ToastTone, message: string, detail?: string) => void;
+  toasts: readonly Toast[];
+  dismiss: (id: number) => void;
+}
+
+const ToastContext = createContext<ToastApi | null>(null);
+
+/** How long a toast stays. Longer for anything that went wrong. */
+const LINGER: Record<ToastTone, number> = {
+  ok: 3_000,
+  info: 4_000,
+  warn: 6_000,
+  danger: 8_000,
+};
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const next = useRef(1);
+
+  const dismiss = useCallback((id: number) => {
+    setToasts((current) => current.filter((t) => t.id !== id));
+  }, []);
+
+  const show = useCallback(
+    (tone: ToastTone, message: string, detail?: string) => {
+      const id = next.current;
+      next.current += 1;
+      setToasts((current) => [...current, { id, tone, message, detail }]);
+      window.setTimeout(() => dismiss(id), LINGER[tone]);
+    },
+    [dismiss],
+  );
+
+  const value = useMemo<ToastApi>(
+    () => ({ show, toasts, dismiss }),
+    [show, toasts, dismiss],
+  );
+
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <ToastList toasts={toasts} onDismiss={dismiss} />
+    </ToastContext.Provider>
+  );
+}
+
+function ToastList({
+  toasts,
+  onDismiss,
+}: {
+  toasts: readonly Toast[];
+  onDismiss: (id: number) => void;
+}) {
+  if (toasts.length === 0) return null;
+  return (
+    // `polite`, not `assertive`: a cashier mid-keystroke must not be
+    // interrupted by a screen reader announcing a success message.
+    <div className="mb-toasts" role="status" aria-live="polite">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`mb-toast mb-toast--${toast.tone}`}>
+          <div className="mb-stack">
+            <span>{toast.message}</span>
+            {toast.detail ? (
+              <span className="mb-field__hint">{toast.detail}</span>
+            ) : null}
+          </div>
+          <Button
+            variant="quiet"
+            small
+            onClick={() => onDismiss(toast.id)}
+            aria-label="Dismiss"
+          >
+            ✕
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function useToast(): ToastApi {
+  const found = useContext(ToastContext);
+  if (!found) throw new Error('useToast was called outside ToastProvider');
+  return found;
+}

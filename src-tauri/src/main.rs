@@ -34,6 +34,8 @@
 mod config;
 mod ipc;
 mod logging;
+mod preview;
+mod push;
 mod startup;
 mod state;
 mod window;
@@ -102,6 +104,11 @@ fn main() {
         .manage(app_state)
         .invoke_handler(commands!())
         .setup(move |app| {
+            // Rust pushes; React subscribes (M4). Started before the window is
+            // shown, so a job that was already parked when the app opened is on
+            // screen at the first paint rather than at the first event.
+            push::pump_print_queue(app.handle());
+            push::emit_print_queue(app.handle());
             if let Some(main) = app.get_webview_window("main") {
                 // Step 8. Restored and THEN shown, so the 800x600 flash audit
                 // F7 describes cannot happen.

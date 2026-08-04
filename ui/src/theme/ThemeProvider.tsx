@@ -28,6 +28,8 @@ import {
   DEFAULT_TEXT_SIZE,
   DEFAULT_THEME,
   TEXT_SIZES,
+  LIGHT,
+  NORMAL_TEXT,
   THEMES,
   themeById,
   toggleTarget,
@@ -85,12 +87,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     read(TEXT_SIZE_KEY, DEFAULT_TEXT_SIZE),
   );
 
-  const theme = themeById(themeId) ?? themeById(DEFAULT_THEME) ?? THEMES[0];
+  // Falls back to a theme that is guaranteed to exist rather than to an index,
+  // so a name the owner removed from tokens.css cannot leave the app unstyled.
+  const theme = themeById(themeId) ?? LIGHT;
 
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute('data-theme', theme.id);
-    const size = TEXT_SIZES.find((s) => s.id === textSize) ?? TEXT_SIZES[1];
+    const size = TEXT_SIZES.find((s) => s.id === textSize) ?? NORMAL_TEXT;
     // One variable. Every type size in tokens.css is calc()'d from it, so
     // this reaches the cart, the dialogs and the receipt preview at once.
     root.style.setProperty('--type-scale', String(size.scale));

@@ -60,6 +60,21 @@ const CHECKS = [
 /** Lines saying `mb-tokens-allow: <why>` exempt themselves, and are counted. */
 const ESCAPE = 'mb-tokens-allow:';
 
+/**
+ * Comments describe these rules constantly — "every control is 44px tall" is
+ * documentation, not a hardcoded size. Stripping them is what keeps the lint
+ * from punishing the thing that explains it.
+ */
+function stripComments(text) {
+  const block = new RegExp("/\\*[\\s\\S]*?\\*/", "g");
+  const lineComment = new RegExp("^\\s*//.*$", "gm");
+  // Blanked rather than deleted, so a reported line number still points at
+  // the right line of the real file.
+  return text
+    .replace(block, (found) => found.replace(new RegExp("[^\\n]", "g"), " "))
+    .replace(lineComment, "");
+}
+
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -83,7 +98,7 @@ let escapes = 0;
 
 for (const file of walk(ROOT)) {
   if (isAllowed(file)) continue;
-  const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+  const lines = stripComments(readFileSync(file, 'utf8')).split(/\r?\n/);
   lines.forEach((line, index) => {
     if (line.includes(ESCAPE)) {
       escapes += 1;

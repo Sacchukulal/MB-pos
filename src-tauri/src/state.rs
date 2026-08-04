@@ -283,3 +283,24 @@ pub struct PrintJobView {
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
+
+impl App {
+    /// A receiver of everything the print queue does, for [`crate::push`].
+    ///
+    /// `None` when there is no shop — a first run has no queue to listen to,
+    /// and that is a state rather than a failure.
+    pub fn subscribe_to_queue(&self) -> Option<std::sync::mpsc::Receiver<mb_print::queue::QueueEvent>> {
+        lock(&self.shop).as_ref().map(|shop| shop.queue.subscribe())
+    }
+
+    /// Everything unfinished, in the words a screen shows.
+    ///
+    /// From `snapshot()` rather than from the event stream, which is P07's own
+    /// reasoning: *"a screen that attached after the `Parked` event would
+    /// otherwise be blind to the one thing it exists to show."*
+    pub fn print_queue_snapshot(&self) -> Vec<PrintJobView> {
+        lock(&self.shop).as_ref().map_or_else(Vec::new, |shop| {
+            shop.queue.snapshot().iter().map(crate::ipc::to_view).collect()
+        })
+    }
+}
