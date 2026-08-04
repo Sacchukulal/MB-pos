@@ -38,6 +38,18 @@ tauri-plugin-single-instance = "2"
 ts-rs = { version = "12", features = ["serde-compat"] }
 
 [features]
-# Tauri's own convention: `cargo test` and `cargo clippy` run without a
-# frontend build, and the bundler turns this on.
+# *** A RELEASE BUILD NEEDS THIS FEATURE, AND FORGETTING IT IS A TRAP. ***
+#
+#     cargo build --release -p magic-bill --features custom-protocol
+#
+# Without it the release binary serves the frontend from `devUrl`
+# (http://localhost:5173) instead of from the assets baked into it, so the
+# shipped application opens on "localhost refused to connect" — on a customer's
+# machine, where there is no dev server and never will be.
+#
+# It is not the default because `cargo run` in development is meant to use the
+# Vite dev server for hot reload. The Tauri CLI passes this automatically for
+# `tauri build`; a plain `cargo build --release` does not, which is exactly how
+# this was found at P08 — by building the release binary, running it, and
+# looking at the window.
 custom-protocol = ["tauri/custom-protocol"]

@@ -215,7 +215,11 @@
   flex-direction: column;
   gap: var(--space-4);
   width: 100%;
-  max-width: var(--space-8);
+  /* --modal-width, NOT --space-8. The first version of this used the spacing
+     token, which is 4rem, and every dialog came out sixty-four pixels wide with
+     one word per line. The lint cannot catch that — both are tokens — which is
+     exactly why the session ends by running the app and looking at it. */
+  max-width: var(--modal-width);
   max-height: 85%;
   padding: var(--space-5);
   background: var(--surface);
