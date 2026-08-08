@@ -158,6 +158,7 @@
      one line. */
   --menu-categories-width: 14rem;
   --class-min: 18rem;
+  --import-box-height: 12rem;
 
   /* Stacking. The kit's overlays were 100 (the modal) and 200 (toasts); the
      lock is above both, because a toast that floated over a locked screen

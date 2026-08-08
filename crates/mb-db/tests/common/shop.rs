@@ -243,7 +243,13 @@ fn menu() -> Vec<MenuItem> {
             category_id: Some(CategoryId::new("cat_food")),
             name: "Water".to_owned(),
             unit_price: Money::from_paise(2_000),
-            tax_class_id: Some(mb_core::TaxClassId::new("tax_packaged_18")),
+            // **No class, deliberately.** This is an inclusive-priced one-off,
+            // and the seeded "Packaged goods 18%" is exclusive — an item
+            // pointing at a class must carry that class's treatment (D56), so
+            // giving it one here would be a fixture describing a shop that
+            // cannot exist. Found by a CSV round trip, which resolves the
+            // class and quite correctly overwrote the disagreement.
+            tax_class_id: None,
             tax_rate: TaxRate::GST_18,
             tax_treatment: TaxTreatment::Inclusive,
             hsn: Some("2201".to_owned()),

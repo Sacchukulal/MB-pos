@@ -40,6 +40,7 @@ import type { MenuRowView } from './generated/MenuRowView';
 import type { MenuEdit } from './generated/MenuEdit';
 import type { CategoryView } from './generated/CategoryView';
 import type { TaxClassView } from './generated/TaxClassView';
+import type { ImportPlanView } from './generated/ImportPlanView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -187,6 +188,10 @@ export interface Commands {
     args: { categoryId: string | null; percent: string };
     returns: string;
   };
+  // The dry run writes nothing; the import then does exactly what it said.
+  plan_menu_import: { args: { csv: string }; returns: ImportPlanView };
+  run_menu_import: { args: { csv: string }; returns: string };
+  export_menu: { args: void; returns: string };
 }
 
 export type CommandName = keyof Commands;

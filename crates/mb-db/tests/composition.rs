@@ -331,3 +331,206 @@ fn a_combo_of_priceless_things_is_refused() {
         .expect_err("an arbitrary split was allowed");
     assert!(refused.to_string().contains("price of its own"), "{refused}");
 }
+
+// ---------------------------------------------------------------------------
+// P13 item 7 — the CSV, and the reason an owner finishes setup.
+// ---------------------------------------------------------------------------
+
+/// **T7, first half: the dry run writes nothing.**
+#[test]
+fn a_dry_run_changes_nothing_and_says_what_would_happen() {
+    let scratch = Scratch::new("csv_dry");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let before = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items")
+        .len();
+
+    // One update (the dosa, by name) and two new ones.
+    let csv = "name,price_paise,tax_class\r\n\
+               Masala Dosa,15000,Restaurant food 5%\r\n\
+               Filter Coffee,3000,Restaurant food 5%\r\n\
+               Rasam,4000,Restaurant food 5%\r\n";
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .expect("planned");
+
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    assert_eq!(plan.new_items.len(), 2, "Filter Coffee and Rasam are new");
+    assert_eq!(plan.updated_items.len(), 1, "the dosa already exists");
+    assert!(plan.summary().contains("2 new"), "{}", plan.summary());
+
+    // **And nothing was written.**
+    let after = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items")
+        .len();
+    assert_eq!(before, after, "the dry run wrote to the database");
+}
+
+/// **T7, second half: the real import matches the dry run exactly.**
+#[test]
+fn the_import_does_what_the_dry_run_said() {
+    let scratch = Scratch::new("csv_apply");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let csv = "name,price_paise,tax_class\r\n\
+               Masala Dosa,15000,Restaurant food 5%\r\n\
+               Filter Coffee,3000,Restaurant food 5%\r\n";
+
+    let (planned_new, planned_updated, written) = db
+        .transaction(|tx| {
+            let repos = Repos::new(tx);
+            let plan = repos.menu_csv().plan(OUTLET, csv)?;
+            let counts = (plan.new_items.len(), plan.updated_items.len());
+            let written = repos.menu_csv().apply(OUTLET, &plan, at(1))?;
+            Ok((counts.0, counts.1, written))
+        })
+        .expect("imported");
+
+    assert_eq!(written, planned_new + planned_updated);
+
+    let items = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items");
+
+    let coffee = items
+        .iter()
+        .find(|i| i.name == "Filter Coffee")
+        .expect("the new item is not there");
+    assert_eq!(coffee.unit_price, Money::from_paise(3_000));
+    assert_eq!(coffee.tax_rate, mb_core::TaxRate::GST_5);
+
+    // The dosa was UPDATED, not duplicated.
+    let dosas: Vec<_> = items.iter().filter(|i| i.name == "Masala Dosa").collect();
+    assert_eq!(dosas.len(), 1, "the import duplicated an existing item");
+    assert_eq!(dosas[0].unit_price, Money::from_paise(15_000));
+    assert_eq!(dosas[0].id, mb_core::ItemId::new("itm_dosa"), "its id changed");
+}
+
+/// **An import that half succeeds is worse than one that refuses.**
+///
+/// One bad row stops the whole file, by line number, and the owner fixes one
+/// cell rather than hunting for which four of four hundred are missing.
+#[test]
+fn one_bad_row_refuses_the_whole_file_by_line_number() {
+    let scratch = Scratch::new("csv_bad");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let before = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items")
+        .len();
+
+    let csv = "name,price_paise,tax_class\r\n\
+               Filter Coffee,3000,Restaurant food 5%\r\n\
+               Rasam,not a number,Restaurant food 5%\r\n\
+               Vada,2500,Nonexistent class\r\n\
+               ,5000,Restaurant food 5%\r\n";
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .expect("planned");
+
+    assert_eq!(plan.refused.len(), 3);
+    // The line numbers are the OWNER's — the header is line 1.
+    assert_eq!(plan.refused[0].0, 3, "wrong line for the bad price");
+    assert!(plan.refused[0].1.contains("12000"), "{}", plan.refused[0].1);
+    assert_eq!(plan.refused[1].0, 4);
+    assert!(plan.refused[1].1.contains("tax classes"), "{}", plan.refused[1].1);
+    assert_eq!(plan.refused[2].0, 5);
+    assert!(plan.refused[2].1.contains("no name"), "{}", plan.refused[2].1);
+
+    assert!(plan.summary().contains("nothing will be imported"), "{}", plan.summary());
+
+    // Applying it is refused outright, and nothing is written.
+    let refused = db
+        .transaction(|tx| Repos::new(tx).menu_csv().apply(OUTLET, &plan, at(1)))
+        .expect_err("a file with bad rows was imported");
+    assert!(refused.to_string().contains("nothing was imported"), "{refused}");
+
+    let after = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items")
+        .len();
+    assert_eq!(before, after);
+}
+
+/// Export then import must be a no-op — the property an owner assumes when
+/// they open the file, add three rows and send it back.
+#[test]
+fn a_menu_survives_a_round_trip_through_a_spreadsheet() {
+    let scratch = Scratch::new("csv_round");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let before = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items");
+
+    let csv = db
+        .transaction(|tx| Repos::new(tx).menu_csv().export(OUTLET))
+        .expect("exported");
+
+    // Audit G7's own example, and the reason this does not join with commas.
+    assert!(csv.contains("\r\n"), "RFC 4180 says CRLF, and Excel agrees");
+    assert!(csv.starts_with("id,name,category,price_paise"), "{csv}");
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, &csv))
+        .expect("planned");
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    assert!(plan.new_items.is_empty(), "a round trip invented items");
+    assert_eq!(plan.updated_items.len(), before.len());
+
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos.menu_csv().apply(OUTLET, &plan, at(2))
+    })
+    .expect("imported");
+
+    let after = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items");
+    assert_eq!(before, after, "a round trip through CSV changed the menu");
+}
+
+/// **Audit G7 itself**: an item name with a comma in it.
+#[test]
+fn an_item_called_chicken_biryani_half_survives() {
+    let scratch = Scratch::new("csv_comma");
+    let db = scratch.open();
+    shop::build(&db);
+
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let mut item = repos
+            .menu()
+            .find_item(&mb_core::ItemId::new("itm_dosa"))?
+            .expect("the dosa");
+        item.name = "Chicken \"Biryani\", Half".to_owned();
+        repos.menu().save_item(OUTLET, &item, at(1))
+    })
+    .expect("renamed");
+
+    let csv = db
+        .transaction(|tx| Repos::new(tx).menu_csv().export(OUTLET))
+        .expect("exported");
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, &csv))
+        .expect("planned");
+
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    assert!(
+        plan.updated_items
+            .iter()
+            .any(|i| i.name == "Chicken \"Biryani\", Half"),
+        "the comma broke the columns — audit G7"
+    );
+}

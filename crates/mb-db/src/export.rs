@@ -254,7 +254,7 @@ fn export_table(conn: &rusqlite::Connection, table: &str) -> Result<Csv, DbError
 }
 
 /// Rule 3 lives here: `None` writes nothing at all, `Some("")` writes `""`.
-fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = Option<&'a str>>) {
+pub(crate) fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = Option<&'a str>>) {
     let mut first = true;
     for cell in cells {
         if !first {
@@ -291,7 +291,7 @@ fn escape(value: &str) -> String {
 }
 
 /// The inverse. `None` for an unquoted empty field, `Some("")` for `""`.
-fn parse_csv(text: &str) -> Vec<Vec<Option<String>>> {
+pub(crate) fn parse_csv(text: &str) -> Vec<Vec<Option<String>>> {
     let mut rows = Vec::new();
     let mut row: Vec<Option<String>> = Vec::new();
     let mut field = String::new();

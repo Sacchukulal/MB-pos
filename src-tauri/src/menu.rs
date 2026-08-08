@@ -641,3 +641,119 @@ pub fn change_menu_prices(
 ) -> UiResult<String> {
     change_prices_on(&app, category_id, percent)
 }
+
+// ---------------------------------------------------------------------------
+// The spreadsheet — P13 item 7.
+//
+// "A shop with 400 items will not type them in, and a setup nobody finishes is
+// a sale nobody keeps."
+// ---------------------------------------------------------------------------
+
+/// What an import would do, before it does anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPlanView {
+    /// The whole sentence, written in Rust: "312 new item(s) and 88 change(s)."
+    pub summary: String,
+    pub new_items: i64,
+    pub updated_items: i64,
+    /// "Line 4: there is no category called \"Snaks\"" — the line number is the
+    /// one in the owner's spreadsheet, counting the header as line 1.
+    pub refused: Vec<String>,
+    /// Nothing may be imported until this is true.
+    pub is_clean: bool,
+}
+
+/// Read a file and say what would happen. **Writes nothing.**
+pub fn plan_import_on(app: &App, csv: String) -> UiResult<ImportPlanView> {
+    guard::require(app, Permission::MenuManage)?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let plan = mb_db::Repos::new(tx).menu_csv().plan(OUTLET, &csv)?;
+                Ok(ImportPlanView {
+                    summary: plan.summary(),
+                    new_items: plan.new_items.len().try_into().unwrap_or(i64::MAX),
+                    updated_items: plan.updated_items.len().try_into().unwrap_or(i64::MAX),
+                    refused: plan
+                        .refused
+                        .iter()
+                        .map(|(line, why)| format!("Line {line}: {why}"))
+                        .collect(),
+                    is_clean: plan.is_clean(),
+                })
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// Do it — **planning again inside the same transaction**, so what is written
+/// is what the file says now rather than what it said when the owner looked.
+///
+/// The alternative is passing the plan across the IPC boundary and back, which
+/// would let a screen edit it. A plan is a decision about a file, and the file
+/// is the thing worth trusting.
+pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let day = today(at);
+
+    let written = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let plan = repos.menu_csv().plan(OUTLET, &csv)?;
+                let written = repos.menu_csv().apply(OUTLET, &plan, at)?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::PRICE_CHANGED,
+                        "menu",
+                    )
+                    .with_after(serde_json::json!({
+                        "imported": written,
+                        "new": plan.new_items.len(),
+                        "changed": plan.updated_items.len(),
+                    })),
+                )?;
+                Ok(written)
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    log_info!("{} imported {written} menu item(s)", who.name);
+    Ok(match written {
+        0 => "Nothing was imported — the file had no rows.".to_owned(),
+        1 => "One item imported.".to_owned(),
+        n => format!("{n} items imported."),
+    })
+}
+
+/// The whole menu as a spreadsheet.
+pub fn export_menu_on(app: &App) -> UiResult<String> {
+    guard::require(app, Permission::MenuManage)?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).menu_csv().export(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+#[tauri::command]
+pub fn plan_menu_import(app: tauri::State<'_, App>, csv: String) -> UiResult<ImportPlanView> {
+    plan_import_on(&app, csv)
+}
+
+#[tauri::command]
+pub fn run_menu_import(app: tauri::State<'_, App>, csv: String) -> UiResult<String> {
+    run_import_on(&app, csv)
+}
+
+#[tauri::command]
+pub fn export_menu(app: tauri::State<'_, App>) -> UiResult<String> {
+    export_menu_on(&app)
+}

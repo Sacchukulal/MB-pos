@@ -435,6 +435,9 @@ macro_rules! commands {
             $crate::menu::save_menu_category,
             $crate::menu::save_tax_class,
             $crate::menu::change_menu_prices,
+            $crate::menu::plan_menu_import,
+            $crate::menu::run_menu_import,
+            $crate::menu::export_menu,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

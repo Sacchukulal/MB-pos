@@ -132,6 +132,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // government, and getting it wrong is a notice rather than a bad price.
     ("save_tax_class", Access::Needs(Permission::SettingsTax)),
     ("change_menu_prices", Access::Needs(Permission::MenuManage)),
+    ("plan_menu_import", Access::Needs(Permission::MenuManage)),
+    ("run_menu_import", Access::Needs(Permission::MenuManage)),
+    ("export_menu", Access::Needs(Permission::MenuManage)),
 
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It

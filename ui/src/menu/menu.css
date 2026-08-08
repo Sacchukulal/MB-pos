@@ -65,3 +65,43 @@
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
 }
+
+/* --- Importing a spreadsheet (P13 item 7) -------------------------------- */
+
+.mb-import__box {
+  width: 100%;
+  min-height: var(--import-box-height);
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  resize: vertical;
+}
+
+.mb-import__box:focus-visible {
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: var(--space-1);
+}
+
+.mb-import__plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin-top: var(--space-3);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* Every refused line, by number. An owner fixes one cell rather than hunting
+   for which four of four hundred are missing. */
+.mb-import__refused {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}

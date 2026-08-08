@@ -42,6 +42,7 @@ import { call, isUiError } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
 import type { TaxClassView } from '../ipc/generated/TaxClassView';
+import type { ImportPlanView } from '../ipc/generated/ImportPlanView';
 
 import './menu.css';
 
@@ -53,6 +54,7 @@ export function Menu() {
   const [find, setFind] = useState('');
   const [editing, setEditing] = useState<MenuRowView | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const toast = useToast();
 
   const report = useCallback(
@@ -181,6 +183,22 @@ export function Menu() {
           <Button variant="quiet" onClick={() => setBulkOpen(true)}>
             Change prices
           </Button>
+          <Button variant="quiet" onClick={() => setImportOpen(true)}>
+            Import
+          </Button>
+          <Button
+            variant="quiet"
+            onClick={() => {
+              call('export_menu')
+                .then((text) => {
+                  void navigator.clipboard.writeText(text);
+                  toast.show('ok', 'The menu is on the clipboard — paste it into a spreadsheet.');
+                })
+                .catch(report);
+            }}
+          >
+            Export
+          </Button>
           <Button
             variant="primary"
             onClick={() =>
@@ -231,6 +249,18 @@ export function Menu() {
             setRows(saved);
             setEditing(null);
             void load();
+          }}
+          onFailed={report}
+        />
+      ) : null}
+
+      {importOpen ? (
+        <ImportMenu
+          onClose={() => setImportOpen(false)}
+          onDone={async (said) => {
+            setImportOpen(false);
+            toast.show('ok', said);
+            await load();
           }}
           onFailed={report}
         />
@@ -535,6 +565,87 @@ function BulkPrices({
           }}
         >
           Change them
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * **The spreadsheet** — P13 item 7, and the reason an owner ever finishes
+ * setting up.
+ *
+ * The dry run is the feature: paste or open a file, see *"312 new item(s) and
+ * 88 change(s)"* — or every bad line by number — and only then decide. Rust
+ * writes nothing until the second button.
+ */
+function ImportMenu({
+  onClose,
+  onDone,
+  onFailed,
+}: {
+  onClose: () => void;
+  onDone: (said: string) => void | Promise<void>;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [csv, setCsv] = useState('');
+  const [plan, setPlan] = useState<ImportPlanView | null>(null);
+
+  const look = () => {
+    setPlan(null);
+    call('plan_menu_import', { csv })
+      .then(setPlan)
+      .catch(onFailed);
+  };
+
+  return (
+    <Modal open title="Import a menu" onClose={onClose} wide>
+      <p className="mb-muted">
+        Paste a spreadsheet here — the first line names the columns. Export the
+        menu first if you want the shape. Nothing is written until you have seen
+        what it would do.
+      </p>
+      <textarea
+        className="mb-import__box"
+        value={csv}
+        onChange={(event) => {
+          setCsv(event.target.value);
+          setPlan(null);
+        }}
+        placeholder="name,price_paise,tax_class"
+        aria-label="The spreadsheet"
+      />
+
+      {plan ? (
+        <div className="mb-import__plan">
+          <strong>{plan.summary}</strong>
+          {plan.refused.length > 0 ? (
+            <ul className="mb-import__refused">
+              {plan.refused.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mb-row mb-row--end">
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={look} disabled={csv.trim() === ''}>
+          See what it would do
+        </Button>
+        <Button
+          variant="primary"
+          disabled={!plan?.isClean || plan.newItems + plan.updatedItems === 0n}
+          onClick={() => {
+            call('run_menu_import', { csv })
+              .then(onDone)
+              .catch(onFailed);
+          }}
+        >
+          Import
         </Button>
       </div>
     </Modal>

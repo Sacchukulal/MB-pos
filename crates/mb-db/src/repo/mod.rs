@@ -32,6 +32,7 @@ pub mod composition;
 pub mod corrections;
 pub mod floor;
 pub mod menu;
+pub mod menucsv;
 pub mod money;
 pub mod order;
 pub mod outbox;
@@ -45,6 +46,7 @@ pub use composition::{Combo, ComboPart, CompositionRepo, Modifier, ModifierGroup
 pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
+pub use menucsv::{ImportPlan, MenuCsvRepo};
 pub use money::MoneyRepo;
 pub use order::OrderRepo;
 pub use outbox::{Op, OutboxRepo, OutboxRow};
@@ -106,6 +108,13 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn outbox(&self) -> OutboxRepo<'a> {
         OutboxRepo::new(self.tx)
+    }
+
+    /// The menu in and out of a spreadsheet (P13) — a shop with 400 items
+    /// will not type them in.
+    #[must_use]
+    pub fn menu_csv(&self) -> MenuCsvRepo<'a> {
+        MenuCsvRepo::new(self.tx)
     }
 
     /// Variants, modifiers and combos (P13) — the three ways one menu row
