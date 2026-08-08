@@ -46,6 +46,7 @@ use crate::item::OrderType;
 use crate::numbering::{Claimed, Numbering};
 use crate::payment::Settlement;
 use crate::qty::{Qty, QtyError};
+use crate::table::SubTable;
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -79,9 +80,24 @@ pub struct OrderCore {
     pub business_day: BusinessDay,
     pub created_at: Timestamp,
     pub order_type: OrderType,
-    /// Set for a dine-in order. P10 adds sub-tables (6A / 6B, scope 1.6) and
-    /// P14 owns the floor plan; here it is only which table this order is on.
+    /// Set for a dine-in order. P14 owns the floor plan; here it is only which
+    /// table this order is on.
     pub table: Option<TableId>,
+    /// Scope 1.6 — the `6A` / `6B` letter, when two parties share one table.
+    /// It belongs to the ORDER and not to the table, because it exists only
+    /// while somebody is sitting there.
+    ///
+    /// Marked `default` for serde so an order written before P14 still reads.
+    #[serde(default)]
+    pub sub_table: Option<SubTable>,
+    /// Scope 1.24 — how many people are eating.
+    ///
+    /// **`None` is honestly unknown and stays that way.** A counter that
+    /// demands a cover count before a cup of tea gets `1` typed into it
+    /// forever, and a report cannot tell that lie from the truth. P18 divides
+    /// by the covers it has and says how many orders it left out.
+    #[serde(default)]
+    pub covers: Option<u32>,
     pub cart: Cart,
     pub created_by: StaffId,
     pub note: Option<String>,
@@ -212,6 +228,8 @@ impl DraftOrder {
                 created_at,
                 order_type,
                 table: None,
+                sub_table: None,
+                covers: None,
                 cart: Cart::new(),
                 created_by,
                 note: None,
@@ -223,6 +241,20 @@ impl DraftOrder {
     #[must_use]
     pub fn on_table(mut self, table: TableId) -> Self {
         self.core.table = Some(table);
+        self
+    }
+
+    /// The `6A` half of a shared table (scope 1.6).
+    #[must_use]
+    pub fn on_seat(mut self, sub: SubTable) -> Self {
+        self.core.sub_table = Some(sub);
+        self
+    }
+
+    /// How many are eating (scope 1.24). Never compulsory — see `OrderCore`.
+    #[must_use]
+    pub fn with_covers(mut self, covers: u32) -> Self {
+        self.core.covers = Some(covers);
         self
     }
 

@@ -90,17 +90,19 @@ impl<'a> OrderRepo<'a> {
 
         self.tx.execute(
             "INSERT INTO orders (id, outlet_id, terminal_id, state, business_day, created_at,
-                                 created_by, order_type, table_id, covers, note,
+                                 created_by, order_type, table_id, sub_table, covers, note,
                                  token_value, token_formatted,
                                  bill_number_value, bill_number_formatted,
                                  settled_at, settled_by,
                                  cancelled_at, cancelled_by, cancel_reason,
                                  voided_at, voided_by, void_reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10,
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?23, ?24, ?10,
                      ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
              ON CONFLICT (id) DO UPDATE SET
                  state                 = excluded.state,
                  table_id              = excluded.table_id,
+                 sub_table             = excluded.sub_table,
+                 covers                = excluded.covers,
                  note                  = excluded.note,
                  token_value           = excluded.token_value,
                  token_formatted       = excluded.token_formatted,
@@ -137,6 +139,11 @@ impl<'a> OrderRepo<'a> {
                 voided.as_ref().map(|(at, _, _)| encode::timestamp_to_sql(*at)),
                 voided.as_ref().map(|(_, by, _)| by.as_str().to_owned()),
                 voided.as_ref().map(|(_, _, why)| why.clone()),
+                // P14: which seat of a shared table (scope 1.6) and how many
+                // are eating (1.24). Both nullable, and covers is honestly
+                // unknown rather than 1 — see `OrderCore::covers`.
+                core.sub_table.as_ref().map(|s| s.as_str().to_owned()),
+                core.covers,
             ],
         )?;
 
@@ -174,6 +181,13 @@ impl<'a> OrderRepo<'a> {
             created_at: header.created_at,
             order_type: header.order_type,
             table: header.table.clone(),
+            sub_table: header
+                .sub_table
+                .as_deref()
+                .map(mb_core::SubTable::parse)
+                .transpose()
+                .map_err(|e| DbError::invariant(format!("orders.sub_table: {e}")))?,
+            covers: header.covers,
             cart,
             created_by: header.created_by.clone(),
             note: header.note.clone(),
@@ -544,10 +558,15 @@ impl<'a> OrderRepo<'a> {
 
     fn read_header(&self, id: &str) -> Result<Option<Header>, DbError> {
         let mut stmt = self.tx.prepare_cached(
+            // New columns go on the END of this list, never in the middle: the
+            // reader below indexes by position, and inserting `sub_table` after
+            // `note` silently shifted every column after it by two. Caught by
+            // two P12 tests reading `cancelled_at` as text (P14).
             "SELECT state, business_day, created_at, created_by, order_type, table_id, note,
                     token_value, token_formatted, bill_number_value, bill_number_formatted,
                     settled_at, settled_by, cancelled_at, cancelled_by, cancel_reason,
-                    voided_at, voided_by, void_reason
+                    voided_at, voided_by, void_reason,
+                    sub_table, covers
                FROM orders WHERE id = ?1",
         )?;
         let mut rows = stmt.query([id])?;
@@ -577,6 +596,8 @@ impl<'a> OrderRepo<'a> {
             voided_at: row.get::<_, Option<i64>>(16)?.map(encode::timestamp_from_sql),
             voided_by: row.get::<_, Option<String>>(17)?.map(StaffId::new),
             void_reason: row.get(18)?,
+            sub_table: row.get::<_, Option<String>>(19)?,
+            covers: row.get(20)?,
         }))
     }
 
@@ -1007,6 +1028,11 @@ struct Header {
     voided_at: Option<mb_core::Timestamp>,
     voided_by: Option<StaffId>,
     void_reason: Option<String>,
+    /// P14, scope 1.6. Stored as the letter; parsed on the way out so a hand-
+    /// edited database cannot put "front-left" on a kitchen ticket.
+    sub_table: Option<String>,
+    /// P14, scope 1.24.
+    covers: Option<u32>,
 }
 
 impl Header {

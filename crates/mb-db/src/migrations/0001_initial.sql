@@ -489,6 +489,14 @@ CREATE TABLE orders (
     voided_by    TEXT REFERENCES staff (id),
     void_reason  TEXT,
 
+    -- Scope 1.22 — where this order's food went when two tables became one
+    -- bill (P14). The order itself is CANCELLED, because its food was sold on
+    -- the other bill and counting it twice is the bug; this column is what
+    -- tells a report the difference between a merge and a walkout, and gives
+    -- "where did table 5's order go" an answer that is a row rather than a
+    -- guess. D47 — a correction is a state, never a deletion.
+    merged_into TEXT REFERENCES orders (id),
+
     -- Scope X1, PENDING. Three nullable columns so an aggregator order can
     -- become one later without a migration on a populated orders table. The
     -- integration itself is a commercial decision, not a code one.

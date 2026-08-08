@@ -65,6 +65,10 @@ pub struct CartState {
     /// travels into the order when it is saved. What the kitchen was told is
     /// never a screen's memory.
     pub kitchen: mb_core::KitchenLedger,
+    /// Scope 1.6 — which half of a shared table this order is (P14).
+    pub sub_table: Option<mb_core::SubTable>,
+    /// Scope 1.24 — how many are eating. `None` is honestly unknown.
+    pub covers: Option<u32>,
     /// Scope 1.26 — a note on the whole order, printed on the bill.
     pub note: Option<String>,
     /// **Who put the first line on this bill** (P11).
@@ -91,6 +95,8 @@ impl Default for CartState {
             settlement: Settlement::new(),
             bill_discount: None,
             kitchen: mb_core::KitchenLedger::new(),
+            sub_table: None,
+            covers: None,
             note: None,
             opened_by: None,
         }
@@ -618,6 +624,8 @@ impl CartState {
             created_at: Timestamp::from_millis(0),
             order_type: self.order_type,
             table: self.table.clone().map(mb_core::TableId::new),
+            sub_table: self.sub_table.clone(),
+            covers: self.covers,
             cart: self.cart.clone(),
             created_by: self
                 .opened_by

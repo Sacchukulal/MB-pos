@@ -124,7 +124,7 @@ fn seed_masters(db: &Db) {
                     section_id: Some("sec_hall".to_owned()),
                     label: n.to_string(),
                     seats: 4,
-                    pos: Some((n * 10, 20)),
+                    pos: Some((n, 1)),
                     sort_order: n,
                     is_active: true,
                 },
