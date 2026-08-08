@@ -20,7 +20,7 @@ pub enum PaymentError {
     #[error("a tip cannot be negative")]
     NegativeTip,
     /// You cannot hand change back out of a card machine.
-    #[error("card, UPI and khata payments come to ₹{non_cash}, which is more than the ₹{due} owed — take the extra in cash or reduce the amount")]
+    #[error("card, UPI and credit payments come to ₹{non_cash}, which is more than the ₹{due} owed — take the extra in cash or reduce the amount")]
     CannotOverpayWithoutCash { non_cash: Money, due: Money },
     #[error("an amount on this settlement is too large to handle: {0}")]
     Money(#[from] MoneyError),
@@ -30,7 +30,7 @@ type Result<T> = std::result::Result<T, PaymentError>;
 
 /// How one payment was made.
 ///
-/// **`Credit` holds the customer id inside the variant**, so a khata sale with
+/// **`Credit` holds the customer id inside the variant**, so a credit sale with
 /// nobody to bill is not a state this program can be in. It is made
 /// unrepresentable rather than validated:
 ///
@@ -47,7 +47,7 @@ pub enum PaymentMode {
     Cash,
     Card,
     Upi,
-    /// On the customer's khata. The id is not optional.
+    /// On the customer's credit. The id is not optional.
     Credit(CustomerId),
     /// Cheque, meal card, a wallet the shop uses. Kept narrow — free text
     /// syncs to the cloud forever (D16).
@@ -64,15 +64,15 @@ impl PaymentMode {
     /// The label a payment-mode report groups by.
     ///
     /// **Every `Credit` groups together**, whichever customer it was. The
-    /// report the owner wants is "how much went on khata this month", not one
-    /// row per customer — that is a khata statement, which is P15's job.
+    /// report the owner wants is "how much went on credit this month", not one
+    /// row per customer — that is a credit statement, which is P15's job.
     #[must_use]
     pub fn report_label(&self) -> &str {
         match self {
             PaymentMode::Cash => "Cash",
             PaymentMode::Card => "Card",
             PaymentMode::Upi => "UPI",
-            PaymentMode::Credit(_) => "Khata",
+            PaymentMode::Credit(_) => "Credit",
             PaymentMode::Other(name) => name,
         }
     }
@@ -85,12 +85,12 @@ pub struct Payment {
     pub amount: Money,
     /// A UPI reference, a card approval code, a cheque number. Short.
     pub reference: Option<String>,
-    /// **Audit B12.** v1 recorded a khata settlement with the payment mode
+    /// **Audit B12.** v1 recorded a credit settlement with the payment mode
     /// `"Full Settlement"`, which is not a payment mode and polluted every
-    /// payment-mode report. A khata settlement is a real payment — cash, UPI
+    /// payment-mode report. A credit settlement is a real payment — cash, UPI
     /// or card — that happens to clear a balance. So `mode` says what it
     /// **was** and this flag says what it **did**.
-    pub settles_khata: bool,
+    pub settles_credit: bool,
 }
 
 impl Payment {
@@ -99,7 +99,7 @@ impl Payment {
             // A zero-rupee payment row is noise in every report downstream.
             return Err(PaymentError::NonPositiveAmount);
         }
-        Ok(Payment { mode, amount, reference: None, settles_khata: false })
+        Ok(Payment { mode, amount, reference: None, settles_credit: false })
     }
 
     #[must_use]
@@ -108,10 +108,10 @@ impl Payment {
         self
     }
 
-    /// Mark this as clearing a khata balance. The mode stays what it was.
+    /// Mark this as clearing a credit balance. The mode stays what it was.
     #[must_use]
-    pub fn settling_khata(mut self) -> Self {
-        self.settles_khata = true;
+    pub fn settling_credit(mut self) -> Self {
+        self.settles_credit = true;
         self
     }
 }
@@ -323,9 +323,9 @@ mod tests {
     }
 
     #[test]
-    fn credit_carries_its_customer_and_reports_as_one_khata_row() {
+    fn credit_carries_its_customer_and_reports_as_one_credit_row() {
         // Two different customers on one bill is unusual but legal — a split
-        // between two regulars. The report wants one Khata row, not two.
+        // between two regulars. The report wants one Credit row, not two.
         let mut settlement = Settlement::new();
         settlement
             .add(pay(PaymentMode::Credit(CustomerId::new("cus_1")), 200))
@@ -335,7 +335,7 @@ mod tests {
             .expect("adds");
 
         let totals = settlement.total_by_mode().expect("totals");
-        assert_eq!(totals, vec![("Khata".to_owned(), rs(500))]);
+        assert_eq!(totals, vec![("Credit".to_owned(), rs(500))]);
 
         // And the id is still reachable for P15's ledger.
         let PaymentMode::Credit(ref customer) = settlement.payments()[0].mode else {
@@ -345,18 +345,18 @@ mod tests {
     }
 
     #[test]
-    fn a_khata_settlement_keeps_its_real_payment_mode() {
+    fn a_credit_settlement_keeps_its_real_payment_mode() {
         // Audit B12: v1 wrote the mode as "Full Settlement". Here the mode is
         // Cash, and the flag records what the payment did.
         let mut settlement = Settlement::new();
-        settlement.add(pay(PaymentMode::Cash, 500).settling_khata()).expect("adds");
+        settlement.add(pay(PaymentMode::Cash, 500).settling_credit()).expect("adds");
 
-        assert!(settlement.payments()[0].settles_khata);
+        assert!(settlement.payments()[0].settles_credit);
         assert_eq!(settlement.payments()[0].mode, PaymentMode::Cash);
         assert_eq!(
             settlement.total_by_mode(),
             Ok(vec![("Cash".to_owned(), rs(500))]),
-            "a khata settlement paid in cash counts as cash"
+            "a credit settlement paid in cash counts as cash"
         );
     }
 

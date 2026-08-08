@@ -43,7 +43,7 @@ Rate   Taxable     CGST     SGST
 --------------------------------
 Card                      484.00
 Sodexo                    242.00
-Khata                     242.00
+Credit                    242.00
 Tip                        20.00
 --------------------------------
 upi://pay?pa=anna@upi&pn=Anna Ku

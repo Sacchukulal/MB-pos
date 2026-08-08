@@ -271,10 +271,10 @@ pub fn rounding_mode_from_sql(text: &str) -> Result<RoundingMode, DbError> {
 /// How a [`PaymentMode`] is split across `payments.mode`,
 /// `payments.customer_id` and `payments.mode_label`.
 ///
-/// Audit B12: v1 recorded a khata settlement with payment mode
+/// Audit B12: v1 recorded a credit settlement with payment mode
 /// `"Full Settlement"`, which is not a payment mode, and it polluted every
 /// payment-mode report. mb-core fixed the shape — `mode` says what it WAS,
-/// `Payment::settles_khata` says what it DID. Do not undo that here by
+/// `Payment::settles_credit` says what it DID. Do not undo that here by
 /// inventing a fifth tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentModeColumns {
@@ -329,7 +329,7 @@ pub fn payment_mode_from_sql(
         ("credit", Some(id), None) => Ok(PaymentMode::Credit(id.into())),
         ("other", None, Some(label)) => Ok(PaymentMode::Other(label.to_owned())),
         ("credit", None, _) => Err(DbError::invariant(
-            "a khata payment is stored without the customer it is owed by",
+            "a credit payment is stored without the customer it is owed by",
         )),
         ("other", _, None) => Err(DbError::invariant(
             "a payment of an 'other' mode is stored without saying which mode",
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn a_khata_payment_without_its_customer_is_refused() {
+    fn a_credit_payment_without_its_customer_is_refused() {
         // The CHECK constraint stops this reaching the disk; this is the belt
         // for that pair of braces.
         assert!(payment_mode_from_sql("credit", None, None).is_err());

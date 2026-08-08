@@ -481,7 +481,7 @@ fn write_bill_rows(
     // Every bill has one payment; every other bill has a second (scope 1.15,
     // split payment).
     tx.execute(
-        "INSERT INTO payments (id, order_id, seq, mode, amount, tip, settles_khata,
+        "INSERT INTO payments (id, order_id, seq, mode, amount, tip, settles_credit,
                                received_at, received_by, business_day)
          VALUES (?1, ?2, 0, 'cash', ?3, 0, 0, ?4, 'staff_1', ?5)",
         rusqlite::params![
@@ -494,7 +494,7 @@ fn write_bill_rows(
     )?;
     if n.is_multiple_of(2) {
         tx.execute(
-            "INSERT INTO payments (id, order_id, seq, mode, amount, tip, settles_khata,
+            "INSERT INTO payments (id, order_id, seq, mode, amount, tip, settles_credit,
                                    received_at, received_by, business_day)
              VALUES (?1, ?2, 1, 'upi', ?3, 0, 0, ?4, 'staff_1', ?5)",
             rusqlite::params![
@@ -519,7 +519,7 @@ fn write_bill_rows(
         rusqlite::params![format!("{order_id}_ob"), order_id, at_sql],
     )?;
 
-    // An expense every twentieth bill and a khata repayment every fiftieth, so
+    // An expense every twentieth bill and a credit repayment every fiftieth, so
     // those tables are not zero in the projection.
     if n.is_multiple_of(20) {
         tx.execute(

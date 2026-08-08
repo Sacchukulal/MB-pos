@@ -1,7 +1,7 @@
 //! The sync outbox — audit A1, A2 and A3, in one table.
 //!
 //! v1's outbox knew about bills. That is why the owner's phone shows ₹0
-//! expenses forever (A2), why khata repayments have never been backed up (A3),
+//! expenses forever (A2), why credit repayments have never been backed up (A3),
 //! and why A1 says the shop's real asset lives on one hard disk.
 //!
 //! **The one rule: enqueueing happens in the SAME transaction as the write it

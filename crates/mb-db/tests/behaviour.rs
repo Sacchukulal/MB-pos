@@ -34,7 +34,7 @@ use rusqlite::Transaction;
 /// `gross_including_tax, rate_bp, treatment` — D4's pipeline, in its own order.
 type BillLineRow = (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, String);
 
-/// `mode, customer_id, mode_label, amount, tip, settles_khata` — the tag, both
+/// `mode, customer_id, mode_label, amount, tip, settles_credit` — the tag, both
 /// payloads, and the flag audit B12 says must not be a mode.
 type PaymentRow = (String, Option<String>, Option<String>, i64, i64, i64);
 
@@ -465,10 +465,10 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
             assert_eq!(encode::money_from_sql(row.5), charge.gross_including_tax);
         }
 
-        // Both payload-carrying payment modes, and the khata flag that audit
+        // Both payload-carrying payment modes, and the credit flag that audit
         // B12 says must not be a mode.
         let mut stmt = conn.prepare(
-            "SELECT mode, customer_id, mode_label, amount, tip, settles_khata
+            "SELECT mode, customer_id, mode_label, amount, tip, settles_credit
                FROM payments WHERE order_id = 'ord_1' ORDER BY seq",
         )?;
         let payments: Vec<PaymentRow> = stmt
@@ -485,8 +485,8 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
             );
             assert_eq!(encode::money_from_sql(row.3), payment.amount);
             assert_eq!(
-                encode::bool_from_sql(row.5, "payments.settles_khata").expect("0 or 1"),
-                payment.settles_khata
+                encode::bool_from_sql(row.5, "payments.settles_credit").expect("0 or 1"),
+                payment.settles_credit
             );
         }
         assert_eq!(
@@ -653,7 +653,7 @@ fn t23_a_repeated_bill_number_is_refused() {
 
 /// The CHECK constraints that carry mb-core's type-level rules down to the
 /// disk: a cancelled order has a reason, a dine-in order past draft has a
-/// table, and a khata payment names its customer.
+/// table, and a credit payment names its customer.
 #[test]
 fn the_orders_table_refuses_what_mb_core_refuses() {
     let db = Scratch::new("checks").open();
@@ -770,8 +770,8 @@ fn build_a_real_bill() -> (Bill, Settlement) {
     )
     .expect("compute");
 
-    // Split payment: part cash, part khata, part something the shop calls
-    // "Sodexo". The khata one carries a customer; the other one a label.
+    // Split payment: part cash, part credit, part something the shop calls
+    // "Sodexo". The credit one carries a customer; the other one a label.
     let mut settlement = Settlement::with_tip(Money::from_paise(2_000)).expect("tip");
     let half = Money::from_paise(bill.grand_total.paise() / 2);
     let quarter = Money::from_paise(bill.grand_total.paise() / 4);
@@ -790,7 +790,7 @@ fn build_a_real_bill() -> (Bill, Settlement) {
         .add(
             Payment::new(PaymentMode::Credit(CustomerId::new("cus_1")), rest)
                 .expect("payment")
-                .settling_khata(),
+                .settling_credit(),
         )
         .expect("add");
 
@@ -953,7 +953,7 @@ fn write_settled_order(
         let tip = if seq == 0 { settlement.tip() } else { Money::ZERO };
         tx.execute(
             "INSERT INTO payments (id, order_id, seq, mode, customer_id, mode_label, amount, tip,
-                                   reference, settles_khata, received_at, received_by, business_day)
+                                   reference, settles_credit, received_at, received_by, business_day)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'staff_1', ?12)",
             rusqlite::params![
                 format!("{order_id}_pay_{seq}"),
@@ -965,7 +965,7 @@ fn write_settled_order(
                 encode::money_to_sql(payment.amount),
                 encode::money_to_sql(tip),
                 payment.reference,
-                encode::bool_to_sql(payment.settles_khata),
+                encode::bool_to_sql(payment.settles_credit),
                 encode::timestamp_to_sql(mb_core::Timestamp::from_millis(1_770_000_000_000)),
                 day_sql,
             ],

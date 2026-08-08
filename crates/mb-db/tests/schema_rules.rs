@@ -443,3 +443,77 @@ fn parse_schema_doc(doc: &str) -> BTreeMap<String, BTreeSet<(String, String)>> {
     }
     out
 }
+
+/// **The owner renamed it, and the old word does not come back.**
+///
+/// 2026-08-08: *"its not khata, rename it as credit"*. "Khata" is what a Kirana
+/// shop calls this and it is not what the product says.
+///
+/// This is D40's rule — *the rules that erode are enforced by scripts, not by
+/// agreement* — because a rename is exactly the kind of change that half
+/// happens: one screen keeps the old word, or the next session writes it back
+/// from memory, and then the product says both.
+///
+/// The **audits** keep saying khata on purpose. They quote v1 and the owner's
+/// own words from before the decision, and editing a quotation to match a later
+/// decision is falsifying the record. They are not in this crate.
+#[test]
+fn the_product_says_credit_and_never_khata() {
+    use std::path::Path;
+
+    let mut offenders = Vec::new();
+    let roots = ["../../crates", "../../src-tauri/src", "../../ui/src", "../../ui/tests"];
+
+    fn walk(dir: &Path, offenders: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // `target` and `node_modules` are build output, not the product.
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name != "target" && name != "node_modules" {
+                    walk(&path, offenders);
+                }
+                continue;
+            }
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !matches!(ext, "rs" | "ts" | "tsx" | "sql" | "css") {
+                continue;
+            }
+            // The guard itself has to say the word to look for it.
+            if path.ends_with("schema_rules.rs") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            for (n, line) in text.lines().enumerate() {
+                let lower = line.to_lowercase();
+                if !lower.contains("khata") {
+                    continue;
+                }
+                // One exemption, and it is narrow: a line may say the old word
+                // while explaining that it IS the old word. That covers this
+                // test, and the comments quoting audit A3 and B12, which are
+                // findings about v1 and mean nothing renamed.
+                let explains = lower.contains("renamed")
+                    || lower.contains("v1 ")
+                    || lower.contains("audit a3")
+                    || lower.contains("audit b12")
+                    || lower.contains("kirana");
+                if !explains {
+                    offenders.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
+                }
+            }
+        }
+    }
+
+    for root in roots {
+        walk(Path::new(root), &mut offenders);
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "the product still says khata in {} place(s):\n{}",
+        offenders.len(),
+        offenders.join("\n"),
+    );
+}

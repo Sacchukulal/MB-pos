@@ -2,7 +2,7 @@
 //!
 //! > Audit **C1**: *"There is no login on the POS at all. Anybody who walks
 //! > behind the counter can open Reports and see the whole day's cash, change
-//! > the bill number, delete menu items, delete khata customers, or deactivate
+//! > the bill number, delete menu items, delete credit customers, or deactivate
 //! > the licence."*
 //!
 //! # Hiding a button is a courtesy; this is the control

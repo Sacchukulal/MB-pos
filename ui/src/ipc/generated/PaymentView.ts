@@ -3,6 +3,6 @@ import type { MoneyView } from "./MoneyView";
 
 export type PaymentView = { index: number, 
 /**
- * "Cash", "Card", "UPI", "Khata" — the label a report groups by.
+ * "Cash", "Card", "UPI", "Credit" — the label a report groups by.
  */
 mode: string, amount: MoneyView, reference: string | null, };

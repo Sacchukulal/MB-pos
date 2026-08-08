@@ -150,7 +150,7 @@ impl RolePreset {
                 Permission::BillDiscountLine,
                 Permission::BillReprint,
                 Permission::DrawerOpen,
-                Permission::KhataCollect,
+                Permission::CreditCollect,
             ]
             .into_iter()
             .collect(),

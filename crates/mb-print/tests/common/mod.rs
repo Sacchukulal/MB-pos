@@ -4,7 +4,7 @@
 //! the awkward blocks only proves the easy ones survive. This one has mixed
 //! rates, a non-GST line, an exempt charge, a line discount that gets capped,
 //! a bill discount, a percentage charge and a flat one, round-off, three split
-//! payments including khata, a tip, a rate-wise summary, an HSN column, a
+//! payments including credit, a tip, a rate-wise summary, an HSN column, a
 //! customer GSTIN, a logo, a UPI QR, a footer, and a DUPLICATE marking.
 
 #![allow(
@@ -148,7 +148,7 @@ pub fn settlement(bill: &Bill) -> Settlement {
         .add(
             Payment::new(PaymentMode::Credit(CustomerId::new("cus_1")), c)
                 .expect("payment")
-                .settling_khata(),
+                .settling_credit(),
         )
         .expect("add");
     settlement

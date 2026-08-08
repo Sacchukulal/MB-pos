@@ -753,9 +753,9 @@ CREATE TABLE payments (
     -- auto-confirmed UPI or a card terminal can be reconciled later.
     device_ref TEXT,
     -- Audit B12: mode says what it WAS, this says what it DID. v1 recorded a
-    -- khata settlement with payment mode "Full Settlement", which is not a
+    -- credit settlement with payment mode "Full Settlement", which is not a
     -- payment mode, and it polluted every payment-mode report.
-    settles_khata INTEGER NOT NULL DEFAULT 0 CHECK (settles_khata IN (0, 1)),
+    settles_credit INTEGER NOT NULL DEFAULT 0 CHECK (settles_credit IN (0, 1)),
     received_at   INTEGER NOT NULL,
     received_by   TEXT REFERENCES staff (id),
     -- D5, denormalised onto the payment so the cash-position report and the day
@@ -806,7 +806,7 @@ CREATE TABLE reprints (
 --
 -- **NOT a negative payment.** `payments` has `CHECK (amount > 0)` and that
 -- check is right — audit B12 is what happens when a table that means "money in"
--- starts holding other things: "v1 recorded a khata settlement with payment
+-- starts holding other things: "v1 recorded a credit settlement with payment
 -- mode 'Full Settlement', which is not a payment mode, and it polluted every
 -- payment-mode report." A refund is its own fact and gets its own table (D22:
 -- adding a table later is the cheap direction).
@@ -1013,8 +1013,8 @@ CREATE TABLE customers (
     updated_at   INTEGER NOT NULL
 ) STRICT;
 
--- The khata ledger (scope 5.1). Audit A3: in v1 "payments received against
--- khata are never sent at all", so the cloud could never rebuild a shop's
+-- The credit ledger (scope 5.1). Audit A3: in v1 "payments received against
+-- credit are never sent at all", so the cloud could never rebuild a shop's
 -- udhaar. Here it is an ordinary table with an ordinary outbox entry.
 CREATE TABLE customer_payments (
     id           TEXT    NOT NULL PRIMARY KEY,
@@ -1136,7 +1136,7 @@ VALUES ('outlet_default', 'terminal_default', 'token', NULL, 1, 1, '', 0),
 -- THE A1 / A2 / A3 FIX, and it is one table.
 --
 -- v1's outbox knew about bills. That is why the owner's phone shows zero
--- expenses forever (A2), why khata repayments have never been backed up (A3),
+-- expenses forever (A2), why credit repayments have never been backed up (A3),
 -- and why A1 says the shop's real asset lives on one hard disk.
 --
 -- Table-agnostic on purpose: a new synced table is a new value in table_name,
@@ -1266,7 +1266,7 @@ INSERT INTO permissions (code, description) VALUES
     ('menu.manage',        'Add, edit and price menu items'),
     ('tables.manage',      'Add and arrange tables and sections'),
     ('customers.manage',   'Add customers and change credit limits'),
-    ('khata.collect',      'Receive a khata repayment'),
+    ('credit.collect',      'Receive a credit repayment'),
     ('expenses.manage',    'Record and edit expenses'),
     ('reports.view',       'See sales reports'),
     ('reports.export',     'Export reports and raw data'),

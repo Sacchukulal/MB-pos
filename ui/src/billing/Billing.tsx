@@ -569,8 +569,8 @@ export function Billing() {
               ))}
               {/* Present and disabled, saying why — a control that is silently
                   absent is a feature nobody remembers to build. */}
-              <Button small disabled title="Khata needs customers, which arrive at P15">
-                Khata
+              <Button small disabled title="Credit needs customers, which arrive at P15">
+                Credit
               </Button>
             </div>
 

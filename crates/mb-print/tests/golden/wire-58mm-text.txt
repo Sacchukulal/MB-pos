@@ -105,7 +105,7 @@ TEXT "Card                      484.00"
 LF
 TEXT "Sodexo                    242.00"
 LF
-TEXT "Khata                     242.00"
+TEXT "Credit                    242.00"
 LF
 TEXT "Tip                        20.00"
 LF

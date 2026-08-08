@@ -529,7 +529,7 @@ impl<'a> OrderRepo<'a> {
             let tip = if seq == 0 { settlement.tip() } else { Money::ZERO };
             self.tx.execute(
                 "INSERT INTO payments (id, order_id, seq, mode, customer_id, mode_label, amount,
-                                       tip, reference, settles_khata, received_at, received_by,
+                                       tip, reference, settles_credit, received_at, received_by,
                                        business_day)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 rusqlite::params![
@@ -542,7 +542,7 @@ impl<'a> OrderRepo<'a> {
                     encode::money_to_sql(payment.amount),
                     encode::money_to_sql(tip),
                     payment.reference,
-                    encode::bool_to_sql(payment.settles_khata),
+                    encode::bool_to_sql(payment.settles_credit),
                     encode::timestamp_to_sql(core.created_at),
                     core.created_by.as_str(),
                     encode::business_day_to_sql(core.business_day),
@@ -747,7 +747,7 @@ impl<'a> OrderRepo<'a> {
     /// Replays [`Settlement`]: `new`, `add` per payment, then the tip.
     fn read_settlement(&self, order_id: &str) -> Result<Settlement, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT mode, customer_id, mode_label, amount, tip, reference, settles_khata
+            "SELECT mode, customer_id, mode_label, amount, tip, reference, settles_credit
                FROM payments WHERE order_id = ?1 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
@@ -765,15 +765,15 @@ impl<'a> OrderRepo<'a> {
         let mut settlement = Settlement::new();
         let mut tip = Money::ZERO;
         for row in rows {
-            let (mode, customer, label, amount, row_tip, reference, khata) = row?;
+            let (mode, customer, label, amount, row_tip, reference, credit) = row?;
             let mode = encode::payment_mode_from_sql(&mode, customer.as_deref(), label.as_deref())?;
             let mut payment = Payment::new(mode, encode::money_from_sql(amount))
                 .map_err(|e| DbError::invariant(format!("order {order_id} payment: {e}")))?;
             if let Some(reference) = reference {
                 payment = payment.with_reference(reference);
             }
-            if encode::bool_from_sql(khata, "payments.settles_khata")? {
-                payment = payment.settling_khata();
+            if encode::bool_from_sql(credit, "payments.settles_credit")? {
+                payment = payment.settling_credit();
             }
             settlement
                 .add(payment)

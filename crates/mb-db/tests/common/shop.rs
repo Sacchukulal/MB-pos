@@ -2,7 +2,7 @@
 //!
 //! Deliberately not minimal: T1's claim is that **nothing** is lost, and a
 //! fixture that leaves out the awkward cases only proves the easy ones survive.
-//! So this shop has a bill in every state, split payments including a khata
+//! So this shop has a bill in every state, split payments including a credit
 //! one, a capped discount, a non-GST line, a partial kitchen delta, a customer
 //! who owes money, cash and non-cash expenses, and a locked day close.
 
@@ -24,7 +24,7 @@ use mb_core::{
 };
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::repo::menu::{Category, MenuItem};
-use mb_db::repo::money::{Customer, DayClose, Expense, KhataPayment};
+use mb_db::repo::money::{Customer, DayClose, Expense, CreditPayment};
 use mb_db::repo::people::{StaffMember, StaffStatus};
 use mb_db::repo::settings::{Printer, StoreProfile};
 use mb_db::{Db, Repos, backup, settle};
@@ -497,7 +497,7 @@ fn settlement_for(bill: &mb_core::Bill, n: i64) -> Settlement {
         .paise();
 
     if n % 6 == 1 {
-        // Split three ways, including khata — the case audit B12 is about.
+        // Split three ways, including credit — the case audit B12 is about.
         let a = Money::from_paise(total / 2);
         let b = Money::from_paise(total / 4);
         let c = Money::from_paise(total - a.paise() - b.paise());
@@ -511,7 +511,7 @@ fn settlement_for(bill: &mb_core::Bill, n: i64) -> Settlement {
             .add(
                 Payment::new(PaymentMode::Credit(CustomerId::new("cus_1")), c)
                     .expect("payment")
-                    .settling_khata(),
+                    .settling_credit(),
             )
             .expect("add");
     } else {
@@ -544,9 +544,9 @@ fn seed_money(db: &Db) {
                 },
             )?;
         }
-        repos.money().record_khata_payment(
+        repos.money().record_credit_payment(
             OUTLET,
-            &KhataPayment {
+            &CreditPayment {
                 id: "cpay_1".to_owned(),
                 customer_id: CustomerId::new("cus_1"),
                 amount: Money::from_paise(30_000),

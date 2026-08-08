@@ -89,7 +89,7 @@ fn t1_no_sink_can_drop_anything() {
         "Non-GST value",                // scope 2.3 — the bar line
         "Tax summary",                  // scope 2.7
         "Card",                         // split payment (1.15)
-        "Khata",
+        "Credit",
         "Sodexo",
         "Tip",
         "upi://pay",                    // the QR payload (8.2)

@@ -228,7 +228,7 @@ pub struct TaxRowView {
 #[serde(rename_all = "camelCase")]
 pub struct PaymentView {
     pub index: usize,
-    /// "Cash", "Card", "UPI", "Khata" — the label a report groups by.
+    /// "Cash", "Card", "UPI", "Credit" — the label a report groups by.
     pub mode: String,
     pub amount: MoneyView,
     pub reference: Option<String>,

@@ -943,9 +943,9 @@ fn t15_a_restore_is_requested_and_performed_before_the_database_opens() {
     assert!(!shop::snapshot(&db).is_empty());
 }
 
-/// T16. The khata balance is a SUM, and there is no column to disagree with it.
+/// T16. The credit balance is a SUM, and there is no column to disagree with it.
 #[test]
-fn t16_the_khata_balance_is_computed_not_stored() {
+fn t16_the_credit_balance_is_computed_not_stored() {
     let scratch = Scratch::new("t16");
     let db = scratch.open();
     shop::build(&db);
@@ -958,9 +958,9 @@ fn t16_the_khata_balance_is_computed_not_stored() {
 
     let before = balance(&db);
     db.transaction(|tx| {
-        Repos::new(tx).money().record_khata_payment(
+        Repos::new(tx).money().record_credit_payment(
             OUTLET,
-            &mb_db::repo::money::KhataPayment {
+            &mb_db::repo::money::CreditPayment {
                 id: "cpay_extra".to_owned(),
                 customer_id: customer.clone(),
                 amount: Money::from_paise(10_000),

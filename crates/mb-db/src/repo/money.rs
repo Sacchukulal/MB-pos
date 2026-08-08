@@ -1,4 +1,4 @@
-//! Money that happens outside a bill: customers and their khata, expenses, and
+//! Money that happens outside a bill: customers and their credit, expenses, and
 //! the day close.
 //!
 //! # The column that is not here
@@ -29,10 +29,10 @@ pub struct Customer {
     pub is_active: bool,
 }
 
-/// A khata repayment. Audit A3: in v1 these were *never* sent to the cloud, so
+/// A credit repayment. Audit A3: in v1 these were *never* sent to the cloud, so
 /// the udhaar ledger could not be rebuilt from a backup at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KhataPayment {
+pub struct CreditPayment {
     pub id: String,
     pub customer_id: CustomerId,
     pub amount: Money,
@@ -172,10 +172,10 @@ impl<'a> MoneyRepo<'a> {
         Ok(encode::money_from_sql(taken - repaid))
     }
 
-    pub fn record_khata_payment(
+    pub fn record_credit_payment(
         &self,
         outlet: &str,
-        payment: &KhataPayment,
+        payment: &CreditPayment,
     ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO customer_payments (id, outlet_id, customer_id, amount, mode, reference,
@@ -202,10 +202,10 @@ impl<'a> MoneyRepo<'a> {
         )
     }
 
-    pub fn list_khata_payments(
+    pub fn list_credit_payments(
         &self,
         customer: &CustomerId,
-    ) -> Result<Vec<KhataPayment>, DbError> {
+    ) -> Result<Vec<CreditPayment>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, amount, mode, reference, received_at, received_by, business_day
                FROM customer_payments WHERE customer_id = ?1 ORDER BY received_at",
@@ -224,7 +224,7 @@ impl<'a> MoneyRepo<'a> {
         let mut out = Vec::new();
         for row in rows {
             let (id, amount, mode, reference, received_at, received_by, day) = row?;
-            out.push(KhataPayment {
+            out.push(CreditPayment {
                 id,
                 customer_id: customer.clone(),
                 amount: encode::money_from_sql(amount),
