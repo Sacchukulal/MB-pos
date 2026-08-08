@@ -13,7 +13,7 @@ export type FloorView = { tiles: Array<TableView>, sections: Array<SectionView>,
  * How many squares each way. The screen draws the grid from this rather
  * than from a number of its own that could disagree.
  */
-grid: bigint, warnMinutes: bigint, lateMinutes: bigint, 
+grid: number, warnMinutes: number, lateMinutes: number, 
 /**
  * True once ANY table has been placed. False means the section grid is
  * what gets drawn — and that is not a degraded mode: no shop should have

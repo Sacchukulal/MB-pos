@@ -482,3 +482,12 @@
   text-align: center;
   white-space: nowrap;
 }
+
+/* WAITING: the same stripe in warn, and no fill. P14 split "waiting too long"
+   into two states, because one threshold meant a table was fine and then
+   suddenly red — a smoke alarm rather than a floor view. The form differs from
+   LATE as well as the colour (stripe only, no wash), so grey-scaling the
+   screen still tells them apart. */
+.mb-tile--waiting {
+  border-left-color: var(--warn);
+}

@@ -43,11 +43,12 @@ function table(label: string, busy = false): TableView {
     id: `tbl_${label}`,
     label,
     section: 'Main Hall',
-    seats: 4n,
+    seats: 4,
     state: busy ? 'occupied' : 'free',
     total: busy ? { paise: 64_600n, text: '646.00' } : null,
-    minutes: busy ? 12n : null,
+    minutes: busy ? 12 : null,
     kitchenTold: true,
+    kitchenMinutes: null,
     orderId: busy ? `ord_${label}` : null,
   };
 }

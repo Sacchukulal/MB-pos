@@ -123,6 +123,10 @@ function Tile({
   onOpen: () => void;
 }) {
   const late = table.state === 'late';
+  // Amber and red are two states, not one — see TableState::Waiting. The
+  // timer is emphasised for both, because a table somebody should look at and
+  // a table somebody must look at are both read off the timer.
+  const overdue = late || table.state === 'waiting';
   return (
     <button
       type="button"
@@ -143,7 +147,7 @@ function Tile({
           {table.minutes === null ? (
             <span>{table.seats > 0 ? `${table.seats} seats` : ''}</span>
           ) : (
-            <span className={late ? 'mb-tile__timer--late' : undefined}>
+            <span className={overdue ? 'mb-tile__timer--late' : undefined}>
               {formatMinutes(table.minutes)}
             </span>
           )}
@@ -159,7 +163,7 @@ function Tile({
           worth interrupting somebody for. */}
       {dense && table.minutes !== null ? (
         <span
-          className={`mb-tile__meta ${late ? 'mb-tile__timer--late' : ''}`.trim()}
+          className={`mb-tile__meta ${overdue ? 'mb-tile__timer--late' : ''}`.trim()}
         >
           {formatMinutes(table.minutes)}
         </span>
@@ -184,6 +188,9 @@ function describe(table: TableView): string {
     case 'occupied':
       parts.push('busy');
       break;
+    case 'waiting':
+      parts.push('busy, waiting a while');
+      break;
     case 'late':
       parts.push('busy, waiting a long time');
       break;
@@ -200,9 +207,9 @@ function describe(table: TableView): string {
  * "12m", "1h 05m". Not a duration library — this is the only place in the
  * product that formats one, and it is nine lines.
  */
-function formatMinutes(minutes: bigint): string {
-  if (minutes < 60n) return `${minutes}m`;
-  const hours = minutes / 60n;
-  const rest = minutes % 60n;
+function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
   return `${hours}h ${String(rest).padStart(2, '0')}m`;
 }

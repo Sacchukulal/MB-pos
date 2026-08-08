@@ -9,7 +9,7 @@ import type { MoneyView } from "./MoneyView";
  * owe?" actually wants, and inventing n orders to answer it would litter the
  * day with bills nobody asked for.
  */
-export type EvenSplitView = { total: MoneyView, ways: bigint, shares: Array<MoneyView>, 
+export type EvenSplitView = { total: MoneyView, ways: number, shares: Array<MoneyView>, 
 /**
  * "₹33.34 each, and one of you pays a paisa more" — said out loud,
  * because a remainder nobody mentions looks like a rounding bug.

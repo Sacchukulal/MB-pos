@@ -138,6 +138,13 @@
   --tile-height: 4.5rem;
   --tile-height-dense: 3.25rem;
   --suggestions-height: 22rem;
+  /* The floor plan (P14, scope 14.1). Sixteen squares each way is enough for a
+     60-table room at four squares a table, and small enough that the whole
+     plan fits the reference machine's 1366x768 without scrolling (D12). The
+     COUNT is Rust's (`floor::GRID_CELLS`) and arrives with the view; this is
+     the size one square is drawn at. */
+  --plan-cells: 16;
+  --plan-cell-size: 3.5rem;
   --help-keys-width: 9rem;
   /* How little of the cart may ever be on screen. The cart column is a grid of
      auto rows around one flexible one, and CSS gives the auto rows their

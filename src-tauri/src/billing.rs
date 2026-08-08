@@ -248,7 +248,7 @@ pub struct TableView {
     /// The section's name, or `None` for the "No table" group that holds open
     /// parcel and self-service orders — *"so no order is ever invisible"*.
     pub section: Option<String>,
-    pub seats: i64,
+    pub seats: u32,
     pub state: TableState,
     /// `None` when the table is free.
     pub total: Option<MoneyView>,
@@ -256,7 +256,7 @@ pub struct TableView {
     /// timestamp**, never from a counter the screen keeps — a screen that
     /// counts loses the count when it re-renders, which is the same argument
     /// D5 makes about business days.
-    pub minutes: Option<i64>,
+    pub minutes: Option<u32>,
     /// Whether the kitchen has been told (crown jewel 2's delta ledger).
     pub kitchen_told: bool,
     /// Minutes since the last kitchen ticket went out — scope 14.2's second
@@ -266,7 +266,7 @@ pub struct TableView {
     /// Read from `order_events`, never from the ledger: the ledger is what the
     /// kitchen believes NOW and its rows are rewritten whenever the order
     /// changes, so a timestamp on them would reset when a cashier typed.
-    pub kitchen_minutes: Option<i64>,
+    pub kitchen_minutes: Option<u32>,
     pub order_id: Option<String>,
 }
 
@@ -508,7 +508,7 @@ pub fn floor_view(
                 id: table.id.as_str().to_owned(),
                 label: table.label.clone(),
                 section,
-                seats: table.seats,
+                seats: crate::ipc::count(table.seats),
                 state: TableState::Free,
                 total: None,
                 minutes: None,
@@ -567,7 +567,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
             TableState::Occupied
         },
         total: running_total(order),
-        minutes: Some(minutes),
+        minutes: Some(crate::ipc::count(minutes)),
                 // The delta ledger (crown jewel 2) answers "is there anything the
         // kitchen has not been told?". An error reading it is not a reason to
         // claim the kitchen is up to date, so it reads as "not told".
@@ -586,7 +586,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
             .map_or(id, |t| t.as_str().to_owned()),
         label,
         section,
-        seats,
+        seats: crate::ipc::count(seats),
     }
 }
 

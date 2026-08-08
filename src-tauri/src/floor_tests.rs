@@ -420,8 +420,8 @@ fn the_two_timers_come_from_settings() {
     // The order was created an hour ago in fixture time, which is the past
     // relative to a real clock, so it is comfortably "late" at any threshold.
     let before = floor_on(&app).expect("the floor");
-    assert_eq!(before.warn_minutes, crate::floor::DEFAULT_WARN_MINUTES);
-    assert_eq!(before.late_minutes, crate::floor::DEFAULT_LATE_MINUTES);
+    assert_eq!(i64::from(before.warn_minutes), crate::floor::DEFAULT_WARN_MINUTES);
+    assert_eq!(i64::from(before.late_minutes), crate::floor::DEFAULT_LATE_MINUTES);
 
     let after = save_thresholds_on(&app, 5, 10).expect("saved");
     assert_eq!(after.warn_minutes, 5);

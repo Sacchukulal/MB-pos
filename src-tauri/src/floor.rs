@@ -54,9 +54,9 @@ pub const DEFAULT_LATE_MINUTES: i64 = 45;
 pub struct SectionView {
     pub id: String,
     pub name: String,
-    pub sort_order: i64,
+    pub sort_order: i32,
     pub is_active: bool,
-    pub table_count: i64,
+    pub table_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -70,18 +70,18 @@ pub struct TableRowView {
     /// rows clash.
     pub printed: String,
     pub section_id: Option<String>,
-    pub seats: i64,
+    pub seats: u32,
     /// `None` when the table is not on the plan — which is every table until
     /// somebody drags one.
-    pub x: Option<i64>,
-    pub y: Option<i64>,
+    pub x: Option<u32>,
+    pub y: Option<u32>,
     pub is_active: bool,
     /// Whether an order is sitting on it right now. A table cannot be hidden
     /// or deleted while this is true, and the screen says so before the click.
     pub is_busy: bool,
     /// How many orders have ever pointed at it — the number the "hide it
     /// instead" refusal quotes.
-    pub history: i64,
+    pub history: u32,
 }
 
 /// The whole floor in one answer: the tiles, the plan, the numbers, the
@@ -96,9 +96,9 @@ pub struct FloorView {
     pub occupancy: OccupancyView,
     /// How many squares each way. The screen draws the grid from this rather
     /// than from a number of its own that could disagree.
-    pub grid: i64,
-    pub warn_minutes: i64,
-    pub late_minutes: i64,
+    pub grid: u32,
+    pub warn_minutes: u32,
+    pub late_minutes: u32,
     /// True once ANY table has been placed. False means the section grid is
     /// what gets drawn — and that is not a degraded mode: no shop should have
     /// to draw a floor plan before it can bill.
@@ -124,7 +124,7 @@ pub struct TableEdit {
     pub id: String,
     pub label: String,
     pub section_id: Option<String>,
-    pub seats: i64,
+    pub seats: u32,
     pub is_active: bool,
 }
 
@@ -177,7 +177,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                         tile.kitchen_minutes = told
                             .iter()
                             .find(|(id, _)| id == order_id)
-                            .map(|(_, when)| minutes_between(*when, at));
+                            .map(|(_, when)| crate::ipc::count(minutes_between(*when, at)));
                     }
                 }
 
@@ -203,12 +203,12 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                             ),
                             label: table.label.clone(),
                             section_id: table.section_id.clone(),
-                            seats: table.seats,
-                            x: table.pos.map(|(x, _)| x),
-                            y: table.pos.map(|(_, y)| y),
+                            seats: crate::ipc::count(table.seats),
+                            x: table.pos.map(|(x, _)| crate::ipc::count(x)),
+                            y: table.pos.map(|(_, y)| crate::ipc::count(y)),
                             is_active: table.is_active,
                             is_busy: busy_ids.iter().any(|id| id == table.id.as_str()),
-                            history: repos.floor().orders_against(&table.id)?,
+                            history: crate::ipc::count(repos.floor().orders_against(&table.id)?),
                         })
                     })
                     .collect::<Result<_, mb_db::DbError>>()?;
@@ -220,7 +220,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                         .map(|section| SectionView {
                             id: section.id.clone(),
                             name: section.name.clone(),
-                            sort_order: section.sort_order,
+                            sort_order: i32::try_from(section.sort_order).unwrap_or(0),
                             is_active: section.is_active,
                             table_count: tables
                                 .iter()
@@ -242,10 +242,10 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                             .average_minutes
                             .map_or_else(|| "—".to_owned(), |m| format!("{m} min at table")),
                     },
-                    grid: mb_db::repo::floor::GRID_CELLS,
+                    grid: crate::ipc::count(mb_db::repo::floor::GRID_CELLS),
                     has_layout: tables.iter().any(|t| t.pos.is_some()),
-                    warn_minutes: warn,
-                    late_minutes: late,
+                    warn_minutes: crate::ipc::count(warn),
+                    late_minutes: crate::ipc::count(late),
                 })
             })
             .map_err(|e| words::from_db(&e))
@@ -332,7 +332,7 @@ pub fn save_table_on(app: &App, edit: TableEdit) -> UiResult<FloorView> {
                         id: TableId::new(edit.id.clone()),
                         section_id: edit.section_id.clone(),
                         label: edit.label.trim().to_owned(),
-                        seats: edit.seats.max(1),
+                        seats: i64::from(edit.seats.max(1)),
                         pos,
                         sort_order: existing.map_or(0, |t| t.sort_order),
                         is_active: edit.is_active,
@@ -852,7 +852,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
 #[serde(rename_all = "camelCase")]
 pub struct EvenSplitView {
     pub total: MoneyView,
-    pub ways: i64,
+    pub ways: u32,
     pub shares: Vec<MoneyView>,
     /// "₹33.34 each, and one of you pays a paisa more" — said out loud,
     /// because a remainder nobody mentions looks like a rounding bug.
@@ -881,7 +881,7 @@ pub fn even_split_on(app: &App, ways: u32) -> UiResult<EvenSplitView> {
 
     Ok(EvenSplitView {
         total: MoneyView::from(total),
-        ways: i64::from(ways),
+        ways,
         shares: shares.into_iter().map(MoneyView::from).collect(),
         note,
     })

@@ -25,11 +25,12 @@ function money(paise: number, text: string): MoneyView {
 function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): TableView {
   return {
     section: 'Main Hall',
-    seats: 4n,
+    seats: 4,
     state: 'free',
     total: null,
     minutes: null,
     kitchenTold: true,
+    kitchenMinutes: null,
     orderId: null,
     ...over,
   };
@@ -45,7 +46,7 @@ describe('the table grid (scope 1.4)', () => {
         tables={[
           table({ id: '1', label: '1', state: 'free' }),
           table({ id: '2', label: '2', state: 'occupied', total: money(64_600, '646.00') }),
-          table({ id: '3', label: '3', state: 'late', minutes: 47n }),
+          table({ id: '3', label: '3', state: 'late', minutes: 47 }),
           table({ id: '4', label: '4', state: 'loaded' }),
         ]}
         filter=""
@@ -70,7 +71,7 @@ describe('the table grid (scope 1.4)', () => {
             label: '6',
             state: 'late',
             total: money(64_600, '646.00'),
-            minutes: 47n,
+            minutes: 47,
           }),
         ]}
         filter=""

@@ -54,6 +54,18 @@ pub struct MoneyView {
     pub text: String,
 }
 
+/// **A stored count, made sendable.**
+///
+/// Every count that crosses the IPC boundary is a `u32`, because `ts-rs`
+/// renders an `i64` as a TypeScript `bigint` and `JSON.stringify` throws on
+/// one (D58). SQLite hands them back as `i64`, so the narrowing happens here,
+/// once, and it clamps rather than wrapping: a shop with more than four
+/// billion tables has a different problem, and saturating says so honestly.
+#[must_use]
+pub fn count(n: i64) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
 impl From<mb_core::Money> for MoneyView {
     fn from(money: mb_core::Money) -> Self {
         MoneyView {

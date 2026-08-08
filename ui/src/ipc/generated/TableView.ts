@@ -10,7 +10,7 @@ export type TableView = { id: string, label: string,
  * The section's name, or `None` for the "No table" group that holds open
  * parcel and self-service orders — *"so no order is ever invisible"*.
  */
-section: string | null, seats: bigint, state: TableState, 
+section: string | null, seats: number, state: TableState, 
 /**
  * `None` when the table is free.
  */
@@ -21,7 +21,7 @@ total: MoneyView | null,
  * counts loses the count when it re-renders, which is the same argument
  * D5 makes about business days.
  */
-minutes: bigint | null, 
+minutes: number | null, 
 /**
  * Whether the kitchen has been told (crown jewel 2's delta ledger).
  */
@@ -35,4 +35,4 @@ kitchenTold: boolean,
  * kitchen believes NOW and its rows are rewritten whenever the order
  * changes, so a timestamp on them would reset when a cashier typed.
  */
-kitchenMinutes: bigint | null, orderId: string | null, };
+kitchenMinutes: number | null, orderId: string | null, };

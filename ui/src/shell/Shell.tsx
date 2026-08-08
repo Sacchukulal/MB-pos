@@ -28,6 +28,7 @@ import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
 import { Bills } from '../corrections/Bills';
+import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
 
 import './shell.css';
@@ -62,6 +63,15 @@ const SCREENS: readonly Screen[] = [
     label: "Billing",
     icon: "₹",
     render: () => <Billing />,
+  },
+  {
+    // The floor answers a different question from the billing grid: not
+    // "which table am I putting this dosa on" but "which table needs me".
+    // Audit F5 is the second one going unanswered.
+    id: 'floor',
+    label: 'Floor',
+    icon: '▦',
+    render: () => <Floor />,
   },
   {
     id: 'bills',

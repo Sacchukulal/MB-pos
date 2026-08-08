@@ -58,6 +58,10 @@ import type { ModifierGroupView } from './generated/ModifierGroupView';
 import type { GroupEdit } from './generated/GroupEdit';
 import type { ComboView } from './generated/ComboView';
 import type { ComboEdit } from './generated/ComboEdit';
+import type { FloorView } from './generated/FloorView';
+import type { TableEdit } from './generated/TableEdit';
+import type { SplitRequest } from './generated/SplitRequest';
+import type { EvenSplitView } from './generated/EvenSplitView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -235,7 +239,49 @@ export interface Commands {
   };
   list_combos: { args: void; returns: ComboView[] };
   save_combo: { args: { combo: ComboEdit }; returns: ComboView[] };
+
+  // P14 — the floor. Scope 14.1 the plan, 14.2 the timers, 14.3 occupancy,
+  // and 1.21/1.22/1.23, the three things you do to an order that is already
+  // on a table.
+  //
+  // Every one of these returns the WHOLE floor, for the reason the cart does
+  // (D4): the second copy is the one that goes stale.
+  floor_plan: { args: void; returns: FloorView };
+  save_floor_section: {
+    args: { id: string; name: string; sortOrder: number; isActive: boolean };
+    returns: FloorView;
+  };
+  delete_floor_section: { args: { id: string }; returns: FloorView };
+  save_dining_table: { args: { edit: TableEdit }; returns: FloorView };
+  add_dining_tables: {
+    args: {
+      sectionId: string | null;
+      prefix: string;
+      from: number;
+      to: number;
+      seats: number;
+    };
+    returns: FloorView;
+  };
+  /** `null` for both takes the table off the plan and back to the section grid. */
+  place_dining_table: {
+    args: { tableId: string; x: number | null; y: number | null };
+    returns: FloorView;
+  };
+  set_dining_table_active: {
+    args: { tableId: string; active: boolean };
+    returns: FloorView;
+  };
+  delete_dining_table: { args: { tableId: string }; returns: FloorView };
+  save_floor_thresholds: { args: { warn: number; late: number }; returns: FloorView };
+  move_order: { args: { orderId: string; toTable: string }; returns: FloorView };
+  merge_orders: { args: { fromOrder: string; intoOrder: string }; returns: FloorView };
+  split_order: { args: { request: SplitRequest }; returns: FloorView };
+  /** Answers "what do we each owe?" — it does not create n bills. */
+  even_split: { args: { ways: number }; returns: EvenSplitView };
+  set_covers: { args: { covers: number | null }; returns: void };
 }
+
 
 export type CommandName = keyof Commands;
 

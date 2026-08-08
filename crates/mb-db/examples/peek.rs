@@ -34,6 +34,16 @@ fn main() {
             "SELECT order_id, amount, mode, reason, refunded_by FROM refunds",
             "SELECT order_id, printed_at, printed_by, reason FROM reprints",
             "SELECT kind, COUNT(*) AS how_many FROM reasons GROUP BY kind",
+            // P14. A merge and a split are invisible above: the merged-away
+            // order shows only as `cancelled`, and the new half of a split
+            // looks like any other open order. These two are what tell them
+            // apart — and this file has now been extended three times for
+            // exactly this reason, which is the argument for extending it.
+            "SELECT id, state, bill_number_formatted, table_id, sub_table, covers, merged_into \
+             FROM orders WHERE merged_into IS NOT NULL OR sub_table IS NOT NULL OR covers IS NOT NULL",
+            "SELECT order_id, at, event, staff_id, detail FROM order_events ORDER BY at",
+            "SELECT id, section_id, label, seats, pos_x, pos_y, is_active FROM dining_tables \
+             WHERE pos_x IS NOT NULL OR is_active = 0",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();

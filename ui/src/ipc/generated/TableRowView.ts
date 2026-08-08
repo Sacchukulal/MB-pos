@@ -6,12 +6,12 @@ export type TableRowView = { id: string, label: string,
  * it (`mb_core::table`). Shown in the master so an owner can see why two
  * rows clash.
  */
-printed: string, sectionId: string | null, seats: bigint, 
+printed: string, sectionId: string | null, seats: number, 
 /**
  * `None` when the table is not on the plan — which is every table until
  * somebody drags one.
  */
-x: bigint | null, y: bigint | null, isActive: boolean, 
+x: number | null, y: number | null, isActive: boolean, 
 /**
  * Whether an order is sitting on it right now. A table cannot be hidden
  * or deleted while this is true, and the screen says so before the click.
@@ -21,4 +21,4 @@ isBusy: boolean,
  * How many orders have ever pointed at it — the number the "hide it
  * instead" refusal quotes.
  */
-history: bigint, };
+history: number, };

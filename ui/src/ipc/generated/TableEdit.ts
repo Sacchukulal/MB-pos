@@ -3,4 +3,4 @@
 /**
  * What the screen sends to place a table.
  */
-export type TableEdit = { id: string, label: string, sectionId: string | null, seats: bigint, isActive: boolean, };
+export type TableEdit = { id: string, label: string, sectionId: string | null, seats: number, isActive: boolean, };
