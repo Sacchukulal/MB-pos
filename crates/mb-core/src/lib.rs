@@ -45,6 +45,7 @@ pub mod bill;
 pub mod businessday;
 pub mod cart;
 pub mod charge;
+pub mod combo;
 pub mod discount;
 pub mod ids;
 pub mod item;
@@ -54,11 +55,13 @@ pub mod order;
 pub mod payment;
 pub mod qty;
 pub mod tax;
+pub mod taxclass;
 pub mod time;
 
 pub use bill::{Bill, BillError, BillInput, BillLine, compute_bill};
 pub use businessday::{BusinessDay, DayRule};
 pub use cart::{Cart, CartError, CartLine, LineIdentity};
+pub use combo::{Apportioned, ComboComponent, ComboError, apportion};
 pub use charge::{BillCharge, Charge, ChargeBasis, ChargeKind};
 pub use discount::{
     Discount, DiscountEntry, DiscountOutcome, DiscountPolicy, DiscountPolicyError,
@@ -74,6 +77,7 @@ pub use order::{
 pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
 pub use qty::{Qty, QtyError};
 pub use time::{Timestamp, TimeError, UtcOffset};
+pub use taxclass::{OrderTypeRate, TaxClass, TaxClassId, starting_classes};
 pub use tax::{
     PlaceOfSupply, RateSummaryRow, TaxAmounts, TaxOutcome, TaxRate, TaxSummary, TaxTreatment,
 };
