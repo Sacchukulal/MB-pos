@@ -58,7 +58,19 @@ export function Modal({
       if (event.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
-    panel.current?.focus();
+
+    // **The field, if there is one; the panel only if there is not.**
+    //
+    // Focusing the panel unconditionally looked right and was not: it ran
+    // AFTER the browser had honoured `autoFocus` on the first input, so it
+    // took the caret straight back out again. Typing into a freshly opened
+    // dialog then went nowhere until you pressed Tab — caught by opening
+    // "Add a size" and typing a name that never arrived (P13).
+    const first = panel.current?.querySelector<HTMLElement>(
+      'input:not([type="hidden"]), select, textarea',
+    );
+    (first ?? panel.current)?.focus();
+
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 

@@ -52,6 +52,10 @@ mod signin_tests;
 /// PERFORMANCE.md §4.
 #[cfg(test)]
 mod perf_tests;
+/// P13's flows are sequences too — set a rate, watch every item on it move;
+/// export, edit a cell, import back. Same reasoning as `signin_tests`.
+#[cfg(test)]
+mod menu_tests;
 mod startup;
 mod state;
 mod window;

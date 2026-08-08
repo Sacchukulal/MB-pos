@@ -205,7 +205,10 @@ export function Billing() {
         setCart(
           await call('cart_add_payment', {
             mode,
-            amountPaise: cart.balance.paise,
+            // The wire carries a JSON number; MoneyView types the field as the
+            // i64 it is in Rust. `Number` reconciles the two and computes
+            // nothing (R8).
+            amountPaise: Number(cart.balance.paise),
           }),
         );
       } catch (cause) {

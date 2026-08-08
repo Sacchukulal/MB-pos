@@ -14,6 +14,18 @@
  *    "command not found" that only fires on the screen nobody opened.
  * 4. **Nothing polls.** Subscriptions are events pushed from Rust
  *    ([`subscribe`]), which is budget M4 and `PERFORMANCE.md` §5 rule 6.
+ *
+ * # No argument is ever a `bigint`
+ *
+ * `invoke` serialises with `JSON.stringify`, and `JSON.stringify` **throws** on
+ * a BigInt. An `i64` on the Rust side arrives here as a plain JSON number, so
+ * anything that comes back and goes straight out again works by accident; a
+ * screen that honestly builds a `1n` does not. P13 found this by saving a
+ * modifier group and reading *"Do not know how to serialize a BigInt"*.
+ *
+ * The fix is on the Rust side — a count that crosses the wire is a `u32`, which
+ * `ts-rs` renders as `number` — and there is a guard in `guards.test.ts` that
+ * fails the build if a `bigint` appears in an argument type again.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -41,6 +53,11 @@ import type { MenuEdit } from './generated/MenuEdit';
 import type { CategoryView } from './generated/CategoryView';
 import type { TaxClassView } from './generated/TaxClassView';
 import type { ImportPlanView } from './generated/ImportPlanView';
+import type { ItemComposition } from './generated/ItemComposition';
+import type { ModifierGroupView } from './generated/ModifierGroupView';
+import type { GroupEdit } from './generated/GroupEdit';
+import type { ComboView } from './generated/ComboView';
+import type { ComboEdit } from './generated/ComboEdit';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -80,7 +97,7 @@ export interface Commands {
   cart_clear: { args: { keepType: boolean }; returns: CartView };
   cart_set_order_type: { args: { orderType: string }; returns: CartView };
   cart_add_payment: {
-    args: { mode: string; amountPaise: bigint };
+    args: { mode: string; amountPaise: number };
     returns: CartView;
   };
   cart_clear_payments: { args: void; returns: CartView };
@@ -153,7 +170,7 @@ export interface Commands {
   refund_bill: {
     args: {
       orderId: string;
-      amountPaise: bigint;
+      amountPaise: number;
       mode: string;
       reason: string;
     };
@@ -192,6 +209,32 @@ export interface Commands {
   plan_menu_import: { args: { csv: string }; returns: ImportPlanView };
   run_menu_import: { args: { csv: string }; returns: string };
   export_menu: { args: void; returns: string };
+
+  // What an item is made of — scope 6.1–6.3. A size, a group of choices and a
+  // combo are all prices, so all three need `menu.manage`.
+  //
+  // Each of these returns the WHOLE new picture rather than the one thing that
+  // changed, for the reason the cart does (D4): the second copy is the one that
+  // goes stale.
+  item_composition: { args: { itemId: string }; returns: ItemComposition };
+  save_item_variant: {
+    args: {
+      itemId: string;
+      variantId: string;
+      name: string;
+      price: string;
+      isActive: boolean;
+    };
+    returns: ItemComposition;
+  };
+  list_modifier_groups: { args: void; returns: ModifierGroupView[] };
+  save_modifier_group: { args: { group: GroupEdit }; returns: ModifierGroupView[] };
+  attach_modifier_group: {
+    args: { itemId: string; groupId: string; attach: boolean };
+    returns: ItemComposition;
+  };
+  list_combos: { args: void; returns: ComboView[] };
+  save_combo: { args: { combo: ComboEdit }; returns: ComboView[] };
 }
 
 export type CommandName = keyof Commands;

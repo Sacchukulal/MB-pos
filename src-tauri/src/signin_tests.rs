@@ -48,6 +48,11 @@ impl Scratch {
         std::fs::create_dir_all(&dir).expect("scratch directory");
         Scratch { dir }
     }
+
+    /// Where a test may put a database. `menu_tests` opens its own shop here.
+    pub(crate) fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
 }
 
 impl Drop for Scratch {

@@ -438,6 +438,13 @@ macro_rules! commands {
             $crate::menu::plan_menu_import,
             $crate::menu::run_menu_import,
             $crate::menu::export_menu,
+            $crate::menu::item_composition,
+            $crate::menu::save_item_variant,
+            $crate::menu::list_modifier_groups,
+            $crate::menu::save_modifier_group,
+            $crate::menu::attach_modifier_group,
+            $crate::menu::list_combos,
+            $crate::menu::save_combo,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

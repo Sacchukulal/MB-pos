@@ -535,6 +535,17 @@
   gap: var(--space-3);
 }
 
+/* The action row at the foot of a dialog: the way out on the right, which is
+   where a hand goes for it.
+
+   This was used in sixteen places and defined in none of them, so every Cancel
+   and Save in the app sat on the left — invisible to every test, obvious the
+   moment somebody opened a dialog and looked (P13). The guard below it now
+   fails the build for the next class that goes missing. */
+.mb-row--end {
+  justify-content: flex-end;
+}
+
 .mb-stack {
   display: flex;
   flex-direction: column;

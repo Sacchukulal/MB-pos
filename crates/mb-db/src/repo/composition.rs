@@ -332,6 +332,36 @@ impl<'a> CompositionRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "items", item.as_str(), Op::Upsert, at)
     }
 
+    /// Stop offering a group on an item.
+    ///
+    /// **This one really is a delete**, and it is the exception that proves the
+    /// rule about the menu never deleting anything: the row says *"this item
+    /// currently offers this group"*, and it is not a thing any bill points at.
+    /// A line that was sold with extra cheese froze the modifier onto itself
+    /// (crown jewel 4) and does not read this table ever again.
+    pub fn detach_group(
+        &self,
+        outlet: &str,
+        item: &ItemId,
+        group_id: &str,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        self.tx.execute(
+            "DELETE FROM item_modifier_groups WHERE item_id = ?1 AND group_id = ?2",
+            rusqlite::params![item.as_str(), group_id],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "items", item.as_str(), Op::Upsert, at)
+    }
+
+    /// Everything one item offers, in one read — the shape the editor wants.
+    pub fn for_item(
+        &self,
+        outlet: &str,
+        item: &ItemId,
+    ) -> Result<(Vec<Variant>, Vec<ModifierGroup>), DbError> {
+        Ok((self.variants_of(item)?, self.groups_for_item(outlet, item)?))
+    }
+
     // -----------------------------------------------------------------------
     // Combos — scope 6.3.
     // -----------------------------------------------------------------------

@@ -135,6 +135,15 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("plan_menu_import", Access::Needs(Permission::MenuManage)),
     ("run_menu_import", Access::Needs(Permission::MenuManage)),
     ("export_menu", Access::Needs(Permission::MenuManage)),
+    // What an item is made of (scope 6.1–6.3). All `menu.manage`: a size and a
+    // modifier are both prices, and a combo is a price with arithmetic in it.
+    ("item_composition", Access::Needs(Permission::MenuManage)),
+    ("save_item_variant", Access::Needs(Permission::MenuManage)),
+    ("list_modifier_groups", Access::Needs(Permission::MenuManage)),
+    ("save_modifier_group", Access::Needs(Permission::MenuManage)),
+    ("attach_modifier_group", Access::Needs(Permission::MenuManage)),
+    ("list_combos", Access::Needs(Permission::MenuManage)),
+    ("save_combo", Access::Needs(Permission::MenuManage)),
 
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It

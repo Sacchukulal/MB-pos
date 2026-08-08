@@ -17,6 +17,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Input,
+  Modal,
   Money,
   Table,
 } from '../src/kit';
@@ -185,5 +186,30 @@ describe('Badge', () => {
     // "Paid" still says paid.
     render(<Badge tone="ok">Paid</Badge>);
     expect(screen.getByText('Paid')).toBeInTheDocument();
+  });
+});
+
+describe('a dialog and the caret (§1, keyboard-first)', () => {
+  it('puts the caret in the first field rather than taking it back out', () => {
+    render(
+      <Modal open title="Add a size" onClose={vi.fn()}>
+        <Input label="Name" autoFocus />
+        <Input label="Price" />
+      </Modal>,
+    );
+    // The panel used to win this race, so the first thing typed into a fresh
+    // dialog went nowhere. Found by opening "Add a size", typing "Half", and
+    // watching it vanish (P13).
+    const name = screen.getByLabelText('Name') as HTMLInputElement;
+    expect(document.activeElement).toBe(name);
+  });
+
+  it('still takes the focus itself when there is nothing to type into', () => {
+    render(
+      <Modal open title="Are you sure?" onClose={vi.fn()}>
+        <p>Nothing to fill in.</p>
+      </Modal>,
+    );
+    expect((document.activeElement as HTMLElement).getAttribute('role')).toBe('dialog');
   });
 });

@@ -105,3 +105,70 @@
   color: var(--danger);
   font-size: var(--text-sm);
 }
+
+/* --- What an item is made of (scope 6.1-6.3) ----------------------------- */
+
+.mb-comp__heading {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+/* The sentence under a heading that says what the thing is FOR. A group of
+   choices is not self-explanatory the first time somebody meets one. */
+.mb-comp__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-comp__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mb-comp__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.mb-comp__rule {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* One line of an editor: the thing, its price, and the way out. */
+.mb-comp__choice {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+/* The fields share the width they have. Without this a `<select>` holds itself
+   as wide as its longest option — "Paneer Butter Masala (Half) - Extra Spicy —
+   315.00" — and pushes Remove off the edge behind a horizontal scrollbar,
+   which is exactly what a combo of two long-named items did (P13). */
+.mb-comp__choice > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.mb-comp__choice > *:last-child {
+  flex: 0 0 auto;
+}
+
+.mb-comp__choice select {
+  /* A long option must ellipsise rather than widen its own dialog. */
+  text-overflow: ellipsis;
+}

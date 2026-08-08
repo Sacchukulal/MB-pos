@@ -106,3 +106,99 @@ describe('nothing polls (M4)', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * **Every class a screen names must exist in a stylesheet.**
+ *
+ * `.mb-row--end` was written in sixteen components and defined in none, so the
+ * primary action of every dialog in the app sat on the left for three
+ * sessions. No test could see it: the markup was right, the tokens were clean,
+ * and the rule simply was not there. This is the cheapest guard that would
+ * have caught it.
+ *
+ * Only literal class names are checked. A name built at run time
+ * (`mb-tile--${state}`) contributes its stem, which is enough to catch a whole
+ * block going missing without pretending to know the states.
+ */
+describe('the classes a screen asks for (P13)', () => {
+  const cssText = (() => {
+    const found: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (entry.endsWith('.css')) found.push(readFileSync(full, 'utf8'));
+      }
+    };
+    walk('src');
+    return found.join('\n');
+  })();
+
+  const asked = (() => {
+    const names = new Set<string>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (entry.endsWith('.tsx')) {
+          const source = readFileSync(full, 'utf8');
+          // Only what is actually a class. A crate named in a comment and an
+          // element id that starts "mb-" are neither.
+          for (const attribute of source.matchAll(
+            /className\s*=\s*(?:"([^"]*)"|\{([^}]*)\})/g,
+          )) {
+            const text = attribute[1] ?? attribute[2] ?? '';
+            for (const match of text.matchAll(
+              /\bmb-[a-z0-9]+(?:__[a-z0-9-]+)?(?:--[a-z0-9]+)?\b/g,
+            )) {
+              names.add(match[0]);
+            }
+          }
+        }
+      }
+    };
+    walk('src');
+    return [...names].sort();
+  })();
+
+  it('finds classes to check at all, so a broken walk cannot pass', () => {
+    expect(asked.length).toBeGreaterThan(50);
+  });
+
+  it('has a rule for every one of them', () => {
+    const missing = asked.filter((name) => !cssText.includes(`.${name}`));
+    expect(missing, `no stylesheet defines: ${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+/**
+ * **Nothing crossing INTO Rust may be a `bigint`.**
+ *
+ * `invoke` serialises arguments with `JSON.stringify`, which throws on a
+ * BigInt — so a command whose argument type says `bigint` is a command a screen
+ * cannot honestly call. P13 shipped one for about an hour: a modifier group's
+ * "choose one" was an `i64` in Rust, which `ts-rs` renders as `bigint`, and
+ * saving the group died with "Do not know how to serialize a BigInt".
+ *
+ * Return types are fine — an i64 arrives as a JSON number and `bigint` is what
+ * Rust means. It is only the outbound half that breaks.
+ */
+describe('the IPC boundary (P13)', () => {
+  it('declares no bigint in any command argument', () => {
+    const source = readFileSync('src/ipc/call.ts', 'utf8');
+    const commands = source.slice(
+      source.indexOf('export interface Commands'),
+      source.indexOf('export type CommandName'),
+    );
+    expect(commands.length).toBeGreaterThan(500);
+
+    // `args:` runs to the matching `returns:`, which is where every entry in
+    // the table puts it.
+    const offenders: string[] = [];
+    for (const entry of commands.matchAll(/args:([\s\S]*?)returns:/g)) {
+      const args = entry[1] ?? '';
+      if (args.includes('bigint')) offenders.push(args.trim());
+    }
+    expect(offenders, `a bigint cannot be sent: ${offenders.join(' | ')}`).toEqual([]);
+  });
+});

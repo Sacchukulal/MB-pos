@@ -757,3 +757,616 @@ pub fn run_menu_import(app: tauri::State<'_, App>, csv: String) -> UiResult<Stri
 pub fn export_menu(app: tauri::State<'_, App>) -> UiResult<String> {
     export_menu_on(&app)
 }
+
+// ---------------------------------------------------------------------------
+// What one item is made of — scope 6.1, 6.2, 6.3.
+//
+// Variants, modifier groups and combos each have their storage and their rules
+// already (mb-db's `composition`, mb-core's `combo`). This is the way in: the
+// screens that let an owner set them up, which is the last thing P13 owes.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct VariantView {
+    pub id: String,
+    pub name: String,
+    pub price: MoneyView,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ModifierView {
+    pub id: String,
+    pub name: String,
+    /// Preformatted, and it may be negative — "No onion, −10.00" is a real line
+    /// on a real menu. R8: TypeScript formats nothing.
+    pub price_delta: MoneyView,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ModifierGroupView {
+    pub id: String,
+    pub name: String,
+    /// **`u32`, not `i64`, and the reason is the wire.** `ts-rs` renders an
+    /// `i64` as a TypeScript `bigint`, and `JSON.stringify` — which is what
+    /// Tauri's `invoke` uses — throws on one. A screen that honestly built a
+    /// `1n` could not send it back. Caught by saving a group and reading
+    /// *"Do not know how to serialize a BigInt"* (P13).
+    ///
+    /// A group with four billion choices is not a thing, so nothing is lost.
+    pub min_select: u32,
+    pub max_select: Option<u32>,
+    /// The rule in words — "Choose one", "Any number". Worked out once, here,
+    /// rather than in every screen that shows a group (UI_GUIDELINES §6).
+    pub rule: String,
+    pub modifiers: Vec<ModifierView>,
+    /// Whether THIS item offers it. Only meaningful inside `item_composition`.
+    pub attached: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ItemComposition {
+    pub item_id: String,
+    pub item_name: String,
+    pub variants: Vec<VariantView>,
+    /// **Every group the shop has**, each flagged with whether this item offers
+    /// it — so attaching one is a tick rather than a retyping. A shop has
+    /// "Spice level" once, not once per curry.
+    pub groups: Vec<ModifierGroupView>,
+}
+
+/// The rule a group enforces, in words a shopkeeper reads.
+fn group_rule(min: i64, max: Option<i64>) -> String {
+    match (min, max) {
+        (0, None) => "Any number".to_owned(),
+        (0, Some(1)) => "One at most".to_owned(),
+        (1, Some(1)) => "Choose one".to_owned(),
+        (0, Some(n)) => format!("Up to {n}"),
+        (n, None) => format!("At least {n}"),
+        (a, Some(b)) if a == b => format!("Choose {a}"),
+        (a, Some(b)) => format!("Choose {a} to {b}"),
+    }
+}
+
+/// A stored count, made sendable. A number this could not hold is a number the
+/// database should not have, so it clamps rather than failing a whole screen.
+fn narrow(count: i64) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn modifier_view(m: &mb_db::repo::composition::Modifier) -> ModifierView {
+    ModifierView {
+        id: m.id.as_str().to_owned(),
+        name: m.name.clone(),
+        price_delta: MoneyView::from(m.price_delta),
+        is_active: m.is_active,
+    }
+}
+
+fn group_view(g: &mb_db::repo::composition::ModifierGroup, attached: bool) -> ModifierGroupView {
+    ModifierGroupView {
+        id: g.id.clone(),
+        name: g.name.clone(),
+        min_select: narrow(g.min_select),
+        max_select: g.max_select.map(narrow),
+        rule: group_rule(g.min_select, g.max_select),
+        modifiers: g.modifiers.iter().map(modifier_view).collect(),
+        attached,
+    }
+}
+
+pub fn item_composition_on(app: &App, item_id: String) -> UiResult<ItemComposition> {
+    guard::require(app, Permission::MenuManage)?;
+    let id = ItemId::new(item_id);
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let item = repos.menu().find_item(&id)?.ok_or_else(|| {
+                    mb_db::DbError::invariant("that item is not on the menu any more")
+                })?;
+                let (variants, attached) = repos.composition().for_item(OUTLET, &id)?;
+                let all = repos.composition().groups(OUTLET)?;
+
+                Ok(ItemComposition {
+                    item_id: item.id.as_str().to_owned(),
+                    item_name: item.name,
+                    variants: variants
+                        .iter()
+                        .map(|v| VariantView {
+                            id: v.id.as_str().to_owned(),
+                            name: v.name.clone(),
+                            price: MoneyView::from(v.unit_price),
+                            is_active: v.is_active,
+                        })
+                        .collect(),
+                    groups: all
+                        .iter()
+                        .map(|g| group_view(g, attached.iter().any(|a| a.id == g.id)))
+                        .collect(),
+                })
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// Add or edit a size — scope 6.1.
+///
+/// **A variant carries its own price, not a discount off the parent.** A half
+/// plate is not a discounted full plate: it is a different thing to cook, at a
+/// price the owner sets, and it lands on its own line of a rate summary.
+pub fn save_variant_on(
+    app: &App,
+    item_id: String,
+    variant_id: String,
+    name: String,
+    price: String,
+    is_active: bool,
+) -> UiResult<ItemComposition> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let day = today(at);
+
+    if name.trim().is_empty() {
+        return Err(UiError::new(
+            "menu.variant_name",
+            "A size needs a name — Half, Full, 500g.",
+        ));
+    }
+    let price = parse_money(&price, "price")?;
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                repos.composition().save_variant(
+                    OUTLET,
+                    &mb_db::repo::composition::Variant {
+                        id: ItemId::new(variant_id.clone()),
+                        item_id: ItemId::new(item_id.clone()),
+                        name: name.trim().to_owned(),
+                        unit_price: price,
+                        sort_order: 0,
+                        is_active,
+                    },
+                    at,
+                )?;
+                // R11 / audit C4 — a variant IS a price, so it is a price change.
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::PRICE_CHANGED,
+                        "item_variant",
+                    )
+                    .about(variant_id.clone())
+                    .with_after(serde_json::json!({
+                        "item": item_id,
+                        "name": name.trim(),
+                        "price_paise": price.paise(),
+                        "is_available": is_active,
+                    })),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    item_composition_on(app, item_id)
+}
+
+/// What the screen sends when a group is edited.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct GroupEdit {
+    pub id: String,
+    pub name: String,
+    /// See `ModifierGroupView` — `u32` so it can cross the wire at all.
+    pub min_select: u32,
+    /// `None` means "any number".
+    pub max_select: Option<u32>,
+    pub modifiers: Vec<ModifierEdit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ModifierEdit {
+    pub id: String,
+    pub name: String,
+    /// Typed by a person, and it may lead with a minus. Parsed by Rust (D39).
+    pub price_delta: String,
+}
+
+pub fn list_groups_on(app: &App) -> UiResult<Vec<ModifierGroupView>> {
+    guard::require(app, Permission::MenuManage)?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).composition().groups(OUTLET))
+            .map_err(|e| words::from_db(&e))
+            .map(|groups| groups.iter().map(|g| group_view(g, false)).collect())
+    })
+}
+
+/// Save a group and everything in it.
+///
+/// **An impossible group is refused as it is written**, not when a cashier
+/// meets it mid-rush: mb-db's `ModifierGroup::check` is the same rule, and
+/// "choose at least 3 of 2" fails here.
+pub fn save_group_on(app: &App, group: GroupEdit) -> UiResult<Vec<ModifierGroupView>> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let day = today(at);
+
+    if group.name.trim().is_empty() {
+        return Err(UiError::new(
+            "menu.group_name",
+            "A group needs a name — Spice level, Add-ons.",
+        ));
+    }
+
+    let mut modifiers = Vec::new();
+    for m in &group.modifiers {
+        if m.name.trim().is_empty() {
+            return Err(UiError::new("menu.modifier_name", "A choice needs a name."));
+        }
+        modifiers.push(mb_db::repo::composition::Modifier {
+            id: mb_core::ModifierId::new(m.id.clone()),
+            name: m.name.trim().to_owned(),
+            price_delta: parse_delta(&m.price_delta)?,
+            sort_order: 0,
+            is_active: true,
+        });
+    }
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                repos.composition().save_group(
+                    OUTLET,
+                    &mb_db::repo::composition::ModifierGroup {
+                        id: group.id.clone(),
+                        name: group.name.trim().to_owned(),
+                        min_select: i64::from(group.min_select),
+                        max_select: group.max_select.map(i64::from),
+                        sort_order: 0,
+                        modifiers: modifiers.clone(),
+                    },
+                    at,
+                )?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::PRICE_CHANGED,
+                        "modifier_group",
+                    )
+                    .about(group.id.clone())
+                    .with_after(serde_json::json!({
+                        "name": group.name.trim(),
+                        "min": group.min_select,
+                        "max": group.max_select,
+                        "choices": modifiers.len(),
+                    })),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    list_groups_on(app)
+}
+
+/// A modifier's price difference, **which may be negative**.
+///
+/// "No cheese, −10" takes money off, and stripping the minus would quietly
+/// charge for it. Blank means free, because most choices are.
+fn parse_delta(text: &str) -> UiResult<Money> {
+    let text = text.trim();
+    let (negative, rest) = match text.strip_prefix('-').or_else(|| text.strip_prefix('\u{2212}')) {
+        Some(rest) => (true, rest.trim()),
+        None => (false, text),
+    };
+    if rest.is_empty() {
+        return Ok(Money::ZERO);
+    }
+    let amount = parse_money(rest, "price")?;
+    Ok(if negative { amount.neg() } else { amount })
+}
+
+/// Offer a group on an item, or stop offering it — scope 6.2.
+pub fn attach_group_on(
+    app: &App,
+    item_id: String,
+    group_id: String,
+    attach: bool,
+) -> UiResult<ItemComposition> {
+    guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let id = ItemId::new(item_id.clone());
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                if attach {
+                    repos.composition().attach_group(OUTLET, &id, &group_id, 0, at)
+                } else {
+                    repos.composition().detach_group(OUTLET, &id, &group_id, at)
+                }
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    item_composition_on(app, item_id)
+}
+
+// ---------------------------------------------------------------------------
+// Combos — scope 6.3.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ComboView {
+    pub id: String,
+    pub name: String,
+    pub price: MoneyView,
+    pub is_active: bool,
+    pub parts: Vec<ComboPartView>,
+    /// What the parts cost bought separately — so an owner can see what the
+    /// deal gives away without doing the arithmetic on paper.
+    pub separately: MoneyView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ComboPartView {
+    pub item_id: String,
+    pub item_name: String,
+    pub qty: String,
+    /// This part's slice of the combo price by D14's rule — **the money**, not
+    /// the stored proportion, so it is right today rather than on the day the
+    /// combo was made.
+    pub share: MoneyView,
+    /// "5%", so a mixed-rate combo shows why it has to be apportioned at all.
+    pub rate: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ComboEdit {
+    pub id: String,
+    pub name: String,
+    pub price: String,
+    pub is_active: bool,
+    /// `(item id, quantity as typed)`.
+    pub parts: Vec<(String, String)>,
+}
+
+pub fn list_combos_on(app: &App) -> UiResult<Vec<ComboView>> {
+    guard::require(app, Permission::MenuManage)?;
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let items = repos.menu().list_items(OUTLET, false)?;
+                let mut out = Vec::new();
+
+                for combo in repos.composition().combos(OUTLET)? {
+                    // **The shares are recomputed from today's prices** rather
+                    // than read back from `share_bp` (D53). A component's price
+                    // moves and a stored share would be wrong in a way nobody
+                    // would ever notice.
+                    let parts: Vec<mb_core::ComboComponent> = combo
+                        .components
+                        .iter()
+                        .map(|p| mb_core::ComboComponent {
+                            item_id: p.item_id.clone(),
+                            qty: p.qty,
+                            standalone: items
+                                .iter()
+                                .find(|i| i.id == p.item_id)
+                                .map_or(Money::ZERO, |i| i.unit_price),
+                        })
+                        .collect();
+
+                    let shares = mb_core::apportion(combo.unit_price, &parts).unwrap_or_default();
+                    let separately = Money::try_sum(
+                        parts.iter().filter_map(|p| p.qty.extend(p.standalone).ok()),
+                    )
+                    .unwrap_or(Money::ZERO);
+
+                    out.push(ComboView {
+                        id: combo.id.clone(),
+                        name: combo.name.clone(),
+                        price: MoneyView::from(combo.unit_price),
+                        is_active: combo.is_active,
+                        separately: MoneyView::from(separately),
+                        parts: combo
+                            .components
+                            .iter()
+                            .map(|p| {
+                                let item = items.iter().find(|i| i.id == p.item_id);
+                                ComboPartView {
+                                    item_id: p.item_id.as_str().to_owned(),
+                                    item_name: item.map_or_else(
+                                        || "An item that is no longer on the menu".to_owned(),
+                                        |i| i.name.clone(),
+                                    ),
+                                    qty: p.qty.to_string(),
+                                    share: MoneyView::from(
+                                        shares
+                                            .iter()
+                                            .find(|s| s.item_id == p.item_id)
+                                            .map_or(Money::ZERO, |s| s.share),
+                                    ),
+                                    rate: item
+                                        .map_or_else(|| "—".to_owned(), |i| i.tax_rate.label()),
+                                }
+                            })
+                            .collect(),
+                    });
+                }
+                Ok(out)
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// Save a combo. The apportionment is the repository's, by D14's rule.
+pub fn save_combo_on(app: &App, combo: ComboEdit) -> UiResult<Vec<ComboView>> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let day = today(at);
+
+    if combo.name.trim().is_empty() {
+        return Err(UiError::new("menu.combo_name", "A combo needs a name."));
+    }
+    if combo.parts.is_empty() {
+        return Err(UiError::new(
+            "menu.combo_empty",
+            "A combo needs at least one thing in it.",
+        ));
+    }
+    let price = parse_money(&combo.price, "price")?;
+
+    let mut parts = Vec::new();
+    for (item_id, qty) in &combo.parts {
+        let parsed = mb_core::Qty::parse(qty.trim()).map_err(|e| {
+            UiError::new(
+                "menu.combo_qty",
+                format!("\"{qty}\" is not a quantity. Try 1, 2 or 0.5."),
+            )
+            .with_detail(e.to_string())
+        })?;
+        parts.push(mb_db::repo::composition::ComboPart {
+            item_id: ItemId::new(item_id.clone()),
+            qty: parsed,
+            // Filled in by `save_combo`, which is the only thing allowed to
+            // decide a share.
+            share_bp: 0,
+        });
+    }
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                // The standalone prices the shares are worked out from, read
+                // now so the stored proportions match today's menu.
+                let standalone: Vec<(ItemId, Money)> = repos
+                    .menu()
+                    .list_items(OUTLET, false)?
+                    .into_iter()
+                    .map(|i| (i.id, i.unit_price))
+                    .collect();
+
+                repos.composition().save_combo(
+                    OUTLET,
+                    &mb_db::repo::composition::Combo {
+                        id: combo.id.clone(),
+                        name: combo.name.trim().to_owned(),
+                        unit_price: price,
+                        is_active: combo.is_active,
+                        components: parts.clone(),
+                    },
+                    &standalone,
+                    at,
+                )?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::PRICE_CHANGED,
+                        "combo",
+                    )
+                    .about(combo.id.clone())
+                    .with_after(serde_json::json!({
+                        "name": combo.name.trim(),
+                        "price_paise": price.paise(),
+                        "parts": parts.len(),
+                        "is_available": combo.is_active,
+                    })),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    log_info!("{} saved the combo {}", who.name, combo.name);
+    list_combos_on(app)
+}
+
+// --- the seats -------------------------------------------------------------
+
+#[tauri::command]
+pub fn item_composition(app: tauri::State<'_, App>, item_id: String) -> UiResult<ItemComposition> {
+    item_composition_on(&app, item_id)
+}
+
+#[tauri::command]
+pub fn save_item_variant(
+    app: tauri::State<'_, App>,
+    item_id: String,
+    variant_id: String,
+    name: String,
+    price: String,
+    is_active: bool,
+) -> UiResult<ItemComposition> {
+    save_variant_on(&app, item_id, variant_id, name, price, is_active)
+}
+
+#[tauri::command]
+pub fn list_modifier_groups(app: tauri::State<'_, App>) -> UiResult<Vec<ModifierGroupView>> {
+    list_groups_on(&app)
+}
+
+#[tauri::command]
+pub fn save_modifier_group(
+    app: tauri::State<'_, App>,
+    group: GroupEdit,
+) -> UiResult<Vec<ModifierGroupView>> {
+    save_group_on(&app, group)
+}
+
+#[tauri::command]
+pub fn attach_modifier_group(
+    app: tauri::State<'_, App>,
+    item_id: String,
+    group_id: String,
+    attach: bool,
+) -> UiResult<ItemComposition> {
+    attach_group_on(&app, item_id, group_id, attach)
+}
+
+#[tauri::command]
+pub fn list_combos(app: tauri::State<'_, App>) -> UiResult<Vec<ComboView>> {
+    list_combos_on(&app)
+}
+
+#[tauri::command]
+pub fn save_combo(app: tauri::State<'_, App>, combo: ComboEdit) -> UiResult<Vec<ComboView>> {
+    save_combo_on(&app, combo)
+}

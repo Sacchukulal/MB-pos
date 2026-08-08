@@ -233,7 +233,7 @@ function Correction({
           // The paise integer Rust sent, handed straight back. TypeScript does
           // not compute it, which is R8 and the reason MoneyView has both
           // halves.
-          amountPaise: bill.total.paise,
+          amountPaise: Number(bill.total.paise),
           mode: 'cash',
           reason,
         });

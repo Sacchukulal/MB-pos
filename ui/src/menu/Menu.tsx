@@ -43,6 +43,7 @@ import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
 import type { TaxClassView } from '../ipc/generated/TaxClassView';
 import type { ImportPlanView } from '../ipc/generated/ImportPlanView';
+import { Combos, Composition, ModifierGroups } from './Composition';
 
 import './menu.css';
 
@@ -53,6 +54,7 @@ export function Menu() {
   const [chosen, setChosen] = useState<string | null>(null);
   const [find, setFind] = useState('');
   const [editing, setEditing] = useState<MenuRowView | null>(null);
+  const [madeOf, setMadeOf] = useState<MenuRowView | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const toast = useToast();
@@ -134,6 +136,9 @@ export function Menu() {
         <div className="mb-row">
           <Button small onClick={() => setEditing(r)}>
             Edit
+          </Button>
+          <Button small variant="quiet" onClick={() => setMadeOf(r)}>
+            Sizes &amp; choices{r.variants > 0n ? ` (${r.variants})` : ''}
           </Button>
           <Button
             small
@@ -237,7 +242,20 @@ export function Menu() {
         )}
 
         <TaxClasses classes={classes} onChanged={load} onFailed={report} />
+        <ModifierGroups onFailed={report} />
+        <Combos rows={rows} onFailed={report} />
       </section>
+
+      {madeOf ? (
+        <Composition
+          row={madeOf}
+          onClose={() => {
+            setMadeOf(null);
+            void load();
+          }}
+          onFailed={report}
+        />
+      ) : null}
 
       {editing ? (
         <EditItem
