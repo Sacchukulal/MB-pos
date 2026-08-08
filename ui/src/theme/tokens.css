@@ -153,6 +153,11 @@
   --lock-people-height: 18rem;
   --dot-size: 0.875rem;
   --permission-min: 15rem;
+  /* The menu screen (P13). The category pane is a list of names, so it is
+     narrow; the class tiles wrap at a width that keeps a rate and a count on
+     one line. */
+  --menu-categories-width: 14rem;
+  --class-min: 18rem;
 
   /* Stacking. The kit's overlays were 100 (the modal) and 200 (toasts); the
      lock is above both, because a toast that floated over a locked screen

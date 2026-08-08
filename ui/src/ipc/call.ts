@@ -36,6 +36,10 @@ import type { AuditView } from './generated/AuditView';
 import type { BillRowView } from './generated/BillRowView';
 import type { DayTotalsView } from './generated/DayTotalsView';
 import type { ReasonView } from './generated/ReasonView';
+import type { MenuRowView } from './generated/MenuRowView';
+import type { MenuEdit } from './generated/MenuEdit';
+import type { CategoryView } from './generated/CategoryView';
+import type { TaxClassView } from './generated/TaxClassView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -153,6 +157,35 @@ export interface Commands {
       reason: string;
     };
     returns: BillRowView[];
+  };
+
+  // P13 — the menu. Audit B10/B11/B14: v1 had one tax rate for the whole
+  // shop, so it could not bill a bar, an AC/non-AC outlet or anyone selling
+  // packaged goods.
+  //
+  // `menu.manage` gates every one of these in Rust. `save_tax_class` needs
+  // `settings.tax` instead, because a rate is what the shop owes the
+  // government rather than what it charges — getting it wrong is a notice,
+  // not a bad price.
+  menu_tax_classes: { args: void; returns: TaxClassView[] };
+  menu_categories: { args: void; returns: CategoryView[] };
+  menu_rows: { args: void; returns: MenuRowView[] };
+  save_menu_item: { args: { edit: MenuEdit }; returns: MenuRowView[] };
+  set_item_available: {
+    args: { itemId: string; available: boolean };
+    returns: MenuRowView[];
+  };
+  save_menu_category: {
+    args: { id: string; name: string; isActive: boolean };
+    returns: CategoryView[];
+  };
+  save_tax_class: {
+    args: { id: string; name: string; rate: string; treatment: string };
+    returns: string;
+  };
+  change_menu_prices: {
+    args: { categoryId: string | null; percent: string };
+    returns: string;
   };
 }
 

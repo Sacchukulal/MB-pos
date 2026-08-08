@@ -38,6 +38,7 @@ mod flows;
 mod guard;
 mod ipc;
 mod logging;
+mod menu;
 mod preview;
 mod push;
 mod search;

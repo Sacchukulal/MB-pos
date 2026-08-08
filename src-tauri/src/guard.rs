@@ -121,6 +121,18 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("void_line", Access::Needs(Permission::OrderItemVoid)),
     ("reprint_bill", Access::Needs(Permission::BillReprint)),
 
+    // --- the menu (P13) -----------------------------------------------------
+    ("menu_tax_classes", Access::Needs(Permission::MenuManage)),
+    ("menu_categories", Access::Needs(Permission::MenuManage)),
+    ("menu_rows", Access::Needs(Permission::MenuManage)),
+    ("save_menu_item", Access::Needs(Permission::MenuManage)),
+    ("set_item_available", Access::Needs(Permission::MenuManage)),
+    ("save_menu_category", Access::Needs(Permission::MenuManage)),
+    // A tax rate is not a menu edit: it is what the shop owes the
+    // government, and getting it wrong is a notice rather than a bad price.
+    ("save_tax_class", Access::Needs(Permission::SettingsTax)),
+    ("change_menu_prices", Access::Needs(Permission::MenuManage)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -349,10 +361,11 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 3] = [
+        const SOURCES: [&str; 4] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
+            include_str!("menu.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {

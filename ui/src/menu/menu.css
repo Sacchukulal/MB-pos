@@ -1,0 +1,67 @@
+/*
+ * The menu screen — two panes (UI_GUIDELINES §4's structure, applied to a
+ * setup screen rather than to billing).
+ *
+ * Not one raw value: every colour, size and space is a token, and the lint
+ * fails the build if that stops being true.
+ */
+
+.mb-menu {
+  display: grid;
+  grid-template-columns: var(--menu-categories-width) minmax(0, 1fr);
+  gap: var(--space-4);
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow: hidden;
+}
+
+.mb-menu__categories {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The item pane scrolls; the search row above it does not, because looking for
+   an item is what you do when the list is too long to see. */
+.mb-menu__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mb-menu__heading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+.mb-menu__classes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--border);
+}
+
+.mb-menu__classlist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--class-min), 1fr));
+  gap: var(--space-2);
+}
+
+.mb-menu__class {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}

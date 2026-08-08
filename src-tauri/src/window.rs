@@ -29,9 +29,29 @@ use tauri::{LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSiz
 use crate::config::{AppConfig, WindowState};
 use crate::log_info;
 
+/// The smallest saved size worth believing.
+///
+/// Not a minimum window size — Windows enforces its own — but a **sanity
+/// floor** on what came out of the config file. Anything under this is not a
+/// shop's preference; it is a minimised rect that got written down. The
+/// reference machine is 1366 × 768, so these are far below anything a person
+/// would deliberately choose.
+const MIN_SENSIBLE_WIDTH: u32 = 640;
+const MIN_SENSIBLE_HEIGHT: u32 = 480;
+
 /// Put the window back where it was, then show it.
 pub fn restore_and_show(window: &tauri::WebviewWindow, state: &WindowState) {
-    if let (Some(width), Some(height)) = (state.width, state.height) {
+    if let (Some(width), Some(height)) = (state.width, state.height)
+        // **A saved size that could not hold a counter is not a saved size.**
+        //
+        // The second layer of the minimised-rect fix: `remember` no longer
+        // writes 144 × 19, but every machine that has already run this build
+        // has that in its config file, and a shop should not have to know why
+        // its window opens the size of a tooltip. An absurd size is ignored and
+        // the default is used, so the file repairs itself on the next resize.
+        && width >= MIN_SENSIBLE_WIDTH
+        && height >= MIN_SENSIBLE_HEIGHT
+    {
         let _ = window.set_size(LogicalSize::new(f64::from(width), f64::from(height)));
     }
     if let (Some(x), Some(y)) = (state.x, state.y) {
@@ -61,6 +81,22 @@ pub fn remember(window: &tauri::WebviewWindow, config: &mut AppConfig) {
     // un-maximising after a restart gives a full-screen-sized "restored"
     // window, which is the same class of bug as F7.
     if maximised {
+        return;
+    }
+
+    // **AND NOT WHILE MINIMISED**, which is the same argument one state along
+    // and the bug it was found by.
+    //
+    // Windows fires a resize when a window is minimised, and the geometry it
+    // reports is the minimised rect: **144 × 19 at (−32000, −32000)**. That got
+    // saved, and the next start restored it — so a shop that minimised Magic
+    // Bill and closed it reopened to a window the size of a tooltip, which
+    // looks exactly like the product being broken.
+    //
+    // Found by looking at the window after the display changed: the log said
+    // "the saved window position is off-screen now — centring instead", which
+    // was the position half of the same bad rect.
+    if window.is_minimized().unwrap_or(false) {
         return;
     }
     let scale = window.scale_factor().unwrap_or(1.0);
@@ -133,5 +169,52 @@ pub fn focus_existing(app: &tauri::AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::WindowState;
+
+    /// **The minimised rect, refused.**
+    ///
+    /// Windows reports a minimised window as 144 x 19 at (-32000, -32000), and
+    /// a resize event fires when it is minimised — so that got saved and the
+    /// next start restored it. A shop that minimised Magic Bill and closed it
+    /// reopened to a window the size of a tooltip.
+    ///
+    /// `remember` no longer writes it, and this is the second layer: a config
+    /// that already carries it repairs itself rather than making somebody
+    /// delete a file they have never heard of.
+    #[test]
+    fn a_minimised_rect_is_not_a_saved_size() {
+        let bad = WindowState {
+            width: Some(144),
+            height: Some(19),
+            x: Some(-32_000),
+            y: Some(-32_000),
+            maximised: false,
+        };
+        assert!(
+            bad.width.is_some_and(|w| w < MIN_SENSIBLE_WIDTH),
+            "144 wide must be refused"
+        );
+        assert!(
+            bad.height.is_some_and(|h| h < MIN_SENSIBLE_HEIGHT),
+            "19 tall must be refused"
+        );
+    }
+
+    /// And a real one is believed — including the reference machine's, which is
+    /// the smallest screen this product supports.
+    #[test]
+    fn a_real_size_is_believed() {
+        for (width, height) in [(1366_u32, 768_u32), (1024, 720), (640, 480)] {
+            assert!(
+                width >= MIN_SENSIBLE_WIDTH && height >= MIN_SENSIBLE_HEIGHT,
+                "{width}x{height} is a size a shop could really have chosen"
+            );
+        }
     }
 }

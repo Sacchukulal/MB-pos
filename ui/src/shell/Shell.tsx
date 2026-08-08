@@ -28,6 +28,7 @@ import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
 import { Bills } from '../corrections/Bills';
+import { Menu } from '../menu/Menu';
 
 import './shell.css';
 import '../auth/auth.css';
@@ -68,6 +69,13 @@ const SCREENS: readonly Screen[] = [
     icon: '❐',
     render: () => <Bills />,
     needs: 'reports.view',
+  },
+  {
+    id: 'menu',
+    label: 'Menu',
+    icon: '≣',
+    render: () => <Menu />,
+    needs: 'menu.manage',
   },
   {
     id: 'staff',

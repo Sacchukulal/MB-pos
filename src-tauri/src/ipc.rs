@@ -426,6 +426,15 @@ macro_rules! commands {
             $crate::corrections::void_line,
             $crate::corrections::reprint_bill,
             $crate::corrections::refund_bill,
+            // P13 — the menu.
+            $crate::menu::menu_tax_classes,
+            $crate::menu::menu_categories,
+            $crate::menu::menu_rows,
+            $crate::menu::save_menu_item,
+            $crate::menu::set_item_available,
+            $crate::menu::save_menu_category,
+            $crate::menu::save_tax_class,
+            $crate::menu::change_menu_prices,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
