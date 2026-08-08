@@ -37,6 +37,7 @@ pub mod outbox;
 pub mod people;
 pub mod print_jobs;
 pub mod settings;
+pub mod taxclass;
 
 pub use audit::{AuditFilter, AuditRepo};
 pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
@@ -48,6 +49,7 @@ pub use outbox::{Op, OutboxRepo, OutboxRow};
 pub use people::{PeopleRepo, StaffMember};
 pub use print_jobs::{PrintJobRepo, PrintJobRow};
 pub use settings::{SettingValue, SettingsRepo};
+pub use taxclass::TaxClassRepo;
 
 /// Every repository, over one transaction.
 #[derive(Debug)]
@@ -102,6 +104,13 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn outbox(&self) -> OutboxRepo<'a> {
         OutboxRepo::new(self.tx)
+    }
+
+    /// The shop's tax classes (P13) — and the one operation that matters:
+    /// editing a class rewrites the live menu and cannot reach a bill.
+    #[must_use]
+    pub fn tax_classes(&self) -> TaxClassRepo<'a> {
+        TaxClassRepo::new(self.tx)
     }
 
     /// Reprints, refunds, reasons and the day reconciliation (P12).

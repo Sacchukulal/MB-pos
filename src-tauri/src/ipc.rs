@@ -784,6 +784,16 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                             category_id: Some(CategoryId::new("cat_food")),
                             name: (*name).to_owned(),
                             unit_price: Money::from_paise(*paise),
+                            // The demo shop points its items at the seeded
+                            // classes, so a rate change on the class moves
+                            // them — which is what a real shop does.
+                            tax_class_id: Some(mb_core::TaxClassId::new(
+                                match treatment {
+                                    mb_core::TaxTreatment::NonGst => "tax_liquor",
+                                    _ if rate.basis_points() == 1_800 => "tax_packaged_18",
+                                    _ => "tax_food_5",
+                                },
+                            )),
                             tax_rate: *rate,
                             tax_treatment: *treatment,
                             hsn: Some("2106".to_owned()),

@@ -8,7 +8,9 @@
 //!
 //! P13 owns the screens. This owns the rows.
 
-use mb_core::{CategoryId, ItemId, ItemSnapshot, Money, TaxRate, TaxTreatment, Timestamp};
+use mb_core::{
+    CategoryId, ItemId, ItemSnapshot, Money, TaxClassId, TaxRate, TaxTreatment, Timestamp,
+};
 use rusqlite::Transaction;
 
 use crate::encode;
@@ -30,6 +32,12 @@ pub struct MenuItem {
     pub category_id: Option<CategoryId>,
     pub name: String,
     pub unit_price: Money,
+    /// **What the owner CHOSE** (P13). The rate and treatment below are what
+    /// that choice currently resolves to â denormalised so the billing path
+    /// never joins for a rate, and rewritten by `TaxClassRepo::save` when the
+    /// class changes. A past bill is untouched by any of it: its line froze
+    /// its own copy (crown jewel 4, D52).
+    pub tax_class_id: Option<TaxClassId>,
     pub tax_rate: TaxRate,
     pub tax_treatment: TaxTreatment,
     pub hsn: Option<String>,
@@ -135,13 +143,14 @@ impl<'a> MenuRepo<'a> {
 
     pub fn save_item(&self, outlet: &str, item: &MenuItem, at: Timestamp) -> Result<(), DbError> {
         self.tx.execute(
-            "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
+            "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id, tax_rate_bp,
                                 tax_treatment, hsn, cost_price, short_code, prep_minutes,
                                 is_open_price, is_available, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?16, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
              ON CONFLICT (id) DO UPDATE SET category_id   = excluded.category_id,
                                             name          = excluded.name,
                                             unit_price    = excluded.unit_price,
+                                            tax_class_id  = excluded.tax_class_id,
                                             tax_rate_bp   = excluded.tax_rate_bp,
                                             tax_treatment = excluded.tax_treatment,
                                             hsn           = excluded.hsn,
@@ -168,6 +177,7 @@ impl<'a> MenuRepo<'a> {
                 encode::bool_to_sql(item.is_available),
                 item.sort_order,
                 encode::timestamp_to_sql(at),
+                item.tax_class_id.as_ref().map(TaxClassId::as_str),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "items", item.id.as_str(), Op::Upsert, at)
@@ -175,11 +185,11 @@ impl<'a> MenuRepo<'a> {
 
     pub fn list_items(&self, outlet: &str, available_only: bool) -> Result<Vec<MenuItem>, DbError> {
         let sql = if available_only {
-            "SELECT id, category_id, name, unit_price, tax_rate_bp, tax_treatment, hsn,
+            "SELECT id, category_id, name, unit_price, tax_class_id, tax_rate_bp, tax_treatment, hsn,
                     cost_price, short_code, prep_minutes, is_open_price, is_available, sort_order
                FROM items WHERE outlet_id = ?1 AND is_available = 1 ORDER BY sort_order, name"
         } else {
-            "SELECT id, category_id, name, unit_price, tax_rate_bp, tax_treatment, hsn,
+            "SELECT id, category_id, name, unit_price, tax_class_id, tax_rate_bp, tax_treatment, hsn,
                     cost_price, short_code, prep_minutes, is_open_price, is_available, sort_order
                FROM items WHERE outlet_id = ?1 ORDER BY sort_order, name"
         };
@@ -190,15 +200,16 @@ impl<'a> MenuRepo<'a> {
                 category_id: row.get(1)?,
                 name: row.get(2)?,
                 unit_price: row.get(3)?,
-                tax_rate_bp: row.get(4)?,
-                tax_treatment: row.get(5)?,
-                hsn: row.get(6)?,
-                cost_price: row.get(7)?,
-                short_code: row.get(8)?,
-                prep_minutes: row.get(9)?,
-                is_open_price: row.get(10)?,
-                is_available: row.get(11)?,
-                sort_order: row.get(12)?,
+                tax_class_id: row.get(4)?,
+                tax_rate_bp: row.get(5)?,
+                tax_treatment: row.get(6)?,
+                hsn: row.get(7)?,
+                cost_price: row.get(8)?,
+                short_code: row.get(9)?,
+                prep_minutes: row.get(10)?,
+                is_open_price: row.get(11)?,
+                is_available: row.get(12)?,
+                sort_order: row.get(13)?,
             })
         })?;
 
@@ -210,6 +221,7 @@ impl<'a> MenuRepo<'a> {
                 category_id: row.category_id.map(CategoryId::new),
                 name: row.name,
                 unit_price: encode::money_from_sql(row.unit_price),
+                tax_class_id: row.tax_class_id.map(TaxClassId::new),
                 tax_rate: encode::tax_rate_from_sql(row.tax_rate_bp, "items.tax_rate_bp")?,
                 tax_treatment: encode::tax_treatment_from_sql(&row.tax_treatment)?,
                 hsn: row.hsn,
@@ -302,6 +314,7 @@ struct ItemRow {
     category_id: Option<String>,
     name: String,
     unit_price: i64,
+    tax_class_id: Option<String>,
     tax_rate_bp: i64,
     tax_treatment: String,
     hsn: Option<String>,

@@ -423,3 +423,172 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
     assert_eq!(totals.gross, Money::ZERO);
     assert_eq!(totals.voids, Money::ZERO);
 }
+
+/// **T2 and T3 — the claim D52 makes, tested.**
+///
+/// Editing a tax class rewrites the live menu. It does NOT touch a bill that
+/// has already been printed, and it does NOT touch the lines already on an
+/// order that is still open — those froze their own rate when they were added
+/// (crown jewel 4).
+#[test]
+fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
+    use mb_core::{TaxClassId, TaxRate, TaxTreatment};
+
+    let scratch = Scratch::new("taxclass");
+    let db = scratch.open();
+    shop::build(&db);
+
+    // The fixture's dosa is on "Restaurant food 5%", and there is a settled
+    // bill with a dosa on it.
+    let before_rate = db
+        .transaction(|tx| {
+            Ok(Repos::new(tx)
+                .menu()
+                .find_item(&mb_core::ItemId::new("itm_dosa"))?
+                .expect("the dosa")
+                .tax_rate)
+        })
+        .expect("read");
+    assert_eq!(before_rate, TaxRate::GST_5);
+
+    // What the settled bill says today.
+    let billed_rates: Vec<i64> = db
+        .read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT rate_bp FROM bill_tax_rows ORDER BY rate_bp",
+            )?;
+            let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+            Ok(rows.filter_map(Result::ok).collect())
+        })
+        .expect("bill rates");
+    assert!(billed_rates.contains(&500), "{billed_rates:?}");
+
+    // The government moves restaurant food to 18%.
+    let repriced = db
+        .transaction(|tx| {
+            let repos = Repos::new(tx);
+            let mut class = repos
+                .tax_classes()
+                .find(OUTLET, &TaxClassId::new("tax_food_5"))?
+                .expect("the class");
+            class.rate = TaxRate::GST_18;
+            class.name = "Restaurant food 18%".to_owned();
+            repos.tax_classes().save(OUTLET, &class, at(9))
+        })
+        .expect("saved");
+
+    assert!(repriced >= 1, "no item followed the class: {repriced}");
+
+    // The MENU moved.
+    let after_rate = db
+        .transaction(|tx| {
+            Ok(Repos::new(tx)
+                .menu()
+                .find_item(&mb_core::ItemId::new("itm_dosa"))?
+                .expect("the dosa")
+                .tax_rate)
+        })
+        .expect("read");
+    assert_eq!(after_rate, TaxRate::GST_18, "the live menu did not follow");
+
+    // **And the bill did not.**
+    let still: Vec<i64> = db
+        .read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT rate_bp FROM bill_tax_rows ORDER BY rate_bp",
+            )?;
+            let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+            Ok(rows.filter_map(Result::ok).collect())
+        })
+        .expect("bill rates");
+    assert_eq!(
+        still, billed_rates,
+        "changing a tax class rewrote a bill that had already been printed"
+    );
+
+    // An item that points at no class is untouched by anybody's class change.
+    let orphan = db
+        .transaction(|tx| {
+            Ok(Repos::new(tx)
+                .menu()
+                .find_item(&mb_core::ItemId::new("itm_beer"))?
+                .expect("the beer")
+                .tax_treatment)
+        })
+        .expect("read");
+    assert_eq!(orphan, TaxTreatment::NonGst, "the beer moved with the food");
+}
+
+/// The five seeded classes are the same five `mb-core` ships, and the liquor
+/// one is what lets a bar bill at all.
+#[test]
+fn the_seeded_classes_match_the_ones_mb_core_ships() {
+    let scratch = Scratch::new("taxclass_seed");
+    let db = scratch.open();
+
+    let stored = db
+        .transaction(|tx| Repos::new(tx).tax_classes().list(OUTLET))
+        .expect("classes");
+    let shipped = mb_core::starting_classes();
+
+    assert_eq!(stored.len(), shipped.len());
+    for expected in &shipped {
+        let found = stored
+            .iter()
+            .find(|c| c.id == expected.id)
+            .unwrap_or_else(|| panic!("{} is not seeded", expected.name));
+        assert_eq!(found.rate, expected.rate, "{}", expected.name);
+        assert_eq!(found.treatment, expected.treatment, "{}", expected.name);
+        assert_eq!(found.name, expected.name);
+    }
+
+    // The commercial one.
+    let liquor = stored
+        .iter()
+        .find(|c| c.treatment == mb_core::TaxTreatment::NonGst)
+        .expect("a shop must be able to sell liquor");
+    assert!(liquor.name.contains("outside GST"), "{}", liquor.name);
+}
+
+/// Scope 6.8's tax half: some states tax the same dish differently to take
+/// away, and the override survives the round trip.
+#[test]
+fn a_per_order_type_rate_round_trips() {
+    use mb_core::{OrderType, TaxClassId, TaxRate, TaxTreatment};
+
+    let scratch = Scratch::new("taxclass_override");
+    let db = scratch.open();
+
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let class = repos
+            .tax_classes()
+            .find(OUTLET, &TaxClassId::new("tax_food_5"))?
+            .expect("the class")
+            .with_override(OrderType::Parcel, TaxRate::GST_18, TaxTreatment::Exclusive);
+        repos.tax_classes().save(OUTLET, &class, at(1))?;
+        Ok(())
+    })
+    .expect("saved");
+
+    let (dine_in, parcel) = db
+        .transaction(|tx| {
+            let repos = Repos::new(tx);
+            Ok((
+                repos.tax_classes().resolve(
+                    OUTLET,
+                    &TaxClassId::new("tax_food_5"),
+                    OrderType::DineIn,
+                )?,
+                repos.tax_classes().resolve(
+                    OUTLET,
+                    &TaxClassId::new("tax_food_5"),
+                    OrderType::Parcel,
+                )?,
+            ))
+        })
+        .expect("resolved");
+
+    assert_eq!(dine_in, Some((TaxRate::GST_5, TaxTreatment::Exclusive)));
+    assert_eq!(parcel, Some((TaxRate::GST_18, TaxTreatment::Exclusive)));
+}

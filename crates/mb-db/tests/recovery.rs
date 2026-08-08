@@ -652,6 +652,7 @@ fn shop_item() -> mb_db::repo::menu::MenuItem {
         category_id: None,
         name: String::new(),
         unit_price: Money::from_paise(10_000),
+        tax_class_id: None,
         tax_rate: mb_core::TaxRate::GST_5,
         tax_treatment: mb_core::TaxTreatment::Exclusive,
         hsn: None,

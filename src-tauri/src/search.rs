@@ -112,6 +112,7 @@ mod tests {
 
     fn item(name: &str) -> MenuItem {
         MenuItem {
+            tax_class_id: None,
             id: ItemId::new(name.to_lowercase().replace(' ', "_")),
             category_id: None,
             name: name.to_owned(),

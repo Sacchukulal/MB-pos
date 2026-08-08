@@ -118,10 +118,53 @@ CREATE TABLE settings (
 -- THE MENU
 -- ===========================================================================
 
+-- THE FIX FOR B10 / B11 / B14, which are one finding from three sides: v1 had
+-- ONE tax rate for the whole shop, so "it could not bill a bar, an AC/non-AC
+-- outlet or anyone selling packaged goods".
+--
+-- A class is a shop's own name for a rate and a treatment. P00 built the
+-- engine; this is how an owner reaches it without choosing basis points four
+-- hundred times.
+--
+-- **A class never reaches a bill** (D52). What reaches a bill is the frozen
+-- snapshot on the line — see `items.tax_rate_bp` below, and crown jewel 4.
+CREATE TABLE tax_classes (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
+    name       TEXT    NOT NULL,
+    rate_bp    INTEGER NOT NULL CHECK (rate_bp BETWEEN 0 AND 10000),
+    treatment  TEXT    NOT NULL
+        CHECK (treatment IN ('exclusive', 'inclusive', 'exempt', 'non_gst')),
+    -- Retired, never deleted: an item may still point at it, and an old bill
+    -- names it in its own frozen values.
+    is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+-- Scope 6.8's tax half: some states tax the same dish differently to take
+-- away. P13b owns the per-order-type PRICE and reads this rather than growing
+-- a second copy of it.
+CREATE TABLE tax_class_rates (
+    class_id   TEXT    NOT NULL REFERENCES tax_classes (id) ON DELETE CASCADE,
+    order_type TEXT    NOT NULL
+        CHECK (order_type IN ('dine_in', 'parcel', 'self_service', 'delivery')),
+    rate_bp    INTEGER NOT NULL CHECK (rate_bp BETWEEN 0 AND 10000),
+    treatment  TEXT    NOT NULL
+        CHECK (treatment IN ('exclusive', 'inclusive', 'exempt', 'non_gst')),
+    PRIMARY KEY (class_id, order_type)
+) STRICT;
+
 CREATE TABLE categories (
     id         TEXT    NOT NULL PRIMARY KEY,
     outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
     name       TEXT    NOT NULL,
+    -- Scope 6.1's setup half: an owner setting up a restaurant chooses
+    -- "food 5%" once, not four hundred times. A new item in this category
+    -- starts here.
+    default_tax_class_id TEXT REFERENCES tax_classes (id),
+    -- P14's grid uses it; stored here because it is a property of the
+    -- category, not of the screen.
+    colour     TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
@@ -137,7 +180,16 @@ CREATE TABLE items (
     name          TEXT    NOT NULL,
     -- Paise (D2).
     unit_price    INTEGER NOT NULL,
-    -- Basis points: 500 is 5%.
+    -- **What the owner CHOSE** (P13). The rate below is what that choice
+    -- currently resolves to.
+    tax_class_id  TEXT REFERENCES tax_classes (id),
+    -- **What the owner GETS, denormalised on purpose.** Basis points: 500 is
+    -- 5%. Editing a class rewrites these on every item that points at it, in
+    -- one transaction — so the billing path never joins to work out a rate,
+    -- the same reason `payments.business_day` is denormalised.
+    --
+    -- Past bills are untouched by any of it: a line froze its own copy when it
+    -- was added (crown jewel 4, D52).
     tax_rate_bp   INTEGER NOT NULL DEFAULT 0 CHECK (tax_rate_bp BETWEEN 0 AND 10000),
     tax_treatment TEXT    NOT NULL DEFAULT 'exclusive'
         CHECK (tax_treatment IN ('exclusive', 'inclusive', 'exempt', 'non_gst')),
@@ -1246,3 +1298,20 @@ INSERT INTO reasons (id, outlet_id, kind, text, sort_order) VALUES
     ('rsn_rep_jam',       'outlet_default', 'reprint',   'Printer jammed',            1),
     ('rsn_rep_faded',     'outlet_default', 'reprint',   'Print came out faded',      2),
     ('rsn_rep_lost',      'outlet_default', 'reprint',   'Bill was lost',             3);
+
+-- ===========================================================================
+-- SEED: the tax classes a shop starts with (P13, audit B10/B11/B14).
+--
+-- Five, and the one that matters commercially is the liquor line: state excise
+-- is not GST at all, and v1 having no way to say so is why a bar could not use
+-- it. `mb_auth`-style seeding — a starting point a shop edits, not a list in
+-- the source. `mb_core::taxclass::starting_classes()` is the same five, and a
+-- test asserts they agree.
+-- ===========================================================================
+
+INSERT INTO tax_classes (id, outlet_id, name, rate_bp, treatment, sort_order) VALUES
+    ('tax_food_5',       'outlet_default', 'Restaurant food 5%',   500,  'exclusive', 0),
+    ('tax_packaged_12',  'outlet_default', 'Packaged goods 12%',   1200, 'exclusive', 1),
+    ('tax_packaged_18',  'outlet_default', 'Packaged goods 18%',   1800, 'exclusive', 2),
+    ('tax_liquor',       'outlet_default', 'Liquor — outside GST', 0,    'non_gst',   3),
+    ('tax_exempt',       'outlet_default', 'Exempt',               0,    'exempt',    4);

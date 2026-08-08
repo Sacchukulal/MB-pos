@@ -73,6 +73,7 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
                             unit_price: mb_core::Money::from_paise(10_000),
                             tax_rate: mb_core::TaxRate::GST_5,
                             tax_treatment: mb_core::TaxTreatment::Exclusive,
+                            tax_class_id: None,
                             hsn: None,
                             cost_price: None,
                             short_code: None,
