@@ -25,6 +25,7 @@ import type { MoneyView } from '../ipc/generated/MoneyView';
 export function Totals({ bill }: { bill: BillView }) {
   return (
     <div className="mb-totals">
+      <div className="mb-totals__breakdown">
       <Row label="Subtotal" value={bill.subtotal} />
 
       {isPositive(bill.lineDiscount) ? (
@@ -83,6 +84,13 @@ export function Totals({ bill }: { bill: BillView }) {
         <Row muted label="Round off" value={bill.roundOff} />
       ) : null}
 
+      </div>
+
+      {/* **PINNED, and outside the scrolling breakdown.** The number a cashier
+          reads out to the customer is the one thing on this panel that may
+          never need scrolling to. Found by billing a dosa, a cola and a beer:
+          six tax rows pushed TOTAL out of view, which was a worse bug than the
+          one the scroll was fixing. */}
       <Row grand label="TOTAL" value={bill.grandTotal} />
     </div>
   );

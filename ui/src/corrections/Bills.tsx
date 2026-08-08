@@ -8,10 +8,14 @@
  *
  * # A voided bill stays in the list
  *
- * Struck through, with its reason showing, and never removed. A bill that
+ * Badged **Voided**, with its reason under it, and never removed. A bill that
  * vanishes is exactly what audit **B5** is complaining about — *"a CA will ask
  * where bill 1042 went"* — and the footer says gross, voids and net so the
  * three always tie on screen as well as in the database.
+ *
+ * The state is carried by the word, the badge and the reason rather than by
+ * colour alone (§2) — checked by looking at it, which is also how the raw JSON
+ * on the History screen was found.
  */
 
 import { useCallback, useEffect, useState } from 'react';

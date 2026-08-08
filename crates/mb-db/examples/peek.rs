@@ -22,6 +22,18 @@ fn main() {
             "SELECT order_id, seq, name, qty, unit_price FROM order_lines",
             "SELECT order_id, mode, amount FROM payments",
             "SELECT id, kind, printer_id, state, attempts, reason FROM print_jobs",
+            // P11 and P12. The master plan tells every session to read the disk
+            // back with this example, and until now it could not show who a
+            // bill was voided by, whether the history hangs together, or
+            // whether money went back — which is most of what those two
+            // sessions built.
+            "SELECT state, bill_number_formatted, void_reason, voided_by, cancel_reason, cancelled_by FROM orders WHERE state IN ('voided','cancelled')",
+            "SELECT seq, action, entity, entity_id, staff_id, substr(hash,1,12) AS hash, substr(COALESCE(prev_hash,'-'),1,12) AS prev FROM audit_log ORDER BY seq",
+            "SELECT id, name, status, CASE WHEN pin_hash IS NULL THEN 'no PIN' ELSE 'has a PIN' END AS pin, role_id FROM staff",
+            "SELECT id, name, is_builtin, max_discount_bp, max_discount_paise FROM roles",
+            "SELECT order_id, amount, mode, reason, refunded_by FROM refunds",
+            "SELECT order_id, printed_at, printed_by, reason FROM reprints",
+            "SELECT kind, COUNT(*) AS how_many FROM reasons GROUP BY kind",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();

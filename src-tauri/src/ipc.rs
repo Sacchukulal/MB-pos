@@ -1164,6 +1164,25 @@ pub fn actor_for(member: &mb_db::repo::people::StaffMember) -> mb_auth::Actor {
 /// **It touches nothing but the session.** The cart, the kitchen ledger and the
 /// print queue are all exactly where they were; that is item 8, and T7.
 pub fn lock_now_on(app: &App) -> UiResult<LockState> {
+    // **A shop with no PIN cannot be locked, because there would be no way
+    // back in.**
+    //
+    // Found by looking at the window: on a first run the title bar offered a
+    // lock button, and pressing it — or Ctrl+L — ended the stand-in session
+    // and put up a lock screen with an empty staff list. The only escape was
+    // restarting the app. One click to a dead end, with every test green.
+    //
+    // Refused HERE rather than by hiding the button, for P11's reason: hiding
+    // a control is a courtesy and Rust is the control. Ctrl+L works on every
+    // screen and would have got past a hidden button anyway.
+    if !app.shop_has_a_pin() {
+        return Err(UiError::new(
+            "auth.nothing_to_unlock_with",
+            "Nobody has a PIN yet, so there would be no way back in. Set a PIN \
+             in Staff first — then the counter locks itself as well.",
+        ));
+    }
+
     if let Some(who) = app.sessions().end() {
         app.record(&AuditEntry::new(
             crate::flows::now(),
@@ -1746,9 +1765,60 @@ fn entry_view(row: &mb_auth::AuditRow) -> AuditEntryView {
             .unwrap_or_else(|| "Somebody not on the staff list".to_owned()),
         what: action::words(&row.action).to_owned(),
         about: row.entity_id.clone(),
-        before: row.before_json.clone(),
-        after: row.after_json.clone(),
+        before: row.before_json.as_deref().map(readable_change),
+        after: row.after_json.as_deref().map(readable_change),
     }
+}
+
+/// **A change, in words a shopkeeper reads** — audit F8, and D39.
+///
+/// `audit_log`'s before/after is JSON, deliberately: the shape differs per
+/// action and nothing ever queries inside it, which is why it is the one place
+/// JSON is allowed in this database. **Showing that JSON to the owner is a
+/// different decision, and it was the wrong one.** The History screen was
+/// rendering `{"state":"settled","total_paise":39300}` at somebody who wanted
+/// to know who voided a bill — *"errors show raw system text to a restaurant
+/// owner"* is the same finding, one screen along.
+///
+/// It is formatted **here** rather than in React because a `*_paise` value is
+/// money, and money is formatted in exactly one place (D39, R8) —
+/// `Money::to_plain_string`.
+fn readable_change(json: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        // Unparseable: show it as it is rather than hiding a row of history.
+        // A trail with a gap in it is worth less than an ugly line in it.
+        return json.to_owned();
+    };
+    let Some(fields) = value.as_object() else {
+        return value.to_string();
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    for (key, field) in fields {
+        let label = key.replace('_', " ");
+        let label = label.strip_suffix(" paise").unwrap_or(&label);
+        // A key like `total_paise` names the unit, not the reader's business.
+        let shown = if key.ends_with("_paise") {
+            field
+                .as_i64()
+                .map_or_else(|| field.to_string(), |paise| {
+                    mb_core::Money::from_paise(paise).to_plain_string()
+                })
+        } else {
+            match field {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Bool(b) => if *b { "yes" } else { "no" }.to_owned(),
+                serde_json::Value::Null => "—".to_owned(),
+                other => other.to_string(),
+            }
+        };
+        let mut label = label.to_owned();
+        if let Some(first) = label.get_mut(0..1) {
+            first.make_ascii_uppercase();
+        }
+        parts.push(format!("{label} {shown}"));
+    }
+    parts.join(", ")
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,4 +1943,40 @@ pub fn cart_add(
 #[tauri::command]
 pub fn cart_clear(app: tauri::State<'_, App>, keep_type: bool) -> UiResult<CartView> {
     cart_clear_on(&app, keep_type)
+}
+
+#[cfg(test)]
+mod change_words {
+    use super::readable_change;
+
+    /// **Audit F8, on the History screen.** The owner asked who voided a bill;
+    /// they should not be reading `total_paise` and a pair of braces.
+    #[test]
+    fn a_change_reads_as_words_and_rupees() {
+        let said = readable_change(
+            r#"{"reason":"Billed twice","state":"voided","total_paise":39300}"#,
+        );
+        assert_eq!(said, "Reason Billed twice, State voided, Total 393.00");
+        assert!(!said.contains('{'), "{said}");
+        assert!(!said.contains("paise"), "{said}");
+    }
+
+    #[test]
+    fn money_is_formatted_by_rust_and_only_by_rust() {
+        // D39: TypeScript never divides by a hundred, here or anywhere.
+        assert_eq!(readable_change(r#"{"amount_paise":5}"#), "Amount 0.05");
+        assert_eq!(readable_change(r#"{"amount_paise":100000}"#), "Amount 1000.00");
+    }
+
+    #[test]
+    fn a_flag_reads_as_a_word() {
+        assert_eq!(readable_change(r#"{"has_pin":true}"#), "Has pin yes");
+        assert_eq!(readable_change(r#"{"has_pin":false}"#), "Has pin no");
+    }
+
+    #[test]
+    fn something_unparseable_is_shown_rather_than_hidden() {
+        // A trail with a gap in it is worth less than an ugly line in it.
+        assert_eq!(readable_change("not json"), "not json");
+    }
 }

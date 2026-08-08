@@ -1,11 +1,36 @@
 /* The shell: title bar, rail, and the print-queue indicator.
    Tokens only, like everything else. */
 
+/*
+ * **A COLUMN, NOT A TWO-ROW GRID**, and P11's banner is why.
+ *
+ * This was `grid-template-rows: var(--titlebar-height) 1fr` — correct for
+ * exactly two children. P11 added a third (the "nobody has a PIN" strip), so
+ * the BANNER took the `1fr` row and grew to a quarter of a 768 px screen,
+ * while the body was pushed into an implicit auto row. Every test was green;
+ * it took four seconds of looking at the window.
+ *
+ * A flex column says what is actually meant — *the body takes what is left* —
+ * and stays true however many strips a later session adds above it. A grid with
+ * a counted number of rows is a bug waiting for the next feature.
+ */
 .mb-shell {
-  display: grid;
-  grid-template-rows: var(--titlebar-height) 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   background: var(--bg);
+}
+
+.mb-shell > .mb-titlebar,
+.mb-shell > .mb-nopin {
+  flex: 0 0 auto;
+}
+
+.mb-shell > .mb-body {
+  flex: 1 1 auto;
+  /* Without this a tall child stretches the body instead of scrolling inside
+     it — the same reason `--cart-lines-min` exists. */
+  min-height: 0;
 }
 
 /* --- Title bar — audit F7, "the plain Windows title bar" ----------------- */

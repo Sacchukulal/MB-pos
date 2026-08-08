@@ -137,7 +137,12 @@ pub fn stand_in_actor(name: &str, id: &str) -> Actor {
         staff_id: StaffId::new(id),
         name: name.to_owned(),
         role_id: None,
-        role_name: Some("Nobody has signed in".to_owned()),
+        // Beside the name in the title bar this reads as a description of the
+        // till, not a contradiction. The first version said "Nobody has signed
+        // in", which rendered as "Counter · Nobody has signed in" — two
+        // statements disagreeing with each other, in the one place a cashier
+        // looks to check whose till they are on.
+        role_name: Some("No PIN set".to_owned()),
         permissions: PermissionSet::everything(),
         max_discount_bp: None,
         max_discount: None,

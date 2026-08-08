@@ -75,12 +75,23 @@
      `1fr` alone loses to the auto rows when the panel is tall (a bill with
      several payments), and the list a cashier is reading disappears at exactly
      the moment they are taking money. It scrolls inside that floor instead. */
-  grid-template-rows: auto minmax(var(--cart-lines-min), 1fr) auto auto auto;
+  grid-template-rows: auto minmax(var(--cart-lines-min), 1fr) minmax(0, auto) auto auto;
   gap: var(--space-3);
   min-height: 0;
-  /* And if even the floor does not fit, the column scrolls rather than
-     silently cropping the buttons off the bottom. */
-  overflow-y: auto;
+  /* **THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT.**
+
+     It used to, on the reasoning that scrolling beats "silently cropping the
+     buttons off the bottom". Looking at a real three-rate bill showed what
+     that means in practice: the totals block grew by three tax rows and pushed
+     **Complete bill** below the fold, so settling a bill needed a scroll
+     first — on the one path §2.2 calls sacred, on a screen shorter than the
+     reference machine's.
+
+     So the ACTIONS are pinned and the TOTALS scroll instead (see
+     `.mb-totals`). A cashier can always reach the button; what they lose when
+     a bill has six tax rates is having all six visible at once, which is the
+     right thing to lose. */
+  overflow: hidden;
   padding: var(--space-4);
   background: var(--surface);
   border: var(--border-width) solid var(--border);
@@ -262,9 +273,36 @@
 .mb-totals {
   display: flex;
   flex-direction: column;
+  /* The breakdown scrolls; TOTAL and the buttons do not. See below. */
+  min-height: 0;
+  overflow: hidden;
   gap: var(--space-1);
   padding-top: var(--space-2);
   border-top: var(--border-width) solid var(--border);
+}
+
+/* **Only the breakdown scrolls.**
+ *
+ * A mixed-rate bill is the case the tax engine exists for — a bar's bill has a
+ * 5% row, an 18% row and a non-GST line, each with its own CGST and SGST, which
+ * is six more rows than a plain bill. Two attempts got this wrong, and both
+ * were found by billing a dosa, a cola and a beer and looking:
+ *
+ *   1. the whole cart column scrolled, so **Complete bill** went below the
+ *      fold — a scroll before every settle, on the sacred path;
+ *   2. then the whole totals block scrolled, so **TOTAL** went out of view —
+ *      the number the cashier reads out to the customer.
+ *
+ * So the breakdown is the only thing that gives way. What a shop loses on a
+ * six-rate bill is seeing all six rate rows at once, which is the right thing
+ * to lose.
+ */
+.mb-totals__breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .mb-totals__row {

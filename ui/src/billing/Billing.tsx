@@ -467,7 +467,10 @@ export function Billing() {
           {tables.length === 0 && menu.length === 0 ? (
             <EmptyState
               title="This shop has no menu or tables yet"
-              body="P13 builds the menu screens and P14 the floor. Until then, put a demo shop in to see the screen work."
+              // UI_GUIDELINES §6, and audit F8: never a system message. A
+              // shopkeeper does not know what "P13" is, and saying it in the
+              // one place a new shop starts is the worst possible moment.
+              body="Add your items and tables in Settings — or put a demo shop in to see how the counter works."
               action={
                 <Button variant="primary" onClick={() => void seedDemo()} disabled={busy}>
                   {busy ? <Spinner /> : 'Add a demo shop'}
@@ -482,7 +485,7 @@ export function Billing() {
             <div className="mb-floor__section">
               <SectionHeader
                 title="Menu"
-                note="P10 makes this a keyboard search. For now, press one."
+                note="Type to search, or press one."
               />
               <div className="mb-floor__grid">
                 {menu.map((item) => (
