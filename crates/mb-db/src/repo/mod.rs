@@ -28,6 +28,7 @@
 use rusqlite::Transaction;
 
 pub mod audit;
+pub mod composition;
 pub mod corrections;
 pub mod floor;
 pub mod menu;
@@ -40,6 +41,7 @@ pub mod settings;
 pub mod taxclass;
 
 pub use audit::{AuditFilter, AuditRepo};
+pub use composition::{Combo, ComboPart, CompositionRepo, Modifier, ModifierGroup, Variant};
 pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
@@ -104,6 +106,13 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn outbox(&self) -> OutboxRepo<'a> {
         OutboxRepo::new(self.tx)
+    }
+
+    /// Variants, modifiers and combos (P13) — the three ways one menu row
+    /// becomes several things a customer can order.
+    #[must_use]
+    pub fn composition(&self) -> CompositionRepo<'a> {
+        CompositionRepo::new(self.tx)
     }
 
     /// The shop's tax classes (P13) — and the one operation that matters:
