@@ -146,6 +146,19 @@
      at it. Four lines is a floor, not a height. */
   --cart-lines-min: 8rem;
 
+  /* The lock screen and the people screens (P11). The card is narrow on
+     purpose: a PIN pad the width of a monitor is a PIN pad you have to look
+     at, and the whole point is that a cashier does it without looking. */
+  --lock-width: 24rem;
+  --lock-people-height: 18rem;
+  --dot-size: 0.875rem;
+  --permission-min: 15rem;
+
+  /* Stacking. The kit's overlays were 100 (the modal) and 200 (toasts); the
+     lock is above both, because a toast that floated over a locked screen
+     would be information leaking past the lock. */
+  --z-lock: 300;
+
   --focus-ring-width: 2px;
   --border-width: 1px;
 }

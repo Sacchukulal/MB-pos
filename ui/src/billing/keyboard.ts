@@ -476,4 +476,9 @@ export const SHORTCUTS: readonly {
   { group: 'The floor', keys: 'Enter', what: 'Open the highlighted table' },
   { group: 'The floor', keys: 'Esc', what: 'Back to the search box' },
   { group: 'Help', keys: '?', what: 'Show this sheet' },
+  // P11. The key is handled by the shell rather than by this reducer — it must
+  // work on every screen, not only on this one — but it is documented HERE,
+  // because the help sheet is generated from this table (audit F4) and a
+  // shortcut written down somewhere else is a shortcut nobody learns.
+  { group: 'The counter', keys: 'Ctrl + L', what: 'Lock the counter' },
 ];

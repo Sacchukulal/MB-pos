@@ -34,11 +34,17 @@
 mod billing;
 mod config;
 mod flows;
+mod guard;
 mod ipc;
 mod logging;
 mod preview;
 mod push;
 mod search;
+mod session;
+/// P11's flows are sequences, and a sequence that can only be checked by
+/// clicking is a sequence that gets checked once. See the file's own note.
+#[cfg(test)]
+mod signin_tests;
 mod startup;
 mod state;
 mod window;
@@ -112,6 +118,11 @@ fn main() {
             // screen at the first paint rather than at the first event.
             push::pump_print_queue(app.handle());
             push::emit_print_queue(app.handle());
+            // **The idle lock** (P11). One sleeping thread; a React timer would
+            // be a poll against M4 and would be bypassed by any screen that is
+            // not open.
+            push::watch_for_idle(app.handle());
+            push::emit_session(app.handle());
             if let Some(main) = app.get_webview_window("main") {
                 // Step 8. Restored and THEN shown, so the 800x600 flash audit
                 // F7 describes cannot happen.

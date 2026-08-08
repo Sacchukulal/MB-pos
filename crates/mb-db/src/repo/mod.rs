@@ -27,6 +27,7 @@
 
 use rusqlite::Transaction;
 
+pub mod audit;
 pub mod floor;
 pub mod menu;
 pub mod money;
@@ -36,6 +37,7 @@ pub mod people;
 pub mod print_jobs;
 pub mod settings;
 
+pub use audit::{AuditFilter, AuditRepo};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
 pub use money::MoneyRepo;
@@ -75,6 +77,14 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn people(&self) -> PeopleRepo<'a> {
         PeopleRepo::new(self.tx)
+    }
+
+    /// The audit trail (P11). Like the print spool it raises **no outbox row**,
+    /// and unlike the print spool that is not about size — it is D16: nothing
+    /// on the phone reads it, so nothing pays to send it.
+    #[must_use]
+    pub fn audit(&self) -> AuditRepo<'a> {
+        AuditRepo::new(self.tx)
     }
 
     #[must_use]

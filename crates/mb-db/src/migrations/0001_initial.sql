@@ -778,11 +778,23 @@ CREATE TABLE staff (
     updated_at INTEGER NOT NULL
 ) STRICT;
 
+-- `is_builtin` means "cannot be DELETED". It does not mean "cannot be edited":
+-- a shop whose waiters take payments must be able to say so without asking us.
+--
+-- The two discount columns are scope 1.12 and they arrived at P11. D18 is why
+-- they live on the ROLE and not on the bill: the policy is checked by the
+-- caller, never inside `compute_bill`, so an old bill recomputes identically
+-- after somebody's role changes.
 CREATE TABLE roles (
-    id         TEXT    NOT NULL PRIMARY KEY,
-    outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
-    name       TEXT    NOT NULL,
-    is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1))
+    id                   TEXT    NOT NULL PRIMARY KEY,
+    outlet_id            TEXT    NOT NULL REFERENCES outlets (id),
+    name                 TEXT    NOT NULL,
+    is_builtin           INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+    -- Basis points. NULL is "no limit", which is not the same as 0 — 0 is a
+    -- role that may not discount at all, and a waiter has exactly that.
+    max_discount_bp      INTEGER CHECK (max_discount_bp BETWEEN 0 AND 10000),
+    -- Paise. NULL is "no limit".
+    max_discount_paise   INTEGER CHECK (max_discount_paise >= 0)
 ) STRICT;
 
 -- THE BACKEND-G7 FIX.
@@ -811,9 +823,31 @@ CREATE TABLE role_permissions (
 --
 -- It must NOT sync by default. It is unbounded, it is the widest row in the
 -- product, and nothing on the phone reads it (D16).
+-- THE THREE CHAIN COLUMNS ARE P11's, AND THEY ARE WHY THIS LOG CAN BE
+-- BELIEVED.
+--
+-- Audit C4 did not ask for an append-only log. It asked for a **tamper-evident**
+-- one, and the two triggers below are not that: they stop this program and
+-- every accident inside it, and they stop nobody at all with a SQLite browser,
+-- who can drop a trigger in one statement.
+--
+-- So every row carries sha256(prev_hash ‖ its own fields). Editing a row
+-- changes its hash; deleting one leaves a gap in `seq` AND breaks the link;
+-- reordering two breaks both. mb_auth::verify_chain reports the first `seq`
+-- where it stops making sense, and the audit screen turns that into a sentence
+-- with a date in it.
+--
+-- Evidence, not prevention — and evidence is the honest goal. The shop's own
+-- machine must be able to read the shop's own file, so nothing here can STOP an
+-- owner with a hex editor. It can make sure they cannot do it quietly.
 CREATE TABLE audit_log (
     id           TEXT    NOT NULL PRIMARY KEY,
     outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    -- Per outlet, gapless, MAX(seq)+1 inside the writing transaction. Exact
+    -- because P04 gave this database one writer; it does not need the
+    -- `counters` machinery, which exists for numbers that survive being handed
+    -- out and not used.
+    seq          INTEGER NOT NULL,
     at           INTEGER NOT NULL,
     business_day INTEGER NOT NULL,
     staff_id     TEXT REFERENCES staff (id),
@@ -821,8 +855,27 @@ CREATE TABLE audit_log (
     entity       TEXT    NOT NULL,
     entity_id    TEXT,
     before_json  TEXT,
-    after_json   TEXT
+    after_json   TEXT,
+    -- NULL only on the very first row of a shop's life.
+    prev_hash    TEXT,
+    hash         TEXT    NOT NULL,
+    UNIQUE (outlet_id, seq)
 ) STRICT;
+
+-- Append-only, at the storage layer (P11 T5). Two triggers, because an UPDATE
+-- and a DELETE are two different ways to rewrite history and SQLite needs to be
+-- told about each one.
+CREATE TRIGGER audit_log_is_append_only_update
+BEFORE UPDATE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'the history cannot be changed');
+END;
+
+CREATE TRIGGER audit_log_is_append_only_delete
+BEFORE DELETE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'the history cannot be deleted');
+END;
 
 -- ===========================================================================
 -- MONEY OUTSIDE THE BILL

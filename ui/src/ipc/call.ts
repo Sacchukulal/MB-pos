@@ -28,6 +28,11 @@ import type { PrinterView } from './generated/PrinterView';
 import type { TableView } from './generated/TableView';
 import type { Pushed } from './generated/Pushed';
 import type { UiError } from './generated/UiError';
+import type { LockState } from './generated/LockState';
+import type { PersonView } from './generated/PersonView';
+import type { RoleView } from './generated/RoleView';
+import type { StaffEdit } from './generated/StaffEdit';
+import type { AuditView } from './generated/AuditView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -87,6 +92,38 @@ export interface Commands {
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
+
+  // P11 — signing in, the people and the history. Audit C1.
+  //
+  // The first four answer while the screen is LOCKED; everything else is
+  // refused in Rust by `guard::require`, which is the control. Hiding a rail
+  // item is only a courtesy.
+  lock_state: { args: void; returns: LockState };
+  login: { args: { staffId: string; pin: string }; returns: LockState };
+  lock_now: { args: void; returns: LockState };
+  /** Returns the NEW recovery code, to be shown once and printed. */
+  recover_with_code: {
+    args: { code: string; staffId: string; newPin: string };
+    returns: string;
+  };
+  list_staff: { args: void; returns: PersonView[] };
+  save_staff_member: { args: { staff: StaffEdit }; returns: PersonView[] };
+  /** `null` clears the PIN. Returns the shop's recovery code the first time one is made. */
+  set_staff_pin: {
+    args: { staffId: string; pin: string | null };
+    returns: string | null;
+  };
+  list_roles: { args: void; returns: RoleView[] };
+  save_role: { args: { role: RoleView }; returns: RoleView[] };
+  list_permissions: { args: void; returns: [string, string][] };
+  audit_trail: {
+    args: {
+      staffId: string | null;
+      actionCode: string | null;
+      days: number | null;
+    };
+    returns: AuditView;
+  };
 }
 
 export type CommandName = keyof Commands;

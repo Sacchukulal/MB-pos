@@ -153,9 +153,66 @@ pub fn no_shop_yet() -> UiError {
     )
 }
 
+/// An instant, as a person at a counter reads it: `8 Aug, 4:32 pm`.
+///
+/// **Formatted in Rust, like money** (D39, R8). TypeScript has `toLocale…`, and
+/// using it would put a second clock in the product — one that reads the
+/// machine's timezone rather than the shop's, and would therefore disagree with
+/// the business day (D19: India is a fixed +05:30 and everything here is exact
+/// because of it).
+///
+/// The workspace denies `integer_division` because D7 is about money, where a
+/// dropped remainder is a rupee somebody lost. Sixty seconds really do make a
+/// minute, and the remainder is the other half of the answer rather than a loss.
+#[must_use]
+#[allow(
+    clippy::integer_division,
+    reason = "a clock is the one place a remainder is not a loss"
+)]
+pub fn when(at: mb_core::Timestamp) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (days, seconds) = at.to_local_parts(mb_core::UtcOffset::INDIA);
+    let (_, month, day) = mb_core::time::civil_from_days(days);
+    let minutes_of_day = seconds / 60;
+    let hour24 = minutes_of_day / 60;
+    let minute = minutes_of_day % 60;
+    let suffix = if hour24 < 12 { "am" } else { "pm" };
+    // 0 is midnight and 12 is noon, both of which read as 12.
+    let hour = match hour24 % 12 {
+        0 => 12,
+        h => h,
+    };
+    let month_name = MONTHS
+        .get(usize::try_from(month.saturating_sub(1)).unwrap_or(0))
+        .copied()
+        .unwrap_or("?");
+    format!("{day} {month_name}, {hour}:{minute:02} {suffix}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clock_reads_the_way_a_shopkeeper_says_it() {
+        // 2026-08-08, 11:02:00 UTC — which is 4:32 pm in the shop.
+        let at = mb_core::Timestamp::from_millis(1_786_186_920_000);
+        assert_eq!(when(at), "8 Aug, 4:32 pm");
+    }
+
+    #[test]
+    fn midnight_and_noon_both_read_as_twelve() {
+        // The two the modulo gets wrong if nobody looks: 0 and 12 are both
+        // "12", not "0".
+        // 2026-08-08 18:30 UTC = 2026-08-09 00:00 IST.
+        let midnight = mb_core::Timestamp::from_millis(1_786_213_800_000);
+        assert_eq!(when(midnight), "9 Aug, 12:00 am");
+        // 06:30 UTC = 12:00 IST.
+        let noon = mb_core::Timestamp::from_millis(1_786_170_600_000);
+        assert_eq!(when(noon), "8 Aug, 12:00 pm");
+    }
 
     #[test]
     fn a_shopkeeper_never_reads_a_system_message() {

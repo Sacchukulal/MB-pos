@@ -5,4 +5,12 @@ import type { PrintJobView } from "./PrintJobView";
  * Everything Rust pushes. One enum, because one channel is easier to reason
  * about than five, and because a screen that has just attached wants the lot.
  */
-export type Pushed = { "kind": "printQueue", jobs: Array<PrintJobView>, } | { "kind": "licence", state: string, } | { "kind": "sync", state: string, };
+export type Pushed = { "kind": "printQueue", jobs: Array<PrintJobView>, } | { "kind": "session", 
+/**
+ * `None` when the screen is locked.
+ */
+who: string | null, role: string | null, 
+/**
+ * True while nobody has a PIN — the shell's undismissable banner.
+ */
+stand_in: boolean, } | { "kind": "licence", state: string, } | { "kind": "sync", state: string, };

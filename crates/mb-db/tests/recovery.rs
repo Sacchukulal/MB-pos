@@ -226,8 +226,21 @@ fn t3_a_corrupted_backup_is_caught_and_refused() {
         f.seek(SeekFrom::Start(len / 2)).expect("seek");
         f.write_all(&[0xAB; 2048]).expect("corrupt");
     }
-    let report = backup::verify(&bytes.path).expect("verify");
-    assert!(!report.is_ok(), "a damaged file was accepted: {report:?}");
+    // **Either outcome is the file being caught, and which one you get depends
+    // on which page the damage lands in.** It used to land somewhere SQLite
+    // could still read around, so `verify` returned a report saying "not ok";
+    // P11's extra columns moved the layout and now the same offset lands
+    // somewhere SQLite refuses to read at all, and `verify` returns an error.
+    // The test asserted the shape of the refusal, which was never the point —
+    // the point is that the damaged backup cannot be restored over a shop.
+    match backup::verify(&bytes.path) {
+        Ok(report) => assert!(!report.is_ok(), "a damaged file was accepted: {report:?}"),
+        Err(_) => { /* refused outright, which is the same answer, louder */ }
+    }
+    assert!(
+        backup::restore(&bytes.path, &scratch.db_path()).is_err(),
+        "a damaged backup was restored anyway"
+    );
 }
 
 /// T4. When the restored database fails its own verification, the safety copy
@@ -1062,30 +1075,37 @@ fn t18_settings_are_typed_and_never_default() {
 
 /// A permission that is not a row cannot be granted — BACKEND-G7, from the
 /// repository's side.
+///
+/// **P11 moved the first half of this into the type system**: `save_role` takes
+/// a `RoleShape` whose permissions are a `PermissionSet`, so a typo does not
+/// compile. What is left to test at this level is the two things a type cannot
+/// promise: that the database itself still refuses a bad code written past the
+/// repository, and that reading one back is an **error** rather than a
+/// permission quietly dropped from the set — which is what a silent "denied"
+/// looked like from behind the counter.
 #[test]
 fn a_permission_typo_is_refused_not_silently_denied() {
     let scratch = Scratch::new("perms");
     let db = scratch.open();
     shop::build(&db);
 
+    // Written past the repository, straight at the table.
     let err = db
         .transaction(|tx| {
-            Repos::new(tx).people().save_role(
-                OUTLET,
-                "role_typo",
-                "Typo",
-                false,
-                &["bill.craete"],
-                Timestamp::from_millis(1),
+            tx.execute(
+                "INSERT INTO role_permissions (role_id, permission_code)
+                 VALUES ('role_cashier', 'bill.craete')",
+                [],
             )
+            .map_err(mb_db::DbError::from)
         })
-        .expect_err("a typo'd permission was accepted");
+        .expect_err("a typo'd permission was accepted by the database");
     assert!(
-        err.to_string().contains("bill.craete"),
-        "the refusal does not name the typo: {err}"
+        err.to_string().to_lowercase().contains("foreign key"),
+        "the foreign key did not refuse it: {err}"
     );
 
-    // And the real thing resolves through to the staff member.
+    // And the real thing resolves through to the staff member, typed.
     let staff = db
         .transaction(|tx| Repos::new(tx).people().list_staff(OUTLET))
         .expect("staff");
@@ -1093,6 +1113,41 @@ fn a_permission_typo_is_refused_not_silently_denied() {
         .iter()
         .find(|s| s.id == StaffId::new("staff_1"))
         .expect("Ravi");
-    assert!(ravi.permissions.contains("bill.create"));
-    assert!(!ravi.permissions.contains("bill.void"));
+    assert!(ravi.permissions.has(mb_auth::Permission::BillCreate));
+    assert!(!ravi.permissions.has(mb_auth::Permission::BillVoid));
+}
+
+/// **T9.** A code the program does not know is an error at the row.
+///
+/// The only way to get one in is to put it in the `permissions` table first,
+/// which is exactly what a newer build of Magic Bill would have done to a shop
+/// that was then rolled back — so this is not a hypothetical.
+#[test]
+fn a_permission_this_build_does_not_know_is_an_error_not_a_quiet_deny() {
+    let scratch = Scratch::new("perm_unknown");
+    let db = scratch.open();
+    shop::build(&db);
+
+    db.transaction(|tx| {
+        tx.execute(
+            "INSERT INTO permissions (code, description)
+             VALUES ('fusion.reactor', 'Something a later version added')",
+            [],
+        )?;
+        tx.execute(
+            "INSERT INTO role_permissions (role_id, permission_code)
+             VALUES ('role_cashier', 'fusion.reactor')",
+            [],
+        )?;
+        Ok(())
+    })
+    .expect("a future permission");
+
+    let err = db
+        .transaction(|tx| Repos::new(tx).people().list_staff(OUTLET))
+        .expect_err("an unknown permission was silently dropped");
+    assert!(
+        err.to_string().contains("fusion.reactor"),
+        "the error does not name the permission: {err}"
+    );
 }

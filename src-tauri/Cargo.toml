@@ -13,6 +13,7 @@ workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+mb-auth = { path = "../crates/mb-auth" }
 mb-core = { path = "../crates/mb-core" }
 mb-db = { path = "../crates/mb-db" }
 mb-print = { path = "../crates/mb-print" }

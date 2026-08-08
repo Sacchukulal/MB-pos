@@ -1,0 +1,231 @@
+/*
+ * The lock screen, the people screen and the history.
+ *
+ * **Not one raw value in this file** — every colour, size, radius and space is
+ * a token (D21, and the owner's ruling of 2026-08-04: the look must be
+ * changeable from one file without touching any functionality). The lint
+ * `scripts/check-tokens.mjs` fails the build if that stops being true, which is
+ * D40: the rules that erode are enforced by scripts.
+ */
+
+/* --- the lock screen ----------------------------------------------------- */
+
+.mb-lock {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-lock);
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  padding: var(--space-5);
+}
+
+.mb-lock__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: center;
+  width: 100%;
+  max-width: var(--lock-width);
+  padding: var(--space-6);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+
+.mb-lock__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+.mb-lock__people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-height: var(--lock-people-height);
+  overflow-y: auto;
+}
+
+/* A name and a role on two lines, so a thirty-person shop is still scannable
+   and a two-person shop still gets a target you cannot miss. */
+.mb-lock__person {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: var(--target-min);
+  text-align: left;
+}
+
+.mb-lock__name {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+}
+
+.mb-lock__role {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-lock__dots {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: var(--space-5);
+}
+
+.mb-lock__dot {
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.mb-lock__dot--filled {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+/* Six is the minimum, so the sixth dot carries a mark: the pad does NOT submit
+   itself (a PIN may be eight long), and without this nothing on screen says
+   when Enter will be accepted. Form, not colour — §2. */
+.mb-lock__dot--six {
+  position: relative;
+}
+
+.mb-lock__dot--six::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(-1 * var(--space-2));
+  width: var(--border-width);
+  height: var(--space-1);
+  background: var(--border-strong);
+}
+
+.mb-lock__problem {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.mb-lock__actions {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.mb-lock__actions > * {
+  flex: 1;
+}
+
+/* The recovery code, read off a screen and typed into a phone or copied onto a
+   slip. Monospace and large, because that is what makes it transcribable. */
+.mb-lock__code {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-caps);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+  user-select: all;
+}
+
+/* --- who is signed in, in the title bar ---------------------------------- */
+
+.mb-who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.mb-who__name {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+/* The banner for a shop with no PIN. NOT dismissible: a dismissed banner is a
+   fixed bug that was never fixed. */
+.mb-nopin {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-bottom: var(--border-width) solid var(--border);
+  font-size: var(--text-sm);
+}
+
+/* --- the people and roles screens ---------------------------------------- */
+
+.mb-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+}
+
+.mb-roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mb-roles__role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.mb-permissions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--permission-min), 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+/* --- the history --------------------------------------------------------- */
+
+.mb-audit__alarm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: var(--border-width) solid var(--danger);
+  border-radius: var(--radius-md);
+}
+
+.mb-audit__change {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.mb-audit__before {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.mb-audit__after {
+  color: var(--text);
+}

@@ -11,6 +11,13 @@ workspace = true
 
 [dependencies]
 mb-core = { path = "../mb-core" }
+
+# P11. mb-db depends on mb-auth so that a permission code read from a row
+# becomes a typed `Permission` **at the row**, and an unknown one is an error
+# there rather than a silent "denied" three layers up. That silent denial is
+# BACKEND-G7, and it is why a typo in v1 could not be debugged from the counter.
+mb-auth = { path = "../mb-auth" }
+
 thiserror = "2"
 
 # R6 / scope 16.15 — the one dependency this crate gets.

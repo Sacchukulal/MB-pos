@@ -146,6 +146,7 @@ pub struct PrinterView {
 
 #[tauri::command]
 pub fn list_printers(app: tauri::State<'_, App>) -> UiResult<Vec<PrinterView>> {
+    guard::require(&app, Permission::SettingsPrinter)?;
     app.with_shop(|shop| {
         let rows = shop
             .db
@@ -179,6 +180,7 @@ pub fn list_printers(app: tauri::State<'_, App>) -> UiResult<Vec<PrinterView>> {
 /// printing works, and D27 says the database is deliberately not open then.
 #[tauri::command]
 pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResult<String> {
+    guard::require(&app, Permission::SettingsPrinter)?;
     let printer = find_printer(&app, &printer_id)?;
     let document = mb_print::testprint::test_document(&printer, None);
     let day = BusinessDay::of(
@@ -221,6 +223,7 @@ pub fn nudge_print_offset(
     dx_mm: i32,
     dy_mm: i32,
 ) -> UiResult<PrinterView> {
+    guard::require(&app, Permission::SettingsPrinter)?;
     app.with_shop(|shop| {
         let mut rows = shop
             .db
@@ -286,11 +289,13 @@ pub fn list_print_jobs(app: tauri::State<'_, App>) -> UiResult<Vec<PrintJobView>
 
 #[tauri::command]
 pub fn retry_print_job(app: tauri::State<'_, App>, id: String) -> UiResult<()> {
+    guard::require(&app, Permission::BillReprint)?;
     app.with_shop(|shop| shop.queue.retry(&id).map_err(|e| words::from_print(&e)))
 }
 
 #[tauri::command]
 pub fn dismiss_print_job(app: tauri::State<'_, App>, id: String) -> UiResult<()> {
+    guard::require(&app, Permission::BillReprint)?;
     app.with_shop(|shop| shop.queue.dismiss(&id).map_err(|e| words::from_print(&e)))
 }
 
@@ -399,6 +404,19 @@ macro_rules! commands {
             $crate::ipc::open_table,
             $crate::flows::print_kitchen_ticket,
             $crate::flows::complete_bill,
+            // P11 — signing in, the people, the history. `guard.rs` has a test
+            // that every one of these has an access decision recorded.
+            $crate::ipc::lock_state,
+            $crate::ipc::login,
+            $crate::ipc::lock_now,
+            $crate::ipc::recover_with_code,
+            $crate::ipc::list_staff,
+            $crate::ipc::save_staff_member,
+            $crate::ipc::set_staff_pin,
+            $crate::ipc::list_roles,
+            $crate::ipc::save_role,
+            $crate::ipc::list_permissions,
+            $crate::ipc::audit_trail,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -452,6 +470,7 @@ use crate::billing::{
 /// What is in the cart right now.
 #[tauri::command]
 pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     app.with_cart(cart_view)
 }
 
@@ -465,6 +484,7 @@ pub fn cart_add(
     qty: Option<String>,
     note: Option<String>,
 ) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     let item = app.find_menu_item(&item_id)?;
     let qty = match qty {
         Some(text) => mb_core::Qty::parse(&text).map_err(|e| {
@@ -498,6 +518,7 @@ pub fn cart_set_qty(
     index: usize,
     qty: String,
 ) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     let parsed = mb_core::Qty::parse(&qty).map_err(|e| {
         UiError::new(
             "cart.qty",
@@ -516,6 +537,7 @@ pub fn cart_set_qty(
 
 #[tauri::command]
 pub fn cart_remove(app: tauri::State<'_, App>, index: usize) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
         state.cart.remove(index).map_err(|e| {
             UiError::new("cart.remove", "That line could not be removed.")
@@ -529,6 +551,7 @@ pub fn cart_remove(app: tauri::State<'_, App>, index: usize) -> UiResult<CartVie
 /// is what stops a parcel counter re-selecting it forty times an hour.
 #[tauri::command]
 pub fn cart_clear(app: tauri::State<'_, App>, keep_type: bool) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
         let kept = state.order_type;
         *state = CartState::default();
@@ -544,6 +567,7 @@ pub fn cart_set_order_type(
     app: tauri::State<'_, App>,
     order_type: String,
 ) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     let kind = order_type_from_label(&order_type).ok_or_else(|| {
         UiError::new("cart.order_type", format!("\"{order_type}\" is not an order type."))
     })?;
@@ -566,6 +590,7 @@ pub fn cart_add_payment(
     mode: String,
     amount_paise: i64,
 ) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     let mode = match mode.as_str() {
         "Cash" => mb_core::PaymentMode::Cash,
         "Card" => mb_core::PaymentMode::Card,
@@ -588,6 +613,7 @@ pub fn cart_add_payment(
 
 #[tauri::command]
 pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
         state.settlement = mb_core::Settlement::new();
         cart_view(state)
@@ -597,6 +623,7 @@ pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
 /// The floor — **the only view of open orders** (scope 1.4).
 #[tauri::command]
 pub fn open_orders(app: tauri::State<'_, App>) -> UiResult<Vec<TableView>> {
+    guard::require(&app, Permission::BillCreate)?;
     let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
     app.with_shop(|shop| {
         let (tables, sections, open) = shop
@@ -623,6 +650,7 @@ pub fn open_orders(app: tauri::State<'_, App>) -> UiResult<Vec<TableView>> {
 /// The menu, for putting something in the cart. P13 owns the menu screens.
 #[tauri::command]
 pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
+    guard::require(&app, Permission::BillCreate)?;
     app.with_shop(|shop| {
         let items = shop
             .db
@@ -649,6 +677,7 @@ pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
+    guard::require(&app, Permission::StaffManage)?;
     use mb_core::{CategoryId, ItemId, Money, TableId, TaxRate, TaxTreatment};
     use mb_db::repo::floor::{DiningTable, Section};
     use mb_db::repo::menu::MenuItem;
@@ -781,6 +810,7 @@ pub fn search_items(
     text: String,
     mode: Option<crate::search::MatchMode>,
 ) -> UiResult<Vec<MenuItemView>> {
+    guard::require(&app, Permission::BillCreate)?;
     app.with_shop(|shop| {
         let items = shop
             .db
@@ -802,6 +832,7 @@ pub fn search_items(
 /// the screen's memory"*).
 #[tauri::command]
 pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
     // **The label, not the id.** The cart carries `tbl_7` because that is the
     // key an order is saved against; the cashier's table is called 7 and the
     // header said "Table tbl_7" until somebody looked at it. Resolved here,
@@ -859,4 +890,942 @@ pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<Cart
         }
         cart_view(state)
     })
+}
+
+// ---------------------------------------------------------------------------
+// P11 — signing in, the people, and the history.
+//
+// Audit C1: "There is no login on the POS at all." Everything below exists to
+// make that sentence untrue, and `guard.rs` is what makes it stay untrue.
+// ---------------------------------------------------------------------------
+
+use mb_auth::audit::action;
+use mb_auth::{AuditEntry, Permission, Pin, PinHash, RoleShape};
+
+use crate::guard;
+
+/// What the lock screen needs, and the only command that answers while locked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct LockState {
+    /// `None` when the screen is locked.
+    pub signed_in_as: Option<String>,
+    pub role: Option<String>,
+    /// What this person may do, so the rail can hide what they cannot open.
+    ///
+    /// **This is a courtesy and not the control.** `guard::require` refuses the
+    /// commands themselves, and there is a test that calls them directly. A
+    /// screen that treated this list as the security boundary would be audit
+    /// C1 with extra steps.
+    pub permissions: Vec<String>,
+    /// True while nobody in this shop has a PIN. The banner reads off it, and
+    /// it is why the app opens straight into billing on a shop's first day.
+    pub nobody_has_a_pin: bool,
+    /// Everybody who could sign in. **Only people with a PIN**, because a name
+    /// on this list that cannot be chosen is a support call.
+    pub people: Vec<PersonView>,
+    /// Whether this shop has a recovery code at all, so the lock screen only
+    /// offers "forgotten your PIN?" when there is something to offer.
+    pub can_recover: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PersonView {
+    pub id: String,
+    pub name: String,
+    pub code: Option<String>,
+    pub role: Option<String>,
+    pub status: String,
+    pub has_pin: bool,
+    /// Empty unless this person is locked out — then it is the sentence the
+    /// screen shows, already counted down.
+    pub locked_out: Option<String>,
+    pub permissions: Vec<String>,
+    pub max_discount_bp: Option<u32>,
+    pub max_discount: Option<MoneyView>,
+}
+
+/// The key the shop's recovery code hash is stored under.
+///
+/// A setting rather than a column: it belongs to the shop, not to a person, and
+/// P04's settings table is exactly the shape for "one value the shop has".
+const RECOVERY_KEY: &str = "auth.recovery_hash";
+
+pub fn lock_state_on(app: &App) -> UiResult<LockState> {
+    let current = app.sessions().current();
+    let (people, can_recover) = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| {
+                    let repos = mb_db::Repos::new(tx);
+                    let staff = repos.people().list_staff(OUTLET)?;
+                    let mut people = Vec::new();
+                    for member in staff {
+                        let locked_out = lockout_message(&repos, &member)?;
+                        people.push(person_view(&member, locked_out));
+                    }
+                    let recovery: Option<String> = repos.settings().get(OUTLET, RECOVERY_KEY)?;
+                    Ok((people, recovery.is_some()))
+                })
+                .map_err(|e| words::from_db(&e))
+        })
+        .unwrap_or_else(|_| (Vec::new(), false));
+
+    Ok(LockState {
+        signed_in_as: current.as_ref().map(|s| s.actor.name.clone()),
+        role: current.as_ref().and_then(|s| s.actor.role_name.clone()),
+        permissions: current.as_ref().map_or_else(Vec::new, |s| {
+            s.actor
+                .permissions
+                .iter()
+                .map(|p| p.code().to_owned())
+                .collect()
+        }),
+        nobody_has_a_pin: people.iter().all(|p| !p.has_pin),
+        // Only people who can actually sign in. A name that cannot be chosen is
+        // a support call about a screen that "does nothing".
+        people: people
+            .into_iter()
+            .filter(|p| p.has_pin && p.status == "active")
+            .collect(),
+        can_recover,
+    })
+}
+
+fn person_view(
+    member: &mb_db::repo::people::StaffMember,
+    locked_out: Option<String>,
+) -> PersonView {
+    PersonView {
+        id: member.id.as_str().to_owned(),
+        name: member.name.clone(),
+        code: member.code.clone(),
+        role: member.role_name.clone(),
+        status: status_word(member.status).to_owned(),
+        has_pin: member.pin_hash.is_some(),
+        locked_out,
+        permissions: member
+            .permissions
+            .iter()
+            .map(|p| p.code().to_owned())
+            .collect(),
+        max_discount_bp: member.max_discount_bp,
+        max_discount: member.max_discount.map(MoneyView::from),
+    }
+}
+
+const fn status_word(status: mb_db::repo::people::StaffStatus) -> &'static str {
+    match status {
+        mb_db::repo::people::StaffStatus::Active => "active",
+        mb_db::repo::people::StaffStatus::Suspended => "suspended",
+        mb_db::repo::people::StaffStatus::Left => "left",
+    }
+}
+
+/// How long this person still has to wait, in words — or `None`.
+fn lockout_message(
+    repos: &mb_db::Repos<'_>,
+    member: &mb_db::repo::people::StaffMember,
+) -> Result<Option<String>, mb_db::DbError> {
+    let failures = repos
+        .audit()
+        .failed_logins_since_success(OUTLET, member.id.as_str())?;
+    let Some(wait) = mb_auth::lockout_after(failures) else {
+        return Ok(None);
+    };
+    let Some(last) = repos.audit().last_failed_login(OUTLET, member.id.as_str())? else {
+        return Ok(None);
+    };
+    let elapsed = crate::flows::now().millis().saturating_sub(last.millis());
+    let elapsed = std::time::Duration::from_millis(elapsed.max(0).unsigned_abs());
+    match wait.checked_sub(elapsed) {
+        Some(remaining) if !remaining.is_zero() => {
+            Ok(Some(mb_auth::lockout::wait_message(remaining)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// **Sign in — one person, one verification.**
+///
+/// BACKEND-**D1** is the finding this shape exists to close: v1 tried the typed
+/// PIN against *every* active staff row, so with ten staff a random guess was
+/// ten times likelier to land, and here it would also cost ten Argon2
+/// verifications. The cashier says who they are first, then proves it.
+pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState> {
+    let at = crate::flows::now();
+    let day = crate::flows::today(at);
+
+    let typed = Pin::parse(&pin).map_err(|e| {
+        UiError::new("auth.pin_shape", format!("{e}. Try again.")).with_detail(e.to_string())
+    })?;
+
+    let member = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).people().find_staff(OUTLET, &staff_id))
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    let Some(member) = member else {
+        return Err(UiError::new(
+            "auth.unknown",
+            "That person is not on this shop's staff list any more.",
+        ));
+    };
+
+    // Scope 9.15 — somebody who has left keeps their history and loses their
+    // way in. T3: it takes effect on the next action, not the next shift.
+    if member.status != mb_db::repo::people::StaffStatus::Active {
+        return Err(UiError::new(
+            "auth.not_active",
+            format!("{} is not signed on as staff here any more.", member.name),
+        ));
+    }
+
+    // The lockout, computed from the history itself.
+    let waiting = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| lockout_message(&mb_db::Repos::new(tx), &member))
+            .map_err(|e| words::from_db(&e))
+    })?;
+    if let Some(message) = waiting {
+        return Err(UiError::new("auth.locked_out", message));
+    }
+
+    let stored = member.pin().map_err(|e| words::from_db(&e))?;
+    let Some(stored) = stored else {
+        return Err(UiError::new(
+            "auth.no_pin",
+            format!(
+                "{} has no PIN yet. Somebody who manages staff can set one.",
+                member.name
+            ),
+        ));
+    };
+
+    if !mb_auth::verify_pin(&typed, &stored) {
+        // The failure is written BEFORE the refusal is returned, because that
+        // row IS the lockout counter (item 4) and a refusal that did not count
+        // would be no lockout at all.
+        app.record(
+            &AuditEntry::new(
+                at,
+                day,
+                Some(member.id.clone()),
+                action::LOGIN_FAILED,
+                "staff",
+            )
+            .about(member.id.as_str()),
+        );
+        let waiting = app
+            .with_shop(|shop| {
+                shop.db
+                    .transaction(|tx| lockout_message(&mb_db::Repos::new(tx), &member))
+                    .map_err(|e| words::from_db(&e))
+            })
+            .unwrap_or(None);
+        return Err(UiError::new(
+            "auth.wrong_pin",
+            waiting.unwrap_or_else(|| "Wrong PIN. Try again.".to_owned()),
+        ));
+    }
+
+    app.sessions().begin(actor_for(&member), at, false);
+    app.record(
+        &AuditEntry::new(at, day, Some(member.id.clone()), action::LOGIN_OK, "staff")
+            .about(member.id.as_str()),
+    );
+    log_info!("{} signed in", member.name);
+    lock_state_on(app)
+}
+
+/// mb-db's row becomes mb-auth's actor. One place, like `printer_config_for`.
+pub fn actor_for(member: &mb_db::repo::people::StaffMember) -> mb_auth::Actor {
+    mb_auth::Actor {
+        staff_id: member.id.clone(),
+        name: member.name.clone(),
+        role_id: member.role_id.clone(),
+        role_name: member.role_name.clone(),
+        permissions: member.permissions.clone(),
+        max_discount_bp: member.max_discount_bp,
+        max_discount: member.max_discount,
+    }
+}
+
+/// Lock the screen — by the button, or by `Ctrl+L`.
+///
+/// **It touches nothing but the session.** The cart, the kitchen ledger and the
+/// print queue are all exactly where they were; that is item 8, and T7.
+pub fn lock_now_on(app: &App) -> UiResult<LockState> {
+    if let Some(who) = app.sessions().end() {
+        app.record(&AuditEntry::new(
+            crate::flows::now(),
+            crate::flows::today(crate::flows::now()),
+            Some(who.staff_id.clone()),
+            action::LOGOUT,
+            "staff",
+        ));
+        log_info!("{} locked the counter", who.name);
+    }
+    lock_state_on(app)
+}
+
+/// **The way back in when the PIN is gone.**
+///
+/// Deliberately not rate-limited: the per-person lockout exists so a malicious
+/// waiter cannot lock the owner out with five wrong guesses, and that
+/// protection is worth nothing if this path can be locked instead. The defence
+/// here is 31^10 and an Argon2 verification per attempt, not a counter.
+///
+/// Using it kills the old code and issues a new one, which the screen prints.
+pub fn recover_with_code_on(
+    app: &App,
+    code: String,
+    staff_id: String,
+    new_pin: String,
+) -> UiResult<String> {
+    let at = crate::flows::now();
+    let day = crate::flows::today(at);
+    let pin = Pin::parse(&new_pin)
+        .map_err(|e| UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string()))?;
+
+    let stored: Option<String> = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).settings().get(OUTLET, RECOVERY_KEY))
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    let Some(stored) = stored else {
+        return Err(UiError::new(
+            "auth.no_recovery",
+            "This shop has no recovery code. Ring support, with your licence key to hand.",
+        ));
+    };
+    let stored = PinHash::from_stored(&stored).map_err(|e| {
+        UiError::new(
+            "auth.recovery_unreadable",
+            "This shop's recovery code could not be read. Ring support.",
+        )
+        .with_detail(e.to_string())
+    })?;
+
+    if !mb_auth::verify_recovery_code(&code, &stored) {
+        return Err(UiError::new(
+            "auth.recovery_wrong",
+            "That is not this shop's recovery code. Check the slip it was printed on.",
+        ));
+    }
+
+    // A new code, before the old one stops working.
+    let (fresh, fresh_hash) = mb_auth::new_recovery_code()
+        .map_err(|e| UiError::new("auth.recovery_failed", "A new recovery code could not be made.").with_detail(e.to_string()))?;
+    let hashed = mb_auth::hash_pin(&pin)
+        .map_err(|e| UiError::new("auth.pin_failed", "That PIN could not be saved.").with_detail(e.to_string()))?;
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let Some(mut member) = repos.people().find_staff(OUTLET, &staff_id)? else {
+                    return Err(mb_db::DbError::invariant(
+                        "that person is not on the staff list",
+                    ));
+                };
+                // Only somebody who manages staff. Otherwise the recovery code
+                // would be a way to hand a waiter a new PIN and the run of the
+                // shop with it.
+                if !member.permissions.has(Permission::StaffManage) {
+                    return Err(mb_db::DbError::invariant(
+                        "the recovery code can only set a PIN for somebody who manages staff",
+                    ));
+                }
+                member.pin_hash = Some(hashed.as_str().to_owned());
+                repos.people().save_staff(OUTLET, &member, at)?;
+                repos.settings().set(
+                    OUTLET,
+                    RECOVERY_KEY,
+                    &fresh_hash.as_str().to_owned(),
+                    at,
+                    None,
+                )?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(member.id.clone()),
+                        action::RECOVERY_USED,
+                        "staff",
+                    )
+                    .about(member.id.as_str()),
+                )?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(member.id.clone()),
+                        action::RECOVERY_ISSUED,
+                        "shop",
+                    ),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    log_warn!("the recovery code was used, and a new one was issued");
+    // Returned so the screen can show it once and print it. From this moment it
+    // exists nowhere else.
+    Ok(fresh.to_print())
+}
+
+// ---------------------------------------------------------------------------
+// The people screen.
+// ---------------------------------------------------------------------------
+
+pub fn list_staff_on(app: &App) -> UiResult<Vec<PersonView>> {
+    guard::require(app, Permission::StaffManage)?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let mut out = Vec::new();
+                for member in repos.people().list_staff(OUTLET)? {
+                    let locked_out = lockout_message(&repos, &member)?;
+                    out.push(person_view(&member, locked_out));
+                }
+                Ok(out)
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+pub fn list_permissions_on(app: &App) -> UiResult<Vec<(String, String)>> {
+    guard::require(app, Permission::StaffManage)?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).people().permission_codes())
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct RoleView {
+    pub id: String,
+    pub name: String,
+    pub is_builtin: bool,
+    pub permissions: Vec<String>,
+    /// **A percentage as text, both ways** — `"12.5%"` out, whatever was typed
+    /// back in. D39 and R8: the screen does not divide by a hundred, any more
+    /// than it divides paise by a hundred. The money guard failed the build on
+    /// the first version of this, which did exactly that.
+    pub max_discount_percent: Option<String>,
+    pub max_discount: Option<MoneyView>,
+}
+
+pub fn list_roles_on(app: &App) -> UiResult<Vec<RoleView>> {
+    guard::require(app, Permission::StaffManage)?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).people().list_roles(OUTLET))
+            .map_err(|e| words::from_db(&e))
+            .map(|roles| roles.iter().map(role_view).collect())
+    })
+}
+
+fn role_view(role: &RoleShape) -> RoleView {
+    RoleView {
+        id: role.id.clone(),
+        name: role.name.clone(),
+        is_builtin: role.is_builtin,
+        permissions: role.permissions.iter().map(|p| p.code().to_owned()).collect(),
+        max_discount_percent: role.percent_label(),
+        max_discount: role.max_discount.map(MoneyView::from),
+    }
+}
+
+pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
+    let who = guard::require(app, Permission::StaffManage)?;
+    let at = crate::flows::now();
+    let day = crate::flows::today(at);
+
+    // **BACKEND-G7 at the boundary.** A code the screen sent that this build
+    // does not know is refused here, by name, rather than silently dropped.
+    let permissions = mb_auth::PermissionSet::from_codes(&role.permissions)
+        .map_err(|e| UiError::new("role.permission", format!("{e}. Reload and try again.")))?;
+
+    let max_discount_bp = RoleShape::parse_percent(
+        role.max_discount_percent.as_deref().unwrap_or_default(),
+    )
+    .map_err(|e| UiError::new("role.percent", e.to_string()))?;
+
+    let shape = RoleShape {
+        id: role.id.clone(),
+        name: role.name.clone(),
+        is_builtin: role.is_builtin,
+        permissions,
+        max_discount_bp,
+        max_discount: role
+            .max_discount
+            .as_ref()
+            .map(|m| mb_core::Money::from_paise(m.paise)),
+    };
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let before = repos
+                    .people()
+                    .list_roles(OUTLET)?
+                    .into_iter()
+                    .find(|r| r.id == shape.id);
+                // **Before and after, not just after** — see the note in
+                // `save_staff_member_on`. A shop that has never had an
+                // administrator must be able to get one.
+                let had_one = !repos.people().active_administrators(OUTLET)?.is_empty();
+                repos.people().save_role(OUTLET, &shape, at)?;
+
+                // **The last-administrator rule.** A shop nobody can administer
+                // can never be repaired from its own counter. The check is
+                // after the write and inside the transaction on purpose: it
+                // asks the real question — "who can administer this shop now?"
+                // — rather than trying to predict the answer, and the rollback
+                // undoes it.
+                if had_one && repos.people().active_administrators(OUTLET)?.is_empty() {
+                    return Err(mb_db::DbError::invariant(
+                        "that would leave nobody able to manage staff — give somebody else \
+                         that permission first",
+                    ));
+                }
+
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::ROLE_SAVED,
+                        "role",
+                    )
+                    .about(&shape.id)
+                    .changed(
+                        before.as_ref().map_or(serde_json::Value::Null, role_json),
+                        role_json(&shape),
+                    ),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    list_roles_on(app)
+}
+
+fn role_json(role: &RoleShape) -> serde_json::Value {
+    serde_json::json!({
+        "name": role.name,
+        "permissions": role.permissions.codes(),
+        "max_discount_bp": role.max_discount_bp,
+        "max_discount_paise": role.max_discount.map(mb_core::Money::paise),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct StaffEdit {
+    pub id: String,
+    pub name: String,
+    pub code: Option<String>,
+    pub role_id: Option<String>,
+    /// "active", "suspended" or "left". Scope 9.15: never "deleted".
+    pub status: String,
+}
+
+pub fn save_staff_member_on(
+    app: &App,
+    staff: StaffEdit,
+) -> UiResult<Vec<PersonView>> {
+    let who = guard::require(app, Permission::StaffManage)?;
+    let at = crate::flows::now();
+    let day = crate::flows::today(at);
+
+    let status = match staff.status.as_str() {
+        "active" => mb_db::repo::people::StaffStatus::Active,
+        "suspended" => mb_db::repo::people::StaffStatus::Suspended,
+        "left" => mb_db::repo::people::StaffStatus::Left,
+        other => {
+            return Err(UiError::new(
+                "staff.status",
+                format!("\"{other}\" is not something a staff member can be."),
+            ));
+        }
+    };
+
+    if staff.name.trim().is_empty() {
+        return Err(UiError::new("staff.name", "A staff member needs a name."));
+    }
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let existing = repos.people().find_staff(OUTLET, &staff.id)?;
+                let before = existing.as_ref().map(staff_json);
+                // **Whether there WAS one, not only whether there is one.**
+                //
+                // Found by driving a shop's first day end to end: the rule as
+                // first written refused the very first hire, because a brand-new
+                // shop has no administrator before the write either. "Do not
+                // remove the last one" and "there must always be one" are
+                // different rules, and only the first one is true — a shop that
+                // has never had an administrator has to be able to get one.
+                let had_one = !repos.people().active_administrators(OUTLET)?.is_empty();
+                let member = mb_db::repo::people::StaffMember {
+                    id: mb_core::StaffId::new(staff.id.clone()),
+                    name: staff.name.trim().to_owned(),
+                    code: staff.code.clone(),
+                    role_id: staff.role_id.clone(),
+                    role_name: None,
+                    // A PIN is set by its own command. Editing a name must not
+                    // be able to clear somebody's way in.
+                    pin_hash: existing.as_ref().and_then(|m| m.pin_hash.clone()),
+                    status,
+                    permissions: mb_auth::PermissionSet::new(),
+                    max_discount_bp: None,
+                    max_discount: None,
+                };
+                repos.people().save_staff(OUTLET, &member, at)?;
+
+                if had_one && repos.people().active_administrators(OUTLET)?.is_empty() {
+                    return Err(mb_db::DbError::invariant(
+                        "that would leave nobody able to manage staff — this is the last person \
+                         who can, so give somebody else that permission first",
+                    ));
+                }
+
+                let after = repos
+                    .people()
+                    .find_staff(OUTLET, &staff.id)?
+                    .as_ref()
+                    .map_or(serde_json::Value::Null, staff_json);
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::STAFF_SAVED,
+                        "staff",
+                    )
+                    .about(&staff.id)
+                    .changed(before.unwrap_or(serde_json::Value::Null), after),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    list_staff_on(app)
+}
+
+/// **Never the PIN itself.** The audit trail is the one table that must not
+/// contain a secret, and this is the function that would have put one there.
+fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
+    serde_json::json!({
+        "name": member.name,
+        "code": member.code,
+        "role_id": member.role_id,
+        "status": status_word(member.status),
+        "has_pin": member.pin_hash.is_some(),
+    })
+}
+
+/// Set or clear a PIN.
+///
+/// Returns the shop's recovery code **only when one is generated**, which is
+/// the first time a PIN is set on somebody who manages staff. It is shown once
+/// and printed, and after that it exists nowhere but on paper.
+pub fn set_staff_pin_on(
+    app: &App,
+    staff_id: String,
+    pin: Option<String>,
+) -> UiResult<Option<String>> {
+    let who = guard::require(app, Permission::StaffManage)?;
+    let at = crate::flows::now();
+    let day = crate::flows::today(at);
+    // What the shop looked like BEFORE. "The first PIN" is a thing you can only
+    // know by having asked first — see `relock_if_this_was_the_first_pin`.
+    let had_a_pin = app.shop_has_a_pin();
+
+    let hashed = match pin.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(typed) => {
+            let parsed = Pin::parse(typed)
+                .map_err(|e| UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string()))?;
+            Some(mb_auth::hash_pin(&parsed).map_err(|e| {
+                UiError::new("auth.pin_failed", "That PIN could not be saved.")
+                    .with_detail(e.to_string())
+            })?)
+        }
+        None => None,
+    };
+
+    let generated = match hashed {
+        Some(_) => Some(mb_auth::new_recovery_code().map_err(|e| {
+            UiError::new("auth.recovery_failed", "A recovery code could not be made.")
+                .with_detail(e.to_string())
+        })?),
+        None => None,
+    };
+
+    let issued = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let Some(mut member) = repos.people().find_staff(OUTLET, &staff_id)? else {
+                    return Err(mb_db::DbError::invariant(
+                        "that person is not on the staff list",
+                    ));
+                };
+                // A PIN with no role is somebody who can sign in and do
+                // nothing, which looks like a broken app rather than a locked
+                // one.
+                if hashed.is_some() && member.role_id.is_none() {
+                    return Err(mb_db::DbError::invariant(
+                        "give this person a role before setting their PIN",
+                    ));
+                }
+                member.pin_hash = hashed.as_ref().map(|h| h.as_str().to_owned());
+                repos.people().save_staff(OUTLET, &member, at)?;
+
+                // The shop's first recovery code, the first time somebody who
+                // manages staff gets a PIN. Not on every PIN: a second code
+                // would silently retire the slip already in the drawer.
+                let existing: Option<String> = repos.settings().get(OUTLET, RECOVERY_KEY)?;
+                let mut issued = None;
+                if existing.is_none()
+                    && member.permissions.has(Permission::StaffManage)
+                    && let Some((code, hash)) = generated.as_ref()
+                {
+                    {
+                        repos.settings().set(
+                            OUTLET,
+                            RECOVERY_KEY,
+                            &hash.as_str().to_owned(),
+                            at,
+                            None,
+                        )?;
+                        repos.audit().append(
+                            OUTLET,
+                            &AuditEntry::new(
+                                at,
+                                day,
+                                Some(who.staff_id.clone()),
+                                action::RECOVERY_ISSUED,
+                                "shop",
+                            ),
+                        )?;
+                        issued = Some(code.to_print());
+                    }
+                }
+
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::PIN_SET, "staff")
+                        .about(&staff_id)
+                        .with_after(serde_json::json!({ "has_pin": hashed.is_some() })),
+                )?;
+                Ok(issued)
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    // **Setting the first PIN locks the app, here and now.** Proving it works
+    // while that person is still standing at the counter is worth four seconds;
+    // finding out at 8 am tomorrow is not.
+    app.relock_if_this_was_the_first_pin(had_a_pin);
+
+    Ok(issued)
+}
+
+// ---------------------------------------------------------------------------
+// The history.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct AuditView {
+    pub entries: Vec<AuditEntryView>,
+    /// The sentence to show when the chain is broken — audit C4's
+    /// "tamper-evident", made visible. `None` when the history hangs together.
+    pub tampered: Option<String>,
+    /// Every action this build knows, for the filter — from the list, not from
+    /// whatever happens to be in this shop's data. A filter that cannot offer
+    /// "voided a bill" until somebody has voided one is useless at exactly the
+    /// moment it is needed.
+    pub actions: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntryView {
+    pub seq: i64,
+    /// Already formatted. R8 — TypeScript does no arithmetic, and that includes
+    /// arithmetic on dates.
+    pub when: String,
+    pub who: String,
+    pub what: String,
+    pub about: Option<String>,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+pub fn audit_trail_on(
+    app: &App,
+    staff_id: Option<String>,
+    action_code: Option<String>,
+    days: Option<i32>,
+) -> UiResult<AuditView> {
+    guard::require(app, Permission::AuditView)?;
+    let today = crate::flows::today(crate::flows::now());
+    let from_day = days.map(|d| BusinessDay::from_days_since_epoch(today.days_since_epoch() - d));
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let rows = repos.audit().list(
+                    OUTLET,
+                    &mb_db::repo::AuditFilter {
+                        from_day,
+                        to_day: None,
+                        staff_id,
+                        action: action_code,
+                        limit: 200,
+                    },
+                )?;
+                let tampered = repos.audit().verify(OUTLET)?.err().map(|b| {
+                    format!(
+                        "This shop's history has been changed outside Magic Bill — {b}. \
+                         Treat everything after that point with care."
+                    )
+                });
+                Ok(AuditView {
+                    entries: rows.iter().map(entry_view).collect(),
+                    tampered,
+                    actions: action::ALL
+                        .iter()
+                        .map(|a| ((*a).to_owned(), action::words(a).to_owned()))
+                        .collect(),
+                })
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+fn entry_view(row: &mb_auth::AuditRow) -> AuditEntryView {
+    AuditEntryView {
+        seq: row.seq,
+        when: crate::words::when(Timestamp::from_millis(row.at)),
+        who: row
+            .staff_name
+            .clone()
+            .unwrap_or_else(|| "Somebody not on the staff list".to_owned()),
+        what: action::words(&row.action).to_owned(),
+        about: row.entity_id.clone(),
+        before: row.before_json.clone(),
+        after: row.after_json.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The command wrappers.
+//
+// Every P11 command's body takes `&App` and lives above; these are the Tauri
+// seats. The split is not ceremony — `tauri::State` cannot be constructed in a
+// test, so a body that took one could only ever be driven by hand through the
+// window. Signing in, locking, setting the first PIN and the last-administrator
+// rule are all sequences, and a sequence that can only be checked by clicking
+// is a sequence that gets checked once.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn lock_state(app: tauri::State<'_, App>) -> UiResult<LockState> {
+    lock_state_on(&app)
+}
+
+#[tauri::command]
+pub fn login(app: tauri::State<'_, App>, staff_id: String, pin: String) -> UiResult<LockState> {
+    login_on(&app, staff_id, pin)
+}
+
+#[tauri::command]
+pub fn lock_now(app: tauri::State<'_, App>) -> UiResult<LockState> {
+    lock_now_on(&app)
+}
+
+#[tauri::command]
+pub fn recover_with_code(
+    app: tauri::State<'_, App>,
+    code: String,
+    staff_id: String,
+    new_pin: String,
+) -> UiResult<String> {
+    recover_with_code_on(&app, code, staff_id, new_pin)
+}
+
+#[tauri::command]
+pub fn list_staff(app: tauri::State<'_, App>) -> UiResult<Vec<PersonView>> {
+    list_staff_on(&app)
+}
+
+#[tauri::command]
+pub fn list_permissions(app: tauri::State<'_, App>) -> UiResult<Vec<(String, String)>> {
+    list_permissions_on(&app)
+}
+
+#[tauri::command]
+pub fn list_roles(app: tauri::State<'_, App>) -> UiResult<Vec<RoleView>> {
+    list_roles_on(&app)
+}
+
+#[tauri::command]
+pub fn save_role(app: tauri::State<'_, App>, role: RoleView) -> UiResult<Vec<RoleView>> {
+    save_role_on(&app, role)
+}
+
+#[tauri::command]
+pub fn save_staff_member(
+    app: tauri::State<'_, App>,
+    staff: StaffEdit,
+) -> UiResult<Vec<PersonView>> {
+    save_staff_member_on(&app, staff)
+}
+
+#[tauri::command]
+pub fn set_staff_pin(
+    app: tauri::State<'_, App>,
+    staff_id: String,
+    pin: Option<String>,
+) -> UiResult<Option<String>> {
+    set_staff_pin_on(&app, staff_id, pin)
+}
+
+#[tauri::command]
+pub fn audit_trail(
+    app: tauri::State<'_, App>,
+    staff_id: Option<String>,
+    action_code: Option<String>,
+    days: Option<i32>,
+) -> UiResult<AuditView> {
+    audit_trail_on(&app, staff_id, action_code, days)
 }

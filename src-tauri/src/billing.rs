@@ -67,6 +67,13 @@ pub struct CartState {
     pub kitchen: mb_core::KitchenLedger,
     /// Scope 1.26 — a note on the whole order, printed on the bill.
     pub note: Option<String>,
+    /// **Who put the first line on this bill** (P11).
+    ///
+    /// It becomes `orders.created_by`, while whoever is signed in when the
+    /// money is taken becomes `orders.settled_by`. Those are two different
+    /// people during a shift change, the schema has had both columns since P04,
+    /// and this field is what finally makes them mean something.
+    pub opened_by: Option<mb_core::StaffId>,
 }
 
 impl Default for CartState {
@@ -85,6 +92,7 @@ impl Default for CartState {
             bill_discount: None,
             kitchen: mb_core::KitchenLedger::new(),
             note: None,
+            opened_by: None,
         }
     }
 }
@@ -596,6 +604,10 @@ impl CartState {
     /// was frozen from an `ItemSnapshot` when it was added, so an order carries
     /// what the menu said *then* and *"old bills never change when you change a
     /// price."*
+    /// `by` is **who opened it**, not who is signed in now — the caller passes
+    /// `opened_by` and falls back to the current person only for a cart that
+    /// somehow has neither. See `flows::complete_bill`, which is the only
+    /// caller, and P11 item 8 for why the two differ.
     pub fn to_draft(&self, at: Timestamp, by: mb_core::StaffId) -> UiResult<mb_core::DraftOrder> {
         let day = mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
         let id = mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| {

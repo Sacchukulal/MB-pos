@@ -14,7 +14,7 @@
 //!
 //! If the printer is on fire, the money is still recorded.
 
-use mb_core::{BusinessDay, DayRule, StaffId, Timestamp, UtcOffset};
+use mb_core::{BusinessDay, DayRule, Timestamp, UtcOffset};
 use mb_print::printer::PrinterConfig;
 use mb_print::queue::{Job, JobKind};
 use tauri::State;
@@ -32,7 +32,7 @@ pub fn now() -> Timestamp {
     )
 }
 
-fn today(at: Timestamp) -> BusinessDay {
+pub fn today(at: Timestamp) -> BusinessDay {
     BusinessDay::of(at, DayRule::default(), UtcOffset::INDIA)
 }
 
@@ -43,6 +43,7 @@ fn today(at: Timestamp) -> BusinessDay {
 /// > memory."*
 #[tauri::command]
 pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
+    crate::guard::require(&app, mb_auth::Permission::BillCreate)?;
     let at = now();
 
     // 1. What is new, from the ledger that travels with the order — so this is
@@ -121,10 +122,18 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
 }
 
 /// Settle the bill — **P05's `settle`, which is one transaction.**
+///
+/// # Two people, two columns
+///
+/// `orders.created_by` is whoever put the first line on this bill;
+/// `orders.settled_by` is whoever is signed in when the money is taken. During
+/// a shift change those are different people, the schema has carried both
+/// columns unused since P04, and P11 is where they start meaning something.
 #[tauri::command]
 pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
+    let who = crate::guard::require(&app, mb_auth::Permission::BillCreate)?;
     let at = now();
-    let staff = StaffId::new(crate::state::DEFAULT_STAFF);
+    let settled_by = who.staff_id.clone();
 
     let (draft, bill, settlement) = app.with_cart(|state| {
         if state.cart.is_empty() {
@@ -161,25 +170,52 @@ pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
                 format!("{} is still to pay on this bill.", left.to_plain_string()),
             ));
         }
-        Ok((state.to_draft(at, staff.clone())?, bill, state.settlement.clone()))
+        // Whoever opened it, and only this person if nobody else did. A cart
+        // with no opener is a cart nothing was ever added to, which the
+        // emptiness check above has already refused.
+        let opened_by = state.opened_by.clone().unwrap_or_else(|| settled_by.clone());
+        Ok((
+            state.to_draft(at, opened_by)?,
+            bill,
+            state.settlement.clone(),
+        ))
     })?;
 
-    let number = app.with_shop(|shop| {
+    let (number, settled) = app.with_shop(|shop| {
         let till = mb_db::Till::new(OUTLET, TERMINAL);
         // Opening claims the token and the bill number atomically (D6).
         let open = mb_db::open_draft(&shop.db, till, draft).map_err(|e| words::from_db(&e))?;
         let formatted = open.bill_number.formatted.clone();
         // And settling writes the order, its lines, its payments and its ledger
         // in ONE commit (B5, and §5 rule 1).
-        mb_db::settle(&shop.db, till, open, bill, settlement, at, staff)
-            .map_err(|e| words::from_db(&e))?;
-        Ok(formatted)
+        let settled = mb_db::settle(
+            &shop.db,
+            till,
+            open,
+            bill.clone(),
+            settlement,
+            at,
+            settled_by.clone(),
+        )
+        .map_err(|e| words::from_db(&e))?;
+        Ok((formatted, settled))
     })?;
 
-    log_info!("bill {number} settled");
+    log_info!("bill {number} settled by {}", who.name);
+    app.record(
+        &mb_auth::AuditEntry::new(
+            at,
+            today(at),
+            Some(settled_by),
+            mb_auth::audit::action::BILL_SETTLED,
+            "bill",
+        )
+        .about(number.clone())
+        .with_after(serde_json::json!({ "total_paise": bill.grand_total.paise() })),
+    );
 
     // THE ORDER IS ON DISK. Now, and only now, the paper.
-    if let Err(e) = queue_bill_print(&app, &number) {
+    if let Err(e) = queue_bill_print(&app, &number, &settled, &bill, &who.name) {
         // Deliberately not fatal: the money is recorded. The failure belongs in
         // the print queue's indicator, which is where a cashier looks.
         log_warn!("bill {number} settled but could not be queued to print: {e}");
@@ -198,13 +234,46 @@ pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
     Ok(number)
 }
 
-fn queue_bill_print(app: &State<'_, App>, number: &str) -> UiResult<()> {
-    // P06's bill template wants a settled order, a store profile and receipt
-    // settings, which P13 and P17 fill in. Until then the slip is P07's test
-    // document, so the QUEUE path is exercised end to end rather than mocked —
-    // and what matters here is that a failure lands in the indicator.
+/// **The real bill, with the real cashier's name on it** — audit C3.
+///
+/// > *"The bill always says 'Cashier: Admin'. Even though a staff list exists."*
+///
+/// Until P11 this queued P07's test slip, with a comment saying the real
+/// document waited for P13 and P17. It could not wait: "the cashier's name is
+/// on the bill" is not demonstrable on a document that has no cashier line, and
+/// scope 9.4 belongs to this session.
+///
+/// **Where the shop has not filled something in, the bill says nothing.** It
+/// does not invent a name, an address or a GSTIN — P17 gives the owner the
+/// screen; this gives them a bill that is honest about being new.
+pub(crate) fn queue_bill_print(
+    app: &App,
+    number: &str,
+    settled: &mb_core::SettledOrder,
+    bill: &mb_core::Bill,
+    cashier: &str,
+) -> UiResult<()> {
     let printer = default_printer(app)?;
-    let document = mb_print::testprint::test_document(&printer, None);
+    let store = store_for_the_bill(app);
+    let settings = mb_print::settings::ReceiptSettings::default();
+    let order = mb_core::AnyOrder::Settled(settled.clone());
+
+    let document = mb_print::template::bill_document(
+        printer.paper,
+        &mb_print::template::BillContext {
+            bill,
+            order: &order,
+            store: &store,
+            settings: &settings,
+            customer: None,
+            cashier: Some(cashier),
+            copy: mb_print::template::Copy::Original,
+            einvoice: mb_print::template::EInvoice::default(),
+            logo: None,
+        },
+    )
+    .map_err(|e| words::from_print(&e))?;
+
     app.with_shop(|shop| {
         shop.queue
             .enqueue(
@@ -216,8 +285,38 @@ fn queue_bill_print(app: &State<'_, App>, number: &str) -> UiResult<()> {
     Ok(())
 }
 
+/// mb-db's stored profile becomes mb-print's header — **the one place those two
+/// vocabularies meet**, for the reason `state::printer_config_for` already
+/// gives.
+///
+/// A shop that has not been set up yet gets an empty `Store`, and the template
+/// already omits every line it has nothing for.
+fn store_for_the_bill(app: &App) -> mb_print::template::Store {
+    let profile = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| mb_db::Repos::new(tx).settings().store_profile(OUTLET))
+                .map_err(|e| words::from_db(&e))
+        })
+        .unwrap_or(None);
+
+    profile.map_or_else(mb_print::template::Store::default, |p| {
+        mb_print::template::Store {
+            name: p.name,
+            address: p.address,
+            phone: p.phone,
+            gstin: p.gstin,
+            fssai: p.fssai,
+            state_code: p.state_code,
+            upi_id: p.upi_id,
+            upi_merchant_name: p.upi_merchant_name,
+            is_composition: p.is_composition,
+        }
+    })
+}
+
 /// Where a job goes before P17 sets up routing.
-fn default_printer(app: &State<'_, App>) -> UiResult<PrinterConfig> {
+fn default_printer(app: &App) -> UiResult<PrinterConfig> {
     let rows = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))

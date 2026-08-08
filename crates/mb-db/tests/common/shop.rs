@@ -13,7 +13,7 @@
     reason = "tests: expect is the assertion, and the fixture splits a fake total"
 )]
 
-use std::collections::BTreeSet;
+use mb_auth::{PermissionSet, RolePreset};
 
 use super::Scratch;
 use mb_core::{
@@ -56,15 +56,12 @@ fn seed_masters(db: &Db) {
     db.transaction(|tx| {
         let repos = Repos::new(tx);
 
-        // Staff and a role, so permissions have somewhere to hang.
-        repos.people().save_role(
-            OUTLET,
-            "role_cashier",
-            "Cashier",
-            true,
-            &["bill.create", "bill.reprint", "drawer.open"],
-            at(0),
-        )?;
+        // Staff and a role, so permissions have somewhere to hang. The preset
+        // rather than a hand-written list: a fixture that invents its own
+        // permissions is a fixture that stops resembling a shop.
+        repos
+            .people()
+            .save_role(OUTLET, &RolePreset::Cashier.shape(), at(0))?;
         repos.people().save_staff(
             OUTLET,
             &StaffMember {
@@ -73,9 +70,21 @@ fn seed_masters(db: &Db) {
                 code: Some("R1".to_owned()),
                 role_id: Some("role_cashier".to_owned()),
                 role_name: None,
-                pin_hash: Some("not-a-real-hash".to_owned()),
+                // A REAL Argon2 hash, not a placeholder string. P11 made
+                // `StaffMember::pin()` refuse a column it cannot parse — a
+                // truncated hash must be a locked door, never "no PIN set" —
+                // so a fixture with a fake one would be testing a shop that
+                // cannot exist.
+                pin_hash: Some(
+                    mb_auth::hash_pin(&mb_auth::Pin::parse("123456").expect("a valid PIN"))
+                        .expect("hashes")
+                        .as_str()
+                        .to_owned(),
+                ),
                 status: StaffStatus::Active,
-                permissions: BTreeSet::new(),
+                permissions: PermissionSet::new(),
+                max_discount_bp: None,
+                max_discount: None,
             },
             at(0),
         )?;
@@ -90,7 +99,9 @@ fn seed_masters(db: &Db) {
                 role_name: None,
                 pin_hash: None,
                 status: StaffStatus::Left,
-                permissions: BTreeSet::new(),
+                permissions: PermissionSet::new(),
+                max_discount_bp: None,
+                max_discount: None,
             },
             at(0),
         )?;

@@ -32,6 +32,7 @@ use ts_rs::TS;
 
 use crate::billing::CartState;
 use crate::config::AppConfig;
+use crate::session::{Sessions, stand_in_actor};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
@@ -56,6 +57,11 @@ pub struct App {
     /// receipt is 2 ms with a warm glyph cache and rather more with a cold one,
     /// so there is exactly one.
     font: Arc<Font>,
+    /// **Who is at the counter** (P11). Deliberately beside the cart rather
+    /// than inside it: locking the screen must not be able to touch an order,
+    /// and two separate locks is the cheapest way to make that structural
+    /// instead of remembered.
+    sessions: Sessions,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -69,12 +75,36 @@ pub struct Shop {
 impl App {
     pub fn new(config: AppConfig) -> Result<App, UiError> {
         let font = Font::builtin().map_err(|e| words::from_print(&e))?;
+        let sessions = Sessions::new();
+        // **A shop that does not exist yet has nothing to lock.**
+        //
+        // Found by running it: after P11 a first run opened straight onto the
+        // lock screen, with an empty staff list and no way past it — because
+        // `open_or_lock` is only reached through `open_shop`, and a first run
+        // never opens one. Nobody could create the shop that would hold the PIN
+        // that would let them in.
+        //
+        // Starting as the stand-in is the same rule item 9 already states, one
+        // step earlier: a shop with no PIN does not lock, and a shop with no
+        // *database* certainly has none. `open_shop` re-decides the moment
+        // there is something to decide about.
+        sessions.begin(
+            stand_in_actor("Counter", DEFAULT_STAFF),
+            crate::flows::now(),
+            true,
+        );
         Ok(App {
             shop: Mutex::new(None),
             config: Mutex::new(config),
             cart: Mutex::new(CartState::default()),
             font: Arc::new(font),
+            sessions,
         })
+    }
+
+    #[must_use]
+    pub fn sessions(&self) -> &Sessions {
+        &self.sessions
     }
 
     /// Take ownership of an open database and start everything that hangs off
@@ -83,6 +113,8 @@ impl App {
     pub fn open_shop(&self, db: Db, path: std::path::PathBuf) {
         let db = Arc::new(db);
         ensure_someone_can_bill(&db);
+        ensure_the_roles_exist(&db);
+        self.open_or_lock(&db);
         let queue = self.build_queue(&db);
         let previous = lock(&self.shop).replace(Shop {
             db,
@@ -245,7 +277,15 @@ fn ensure_someone_can_bill(db: &Arc<Db>) {
                 role_name: None,
                 pin_hash: None,
                 status: StaffStatus::Active,
-                permissions: std::collections::BTreeSet::new(),
+                // **No role, on purpose.** The stand-in's authority lives in
+                // the in-memory session (`session::stand_in_actor`) and only
+                // while no PIN exists anywhere. Giving this row the Owner role
+                // would make `active_administrators` count a person who can
+                // never log in, and the "last administrator" rule would then be
+                // satisfied by nobody.
+                permissions: mb_auth::PermissionSet::new(),
+                max_discount_bp: None,
+                max_discount: None,
             },
             crate::flows::now(),
         )?;
@@ -259,6 +299,136 @@ fn ensure_someone_can_bill(db: &Arc<Db>) {
         // words at the moment they try to bill, which is where it belongs.
         Err(e) => log_warn!("the default counter user could not be added ({e})"),
     }
+}
+
+/// The four roles a shop starts with.
+///
+/// Seeded only when there are none: a shop that has renamed "Waiter" to
+/// "Steward" and taken a permission off it must not find them back tomorrow.
+fn ensure_the_roles_exist(db: &Arc<Db>) {
+    let result = db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        if !repos.people().list_roles(OUTLET)?.is_empty() {
+            return Ok(false);
+        }
+        for preset in mb_auth::RolePreset::ALL {
+            repos
+                .people()
+                .save_role(OUTLET, &preset.shape(), crate::flows::now())?;
+        }
+        Ok(true)
+    });
+
+    match result {
+        Ok(true) => log_info!("added the four starting roles"),
+        Ok(false) => {}
+        Err(e) => log_warn!("the starting roles could not be added ({e})"),
+    }
+}
+
+impl App {
+    /// **Open unlocked, or open locked** — P11 item 9, and the first decision
+    /// this app makes about a shop.
+    ///
+    /// If nobody has a PIN, there is nothing to unlock with, so the counter
+    /// opens as the stand-in user and the shell nags. The moment one PIN
+    /// exists, the app opens locked.
+    fn open_or_lock(&self, db: &Arc<Db>) {
+        match anybody_has_a_pin(db) {
+            Ok(true) => {
+                self.sessions.end();
+                log_info!("this shop uses PINs; the counter is locked");
+            }
+            Ok(false) => {
+                self.sessions.begin(
+                    stand_in_actor("Counter", DEFAULT_STAFF),
+                    crate::flows::now(),
+                    true,
+                );
+                log_warn!("nobody has a PIN; anybody at this machine can do anything");
+            }
+            // A shop whose staff list will not read is a shop that must not
+            // silently open unlocked. Locked is the safe direction to be wrong
+            // in, and the lock screen will show the same failure.
+            Err(e) => {
+                self.sessions.end();
+                log_warn!("the staff list could not be read ({e}); locking the counter");
+            }
+        }
+    }
+
+    /// Does anybody in this shop have a PIN?
+    ///
+    /// `false` on a shop that will not answer, which is the same direction
+    /// [`App::open_or_lock`] is wrong in: the caller uses this to decide
+    /// whether to lock, and locking is safe.
+    #[must_use]
+    pub fn shop_has_a_pin(&self) -> bool {
+        self.with_shop(|shop| Ok(anybody_has_a_pin(&shop.db).unwrap_or(false)))
+            .unwrap_or(false)
+    }
+
+    /// **Setting the FIRST PIN locks the app immediately** — proving it works
+    /// while that person is still standing there is worth four seconds.
+    ///
+    /// `had_a_pin` is what the shop looked like *before* the change, and it is
+    /// the whole of the rule.
+    ///
+    /// Found by driving a shop's first day end to end: the first version
+    /// re-evaluated on every PIN change, so an owner setting PINs for four
+    /// staff was thrown out to the lock screen after each one — and after
+    /// setting their OWN first, they could not set anybody else's until they
+    /// had signed back in. That is not "prove it works", it is a shop that
+    /// fights the person setting it up.
+    pub fn relock_if_this_was_the_first_pin(&self, had_a_pin: bool) {
+        if had_a_pin || !self.shop_has_a_pin() {
+            return;
+        }
+        let _ = self.with_shop(|shop| {
+            let db = Arc::clone(&shop.db);
+            self.open_or_lock(&db);
+            Ok(())
+        });
+    }
+}
+
+impl App {
+    /// Write one line of history.
+    ///
+    /// **Best effort, and deliberately so, for this one caller shape.** An
+    /// audit row that describes something which has already happened — a lock,
+    /// a logout, a refusal — must not be able to fail the thing it describes.
+    /// Where the row is evidence *of a change*, it goes in the same transaction
+    /// as the change instead, and there is no version of that path which uses
+    /// this function (see `flows::complete_bill` and `ipc::save_staff_member`).
+    pub fn record(&self, entry: &mb_auth::AuditEntry) {
+        let written = self.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| mb_db::Repos::new(tx).audit().append(OUTLET, entry))
+                .map_err(|e| words::from_db(&e))
+        });
+        if let Err(e) = written {
+            log_warn!("\"{}\" could not be written to the history: {e}", entry.action);
+        }
+    }
+
+    pub fn record_lock(&self, who: &mb_auth::Actor) {
+        self.record(&mb_auth::AuditEntry::new(
+            crate::flows::now(),
+            crate::flows::today(crate::flows::now()),
+            Some(who.staff_id.clone()),
+            mb_auth::audit::action::LOCKED,
+            "staff",
+        ));
+    }
+}
+
+/// Does anybody at this shop have a PIN at all?
+pub fn anybody_has_a_pin(db: &Arc<Db>) -> Result<bool, mb_db::DbError> {
+    Ok(db
+        .transaction(|tx| mb_db::Repos::new(tx).people().list_staff(OUTLET))?
+        .iter()
+        .any(|s| s.pin_hash.is_some()))
 }
 
 /// The id of the printer that exists when no printer exists.
@@ -377,6 +547,16 @@ pub enum Pushed {
     /// The print queue changed. Carries the whole snapshot rather than a delta:
     /// it is a handful of rows, and a delta is a thing that can be missed.
     PrintQueue { jobs: Vec<PrintJobView> },
+    /// The screen locked itself, or somebody signed in or out. Pushed rather
+    /// than polled: the idle timer is Rust's (P11), so React learns about it
+    /// the same way it learns about a print job.
+    Session {
+        /// `None` when the screen is locked.
+        who: Option<String>,
+        role: Option<String>,
+        /// True while nobody has a PIN — the shell's undismissable banner.
+        stand_in: bool,
+    },
     /// A stub with the right shape, so P21 fills it in rather than reshaping
     /// the UI (R10 — there is no licence code in this session).
     Licence { state: String },

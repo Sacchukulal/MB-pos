@@ -545,3 +545,88 @@ fn write_bill_rows(
 
     Ok(())
 }
+
+/// **M5's P11 addendum — what the audit trail costs.**
+///
+/// `m5_a_year_of_trading_fits_the_budget` above weighs bills, and it was
+/// written before `audit_log` had anything in it. P11 fills that table on
+/// every login, void, discount, price change and setting change, and adds
+/// `seq`, `prev_hash` and `hash` to every row — 128 bytes of hex on top of the
+/// content.
+///
+/// D35 asked exactly this question about the print spool and the answer was to
+/// stop keeping one ("a spool, not a log"). It cannot be the answer here: an
+/// audit trail that forgets is not an audit trail. So the number has to be
+/// measured and it has to fit — and if it ever stops fitting, the fix is a
+/// written retention rule executed by P18's day close, never a quieter trail.
+#[test]
+fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
+    use mb_auth::AuditEntry;
+
+    /// A busy shop: logins, voids, discounts, price changes, day closes.
+    const ACTIONS_PER_DAY: u64 = 200;
+    const SAMPLE: u64 = 5_000;
+
+    let scratch = Scratch::new("m5_audit");
+    let db = scratch.open();
+
+    // The main file PLUS its WAL: in WAL mode the rows are not in the main
+    // file until a checkpoint, and the first version of this measured 0 bytes
+    // per row because of it.
+    let empty = file_bytes(&scratch);
+
+    db.transaction(|tx| {
+        tx.execute(
+            "INSERT INTO staff (id, outlet_id, name, status, created_at, updated_at)
+             VALUES ('staff_1', 'outlet_default', 'Cashier', 'active', 0, 0)",
+            [],
+        )?;
+        Ok(())
+    })
+    .expect("somebody to blame");
+
+    let start = Instant::now();
+    db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        for n in 0..SAMPLE {
+            // The widest realistic shape: a price change, which is the only
+            // kind that carries both a before and an after.
+            let entry = AuditEntry::new(
+                Timestamp::from_millis(1_770_000_000_000 + i64::try_from(n).unwrap_or(0)),
+                BusinessDay::from_days_since_epoch(20_600),
+                Some(mb_core::StaffId::new("staff_1")),
+                mb_auth::audit::action::PRICE_CHANGED,
+                "menu_item",
+            )
+            .about(format!("itm_{n}"))
+            .changed(
+                serde_json::json!({ "unit_price": 12_000, "name": "Masala Dosa" }),
+                serde_json::json!({ "unit_price": 9_000, "name": "Masala Dosa" }),
+            );
+            repos.audit().append("outlet_default", &entry)?;
+        }
+        Ok(())
+    })
+    .expect("write the history");
+    let wrote_in = start.elapsed();
+
+    let full = file_bytes(&scratch);
+    let per_row = full.saturating_sub(empty) / SAMPLE;
+    let per_year = per_row * ACTIONS_PER_DAY * 365;
+
+    println!("\n--- M5 addendum: the audit trail (P11) ---");
+    println!("  rows written         {SAMPLE}");
+    println!("  per row              {per_row} bytes");
+    println!("  at {ACTIONS_PER_DAY}/day, one year  {} MB", per_year / (1024 * 1024));
+    println!("  M5 headroom          400 MB budget, bills project to 318 MB");
+    println!("  wrote in             {wrote_in:.2?}");
+
+    // The whole M5 budget is 400 MB and the bills project to 318. The trail has
+    // to live in what is left, with room to spare — 40 MB is half the headroom.
+    #[cfg(not(debug_assertions))]
+    assert!(
+        per_year < 40 * 1024 * 1024,
+        "the audit trail projects to {per_year} bytes a year, which eats M5's headroom — \
+         write a retention rule into PERFORMANCE.md and give it to P18's day close"
+    );
+}

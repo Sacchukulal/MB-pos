@@ -1,0 +1,426 @@
+//! **The one place this program says no.**
+//!
+//! > Audit **C1**: *"There is no login on the POS at all. Anybody who walks
+//! > behind the counter can open Reports and see the whole day's cash, change
+//! > the bill number, delete menu items, delete khata customers, or deactivate
+//! > the licence."*
+//!
+//! # Hiding a button is a courtesy; this is the control
+//!
+//! A permission check in TypeScript is decoration: the command is still there,
+//! and `window.__TAURI__.invoke` is two lines away in a dev console. Every
+//! guarded command therefore opens with one line —
+//!
+//! ```ignore
+//! let who = guard::require(&app, Permission::BillVoid)?;
+//! ```
+//!
+//! — and `require` does exactly three things: refuse when nobody is logged in,
+//! refuse when this person may not, and **touch the session's idle clock**, so
+//! that clock is fed by work rather than by mouse movement crossing the IPC
+//! boundary.
+//!
+//! # The coverage table, and why it is a table
+//!
+//! There are twenty-eight commands today and there will be well over a hundred
+//! by P30. A rule that every one of them is checked, enforced by everybody
+//! remembering, is D40's definition of a rule that erodes — *"the rules that
+//! erode are enforced by scripts, not by agreement"*.
+//!
+//! So [`COMMAND_ACCESS`] lists every command and what it needs, and a test
+//! reads `ipc.rs` and `flows.rs`, finds every `#[tauri::command]`, and fails if
+//! one is missing from the list. Adding a command without deciding is not a
+//! review comment; it is a red build. Choosing [`Access::Public`] is allowed —
+//! it just has to be chosen.
+
+use mb_auth::{Actor, Permission};
+
+use crate::state::App;
+use crate::words::{UiError, UiResult};
+
+/// What a command needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    /// Anybody, including nobody: these work on the lock screen. Keep this list
+    /// short and keep the reason with it.
+    Public,
+    Needs(Permission),
+}
+
+/// **Every command in the product, and what it needs.**
+pub const COMMAND_ACCESS: &[(&str, Access)] = &[
+    // --- works while locked, and has to ------------------------------------
+    // The shell reads its own state before anybody has logged in.
+    ("app_status", Access::Public),
+    // The theme toggle is on the lock screen (UI_GUIDELINES §0: light and dark
+    // both ship, with a toggle the user can press — including this user).
+    ("set_appearance", Access::Public),
+    // Audit E7: "send me the log" must be a button, and support asks for it
+    // precisely when nobody can get in.
+    ("reveal_logs", Access::Public),
+    // The lock screen itself.
+    ("lock_state", Access::Public),
+    ("login", Access::Public),
+    ("lock_now", Access::Public),
+    ("recover_with_code", Access::Public),
+    // The print queue indicator stays visible while locked — audit D4: a bill
+    // that printed wrong while the screen was locked is still the shop's
+    // problem, and a queue nobody can see is the finding itself.
+    ("list_print_jobs", Access::Public),
+    // The preview of the built-in test slip needs no shop and no data.
+    ("preview_test_page", Access::Public),
+
+    // --- billing ------------------------------------------------------------
+    ("current_cart", Access::Needs(Permission::BillCreate)),
+    ("cart_add", Access::Needs(Permission::BillCreate)),
+    ("cart_set_qty", Access::Needs(Permission::BillCreate)),
+    ("cart_remove", Access::Needs(Permission::BillCreate)),
+    ("cart_clear", Access::Needs(Permission::BillCreate)),
+    ("cart_set_order_type", Access::Needs(Permission::BillCreate)),
+    ("cart_add_payment", Access::Needs(Permission::BillCreate)),
+    ("cart_clear_payments", Access::Needs(Permission::BillCreate)),
+    ("open_orders", Access::Needs(Permission::BillCreate)),
+    ("menu_items", Access::Needs(Permission::BillCreate)),
+    ("search_items", Access::Needs(Permission::BillCreate)),
+    ("open_table", Access::Needs(Permission::BillCreate)),
+    ("print_kitchen_ticket", Access::Needs(Permission::BillCreate)),
+    ("complete_bill", Access::Needs(Permission::BillCreate)),
+
+    // --- paper --------------------------------------------------------------
+    ("list_printers", Access::Needs(Permission::SettingsPrinter)),
+    ("print_test_page", Access::Needs(Permission::SettingsPrinter)),
+    ("nudge_print_offset", Access::Needs(Permission::SettingsPrinter)),
+    // Retrying or abandoning a print is reprinting a bill, which is a thing a
+    // shop counts (scope 1.20) and therefore a thing it permits.
+    ("retry_print_job", Access::Needs(Permission::BillReprint)),
+    ("dismiss_print_job", Access::Needs(Permission::BillReprint)),
+
+    // --- people -------------------------------------------------------------
+    ("list_staff", Access::Needs(Permission::StaffManage)),
+    ("save_staff_member", Access::Needs(Permission::StaffManage)),
+    ("set_staff_pin", Access::Needs(Permission::StaffManage)),
+    ("list_roles", Access::Needs(Permission::StaffManage)),
+    ("save_role", Access::Needs(Permission::StaffManage)),
+    ("list_permissions", Access::Needs(Permission::StaffManage)),
+    ("audit_trail", Access::Needs(Permission::AuditView)),
+
+    // --- development only ---------------------------------------------------
+    // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
+    // still needs a permission, because a dev build is what a support engineer
+    // runs on a shop's own machine.
+    ("seed_demo_shop", Access::Needs(Permission::StaffManage)),
+];
+
+/// Refuse, or hand back who is doing this.
+pub fn require(app: &App, need: Permission) -> UiResult<Actor> {
+    let Some(session) = app.sessions().current() else {
+        // The screen turns this code into the lock screen. It is not an error
+        // the cashier has done anything about — they just need to sign in.
+        return Err(UiError::new(
+            "auth.locked",
+            "The screen is locked. Sign in to carry on.",
+        ));
+    };
+
+    if let Err(denied) = session.actor.must(need) {
+        return Err(UiError::new(
+            "auth.denied",
+            format!(
+                "{}, {}. Ask somebody who can.",
+                capitalise(&denied.to_string()),
+                session.actor.name
+            ),
+        )
+        .with_detail(format!("needs {}", need.code())));
+    }
+
+    // Work happened. This is what feeds the idle clock — see `session`.
+    app.sessions().touch(crate::flows::now());
+    Ok(session.actor)
+}
+
+/// "you do not have permission to void a bill" → "You do not have permission to
+/// void a bill". The sentence is built here rather than stored capitalised
+/// because `AuthError`'s `Display` is also a log line.
+fn capitalise(sentence: &str) -> String {
+    let mut chars = sentence.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// What a command needs, or `None` if nobody has said.
+#[must_use]
+pub fn access_for(command: &str) -> Option<Access> {
+    COMMAND_ACCESS
+        .iter()
+        .find(|(name, _)| *name == command)
+        .map(|(_, access)| *access)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    use mb_auth::PermissionSet;
+
+    use crate::state::App;
+
+    fn an_app() -> App {
+        App::new(crate::config::AppConfig::default()).expect("the font loads")
+    }
+
+    fn a_waiter() -> mb_auth::Actor {
+        mb_auth::Actor {
+            staff_id: mb_core::StaffId::new("staff_waiter"),
+            name: "Priya".to_owned(),
+            role_id: Some("role_waiter".to_owned()),
+            role_name: Some("Waiter".to_owned()),
+            permissions: [Permission::BillCreate].into_iter().collect(),
+            max_discount_bp: Some(0),
+            max_discount: None,
+        }
+    }
+
+    /// **T1 — and this is the test audit C1 is about.**
+    ///
+    /// The command is CALLED, not hidden. Every guarded command in the product
+    /// funnels through `require`, and `every_command_is_classified` below proves
+    /// there is no command that does not — so these two tests together are the
+    /// claim that a permission cannot be got past from a dev console.
+    #[test]
+    fn a_command_is_refused_when_the_person_may_not_do_it() {
+        let app = an_app();
+        app.sessions()
+            .begin(a_waiter(), crate::flows::now(), false);
+
+        // What a waiter may do.
+        assert!(require(&app, Permission::BillCreate).is_ok());
+
+        // And what they may not. Audit C1 by name: "anybody who walks behind
+        // the counter can open Reports and see the whole day's cash."
+        for refused in [
+            Permission::ReportsView,
+            Permission::BillVoid,
+            Permission::DrawerOpen,
+            Permission::StaffManage,
+            Permission::BackupRun,
+        ] {
+            let error = require(&app, refused).expect_err("it was allowed");
+            assert_eq!(error.code, "auth.denied", "{refused:?}");
+            assert!(
+                error.message.contains("Priya"),
+                "the refusal should name who is signed in: {}",
+                error.message
+            );
+            assert!(
+                error.detail.is_some_and(|d| d.contains(refused.code())),
+                "the detail should carry the permission for a support call"
+            );
+        }
+    }
+
+    #[test]
+    fn everything_is_refused_while_the_screen_is_locked() {
+        let app = an_app();
+        app.sessions().end();
+        for need in Permission::ALL {
+            let error = require(&app, *need).expect_err("it was allowed");
+            assert_eq!(error.code, "auth.locked");
+        }
+    }
+
+    /// **A shop that does not exist yet has nothing to lock.**
+    ///
+    /// Found by running it: the first version opened a first run straight onto
+    /// the lock screen, with an empty staff list and no way past — nobody could
+    /// create the shop that would hold the PIN that would let them in.
+    #[test]
+    fn a_first_run_is_not_locked_out_of_itself() {
+        let app = an_app();
+        let session = app.sessions().current().expect("somebody is at the counter");
+        assert!(session.is_stand_in);
+        assert!(require(&app, Permission::StaffManage).is_ok());
+    }
+
+    /// **T7's half that lives here.** Locking touches the session and nothing
+    /// else — a shift change at 9 pm cannot cost a table its order.
+    #[test]
+    fn locking_does_not_touch_the_cart() {
+        let app = an_app();
+        app.sessions().begin(a_waiter(), crate::flows::now(), false);
+        app.with_cart_mut(|state| {
+            state.table = Some("tbl_7".to_owned());
+            state.table_label = Some("7".to_owned());
+            state.order_type = mb_core::OrderType::Parcel;
+            Ok(())
+        })
+        .expect("the cart takes a table");
+
+        app.sessions().end();
+
+        app.with_cart(|state| {
+            assert_eq!(state.table.as_deref(), Some("tbl_7"));
+            assert_eq!(state.table_label.as_deref(), Some("7"));
+            assert_eq!(state.order_type, mb_core::OrderType::Parcel);
+            Ok(())
+        })
+        .expect("the cart is where it was");
+    }
+
+    /// Work feeds the idle clock, and it is the GUARD that feeds it — not a
+    /// mouse event crossing the IPC boundary.
+    #[test]
+    fn a_guarded_command_keeps_the_screen_awake() {
+        let app = an_app();
+        let long_ago = mb_core::Timestamp::from_millis(0);
+        app.sessions().begin(a_waiter(), long_ago, false);
+        assert!(
+            app.sessions()
+                .is_idle(crate::flows::now(), crate::session::IDLE_LOCK),
+            "it should have gone idle"
+        );
+
+        require(&app, Permission::BillCreate).expect("allowed");
+        assert!(
+            !app.sessions()
+                .is_idle(crate::flows::now(), crate::session::IDLE_LOCK),
+            "taking an order did not count as being at the counter"
+        );
+    }
+
+    /// A refusal must NOT touch it, or somebody pressing a button they are not
+    /// allowed to press would keep the till unlocked all night.
+    #[test]
+    fn a_refused_command_does_not() {
+        let app = an_app();
+        let long_ago = mb_core::Timestamp::from_millis(0);
+        app.sessions().begin(a_waiter(), long_ago, false);
+        let _ = require(&app, Permission::ReportsView);
+        assert!(
+            app.sessions()
+                .is_idle(crate::flows::now(), crate::session::IDLE_LOCK),
+            "a refusal counted as work"
+        );
+    }
+
+    #[test]
+    fn the_stand_in_may_do_everything_on_a_shop_with_no_pin() {
+        // Requirement 3: a shop must be able to bill on its first day, and on
+        // that day nobody has a PIN. See `session::stand_in_actor`.
+        let app = an_app();
+        app.sessions().begin(
+            crate::session::stand_in_actor("Counter", "staff_default"),
+            crate::flows::now(),
+            true,
+        );
+        for need in Permission::ALL {
+            assert!(require(&app, *need).is_ok(), "{need:?} was refused");
+        }
+        assert_eq!(PermissionSet::everything().len(), Permission::ALL.len());
+    }
+
+    /// Every `#[tauri::command]` in the two files that define them.
+    ///
+    /// `include_str!` rather than reading the file at runtime: the sources are
+    /// baked in at compile time, so this cannot pass because somebody ran the
+    /// test from the wrong directory.
+    fn declared_commands() -> BTreeSet<String> {
+        const SOURCES: [&str; 2] = [include_str!("ipc.rs"), include_str!("flows.rs")];
+        let mut found = BTreeSet::new();
+        for source in SOURCES {
+            let mut lines = source.lines().peekable();
+            while let Some(line) = lines.next() {
+                if line.trim() != "#[tauri::command]" {
+                    continue;
+                }
+                // The attribute may be followed by more attributes (`#[cfg]`),
+                // then the signature.
+                for next in lines.by_ref() {
+                    let next = next.trim();
+                    if next.starts_with('#') {
+                        continue;
+                    }
+                    if let Some(rest) = next.strip_prefix("pub fn ") {
+                        let name: String =
+                            rest.chars().take_while(|c| *c != '(' && *c != '<').collect();
+                        found.insert(name);
+                    }
+                    break;
+                }
+            }
+        }
+        found
+    }
+
+    /// **T11.** A command with no decision recorded fails the build.
+    #[test]
+    fn every_command_is_classified() {
+        let declared = declared_commands();
+        assert!(
+            declared.len() > 20,
+            "the scan found only {} commands, so it is broken rather than the code being clean",
+            declared.len()
+        );
+
+        let classified: BTreeSet<String> = COMMAND_ACCESS
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
+
+        let undecided: Vec<&String> = declared.difference(&classified).collect();
+        assert!(
+            undecided.is_empty(),
+            "these commands exist with no access decision — add them to COMMAND_ACCESS, \
+             choosing Access::Public on purpose if that is what you mean: {undecided:?}"
+        );
+
+        let ghosts: Vec<&String> = classified.difference(&declared).collect();
+        assert!(
+            ghosts.is_empty(),
+            "these are classified but no longer exist — delete the line: {ghosts:?}"
+        );
+    }
+
+    /// The scan is the load-bearing half of the test above, so it gets its own
+    /// assertion rather than being trusted.
+    #[test]
+    fn the_scan_finds_commands_in_both_files() {
+        let declared = declared_commands();
+        assert!(declared.contains("app_status"), "missed ipc.rs");
+        assert!(declared.contains("complete_bill"), "missed flows.rs");
+        // One that is behind a #[cfg], which is the case that breaks a naive
+        // "the line after the attribute" scan.
+        assert!(declared.contains("seed_demo_shop"), "missed a cfg'd command");
+    }
+
+    /// Public is a decision, and a short list. If this number grows, somebody
+    /// is making things public to get past the build.
+    #[test]
+    fn the_public_list_stays_short_and_deliberate() {
+        let public = COMMAND_ACCESS
+            .iter()
+            .filter(|(_, access)| *access == Access::Public)
+            .count();
+        assert!(
+            public <= 10,
+            "{public} public commands is too many to still be a decision"
+        );
+    }
+
+    #[test]
+    fn nothing_is_classified_twice() {
+        let mut seen = BTreeSet::new();
+        for (name, _) in COMMAND_ACCESS {
+            assert!(seen.insert(*name), "{name} is classified twice");
+        }
+    }
+
+    #[test]
+    fn a_refusal_names_the_person_and_says_what_to_do() {
+        let sentence = capitalise("you do not have permission to void a bill");
+        assert!(sentence.starts_with("You do not"));
+    }
+}

@@ -74,3 +74,60 @@ pub fn emit_print_queue(app: &AppHandle) {
         log_warn!("a print queue update could not be sent to the window: {e}");
     }
 }
+
+/// Tell the window who is at the counter — or that nobody is.
+///
+/// The same argument as the queue snapshot: the screen is told the state, never
+/// the transition, so a screen that mounted late cannot be showing a stale
+/// name over an unlocked till.
+pub fn emit_session(app: &AppHandle) {
+    let Some(state) = app.try_state::<App>() else {
+        return;
+    };
+    let current = state.sessions().current();
+    let message = Pushed::Session {
+        who: current.as_ref().map(|s| s.actor.name.clone()),
+        role: current.as_ref().and_then(|s| s.actor.role_name.clone()),
+        stand_in: current.as_ref().is_some_and(|s| s.is_stand_in),
+    };
+    if let Err(e) = app.emit(CHANNEL, message) {
+        log_warn!("the sign-in state could not be sent to the window: {e}");
+    }
+}
+
+/// **The idle clock** (P11 item 8, budget M4).
+///
+/// One thread, asleep almost always, that locks the counter when nothing has
+/// happened for [`crate::session::IDLE_LOCK`]. It is here rather than in React
+/// for two reasons: a React timer is a poll, and a React timer is bypassed by
+/// any screen that is not open.
+pub fn watch_for_idle(app: &AppHandle) {
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("mb-idle".to_owned())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(crate::session::IDLE_TICK);
+                let Some(state) = handle.try_state::<App>() else {
+                    return;
+                };
+                if !state
+                    .sessions()
+                    .is_idle(crate::flows::now(), crate::session::IDLE_LOCK)
+                {
+                    continue;
+                }
+                if let Some(who) = state.sessions().end() {
+                    crate::log_info!("the counter locked itself after {who} went quiet", who = who.name);
+                    state.record_lock(&who);
+                }
+                emit_session(&handle);
+            }
+        });
+
+    if let Err(e) = spawned {
+        // A counter that never locks is audit C1 back again, so this is said
+        // out loud rather than swallowed.
+        log_warn!("the idle lock could not be started: {e}");
+    }
+}
