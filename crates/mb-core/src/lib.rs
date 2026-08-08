@@ -46,6 +46,7 @@ pub mod businessday;
 pub mod cart;
 pub mod charge;
 pub mod combo;
+pub mod credit;
 pub mod discount;
 pub mod ids;
 pub mod item;

@@ -10,6 +10,7 @@
 //! balance that can disagree with its own ledger, and the day it does, nobody
 //! can tell which one is right.
 
+use mb_core::credit::{Ageing, Movement, MovementKind};
 use mb_core::{BusinessDay, CustomerId, Money, StaffId, Timestamp};
 use rusqlite::Transaction;
 
@@ -43,6 +44,31 @@ pub struct CreditPayment {
     pub received_by: Option<StaffId>,
     pub business_day: BusinessDay,
 }
+
+
+/// An opening balance, a write-off, or a correction — scope 5.1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreditAdjustment {
+    pub id: String,
+    pub customer_id: CustomerId,
+    /// Always positive. `increases` is the direction.
+    pub amount: Money,
+    pub increases: bool,
+    pub reason: String,
+    pub at: Timestamp,
+    pub business_day: BusinessDay,
+    pub made_by: Option<StaffId>,
+}
+
+/// One line of "who owes me money".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Owing {
+    pub customer: Customer,
+    pub balance: Money,
+    pub ageing: Ageing,
+    pub last_movement: BusinessDay,
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expense {
@@ -94,11 +120,12 @@ impl<'a> MoneyRepo<'a> {
         at: Timestamp,
     ) -> Result<(), DbError> {
         self.tx.execute(
-            "INSERT INTO customers (id, outlet_id, name, phone, gstin, address, credit_limit,
-                                    is_active, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+            "INSERT INTO customers (id, outlet_id, name, phone, phone_key, gstin, address,
+                                    credit_limit, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?10, ?5, ?6, ?7, ?8, ?9, ?9)
              ON CONFLICT (id) DO UPDATE SET name         = excluded.name,
                                             phone        = excluded.phone,
+                                            phone_key    = excluded.phone_key,
                                             gstin        = excluded.gstin,
                                             address      = excluded.address,
                                             credit_limit = excluded.credit_limit,
@@ -114,6 +141,10 @@ impl<'a> MoneyRepo<'a> {
                 customer.credit_limit.map(encode::money_to_sql),
                 encode::bool_to_sql(customer.is_active),
                 encode::timestamp_to_sql(at),
+                // The derived copy, with ONE writer — this line (D56's rule
+                // again). The UNIQUE INDEX on it is what makes "one phone is
+                // one customer" structural rather than remembered.
+                customer.phone.as_deref().and_then(mb_core::credit::phone_key),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "customers", customer.id.as_str(), Op::Upsert, at)
@@ -170,6 +201,179 @@ impl<'a> MoneyRepo<'a> {
             |r| r.get(0),
         )?;
         Ok(encode::money_from_sql(taken - repaid))
+    }
+
+
+    /// Who owns this phone number, if anybody — scope 5.4.
+    ///
+    /// **The lookup a duplicate must go through.** "That number is already
+    /// Rekha's — open her?" is the only acceptable answer to a second row for
+    /// one number, and it needs the existing customer, not a boolean.
+    pub fn customer_by_phone(
+        &self,
+        outlet: &str,
+        phone: &str,
+    ) -> Result<Option<Customer>, DbError> {
+        let Some(key) = mb_core::credit::phone_key(phone) else {
+            return Ok(None);
+        };
+        let found = self
+            .list_customers(outlet)?
+            .into_iter()
+            .find(|c| c.phone.as_deref().and_then(mb_core::credit::phone_key) == Some(key.clone()));
+        Ok(found)
+    }
+
+    /// Everything that has ever moved this account — scope 5.1.
+    ///
+    /// Three sources, one shape:
+    ///
+    /// * **sales** are `payments` rows in credit mode on a SETTLED order. A
+    ///   voided bill drops out here, which is why voiding one returns the
+    ///   balance exactly to what it was without any reversing row: the sale
+    ///   simply stops being a settled sale (D47 — a correction is a state).
+    /// * **repayments** are `customer_payments`.
+    /// * **adjustments** are `credit_adjustments`, with their reason.
+    ///
+    /// Ordered oldest first, because that is the order the ageing applies them
+    /// in and a statement prints them in.
+    pub fn credit_movements(&self, customer: &CustomerId) -> Result<Vec<Movement>, DbError> {
+        let mut out = Vec::new();
+
+        let mut sales = self.tx.prepare_cached(
+            "SELECT o.business_day, p.amount, COALESCE(o.bill_number_formatted, o.id)
+               FROM payments p JOIN orders o ON o.id = p.order_id
+              WHERE p.customer_id = ?1 AND p.mode = 'credit' AND o.state = 'settled'",
+        )?;
+        for row in sales.query_map([customer.as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+        })? {
+            let (day, amount, note) = row?;
+            out.push(Movement {
+                day: encode::business_day_from_sql(day, "orders.business_day")?,
+                kind: MovementKind::Sale,
+                amount: encode::money_from_sql(amount),
+                note,
+            });
+        }
+
+        let mut repayments = self.tx.prepare_cached(
+            "SELECT business_day, amount, COALESCE(reference, mode)
+               FROM customer_payments WHERE customer_id = ?1",
+        )?;
+        for row in repayments.query_map([customer.as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+        })? {
+            let (day, amount, note) = row?;
+            out.push(Movement {
+                day: encode::business_day_from_sql(day, "customer_payments.business_day")?,
+                kind: MovementKind::Repayment,
+                amount: encode::money_from_sql(amount),
+                note,
+            });
+        }
+
+        let mut adjustments = self.tx.prepare_cached(
+            "SELECT business_day, amount, increases, reason
+               FROM credit_adjustments WHERE customer_id = ?1",
+        )?;
+        for row in adjustments.query_map([customer.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })? {
+            let (day, amount, increases, reason) = row?;
+            out.push(Movement {
+                day: encode::business_day_from_sql(day, "credit_adjustments.business_day")?,
+                kind: MovementKind::Adjustment {
+                    increases: encode::bool_from_sql(increases, "credit_adjustments.increases")?,
+                },
+                amount: encode::money_from_sql(amount),
+                note: reason,
+            });
+        }
+
+        out.sort_by_key(|m| m.day.days_since_epoch());
+        Ok(out)
+    }
+
+    /// An opening balance, a write-off, or a correction.
+    ///
+    /// The reason is required by the schema as well as by the type, because
+    /// this is the one door in the credit account somebody could use to make
+    /// money disappear.
+    pub fn save_credit_adjustment(
+        &self,
+        outlet: &str,
+        adjustment: &CreditAdjustment,
+    ) -> Result<(), DbError> {
+        if adjustment.reason.trim().is_empty() {
+            return Err(DbError::invariant("an adjustment needs a reason"));
+        }
+        if !adjustment.amount.is_positive() {
+            return Err(DbError::invariant(
+                "an adjustment is a positive amount and a direction, never a negative amount",
+            ));
+        }
+        self.tx.execute(
+            "INSERT INTO credit_adjustments (id, outlet_id, customer_id, amount, increases,
+                                             reason, at, business_day, made_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                adjustment.id,
+                outlet,
+                adjustment.customer_id.as_str(),
+                encode::money_to_sql(adjustment.amount),
+                encode::bool_to_sql(adjustment.increases),
+                adjustment.reason.trim(),
+                encode::timestamp_to_sql(adjustment.at),
+                encode::business_day_to_sql(adjustment.business_day),
+                adjustment.made_by.as_ref().map(StaffId::as_str),
+            ],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(
+            outlet,
+            "credit_adjustments",
+            &adjustment.id,
+            Op::Upsert,
+            adjustment.at,
+        )
+    }
+
+    /// **Who owes me money** — the screen an owner actually opens.
+    ///
+    /// One pass over every customer with a movement, so the list and the
+    /// customer screen cannot disagree: both are built from
+    /// [`MoneyRepo::credit_movements`].
+    pub fn who_owes(&self, outlet: &str, today: BusinessDay) -> Result<Vec<Owing>, DbError> {
+        let mut out = Vec::new();
+        for customer in self.list_customers(outlet)? {
+            let movements = self.credit_movements(&customer.id)?;
+            if movements.is_empty() {
+                continue;
+            }
+            let balance = mb_core::credit::balance(&movements)
+                .map_err(|e| DbError::invariant(e.to_string()))?;
+            let ageing = mb_core::credit::ageing(&movements, today)
+                .map_err(|e| DbError::invariant(e.to_string()))?;
+            let last = movements
+                .last()
+                .map_or(today, |m| m.day);
+            out.push(Owing { customer, balance, ageing, last_movement: last });
+        }
+        // Oldest debt first: the point of the screen is what has been owed
+        // longest, not who is alphabetically first.
+        out.sort_by(|a, b| {
+            b.ageing
+                .oldest_days
+                .unwrap_or(-1)
+                .cmp(&a.ageing.oldest_days.unwrap_or(-1))
+                .then(b.balance.paise().cmp(&a.balance.paise()))
+        });
+        Ok(out)
     }
 
     pub fn record_credit_payment(

@@ -1004,6 +1004,13 @@ CREATE TABLE customers (
     address      TEXT,
     -- Scope 5.2. NULL means no limit, which is not the same as a limit of zero.
     credit_limit INTEGER,
+    -- The last ten digits of `phone`, and the reason it is stored rather than
+    -- computed in the WHERE clause is the UNIQUE INDEX below it: **the phone
+    -- is the identity in this market**, and two rows for one number are two
+    -- balances for one person. The derived copy has ONE writer (P15,
+    -- `MoneyRepo::save_customer`), which is D56's rule applied again.
+    -- `phone` keeps what was typed.
+    phone_key    TEXT,
     -- Scope 5.7, as days-since-epoch so the report is a range scan.
     birthday     INTEGER,
     anniversary  INTEGER,
@@ -1030,6 +1037,27 @@ CREATE TABLE customer_payments (
     note         TEXT,
     CHECK ((mode = 'other') = (mode_label IS NOT NULL)),
     CHECK (amount <> 0)
+) STRICT;
+
+-- Scope 5.1. An opening balance, a write-off, or a correction: the movements
+-- that are neither a sale nor a repayment. Every one carries a reason and a
+-- name, because an adjustment with neither is indistinguishable from a
+-- mistake — and this is the one table in the credit account somebody could
+-- use to make money disappear.
+CREATE TABLE credit_adjustments (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    customer_id  TEXT    NOT NULL REFERENCES customers (id),
+    -- Always positive paise. The direction is `increases`, never a sign: a
+    -- negative amount in a ledger is how a subtraction becomes an addition in
+    -- somebody's report six months later.
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    increases    INTEGER NOT NULL CHECK (increases IN (0, 1)),
+    reason       TEXT    NOT NULL,
+    at           INTEGER NOT NULL,
+    business_day INTEGER NOT NULL,
+    made_by      TEXT REFERENCES staff (id),
+    CHECK (trim(reason) <> '')
 ) STRICT;
 
 -- Data, not a hardcoded list.
@@ -1209,6 +1237,13 @@ CREATE INDEX idx_bill_charges_order ON bill_charges (order_id);
 CREATE INDEX idx_payments_order    ON payments (order_id);
 CREATE INDEX idx_payments_day_mode ON payments (business_day, mode);
 CREATE INDEX idx_payments_customer ON payments (customer_id) WHERE customer_id IS NOT NULL;
+
+-- **One phone number is one customer** (P15, scope 5.4). Partial, because a
+-- walk-in with no number is normal and a shop has many of them.
+CREATE UNIQUE INDEX idx_customers_phone_key
+    ON customers (outlet_id, phone_key) WHERE phone_key IS NOT NULL;
+
+CREATE INDEX idx_credit_adjustments_customer ON credit_adjustments (customer_id);
 
 CREATE INDEX idx_items_category    ON items (outlet_id, category_id);
 CREATE INDEX idx_items_short_code  ON items (outlet_id, short_code) WHERE short_code IS NOT NULL;

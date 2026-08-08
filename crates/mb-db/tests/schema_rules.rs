@@ -279,6 +279,10 @@ fn t8_every_named_index_exists() {
         "idx_orders_table",
         "idx_orders_token",
         "idx_payments_customer",
+        // P15: one phone number is one customer (scope 5.4), and the ledger
+        // read for one customer.
+        "idx_customers_phone_key",
+        "idx_credit_adjustments_customer",
         "idx_payments_day_mode",
         "idx_payments_order",
         "idx_reprints_day",
