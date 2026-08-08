@@ -445,6 +445,20 @@ macro_rules! commands {
             $crate::menu::attach_modifier_group,
             $crate::menu::list_combos,
             $crate::menu::save_combo,
+            $crate::floor::floor_plan,
+            $crate::floor::save_floor_section,
+            $crate::floor::delete_floor_section,
+            $crate::floor::save_dining_table,
+            $crate::floor::add_dining_tables,
+            $crate::floor::place_dining_table,
+            $crate::floor::set_dining_table_active,
+            $crate::floor::delete_dining_table,
+            $crate::floor::save_floor_thresholds,
+            $crate::floor::move_order,
+            $crate::floor::merge_orders,
+            $crate::floor::split_order,
+            $crate::floor::even_split,
+            $crate::floor::set_covers,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -650,6 +664,10 @@ pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
 pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     guard::require(app, Permission::BillCreate)?;
     let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    // The same two thresholds the floor screen uses, from the same place —
+    // a billing grid and a floor plan disagreeing about which table is late
+    // would be worse than neither of them saying so.
+    let (warn, late) = crate::floor::thresholds(app)?;
     app.with_shop(|shop| {
         let (tables, sections, open) = shop
             .db
@@ -668,6 +686,8 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
             &open,
             loaded.as_deref(),
             Timestamp::from_millis(now_millis()),
+            warn,
+            late,
         ))
     })
 }

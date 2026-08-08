@@ -25,4 +25,14 @@ minutes: bigint | null,
 /**
  * Whether the kitchen has been told (crown jewel 2's delta ledger).
  */
-kitchenTold: boolean, orderId: string | null, };
+kitchenTold: boolean, 
+/**
+ * Minutes since the last kitchen ticket went out — scope 14.2's second
+ * timer, and the one that catches a forgotten table: *"food ordered 18
+ * minutes ago and nothing since"*. `None` when nothing has been sent.
+ *
+ * Read from `order_events`, never from the ledger: the ledger is what the
+ * kitchen believes NOW and its rows are rewritten whenever the order
+ * changes, so a timestamp on them would reset when a cashier typed.
+ */
+kitchenMinutes: bigint | null, orderId: string | null, };

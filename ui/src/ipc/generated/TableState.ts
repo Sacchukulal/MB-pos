@@ -4,4 +4,4 @@
  * **State is carried in form as well as colour** (UI_GUIDELINES §2 rule 2).
  * Grey-scale the screen and all four must still be distinguishable.
  */
-export type TableState = "free" | "occupied" | "late" | "loaded";
+export type TableState = "free" | "occupied" | "waiting" | "late" | "loaded";

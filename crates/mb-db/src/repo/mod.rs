@@ -30,6 +30,7 @@ use rusqlite::Transaction;
 pub mod audit;
 pub mod composition;
 pub mod corrections;
+pub mod events;
 pub mod floor;
 pub mod menu;
 pub mod menucsv;
@@ -135,6 +136,13 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn corrections(&self) -> CorrectionsRepo<'a> {
         CorrectionsRepo::new(self.tx)
+    }
+
+    /// What happened to an order and when (P14) — the first writer of
+    /// `order_events`, which P04 modelled and nothing had used.
+    #[must_use]
+    pub fn events(&self) -> crate::repo::events::EventsRepo<'a> {
+        crate::repo::events::EventsRepo::new(self.tx)
     }
 
     /// The print spool (P07). The one repository that deliberately does **not**

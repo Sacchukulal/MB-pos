@@ -135,6 +135,34 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
         log_warn!("the kitchen ledger could not be saved: {e}");
     }
 
+    // 5. **And WHEN it was told** (P14, scope 14.2). The floor's second timer
+    //    is "food ordered 18 minutes ago and nothing since", which is the
+    //    number that catches a forgotten table — and it cannot be read off the
+    //    ledger, whose rows are rewritten whenever anything on the order
+    //    changes. An event happened at a moment and nothing later moves it.
+    if let Some(order_id) = app.with_cart(|state| Ok(state.order_id.clone()))? {
+        let day = today(at);
+        let recorded = app.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| {
+                    mb_db::Repos::new(tx).events().record(
+                        &order_id,
+                        at,
+                        day,
+                        mb_db::repo::events::KITCHEN_TICKET,
+                        None,
+                        None,
+                    )
+                })
+                .map_err(|e| words::from_db(&e))
+        });
+        if let Err(e) = recorded {
+            // The paper is already out. Losing the timestamp costs a timer on
+            // the floor, not a ticket, so it is logged rather than raised.
+            log_warn!("the kitchen ticket time could not be recorded: {e}");
+        }
+    }
+
     log_info!("kitchen ticket queued with {} line(s)", lines.len());
     Ok(id)
 }

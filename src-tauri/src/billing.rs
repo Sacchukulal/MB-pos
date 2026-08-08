@@ -35,12 +35,11 @@ use ts_rs::TS;
 use crate::ipc::MoneyView;
 use crate::words::{UiError, UiResult};
 
-/// How long a table may sit before the floor is told about it.
-///
-/// Scope 14.2 makes this configurable and P17 owns the screen for it; until
-/// then it is thirty minutes, which is roughly a South Indian lunch and short
-/// enough that the state is visible during a shift rather than in theory.
-pub const LATE_AFTER_MINUTES: i64 = 30;
+// Scope 14.2's thresholds used to be one constant here. They are settings now
+// (`floor::WARN_KEY` / `floor::LATE_KEY`), read in Rust and passed in, because
+// a dosa counter turns a table in eight minutes and a fine-dining room in
+// ninety — one number is wrong for both.
+
 
 // ---------------------------------------------------------------------------
 // The cart, as the process holds it.
@@ -260,6 +259,14 @@ pub struct TableView {
     pub minutes: Option<i64>,
     /// Whether the kitchen has been told (crown jewel 2's delta ledger).
     pub kitchen_told: bool,
+    /// Minutes since the last kitchen ticket went out — scope 14.2's second
+    /// timer, and the one that catches a forgotten table: *"food ordered 18
+    /// minutes ago and nothing since"*. `None` when nothing has been sent.
+    ///
+    /// Read from `order_events`, never from the ledger: the ledger is what the
+    /// kitchen believes NOW and its rows are rewritten whenever the order
+    /// changes, so a timestamp on them would reset when a cashier typed.
+    pub kitchen_minutes: Option<i64>,
     pub order_id: Option<String>,
 }
 
@@ -273,7 +280,13 @@ pub enum TableState {
     Free,
     /// Solid card, left stripe, amount in mono.
     Occupied,
-    /// Past [`LATE_AFTER_MINUTES`]. Stripe plus an emphasised timer.
+    /// Past the WARN threshold. Stripe plus a plain timer — the state that
+    /// says "keep an eye on this one" without shouting.
+    ///
+    /// P14 added this half. One threshold meant a table was fine and then
+    /// suddenly red, which is a smoke alarm rather than a floor view.
+    Waiting,
+    /// Past the LATE threshold. Stripe plus an emphasised timer.
     ///
     /// §4: *"the single most useful thing a floor view can show, and no
     /// version of Magic Bill has ever had it. It is not optional."*
@@ -455,6 +468,12 @@ pub fn floor_view(
     open: &[AnyOrder],
     loaded_order: Option<&str>,
     now: Timestamp,
+    // **Both thresholds come from settings** (P14, scope 14.2). A dosa
+    // counter turns a table in eight minutes and a fine-dining room in
+    // ninety; the one hard-coded constant that used to live here was wrong
+    // for both.
+    warn_after: i64,
+    late_after: i64,
 ) -> Vec<TableView> {
     let mut out = Vec::with_capacity(tables.len() + open.len());
 
@@ -473,7 +492,18 @@ pub fn floor_view(
         });
 
         out.push(match order {
-            Some(order) => tile_for(order, table.label.clone(), section, table.seats, loaded_order, now),
+            Some(order) => tile_for(
+                order,
+                Seat {
+                    label: table.label.clone(),
+                    section,
+                    seats: table.seats,
+                    loaded_order,
+                    now,
+                    warn_after,
+                    late_after,
+                },
+            ),
             None => TableView {
                 id: table.id.as_str().to_owned(),
                 label: table.label.clone(),
@@ -483,6 +513,7 @@ pub fn floor_view(
                 total: None,
                 minutes: None,
                 kitchen_told: false,
+                kitchen_minutes: None,
                 order_id: None,
             },
         });
@@ -496,20 +527,30 @@ pub fn floor_view(
         // table is labelled by its order type. P10 shows the token once an
         // order has been opened and numbered.
         let label = order_type_label(order.core().order_type).to_owned();
-        out.push(tile_for(order, label, None, 0, loaded_order, now));
+        out.push(tile_for(
+            order,
+            Seat { label, section: None, seats: 0, loaded_order, now, warn_after, late_after },
+        ));
     }
 
     out
 }
 
-fn tile_for(
-    order: &AnyOrder,
+/// Where a tile sits and how long a table may sit there — the four things
+/// that describe the SEAT rather than the order in it, so `tile_for` takes two
+/// arguments instead of six.
+struct Seat<'a> {
     label: String,
     section: Option<String>,
     seats: i64,
-    loaded_order: Option<&str>,
+    loaded_order: Option<&'a str>,
     now: Timestamp,
-) -> TableView {
+    warn_after: i64,
+    late_after: i64,
+}
+
+fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
+    let Seat { label, section, seats, loaded_order, now, warn_after, late_after } = seat;
     let core = order.core();
     let id = core.id.as_str().to_owned();
     let minutes = (now.millis() - core.created_at.millis()).div_euclid(60_000).max(0);
@@ -518,8 +559,10 @@ fn tile_for(
     TableView {
         state: if loaded {
             TableState::Loaded
-        } else if minutes >= LATE_AFTER_MINUTES {
+        } else if minutes >= late_after {
             TableState::Late
+        } else if minutes >= warn_after {
+            TableState::Waiting
         } else {
             TableState::Occupied
         },
@@ -532,6 +575,10 @@ fn tile_for(
             .kitchen
             .pending(&core.cart)
             .is_ok_and(|pending| pending.is_empty()),
+        // Filled in by `floor::floor_on`, which is the only caller with the
+        // events table open. A tile built anywhere else honestly says "no
+        // ticket time known" rather than guessing from created_at.
+        kitchen_minutes: None,
         order_id: Some(id.clone()),
         id: core
             .table

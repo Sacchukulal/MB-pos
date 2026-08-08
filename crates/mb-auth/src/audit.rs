@@ -61,6 +61,12 @@ pub mod action {
     pub const BILL_VOIDED: AuditAction = "bill.voided";
     pub const BILL_REPRINTED: AuditAction = "bill.reprinted";
     pub const ORDER_CANCELLED: AuditAction = "order.cancelled";
+    /// P14, scope 1.23 — the party changed seats.
+    pub const ORDER_MOVED: AuditAction = "order.moved";
+    /// P14, scope 1.22 — two tables became one bill.
+    pub const ORDER_MERGED: AuditAction = "order.merged";
+    /// P14, scope 1.21 — one table became two bills.
+    pub const ORDER_SPLIT: AuditAction = "order.split";
     pub const ITEM_VOIDED: AuditAction = "item.voided";
     pub const DISCOUNT_GIVEN: AuditAction = "discount.given";
     pub const DISCOUNT_REFUSED: AuditAction = "discount.refused";
@@ -88,6 +94,9 @@ pub mod action {
         BILL_VOIDED,
         BILL_REPRINTED,
         ORDER_CANCELLED,
+        ORDER_MOVED,
+        ORDER_MERGED,
+        ORDER_SPLIT,
         ITEM_VOIDED,
         DISCOUNT_GIVEN,
         DISCOUNT_REFUSED,
@@ -118,6 +127,9 @@ pub mod action {
             BILL_VOIDED => "Voided a bill",
             BILL_REPRINTED => "Reprinted a bill",
             ORDER_CANCELLED => "Cancelled an order",
+            ORDER_MOVED => "Moved an order to another table",
+            ORDER_MERGED => "Merged two tables into one bill",
+            ORDER_SPLIT => "Split a bill",
             ITEM_VOIDED => "Voided an item",
             DISCOUNT_GIVEN => "Gave a discount",
             DISCOUNT_REFUSED => "Tried to give too big a discount",

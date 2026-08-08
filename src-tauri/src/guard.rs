@@ -144,6 +144,24 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("attach_modifier_group", Access::Needs(Permission::MenuManage)),
     ("list_combos", Access::Needs(Permission::MenuManage)),
     ("save_combo", Access::Needs(Permission::MenuManage)),
+    // The floor (P14). Reading it is billing work — a cashier has to see the
+    // tables. CHANGING the room is `tables.manage`, and the three operations
+    // are gated by what they really do: moving an order is billing, merging
+    // one away destroys a bill number and is gated like a void.
+    ("floor_plan", Access::Needs(Permission::BillCreate)),
+    ("save_floor_section", Access::Needs(Permission::TablesManage)),
+    ("delete_floor_section", Access::Needs(Permission::TablesManage)),
+    ("save_dining_table", Access::Needs(Permission::TablesManage)),
+    ("add_dining_tables", Access::Needs(Permission::TablesManage)),
+    ("place_dining_table", Access::Needs(Permission::TablesManage)),
+    ("set_dining_table_active", Access::Needs(Permission::TablesManage)),
+    ("delete_dining_table", Access::Needs(Permission::TablesManage)),
+    ("save_floor_thresholds", Access::Needs(Permission::TablesManage)),
+    ("move_order", Access::Needs(Permission::BillCreate)),
+    ("merge_orders", Access::Needs(Permission::BillVoid)),
+    ("split_order", Access::Needs(Permission::BillCreate)),
+    ("even_split", Access::Needs(Permission::BillCreate)),
+    ("set_covers", Access::Needs(Permission::BillCreate)),
 
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
@@ -373,11 +391,12 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 4] = [
+        const SOURCES: [&str; 5] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
             include_str!("menu.rs"),
+            include_str!("floor.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {

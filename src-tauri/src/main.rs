@@ -34,6 +34,7 @@
 mod billing;
 mod config;
 mod corrections;
+mod floor;
 mod flows;
 mod guard;
 mod ipc;
@@ -52,6 +53,10 @@ mod signin_tests;
 /// PERFORMANCE.md §4.
 #[cfg(test)]
 mod perf_tests;
+/// P14 moves an order between tables, merges two and splits one. Every one of
+/// those is a sequence on the money path that moves the kitchen ledger with it.
+#[cfg(test)]
+mod floor_tests;
 /// P13's flows are sequences too — set a rate, watch every item on it move;
 /// export, edit a cell, import back. Same reasoning as `signin_tests`.
 #[cfg(test)]
