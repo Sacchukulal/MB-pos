@@ -139,6 +139,12 @@
   --tile-height-dense: 3.25rem;
   --suggestions-height: 22rem;
   --help-keys-width: 9rem;
+  /* How little of the cart may ever be on screen. The cart column is a grid of
+     auto rows around one flexible one, and CSS gives the auto rows their
+     content first — so when payments appeared the item list was squeezed to
+     nothing while it still said "2 lines". Found by paying a bill and looking
+     at it. Four lines is a floor, not a height. */
+  --cart-lines-min: 8rem;
 
   --focus-ring-width: 2px;
   --border-width: 1px;

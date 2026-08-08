@@ -19,4 +19,12 @@ balance: MoneyView,
 /**
  * What to hand back. Zero unless the customer over-paid in cash (1.16).
  */
-change: MoneyView, isEmpty: boolean, };
+change: MoneyView, isEmpty: boolean, 
+/**
+ * Whether the kitchen has been told everything on this bill.
+ *
+ * **Decides what Enter on an empty box does** (audit 2.3): print the
+ * ticket, or complete the bill. It comes from the order's own ledger, so
+ * it is right after a merge and after a restart.
+ */
+kitchenUpToDate: boolean, };

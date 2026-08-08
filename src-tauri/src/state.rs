@@ -82,6 +82,7 @@ impl App {
     /// shop while the app is running.
     pub fn open_shop(&self, db: Db, path: std::path::PathBuf) {
         let db = Arc::new(db);
+        ensure_someone_can_bill(&db);
         let queue = self.build_queue(&db);
         let previous = lock(&self.shop).replace(Shop {
             db,
@@ -103,7 +104,7 @@ impl App {
     /// and show what it knows, the shop is still in the position the finding
     /// describes — *"nothing remembers it"*.
     fn build_queue(&self, db: &Arc<Db>) -> Queue {
-        let printers = db
+        let mut printers = db
             .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
             .unwrap_or_else(|e| {
                 log_warn!("the printer list could not be read ({e}); starting with none");
@@ -112,6 +113,26 @@ impl App {
             .iter()
             .map(printer_config_for)
             .collect::<Vec<_>>();
+
+        // **A shop with no printer set up must still be able to bill** —
+        // requirement 3 of the ten, and the state every shop is in on its first
+        // day. See `fallback_row`: it is saved, not invented, so the queue's
+        // threads and the spool's foreign key agree with the settings screen
+        // about which printers exist.
+        if printers.is_empty() {
+            log_warn!("no printer is set up; jobs will be spooled and printed nowhere");
+            let row = fallback_row();
+            match db.transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .settings()
+                    .save_printer(OUTLET, &row, crate::flows::now())
+            }) {
+                Ok(()) => printers.push(printer_config_for(&row)),
+                // Billing still works; printing does not, and the reason is
+                // written down where an owner's support call can find it.
+                Err(e) => log_warn!("the stand-in printer could not be saved ({e})"),
+            }
+        }
 
         log_info!("starting the print queue with {} printer(s)", printers.len());
 
@@ -179,6 +200,105 @@ impl App {
             log_info!("shutting the print queue down");
             shop.queue.shutdown();
         }
+    }
+}
+
+/// Who a bill is created by before anybody has logged in.
+///
+/// P11 owns staff, roles and PINs, and will replace this with whoever is at the
+/// counter. Until then every order is `created_by` this id — and `orders` has
+/// `created_by TEXT NOT NULL REFERENCES staff (id)`, so the row has to be there
+/// or nothing can be billed at all.
+pub const DEFAULT_STAFF: &str = "staff_default";
+
+/// Make sure the shop has somebody to bill as.
+///
+/// The migration seeds the outlet and the terminal an order points at; it does
+/// **not** seed staff, because people are P11's and inventing a shop's staff
+/// list is a product decision this is not entitled to make. One row, named for
+/// what it is, is the smallest thing that keeps requirement 3 true — *a shop
+/// must be able to bill on its first day.*
+///
+/// Found by settling a bill: "FOREIGN KEY constraint failed", from `created_by`
+/// pointing at a person who did not exist. The bill's money had already been
+/// taken on screen.
+fn ensure_someone_can_bill(db: &Arc<Db>) {
+    use mb_db::repo::people::{StaffMember, StaffStatus};
+
+    let result = db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        if repos
+            .people()
+            .list_staff(OUTLET)?
+            .iter()
+            .any(|s| s.id.as_str() == DEFAULT_STAFF)
+        {
+            return Ok(false);
+        }
+        repos.people().save_staff(
+            OUTLET,
+            &StaffMember {
+                id: mb_core::StaffId::new(DEFAULT_STAFF),
+                name: "Counter".to_owned(),
+                code: None,
+                role_id: None,
+                role_name: None,
+                pin_hash: None,
+                status: StaffStatus::Active,
+                permissions: std::collections::BTreeSet::new(),
+            },
+            crate::flows::now(),
+        )?;
+        Ok(true)
+    });
+
+    match result {
+        Ok(true) => log_info!("added the default counter user so bills can be created"),
+        Ok(false) => {}
+        // Not fatal here: the failure will be reported in the cashier's own
+        // words at the moment they try to bill, which is where it belongs.
+        Err(e) => log_warn!("the default counter user could not be added ({e})"),
+    }
+}
+
+/// The id of the printer that exists when no printer exists.
+pub const NO_PRINTER: &str = "prn_none";
+
+/// The printer a shop has before it has a printer — **a real row.**
+///
+/// Requirement 3 of the ten: a shop must be able to bill on its first day, and
+/// on that day nobody has set a printer up. `kind = 'none'` is the case the
+/// schema already wrote down for this — *"it accepts jobs and prints nothing"* —
+/// and P17 turns it into a real one by editing this row.
+///
+/// # It is a row, and that is the point
+///
+/// Two attempts at this got it wrong by inventing a `PrinterConfig` at job
+/// time instead, and each failed differently and only when run:
+///
+/// 1. the queue runs a thread per printer it was **started** with and refuses a
+///    job addressed to any other — *"there is no printer prn_none"*;
+/// 2. the spool row has `printer_id REFERENCES printers (id)`, so even once the
+///    thread existed the durable write was refused — *"FOREIGN KEY constraint
+///    failed"*.
+///
+/// Both are the same mistake: a printer that some of the system believes in.
+/// Saving the row means there is one answer to "what printers are there?", and
+/// the queue, the spool and the settings screen all read it.
+fn fallback_row() -> mb_db::repo::settings::Printer {
+    mb_db::repo::settings::Printer {
+        id: NO_PRINTER.to_owned(),
+        name: "No printer set up yet".to_owned(),
+        kind: "none".to_owned(),
+        address: None,
+        paper_mm: 80,
+        is_default: true,
+        can_kick_drawer: false,
+        offset_x_mm: 0,
+        offset_y_mm: 0,
+        role: "both".to_owned(),
+        engine: "raster".to_owned(),
+        is_bold_dark: false,
     }
 }
 

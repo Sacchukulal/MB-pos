@@ -80,6 +80,10 @@ export interface Commands {
   };
   /** Budget B7 — an existing table's order into the cart. */
   open_table: { args: { tableId: string }; returns: CartView };
+  /** The delta only, from the order's own ledger (crown jewel 2). */
+  print_kitchen_ticket: { args: void; returns: string };
+  /** settle() — one transaction — and THEN the print (audit D4). */
+  complete_bill: { args: void; returns: string };
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };

@@ -215,6 +215,32 @@ export function Billing() {
     [cart, report],
   );
 
+  /** The delta only — never the whole order (crown jewel 2). */
+  const printKitchen = useCallback(async () => {
+    try {
+      await call('print_kitchen_ticket');
+      setCart(await call('current_cart'));
+      toast.show('ok', 'Kitchen ticket sent.');
+    } catch (cause) {
+      report(cause);
+    }
+  }, [report, toast]);
+
+  /**
+   * Settle, then print. **In that order** — the money is on disk before the
+   * paper is attempted, so a printer that is off cannot lose a bill (D4).
+   */
+  const completeBill = useCallback(async () => {
+    try {
+      const number = await call('complete_bill');
+      setCart(await call('current_cart'));
+      await refreshFloor();
+      toast.show('ok', `Bill ${number} settled.`);
+    } catch (cause) {
+      report(cause);
+    }
+  }, [refreshFloor, report, toast]);
+
   const clearPayments = useCallback(async () => {
     try {
       setCart(await call('cart_clear_payments'));
@@ -286,10 +312,10 @@ export function Billing() {
           searchBox.current?.focus();
           return;
         case 'print-kitchen':
-          toast.show('info', 'The kitchen ticket needs the settle flow — still to come.');
+          await printKitchen();
           return;
         case 'complete-bill':
-          toast.show('info', 'Completing the bill needs the settle flow — still to come.');
+          await completeBill();
           return;
         case 'merge-into':
           await openTableById(command.tableId);
@@ -300,7 +326,7 @@ export function Billing() {
           return;
       }
     },
-    [addItem, newOrder, openTableById, setOrderType, toast],
+    [addItem, completeBill, newOrder, openTableById, printKitchen, setOrderType, toast],
   );
 
   // Perform one batch per committed dispatch. Keyed on `seq` rather than on
@@ -321,10 +347,10 @@ export function Billing() {
     dispatch({
       kind: 'cart',
       hasItems: cart ? !cart.isEmpty : false,
-      // Until the kitchen ledger is wired through the cart view, a non-empty
-      // cart counts as "the kitchen has not seen it" — which makes Enter print
-      // the ticket first, and that is the safe way round.
-      kitchenUpToDate: false,
+      // From the ORDER'S OWN LEDGER (crown jewel 2), so Enter on an empty box
+      // picks the right branch after a merge and after a restart — not from
+      // anything this screen is remembering.
+      kitchenUpToDate: cart?.kitchenUpToDate ?? true,
     });
   }, [cart]);
 
@@ -570,8 +596,17 @@ export function Billing() {
           </div>
 
           <div className="mb-actions">
-            <Button disabled={!cart || cart.isEmpty}>Kitchen ticket</Button>
-            <Button variant="primary" disabled={!cart || cart.isEmpty}>
+            <Button
+              disabled={!cart || cart.isEmpty}
+              onClick={() => void printKitchen()}
+            >
+              Kitchen ticket
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => void completeBill()}
+            >
               Complete bill
             </Button>
             <Button variant="quiet" onClick={() => void newOrder()}>

@@ -71,9 +71,16 @@
 
 .mb-billing__cart {
   display: grid;
-  grid-template-rows: auto 1fr auto auto auto;
+  /* Header, THE ITEMS, totals, payment, actions. The items row keeps a floor:
+     `1fr` alone loses to the auto rows when the panel is tall (a bill with
+     several payments), and the list a cashier is reading disappears at exactly
+     the moment they are taking money. It scrolls inside that floor instead. */
+  grid-template-rows: auto minmax(var(--cart-lines-min), 1fr) auto auto auto;
   gap: var(--space-3);
   min-height: 0;
+  /* And if even the floor does not fit, the column scrolls rather than
+     silently cropping the buttons off the bottom. */
+  overflow-y: auto;
   padding: var(--space-4);
   background: var(--surface);
   border: var(--border-width) solid var(--border);

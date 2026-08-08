@@ -397,6 +397,8 @@ macro_rules! commands {
             $crate::ipc::menu_items,
             $crate::ipc::search_items,
             $crate::ipc::open_table,
+            $crate::flows::print_kitchen_ticket,
+            $crate::flows::complete_bill,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -551,6 +553,7 @@ pub fn cart_set_order_type(
         // against a table nobody is sitting at.
         if !matches!(kind, mb_core::OrderType::DineIn) {
             state.table = None;
+            state.table_label = None;
         }
         cart_view(state)
     })
@@ -799,6 +802,22 @@ pub fn search_items(
 /// the screen's memory"*).
 #[tauri::command]
 pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<CartView> {
+    // **The label, not the id.** The cart carries `tbl_7` because that is the
+    // key an order is saved against; the cashier's table is called 7 and the
+    // header said "Table tbl_7" until somebody looked at it. Resolved here,
+    // once, rather than by trimming a prefix off an id anywhere else.
+    let label = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).floor().list_tables(OUTLET))
+            .map_err(|e| words::from_db(&e))
+            .map(|tables| {
+                tables
+                    .into_iter()
+                    .find(|t| t.id.as_str() == table_id)
+                    .map(|t| t.label)
+            })
+    })?;
+
     let found = app.with_shop(|shop| {
         let open = shop
             .db
@@ -824,6 +843,7 @@ pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<Cart
                 state.order_type = core.order_type;
                 state.order_id = Some(core.id.as_str().to_owned());
                 state.table = Some(table_id.clone());
+                state.table_label = label.clone();
                 state.settlement = mb_core::Settlement::new();
             }
             None => {
@@ -832,6 +852,7 @@ pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<Cart
                 *state = crate::billing::CartState {
                     order_type: state.order_type,
                     table: Some(table_id.clone()),
+                    table_label: label.clone(),
                     ..crate::billing::CartState::default()
                 };
             }

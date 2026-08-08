@@ -53,11 +53,20 @@ pub struct CartState {
     pub order_type: OrderType,
     /// The table this cart belongs to, when it is a dine-in order.
     pub table: Option<String>,
+    /// What the cashier calls that table — "7", not "tbl_7". The id above is
+    /// the key an order is saved against; this is the word on the screen.
+    pub table_label: Option<String>,
     /// The order being edited, when an existing one was opened. `None` for a
     /// cart that has not been saved yet.
     pub order_id: Option<String>,
     pub settlement: Settlement,
     pub bill_discount: Option<DiscountEntry>,
+    /// **Crown jewel 2 lives here while the order is being typed**, and it
+    /// travels into the order when it is saved. What the kitchen was told is
+    /// never a screen's memory.
+    pub kitchen: mb_core::KitchenLedger,
+    /// Scope 1.26 — a note on the whole order, printed on the bill.
+    pub note: Option<String>,
 }
 
 impl Default for CartState {
@@ -70,9 +79,12 @@ impl Default for CartState {
             // screen's; the default is here.
             order_type: OrderType::DineIn,
             table: None,
+            table_label: None,
             order_id: None,
             settlement: Settlement::new(),
             bill_discount: None,
+            kitchen: mb_core::KitchenLedger::new(),
+            note: None,
         }
     }
 }
@@ -116,6 +128,12 @@ pub struct CartView {
     /// What to hand back. Zero unless the customer over-paid in cash (1.16).
     pub change: MoneyView,
     pub is_empty: bool,
+    /// Whether the kitchen has been told everything on this bill.
+    ///
+    /// **Decides what Enter on an empty box does** (audit 2.3): print the
+    /// ticket, or complete the bill. It comes from the order's own ledger, so
+    /// it is right after a merge and after a restart.
+    pub kitchen_up_to_date: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -295,9 +313,13 @@ pub fn cart_view(state: &CartState) -> UiResult<CartView> {
         .collect();
 
     let paid = state.settlement.total_paid().map_err(money_error)?;
+    // **`balance`, not `amount_due`.** `amount_due` is what the bill ASKS for
+    // (the total plus any tip); `balance` is what is LEFT after what has been
+    // taken. Getting these the wrong way round showed "Balance 336.00" beside
+    // "Cash 336.00" — found by paying a bill and looking at it.
     let due = state
         .settlement
-        .amount_due(bill.grand_total)
+        .balance(bill.grand_total)
         .map_err(money_error)?;
     let change = state
         .settlement
@@ -308,7 +330,7 @@ pub fn cart_view(state: &CartState) -> UiResult<CartView> {
         lines,
         bill: bill_view(&bill)?,
         order_type: order_type_label(state.order_type).to_owned(),
-        table: state.table.clone(),
+        table: state.table_label.clone().or_else(|| state.table.clone()),
         payments: state
             .settlement
             .payments()
@@ -325,6 +347,10 @@ pub fn cart_view(state: &CartState) -> UiResult<CartView> {
         balance: due.into(),
         change: change.into(),
         is_empty: state.cart.is_empty(),
+        kitchen_up_to_date: state
+            .kitchen
+            .pending(&state.cart)
+            .is_ok_and(|pending| pending.is_empty()),
     })
 }
 
@@ -555,6 +581,66 @@ pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
 /// The cart, held for the life of the process.
 pub type Cart_ = Mutex<CartState>;
 
+
+// ---------------------------------------------------------------------------
+// Turning a cart into an order (P10).
+// ---------------------------------------------------------------------------
+
+/// The terminal this counter is. One until P27 builds the second.
+pub const TERMINAL: &str = "terminal_default";
+
+impl CartState {
+    /// Build the draft this cart represents.
+    ///
+    /// **Crown jewel 4 is already satisfied** by the time this runs: each line
+    /// was frozen from an `ItemSnapshot` when it was added, so an order carries
+    /// what the menu said *then* and *"old bills never change when you change a
+    /// price."*
+    pub fn to_draft(&self, at: Timestamp, by: mb_core::StaffId) -> UiResult<mb_core::DraftOrder> {
+        let day = mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
+        let id = mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| {
+            // A new order gets an id from the clock plus the terminal. D13 says
+            // ids are text because two terminals collide on integers, and this
+            // is that rule honoured rather than restated.
+            format!("ord_{}_{}", at.millis(), TERMINAL)
+        }));
+
+        let mut draft = mb_core::DraftOrder::new(id, day, at, self.order_type, by);
+        if let Some(table) = self.table.as_ref() {
+            draft = draft.on_table(mb_core::TableId::new(table.clone()));
+        }
+        draft.core.cart = self.cart.clone();
+        draft.core.kitchen = self.kitchen.clone();
+        draft.core.note = self.note.clone();
+        Ok(draft)
+    }
+}
+
+/// What the kitchen has not been told about yet — **crown jewel 2.**
+///
+/// > *"The delta KOT. Only what the kitchen has not seen gets printed, and what
+/// > was printed is remembered **in the database**, not in the screen's
+/// > memory."*
+///
+/// The ledger travels with the order, so this is right after a merge, after a
+/// restart, and on a second terminal. A screen-held delta would be wrong on all
+/// three.
+pub fn pending_for_kitchen(state: &CartState) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
+    state.cart_pending()
+}
+
+impl CartState {
+    pub fn cart_pending(&self) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
+        self.kitchen.pending(&self.cart).map_err(|e| {
+            UiError::new(
+                "kitchen.delta",
+                "What the kitchen still needs could not be worked out. Nothing has been sent.",
+            )
+            .with_detail(e.to_string())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,6 +758,60 @@ mod tests {
         assert_eq!(view.bill.grand_total.text, bill.grand_total.to_plain_string());
         assert_eq!(view.bill.subtotal.paise, bill.subtotal.paise());
         assert_eq!(view.lines[0].amount.paise, bill.lines[0].gross_including_tax.paise());
+    }
+
+    /// **Balance is what is LEFT, not what the bill asks for.**
+    ///
+    /// The regression this pins was found by paying a bill and looking at it:
+    /// the panel said "Cash 336.00" and "Balance 336.00" at the same time,
+    /// because both this view and `complete_bill` had called `amount_due` —
+    /// which is the total plus tip and never falls as money comes in. The same
+    /// mistake made Complete bill refuse every bill on earth.
+    ///
+    /// Every assertion below is wrong under `amount_due` and right under
+    /// `balance`, which is the only reason to have it.
+    #[test]
+    fn paying_the_bill_brings_the_balance_down_to_nothing() {
+        let mut state = CartState::default();
+        state
+            .cart
+            .add(
+                item("itm_dosa", "Masala Dosa", 10_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                one(),
+                None,
+                vec![],
+            )
+            .expect("add");
+
+        // 100.00 @ 5% exclusive = 105.00.
+        let total = state.bill().expect("bill").grand_total;
+        assert_eq!(total.paise(), 10_500);
+        assert_eq!(cart_view(&state).expect("view").balance.paise, 10_500);
+
+        // Part of it: still owed, and the panel must say how much.
+        state
+            .settlement
+            .add(
+                mb_core::Payment::new(mb_core::PaymentMode::Cash, Money::from_paise(5_000))
+                    .expect("payment"),
+            )
+            .expect("add");
+        let view = cart_view(&state).expect("view");
+        assert_eq!(view.paid.paise, 5_000);
+        assert_eq!(view.balance.paise, 5_500, "half paid is not paid");
+
+        // And the rest: nothing left, and nothing to hand back.
+        state
+            .settlement
+            .add(
+                mb_core::Payment::new(mb_core::PaymentMode::Cash, Money::from_paise(5_500))
+                    .expect("payment"),
+            )
+            .expect("add");
+        let view = cart_view(&state).expect("view");
+        assert_eq!(view.balance.paise, 0, "the bill is paid in full");
+        assert_eq!(view.change.paise, 0);
+        assert!(state.settlement.is_settled(total).expect("settled"));
     }
 
     /// **T7 — fractional quantity** (scope 1.10). `Qty` is thousandths; the

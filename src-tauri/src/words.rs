@@ -95,6 +95,15 @@ pub fn from_db(error: &mb_db::DbError) -> UiError {
              the latest version and open it again."
                 .to_owned(),
         ),
+        // NOT a case for `Invariant`. Its text reads like a sentence for a
+        // person — "a dine-in order needs a table before it can be opened" —
+        // and surfacing it was tempting after a real toast said "the shop's
+        // data could not be read" for exactly that. But the same variant also
+        // carries "SQLITE_BUSY: database is locked", which is audit F8's whole
+        // complaint, and `a_shopkeeper_never_reads_a_system_message` below
+        // caught the attempt. The rules a cashier can act on get a guard and
+        // words of their own where they are broken — see `flows::complete_bill`
+        // and its `bill.no_table`.
         _ => (
             "db.failed",
             "The shop's data could not be read. Nothing has been changed.".to_owned(),
@@ -102,6 +111,7 @@ pub fn from_db(error: &mb_db::DbError) -> UiError {
     };
     UiError::new(code, message).with_detail(detail)
 }
+
 
 /// Printing.
 #[must_use]

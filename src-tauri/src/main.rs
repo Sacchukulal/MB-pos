@@ -33,6 +33,7 @@
 
 mod billing;
 mod config;
+mod flows;
 mod ipc;
 mod logging;
 mod preview;
