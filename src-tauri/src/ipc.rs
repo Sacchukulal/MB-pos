@@ -471,6 +471,14 @@ macro_rules! commands {
             $crate::floor::split_order,
             $crate::floor::even_split,
             $crate::floor::set_covers,
+            $crate::credit::who_owes,
+            $crate::credit::customers,
+            $crate::credit::customer_account,
+            $crate::credit::save_customer,
+            $crate::credit::record_repayment,
+            $crate::credit::save_credit_adjustment,
+            $crate::credit::credit_headroom,
+            $crate::credit::put_on_account,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

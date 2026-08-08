@@ -66,6 +66,8 @@ pub struct CartState {
     pub kitchen: mb_core::KitchenLedger,
     /// Scope 1.6 — which half of a shared table this order is (P14).
     pub sub_table: Option<mb_core::SubTable>,
+    /// Whose account this bill went on, when it went on one (P15, scope 5.1).
+    pub customer: Option<String>,
     /// Scope 1.24 — how many are eating. `None` is honestly unknown.
     pub covers: Option<u32>,
     /// Scope 1.26 — a note on the whole order, printed on the bill.
@@ -95,6 +97,7 @@ impl Default for CartState {
             bill_discount: None,
             kitchen: mb_core::KitchenLedger::new(),
             sub_table: None,
+            customer: None,
             covers: None,
             note: None,
             opened_by: None,

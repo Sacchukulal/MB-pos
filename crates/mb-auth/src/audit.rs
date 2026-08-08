@@ -67,6 +67,12 @@ pub mod action {
     pub const ORDER_MERGED: AuditAction = "order.merged";
     /// P14, scope 1.21 — one table became two bills.
     pub const ORDER_SPLIT: AuditAction = "order.split";
+    /// P15, scope 5.1 — money handed over against an account.
+    pub const CREDIT_TAKEN: AuditAction = "credit.taken";
+    /// P15 — an opening balance, a write-off or a correction.
+    pub const CREDIT_ADJUSTED: AuditAction = "credit.adjusted";
+    /// P15, scope 5.2 — somebody approved a bill past the limit.
+    pub const CREDIT_LIMIT_OVERRIDDEN: AuditAction = "credit.limit_overridden";
     pub const ITEM_VOIDED: AuditAction = "item.voided";
     pub const DISCOUNT_GIVEN: AuditAction = "discount.given";
     pub const DISCOUNT_REFUSED: AuditAction = "discount.refused";
@@ -97,6 +103,9 @@ pub mod action {
         ORDER_MOVED,
         ORDER_MERGED,
         ORDER_SPLIT,
+        CREDIT_TAKEN,
+        CREDIT_ADJUSTED,
+        CREDIT_LIMIT_OVERRIDDEN,
         ITEM_VOIDED,
         DISCOUNT_GIVEN,
         DISCOUNT_REFUSED,
@@ -130,6 +139,9 @@ pub mod action {
             ORDER_MOVED => "Moved an order to another table",
             ORDER_MERGED => "Merged two tables into one bill",
             ORDER_SPLIT => "Split a bill",
+            CREDIT_TAKEN => "Took a credit repayment",
+            CREDIT_ADJUSTED => "Adjusted what a customer owes",
+            CREDIT_LIMIT_OVERRIDDEN => "Approved a bill past the credit limit",
             ITEM_VOIDED => "Voided an item",
             DISCOUNT_GIVEN => "Gave a discount",
             DISCOUNT_REFUSED => "Tried to give too big a discount",

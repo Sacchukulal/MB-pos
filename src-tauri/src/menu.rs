@@ -569,6 +569,12 @@ pub fn change_prices_on(
 }
 
 /// A price or a cost, as a person typed it.
+/// The same parser, for the sessions that came after P13 and would otherwise
+/// write a second one. Money is parsed in Rust, in one place (D39).
+pub fn parse_money_public(text: &str) -> UiResult<Money> {
+    parse_money(text, "amount")
+}
+
 fn parse_money(text: &str, what: &'static str) -> UiResult<Money> {
     Money::parse(text.trim()).map_err(|e| {
         UiError::new(

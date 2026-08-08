@@ -163,6 +163,23 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("even_split", Access::Needs(Permission::BillCreate)),
     ("set_covers", Access::Needs(Permission::BillCreate)),
 
+    // --- customers and what they owe (P15) --------------------------------
+    // The owner renamed this from "khata" on 2026-08-08.
+    ("who_owes", Access::Needs(Permission::CustomersManage)),
+    ("customers", Access::Needs(Permission::CustomersManage)),
+    ("customer_account", Access::Needs(Permission::CustomersManage)),
+    ("save_customer", Access::Needs(Permission::CustomersManage)),
+    // Taking money IN is a cashier's job — `credit.collect` exists for exactly
+    // this and nothing else.
+    ("record_repayment", Access::Needs(Permission::CreditCollect)),
+    // Changing what somebody owes without money moving is not. It is the one
+    // door in this account that could make money disappear.
+    ("save_credit_adjustment", Access::Needs(Permission::CustomersManage)),
+    // Both of these happen mid-bill, so they are billing work; going PAST the
+    // limit asks for `customers.manage` a second time inside the command.
+    ("credit_headroom", Access::Needs(Permission::BillCreate)),
+    ("put_on_account", Access::Needs(Permission::BillCreate)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -391,12 +408,13 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 5] = [
+        const SOURCES: [&str; 6] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
             include_str!("menu.rs"),
             include_str!("floor.rs"),
+            include_str!("credit.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {

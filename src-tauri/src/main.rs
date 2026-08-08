@@ -34,6 +34,7 @@
 mod billing;
 mod config;
 mod corrections;
+mod credit;
 mod floor;
 mod flows;
 mod guard;
@@ -53,6 +54,10 @@ mod signin_tests;
 /// PERFORMANCE.md §4.
 #[cfg(test)]
 mod perf_tests;
+/// P15's credit account is a sequence too: bill a regular, take money back,
+/// and the statement has to add up at every step.
+#[cfg(test)]
+mod credit_tests;
 /// P14 moves an order between tables, merges two and splits one. Every one of
 /// those is a sequence on the money path that moves the kitchen ledger with it.
 #[cfg(test)]
