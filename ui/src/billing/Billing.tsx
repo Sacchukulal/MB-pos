@@ -49,6 +49,7 @@ import {
 
 /** The reducer's state, plus the commands it last asked for. */
 type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
+import { PutOnAccount } from '../credit/Credit';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
 
@@ -68,6 +69,8 @@ export function Billing() {
   const filter = '';
   const [locked, setLocked] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  /// P15 — the customer picker for a bill going on an account.
+  const [onAccount, setOnAccount] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // ONE shared clock (§5 rule 10). The tiles do not each own a timer; they
@@ -567,9 +570,14 @@ export function Billing() {
                   {mode}
                 </Button>
               ))}
-              {/* Present and disabled, saying why — a control that is silently
-                  absent is a feature nobody remembers to build. */}
-              <Button small disabled title="Credit needs customers, which arrive at P15">
+              {/* P15 made this real. A credit sale happens mid-bill with the
+                  customer standing there, so the picker opens here rather
+                  than sending a cashier to another screen. */}
+              <Button
+                small
+                disabled={!cart || cart.isEmpty}
+                onClick={() => setOnAccount(true)}
+              >
                 Credit
               </Button>
             </div>
@@ -671,6 +679,20 @@ export function Billing() {
         }}
         onCancel={() => setConfirmCancel(false)}
       />
+
+      {onAccount ? (
+        <PutOnAccount
+          onClose={() => setOnAccount(false)}
+          onDone={(said) => {
+            setOnAccount(false);
+            toast.show('ok', said);
+            // The cart came back from Rust with the credit payment on it; ask
+            // for it again rather than trusting a second copy (D4).
+            call('current_cart').then(setCart).catch(report);
+          }}
+          onFailed={report}
+        />
+      ) : null}
     </div>
   );
 }

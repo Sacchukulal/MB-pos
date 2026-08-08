@@ -62,6 +62,10 @@ import type { FloorView } from './generated/FloorView';
 import type { TableEdit } from './generated/TableEdit';
 import type { SplitRequest } from './generated/SplitRequest';
 import type { EvenSplitView } from './generated/EvenSplitView';
+import type { CustomerView } from './generated/CustomerView';
+import type { CustomerEdit } from './generated/CustomerEdit';
+import type { AccountView } from './generated/AccountView';
+import type { HeadroomView } from './generated/HeadroomView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -280,7 +284,34 @@ export interface Commands {
   /** Answers "what do we each owe?" — it does not create n bills. */
   even_split: { args: { ways: number }; returns: EvenSplitView };
   set_covers: { args: { covers: number | null }; returns: void };
+
+  // P15 — customers and what they owe. The owner renamed this from "khata"
+  // on 2026-08-08.
+  //
+  // The balance is never sent as a number to add up: every one of these
+  // returns money already formatted and ageing already bucketed, because a
+  // screen that divides by thirty has a second answer.
+  who_owes: { args: void; returns: CustomerView[] };
+  customers: { args: void; returns: CustomerView[] };
+  customer_account: { args: { customerId: string }; returns: AccountView };
+  /** A duplicate phone comes back as an error carrying the existing id. */
+  save_customer: { args: { edit: CustomerEdit }; returns: CustomerView[] };
+  record_repayment: {
+    args: { customerId: string; amount: string; mode: string; reference: string };
+    returns: AccountView;
+  };
+  save_credit_adjustment: {
+    args: { customerId: string; amount: string; increases: boolean; reason: string };
+    returns: AccountView;
+  };
+  /** What this bill would do to the account — asked before it happens. */
+  credit_headroom: { args: { customerId: string }; returns: HeadroomView };
+  put_on_account: {
+    args: { customerId: string; overrideLimit: boolean };
+    returns: CartView;
+  };
 }
+
 
 
 export type CommandName = keyof Commands;

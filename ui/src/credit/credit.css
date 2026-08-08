@@ -1,0 +1,74 @@
+/*
+ * Customers and what they owe — scope 5.1-5.4.
+ *
+ * Every colour, size and space is a token; the lint fails the build if that
+ * stops being true.
+ */
+
+.mb-credit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+/* The ageing line, which is the thing an owner reads before anything else. */
+.mb-credit__ageing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Over ninety days is the bucket somebody phones about, so it is the one
+   bucket that carries colour — and it carries the words "Over 90" too, which
+   is §2 rule 2: colour is never the only signal. */
+.mb-credit__old {
+  color: var(--danger);
+}
+
+.mb-credit__nolimit {
+  color: var(--text-muted);
+}
+
+.mb-credit__heading {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+.mb-credit__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* The statement itself. A plain table, because a statement is a column of
+   numbers that has to add up and nothing else. */
+.mb-ledger {
+  width: 100%;
+  margin-top: var(--space-2);
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.mb-ledger th,
+.mb-ledger td {
+  padding: var(--space-2);
+  border-bottom: var(--border-width) solid var(--border);
+  text-align: left;
+}
+
+.mb-ledger th {
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+}

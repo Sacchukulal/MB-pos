@@ -28,6 +28,7 @@ import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
 import { Bills } from '../corrections/Bills';
+import { Credit } from '../credit/Credit';
 import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
 
@@ -72,6 +73,16 @@ const SCREENS: readonly Screen[] = [
     label: 'Floor',
     icon: '▦',
     render: () => <Floor />,
+  },
+  {
+    // Not "Khata" — the owner renamed it on 2026-08-08. The screen answers
+    // "who owes me money", which is why that is its default view rather than
+    // an alphabetical list nobody opens.
+    id: 'credit',
+    label: 'Credit',
+    icon: '☰',
+    render: () => <Credit />,
+    needs: 'customers.manage',
   },
   {
     id: 'bills',

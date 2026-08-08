@@ -44,6 +44,15 @@ fn main() {
             "SELECT order_id, at, event, staff_id, detail FROM order_events ORDER BY at",
             "SELECT id, section_id, label, seats, pos_x, pos_y, is_active FROM dining_tables \
              WHERE pos_x IS NOT NULL OR is_active = 0",
+            // P15. The credit account, from its three sources — and the
+            // balance is deliberately NOT here, because there is no balance
+            // column to read: it is the sum of these rows.
+            "SELECT id, name, phone, phone_key, credit_limit FROM customers",
+            "SELECT p.customer_id, o.bill_number_formatted, p.amount, o.state
+               FROM payments p JOIN orders o ON o.id = p.order_id
+              WHERE p.mode = 'credit'",
+            "SELECT customer_id, amount, mode, reference, business_day FROM customer_payments",
+            "SELECT customer_id, amount, increases, reason, made_by FROM credit_adjustments",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();
