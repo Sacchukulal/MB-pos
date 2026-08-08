@@ -67,9 +67,15 @@ impl<'a> OrderRepo<'a> {
 
         // Replace rather than accumulate. The children go first, because the
         // foreign keys point upwards and nothing may cascade (D22 / P04).
+        //
+        // **The header itself is UPSERTED, not deleted and re-inserted**, and
+        // P12 is what found the difference: `reprints` and `refunds` point at
+        // `orders(id)`, so deleting the row to re-add it broke the foreign key
+        // — voiding a bill that had been reprinted failed with "FOREIGN KEY
+        // constraint failed" and the shop was told its data could not be read.
+        //
+        // The children have no such problem: nothing references an order line.
         self.delete_children(id)?;
-        self.tx
-            .execute("DELETE FROM orders WHERE id = ?1", [id])?;
 
         let numbers = order.bill_number();
         let token = match order {
@@ -91,7 +97,23 @@ impl<'a> OrderRepo<'a> {
                                  cancelled_at, cancelled_by, cancel_reason,
                                  voided_at, voided_by, void_reason)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10,
-                     ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                     ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+             ON CONFLICT (id) DO UPDATE SET
+                 state                 = excluded.state,
+                 table_id              = excluded.table_id,
+                 note                  = excluded.note,
+                 token_value           = excluded.token_value,
+                 token_formatted       = excluded.token_formatted,
+                 bill_number_value     = excluded.bill_number_value,
+                 bill_number_formatted = excluded.bill_number_formatted,
+                 settled_at            = excluded.settled_at,
+                 settled_by            = excluded.settled_by,
+                 cancelled_at          = excluded.cancelled_at,
+                 cancelled_by          = excluded.cancelled_by,
+                 cancel_reason         = excluded.cancel_reason,
+                 voided_at             = excluded.voided_at,
+                 voided_by             = excluded.voided_by,
+                 void_reason           = excluded.void_reason",
             rusqlite::params![
                 id,
                 outlet,

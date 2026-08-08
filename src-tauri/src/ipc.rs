@@ -417,6 +417,15 @@ macro_rules! commands {
             $crate::ipc::save_role,
             $crate::ipc::list_permissions,
             $crate::ipc::audit_trail,
+            // P12 — the four ways a shop takes something back (B5, B6, D7).
+            $crate::corrections::list_bills,
+            $crate::corrections::day_totals,
+            $crate::corrections::reasons,
+            $crate::corrections::void_bill,
+            $crate::corrections::cancel_order,
+            $crate::corrections::void_line,
+            $crate::corrections::reprint_bill,
+            $crate::corrections::refund_bill,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -477,14 +486,13 @@ pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
 /// Put an item in. **`Cart::add` merges** by `LineIdentity` — same item, same
 /// note, same modifiers — which is P01's rule and the reason the cart is not
 /// in TypeScript.
-#[tauri::command]
-pub fn cart_add(
-    app: tauri::State<'_, App>,
+pub fn cart_add_on(
+    app: &App,
     item_id: String,
     qty: Option<String>,
     note: Option<String>,
 ) -> UiResult<CartView> {
-    guard::require(&app, Permission::BillCreate)?;
+    guard::require(app, Permission::BillCreate)?;
     let item = app.find_menu_item(&item_id)?;
     let qty = match qty {
         Some(text) => mb_core::Qty::parse(&text).map_err(|e| {
@@ -549,9 +557,8 @@ pub fn cart_remove(app: tauri::State<'_, App>, index: usize) -> UiResult<CartVie
 
 /// New order. Keeps the order type, because **the type lock** (crown jewel 1)
 /// is what stops a parcel counter re-selecting it forty times an hour.
-#[tauri::command]
-pub fn cart_clear(app: tauri::State<'_, App>, keep_type: bool) -> UiResult<CartView> {
-    guard::require(&app, Permission::BillCreate)?;
+pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
+    guard::require(app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
         let kept = state.order_type;
         *state = CartState::default();
@@ -621,9 +628,8 @@ pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
 }
 
 /// The floor — **the only view of open orders** (scope 1.4).
-#[tauri::command]
-pub fn open_orders(app: tauri::State<'_, App>) -> UiResult<Vec<TableView>> {
-    guard::require(&app, Permission::BillCreate)?;
+pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
+    guard::require(app, Permission::BillCreate)?;
     let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
     app.with_shop(|shop| {
         let (tables, sections, open) = shop
@@ -804,13 +810,12 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
 /// beats word-start beats inside-word, and a second copy of that in TypeScript
 /// would disagree with this one the moment P13 adds short codes to the same
 /// box. See `search.rs`.
-#[tauri::command]
-pub fn search_items(
-    app: tauri::State<'_, App>,
+pub fn search_items_on(
+    app: &App,
     text: String,
     mode: Option<crate::search::MatchMode>,
 ) -> UiResult<Vec<MenuItemView>> {
-    guard::require(&app, Permission::BillCreate)?;
+    guard::require(app, Permission::BillCreate)?;
     app.with_shop(|shop| {
         let items = shop
             .db
@@ -830,9 +835,8 @@ pub fn search_items(
 /// comes with it, which is what makes the kitchen delta right afterwards
 /// (crown jewel 2: *"what was printed is remembered in the database, not in
 /// the screen's memory"*).
-#[tauri::command]
-pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<CartView> {
-    guard::require(&app, Permission::BillCreate)?;
+pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
+    guard::require(app, Permission::BillCreate)?;
     // **The label, not the id.** The cart carries `tbl_7` because that is the
     // key an order is saved against; the cashier's table is called 7 and the
     // header said "Table tbl_7" until somebody looked at it. Resolved here,
@@ -1828,4 +1832,45 @@ pub fn audit_trail(
     days: Option<i32>,
 ) -> UiResult<AuditView> {
     audit_trail_on(&app, staff_id, action_code, days)
+}
+
+/// The floor, as a screen shows it. Body over `&App` (D46) so P12's
+/// "does a cancel free the table?" can be asked without a window.
+#[tauri::command]
+pub fn open_orders(app: tauri::State<'_, App>) -> UiResult<Vec<TableView>> {
+    open_orders_on(&app)
+}
+
+/// Ranked item search (P10, budget B2). Body over `&App` (D46) so B2 can be
+/// measured without a window.
+#[tauri::command]
+pub fn search_items(
+    app: tauri::State<'_, App>,
+    text: String,
+    mode: Option<crate::search::MatchMode>,
+) -> UiResult<Vec<MenuItemView>> {
+    search_items_on(&app, text, mode)
+}
+
+// Bodies over `&App` (D46), so the billing budgets can be measured and the
+// correction sequences driven without a window.
+
+#[tauri::command]
+pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<CartView> {
+    open_table_on(&app, table_id)
+}
+
+#[tauri::command]
+pub fn cart_add(
+    app: tauri::State<'_, App>,
+    item_id: String,
+    qty: Option<String>,
+    note: Option<String>,
+) -> UiResult<CartView> {
+    cart_add_on(&app, item_id, qty, note)
+}
+
+#[tauri::command]
+pub fn cart_clear(app: tauri::State<'_, App>, keep_type: bool) -> UiResult<CartView> {
+    cart_clear_on(&app, keep_type)
 }

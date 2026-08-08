@@ -604,6 +604,30 @@ impl CartState {
     /// was frozen from an `ItemSnapshot` when it was added, so an order carries
     /// what the menu said *then* and *"old bills never change when you change a
     /// price."*
+    /// Enough of an order for the kitchen templates to read — the cart, the
+    /// type and the ledger.
+    ///
+    /// P12's cancellation slip needs an `OrderCore` to look line names up in,
+    /// and the cart being mid-edit is exactly when it needs one. Nothing here
+    /// is saved; the id and the times are placeholders, and `to_draft` is still
+    /// the only thing that builds an order that reaches the disk.
+    pub fn to_core_for_printing(&self) -> mb_core::OrderCore {
+        mb_core::OrderCore {
+            id: mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| "unsaved".to_owned())),
+            business_day: mb_core::BusinessDay::from_days_since_epoch(0),
+            created_at: Timestamp::from_millis(0),
+            order_type: self.order_type,
+            table: self.table.clone().map(mb_core::TableId::new),
+            cart: self.cart.clone(),
+            created_by: self
+                .opened_by
+                .clone()
+                .unwrap_or_else(|| mb_core::StaffId::new("unknown")),
+            note: self.note.clone(),
+            kitchen: self.kitchen.clone(),
+        }
+    }
+
     /// `by` is **who opened it**, not who is signed in now — the caller passes
     /// `opened_by` and falls back to the current person only for a cart that
     /// somehow has neither. See `flows::complete_bill`, which is the only

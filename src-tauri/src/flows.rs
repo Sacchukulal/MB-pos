@@ -41,9 +41,8 @@ pub fn today(at: Timestamp) -> BusinessDay {
 /// > Crown jewel 2: *"only what the kitchen has not seen gets printed, and what
 /// > was printed is remembered **in the database**, not in the screen's
 /// > memory."*
-#[tauri::command]
-pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
-    crate::guard::require(&app, mb_auth::Permission::BillCreate)?;
+pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
+    crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     let at = now();
 
     // 1. What is new, from the ledger that travels with the order — so this is
@@ -76,7 +75,7 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
     })?;
 
     // 2. Build it and hand it to the queue.
-    let printer = default_printer(&app)?;
+    let printer = default_printer(app)?;
     let settings = mb_print::settings::KitchenSettings::default();
     let ctx = mb_print::template::KitchenContext {
         kind: mb_print::template::TicketKind::New,
@@ -103,6 +102,14 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
             .map_err(|e| words::from_print(&e))
     })?;
 
+    // 2b. **The order goes on disk BEFORE the paper.** Same rule as
+    //     `complete_bill`, and the same reason (D4): if the order is not saved
+    //     first, a kitchen ticket exists for something the shop has no record
+    //     of — and, until P12, there was no Open order on disk at all, so audit
+    //     B6's "cancel the order" had nothing to cancel and the floor grid had
+    //     nothing to show (scope 1.4).
+    park_open_order(app)?;
+
     // 3. **Only once it is durably queued** do we remember it was told. Marking
     //    first and enqueuing second would lose the items silently if the
     //    enqueue failed — and the kitchen would never learn about them.
@@ -117,6 +124,17 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
         })
     })?;
 
+    // 4. **And the ledger goes to disk too.** Crown jewel 2 is that what the
+    //    kitchen was told is remembered *in the database, not in the screen's
+    //    memory* — so parking before the paper (step 2b) is only half of it.
+    //
+    //    Found by cancelling an order: the slip listed nothing, because the
+    //    parked row had been written before `mark_printed` and its ledger was
+    //    empty. The order was on disk and what the kitchen knew was not.
+    if let Err(e) = park_open_order(app) {
+        log_warn!("the kitchen ledger could not be saved: {e}");
+    }
+
     log_info!("kitchen ticket queued with {} line(s)", lines.len());
     Ok(id)
 }
@@ -129,9 +147,8 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
 /// `orders.settled_by` is whoever is signed in when the money is taken. During
 /// a shift change those are different people, the schema has carried both
 /// columns unused since P04, and P11 is where they start meaning something.
-#[tauri::command]
-pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
-    let who = crate::guard::require(&app, mb_auth::Permission::BillCreate)?;
+pub fn complete_bill_on(app: &App) -> UiResult<String> {
+    let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     let at = now();
     let settled_by = who.staff_id.clone();
 
@@ -183,8 +200,24 @@ pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
 
     let (number, settled) = app.with_shop(|shop| {
         let till = mb_db::Till::new(OUTLET, TERMINAL);
-        // Opening claims the token and the bill number atomically (D6).
-        let open = mb_db::open_draft(&shop.db, till, draft).map_err(|e| words::from_db(&e))?;
+        // **An order the kitchen already knows about is already on disk**, with
+        // its numbers claimed (see `park_open_order`). Claiming again would
+        // burn a bill number per kitchen ticket and leave the parked row
+        // behind, open, on a table nobody is sitting at.
+        let existing = shop
+            .db
+            .transaction(|tx| mb_db::Repos::new(tx).orders().find(&draft.core.id))
+            .map_err(|e| words::from_db(&e))?;
+
+        let open = match existing {
+            Some(mb_core::AnyOrder::Open(mut open)) => {
+                // The cart may have moved on since the ticket printed.
+                open.core = draft.core.clone();
+                open
+            }
+            // Opening claims the token and the bill number atomically (D6).
+            _ => mb_db::open_draft(&shop.db, till, draft).map_err(|e| words::from_db(&e))?,
+        };
         let formatted = open.bill_number.formatted.clone();
         // And settling writes the order, its lines, its payments and its ledger
         // in ONE commit (B5, and §5 rule 1).
@@ -215,7 +248,7 @@ pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
     );
 
     // THE ORDER IS ON DISK. Now, and only now, the paper.
-    if let Err(e) = queue_bill_print(&app, &number, &settled, &bill, &who.name) {
+    if let Err(e) = queue_bill_print(app, &number, &settled, &bill, &who.name) {
         // Deliberately not fatal: the money is recorded. The failure belongs in
         // the print queue's indicator, which is where a cashier looks.
         log_warn!("bill {number} settled but could not be queued to print: {e}");
@@ -316,7 +349,7 @@ fn store_for_the_bill(app: &App) -> mb_print::template::Store {
 }
 
 /// Where a job goes before P17 sets up routing.
-fn default_printer(app: &App) -> UiResult<PrinterConfig> {
+pub(crate) fn default_printer(app: &App) -> UiResult<PrinterConfig> {
     let rows = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
@@ -340,4 +373,150 @@ fn default_printer(app: &App) -> UiResult<PrinterConfig> {
                  Add a printer in Settings.",
             )
         })
+}
+
+/// **One template, another argument** — P12's reprint, and audit D7.
+///
+/// `bill_document` already takes a [`Copy`](mb_print::template::Copy), so a
+/// duplicate and a voided copy are the same call with a different value. There
+/// is deliberately no second rendering path: *"v1's diverged because it had its
+/// own copy of the layout"*, and the fix is that there is nothing to diverge
+/// from.
+pub(crate) fn queue_bill_copy(
+    app: &App,
+    order: &mb_core::AnyOrder,
+    bill: &mb_core::Bill,
+    cashier: &str,
+    copy: mb_print::template::Copy,
+) -> UiResult<()> {
+    let printer = default_printer(app)?;
+    let store = store_for_the_bill(app);
+    let settings = mb_print::settings::ReceiptSettings::default();
+    let because = match &copy {
+        mb_print::template::Copy::Original => "bill".to_owned(),
+        mb_print::template::Copy::Duplicate { number } => format!("copy {number}"),
+        mb_print::template::Copy::Voided { .. } => "voided copy".to_owned(),
+    };
+
+    let document = mb_print::template::bill_document(
+        printer.paper,
+        &mb_print::template::BillContext {
+            bill,
+            order,
+            store: &store,
+            settings: &settings,
+            customer: None,
+            cashier: Some(cashier),
+            copy,
+            einvoice: mb_print::template::EInvoice::default(),
+            logo: None,
+        },
+    )
+    .map_err(|e| words::from_print(&e))?;
+
+    app.with_shop(|shop| {
+        shop.queue
+            .enqueue(Job::new(JobKind::Bill, &printer.id, document, today(now())).because(because))
+            .map_err(|e| words::from_print(&e))
+    })?;
+    Ok(())
+}
+
+/// **Put the open order on disk** — scope 1.4, and the thing audit B6's fix
+/// needs in order to have anything to cancel.
+///
+/// # Why here, and why now
+///
+/// Until P12 an order lived in the cart's memory until it was settled, so:
+/// nothing appeared on the floor grid as busy, nothing survived a restart, and
+/// `cancel_order` — whose whole finding is *"the order sits in the Processing
+/// list forever and the table stays busy"* — could never find an order to
+/// cancel. It was a command that could not work.
+///
+/// **The moment the kitchen is told is the moment the order is real.** Before
+/// that it is somebody typing; after it, food is being cooked and a shop that
+/// loses the record has lost money. So `print_kitchen_ticket` parks it, before
+/// the paper, for the same reason `complete_bill` saves before it prints (D4).
+///
+/// Numbers are claimed exactly once: the first park claims them (D6, atomic),
+/// and `complete_bill` reuses the parked order rather than claiming again.
+pub(crate) fn park_open_order(app: &App) -> UiResult<String> {
+    let at = now();
+    let existing = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    let staff = app
+        .sessions()
+        .current()
+        .map_or_else(|| mb_core::StaffId::new(crate::state::DEFAULT_STAFF), |s| s.actor.staff_id);
+
+    let draft = app.with_cart(|state| {
+        let opened_by = state.opened_by.clone().unwrap_or_else(|| staff.clone());
+        state.to_draft(at, opened_by)
+    })?;
+    let id = draft.core.id.clone();
+
+    let number = app.with_shop(|shop| {
+        let till = mb_db::Till::new(OUTLET, TERMINAL);
+        let found = match &existing {
+            Some(_) => shop
+                .db
+                .transaction(|tx| mb_db::Repos::new(tx).orders().find(&id))
+                .map_err(|e| words::from_db(&e))?,
+            None => None,
+        };
+
+        match found {
+            // Already parked: keep its numbers, take the cart as it is now.
+            Some(mb_core::AnyOrder::Open(mut open)) => {
+                open.core = draft.core.clone();
+                let number = open.bill_number.formatted.clone();
+                shop.db
+                    .transaction(|tx| {
+                        mb_db::Repos::new(tx).orders().save(
+                            OUTLET,
+                            TERMINAL,
+                            &mb_core::AnyOrder::Open(open.clone()),
+                        )
+                    })
+                    .map_err(|e| words::from_db(&e))?;
+                Ok(number)
+            }
+            // Settled, voided or cancelled: it is not ours to touch any more.
+            Some(_) => Err(UiError::new(
+                "order.finished",
+                "This order has already been finished. Start a new one.",
+            )),
+            None => {
+                let open = mb_db::open_draft(&shop.db, till, draft.clone())
+                    .map_err(|e| words::from_db(&e))?;
+                Ok(open.bill_number.formatted)
+            }
+        }
+    })?;
+
+    // The cart now knows which order it is, so the next park updates rather
+    // than claiming a second set of numbers.
+    app.with_cart_mut(|state| {
+        state.order_id = Some(id.as_str().to_owned());
+        if state.opened_by.is_none() {
+            state.opened_by = Some(staff.clone());
+        }
+        Ok(())
+    })?;
+
+    Ok(number)
+}
+
+// ---------------------------------------------------------------------------
+// The command seats (D46). The bodies above take `&App` so the sequences they
+// belong to can be driven in a test — see `signin_tests.rs`.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
+    print_kitchen_ticket_on(&app)
+}
+
+#[tauri::command]
+pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
+    complete_bill_on(&app)
 }

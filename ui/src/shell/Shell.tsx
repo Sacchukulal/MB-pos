@@ -27,6 +27,7 @@ import { Gallery } from '../gallery/Gallery';
 import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
+import { Bills } from '../corrections/Bills';
 
 import './shell.css';
 import '../auth/auth.css';
@@ -60,6 +61,13 @@ const SCREENS: readonly Screen[] = [
     label: "Billing",
     icon: "₹",
     render: () => <Billing />,
+  },
+  {
+    id: 'bills',
+    label: 'Bills',
+    icon: '❐',
+    render: () => <Bills />,
+    needs: 'reports.view',
   },
   {
     id: 'staff',

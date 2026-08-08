@@ -33,6 +33,9 @@ import type { PersonView } from './generated/PersonView';
 import type { RoleView } from './generated/RoleView';
 import type { StaffEdit } from './generated/StaffEdit';
 import type { AuditView } from './generated/AuditView';
+import type { BillRowView } from './generated/BillRowView';
+import type { DayTotalsView } from './generated/DayTotalsView';
+import type { ReasonView } from './generated/ReasonView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -123,6 +126,33 @@ export interface Commands {
       days: number | null;
     };
     returns: AuditView;
+  };
+
+  // P12 — the four ways a shop takes something back (audit B5, B6, D7).
+  // Every one of them refuses in Rust; the dialogs only collect the reason.
+  list_bills: { args: void; returns: BillRowView[] };
+  day_totals: { args: void; returns: DayTotalsView };
+  reasons: { args: { kind: string }; returns: ReasonView[] };
+  void_bill: {
+    args: {
+      orderId: string;
+      reason: string;
+      approverStaffId: string | null;
+      approverPin: string | null;
+    };
+    returns: BillRowView[];
+  };
+  cancel_order: { args: { orderId: string; reason: string }; returns: void };
+  void_line: { args: { index: number; reason: string }; returns: CartView };
+  reprint_bill: { args: { orderId: string; reason: string }; returns: string };
+  refund_bill: {
+    args: {
+      orderId: string;
+      amountPaise: bigint;
+      mode: string;
+      reason: string;
+    };
+    returns: BillRowView[];
   };
 }
 

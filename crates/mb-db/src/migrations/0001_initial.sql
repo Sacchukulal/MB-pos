@@ -742,6 +742,55 @@ CREATE TABLE reprints (
     reason      TEXT
 ) STRICT;
 
+-- Scope 8.7, added at P12: money going back to a customer.
+--
+-- **NOT a negative payment.** `payments` has `CHECK (amount > 0)` and that
+-- check is right — audit B12 is what happens when a table that means "money in"
+-- starts holding other things: "v1 recorded a khata settlement with payment
+-- mode 'Full Settlement', which is not a payment mode, and it polluted every
+-- payment-mode report." A refund is its own fact and gets its own table (D22:
+-- adding a table later is the cheap direction).
+--
+-- Only ever against a voided order, and never for more than was taken. Both
+-- rules are the repository's, because both need to read the order.
+CREATE TABLE refunds (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    order_id     TEXT    NOT NULL REFERENCES orders (id),
+    -- Paise, and positive: the direction is the table's name.
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    -- How it went back: 'cash', 'card', 'upi', 'other'. Deliberately not the
+    -- payment-mode enum — money can go back in cash that came in on a card,
+    -- and a shop needs to see that in its drawer count.
+    mode         TEXT    NOT NULL,
+    reason       TEXT    NOT NULL CHECK (trim(reason) <> ''),
+    refunded_at  INTEGER NOT NULL,
+    refunded_by  TEXT REFERENCES staff (id),
+    -- D5, denormalised like every other money row, so the day's cash position
+    -- never joins back to orders to find out which day this was.
+    business_day INTEGER NOT NULL
+) STRICT;
+
+-- Scope 1.17-1.20, added at P12: the reasons a shop offers for its own
+-- corrections.
+--
+-- **Editable data, not a hardcoded list.** The reasons a chai stall needs are
+-- not the reasons a bar needs, and a list in the source is a support call. One
+-- table for all four flows, because the reason dialog is one component with
+-- four callers.
+--
+-- A shop may also type free text, and mb-core refuses an empty reason either
+-- way — `require_reason` has been there since P03.
+CREATE TABLE reasons (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
+    kind       TEXT    NOT NULL
+        CHECK (kind IN ('void', 'cancel', 'item_void', 'reprint')),
+    text       TEXT    NOT NULL CHECK (trim(text) <> ''),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+) STRICT;
+
 -- A cheap append-only trail of what happened to one order, distinct from
 -- audit_log: this one is narrow, always written, and safe to sync. audit_log
 -- carries before/after JSON and is not.
@@ -1168,3 +1217,32 @@ INSERT INTO permissions (code, description) VALUES
     ('staff.manage',       'Add staff, set roles and PINs'),
     ('audit.view',         'Read the audit trail'),
     ('backup.run',         'Take and restore a backup');
+
+-- ===========================================================================
+-- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).
+--
+-- A starting point, not a law: the table exists so a shop can edit them, and
+-- P12's own test asserts a shop's edits survive.
+-- ===========================================================================
+
+INSERT INTO reasons (id, outlet_id, kind, text, sort_order) VALUES
+    ('rsn_void_wrong',    'outlet_default', 'void',      'Wrong items billed',        0),
+    ('rsn_void_double',   'outlet_default', 'void',      'Billed twice',              1),
+    ('rsn_void_price',    'outlet_default', 'void',      'Wrong price',               2),
+    ('rsn_void_cust',     'outlet_default', 'void',      'Customer changed their mind', 3),
+    ('rsn_void_test',     'outlet_default', 'void',      'Test bill',                 4),
+
+    ('rsn_can_left',      'outlet_default', 'cancel',    'Customer left',             0),
+    ('rsn_can_wait',      'outlet_default', 'cancel',    'Waited too long',           1),
+    ('rsn_can_stock',     'outlet_default', 'cancel',    'Item not available',        2),
+    ('rsn_can_wrong',     'outlet_default', 'cancel',    'Opened on the wrong table', 3),
+
+    ('rsn_itm_wrong',     'outlet_default', 'item_void', 'Ordered by mistake',        0),
+    ('rsn_itm_stock',     'outlet_default', 'item_void', 'Not available',             1),
+    ('rsn_itm_change',    'outlet_default', 'item_void', 'Customer changed it',       2),
+    ('rsn_itm_quality',   'outlet_default', 'item_void', 'Sent back',                 3),
+
+    ('rsn_rep_customer',  'outlet_default', 'reprint',   'Customer asked for a copy', 0),
+    ('rsn_rep_jam',       'outlet_default', 'reprint',   'Printer jammed',            1),
+    ('rsn_rep_faded',     'outlet_default', 'reprint',   'Print came out faded',      2),
+    ('rsn_rep_lost',      'outlet_default', 'reprint',   'Bill was lost',             3);

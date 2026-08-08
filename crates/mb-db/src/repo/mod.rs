@@ -28,6 +28,7 @@
 use rusqlite::Transaction;
 
 pub mod audit;
+pub mod corrections;
 pub mod floor;
 pub mod menu;
 pub mod money;
@@ -38,6 +39,7 @@ pub mod print_jobs;
 pub mod settings;
 
 pub use audit::{AuditFilter, AuditRepo};
+pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
 pub use money::MoneyRepo;
@@ -100,6 +102,12 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn outbox(&self) -> OutboxRepo<'a> {
         OutboxRepo::new(self.tx)
+    }
+
+    /// Reprints, refunds, reasons and the day reconciliation (P12).
+    #[must_use]
+    pub fn corrections(&self) -> CorrectionsRepo<'a> {
+        CorrectionsRepo::new(self.tx)
     }
 
     /// The print spool (P07). The one repository that deliberately does **not**

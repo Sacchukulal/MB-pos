@@ -37,12 +37,12 @@ use crate::state::{App, OUTLET};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-struct Scratch {
+pub(crate) struct Scratch {
     dir: PathBuf,
 }
 
 impl Scratch {
-    fn new(label: &str) -> Scratch {
+    pub(crate) fn new(label: &str) -> Scratch {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("mb-signin-{label}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch directory");
@@ -605,4 +605,453 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
         jobs.iter().any(|j| j.reason.as_deref() == Some("bill 0001")),
         "the bill did not reach the queue: {jobs:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// P12 — the four ways a shop takes something back, driven end to end.
+// ---------------------------------------------------------------------------
+
+use crate::corrections::{
+    cancel_order_on, day_totals_on, list_bills_on, refund_on, reprint_bill_on, void_bill_on,
+    void_line_on,
+};
+
+/// A shop with a menu and an owner, ready to trade.
+fn a_trading_shop(scratch: &Scratch) -> App {
+    let app = a_shop(scratch);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                Repos::new(tx).menu().save_item(
+                    OUTLET,
+                    &mb_db::repo::menu::MenuItem {
+                        id: mb_core::ItemId::new("itm_tea"),
+                        category_id: None,
+                        name: "Masala Tea".to_owned(),
+                        unit_price: mb_core::Money::from_paise(2_500),
+                        tax_rate: mb_core::TaxRate::GST_5,
+                        tax_treatment: mb_core::TaxTreatment::Exclusive,
+                        hsn: None,
+                        cost_price: None,
+                        short_code: None,
+                        prep_minutes: None,
+                        is_open_price: false,
+                        is_available: true,
+                        sort_order: 0,
+                    },
+                    crate::flows::now(),
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("a menu item");
+    app
+}
+
+/// Put `qty` teas in the cart, the way the billing screen does.
+fn order_teas(app: &App, qty: u32) {
+    let item = app.find_menu_item("itm_tea").expect("on the menu");
+    app.with_cart_mut(|state| {
+        *state = crate::billing::CartState {
+            order_type: mb_core::OrderType::Parcel,
+            ..crate::billing::CartState::default()
+        };
+        state
+            .cart
+            .add(
+                crate::billing::snapshot_for(&item),
+                mb_core::Qty::from_whole(i64::from(qty)).expect("in range"),
+                None,
+                vec![],
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a cart");
+}
+
+/// Pay it and settle it.
+fn settle_the_cart(app: &App) -> String {
+    app.with_cart_mut(|state| {
+        let total = state.bill()?.grand_total;
+        state
+            .settlement
+            .add(mb_core::Payment::new(mb_core::PaymentMode::Cash, total).expect("a payment"))
+            .expect("paid");
+        Ok(())
+    })
+    .expect("paid");
+    crate::flows::complete_bill_on(app).expect("settled")
+}
+
+/// **T1, T2, T3 and T9 — one walk through a shop's afternoon.**
+#[test]
+fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
+    let scratch = Scratch::new("void_day");
+    let app = a_trading_shop(&scratch);
+
+    order_teas(&app, 2);
+    let first = settle_the_cart(&app);
+    order_teas(&app, 4);
+    let second = settle_the_cart(&app);
+    assert_ne!(first, second, "two bills took the same number");
+
+    let bills = list_bills_on(&app).expect("the day's bills");
+    assert_eq!(bills.len(), 2);
+    // Newest first — the bill somebody wants is the one that just printed.
+    assert_eq!(bills[0].number, second);
+
+    let before = day_totals_on(&app).expect("totals");
+    assert_eq!(before.bills, 2);
+    assert_eq!(before.voids.paise, 0);
+    assert_eq!(before.net.paise, before.gross.paise);
+
+    // T1: a void with no reason is refused, by Rust, on a direct call.
+    let target = bills[0].order_id.clone();
+    let refused = void_bill_on(&app, target.clone(), "   ".to_owned(), None, None)
+        .expect_err("a void with no reason was allowed");
+    assert_eq!(refused.code, "void.refused");
+
+    let after_void = void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None)
+        .expect("voided");
+
+    // T2: it keeps its number and STAYS IN THE LIST.
+    let voided = after_void
+        .iter()
+        .find(|b| b.order_id == target)
+        .expect("the voided bill vanished from the day's list");
+    assert_eq!(voided.number, second);
+    assert_eq!(voided.state, "voided");
+    assert_eq!(voided.void_reason.as_deref(), Some("Billed twice"));
+
+    // T3: gross - voids = net.
+    let after = day_totals_on(&app).expect("totals");
+    println!(
+        "\n  gross {}   voids {}   net {}   ({} bills, {} voided)",
+        after.gross.text, after.voids.text, after.net.text, after.bills, after.voided_bills
+    );
+    assert_eq!(after.bills, 2, "a voided bill left the count");
+    assert_eq!(after.voided_bills, 1);
+    assert_eq!(after.gross.paise, before.gross.paise, "a void edited the past");
+    assert_eq!(
+        after.net.paise,
+        after.gross.paise - after.voids.paise,
+        "gross - voids != net"
+    );
+
+    // T9: in the history, with before and after.
+    let history = crate::ipc::audit_trail_on(&app, None, None, None).expect("history");
+    let entry = history
+        .entries
+        .iter()
+        .find(|e| e.what == "Voided a bill")
+        .expect("the void is not in the history");
+    assert!(entry.before.as_deref().unwrap_or_default().contains("settled"));
+    assert!(entry.after.as_deref().unwrap_or_default().contains("Billed twice"));
+
+    // And a bill cannot be voided twice.
+    let again = void_bill_on(&app, target, "Again".to_owned(), None, None)
+        .expect_err("the same bill was voided twice");
+    assert_eq!(again.code, "void.not_settled");
+}
+
+/// **T10.** The manager PIN is enforced in Rust, four ways.
+#[test]
+fn a_big_void_needs_a_second_person() {
+    let scratch = Scratch::new("void_approval");
+    let app = a_trading_shop(&scratch);
+    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
+
+    // Every void in this shop needs approval.
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                Repos::new(tx).settings().set(
+                    OUTLET,
+                    "bill.void.approval_above_paise",
+                    &mb_core::Money::from_paise(1),
+                    crate::flows::now(),
+                    None,
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("a threshold");
+
+    order_teas(&app, 2);
+    settle_the_cart(&app);
+    let bills = list_bills_on(&app).expect("bills");
+    let target = bills[0].order_id.clone();
+
+    // (a) no approver at all.
+    let refused = void_bill_on(&app, target.clone(), "Wrong price".to_owned(), None, None)
+        .expect_err("a big void went through unapproved");
+    assert_eq!(refused.code, "void.needs_approval");
+    assert!(refused.message.contains("manager"), "{}", refused.message);
+
+    // (b) an approver who may not void. The owner gets a PIN first, because
+    // the FIRST PIN in a shop locks the counter (P11 item 9) and everything
+    // after it would be refused as `auth.locked`.
+    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned()))
+        .expect("a PIN for the owner");
+    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("signed back in");
+    set_staff_pin_on(&app, "staff_waiter".to_owned(), Some("111111".to_owned()))
+        .expect("a PIN for Priya");
+    let refused = void_bill_on(
+        &app,
+        target.clone(),
+        "Wrong price".to_owned(),
+        Some("staff_waiter".to_owned()),
+        Some("111111".to_owned()),
+    )
+    .expect_err("a waiter waved a void through");
+    assert_eq!(refused.code, "void.approver_denied");
+
+    // (c) the right person, the wrong PIN.
+    let refused = void_bill_on(
+        &app,
+        target.clone(),
+        "Wrong price".to_owned(),
+        Some("staff_owner".to_owned()),
+        Some("999999".to_owned()),
+    )
+    .expect_err("a wrong PIN approved a void");
+    assert_eq!(refused.code, "void.approver_wrong_pin");
+
+    // (d) and correctly.
+    void_bill_on(
+        &app,
+        target,
+        "Wrong price".to_owned(),
+        Some("staff_owner".to_owned()),
+        Some("246813".to_owned()),
+    )
+    .expect("an approved void was still refused");
+}
+
+/// **T11.** Money only goes back against a voided bill, and never more than
+/// came in.
+#[test]
+fn money_goes_back_only_after_a_void() {
+    let scratch = Scratch::new("refund_flow");
+    let app = a_trading_shop(&scratch);
+    order_teas(&app, 2);
+    settle_the_cart(&app);
+
+    let bills = list_bills_on(&app).expect("bills");
+    let target = bills[0].order_id.clone();
+    let total = bills[0].total.paise;
+
+    let refused = refund_on(
+        &app,
+        target.clone(),
+        total,
+        "cash".to_owned(),
+        "Billed twice".to_owned(),
+    )
+    .expect_err("money went back on a live bill");
+    assert!(
+        refused.detail.unwrap_or_default().contains("voided"),
+        "the refusal should say why"
+    );
+
+    void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
+
+    let refused = refund_on(
+        &app,
+        target.clone(),
+        total + 100,
+        "cash".to_owned(),
+        "Billed twice".to_owned(),
+    )
+    .expect_err("more went back than came in");
+    assert!(refused.detail.unwrap_or_default().contains("left to give back"));
+
+    let after = refund_on(
+        &app,
+        target.clone(),
+        total,
+        "cash".to_owned(),
+        "Billed twice".to_owned(),
+    )
+    .expect("the refund was refused");
+
+    let row = after.iter().find(|b| b.order_id == target).expect("the bill");
+    assert_eq!(row.refunded.as_ref().map(|m| m.paise), Some(total));
+
+    let totals = day_totals_on(&app).expect("totals");
+    assert_eq!(totals.refunded.paise, total);
+    // The void is the whole bill whether or not money went back.
+    assert_eq!(totals.voids.paise, total);
+}
+
+/// **T7 and T8.** A reprint is counted and marked, and a voided bill reprints
+/// as voided rather than as a duplicate.
+#[test]
+fn a_reprint_says_which_copy_it_is() {
+    let scratch = Scratch::new("reprint_flow");
+    let app = a_trading_shop(&scratch);
+    order_teas(&app, 2);
+    settle_the_cart(&app);
+
+    let bills = list_bills_on(&app).expect("bills");
+    let target = bills[0].order_id.clone();
+
+    let said = reprint_bill_on(&app, target.clone(), "Customer asked for a copy".to_owned())
+        .expect("reprinted");
+    assert!(said.contains("Copy 2"), "{said}");
+    let said = reprint_bill_on(&app, target.clone(), "Printer jammed".to_owned())
+        .expect("reprinted");
+    assert!(said.contains("Copy 3"), "{said}");
+
+    let bills = list_bills_on(&app).expect("bills");
+    let row = bills.iter().find(|b| b.order_id == target).expect("the bill");
+    assert_eq!(row.reprints, 2, "the copies were not counted");
+
+    let jobs = app.print_queue_snapshot();
+    assert!(
+        jobs.iter().any(|j| j.reason.as_deref() == Some("copy 2")),
+        "the copy did not reach the printer: {jobs:?}"
+    );
+
+    // And a voided bill reprints as VOIDED — the more important fact about
+    // that piece of paper.
+    void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
+    reprint_bill_on(&app, target, "Customer asked for a copy".to_owned())
+        .expect("a voided bill could not be reprinted");
+    let jobs = app.print_queue_snapshot();
+    assert!(
+        jobs.iter().any(|j| j.reason.as_deref() == Some("voided copy")),
+        "the voided copy printed as an ordinary duplicate: {jobs:?}"
+    );
+}
+
+/// **T6.** A cancel frees the table; a void does not touch one.
+///
+/// This is also the test that proves an OPEN order reaches the disk at all —
+/// before P12 it never did, and `cancel_order` was a command that could not
+/// find anything to cancel.
+#[test]
+fn a_cancel_frees_the_table_and_a_void_does_not() {
+    let scratch = Scratch::new("free_table");
+    let app = a_trading_shop(&scratch);
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = Repos::new(tx);
+                repos.floor().save_section(
+                    OUTLET,
+                    &mb_db::repo::floor::Section {
+                        id: "sec_hall".to_owned(),
+                        name: "Hall".to_owned(),
+                        sort_order: 0,
+                        is_active: true,
+                    },
+                    crate::flows::now(),
+                )?;
+                repos.floor().save_table(
+                    OUTLET,
+                    &mb_db::repo::floor::DiningTable {
+                        id: mb_core::TableId::new("tbl_7"),
+                        section_id: Some("sec_hall".to_owned()),
+                        label: "7".to_owned(),
+                        seats: 4,
+                        pos: None,
+                        sort_order: 7,
+                        is_active: true,
+                    },
+                    crate::flows::now(),
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("a table");
+
+    let item = app.find_menu_item("itm_tea").expect("on the menu");
+    app.with_cart_mut(|state| {
+        *state = crate::billing::CartState {
+            order_type: mb_core::OrderType::DineIn,
+            table: Some("tbl_7".to_owned()),
+            table_label: Some("7".to_owned()),
+            ..crate::billing::CartState::default()
+        };
+        state
+            .cart
+            .add(
+                crate::billing::snapshot_for(&item),
+                mb_core::Qty::from_whole(2).expect("in range"),
+                None,
+                vec![],
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a dine-in cart");
+
+    // Telling the kitchen is what puts the order on the floor.
+    crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
+    let order_id = app
+        .with_cart(|state| Ok(state.order_id.clone()))
+        .expect("cart")
+        .expect("the order was never parked");
+
+    let busy = crate::ipc::open_orders_on(&app).expect("floor");
+    assert!(
+        busy.iter()
+            .any(|t| t.id == "tbl_7" && t.order_id.is_some()),
+        "the table is not busy after the kitchen was told: {busy:?}"
+    );
+
+    cancel_order_on(&app, order_id, "Customer left".to_owned()).expect("cancelled");
+
+    let free = crate::ipc::open_orders_on(&app).expect("floor");
+    let table = free.iter().find(|t| t.id == "tbl_7").expect("table 7");
+    assert!(
+        table.order_id.is_none(),
+        "the table is still busy after the order was cancelled — audit B6"
+    );
+
+    // And the kitchen was told to stop.
+    let jobs = app.print_queue_snapshot();
+    assert!(
+        jobs.iter().any(|j| j.reason.as_deref() == Some("cancellation")),
+        "the kitchen was never told to stop: {jobs:?}"
+    );
+}
+
+/// **T4 and T5.** Voiding a told item prints a slip for exactly that item, and
+/// the line is never re-sent.
+#[test]
+fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
+    let scratch = Scratch::new("void_line");
+    let app = a_trading_shop(&scratch);
+
+    order_teas(&app, 3);
+    crate::flows::print_kitchen_ticket_on(&app).expect("told");
+    let before = app.print_queue_snapshot().len();
+
+    let view = void_line_on(&app, 0, "Ordered by mistake".to_owned()).expect("voided");
+    assert!(view.lines.is_empty(), "the line is still on the bill");
+
+    // T4: exactly one slip, and it is a cancellation.
+    let jobs = app.print_queue_snapshot();
+    assert_eq!(jobs.len(), before + 1, "expected exactly one cancellation slip");
+    assert!(jobs.iter().any(|j| j.reason.as_deref() == Some("cancellation")));
+
+    // T5: nothing comes back. There is nothing pending and nothing over-told,
+    // so a second ticket has nothing to say.
+    let nothing = crate::flows::print_kitchen_ticket_on(&app)
+        .expect_err("a voided line was sent to the kitchen again");
+    assert_eq!(nothing.code, "kitchen.nothing");
+}
+
+/// Shared with `perf_tests`, which needs the same scratch shop.
+pub(crate) fn scratch(label: &str) -> Scratch {
+    Scratch::new(label)
+}
+
+pub(crate) fn shop_for_perf(scratch: &Scratch) -> App {
+    a_shop(scratch)
 }

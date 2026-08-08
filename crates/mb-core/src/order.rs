@@ -395,6 +395,46 @@ impl KitchenLedger {
         Ok(excess)
     }
 
+    /// **The other half of [`KitchenLedger::over_told`]** — record that the
+    /// kitchen has been told to stop.
+    ///
+    /// P03 built `over_told` and said P12 would turn it into a cancellation
+    /// slip. This is what makes that work more than once: without it,
+    /// `over_told` keeps returning the same line, and every cancellation slip
+    /// for the rest of that order repeats it — the kitchen gets told to stop
+    /// cooking the same dosa four times.
+    ///
+    /// # The order of operations is load-bearing
+    ///
+    /// Remove the line, ask `over_told`, **print**, and only then call this —
+    /// the same shape as `print_kitchen_ticket` (P10), and for the same reason:
+    /// recording before the paper is durable loses the cancellation silently,
+    /// and the kitchen carries on cooking.
+    ///
+    /// An entry that falls to zero is dropped rather than kept at zero. The
+    /// ledger is a record of what the kitchen currently believes, not a
+    /// history — `order_events` and `audit_log` are the history.
+    pub fn mark_cancelled(
+        &mut self,
+        cancelled: &[(LineIdentity, Qty)],
+    ) -> std::result::Result<(), QtyError> {
+        for (identity, qty) in cancelled {
+            if let Some((_, running)) = self.told.iter_mut().find(|(known, _)| known == identity) {
+                // Saturating at zero rather than erroring: being asked to
+                // cancel more than the kitchen was told is not a failure a
+                // cashier can act on, and refusing it would leave the ledger
+                // saying the kitchen is still cooking something it was told to
+                // stop.
+                *running = running.sub(*qty).unwrap_or(Qty::ZERO);
+                if !running.is_positive() {
+                    *running = Qty::ZERO;
+                }
+            }
+        }
+        self.told.retain(|(_, qty)| qty.is_positive());
+        Ok(())
+    }
+
     fn quantity_told(&self, identity: &LineIdentity) -> Qty {
         self.told
             .iter()
@@ -694,6 +734,107 @@ mod tests {
         order.core.cart.remove(0).expect("removes");
         let over = order.core.kitchen.over_told(&order.core.cart).expect("computes");
         assert_eq!(over[0].1, Qty::from_whole(3).expect("in range"));
+    }
+
+    /// **P12's half of the seam.** Without it, the same line comes back on
+    /// every cancellation slip for the rest of the order.
+    #[test]
+    fn telling_the_kitchen_to_stop_is_remembered() {
+        let (mut order, _) = open_parcel();
+        order
+            .core
+            .cart
+            .add(item("dosa", 8_000), Qty::from_whole(3).expect("in range"), None, vec![])
+            .expect("adds");
+        let ticket = order.core.kitchen.pending(&order.core.cart).expect("computes");
+        order.core.kitchen.mark_printed(&ticket).expect("marks");
+
+        // Void one of the three.
+        order.core.cart.set_qty(0, Qty::from_whole(2).expect("in range")).expect("sets");
+        let cancel = order.core.kitchen.over_told(&order.core.cart).expect("computes");
+        assert_eq!(cancel[0].1, Qty::ONE, "one dosa to stop");
+
+        order.core.kitchen.mark_cancelled(&cancel).expect("marks");
+
+        // **The slip does not print again.** This is the whole point.
+        assert!(
+            order.core.kitchen.over_told(&order.core.cart).expect("computes").is_empty(),
+            "the kitchen would have been told to stop the same dosa twice"
+        );
+        // And the kitchen still believes in the two that are left, so nothing
+        // is re-sent either.
+        assert!(
+            order.core.kitchen.pending(&order.core.cart).expect("computes").is_empty(),
+            "a cancelled line came back as something new to cook"
+        );
+    }
+
+    /// Cancelling the whole line drops it from the ledger rather than leaving a
+    /// zero behind — the ledger is what the kitchen believes now, not history.
+    #[test]
+    fn cancelling_everything_empties_the_ledger() {
+        let (mut order, _) = open_parcel();
+        order
+            .core
+            .cart
+            .add(item("dosa", 8_000), Qty::from_whole(2).expect("in range"), None, vec![])
+            .expect("adds");
+        let ticket = order.core.kitchen.pending(&order.core.cart).expect("computes");
+        order.core.kitchen.mark_printed(&ticket).expect("marks");
+
+        order.core.cart.remove(0).expect("removes");
+        let cancel = order.core.kitchen.over_told(&order.core.cart).expect("computes");
+        order.core.kitchen.mark_cancelled(&cancel).expect("marks");
+
+        assert!(order.core.kitchen.is_empty(), "a zero row was left behind");
+    }
+
+    /// Being asked to stop more than the kitchen was told is not a failure a
+    /// cashier can do anything about, and refusing it would leave the ledger
+    /// insisting the kitchen is still cooking something it was told to stop.
+    #[test]
+    fn cancelling_more_than_was_ever_told_is_not_an_error() {
+        let (mut order, _) = open_parcel();
+        order
+            .core
+            .cart
+            .add(item("dosa", 8_000), Qty::ONE, None, vec![])
+            .expect("adds");
+        let ticket = order.core.kitchen.pending(&order.core.cart).expect("computes");
+        order.core.kitchen.mark_printed(&ticket).expect("marks");
+
+        let identity = ticket[0].0.clone();
+        order
+            .core
+            .kitchen
+            .mark_cancelled(&[(identity, Qty::from_whole(9).expect("in range"))])
+            .expect("does not refuse");
+        assert!(order.core.kitchen.is_empty());
+    }
+
+    /// A line the kitchen never heard of is not its problem.
+    #[test]
+    fn cancelling_a_line_the_kitchen_never_heard_of_changes_nothing() {
+        let (mut order, _) = open_parcel();
+        order
+            .core
+            .cart
+            .add(item("dosa", 8_000), Qty::ONE, None, vec![])
+            .expect("adds");
+        let ticket = order.core.kitchen.pending(&order.core.cart).expect("computes");
+        order.core.kitchen.mark_printed(&ticket).expect("marks");
+
+        let stranger = LineIdentity {
+            item_id: ItemId::new("itm_never"),
+            note: None,
+            modifier_ids: vec![],
+        };
+        order
+            .core
+            .kitchen
+            .mark_cancelled(&[(stranger, Qty::ONE)])
+            .expect("does not refuse");
+        assert_eq!(order.core.kitchen.told().len(), 1, "the real line was touched");
     }
 
     #[test]

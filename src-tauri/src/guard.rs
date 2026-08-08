@@ -104,6 +104,23 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("list_permissions", Access::Needs(Permission::StaffManage)),
     ("audit_trail", Access::Needs(Permission::AuditView)),
 
+    // --- taking something back (P12) ----------------------------------------
+    // The day's takings on a screen, which is audit C1's first example of what
+    // anybody could see — so it is `reports.view`, not `bill.create`.
+    ("list_bills", Access::Needs(Permission::ReportsView)),
+    ("day_totals", Access::Needs(Permission::ReportsView)),
+    // The reason list itself is not sensitive; being unable to read it would
+    // make every correction dialog open empty.
+    ("reasons", Access::Needs(Permission::BillCreate)),
+    ("void_bill", Access::Needs(Permission::BillVoid)),
+    // A refund is the money half of a void, so it is the same permission: a
+    // shop that let a cashier hand cash back without letting them void would
+    // have a hole shaped exactly like the one B5 describes.
+    ("refund_bill", Access::Needs(Permission::BillVoid)),
+    ("cancel_order", Access::Needs(Permission::OrderCancel)),
+    ("void_line", Access::Needs(Permission::OrderItemVoid)),
+    ("reprint_bill", Access::Needs(Permission::BillReprint)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -328,7 +345,15 @@ mod tests {
     /// baked in at compile time, so this cannot pass because somebody ran the
     /// test from the wrong directory.
     fn declared_commands() -> BTreeSet<String> {
-        const SOURCES: [&str; 2] = [include_str!("ipc.rs"), include_str!("flows.rs")];
+        // **Every file that defines commands must be in this list**, and P12
+        // proved why it is a risk worth naming: a new module's commands would
+        // otherwise be invisible to the very test that exists to see them, and
+        // the coverage check would pass while covering nothing.
+        const SOURCES: [&str; 3] = [
+            include_str!("ipc.rs"),
+            include_str!("flows.rs"),
+            include_str!("corrections.rs"),
+        ];
         let mut found = BTreeSet::new();
         for source in SOURCES {
             let mut lines = source.lines().peekable();
@@ -381,6 +406,50 @@ mod tests {
         assert!(
             ghosts.is_empty(),
             "these are classified but no longer exist — delete the line: {ghosts:?}"
+        );
+    }
+
+    /// **And the file list itself is checked**, because it is the one part of
+    /// this mechanism that fails silently.
+    ///
+    /// P12 found the hole: it added `corrections.rs` with eight commands, and
+    /// `SOURCES` did not know about it — so the coverage test above would have
+    /// passed while covering none of them. A guard that can be bypassed by
+    /// adding a file is a guard with a hole shaped like a new feature.
+    ///
+    /// `CARGO_MANIFEST_DIR` is resolved at compile time, so this cannot pass by
+    /// being run from the wrong directory.
+    #[test]
+    fn every_file_that_defines_commands_is_scanned() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(&src).expect("src/ is readable") {
+            let path = entry.expect("a directory entry").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("a source file");
+            // **A LINE that is the attribute**, not a file that merely mentions
+            // it — the same rule the scanner uses. Matching on `contains` found
+            // this file itself, whose scanner compares against that string.
+            if !text.lines().any(|line| line.trim() == "#[tauri::command]") {
+                continue;
+            }
+            let scanned = declared_commands();
+            // Every command in this file must have been found by the scan.
+            let names: Vec<String> = text
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("pub fn "))
+                .map(|rest| rest.chars().take_while(|c| *c != '(' && *c != '<').collect())
+                .collect();
+            if !names.iter().any(|n: &String| scanned.contains(n)) {
+                missing.push(path.display().to_string());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these files define commands and are not in SOURCES, so the coverage \
+             test cannot see them: {missing:?}"
         );
     }
 

@@ -33,6 +33,7 @@
 
 mod billing;
 mod config;
+mod corrections;
 mod flows;
 mod guard;
 mod ipc;
@@ -45,6 +46,11 @@ mod session;
 /// clicking is a sequence that gets checked once. See the file's own note.
 #[cfg(test)]
 mod signin_tests;
+/// B2 and B7 — the two of P10's five budgets that can be measured without a
+/// screen. B1, B3 and B8 are re-assigned to P22; see the file, and
+/// PERFORMANCE.md §4.
+#[cfg(test)]
+mod perf_tests;
 mod startup;
 mod state;
 mod window;
