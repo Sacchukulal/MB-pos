@@ -195,6 +195,40 @@ impl Cart {
         }
     }
 
+    /// Put a whole line on, merging it into an existing one where that is
+    /// honest — the arrival half of a merge or a split (P14, `transfer`).
+    ///
+    /// **Identity is not enough here, and that is the difference from
+    /// [`Cart::add`].** Two lines of the same dish where one carries a 50%
+    /// staff discount and the other does not are not the same line: merging
+    /// them would silently discount food nobody authorised a discount on, or
+    /// throw one away. So a line merges only into a line with the same
+    /// identity **and the same discount**, and otherwise sits beside it.
+    pub fn push(&mut self, line: CartLine) -> Result<usize> {
+        if !line.qty.is_positive() {
+            return Err(CartError::NonPositiveQty);
+        }
+        let key = line.identity();
+        let twin = self.lines.iter().position(|existing| {
+            existing.identity() == key && existing.line_discount == line.line_discount
+        });
+
+        match twin {
+            Some(index) => {
+                let merged = self.lines[index]
+                    .qty
+                    .add(line.qty)
+                    .map_err(|_| CartError::NonPositiveQty)?;
+                self.lines[index].qty = merged;
+                Ok(index)
+            }
+            None => {
+                self.lines.push(line);
+                Ok(self.lines.len() - 1)
+            }
+        }
+    }
+
     pub fn remove(&mut self, index: usize) -> Result<CartLine> {
         self.check(index)?;
         Ok(self.lines.remove(index))

@@ -435,11 +435,50 @@ impl KitchenLedger {
         Ok(())
     }
 
-    fn quantity_told(&self, identity: &LineIdentity) -> Qty {
+    /// How much of one line the kitchen has been told about.
+    ///
+    /// Public since P14, because splitting an order has to ask — but `told`
+    /// itself stays private. The difference matters: a reader can find out
+    /// what the kitchen believes; only the methods here can change it, so
+    /// every change goes past the conservation arguments written on them.
+    #[must_use]
+    pub fn quantity_told(&self, identity: &LineIdentity) -> Qty {
         self.told
             .iter()
             .find(|(known, _)| known == identity)
             .map_or(Qty::ZERO, |(_, qty)| *qty)
+    }
+
+    /// Set one line's told quantity outright — **the split half of P14.**
+    ///
+    /// Not a general-purpose setter: `mark_printed` and `mark_cancelled` are
+    /// the ways the kitchen's belief changes during an order's life, and they
+    /// stay that way. This exists because a split moves quantity between two
+    /// ledgers, and the origin's new figure is neither an addition nor a
+    /// cancellation — nothing was cooked and nothing was called off; the food
+    /// simply belongs to a different bill now. `transfer::take_lines` carries
+    /// the arithmetic and the reasoning.
+    ///
+    /// Zero drops the entry, for the reason `mark_cancelled` gives: the ledger
+    /// records what the kitchen currently believes, not a history.
+    pub fn set_told(&mut self, identity: &LineIdentity, qty: Qty) {
+        match self.told.iter_mut().find(|(known, _)| known == identity) {
+            Some((_, running)) => *running = qty,
+            None if qty.is_positive() => self.told.push((identity.clone(), qty)),
+            None => {}
+        }
+        self.told.retain(|(_, qty)| qty.is_positive());
+    }
+
+    /// Add another order's ledger into this one — **the merge half.**
+    ///
+    /// Per identity, so two tables that were each told about dosas produce one
+    /// order that was told about all of them. Adding is the only correct
+    /// operation here: taking the larger, or replacing, would leave the
+    /// kitchen either cooking a duplicate or never hearing about the
+    /// difference.
+    pub fn merge_from(&mut self, other: &KitchenLedger) -> std::result::Result<(), QtyError> {
+        self.mark_printed(&other.told)
     }
 }
 

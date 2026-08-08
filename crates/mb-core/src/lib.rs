@@ -54,9 +54,11 @@ pub mod numbering;
 pub mod order;
 pub mod payment;
 pub mod qty;
+pub mod table;
 pub mod tax;
 pub mod taxclass;
 pub mod time;
+pub mod transfer;
 
 pub use bill::{Bill, BillError, BillInput, BillLine, compute_bill};
 pub use businessday::{BusinessDay, DayRule};
@@ -78,6 +80,8 @@ pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
 pub use qty::{Qty, QtyError};
 pub use time::{Timestamp, TimeError, UtcOffset};
 pub use taxclass::{OrderTypeRate, TaxClass, TaxClassId, starting_classes};
+pub use table::{SubTable, TableError, clashes_with, printed_name, printed_seat, same_table};
+pub use transfer::{Pick, Portion, TransferError, even_shares, merge_into, take_lines};
 pub use tax::{
     PlaceOfSupply, RateSummaryRow, TaxAmounts, TaxOutcome, TaxRate, TaxSummary, TaxTreatment,
 };
