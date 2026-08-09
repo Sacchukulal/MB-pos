@@ -246,8 +246,15 @@
   white-space: pre-line;
 }
 
+/* **It wraps, and P18 is why.**
+   P17 gave ConfirmDialog a third button and never put three long labels in
+   one. "Cancel / Close without printing / Close and print the slip" is wider
+   than a 26rem modal, and the row did not wrap — so Cancel was pushed off the
+   left edge and clipped. A dialog you cannot back out of is the worst kind.
+   Found by closing a day and looking at the screen. */
 .mb-modal__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
 }
@@ -427,6 +434,15 @@
 
 .mb-table tbody tr:hover {
   background: var(--surface-2);
+}
+
+/* The totals row. Heavier rule above it and bold figures, so it reads as the
+   sum of the column rather than as one more row of it. */
+.mb-table tfoot td {
+  border-top: var(--border-width) solid var(--border-strong);
+  border-bottom: none;
+  font-weight: var(--weight-bold);
+  color: var(--text);
 }
 
 /* --- Tabs --------------------------------------------------------------- */

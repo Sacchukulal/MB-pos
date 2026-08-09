@@ -262,17 +262,24 @@ fn compare(now: Money, before: Money, previous: Period) -> CompareView {
                 .saturating_div(before.paise().abs().max(1)),
         )
     };
+    // "the day before" reads better than "the 1 days before" — which is what
+    // this said until somebody looked at it (§6, and P17's "1 have been
+    // issued" was the same bug).
+    let span = if previous.days() == 1 {
+        "the day before".to_owned()
+    } else {
+        format!("the {} days before", previous.days())
+    };
     let summary = match (direction, percent) {
         (_, None) if before.is_zero() && now.is_zero() => {
-            format!("Nothing in the {} days before either.", previous.days())
+            format!("Nothing {span} either.")
         }
-        (_, None) => format!("Nothing at all in the {} days before.", previous.days()),
-        ("same", _) => format!("Exactly the same as the {} days before.", previous.days()),
+        (_, None) => format!("Nothing at all {span}."),
+        ("same", _) => format!("Exactly the same as {span}."),
         (dir, Some(p)) => format!(
-            "{} {}% on the {} days before ({}).",
+            "{} {}% on {span} ({}).",
             if dir == "up" { "Up" } else { "Down" },
             p.abs(),
-            previous.days(),
             before.to_plain_string()
         ),
     };
@@ -333,11 +340,19 @@ fn build(
             columns.push(column("Total", true));
 
             let mut gross = Money::ZERO;
+            let mut discount = Money::ZERO;
+            let mut tax = Money::ZERO;
+            let mut qty = mb_core::Qty::ZERO;
             let mut bills = 0_i64;
             let rows = buckets
                 .iter()
                 .map(|b| {
                     gross = gross.add(b.gross).unwrap_or(gross);
+                    discount = discount.add(b.discount).unwrap_or(discount);
+                    tax = tax.add(b.tax).unwrap_or(tax);
+                    if let Some(each) = b.qty {
+                        qty = qty.add(each).unwrap_or(qty);
+                    }
                     bills += b.bills;
                     let mut row = vec![b.label.clone(), b.bills.to_string()];
                     if wants_qty {
@@ -350,11 +365,18 @@ fn build(
                 })
                 .collect();
 
+            // **Every column that has figures in it gets a total.** The first
+            // version left Discount and Tax blank, which on a screen reads as
+            // "this is broken" rather than as "we chose not to add these up".
             let mut totals = vec!["Total".to_owned(), bills.to_string()];
             if wants_qty {
-                totals.push(String::new());
+                totals.push(qty.to_string());
             }
-            totals.extend([String::new(), String::new(), gross.to_plain_string()]);
+            totals.extend([
+                discount.to_plain_string(),
+                tax.to_plain_string(),
+                gross.to_plain_string(),
+            ]);
 
             // The comparison, from the same query over the previous period.
             let previous = period.previous();
@@ -743,8 +765,9 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             "danger",
             "Something did not print",
             format!(
-                "{parked} job(s) gave up after retrying. Open the print queue \
-                 from the bar at the top and either try again or dismiss them."
+                "{} gave up after retrying. Open the print queue from the bar \
+                 at the top and either try again or dismiss them.",
+                words::count(i64::try_from(parked).unwrap_or(i64::MAX), "job", "jobs")
             ),
         ));
     }
@@ -770,8 +793,12 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
                 "warn",
                 "Somebody has owed you for over a month",
                 format!(
-                    "{} customer(s), the oldest {}. Open Credit to see who.",
-                    old.len(),
+                    "{}, the oldest {}. Open Credit to see who.",
+                    words::count(
+                        i64::try_from(old.len()).unwrap_or(i64::MAX),
+                        "customer",
+                        "customers"
+                    ),
                     old.iter().map(|c| c.oldest.as_str()).max().unwrap_or("—")
                 ),
             ));
@@ -785,9 +812,13 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             "info",
             "Regular payments are due",
             format!(
-                "{} reminder(s) waiting — rent, salary, the internet bill. \
-                 Nothing posts itself; open Spends to confirm them.",
-                spends.due.len()
+                "{} waiting — rent, salary, the internet bill. Nothing posts \
+                 itself; open Spends to confirm them.",
+                words::count(
+                    i64::try_from(spends.due.len()).unwrap_or(i64::MAX),
+                    "reminder",
+                    "reminders"
+                )
             ),
         ));
     }
@@ -816,7 +847,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             StatView {
                 label: "Takings".to_owned(),
                 value: totals.net.to_plain_string(),
-                note: format!("{} bills", totals.bills),
+                note: words::count(totals.bills, "bill", "bills"),
             },
             StatView {
                 label: "Average bill".to_owned(),
@@ -835,7 +866,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             StatView {
                 label: "Voided".to_owned(),
                 value: totals.voids.to_plain_string(),
-                note: format!("{} bill(s)", totals.voided_bills),
+                note: words::count(totals.voided_bills, "bill", "bills"),
             },
         ],
         compare: Some(compare_view),
@@ -1112,6 +1143,24 @@ mod tests {
         // "up infinity%" is worse than saying what happened.
         let fresh = compare(Money::from_paise(5_000), Money::ZERO, previous);
         assert!(fresh.summary.contains("Nothing at all"), "{}", fresh.summary);
+    }
+
+    /// **Found by looking at it.** The dashboard read "Nothing at all in the 1
+    /// days before" — the same bug as P17's "1 have been issued", which is
+    /// also the same bug as "0 bill(s)" three cards to the left of it.
+    #[test]
+    fn one_day_is_not_one_days() {
+        let yesterday = Period::one_day(BusinessDay::from_ymd(2026, 8, 8));
+        let fresh = compare(Money::from_paise(12_600), Money::ZERO, yesterday);
+        assert_eq!(fresh.summary, "Nothing at all the day before.");
+
+        let up = compare(
+            Money::from_paise(10_800),
+            Money::from_paise(10_000),
+            yesterday,
+        );
+        assert_eq!(up.summary, "Up 8% on the day before (100.00).");
+        assert!(!up.summary.contains("1 days"), "{}", up.summary);
     }
 
     /// **T4 — audit G7, made impossible.** The one writer escapes it.

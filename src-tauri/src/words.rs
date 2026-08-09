@@ -164,6 +164,27 @@ pub fn no_shop_yet() -> UiError {
 /// The workspace denies `integer_division` because D7 is about money, where a
 /// dropped remainder is a rupee somebody lost. Sixty seconds really do make a
 /// minute, and the remainder is the other half of the answer rather than a loss.
+/// **A count and its noun, with the right ending.**
+///
+/// "3 bills", "1 bill", "no bills" — never "1 bills" and never "0 bill(s)".
+///
+/// P17 shipped "1 have been issued" and P18 shipped "in the 1 days before" and
+/// "0 bill(s)", all three found by looking at the screen rather than by a test.
+/// They are the same bug: a sentence assembled from a number and a noun, by
+/// somebody who had a plural in mind. One function, so it is assembled once.
+///
+/// The zero case says "no bills" rather than "0 bills" because that is how a
+/// person reads a figure out loud, and because a screen full of zeroes is
+/// harder to scan than a screen that says nothing happened.
+#[must_use]
+pub fn count(how_many: i64, one: &str, many: &str) -> String {
+    match how_many {
+        0 => format!("no {many}"),
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
+    }
+}
+
 #[must_use]
 #[allow(
     clippy::integer_division,
@@ -194,6 +215,21 @@ pub fn when(at: mb_core::Timestamp) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The bug this function exists to make impossible.** Three shipped:
+    /// "1 have been issued" (P17), "in the 1 days before" and "0 bill(s)"
+    /// (P18) — all found by looking at a screen, none by a test.
+    #[test]
+    fn a_count_and_its_noun_agree() {
+        assert_eq!(count(0, "bill", "bills"), "no bills");
+        assert_eq!(count(1, "bill", "bills"), "1 bill");
+        assert_eq!(count(2, "bill", "bills"), "2 bills");
+        assert_eq!(count(48, "customer", "customers"), "48 customers");
+        // Irregular plurals are the caller's to give, which is why both words
+        // are arguments rather than one plus an "s".
+        assert_eq!(count(1, "penny", "pence"), "1 penny");
+        assert_eq!(count(3, "penny", "pence"), "3 pence");
+    }
 
     #[test]
     fn the_clock_reads_the_way_a_shopkeeper_says_it() {

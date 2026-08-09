@@ -124,11 +124,21 @@ export function Table<Row>({
   rows,
   rowKey,
   empty,
+  footer,
 }: {
   columns: readonly Column<Row>[];
   rows: readonly Row[];
   rowKey: (row: Row) => string;
   empty?: ReactNode;
+  /**
+   * **The totals row, and it belongs to the table.**
+   *
+   * P18 first drew it as a second `<table>` underneath, and the columns did
+   * not line up — two tables cannot agree on a column width. §3: *"a column of
+   * rupees that doesn't line up looks broken to a shopkeeper."* One cell per
+   * column, or nothing.
+   */
+  footer?: readonly ReactNode[];
 }) {
   if (rows.length === 0 && empty) return <>{empty}</>;
   return (
@@ -159,6 +169,20 @@ export function Table<Row>({
           </tr>
         ))}
       </tbody>
+      {footer ? (
+        <tfoot>
+          <tr>
+            {columns.map((column, index) => (
+              <td
+                key={column.key}
+                className={column.numeric ? 'mb-numeric' : undefined}
+              >
+                {footer[index] ?? null}
+              </td>
+            ))}
+          </tr>
+        </tfoot>
+      ) : null}
     </table>
   );
 }

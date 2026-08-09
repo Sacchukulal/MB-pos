@@ -7,6 +7,8 @@
  * exactly what this session is for.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -110,6 +112,44 @@ describe('ConfirmDialog', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Void the bill' }));
     expect(onConfirm).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * **All three ways out are reachable** — P18.
+   *
+   * P17 added the third button and never put three long labels in one dialog.
+   * Closing a day offers "Cancel / Close without printing / Close and print
+   * the slip", which is wider than a 26rem modal, and the row did not wrap —
+   * Cancel was pushed off the left edge and clipped. Found by looking at the
+   * screen, which is why the fix is in `kit.css` and the guard is here.
+   */
+  it('keeps all three ways out when the labels are long', async () => {
+    const onCancel = vi.fn();
+    const onOther = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        title="Close the day?"
+        body="Over by 874.00."
+        confirmLabel="Close and print the slip"
+        otherLabel="Close without printing"
+        onConfirm={vi.fn()}
+        onOther={onOther}
+        onCancel={onCancel}
+      />,
+    );
+    // Wrapping is what keeps the third button on the page. jsdom applies no
+    // stylesheet, so the rule is checked in the stylesheet itself — the same
+    // trick `contrast.test.ts` uses, and for the same reason.
+    const css = readFileSync('src/kit/kit.css', 'utf8');
+    const rule = css.slice(css.indexOf('.mb-modal__actions'));
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('flex-wrap: wrap');
+
+    // And every one of the three does its own thing.
+    await userEvent.click(screen.getByRole('button', { name: 'Close without printing' }));
+    expect(onOther).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it('closes on Escape', async () => {

@@ -101,12 +101,13 @@ export function DayClose() {
       />
 
       {view.isClosed ? (
-        <Card>
+        // The sentence and the way out, side by side. A quiet button on its
+        // own line came out centred with no chrome and read as a heading —
+        // an action nobody would press because it did not look like one.
+        <Card className="mb-dayclose__banner">
           <p className="mb-dayclose__closed">{view.closedSays}</p>
           {view.mayClose ? (
-            <Button variant="quiet" onClick={() => setReopening(true)}>
-              Open this day again
-            </Button>
+            <Button onClick={() => setReopening(true)}>Open this day again</Button>
           ) : null}
         </Card>
       ) : null}

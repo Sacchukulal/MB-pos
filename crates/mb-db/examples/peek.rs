@@ -67,6 +67,14 @@ fn main() {
             "SELECT key, value, value_type, updated_by FROM settings ORDER BY key",
             "SELECT kind, terminal_id, prefix, pad_width, reset_daily, start, last_issued
                FROM counters",
+            // P18. The night's record: what the till expected, what a person
+            // counted, the difference, why, and whether the day is sealed. The
+            // screen saying "Closed" is the thing being tested (audit B15).
+            "SELECT business_day, opening_float, expected_cash, counted_cash, variance,
+                    is_locked, closed_by, note
+               FROM day_closes ORDER BY business_day",
+            "SELECT day_close_id, denomination, count
+               FROM day_close_denominations ORDER BY denomination DESC",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();

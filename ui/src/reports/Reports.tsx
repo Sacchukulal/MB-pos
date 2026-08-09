@@ -248,6 +248,10 @@ export function Reports() {
                 columns={columns}
                 rows={lines}
                 rowKey={(line) => `${line.at}`}
+                // The totals belong to the table: a second table underneath
+                // could not agree with it about column widths, and a column of
+                // rupees that does not line up looks broken (§3).
+                footer={report.totals ?? undefined}
                 empty={
                   <EmptyState
                     title="Nothing in this period"
@@ -255,28 +259,6 @@ export function Reports() {
                   />
                 }
               />
-              {report.totals ? (
-                <table className="mb-reports__totals">
-                  <tbody>
-                    <tr>
-                      {report.totals.map((cell, index) => (
-                        <td
-                          // The cells are positional and can repeat ("" twice),
-                          // so the column index IS the identity here.
-                          key={`${index}-${cell}`}
-                          className={
-                            report.columns[index]?.numeric
-                              ? 'mb-reports__total mb-reports__total--numeric'
-                              : 'mb-reports__total'
-                          }
-                        >
-                          {cell}
-                        </td>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              ) : null}
             </div>
 
             {report.notes.map((note) => (

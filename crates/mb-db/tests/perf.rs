@@ -711,12 +711,35 @@ fn r1_r2_r3_the_report_budgets() {
     println!("  R2 a year, projected {projected_year:.1} ms at {BILLS_PER_YEAR} bills");
     println!("     (budget 2500 ms, ceiling 6000)");
 
+    // **R3 — the day close.** Everything the closing screen reads before a
+    // person can type the first number: what the day took, what the drawer
+    // should hold, and whether the day is already sealed. It is one paint of
+    // one screen, so it is measured as one round trip rather than as three.
+    let mut close_best = f64::MAX;
+    for _ in 0..3 {
+        let start = Instant::now();
+        db.transaction(|tx| {
+            let repos = mb_db::Repos::new(tx);
+            repos.corrections().day_totals(common::OUTLET, today.from)?;
+            repos.money().cash_position(common::OUTLET, today.from)?;
+            repos.money().find_day_close(common::OUTLET, today.from)?;
+            Ok(())
+        })
+        .expect("the day close");
+        close_best = close_best.min(start.elapsed().as_secs_f64() * 1000.0);
+    }
+    println!("  R3 day close         {close_best:.1} ms   (budget 1500, ceiling 4000)");
+
     #[cfg(not(debug_assertions))]
     {
         assert!(day_best < 1_500.0, "R1's ceiling: today took {day_best:.1} ms");
         assert!(
             projected_year < 6_000.0,
             "R2's ceiling: a year projects to {projected_year:.1} ms"
+        );
+        assert!(
+            close_best < 4_000.0,
+            "R3's ceiling: the day close took {close_best:.1} ms"
         );
     }
 }

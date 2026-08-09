@@ -123,25 +123,6 @@
   overflow: auto;
 }
 
-/* The totals row, kept out of the table body so sorting or virtualising the
-   rows later cannot carry it away with them. */
-.mb-reports__totals {
-  width: 100%;
-  border-collapse: collapse;
-  border-top: var(--border-width) solid var(--border-strong);
-}
-
-.mb-reports__total {
-  padding: var(--space-2) var(--space-3);
-  font-weight: var(--weight-bold);
-  color: var(--text);
-}
-
-.mb-reports__total--numeric {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
 
 .mb-reports__note {
   margin: 0;
@@ -237,6 +218,7 @@
 /* The line a person looks for first. */
 .mb-dayclose__verdict {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: var(--space-3);
   font-size: var(--text-lg);
@@ -329,6 +311,7 @@
 
 .mb-dash__item {
   display: flex;
+  flex-direction: row;
   align-items: flex-start;
   gap: var(--space-3);
 }
@@ -353,4 +336,23 @@
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--line-normal);
+}
+
+/* The "this day is closed" banner: the sentence on the left, the way out on
+   the right. */
+.mb-dayclose__banner {
+  display: flex;
+  /* **A Card is a COLUMN** (`.mb-card` sets `flex-direction: column`), so
+     every row placed inside one has to say so. Three of these shipped
+     stacked and centred before anybody looked: this banner, the variance
+     verdict, and each row of the attention list. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mb-dayclose__banner .mb-dayclose__closed {
+  margin: 0;
 }
