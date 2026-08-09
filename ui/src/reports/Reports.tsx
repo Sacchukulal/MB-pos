@@ -34,6 +34,7 @@ import {
   type Column,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
+import { Dashboard } from './Dashboard';
 import { DayClose } from './DayClose';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
 import type { ReportEntryView } from '../ipc/generated/ReportEntryView';
@@ -50,7 +51,10 @@ interface Line {
 
 export function Reports() {
   const [list, setList] = useState<ReportListView | null>(null);
-  const [chosen, setChosen] = useState<string>('sales_day');
+  // **The dashboard is what this screen opens on.** Audit G1: the owner's
+  // first question is "what needs me", and a screen that opens on a list of
+  // reports makes them ask it themselves.
+  const [chosen, setChosen] = useState<string>(TODAY);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [report, setReport] = useState<ReportView | null>(null);
@@ -83,8 +87,8 @@ export function Reports() {
   // again. No caching — a report is a question about right now, and a stale
   // answer with today's date on it is worse than a spinner.
   useEffect(() => {
-    // The day close is not a report and there is nothing to ask for.
-    if (!from || !to || chosen === DAY_CLOSE) return;
+    // Neither the dashboard nor the day close is a report.
+    if (!from || !to || chosen === DAY_CLOSE || chosen === TODAY) return;
     setBusy(true);
     call('report', { id: chosen, period: { from, to } })
       .then(setReport)
@@ -115,21 +119,32 @@ export function Reports() {
   return (
     <div className="mb-reports">
       <nav className="mb-reports__rail" aria-label="Reports">
-        {/* At the top and on its own, because it is the one thing on this
-            screen a shop does every single night. */}
+        {/* At the top and on their own: one is the question an owner opens
+            this screen to ask, the other is the thing a shop does every single
+            night. Neither is a report. */}
         <div className="mb-reports__group">
-          <button
-            type="button"
-            className={
-              chosen === DAY_CLOSE
-                ? 'mb-reports__pick mb-reports__pick--on'
-                : 'mb-reports__pick'
-            }
-            aria-current={chosen === DAY_CLOSE}
-            onClick={() => setChosen(DAY_CLOSE)}
-          >
-            Close the day
-          </button>
+          {[
+            // Not just "Today": there is a period preset by that name three
+            // inches to the right, and two buttons saying the same word that
+            // do different things is how a screen teaches somebody to distrust
+            // it. Found by a test that could not tell them apart either.
+            { id: TODAY, label: 'Today at a glance' },
+            { id: DAY_CLOSE, label: 'Close the day' },
+          ].map((entry) => (
+            <button
+              type="button"
+              key={entry.id}
+              className={
+                chosen === entry.id
+                  ? 'mb-reports__pick mb-reports__pick--on'
+                  : 'mb-reports__pick'
+              }
+              aria-current={chosen === entry.id}
+              onClick={() => setChosen(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
         </div>
         {groups(list.reports).map(([group, entries]) => (
           <div className="mb-reports__group" key={group}>
@@ -154,7 +169,9 @@ export function Reports() {
       </nav>
 
       <div className="mb-reports__body">
-        {chosen === DAY_CLOSE ? (
+        {chosen === TODAY ? (
+          <Dashboard />
+        ) : chosen === DAY_CLOSE ? (
           <DayClose />
         ) : (
           <>
@@ -282,6 +299,9 @@ export function Reports() {
 
 /** Not a report id — the one entry on this screen that is a thing to DO. */
 const DAY_CLOSE = 'day_close';
+
+/** Nor is the dashboard: it is the answer to a question, not a report. */
+const TODAY = 'today';
 
 /** The reports in their groups, in the order Rust listed them. */
 function groups(entries: readonly ReportEntryView[]): [string, ReportEntryView[]][] {

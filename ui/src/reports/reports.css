@@ -264,3 +264,93 @@
   justify-content: flex-end;
   gap: var(--space-3);
 }
+
+/* ---------------------------------------------------------------------------
+   Today, and what needs you (P18) — audit G1.
+
+   The figures across the top, the comparison under them, then the list. In
+   that order because it is the order the questions come in: how did today go,
+   how does that compare, and what do I have to do about anything.
+   --------------------------------------------------------------------------- */
+
+.mb-dash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-4);
+}
+
+.mb-dash__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+.mb-dash__heading {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-dash__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));
+  gap: var(--space-3);
+}
+
+.mb-dash__note {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+}
+
+.mb-dash__compare {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.mb-dash__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mb-dash__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* The left stripe carries the urgency as a shape as well as a colour. */
+.mb-dash__item--danger {
+  box-shadow: inset var(--space-1) 0 0 0 var(--danger);
+}
+
+.mb-dash__item--warn {
+  box-shadow: inset var(--space-1) 0 0 0 var(--warn);
+}
+
+.mb-dash__item--info {
+  box-shadow: inset var(--space-1) 0 0 0 var(--accent);
+}
+
+.mb-dash__detail,
+.mb-dash__quiet,
+.mb-dash__trouble {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}

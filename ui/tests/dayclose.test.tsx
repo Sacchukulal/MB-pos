@@ -26,8 +26,15 @@ const { ToastProvider } = await import('../src/kit');
 
 import type { DayCloseView } from '../src/ipc/generated/DayCloseView';
 
+/**
+ * `MoneyView.paise` is a `bigint`, because Rust's is an `i64`.
+ *
+ * That is fine in this direction: D58 bans a `bigint` going INTO Rust, where
+ * `JSON.stringify` would throw on it. Coming out it is just a number nothing
+ * on this screen does arithmetic on.
+ */
 function money(paise: number, text: string) {
-  return { paise, text };
+  return { paise: BigInt(paise), text };
 }
 
 const view: DayCloseView = {

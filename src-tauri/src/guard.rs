@@ -253,6 +253,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("report", Access::Needs(Permission::ReportsView)),
     ("report_csv", Access::Needs(Permission::ReportsView)),
     ("report_pdf", Access::Needs(Permission::ReportsView)),
+    // The dashboard is the day's takings on a screen, like every other
+    // report. What it ADDS to the attention list is filtered by what the
+    // person looking may already see — it never widens anything.
+    ("dashboard", Access::Needs(Permission::ReportsView)),
 
     // --- closing the day (P18) ----------------------------------------------
     // READING the count is `reports.view` — it is the day's cash on a screen,

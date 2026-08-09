@@ -624,6 +624,238 @@ pub fn csv_of(report: &ReportView) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Today, at a glance — and the list of things that need somebody.
+// ---------------------------------------------------------------------------
+
+/// **The first thing an owner sees**, and the reason it is first.
+///
+/// Audit **G1**: *"the owner's questions — how did today go, what is unusual,
+/// what needs me — are answered by opening four screens and doing arithmetic in
+/// your head."* Thirteen reports do not answer "what needs me" either; they
+/// answer questions you already knew to ask. This answers the one you did not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardView {
+    /// "Today, so far — 2026-08-09".
+    pub title: String,
+    pub stats: Vec<StatView>,
+    pub compare: Option<CompareView>,
+    /// **Things that need a person.** Empty is the good case and the screen
+    /// says so out loud rather than showing a blank panel.
+    pub attention: Vec<AttentionView>,
+    pub quiet: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct StatView {
+    pub label: String,
+    /// Already formatted, always. Even the counts — R8 does not have an
+    /// exception for small numbers.
+    pub value: String,
+    pub note: String,
+}
+
+/// One thing that needs somebody.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionView {
+    /// `danger`, `warn` or `info`. The words say it too — colour is never the
+    /// only signal (§2 rule 2).
+    pub tone: String,
+    pub title: String,
+    /// A whole sentence saying what to do about it.
+    pub detail: String,
+}
+
+fn needs_you(tone: &str, title: &str, detail: String) -> AttentionView {
+    AttentionView {
+        tone: tone.to_owned(),
+        title: title.to_owned(),
+        detail,
+    }
+}
+
+/// Today's figures, and everything that is waiting for a person.
+///
+/// **Every entry on the attention list is read from the thing that already
+/// knows.** The backup headline is `backup::status_on`'s own sentence, the
+/// parked prints are the queue's own snapshot, the reminders are the Spends
+/// screen's. A dashboard that recomputed any of them would be a fifth place
+/// for a figure to disagree — which is audit G1 with more steps.
+pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
+    let who = guard::require(app, Permission::ReportsView)?;
+    let day = crate::flows::today(crate::flows::now());
+    let period = Period::one_day(day);
+    let yesterday = day.previous();
+
+    let (totals, position, closed_yesterday) = app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                Ok((
+                    repos.corrections().day_totals(OUTLET, day)?,
+                    repos.money().cash_position(OUTLET, day)?,
+                    repos.corrections().day_is_locked(OUTLET, yesterday)?,
+                ))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    // The average bill, computed here because it is money divided by a count
+    // and TypeScript may do neither.
+    let average = if totals.bills > 0 {
+        Money::from_paise(totals.net.paise().saturating_div(totals.bills))
+    } else {
+        Money::ZERO
+    };
+
+    let mut attention = Vec::new();
+
+    // 1. Yesterday, never closed. The one that compounds: a shop that skips a
+    //    close never notices the day it was ₹2,000 short.
+    if !closed_yesterday {
+        attention.push(needs_you(
+            "warn",
+            "Yesterday was never closed",
+            format!(
+                "{yesterday} has no closing count. Closing it records what was \
+                 in the drawer, and locks the day so its bills cannot change."
+            ),
+        ));
+    }
+
+    // 2. Paper that did not come out — audit D4, and the whole reason P07's
+    //    queue parks a job instead of dropping it.
+    let parked = app.with_shop(|shop| {
+        Ok(shop
+            .queue
+            .snapshot()
+            .iter()
+            .filter(|job| job.state == mb_print::queue::JobState::Parked)
+            .count())
+    })?;
+    if parked > 0 {
+        attention.push(needs_you(
+            "danger",
+            "Something did not print",
+            format!(
+                "{parked} job(s) gave up after retrying. Open the print queue \
+                 from the bar at the top and either try again or dismiss them."
+            ),
+        ));
+    }
+
+    // 3. The backup, in the backup screen's own words (audit A1).
+    if who.must(Permission::BackupRun).is_ok()
+        && let Ok(backup) = crate::settings::backup::status_on(app)
+        && backup.tone != "ok"
+    {
+        attention.push(needs_you(&backup.tone, "Backup", backup.headline));
+    }
+
+    // 4. Money owed, and money the shop owes.
+    if who.must(Permission::CustomersManage).is_ok()
+        && let Ok(owing) = crate::credit::who_owes_on(app)
+    {
+        let old: Vec<_> = owing
+            .iter()
+            .filter(|c| c.oldest.split(' ').next().and_then(|n| n.parse::<i64>().ok()).is_some_and(|d| d > 30))
+            .collect();
+        if !old.is_empty() {
+            attention.push(needs_you(
+                "warn",
+                "Somebody has owed you for over a month",
+                format!(
+                    "{} customer(s), the oldest {}. Open Credit to see who.",
+                    old.len(),
+                    old.iter().map(|c| c.oldest.as_str()).max().unwrap_or("—")
+                ),
+            ));
+        }
+    }
+    if who.must(Permission::ExpensesManage).is_ok()
+        && let Ok(spends) = crate::expenses::expenses_on(app)
+        && !spends.due.is_empty()
+    {
+        attention.push(needs_you(
+            "info",
+            "Regular payments are due",
+            format!(
+                "{} reminder(s) waiting — rent, salary, the internet bill. \
+                 Nothing posts itself; open Spends to confirm them.",
+                spends.due.len()
+            ),
+        ));
+    }
+
+    // The comparison against yesterday, through the same report the screen
+    // would run.
+    let compare_view = app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let reports = mb_db::Repos::new(tx).reports();
+                let sum = |p: Period| -> Result<Money, mb_db::DbError> {
+                    Ok(reports
+                        .sales_by(OUTLET, p, SalesBy::Day)?
+                        .iter()
+                        .try_fold(Money::ZERO, |acc, b| acc.add(b.gross))
+                        .unwrap_or(Money::ZERO))
+                };
+                Ok(compare(sum(period)?, sum(period.previous())?, period.previous()))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    Ok(DashboardView {
+        title: format!("Today, so far — {day}"),
+        stats: vec![
+            StatView {
+                label: "Takings".to_owned(),
+                value: totals.net.to_plain_string(),
+                note: format!("{} bills", totals.bills),
+            },
+            StatView {
+                label: "Average bill".to_owned(),
+                value: average.to_plain_string(),
+                note: if totals.bills > 0 {
+                    String::new()
+                } else {
+                    "Nothing sold yet today.".to_owned()
+                },
+            },
+            StatView {
+                label: "In the drawer".to_owned(),
+                value: position.expected.to_plain_string(),
+                note: "What the till expects, before counting.".to_owned(),
+            },
+            StatView {
+                label: "Voided".to_owned(),
+                value: totals.voids.to_plain_string(),
+                note: format!("{} bill(s)", totals.voided_bills),
+            },
+        ],
+        compare: Some(compare_view),
+        quiet: if attention.is_empty() {
+            "Nothing needs you. The backup is current, everything printed, and \
+             yesterday is closed."
+                .to_owned()
+        } else {
+            String::new()
+        },
+        attention,
+    })
+}
+
+#[tauri::command]
+pub fn dashboard(app: tauri::State<'_, App>) -> UiResult<DashboardView> {
+    dashboard_on(&app)
+}
+
+// ---------------------------------------------------------------------------
 // Onto paper, and onto disk.
 // ---------------------------------------------------------------------------
 

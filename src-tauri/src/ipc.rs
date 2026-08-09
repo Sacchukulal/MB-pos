@@ -530,6 +530,7 @@ macro_rules! commands {
             $crate::reports::report,
             $crate::reports::report_csv,
             $crate::reports::report_pdf,
+            $crate::reports::dashboard,
             $crate::dayclose::day_close,
             $crate::dayclose::count_cash,
             $crate::dayclose::close_day,

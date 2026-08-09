@@ -79,6 +79,7 @@ import type { VerifyView } from './generated/VerifyView';
 import type { ConfigPlanView } from './generated/ConfigPlanView';
 import type { NumberingView } from './generated/NumberingView';
 import type { CountArg } from './generated/CountArg';
+import type { DashboardView } from './generated/DashboardView';
 import type { DayCloseView } from './generated/DayCloseView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
@@ -429,6 +430,9 @@ export interface Commands {
   // P18 — thirteen reports behind four commands, because the report list is
   // the screen. A period crosses as two `YYYY-MM-DD` strings: TypeScript does
   // no date arithmetic on the value every report is keyed by.
+  // Audit G1's answer: "how did today go, and what needs me" — the question
+  // thirteen reports do not answer because you have to know to ask them.
+  dashboard: { args: void; returns: DashboardView };
   report_list: { args: void; returns: ReportListView };
   report: { args: { id: string; period: PeriodArg }; returns: ReportView };
   report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
