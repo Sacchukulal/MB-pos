@@ -81,6 +81,7 @@ import type { NumberingView } from './generated/NumberingView';
 import type { CountArg } from './generated/CountArg';
 import type { DashboardView } from './generated/DashboardView';
 import type { DayCloseView } from './generated/DayCloseView';
+import type { NetworkView } from './generated/NetworkView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
 import type { ReportView } from './generated/ReportView';
@@ -437,6 +438,16 @@ export interface Commands {
   report: { args: { id: string; period: PeriodArg }; returns: ReportView };
   report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
   report_pdf: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
+
+  // P19 — the phones this counter serves. Reading the panel is reports.view;
+  // every write is devices.pair, because letting a phone onto the shop's
+  // network is its own decision.
+  network: { args: void; returns: NetworkView };
+  open_pairing: { args: void; returns: NetworkView };
+  close_pairing: { args: void; returns: NetworkView };
+  allow_device: { args: { requestId: string }; returns: NetworkView };
+  refuse_device: { args: { requestId: string }; returns: NetworkView };
+  revoke_device: { args: { deviceId: string }; returns: NetworkView };
 
   // P18's day close — requirement 9 of the ten. `count_cash` recomputes the
   // variance as somebody types: there is ONE variance calculation and it is in

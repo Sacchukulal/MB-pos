@@ -30,6 +30,7 @@ use rusqlite::Transaction;
 pub mod audit;
 pub mod composition;
 pub mod corrections;
+pub mod devices;
 pub mod events;
 pub mod floor;
 pub mod menu;
@@ -140,6 +141,12 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn corrections(&self) -> CorrectionsRepo<'a> {
         CorrectionsRepo::new(self.tx)
+    }
+
+    /// P19 devices — the phones this counter serves.
+    #[must_use]
+    pub fn devices(&self) -> devices::DevicesRepo<'a> {
+        devices::DevicesRepo::new(self.tx)
     }
 
     /// Every report (P18), grouped by the stored business day.

@@ -73,6 +73,13 @@ pub struct App {
     /// Replaced **wholesale** on save, so nothing on the printing path can ever
     /// see half of a change.
     shop_config: Mutex<crate::settings::ShopConfig>,
+    /// **The counter as a server** (P19, D9). `None` until the network is
+    /// started, which is a state and not a failure: a single-till shop with no
+    /// phones never starts it and loses nothing.
+    ///
+    /// Dropping it stops the server and withdraws the mDNS advertisement, so
+    /// closing the window really does take the counter off the network.
+    network: Mutex<Option<Arc<crate::lan::Network>>>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -111,7 +118,29 @@ impl App {
             font: Arc::new(font),
             sessions,
             shop_config: Mutex::new(crate::settings::ShopConfig::default()),
+            network: Mutex::new(None),
         })
+    }
+
+    /// The counter as a server, if it is on. A clone of the `Arc`, so nothing
+    /// holds this lock while a phone is being served.
+    #[must_use]
+    pub fn network(&self) -> Option<Arc<crate::lan::Network>> {
+        lock(&self.network).clone()
+    }
+
+    pub fn set_network(&self, network: Option<Arc<crate::lan::Network>>) {
+        *lock(&self.network) = network;
+    }
+
+    /// This counter's stable identity, for a phone that has to recognise it
+    /// again after a DHCP move. Empty when the network has never started.
+    #[must_use]
+    pub fn lan_server_id(&self) -> String {
+        lock(&self.network)
+            .as_ref()
+            .map(|n| n.server_id.clone())
+            .unwrap_or_default()
     }
 
     /// What this shop has chosen. A clone, because the caller holds it across a
@@ -616,6 +645,13 @@ pub enum Pushed {
     Licence { state: String },
     /// Likewise, for P33.
     Sync { state: String },
+    /// **A phone is asking to join** (P19). Pushed rather than polled, which is
+    /// budget M4: the panel must not run a timer, and the person holding the
+    /// phone is standing at the counter waiting for the name to appear.
+    Pairing {
+        /// How many phones are waiting for somebody to press Allow.
+        waiting: u32,
+    },
 }
 
 /// A print job, as a screen shows it.

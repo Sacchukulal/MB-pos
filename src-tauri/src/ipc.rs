@@ -535,6 +535,13 @@ macro_rules! commands {
             $crate::dayclose::count_cash,
             $crate::dayclose::close_day,
             $crate::dayclose::reopen_day,
+            // P19 — the phones this counter serves.
+            $crate::lan::network,
+            $crate::lan::open_pairing,
+            $crate::lan::close_pairing,
+            $crate::lan::allow_device,
+            $crate::lan::refuse_device,
+            $crate::lan::revoke_device,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

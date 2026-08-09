@@ -176,6 +176,17 @@
   /* Four stat cards across at 1366, two on a laptop, one on a tablet. */
   --dash-stat: 13rem;
 
+  /* P19 pairing QR. A version-2 code is 25 modules; 8px each makes it 200px
+     across, which every phone camera reads from arm length. */
+  --qr-dot: 8px;
+  /* **The two values in this file that a theme must NOT change.** A QR is read
+     by a camera, not by a person: it needs real black on real white, and a
+     dark-mode QR is a QR that does not scan. They are tokens anyway, because
+     D21 says every value lives here — including the ones with a reason not to
+     move. */
+  --qr-ink: #000000;
+  --qr-paper: #ffffff;
+
   /* The lock screen and the people screens (P11). The card is narrow on
      purpose: a PIN pad the width of a monitor is a PIN pad you have to look
      at, and the whole point is that a cashier does it without looking. */

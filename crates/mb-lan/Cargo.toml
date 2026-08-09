@@ -1,0 +1,94 @@
+[package]
+name = "mb-lan"
+description = "Magic Bill's counter-side network: the road a phone's order travels, and the gate on it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# What this crate knows about the shop: nothing. It knows about sockets, TLS,
+# framing, authentication and rate limits. Every business operation arrives
+# through the `Counter` trait, which `magic-bill` implements — D1 and audit E3
+# applied to a network layer, and what will let P20 add messages without
+# touching a socket.
+mb-auth = { path = "../mb-auth" }
+mb-core = { path = "../mb-core" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# ---------------------------------------------------------------------------
+# R6 — the crates this session adds, and why each of them earns its place.
+# ---------------------------------------------------------------------------
+#
+# ## The async runtime, and why PERFORMANCE.md §5 rule 8 comes out the other
+#    way here
+#
+# That rule rejected an async runtime for the PRINT QUEUE, and the reason it
+# gave was specific: four printers, a socket each, idle most of the day — Tokio
+# would have been a dependency, a scheduler and a different mental model, to
+# buy nothing.
+#
+# This session's workload is the opposite one. Fifteen phones hold long-lived
+# WebSockets, and thread-per-connection on the 4 GB reference machine means
+# fifteen stacks sitting idle waiting for a waiter to press something. And the
+# fact that settles it: **tokio and hyper are already inside this binary**,
+# pulled in by Tauri. There is no new runtime here — only a second user of the
+# one that is already running.
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+
+# The router, the extractors and the WebSocket upgrade, over the hyper already
+# in the tree. The alternative is hand-rolling a router, a path matcher and
+# RFC 6455's handshake — about a thousand lines this crate would then own and
+# get subtly wrong, against roughly 300 KB of compiled code.
+#
+# `default-features = false` plus exactly what is used: no multipart, no
+# form decoding, no tracing. A shop counter serves JSON and one WebSocket.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "ws", "query", "tokio"] }
+
+# TLS. **Not native-tls, deliberately**: we generate our own certificate and
+# the phone pins it by fingerprint, so the platform trust store has nothing to
+# say about it — asking it would only add a way for the connection to be
+# refused for a reason that does not apply. rustls is pure Rust, which also
+# keeps the `unsafe_code = "forbid"` lint honest.
+#
+# `ring` rather than aws-lc-rs: aws-lc-rs needs a C toolchain and NASM on
+# Windows, and a build that needs NASM is a build a future session cannot run.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+
+# Makes the self-signed certificate on first run. Small, pure Rust, and the
+# alternative is shelling out to openssl — which is not installed on a shop PC
+# and is not something to make a restaurant install.
+rcgen = { version = "0.14", default-features = false, features = ["pem", "ring"] }
+
+# mDNS/Bonjour, so a phone finds the counter with no typing. It is the FIRST of
+# two discovery paths and never the only one: mDNS is unreliable on cheap
+# consumer routers, absent on a network with client isolation turned on, and
+# flaky on several Android builds. The QR below is the other path and it always
+# works.
+mdns-sd = { version = "0.20", default-features = false }
+
+# The pairing QR. `default-features = false` drops the image encoder and the
+# SVG renderer: this crate hands back a matrix of booleans and the counter's
+# screen draws it as a CSS grid, because a bitmap crossing IPC to be scaled by
+# a browser is three problems where one will do.
+qrcode = { version = "0.14", default-features = false }
+
+# Base64url for the device credential and the certificate fingerprint. Tiny,
+# and the alternative is writing an encoder whose only interesting property is
+# that it must be exactly right.
+base64 = "0.22"
+
+[dev-dependencies]
+# The test client. Same TLS stack as the server, so T10 is testing the real
+# handshake rather than a mock of one.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-manual-roots", "http2"] }
+serde_json = "1"
+base64 = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }

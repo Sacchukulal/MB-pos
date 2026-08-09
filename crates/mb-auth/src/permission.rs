@@ -51,6 +51,10 @@ pub enum Permission {
     StaffManage,
     AuditView,
     BackupRun,
+    /// P19. Letting a phone onto the counter is its own decision: the person
+    /// who may take an order is not automatically the person who may add a
+    /// device to the shop's network.
+    DevicesPair,
 }
 
 impl Permission {
@@ -78,6 +82,7 @@ impl Permission {
         Permission::StaffManage,
         Permission::AuditView,
         Permission::BackupRun,
+        Permission::DevicesPair,
     ];
 
     /// The stored form. **This string is a database value**: changing one is a
@@ -107,6 +112,7 @@ impl Permission {
             Permission::StaffManage => "staff.manage",
             Permission::AuditView => "audit.view",
             Permission::BackupRun => "backup.run",
+            Permission::DevicesPair => "devices.pair",
         }
     }
 
@@ -138,6 +144,7 @@ impl Permission {
             Permission::StaffManage => "manage staff",
             Permission::AuditView => "read the history",
             Permission::BackupRun => "take or restore a backup",
+            Permission::DevicesPair => "let a phone onto this counter",
         }
     }
 
@@ -238,9 +245,9 @@ mod tests {
         // to iterate an enum in Rust without a dependency, and this test is
         // cheaper than one: a variant added below ALL has no row, no screen and
         // no check, and nothing else would notice.
-        assert_eq!(Permission::ALL.len(), 22);
+        assert_eq!(Permission::ALL.len(), 23);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 22, "two permissions share a code");
+        assert_eq!(codes.len(), 23, "two permissions share a code");
     }
 
     #[test]

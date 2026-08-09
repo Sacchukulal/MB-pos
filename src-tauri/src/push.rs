@@ -95,6 +95,63 @@ pub fn emit_session(app: &AppHandle) {
     }
 }
 
+/// **A phone is asking to join** (P19, budget M4).
+///
+/// The panel does not poll. A phone can present its code at any moment, and
+/// the person holding it is standing at the counter waiting for the name to
+/// appear — so the counter pushes, exactly as it does for a print job and a
+/// sign-in. The first version of the panel ran a `setInterval` while the code
+/// was on screen, and `guards.test.ts` failed the build over it, which is
+/// D40's rule working: the rules that erode are enforced by scripts.
+pub fn emit_pairing(app: &AppHandle) {
+    let Some(state) = app.try_state::<App>() else {
+        return;
+    };
+    let waiting = state
+        .network()
+        .map_or(0, |n| u32::try_from(n.shared.desk.waiting().len()).unwrap_or(u32::MAX));
+    if let Err(e) = app.emit(CHANNEL, Pushed::Pairing { waiting }) {
+        log_warn!("the pairing panel could not be told: {e}");
+    }
+}
+
+/// Watch the pairing desk while it is open.
+///
+/// **This is not a poll of the SCREEN** — nothing crosses to React unless the
+/// number actually changes, and the thread sleeps whenever no code is being
+/// shown. It exists because a phone arrives over a socket on another thread,
+/// and a socket handler must not reach into Tauri's window (rule 2 of
+/// `mb-lan`'s guarantee: a handler holds nothing the counter needs).
+pub fn watch_for_pairing(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::Builder::new()
+        .name("mb-pairing".to_owned())
+        .spawn(move || {
+            let mut last = 0_u32;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(700));
+                let Some(state) = handle.try_state::<App>() else {
+                    return;
+                };
+                let Some(network) = state.network() else {
+                    continue;
+                };
+                // Asleep unless somebody is deliberately watching for a phone.
+                if network.shared.desk.showing(crate::flows::now()).is_none() {
+                    last = 0;
+                    continue;
+                }
+                let waiting =
+                    u32::try_from(network.shared.desk.waiting().len()).unwrap_or(u32::MAX);
+                if waiting != last {
+                    last = waiting;
+                    emit_pairing(&handle);
+                }
+            }
+        })
+        .ok();
+}
+
 /// **The idle clock** (P11 item 8, budget M4).
 ///
 /// One thread, asleep almost always, that locks the counter when nothing has

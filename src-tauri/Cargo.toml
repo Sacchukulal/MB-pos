@@ -17,6 +17,10 @@ mb-auth = { path = "../crates/mb-auth" }
 mb-core = { path = "../crates/mb-core" }
 mb-db = { path = "../crates/mb-db" }
 mb-print = { path = "../crates/mb-print" }
+# P19 — the counter as a server. It owns the sockets and no business rule; see
+# its own Cargo.toml for why an async runtime is right here and was wrong for
+# the print queue.
+mb-lan = { path = "../crates/mb-lan" }
 
 # P17. "Which printers does this machine have?" is an operating-system
 # question, and this is the crate that talks to the operating system â it

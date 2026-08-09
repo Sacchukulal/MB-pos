@@ -43,6 +43,9 @@ mod expenses;
 mod flows;
 mod guard;
 mod ipc;
+/// P19. **The counter as a server** — D9: the phone talks to the till over the
+/// shop's own WiFi, and the cloud is never the road an order travels.
+mod lan;
 mod logging;
 mod menu;
 mod preview;
@@ -165,6 +168,10 @@ fn main() {
             // be a poll against M4 and would be bypassed by any screen that is
             // not open.
             push::watch_for_idle(app.handle());
+            // P19. Last, because it is the only thing here that opens a socket
+            // — and it never stops the window opening if it cannot.
+            lan::start(app.handle());
+            push::watch_for_pairing(app.handle());
             push::emit_session(app.handle());
             if let Some(main) = app.get_webview_window("main") {
                 // Step 8. Restored and THEN shown, so the 800x600 flash audit

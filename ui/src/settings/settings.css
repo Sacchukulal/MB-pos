@@ -435,3 +435,143 @@
   color: var(--text);
 }
 
+
+/* ---------------------------------------------------------------------------
+   The phones this counter serves (P19) — decision D9.
+
+   The QR is a CSS grid of `--qr-size` squares. Not an image: Rust sends the
+   modules as booleans, so this is sharp at any size and there is no bitmap
+   crossing IPC to be scaled by a browser.
+   --------------------------------------------------------------------------- */
+
+.mb-network {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-4);
+}
+
+.mb-network__headline {
+  border-left: var(--space-1) solid var(--border-strong);
+}
+
+.mb-network__headline--ok {
+  border-left-color: var(--ok);
+}
+
+.mb-network__headline--warn {
+  border-left-color: var(--warn);
+}
+
+.mb-network__headline--danger {
+  border-left-color: var(--danger);
+}
+
+.mb-network__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-network__note {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* The certificate fingerprint. Long, so it wraps rather than pushing the card
+   sideways — §1 forbids the page scrolling horizontally. */
+.mb-network__fingerprint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.mb-network__pairing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  margin-top: var(--space-3);
+}
+
+.mb-network__qr {
+  display: flex;
+  flex-direction: column;
+  /* The quiet zone. A QR with no margin around it is a QR half the phones in
+     a restaurant will not see. */
+  padding: var(--space-3);
+  background: var(--qr-paper);
+  border-radius: var(--radius-sm);
+}
+
+.mb-network__qrrow {
+  display: flex;
+  flex-direction: row;
+  height: var(--qr-dot);
+}
+
+.mb-network__dot {
+  width: var(--qr-dot);
+  height: var(--qr-dot);
+  background: transparent;
+}
+
+/* **The one thing on this screen that does not follow the theme**, and the
+   tokens say so: a QR is not decoration, and a themed one is a QR that stops
+   scanning in dark mode. See `--qr-ink` in tokens.css. */
+.mb-network__dot--on {
+  background: var(--qr-ink);
+}
+
+.mb-network__code {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-network__code strong {
+  font-size: var(--text-2xl);
+  letter-spacing: var(--tracking-caps);
+  color: var(--text);
+}
+
+.mb-network__waiting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.mb-network__ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.mb-network__device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--border);
+}

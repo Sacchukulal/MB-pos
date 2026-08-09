@@ -288,6 +288,11 @@ fn t8_every_named_index_exists() {
         "idx_reprints_day",
         "idx_reservations_day",
         "idx_sync_outbox_pending",
+        // P19: the authentication path reads the live device register on EVERY
+        // request, because revocation has to bite on the next request and not
+        // on the next login (D77's sibling). Partial, so it is the size of the
+        // phones in use rather than the size of every phone ever paired.
+        "idx_lan_devices_live",
     ];
 
     let db = Scratch::new("t8").open();

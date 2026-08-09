@@ -148,11 +148,38 @@ impl fmt::Debug for PinHash {
 }
 
 pub fn hash_pin(pin: &Pin) -> Result<PinHash, AuthError> {
+    hash_secret(pin.expose())
+}
+
+/// The same Argon2, for a secret that is not a PIN.
+///
+/// P19's device credential is 32 random bytes rather than four digits, but it
+/// is stored in the same database, which is copied to a pen drive on purpose
+/// (P05). One hashing function, one set of parameters, one place to change
+/// them — a second `Argon2::new` somewhere else is how two halves of a product
+/// end up with two different costs and nobody notices the weaker one.
+///
+/// # Errors
+///
+/// If Argon2 cannot hash it.
+pub fn hash_secret(secret: &[u8]) -> Result<PinHash, AuthError> {
     let salt = SaltString::generate(&mut OsRng);
     let hash = argon()?
-        .hash_password(pin.expose(), &salt)
+        .hash_password(secret, &salt)
         .map_err(|_| AuthError::HashFailed)?;
     Ok(PinHash(hash.to_string()))
+}
+
+/// True when the secret matches. See [`verify_pin`] for why it is a `bool`.
+#[must_use]
+pub fn verify_secret(offered: &[u8], hash: &PinHash) -> bool {
+    let Ok(parsed) = PasswordHash::new(&hash.0) else {
+        return false;
+    };
+    let Ok(argon) = argon() else {
+        return false;
+    };
+    argon.verify_password(offered, &parsed).is_ok()
 }
 
 /// True when the PIN matches.
@@ -163,13 +190,7 @@ pub fn hash_pin(pin: &Pin) -> Result<PinHash, AuthError> {
 /// that fails *fast* for an unknown person is a login that enumerates staff.
 #[must_use]
 pub fn verify_pin(pin: &Pin, hash: &PinHash) -> bool {
-    let Ok(parsed) = PasswordHash::new(&hash.0) else {
-        return false;
-    };
-    let Ok(argon) = argon() else {
-        return false;
-    };
-    argon.verify_password(pin.expose(), &parsed).is_ok()
+    verify_secret(pin.expose(), hash)
 }
 
 // ---------------------------------------------------------------------------
@@ -180,28 +201,22 @@ pub fn verify_pin(pin: &Pin, hash: &PinHash) -> bool {
 /// same per-shop salt — and these two functions exist so that
 /// [`crate::recovery`] never has to reach for `argon2` itself.
 ///
-/// They are `pub(crate)` on purpose: hashing an arbitrary string is not a
-/// service this crate offers, because the *only* two secrets in the product are
-/// the PIN and the recovery code, and a third one should have to be added here,
-/// deliberately, with a reason.
+/// They were `pub(crate)` on purpose, with a note saying the *only* two
+/// secrets in the product are the PIN and the recovery code, and that a third
+/// should have to be added here deliberately, with a reason.
+///
+/// **P19 is that third one**, and this is the reason: a phone holds a bearer
+/// credential for the counter's network. It is added the way the note asked —
+/// by promoting the two functions to [`hash_secret`] and [`verify_secret`]
+/// rather than by growing a second Argon2 configuration somewhere else, which
+/// is how two halves of a product end up with two different costs and nobody
+/// notices the weaker one.
 pub(crate) fn hash_recovery(code: &crate::recovery::RecoveryCode) -> Result<PinHash, AuthError> {
-    let salt = SaltString::generate(&mut OsRng);
-    let hash = argon()?
-        .hash_password(code.as_typed().as_bytes(), &salt)
-        .map_err(|_| AuthError::HashFailed)?;
-    Ok(PinHash(hash.to_string()))
+    hash_secret(code.as_typed().as_bytes())
 }
 
 pub(crate) fn verify_recovery(code: &crate::recovery::RecoveryCode, hash: &PinHash) -> bool {
-    let Ok(parsed) = PasswordHash::new(&hash.0) else {
-        return false;
-    };
-    let Ok(argon) = argon() else {
-        return false;
-    };
-    argon
-        .verify_password(code.as_typed().as_bytes(), &parsed)
-        .is_ok()
+    verify_secret(code.as_typed().as_bytes(), hash)
 }
 
 #[cfg(test)]

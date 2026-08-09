@@ -87,10 +87,15 @@ pub mod action {
     pub const COUNTER_CHANGED: AuditAction = "counter.changed";
     pub const DRAWER_OPENED: AuditAction = "drawer.opened";
     pub const DAY_CLOSED: AuditAction = "day.closed";
-    /// P18 â a locked day was opened again. **Its own action**, and never a
+    /// P18 — a locked day was opened again. **Its own action**, and never a
     /// second `DAY_CLOSED`: an owner asking "who unlocked Tuesday?" must be
     /// able to search for it.
     pub const DAY_REOPENED: AuditAction = "day.reopened";
+    /// P19 — a phone was let onto the counter, or taken off it. Its own
+    /// actions, because "who added that tablet?" is a question an owner asks
+    /// months later and has to be able to search for.
+    pub const DEVICE_PAIRED: AuditAction = "device.paired";
+    pub const DEVICE_REVOKED: AuditAction = "device.revoked";
     pub const BACKUP_RESTORED: AuditAction = "backup.restored";
 
     /// Every one of the above, for the screen's filter.
@@ -128,6 +133,8 @@ pub mod action {
         DRAWER_OPENED,
         DAY_CLOSED,
         DAY_REOPENED,
+        DEVICE_PAIRED,
+        DEVICE_REVOKED,
         BACKUP_RESTORED,
     ];
 
@@ -168,6 +175,8 @@ pub mod action {
             DRAWER_OPENED => "Opened the cash drawer",
             DAY_CLOSED => "Closed the day",
             DAY_REOPENED => "Opened a closed day again",
+            DEVICE_PAIRED => "Added a phone to the counter",
+            DEVICE_REVOKED => "Removed a phone from the counter",
             BACKUP_RESTORED => "Restored a backup",
             _ => "Did something this version does not know about",
         }
@@ -300,6 +309,19 @@ pub struct Chained<'a> {
 ///
 /// `staff_name` is deliberately **not** here: it is a join, not a stored
 /// column, and a shop correcting a spelling must not break its own history.
+/// SHA-256 of some bytes.
+///
+/// P19 needs it for a certificate fingerprint, which is the number a phone
+/// pins. It lives here because this crate is the only home of `sha2` (see the
+/// module list in `lib.rs`), and a second `Sha256::new()` elsewhere would be
+/// the start of a second cryptography surface nobody is reviewing.
+#[must_use]
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().into()
+}
+
 #[must_use]
 pub fn chain_hash(f: &Chained<'_>) -> String {
     let Chained {

@@ -1324,6 +1324,53 @@ CREATE INDEX idx_reservations_day  ON reservations (outlet_id, business_day);
 CREATE INDEX idx_sync_outbox_pending ON sync_outbox (created_at) WHERE synced_at IS NULL;
 
 -- ===========================================================================
+-- P19: THE PHONES THIS COUNTER SERVES.
+--
+-- **D9.** In v1 every tap on a waiter's phone travelled to Mumbai and back, and
+-- the server refused the order if the counter had not checked in within five
+-- minutes. From P19 the phone talks to the COUNTER, over the shop's own WiFi,
+-- and this is the register of which phones are allowed to.
+--
+-- The shop WiFi is not trustworthy — guests are on it — so a phone is not a
+-- device that knows the address, it is a device that has been let in by a
+-- person and holds a credential we issued.
+--
+-- **The certificate and its private key are NOT here.** They live beside the
+-- config, in `%APPDATA%\MagicBill`, because a backup taken on one machine is
+-- restored onto another (P05) and a restored backup must not resurrect another
+-- machine's private key. A certificate is machine identity; this table is shop
+-- data.
+-- ===========================================================================
+CREATE TABLE lan_devices (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    -- What the phone calls itself. Shown to the person who approves it, so a
+    -- device that appears unexpectedly can be refused by name.
+    name         TEXT    NOT NULL CHECK (trim(name) <> ''),
+    platform     TEXT    NOT NULL,
+    -- **Argon2 of the credential, never the credential.** This database is
+    -- copied to a pen drive on purpose (P05); a plaintext secret in it is a
+    -- database that hands out access to whoever finds the drive.
+    secret_hash  TEXT    NOT NULL,
+    -- Nullable on purpose: a shared tablet at the pass belongs to no one
+    -- person, and each ACTION on it still names the staff member who did it.
+    staff_id     TEXT REFERENCES staff (id),
+    paired_at    INTEGER NOT NULL,
+    paired_by    TEXT REFERENCES staff (id),
+    last_seen_at INTEGER,
+    last_ip      TEXT,
+    -- **A revoked device is not deleted** — D47's rule, which is that a
+    -- correction is a state and never a deletion. An owner asking "which phone
+    -- was that, and who took it off?" needs the row to still be here.
+    revoked_at   INTEGER,
+    revoked_by   TEXT REFERENCES staff (id)
+) STRICT;
+
+-- The authentication path reads this on EVERY request (revocation has to bite
+-- on the next request, not the next login), so it is an index and not a scan.
+CREATE INDEX idx_lan_devices_live ON lan_devices (outlet_id) WHERE revoked_at IS NULL;
+
+-- ===========================================================================
 -- VIEWS
 --
 -- Timestamps are INTEGER milliseconds, which is the right thing to store and
@@ -1373,7 +1420,11 @@ INSERT INTO permissions (code, description) VALUES
     ('settings.tax',       'Change tax settings and numbering'),
     ('staff.manage',       'Add staff, set roles and PINs'),
     ('audit.view',         'Read the audit trail'),
-    ('backup.run',         'Take and restore a backup');
+    ('backup.run',         'Take and restore a backup'),
+    -- P19. Letting a phone onto the counter is its own decision: the person who
+    -- may take an order is not automatically the person who may add a device to
+    -- the shop's network.
+    ('devices.pair',       'Let a phone onto this counter, and take it off again');
 
 -- ===========================================================================
 -- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).

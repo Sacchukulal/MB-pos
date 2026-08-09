@@ -31,5 +31,11 @@ argon2 = { version = "0.5", features = ["std"] }
 # hash chain is what makes an edited or deleted row show up.
 sha2 = "0.10"
 
+# P19: the device credential and the pairing token are random bytes that have
+# to survive a QR code, a URL and a copy-paste unchanged. base64url is the
+# answer, and writing an encoder whose only interesting property is being
+# exactly right is not a good use of anybody's time.
+base64 = "0.22"
+
 [dev-dependencies]
 serde_json = "1"

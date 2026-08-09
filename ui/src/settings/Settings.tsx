@@ -45,6 +45,7 @@ import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt } from '../preview/Receipt';
 import { Appearance } from './Appearance';
 import { Backup } from './Backup';
+import { Network } from './Network';
 import { Numbering } from './Numbering';
 import { Printers } from './Printers';
 
@@ -67,7 +68,19 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   numbering: () => <Numbering />,
   backup: () => <Backup />,
   appearance: () => <Appearance />,
+  network: () => <Network />,
 };
+
+/**
+ * **Sections that are not settings.**
+ *
+ * The catalogue is the screen (D72) and P19 has nothing to put in it: a paired
+ * phone is a ROW, not a setting, exactly as a printer and a counter are. So
+ * the rail gets one appended entry rather than the catalogue getting a group
+ * with nothing in it — which would have to be special-cased in the load, the
+ * save, the export and the both-directions test.
+ */
+const EXTRA_SECTIONS = [{ code: 'network', label: 'Phones', canEdit: true, settings: [] }];
 
 /**
  * Which sections show the paper beside them.
@@ -132,7 +145,7 @@ export function Settings() {
     [],
   );
 
-  const groups = view?.groups ?? [];
+  const groups = [...(view?.groups ?? []), ...EXTRA_SECTIONS];
   const active = groups.find((g) => g.code === group) ?? groups[0];
   const showsPaper = active !== undefined && SHOWS_PAPER.has(active.code) && matches === null;
 

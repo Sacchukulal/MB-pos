@@ -268,6 +268,19 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("close_day", Access::Needs(Permission::DayClose)),
     ("reopen_day", Access::Needs(Permission::DayClose)),
 
+    // --- the phones this counter serves (P19) --------------------------------
+    // READING the panel is `reports.view`: it shows which devices exist and
+    // when they were last seen, which is shop information rather than a
+    // control. Every WRITE is `devices.pair` — letting a phone onto the shop's
+    // network is its own decision, and taking one off is the same decision
+    // backwards.
+    ("network", Access::Needs(Permission::ReportsView)),
+    ("open_pairing", Access::Needs(Permission::DevicesPair)),
+    ("close_pairing", Access::Needs(Permission::DevicesPair)),
+    ("allow_device", Access::Needs(Permission::DevicesPair)),
+    ("refuse_device", Access::Needs(Permission::DevicesPair)),
+    ("revoke_device", Access::Needs(Permission::DevicesPair)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -536,7 +549,8 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 13] = [
+        const SOURCES: [&str; 14] = [
+            include_str!("lan.rs"),
             include_str!("dayclose.rs"),
             include_str!("reports.rs"),
             include_str!("ipc.rs"),
