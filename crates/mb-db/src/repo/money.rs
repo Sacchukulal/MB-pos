@@ -11,6 +11,7 @@
 //! can tell which one is right.
 
 use mb_core::credit::{Ageing, Movement, MovementKind};
+use mb_core::expense::Every;
 use mb_core::{BusinessDay, CustomerId, Money, StaffId, Timestamp};
 use rusqlite::Transaction;
 
@@ -70,18 +71,85 @@ pub struct Owing {
 }
 
 
+
+/// A category, and it is DATA (audit B14): v1's six were in the source, so a
+/// shop that spent money on anything else recorded it as "Other" forever.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpenseCategory {
+    pub id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub is_active: bool,
+}
+
+/// What moved in or out of the DRAWER that is not a sale and not an expense.
+///
+/// A cash expense deliberately has no row here — see the schema comment on
+/// `cash_movements`. Two rows for one fact can disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CashMovement {
+    pub id: String,
+    /// `float`, `top_up`, `payout` or `bank_drop`. The direction belongs to
+    /// the kind; the amount is always positive.
+    pub kind: String,
+    pub amount: Money,
+    pub reason: String,
+    pub at: Timestamp,
+    pub business_day: BusinessDay,
+    pub moved_by: Option<StaffId>,
+}
+
+/// Rent, salary, the internet bill. **A template and a reminder — never an
+/// automatic posting.**
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recurring {
+    pub id: String,
+    pub category_id: Option<String>,
+    pub description: String,
+    pub amount: Money,
+    pub mode: String,
+    pub paid_to: Option<String>,
+    pub every: Every,
+    pub next_due: BusinessDay,
+    pub is_active: bool,
+}
+
+/// The number a drawer is counted against — scope 10.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CashPosition {
+    pub opening_float: Money,
+    pub cash_sales: Money,
+    pub top_ups: Money,
+    pub cash_expenses: Money,
+    pub payouts: Money,
+    pub bank_drops: Money,
+    /// float + sales + top-ups − expenses − payouts − drops.
+    pub expected: Money,
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expense {
     pub id: String,
     pub category_id: Option<String>,
     pub description: String,
     pub amount: Money,
-    /// Whether it came out of the till, which decides the day close's expected
-    /// cash.
-    pub is_cash: bool,
+    /// `cash`, `bank`, `upi` or `card`. **Cash decides the day close's
+    /// expected drawer**; the other three are only telling a shop which
+    /// statement to reconcile against, which is why one boolean was not
+    /// enough (P16).
+    pub mode: String,
+    /// A NAME. Suppliers and their ledger are P26.
+    pub paid_to: Option<String>,
+    pub reference: Option<String>,
+    /// Input credit (scope 2.9): the rate, and the tax inside what was paid.
+    /// Both or neither — the schema says so too.
+    pub gst_rate_bp: Option<i64>,
+    pub gst_amount: Option<Money>,
     pub paid_at: Timestamp,
     pub paid_by: Option<StaffId>,
     pub business_day: BusinessDay,
+    pub note: Option<String>,
 }
 
 /// Scope 10.8 and requirement 9 of the ten.
@@ -450,25 +518,38 @@ impl<'a> MoneyRepo<'a> {
     /// Audit A2: v1's counter never sent expenses, so the owner's phone showed
     /// ₹0 and an inflated net profit forever. Here it is the same table, the
     /// same outbox and the same treatment as a bill.
+    /// Save or edit an expense — scope 10.6, audit B15 (v1 could do neither).
     pub fn save_expense(&self, outlet: &str, expense: &Expense) -> Result<(), DbError> {
         self.tx.execute(
-            "INSERT INTO expenses (id, outlet_id, category_id, description, amount, is_cash,
-                                   paid_at, paid_by, business_day)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT (id) DO UPDATE SET category_id = excluded.category_id,
-                                            description = excluded.description,
-                                            amount      = excluded.amount,
-                                            is_cash     = excluded.is_cash",
+            "INSERT INTO expenses (id, outlet_id, category_id, description, amount, mode,
+                                   paid_to, reference, gst_rate_bp, gst_amount,
+                                   paid_at, paid_by, business_day, note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT (id) DO UPDATE SET category_id  = excluded.category_id,
+                                            description  = excluded.description,
+                                            amount       = excluded.amount,
+                                            mode         = excluded.mode,
+                                            paid_to      = excluded.paid_to,
+                                            reference    = excluded.reference,
+                                            gst_rate_bp  = excluded.gst_rate_bp,
+                                            gst_amount   = excluded.gst_amount,
+                                            business_day = excluded.business_day,
+                                            note         = excluded.note",
             rusqlite::params![
                 expense.id,
                 outlet,
                 expense.category_id,
                 expense.description,
                 encode::money_to_sql(expense.amount),
-                encode::bool_to_sql(expense.is_cash),
+                expense.mode,
+                expense.paid_to,
+                expense.reference,
+                expense.gst_rate_bp,
+                expense.gst_amount.map(encode::money_to_sql),
                 encode::timestamp_to_sql(expense.paid_at),
                 expense.paid_by.as_ref().map(StaffId::as_str),
                 encode::business_day_to_sql(expense.business_day),
+                expense.note,
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(
@@ -481,53 +562,366 @@ impl<'a> MoneyRepo<'a> {
     }
 
     pub fn list_expenses(&self, outlet: &str, day: BusinessDay) -> Result<Vec<Expense>, DbError> {
-        let mut stmt = self.tx.prepare_cached(
-            "SELECT id, category_id, description, amount, is_cash, paid_at, paid_by, business_day
+        self.read_expenses(
+            "SELECT id, category_id, description, amount, mode, paid_to, reference,
+                    gst_rate_bp, gst_amount, paid_at, paid_by, business_day, note
                FROM expenses WHERE outlet_id = ?1 AND business_day = ?2 ORDER BY paid_at",
+            rusqlite::params![outlet, encode::business_day_to_sql(day)],
+        )
+    }
+
+    /// Everything between two days — what the month-against-month view reads.
+    pub fn expenses_between(
+        &self,
+        outlet: &str,
+        from: BusinessDay,
+        to: BusinessDay,
+    ) -> Result<Vec<Expense>, DbError> {
+        self.read_expenses(
+            "SELECT id, category_id, description, amount, mode, paid_to, reference,
+                    gst_rate_bp, gst_amount, paid_at, paid_by, business_day, note
+               FROM expenses
+              WHERE outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3
+              ORDER BY business_day, paid_at",
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to),
+            ],
+        )
+    }
+
+    fn read_expenses(
+        &self,
+        sql: &str,
+        params: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<Expense>, DbError> {
+        let mut stmt = self.tx.prepare_cached(sql)?;
+        let rows = stmt.query_map(params, |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, Option<String>>(12)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                id,
+                category_id,
+                description,
+                amount,
+                mode,
+                paid_to,
+                reference,
+                gst_rate_bp,
+                gst_amount,
+                paid_at,
+                paid_by,
+                day,
+                note,
+            ) = row?;
+            out.push(Expense {
+                id,
+                category_id,
+                description,
+                amount: encode::money_from_sql(amount),
+                mode,
+                paid_to,
+                reference,
+                gst_rate_bp,
+                gst_amount: gst_amount.map(encode::money_from_sql),
+                paid_at: encode::timestamp_from_sql(paid_at),
+                paid_by: paid_by.map(StaffId::new),
+                business_day: encode::business_day_from_sql(day, "expenses.business_day")?,
+                note,
+            });
+        }
+        Ok(out)
+    }
+
+    /// **An expense really is deleted** — and it is the only money row in this
+    /// product that is.
+    ///
+    /// A bill is voided rather than deleted because a customer has a copy of
+    /// it and the number must never be reused. An expense has neither
+    /// property: a ₹40 milk purchase typed twice is a typing mistake, not a
+    /// transaction, and leaving it as a "voided expense" would mean a shop's
+    /// expense list is full of things that did not happen. The audit row (R11)
+    /// is what makes it accountable, and it carries the whole row as `before`.
+    pub fn delete_expense(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        let gone = self
+            .tx
+            .execute("DELETE FROM expenses WHERE outlet_id = ?1 AND id = ?2", rusqlite::params![outlet, id])?;
+        if gone == 0 {
+            return Err(DbError::invariant("that expense is not here any more"));
+        }
+        OutboxRepo::new(self.tx).enqueue(outlet, "expenses", id, Op::Delete, at)
+    }
+
+    // -- categories, which are DATA (audit B14) ------------------------------
+
+    pub fn save_expense_category(
+        &self,
+        outlet: &str,
+        category: &ExpenseCategory,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        if category.name.trim().is_empty() {
+            return Err(DbError::invariant("a category needs a name"));
+        }
+        self.tx.execute(
+            "INSERT INTO expense_categories (id, outlet_id, name, sort_order, is_active)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (id) DO UPDATE SET name       = excluded.name,
+                                            sort_order = excluded.sort_order,
+                                            is_active  = excluded.is_active",
+            rusqlite::params![
+                category.id,
+                outlet,
+                category.name.trim(),
+                category.sort_order,
+                encode::bool_to_sql(category.is_active),
+            ],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "expense_categories", &category.id, Op::Upsert, at)
+    }
+
+    pub fn list_expense_categories(&self, outlet: &str) -> Result<Vec<ExpenseCategory>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT id, name, sort_order, is_active FROM expense_categories
+              WHERE outlet_id = ?1 ORDER BY sort_order, name",
+        )?;
+        let rows = stmt.query_map([outlet], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, name, sort_order, is_active) = row?;
+            out.push(ExpenseCategory {
+                id,
+                name,
+                sort_order,
+                is_active: encode::bool_from_sql(is_active, "expense_categories.is_active")?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// A category with money against it cannot be deleted — the same rule and
+    /// the same sentence shape as a table with bills against it (P14).
+    pub fn delete_expense_category(
+        &self,
+        outlet: &str,
+        id: &str,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        let used: i64 = self.tx.query_row(
+            "SELECT count(*) FROM expenses WHERE category_id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        if used > 0 {
+            return Err(DbError::invariant(format!(
+                "{used} expense(s) are in this category. Hide it instead — that takes it off \
+                 the list and keeps the history"
+            )));
+        }
+        self.tx.execute(
+            "DELETE FROM expense_categories WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "expense_categories", id, Op::Delete, at)
+    }
+
+    // -- the drawer ----------------------------------------------------------
+
+    pub fn save_cash_movement(
+        &self,
+        outlet: &str,
+        movement: &CashMovement,
+    ) -> Result<(), DbError> {
+        if movement.reason.trim().is_empty() {
+            return Err(DbError::invariant("a cash movement needs a reason"));
+        }
+        if !movement.amount.is_positive() {
+            return Err(DbError::invariant(
+                "a cash movement is a positive amount and a kind, never a negative amount",
+            ));
+        }
+        self.tx.execute(
+            "INSERT INTO cash_movements (id, outlet_id, kind, amount, reason, at, business_day,
+                                         moved_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (id) DO UPDATE SET kind   = excluded.kind,
+                                            amount = excluded.amount,
+                                            reason = excluded.reason",
+            rusqlite::params![
+                movement.id,
+                outlet,
+                movement.kind,
+                encode::money_to_sql(movement.amount),
+                movement.reason.trim(),
+                encode::timestamp_to_sql(movement.at),
+                encode::business_day_to_sql(movement.business_day),
+                movement.moved_by.as_ref().map(StaffId::as_str),
+            ],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "cash_movements", &movement.id, Op::Upsert, movement.at)
+    }
+
+    pub fn list_cash_movements(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+    ) -> Result<Vec<CashMovement>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT id, kind, amount, reason, at, business_day, moved_by FROM cash_movements
+              WHERE outlet_id = ?1 AND business_day = ?2 ORDER BY at",
         )?;
         let rows = stmt.query_map(
             rusqlite::params![outlet, encode::business_day_to_sql(day)],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, Option<String>>(6)?,
-                    row.get::<_, i64>(7)?,
                 ))
             },
         )?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, category_id, description, amount, is_cash, paid_at, paid_by, day) = row?;
-            out.push(Expense {
+            let (id, kind, amount, reason, at, day, moved_by) = row?;
+            out.push(CashMovement {
                 id,
-                category_id,
-                description,
+                kind,
                 amount: encode::money_from_sql(amount),
-                is_cash: encode::bool_from_sql(is_cash, "expenses.is_cash")?,
-                paid_at: encode::timestamp_from_sql(paid_at),
-                paid_by: paid_by.map(StaffId::new),
-                business_day: encode::business_day_from_sql(day, "expenses.business_day")?,
+                reason,
+                at: encode::timestamp_from_sql(at),
+                business_day: encode::business_day_from_sql(day, "cash_movements.business_day")?,
+                moved_by: moved_by.map(StaffId::new),
             });
         }
         Ok(out)
     }
 
-    // -- the day close ------------------------------------------------------
-
-    /// Expected cash in the drawer: the opening float, plus cash taken on
-    /// bills, less cash expenses. What the Z-report compares against a count.
-    pub fn expected_cash(
+    pub fn delete_cash_movement(
         &self,
         outlet: &str,
-        day: BusinessDay,
-        opening_float: Money,
-    ) -> Result<Money, DbError> {
+        id: &str,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        self.tx.execute(
+            "DELETE FROM cash_movements WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "cash_movements", id, Op::Delete, at)
+    }
+
+    // -- recurring templates -------------------------------------------------
+
+    pub fn save_recurring(&self, outlet: &str, template: &Recurring, at: Timestamp) -> Result<(), DbError> {
+        self.tx.execute(
+            "INSERT INTO recurring_expenses (id, outlet_id, category_id, description, amount,
+                                             mode, paid_to, every, next_due, is_active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT (id) DO UPDATE SET category_id = excluded.category_id,
+                                            description = excluded.description,
+                                            amount      = excluded.amount,
+                                            mode        = excluded.mode,
+                                            paid_to     = excluded.paid_to,
+                                            every       = excluded.every,
+                                            next_due    = excluded.next_due,
+                                            is_active   = excluded.is_active",
+            rusqlite::params![
+                template.id,
+                outlet,
+                template.category_id,
+                template.description,
+                encode::money_to_sql(template.amount),
+                template.mode,
+                template.paid_to,
+                match template.every {
+                    Every::Week => "week",
+                    Every::Month => "month",
+                },
+                encode::business_day_to_sql(template.next_due),
+                encode::bool_to_sql(template.is_active),
+            ],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "recurring_expenses", &template.id, Op::Upsert, at)
+    }
+
+    pub fn list_recurring(&self, outlet: &str) -> Result<Vec<Recurring>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT id, category_id, description, amount, mode, paid_to, every, next_due,
+                    is_active
+               FROM recurring_expenses WHERE outlet_id = ?1 ORDER BY next_due",
+        )?;
+        let rows = stmt.query_map([outlet], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, category_id, description, amount, mode, paid_to, every, next_due, is_active) =
+                row?;
+            out.push(Recurring {
+                id,
+                category_id,
+                description,
+                amount: encode::money_from_sql(amount),
+                mode,
+                paid_to,
+                every: if every == "week" { Every::Week } else { Every::Month },
+                next_due: encode::business_day_from_sql(next_due, "recurring_expenses.next_due")?,
+                is_active: encode::bool_from_sql(is_active, "recurring_expenses.is_active")?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// **The cash position** — scope 10.6, and the number a drawer is counted
+    /// against.
+    ///
+    /// `float + cash taken on bills + top-ups − cash expenses − payouts − bank
+    /// drops`, computed in one place because P18's day close reads this
+    /// function rather than writing a second one that can disagree with it.
+    ///
+    /// **A cash expense is not double-counted**, and cannot be: it is an
+    /// expense row and nothing else. The movements table deliberately holds no
+    /// row for it (see the schema comment).
+    pub fn cash_position(&self, outlet: &str, day: BusinessDay) -> Result<CashPosition, DbError> {
         let day_sql = encode::business_day_to_sql(day);
+
         let taken: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(p.amount + p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
@@ -536,15 +930,65 @@ impl<'a> MoneyRepo<'a> {
             rusqlite::params![outlet, day_sql],
             |r| r.get(0),
         )?;
-        let paid_out: i64 = self.tx.query_row(
+        let spent: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM expenses
-              WHERE outlet_id = ?1 AND business_day = ?2 AND is_cash = 1",
+              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'",
             rusqlite::params![outlet, day_sql],
             |r| r.get(0),
         )?;
-        Ok(encode::money_from_sql(
-            opening_float.paise() + taken - paid_out,
-        ))
+        let moved = |kind: &str| -> Result<i64, DbError> {
+            Ok(self.tx.query_row(
+                "SELECT COALESCE(SUM(amount), 0) FROM cash_movements
+                  WHERE outlet_id = ?1 AND business_day = ?2 AND kind = ?3",
+                rusqlite::params![outlet, day_sql, kind],
+                |r| r.get(0),
+            )?)
+        };
+        let float = moved("float")?;
+        let top_ups = moved("top_up")?;
+        let payouts = moved("payout")?;
+        let drops = moved("bank_drop")?;
+
+        Ok(CashPosition {
+            opening_float: encode::money_from_sql(float),
+            cash_sales: encode::money_from_sql(taken),
+            top_ups: encode::money_from_sql(top_ups),
+            cash_expenses: encode::money_from_sql(spent),
+            payouts: encode::money_from_sql(payouts),
+            bank_drops: encode::money_from_sql(drops),
+            expected: encode::money_from_sql(
+                float + taken + top_ups - spent - payouts - drops,
+            ),
+        })
+    }
+
+    // -- the day close ------------------------------------------------------
+    /// **Superseded by [`MoneyRepo::cash_position`], and kept as one line of
+    /// delegation rather than a second answer.**
+    ///
+    /// P05 wrote this before cash movements existed, so it took the opening
+    /// float as an argument and knew nothing about payouts or bank drops. P16
+    /// gave the drawer its own table; a shop that pays out ₹300 and drops
+    /// ₹1,000 at the bank would have been told to expect ₹1,300 it does not
+    /// have.
+    ///
+    /// The float argument is now only used when the day has no float movement
+    /// recorded — which is a shop that has not opened its drawer through the
+    /// product yet.
+    pub fn expected_cash(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+        opening_float: Money,
+    ) -> Result<Money, DbError> {
+        let position = self.cash_position(outlet, day)?;
+        if position.opening_float.is_zero() {
+            return position
+                .expected
+                .add(opening_float)
+                .map_err(|e| DbError::invariant(e.to_string()));
+        }
+        Ok(position.expected)
     }
 
     pub fn save_day_close(&self, outlet: &str, close: &DayClose) -> Result<(), DbError> {

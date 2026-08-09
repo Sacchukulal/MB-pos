@@ -525,10 +525,16 @@ fn settlement_for(bill: &mb_core::Bill, n: i64) -> Settlement {
 fn seed_money(db: &Db) {
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        tx.execute(
-            "INSERT INTO expense_categories (id, outlet_id, name) VALUES ('exc_gas', ?1, 'Gas')",
-            [OUTLET],
-        )?;
+        // P16 seeds a starting set of categories, `exc_gas` among them, so
+        // this fixture no longer creates it — it just uses it.
+        {
+            let seeded: i64 = tx.query_row(
+                "SELECT count(*) FROM expense_categories WHERE id = 'exc_gas'",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(seeded, 1, "migration 0001 seeds the expense categories");
+        }
         for n in 0..6_i64 {
             repos.money().save_expense(
                 OUTLET,
@@ -537,7 +543,12 @@ fn seed_money(db: &Db) {
                     category_id: Some("exc_gas".to_owned()),
                     description: format!("Gas cylinder {n}"),
                     amount: Money::from_paise(180_000 + n),
-                    is_cash: n % 2 == 0,
+                    mode: if n % 2 == 0 { "cash".to_owned() } else { "upi".to_owned() },
+                    paid_to: None,
+                    reference: None,
+                    gst_rate_bp: None,
+                    gst_amount: None,
+                    note: None,
                     paid_at: at(n),
                     paid_by: Some(StaffId::new("staff_1")),
                     business_day: day(i32::try_from(n % 3).expect("small")),

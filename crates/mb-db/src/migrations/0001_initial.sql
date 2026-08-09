@@ -1061,6 +1061,48 @@ CREATE TABLE credit_adjustments (
 ) STRICT;
 
 -- Data, not a hardcoded list.
+-- P16. What moved in and out of the DRAWER that is not a sale and not an
+-- expense: the opening float, a top-up from the owner, a payout, a bank drop.
+--
+-- **A cash expense is deliberately NOT in here.** It would be a second row for
+-- one fact, and two rows for one fact can disagree — the same argument D65
+-- makes about a credit balance. The cash position is a query that adds these
+-- to the cash sales and subtracts the cash expenses; the duplicate cannot
+-- exist because it is never written.
+CREATE TABLE cash_movements (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    kind         TEXT    NOT NULL
+        CHECK (kind IN ('float', 'top_up', 'payout', 'bank_drop')),
+    -- Always positive paise. The direction belongs to the kind, never to a
+    -- sign — a negative amount in a ledger is how a subtraction becomes an
+    -- addition in somebody's report six months later.
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    reason       TEXT    NOT NULL,
+    at           INTEGER NOT NULL,
+    business_day INTEGER NOT NULL,
+    moved_by     TEXT REFERENCES staff (id),
+    CHECK (trim(reason) <> '')
+) STRICT;
+
+-- P16. Rent, salary, the internet bill. A TEMPLATE and a reminder — nothing
+-- here is ever posted automatically, because silently writing money into a
+-- shop's books is not acceptable at any level of convenience.
+CREATE TABLE recurring_expenses (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    category_id  TEXT REFERENCES expense_categories (id),
+    description  TEXT    NOT NULL,
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    mode         TEXT    NOT NULL DEFAULT 'cash'
+        CHECK (mode IN ('cash', 'bank', 'upi', 'card')),
+    paid_to      TEXT,
+    every        TEXT    NOT NULL CHECK (every IN ('week', 'month')),
+    -- Days since epoch. Advanced only when a reminder is CONFIRMED.
+    next_due     INTEGER NOT NULL,
+    is_active    INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+) STRICT;
+
 CREATE TABLE expense_categories (
     id         TEXT    NOT NULL PRIMARY KEY,
     outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
@@ -1077,13 +1119,28 @@ CREATE TABLE expenses (
     category_id  TEXT REFERENCES expense_categories (id),
     description  TEXT    NOT NULL,
     amount       INTEGER NOT NULL,
-    -- Whether it came out of the till decides the day close's expected cash.
-    is_cash      INTEGER NOT NULL DEFAULT 1 CHECK (is_cash IN (0, 1)),
+    -- P16 replaced `is_cash` with the real mode. Whether it came out of the
+    -- till still decides the day close's expected cash — that is `mode =
+    -- 'cash'` — but a shop reconciling a bank statement needs to tell a
+    -- transfer from a UPI payment, and one boolean cannot.
+    mode         TEXT    NOT NULL DEFAULT 'cash'
+        CHECK (mode IN ('cash', 'bank', 'upi', 'card')),
+    -- A NAME, not a supplier record: suppliers and their ledger are P26.
+    paid_to      TEXT,
+    reference    TEXT,
+    -- Scope 2.9, input credit. A shop that buys 1,180 of vegetables at 18%
+    -- has 180 it can claim, and v1 could not record it at all. Both columns
+    -- or neither.
+    gst_rate_bp  INTEGER,
+    gst_amount   INTEGER,
     paid_at      INTEGER NOT NULL,
     paid_by      TEXT REFERENCES staff (id),
     business_day INTEGER NOT NULL,
     note         TEXT,
-    CHECK (amount > 0)
+    CHECK (amount > 0),
+    CHECK ((gst_rate_bp IS NULL) = (gst_amount IS NULL)),
+    -- The tax cannot be more than the money that was spent.
+    CHECK (gst_amount IS NULL OR (gst_amount >= 0 AND gst_amount <= amount))
 ) STRICT;
 
 -- Scope 10.8 and requirement 9 of the ten: "The day can be closed: expected
@@ -1319,6 +1376,24 @@ INSERT INTO permissions (code, description) VALUES
 -- A starting point, not a law: the table exists so a shop can edit them, and
 -- P12's own test asserts a shop's edits survive.
 -- ===========================================================================
+
+-- P16, audit B14: v1's expense categories were a hardcoded six-item list in
+-- the source, so a shop that spent money on anything else recorded it as
+-- "Other" forever. These are a STARTING POINT and every one of them can be
+-- renamed, reordered or hidden.
+INSERT INTO expense_categories (id, outlet_id, name, sort_order) VALUES
+    ('exc_vegetables',  'outlet_default', 'Vegetables',      0),
+    ('exc_milk',        'outlet_default', 'Milk',            1),
+    ('exc_meat',        'outlet_default', 'Meat and fish',   2),
+    ('exc_groceries',   'outlet_default', 'Groceries',       3),
+    ('exc_gas',         'outlet_default', 'Gas',             4),
+    ('exc_salary',      'outlet_default', 'Salary',          5),
+    ('exc_rent',        'outlet_default', 'Rent',            6),
+    ('exc_electricity', 'outlet_default', 'Electricity',     7),
+    ('exc_water',       'outlet_default', 'Water',           8),
+    ('exc_maintenance', 'outlet_default', 'Maintenance',     9),
+    ('exc_transport',   'outlet_default', 'Transport',      10),
+    ('exc_other',       'outlet_default', 'Other',          11);
 
 INSERT INTO reasons (id, outlet_id, kind, text, sort_order) VALUES
     ('rsn_void_wrong',    'outlet_default', 'void',      'Wrong items billed',        0),

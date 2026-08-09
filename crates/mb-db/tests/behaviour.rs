@@ -88,10 +88,19 @@ fn t6_a_rolled_back_transaction_leaves_nothing() {
     assert!(result.is_err());
 
     db.read(|conn| {
-        for table in ["staff", "sections", "dining_tables", "categories", "items", "expense_categories"] {
+        for table in ["staff", "sections", "dining_tables", "categories", "items"] {
             let n: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;
             assert_eq!(n, 0, "{table} kept rows from a rolled-back transaction");
         }
+        // `expense_categories` is SEEDED by migration 0001 (P16), so the
+        // question here is whether the rolled-back row survived — not
+        // whether the table is empty.
+        let rolled_back: i64 = conn.query_row(
+            "SELECT count(*) FROM expense_categories WHERE id = 'exc_1'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(rolled_back, 0, "a rolled-back category survived");
         Ok(())
     })
     .expect("count");
@@ -164,7 +173,13 @@ fn t7_a_long_read_does_not_block_a_write() {
 
     // And the reverse: the reader's snapshot is still readable afterwards.
     db.read(|conn| {
-        let n: i64 = conn.query_row("SELECT count(*) FROM expense_categories", [], |r| r.get(0))?;
+        // The twelve seeded by migration 0001 (P16), plus the one this test
+        // wrote while a read was open.
+        let n: i64 = conn.query_row(
+            "SELECT count(*) FROM expense_categories WHERE id LIKE 'exc_t7%' OR id = 'exc_1'",
+            [],
+            |r| r.get(0),
+        )?;
         assert_eq!(n, 1);
         Ok(())
     })

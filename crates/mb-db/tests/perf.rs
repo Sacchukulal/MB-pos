@@ -338,7 +338,7 @@ fn seed_a_shop(db: &Db) {
         }
         tx.execute(
             "INSERT INTO expense_categories (id, outlet_id, name)
-             VALUES ('exc_1', 'outlet_default', 'Gas')",
+             VALUES ('exc_perf', 'outlet_default', 'Gas')",
             [],
         )?;
         for n in 0..200 {
@@ -523,9 +523,10 @@ fn write_bill_rows(
     // those tables are not zero in the projection.
     if n.is_multiple_of(20) {
         tx.execute(
-            "INSERT INTO expenses (id, outlet_id, category_id, description, amount, is_cash,
+            "INSERT INTO expenses (id, outlet_id, category_id, description, amount, mode,
                                    paid_at, paid_by, business_day)
-             VALUES (?1, 'outlet_default', 'exc_1', 'Gas cylinder', 180000, 1, ?2, 'staff_1', ?3)",
+             VALUES (?1, 'outlet_default', 'exc_gas', 'Gas cylinder', 180000, 'cash', ?2,
+                     'staff_1', ?3)",
             rusqlite::params![format!("exp_{n:07}"), at_sql, day_sql],
         )?;
     }
