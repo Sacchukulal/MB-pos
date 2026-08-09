@@ -58,6 +58,15 @@ fn main() {
             "SELECT id, category_id, description, amount, mode, paid_to, gst_amount \n               FROM expenses",
             "SELECT kind, amount, reason, business_day FROM cash_movements",
             "SELECT id, description, amount, every, next_due, is_active FROM recurring_expenses",
+            // P17. The two places a setting is kept, and reading them back is
+            // the only proof that the settings screen did anything — the
+            // screen saying "Saved" is the thing being tested.
+            "SELECT name, phone, gstin, fssai, state_code, upi_id, upi_reference,
+                    is_composition, default_place_of_supply
+               FROM store_profile",
+            "SELECT key, value, value_type, updated_by FROM settings ORDER BY key",
+            "SELECT kind, terminal_id, prefix, pad_width, reset_daily, start, last_issued
+               FROM counters",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();

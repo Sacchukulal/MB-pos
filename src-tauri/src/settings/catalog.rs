@@ -708,6 +708,10 @@ pub const CATALOG: &[Entry] = &[
     pick!("kitchen.pattern", Kitchen, Row, "Separator line",
         "", ["kot", "line", "divider"], PATTERNS, pattern_to, pattern_from,
         kitchen.pattern),
+    pick!("kitchen.row_height", Kitchen, Row, "Row height",
+        "How much air there is between dishes. The kitchen reads this at speed.",
+        ["kot", "spacing", "compact", "relaxed"], ROW_HEIGHTS, row_height_to,
+        row_height_from, kitchen.row_height),
     flag!("kitchen.separators.below_title", Kitchen, Row, "Line under the title",
         "", ["kot", "separator", "title"], kitchen.separators.below_title),
     flag!("kitchen.separators.below_token", Kitchen, Row, "Line under the token",
@@ -718,10 +722,6 @@ pub const CATALOG: &[Entry] = &[
         "", ["kot", "separator", "columns"], kitchen.separators.below_column_names),
     flag!("kitchen.separators.below_items", Kitchen, Row, "Line under the food",
         "", ["kot", "separator", "items"], kitchen.separators.below_items),
-    pick!("kitchen.row_height", Kitchen, Row, "Row height",
-        "How much air there is between dishes. The kitchen reads this at speed.",
-        ["kot", "spacing", "compact", "relaxed"], ROW_HEIGHTS, row_height_to,
-        row_height_from, kitchen.row_height),
     size!("kitchen.title.scale", Kitchen, "Title size",
         "", ["kot", "size", "title"], kitchen.title),
     flag!("kitchen.title.bold", Kitchen, Row, "Title in bold",
@@ -751,6 +751,10 @@ pub const CATALOG: &[Entry] = &[
     pick!("billing.locked_order_type", Billing, Row, "Which order type",
         "Used when the order type is locked.", ["order type", "parcel", "dine in"],
         ORDER_TYPES, order_type_to, order_type_from, billing.locked_order_type),
+    number!("billing.idle_lock_minutes", Billing, Row, "Lock the counter after",
+        "Minutes of nobody touching it. 0 never locks by itself.",
+        ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
+        billing.idle_lock_minutes),
     flag!("billing.confirm_before_kitchen", Billing, Row, "Ask before printing a kitchen ticket",
         "", ["confirm", "kot", "ask"], billing.confirm_before_kitchen),
     flag!("billing.confirm_before_bill", Billing, Row, "Ask before printing a bill",
@@ -758,10 +762,6 @@ pub const CATALOG: &[Entry] = &[
     flag!("billing.kitchen_ticket_off", Billing, Row, "This shop has no kitchen ticket",
         "For a counter where the food is already made.",
         ["kot", "disable", "off", "no kitchen"], billing.kitchen_ticket_off),
-    number!("billing.idle_lock_minutes", Billing, Row, "Lock the counter after",
-        "Minutes of nobody touching it. 0 never locks by itself.",
-        ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
-        billing.idle_lock_minutes),
     number!("billing.service_charge_bp", Billing, Row, "Service charge",
         "In hundredths of a percent, so 500 is 5%. 0 means you do not charge it. \
          Added to dine-in bills only.",
@@ -814,6 +814,64 @@ pub const CATALOG: &[Entry] = &[
 #[must_use]
 pub fn find(key: &str) -> Option<&'static Entry> {
     CATALOG.iter().find(|e| e.key == key)
+}
+
+/// **Sub-headings, by key prefix** — and this is a bug found by looking at it.
+///
+/// The bill section is thirty-nine settings, and the first version drew them as
+/// one undifferentiated grid: a shopkeeper wanting "Total size" scrolled past
+/// twenty checkboxes with no landmark to steer by. Audit Part 3 groups them —
+/// visibility, separators, sizes — and the screen did not.
+///
+/// It is a prefix table rather than a field on all ninety lines because **the
+/// keys already say what they are**: everything under `receipt.separators.` is
+/// a separator. The longest matching prefix wins, so `receipt.qr_width_pct`
+/// lands under the QR code rather than under the bill in general.
+///
+/// A key with no prefix here falls back to its group's own label, and there is
+/// a test that every entry gets a heading.
+const TOPICS: &[(&str, &str)] = &[
+    ("store.upi_", "Taking money by UPI"),
+    ("receipt.pattern", "Paper and spacing"),
+    ("receipt.row_height", "Paper and spacing"),
+    ("receipt.show.", "What goes on the bill"),
+    ("receipt.separators.", "Dividing lines"),
+    ("receipt.sections.", "Sizes and bold"),
+    ("receipt.logo", "Your logo"),
+    ("receipt.qr", "The UPI QR code"),
+    ("receipt.footer", "The last words"),
+    ("receipt.composition_note", "The last words"),
+    ("kitchen.show_", "What goes on the ticket"),
+    ("kitchen.two_column", "What goes on the ticket"),
+    ("kitchen.pattern", "Paper and spacing"),
+    ("kitchen.row_height", "Paper and spacing"),
+    ("kitchen.separators.", "Dividing lines"),
+    ("kitchen.title", "Sizes and bold"),
+    ("kitchen.details", "Sizes and bold"),
+    ("kitchen.items", "Sizes and bold"),
+    ("billing.search_mode", "At the counter"),
+    ("billing.rounding", "At the counter"),
+    ("billing.lock_order_type", "At the counter"),
+    ("billing.locked_order_type", "At the counter"),
+    ("billing.confirm_", "Before it prints"),
+    ("billing.kitchen_ticket_off", "Before it prints"),
+    ("billing.idle_lock_minutes", "At the counter"),
+    ("billing.service_charge", "Charges you add"),
+    ("billing.packing_charge", "Charges you add"),
+    ("billing.delivery_charge", "Charges you add"),
+];
+
+/// The heading a setting sits under.
+#[must_use]
+pub fn topic_for(entry: &Entry) -> &'static str {
+    TOPICS
+        .iter()
+        .filter(|(prefix, _)| entry.key.starts_with(prefix))
+        // Longest wins: `receipt.qr` and `receipt.qr_width_pct` are both the QR
+        // code, and `kitchen.show_` must not swallow `kitchen.show_column_names`
+        // into something more general.
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map_or_else(|| entry.group.label(), |(_, heading)| *heading)
 }
 
 /// **The GSTIN's state code must be the shop's own state.**

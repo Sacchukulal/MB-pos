@@ -133,6 +133,36 @@ fn every_entry_is_written_for_a_shopkeeper() {
     }
 }
 
+/// **Every setting sits under a heading, and headings come in runs.**
+///
+/// The screen draws a heading when it changes, so a topic that appears, stops
+/// and comes back again would draw the same heading twice with unrelated
+/// settings between. Found by looking at thirty-nine receipt settings in one
+/// flat grid; this is what stops it happening again.
+#[test]
+fn every_setting_has_a_heading_and_the_headings_do_not_interleave() {
+    for group in Group::ALL {
+        let mut seen: Vec<&str> = Vec::new();
+        let mut previous = "";
+        for entry in CATALOG.iter().filter(|e| e.group == *group) {
+            let topic = catalog::topic_for(entry);
+            assert!(!topic.is_empty(), "{} has no heading", entry.key);
+            if topic == previous {
+                continue;
+            }
+            assert!(
+                !seen.contains(&topic),
+                "\"{topic}\" comes back after something else in {}, so the screen \
+                 would draw it twice — move {} beside its own kind in CATALOG",
+                group.label(),
+                entry.key
+            );
+            seen.push(topic);
+            previous = topic;
+        }
+    }
+}
+
 /// **T9.** An owner must never hunt.
 #[test]
 fn search_finds_a_setting_by_the_word_a_person_would_type() {

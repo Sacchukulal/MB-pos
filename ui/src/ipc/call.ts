@@ -68,6 +68,9 @@ import type { AccountView } from './generated/AccountView';
 import type { HeadroomView } from './generated/HeadroomView';
 import type { ExpensesView } from './generated/ExpensesView';
 import type { ExpenseEdit } from './generated/ExpenseEdit';
+import type { SettingsView } from './generated/SettingsView';
+import type { SettingEdit } from './generated/SettingEdit';
+import type { SavedView } from './generated/SavedView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -342,6 +345,21 @@ export interface Commands {
   /** The only way a reminder becomes money. */
   confirm_recurring_expense: { args: { id: string }; returns: ExpensesView };
   export_expenses: { args: void; returns: string };
+
+  // --- P17, the settings ----------------------------------------------------
+  // Five commands for ninety settings, because the catalogue IS the screen:
+  // every label, help sentence, limit and choice comes down inside
+  // `SettingsView`, and one component renders all of it.
+  settings_all: { args: void; returns: SettingsView };
+  /** After a restore, and whenever a screen wants to be sure. */
+  reload_settings: { args: void; returns: SettingsView };
+  /** Returns the KEYS that match. The matching rule lives in Rust with the
+   *  synonym list it reads — a second copy here would disagree. */
+  search_settings: { args: { text: string }; returns: string[] };
+  save_settings: { args: { edits: SettingEdit[] }; returns: SavedView };
+  /** What "reset this section" WOULD set. It does not save — the screen shows
+   *  them as unsaved edits, so a reset can be looked at and cancelled. */
+  settings_defaults_for: { args: { group: string }; returns: SettingEdit[] };
 }
 
 

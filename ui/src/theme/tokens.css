@@ -153,6 +153,14 @@
      at it. Four lines is a floor, not a height. */
   --cart-lines-min: 8rem;
 
+  /* The settings screen (P17). The section list is fixed at a width that holds
+     "The kitchen ticket" plus its read-only mark; the fields flow into as many
+     columns as fit, and 20rem is the width at which a GSTIN and a state name
+     both still fit on one line. At 1366 that is two columns, which is what
+     stops ninety settings becoming a mile of scrolling. */
+  --settings-rail: 15rem;
+  --settings-field: 20rem;
+
   /* The lock screen and the people screens (P11). The card is narrow on
      purpose: a PIN pad the width of a monitor is a PIN pad you have to look
      at, and the whole point is that a cashier does it without looking. */

@@ -45,6 +45,19 @@ pub enum Access {
     /// short and keep the reason with it.
     Public,
     Needs(Permission),
+    /// **Any one of these opens the door** (P17).
+    ///
+    /// The settings screen is four screens in a trench coat: the shop's
+    /// details, tax, printers and backup are four permissions, and a shop that
+    /// gives one person the printers and another the tax rates is doing the
+    /// normal thing. Requiring all four to *read* the screen would mean nobody
+    /// but the owner could open it; requiring one particular one would mean the
+    /// printer person needed `settings.store` to reach the printers.
+    ///
+    /// **It is a read-side answer only.** Every save re-checks the permission
+    /// of the section it is writing, one by one, so this widens what can be
+    /// looked at and never what can be changed.
+    NeedsAny(&'static [Permission]),
 }
 
 /// **Every command in the product, and what it needs.**
@@ -193,6 +206,17 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("confirm_recurring_expense", Access::Needs(Permission::ExpensesManage)),
     ("export_expenses", Access::Needs(Permission::ExpensesManage)),
 
+    // --- settings (P17) -----------------------------------------------------
+    // Reading is `NeedsAny`: the shop's details, tax, printers and backup are
+    // four permissions and a shop may well split them between two people.
+    // **Every save re-checks the section it is writing** — see
+    // `settings::ipc::permission_for`, which both sides call.
+    ("settings_all", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    ("reload_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    ("search_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    ("save_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    ("settings_defaults_for", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -226,6 +250,46 @@ pub fn require(app: &App, need: Permission) -> UiResult<Actor> {
     // Work happened. This is what feeds the idle clock — see `session`.
     app.sessions().touch(crate::flows::now());
     Ok(session.actor)
+}
+
+/// The four permissions the settings screen is built out of.
+pub const SETTINGS_PERMISSIONS: &[Permission] = &[
+    Permission::SettingsStore,
+    Permission::SettingsTax,
+    Permission::SettingsPrinter,
+    Permission::BackupRun,
+];
+
+/// Refuse unless this person has **at least one** of these — see
+/// [`Access::NeedsAny`].
+pub fn require_any(app: &App, needs: &[Permission]) -> UiResult<Actor> {
+    let Some(session) = app.sessions().current() else {
+        return Err(UiError::new(
+            "auth.locked",
+            "The screen is locked. Sign in to carry on.",
+        ));
+    };
+    if let Some(first) = needs.iter().find(|need| session.actor.must(**need).is_ok()) {
+        // Through the ordinary door, so the idle clock is fed in exactly one
+        // place and this cannot drift from it.
+        return require(app, *first);
+    }
+    Err(UiError::new(
+        "auth.denied",
+        format!(
+            "{}, you cannot change any of this shop's settings. Ask somebody \
+             who can.",
+            session.actor.name
+        ),
+    )
+    .with_detail(format!(
+        "needs one of {}",
+        needs
+            .iter()
+            .map(|p| p.code())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )))
 }
 
 /// "you do not have permission to void a bill" → "You do not have permission to
@@ -421,7 +485,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 7] = [
+        const SOURCES: [&str; 8] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
@@ -429,6 +493,7 @@ mod tests {
             include_str!("floor.rs"),
             include_str!("credit.rs"),
             include_str!("expenses.rs"),
+            include_str!("settings/ipc.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {
@@ -497,13 +562,25 @@ mod tests {
     /// being run from the wrong directory.
     #[test]
     fn every_file_that_defines_commands_is_scanned() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut missing = Vec::new();
-        for entry in std::fs::read_dir(&src).expect("src/ is readable") {
-            let path = entry.expect("a directory entry").path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
+        // **Every .rs file under src/, at any depth.** P17 put commands in
+        // `src/settings/ipc.rs`, and a scan that only read the top level would
+        // have missed all five of them — which is the same hole P12 found by
+        // adding `corrections.rs`, one directory deeper.
+        fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a readable directory") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    rust_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
             }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        let mut missing = Vec::new();
+        for path in files {
             let text = std::fs::read_to_string(&path).expect("a source file");
             // **A LINE that is the attribute**, not a file that merely mentions
             // it — the same rule the scanner uses. Matching on `contains` found

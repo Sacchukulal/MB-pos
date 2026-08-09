@@ -487,6 +487,13 @@ macro_rules! commands {
             $crate::expenses::save_recurring_expense,
             $crate::expenses::confirm_recurring_expense,
             $crate::expenses::export_expenses,
+            // P17 — the settings. Five commands for ninety settings, because
+            // the catalogue is the screen.
+            $crate::settings::ipc::settings_all,
+            $crate::settings::ipc::reload_settings,
+            $crate::settings::ipc::search_settings,
+            $crate::settings::ipc::save_settings,
+            $crate::settings::ipc::settings_defaults_for,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -1879,6 +1886,24 @@ fn readable_change(json: &str) -> String {
 
     let mut parts: Vec<String> = Vec::new();
     for (key, field) in fields {
+        // **A settings change is keyed by its setting's KEY, and the screen
+        // must not show one.** P17 stores `receipt.footer` on purpose — a key
+        // is stable and a label gets reworded, and history that changes its
+        // words when a screen is edited is history nobody can rely on. So the
+        // record keeps the key and this, the one place a machine state becomes
+        // words, looks the label up. Found by looking at the History screen
+        // after saving a setting: it read "Receipt.footer Thank you, visit
+        // again", which is audit F8 with a full stop in it.
+        if let Some(entry) = crate::settings::catalog::find(key) {
+            let shown = match field {
+                serde_json::Value::String(s) if s.is_empty() => "—".to_owned(),
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Null => "—".to_owned(),
+                other => other.to_string(),
+            };
+            parts.push(format!("{} {shown}", entry.label));
+            continue;
+        }
         let label = key.replace('_', " ");
         let label = label.strip_suffix(" paise").unwrap_or(&label);
         // A key like `total_paise` names the unit, not the reader's business.

@@ -1,0 +1,175 @@
+/*
+ * The settings screen — audit Part 3, every row.
+ *
+ * Two regions and nothing else: the section list on the left and the section
+ * on the right. A settings screen with tabs inside panels inside cards is what
+ * UI_GUIDELINES §5 means by "avoid cards inside cards", and it is what makes a
+ * shopkeeper unable to find the footer message.
+ *
+ * Every value is a token (D21). Correct at 1366x768, which is the reference
+ * machine: the section list is fixed and the fields column is what grows.
+ */
+
+.mb-settings {
+  display: grid;
+  grid-template-columns: var(--settings-rail) minmax(0, 1fr);
+  /* The sections and the body, then the save bar across the bottom. Naming the
+     rows is what stops the save bar dropping into the left cell — which is
+     what it did, and it looked like a broken component rather than a broken
+     layout. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-4);
+}
+
+.mb-settings__save {
+  grid-column: 1 / -1;
+}
+
+/* The sections, and the one search box that reaches all of them. */
+.mb-settings__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.mb-settings__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-settings__section:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* The section you are on. A left stripe as well as a fill, because colour is
+   never the only signal (§2 rule 2). */
+.mb-settings__section[aria-current='page'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  box-shadow: inset var(--space-1) 0 0 0 var(--accent);
+}
+
+.mb-settings__locked {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-settings__body {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The section's name stays put while its settings scroll. Before this, ninety
+   settings later you could not tell which section you were in. */
+.mb-settings__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  background: var(--surface);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+/* One run of settings under one sub-heading. */
+.mb-settings__topic {
+  margin-bottom: var(--space-6);
+}
+
+.mb-settings__subtitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-settings__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+/* Two columns at 1366 and wider, one below it. Settings are short fields and a
+   single column wastes half the screen on a counter monitor. */
+.mb-settings__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.mb-settings__field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* Changed and not saved. A left stripe AND the word, for the same reason the
+   active section has both. */
+.mb-settings__field--changed {
+  padding-left: var(--space-3);
+  border-left: var(--space-1) solid var(--warn);
+}
+
+.mb-settings__mark {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+/* A search hit says which section it came from, or "Round off the total"
+   answers a question without saying where to find it next time. */
+.mb-settings__hit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-settings__where {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* No shop to configure: one message, centred, and no form to fill in. */
+.mb-settings--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

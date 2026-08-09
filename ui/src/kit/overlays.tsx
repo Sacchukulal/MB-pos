@@ -110,6 +110,16 @@ export interface ConfirmDialogProps {
   destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * **A third way out** — P17, and it is the unsaved-changes question.
+   *
+   * "Save / Discard / Cancel" is not two choices with a default; it is three,
+   * and squeezing it into two means one of them is missing. It is here rather
+   * than in the screen because the alternative is every screen with a save bar
+   * inventing its own three-button dialog, which is audit F10 exactly.
+   */
+  otherLabel?: string;
+  onOther?: () => void;
 }
 
 /**
@@ -128,6 +138,8 @@ export function ConfirmDialog({
   destructive,
   onConfirm,
   onCancel,
+  otherLabel,
+  onOther,
 }: ConfirmDialogProps) {
   return (
     <Modal
@@ -137,6 +149,9 @@ export function ConfirmDialog({
       actions={
         <>
           <Button onClick={onCancel}>{cancelLabel}</Button>
+          {otherLabel && onOther ? (
+            <Button onClick={onOther}>{otherLabel}</Button>
+          ) : null}
           <Button
             variant={destructive ? 'danger' : 'primary'}
             onClick={onConfirm}

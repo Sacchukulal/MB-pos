@@ -32,6 +32,7 @@ import { Credit } from '../credit/Credit';
 import { Expenses } from '../expenses/Expenses';
 import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
+import { Settings } from '../settings/Settings';
 
 import './shell.css';
 import '../auth/auth.css';
@@ -50,6 +51,15 @@ export interface Screen {
    * screen that would refuse everything it tried to load.
    */
   needs?: string;
+  /**
+   * **Any one of these opens it** — P17's settings screen, which is four
+   * permissions in a trench coat (the shop's details, tax, printers, backup).
+   * A shop that gives one person the printers and another the tax rates is
+   * doing the normal thing, and neither of them should find the rail item
+   * missing. `guard::Access::NeedsAny` is the Rust half, and the sections a
+   * person may not change arrive marked read-only rather than absent.
+   */
+  needsAny?: readonly string[];
 }
 
 /**
@@ -123,6 +133,15 @@ const SCREENS: readonly Screen[] = [
     icon: '☷',
     render: () => <Audit />,
     needs: 'audit.view',
+  },
+  {
+    // Last but one, and below Menu: settings are what an owner opens once a
+    // month, so they must not sit where a cashier's hand goes.
+    id: 'settings',
+    label: 'Settings',
+    icon: '⚙',
+    render: () => <Settings />,
+    needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
   },
   {
     id: 'gallery',
@@ -225,9 +244,12 @@ export function Shell() {
   );
 
   // Everything this person may open. A screen with no `needs` is everybody's.
-  const allowed = SCREENS.filter(
-    (item) => !item.needs || (lock?.permissions ?? []).includes(item.needs),
-  );
+  const held = lock?.permissions ?? [];
+  const allowed = SCREENS.filter((item) => {
+    if (item.needs && !held.includes(item.needs)) return false;
+    if (item.needsAny && !item.needsAny.some((need) => held.includes(need))) return false;
+    return true;
+  });
   const active = allowed.find((s) => s.id === screen) ?? allowed[0];
 
   // **Locked = there is nobody signed in.** Not a flag: the same fact Rust

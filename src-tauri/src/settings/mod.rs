@@ -42,6 +42,7 @@
 //! [`Storage::Store`].
 
 pub mod catalog;
+pub mod ipc;
 pub mod value;
 
 use mb_core::{Money, Timestamp};
