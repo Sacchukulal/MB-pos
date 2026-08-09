@@ -342,7 +342,8 @@ fn the_day_start_becomes_a_day_rule() {
     assert_eq!(Day::default().rule(), mb_core::DayRule::DEFAULT);
     assert_eq!(
         Day {
-            starts_at_minutes: 240
+            starts_at_minutes: 240,
+            ..Day::default()
         }
         .rule()
         .starts_at_minutes(),
@@ -352,7 +353,8 @@ fn the_day_start_becomes_a_day_rule() {
     // the row is corrupt — and a corrupt row must not stop a bill being dated.
     assert_eq!(
         Day {
-            starts_at_minutes: 5_000
+            starts_at_minutes: 5_000,
+            ..Day::default()
         }
         .rule(),
         mb_core::DayRule::DEFAULT

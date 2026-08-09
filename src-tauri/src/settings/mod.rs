@@ -283,12 +283,23 @@ pub struct Day {
     /// Minutes past midnight. 300 is 5 a.m., the default every Indian
     /// restaurant recognises.
     pub starts_at_minutes: u32,
+    /// P18. Above this difference between counted and expected cash, closing
+    /// the day asks why — and the answer goes on the slip and in the history.
+    pub variance_reason_above: mb_core::Money,
+    /// Whether the drawer keeps change overnight.
+    pub carry_float: bool,
+    pub float_amount: mb_core::Money,
 }
 
 impl Default for Day {
     fn default() -> Self {
         Day {
             starts_at_minutes: u32::from(mb_core::DayRule::DEFAULT.starts_at_minutes()),
+            // ₹20. Small enough that a real shortage is caught, large enough
+            // that a rounded-off bill does not make a cashier fill in a form.
+            variance_reason_above: mb_core::Money::from_paise(2_000),
+            carry_float: false,
+            float_amount: mb_core::Money::ZERO,
         }
     }
 }

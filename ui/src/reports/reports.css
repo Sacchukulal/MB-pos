@@ -149,3 +149,118 @@
   font-size: var(--text-sm);
   line-height: var(--line-normal);
 }
+
+/* ---------------------------------------------------------------------------
+   Closing the day (P18) — audit B15.
+
+   Two columns on a 1366-wide till: what the till expects on the left, the
+   count on the right, so a person's eyes move between the two figures they are
+   comparing rather than up and down one long form.
+   --------------------------------------------------------------------------- */
+
+.mb-dayclose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-4);
+}
+
+.mb-dayclose__columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--dayclose-column), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.mb-dayclose__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-dayclose__line + .mb-dayclose__title {
+  margin-top: var(--space-4);
+}
+
+.mb-dayclose__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-dayclose__line--strong {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border-strong);
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+}
+
+/* One row per note: the face value, the box, what it comes to. Fixed columns,
+   so the boxes line up under each other — a count grid whose boxes shift as
+   the totals grow is a count somebody redoes. */
+.mb-dayclose__grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mb-dayclose__note {
+  display: grid;
+  grid-template-columns: var(--dayclose-face) var(--dayclose-box) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mb-dayclose__face {
+  font-weight: var(--weight-bold);
+  text-align: right;
+  color: var(--text);
+}
+
+.mb-dayclose__rowtotal {
+  text-align: right;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* The line a person looks for first. */
+.mb-dayclose__verdict {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-lg);
+}
+
+.mb-dayclose__verdict--short {
+  border-color: var(--danger);
+}
+
+.mb-dayclose__verdict--over {
+  border-color: var(--warn);
+}
+
+.mb-dayclose__closed,
+.mb-dayclose__carry,
+.mb-dayclose__why {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.mb-dayclose__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}

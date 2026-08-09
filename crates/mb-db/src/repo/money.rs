@@ -166,6 +166,22 @@ pub struct DayClose {
     pub is_locked: bool,
     pub closed_at: Timestamp,
     pub closed_by: Option<StaffId>,
+    /// Why the drawer was out, when it was out by more than the shop's
+    /// threshold. **The reason is the feature**: "₹340 short" tells an owner
+    /// nothing, and "₹340 short — paid the vegetable man from the drawer" tells
+    /// them everything. Audit B15.
+    pub note: Option<String>,
+}
+
+/// How many of each note and coin were counted.
+///
+/// A child table rather than a JSON column, because "we are always short of
+/// tens" is a report an owner really asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Denomination {
+    /// Paise, so a ₹500 note is 50000.
+    pub value: Money,
+    pub count: u32,
 }
 
 #[derive(Debug)]
@@ -994,12 +1010,16 @@ impl<'a> MoneyRepo<'a> {
     pub fn save_day_close(&self, outlet: &str, close: &DayClose) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO day_closes (id, outlet_id, business_day, opening_float, expected_cash,
-                                     counted_cash, variance, is_locked, closed_at, closed_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                     counted_cash, variance, is_locked, closed_at, closed_by,
+                                     note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT (outlet_id, business_day)
              DO UPDATE SET counted_cash = excluded.counted_cash,
                            variance     = excluded.variance,
-                           is_locked    = excluded.is_locked",
+                           is_locked    = excluded.is_locked,
+                           closed_at    = excluded.closed_at,
+                           closed_by    = excluded.closed_by,
+                           note         = excluded.note",
             rusqlite::params![
                 close.id,
                 outlet,
@@ -1011,6 +1031,7 @@ impl<'a> MoneyRepo<'a> {
                 encode::bool_to_sql(close.is_locked),
                 encode::timestamp_to_sql(close.closed_at),
                 close.closed_by.as_ref().map(StaffId::as_str),
+                close.note,
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(
@@ -1029,7 +1050,7 @@ impl<'a> MoneyRepo<'a> {
     ) -> Result<Option<DayClose>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, business_day, opening_float, expected_cash, counted_cash, variance,
-                    is_locked, closed_at, closed_by
+                    is_locked, closed_at, closed_by, note
                FROM day_closes WHERE outlet_id = ?1 AND business_day = ?2",
         )?;
         let mut rows = stmt.query(rusqlite::params![
@@ -1049,6 +1070,75 @@ impl<'a> MoneyRepo<'a> {
             is_locked: encode::bool_from_sql(row.get(6)?, "day_closes.is_locked")?,
             closed_at: encode::timestamp_from_sql(row.get(7)?),
             closed_by: row.get::<_, Option<String>>(8)?.map(StaffId::new),
+            note: row.get(9)?,
         }))
+    }
+
+    /// **The counted notes and coins**, replacing whatever was there.
+    ///
+    /// A recount is a correction of the count, not a second count — two rows
+    /// for the same denomination on the same day would make the mix report a
+    /// lie. `DELETE` then insert, in the caller's transaction, so a half-written
+    /// count cannot exist.
+    pub fn save_denominations(
+        &self,
+        close_id: &str,
+        counted: &[Denomination],
+    ) -> Result<(), DbError> {
+        self.tx.execute(
+            "DELETE FROM day_close_denominations WHERE day_close_id = ?1",
+            rusqlite::params![close_id],
+        )?;
+        let mut stmt = self.tx.prepare_cached(
+            "INSERT INTO day_close_denominations (day_close_id, denomination, count)
+             VALUES (?1, ?2, ?3)",
+        )?;
+        for note in counted {
+            // A zero count is not stored: "no five-hundreds" and "we did not
+            // record five-hundreds" are the same thing to a shop, and a table
+            // full of zeroes makes the mix report harder to read for nothing.
+            if note.count == 0 {
+                continue;
+            }
+            stmt.execute(rusqlite::params![
+                close_id,
+                encode::money_to_sql(note.value),
+                i64::from(note.count),
+            ])?;
+        }
+        Ok(())
+    }
+
+    pub fn denominations(&self, close_id: &str) -> Result<Vec<Denomination>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT denomination, count FROM day_close_denominations
+              WHERE day_close_id = ?1 ORDER BY denomination DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![close_id], |row| {
+            Ok(Denomination {
+                value: encode::money_from_sql(row.get(0)?),
+                count: u32::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// **Unlock a day that was closed** — see the audit row the caller writes.
+    ///
+    /// Not a delete. The close row stays, with its count and its reason, and
+    /// only the lock comes off: a day that was closed at 11 pm, reopened at
+    /// 11:20 and closed again is three facts, and deleting the first one loses
+    /// two of them.
+    pub fn unlock_day(&self, outlet: &str, day: BusinessDay) -> Result<bool, DbError> {
+        let changed = self.tx.execute(
+            "UPDATE day_closes SET is_locked = 0
+              WHERE outlet_id = ?1 AND business_day = ?2 AND is_locked = 1",
+            rusqlite::params![outlet, encode::business_day_to_sql(day)],
+        )?;
+        Ok(changed > 0)
     }
 }

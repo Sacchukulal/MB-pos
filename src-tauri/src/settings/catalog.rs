@@ -815,6 +815,22 @@ pub const CATALOG: &[Entry] = &[
          will ever run.",
         ["day", "business day", "5 am", "close", "midnight", "cutoff"],
         0..=1439 "minutes past midnight", u32, day.starts_at_minutes),
+    // P18's day close. The threshold is the shop's own tolerance: a stall that
+    // deals in tens does not want a form every time it is ₹2 out, and a
+    // restaurant taking ₹80,000 a day wants one at ₹100.
+    cash!("day.variance_reason_above", Day, Row, "Ask for a reason if the drawer is out by more than",
+        "When the counted cash differs from the expected cash by more than \
+         this, closing the day asks why. Zero asks every time.",
+        ["variance", "short", "over", "reason", "difference", "drawer"],
+        0..=1_000_000, day.variance_reason_above),
+    flag!("day.carry_float", Day, Row, "Leave a float in the drawer overnight",
+        "Tomorrow starts with the amount below already counted, instead of an \
+         empty drawer.",
+        ["float", "opening", "carry", "tomorrow", "change"], day.carry_float),
+    cash!("day.float_amount", Day, Row, "How much to leave",
+        "Only used when the float is carried forward.",
+        ["float", "opening", "how much", "change", "tomorrow"],
+        0..=10_000_000, day.float_amount),
 
     // --- backup -------------------------------------------------------------
     words!("backup.folder", Backup, Row, "Backup folder",

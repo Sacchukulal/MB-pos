@@ -586,6 +586,7 @@ fn seed_money(db: &Db) {
                 is_locked: true,
                 closed_at: at(600),
                 closed_by: Some(StaffId::new("staff_1")),
+                note: Some("short a fifty, no idea why".to_owned()),
             },
         )?;
         Ok(())

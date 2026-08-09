@@ -166,6 +166,14 @@
      is a preview that lies about the one thing it exists to show. */
   --settings-paper: 28rem;
 
+  /* The day close (P18). Two columns at 1366 and one below that: the expected
+     figures and the count have to sit side by side, because the whole task is
+     comparing them. The face value column is wide enough for "500" and the box
+     for four digits — nobody counts ten thousand notes of one kind. */
+  --dayclose-column: 22rem;
+  --dayclose-face: 3rem;
+  --dayclose-box: 5rem;
+
   /* The lock screen and the people screens (P11). The card is narrow on
      purpose: a PIN pad the width of a monitor is a PIN pad you have to look
      at, and the whole point is that a cashier does it without looking. */

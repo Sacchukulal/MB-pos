@@ -254,6 +254,16 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("report_csv", Access::Needs(Permission::ReportsView)),
     ("report_pdf", Access::Needs(Permission::ReportsView)),
 
+    // --- closing the day (P18) ----------------------------------------------
+    // READING the count is `reports.view` — it is the day's cash on a screen,
+    // which is audit C1's own example. DOING it is `day.close`, and so is
+    // opening a closed day again: those are the two writes that decide whether
+    // yesterday can still be edited.
+    ("day_close", Access::Needs(Permission::ReportsView)),
+    ("count_cash", Access::Needs(Permission::ReportsView)),
+    ("close_day", Access::Needs(Permission::DayClose)),
+    ("reopen_day", Access::Needs(Permission::DayClose)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -522,7 +532,8 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 12] = [
+        const SOURCES: [&str; 13] = [
+            include_str!("dayclose.rs"),
             include_str!("reports.rs"),
             include_str!("ipc.rs"),
             include_str!("flows.rs"),

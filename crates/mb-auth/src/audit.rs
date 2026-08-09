@@ -87,6 +87,10 @@ pub mod action {
     pub const COUNTER_CHANGED: AuditAction = "counter.changed";
     pub const DRAWER_OPENED: AuditAction = "drawer.opened";
     pub const DAY_CLOSED: AuditAction = "day.closed";
+    /// P18 â a locked day was opened again. **Its own action**, and never a
+    /// second `DAY_CLOSED`: an owner asking "who unlocked Tuesday?" must be
+    /// able to search for it.
+    pub const DAY_REOPENED: AuditAction = "day.reopened";
     pub const BACKUP_RESTORED: AuditAction = "backup.restored";
 
     /// Every one of the above, for the screen's filter.
@@ -123,6 +127,7 @@ pub mod action {
         COUNTER_CHANGED,
         DRAWER_OPENED,
         DAY_CLOSED,
+        DAY_REOPENED,
         BACKUP_RESTORED,
     ];
 
@@ -162,6 +167,7 @@ pub mod action {
             COUNTER_CHANGED => "Changed the bill counter",
             DRAWER_OPENED => "Opened the cash drawer",
             DAY_CLOSED => "Closed the day",
+            DAY_REOPENED => "Opened a closed day again",
             BACKUP_RESTORED => "Restored a backup",
             _ => "Did something this version does not know about",
         }

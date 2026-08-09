@@ -78,6 +78,8 @@ import type { BackupView } from './generated/BackupView';
 import type { VerifyView } from './generated/VerifyView';
 import type { ConfigPlanView } from './generated/ConfigPlanView';
 import type { NumberingView } from './generated/NumberingView';
+import type { CountArg } from './generated/CountArg';
+import type { DayCloseView } from './generated/DayCloseView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
 import type { ReportView } from './generated/ReportView';
@@ -431,6 +433,17 @@ export interface Commands {
   report: { args: { id: string; period: PeriodArg }; returns: ReportView };
   report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
   report_pdf: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
+
+  // P18's day close — requirement 9 of the ten. `count_cash` recomputes the
+  // variance as somebody types: there is ONE variance calculation and it is in
+  // Rust, so the preview cannot disagree with what gets saved.
+  day_close: { args: void; returns: DayCloseView };
+  count_cash: { args: { counts: CountArg[] }; returns: DayCloseView };
+  close_day: {
+    args: { counts: CountArg[]; reason: string; print: boolean };
+    returns: DayCloseView;
+  };
+  reopen_day: { args: { reason: string }; returns: DayCloseView };
 }
 
 

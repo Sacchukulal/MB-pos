@@ -335,6 +335,7 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             K::Label => "Label",
             K::Test => "Test print",
             K::Drawer => "Cash drawer",
+            K::DayClose => "Closing slip",
         }
         .to_owned(),
         state: match status.state {
@@ -529,6 +530,10 @@ macro_rules! commands {
             $crate::reports::report,
             $crate::reports::report_csv,
             $crate::reports::report_pdf,
+            $crate::dayclose::day_close,
+            $crate::dayclose::count_cash,
+            $crate::dayclose::close_day,
+            $crate::dayclose::reopen_day,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

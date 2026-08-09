@@ -35,6 +35,9 @@ mod billing;
 mod config;
 mod corrections;
 mod credit;
+/// P18. **Closing the day** — requirement 9 of the ten, and audit B15: the
+/// expected cash, the counted cash, the difference in words, and the lock.
+mod dayclose;
 mod floor;
 mod expenses;
 mod flows;
@@ -81,6 +84,10 @@ mod menu_tests;
 /// tests need a real `settings` table to count rows in.
 #[cfg(test)]
 mod settings_tests;
+/// P18's day close is a sequence a shop performs every night, and the lock it
+/// produces has to be real — so it is driven with the real commands.
+#[cfg(test)]
+mod dayclose_tests;
 mod startup;
 mod state;
 mod window;

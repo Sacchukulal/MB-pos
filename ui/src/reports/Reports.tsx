@@ -34,6 +34,7 @@ import {
   type Column,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
+import { DayClose } from './DayClose';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
 import type { ReportEntryView } from '../ipc/generated/ReportEntryView';
 import type { ReportListView } from '../ipc/generated/ReportListView';
@@ -82,7 +83,8 @@ export function Reports() {
   // again. No caching — a report is a question about right now, and a stale
   // answer with today's date on it is worse than a spinner.
   useEffect(() => {
-    if (!from || !to) return;
+    // The day close is not a report and there is nothing to ask for.
+    if (!from || !to || chosen === DAY_CLOSE) return;
     setBusy(true);
     call('report', { id: chosen, period: { from, to } })
       .then(setReport)
@@ -113,6 +115,22 @@ export function Reports() {
   return (
     <div className="mb-reports">
       <nav className="mb-reports__rail" aria-label="Reports">
+        {/* At the top and on its own, because it is the one thing on this
+            screen a shop does every single night. */}
+        <div className="mb-reports__group">
+          <button
+            type="button"
+            className={
+              chosen === DAY_CLOSE
+                ? 'mb-reports__pick mb-reports__pick--on'
+                : 'mb-reports__pick'
+            }
+            aria-current={chosen === DAY_CLOSE}
+            onClick={() => setChosen(DAY_CLOSE)}
+          >
+            Close the day
+          </button>
+        </div>
         {groups(list.reports).map(([group, entries]) => (
           <div className="mb-reports__group" key={group}>
             <h2 className="mb-reports__grouptitle">{group}</h2>
@@ -136,6 +154,10 @@ export function Reports() {
       </nav>
 
       <div className="mb-reports__body">
+        {chosen === DAY_CLOSE ? (
+          <DayClose />
+        ) : (
+          <>
         <div className="mb-reports__when">
           <div className="mb-reports__presets">
             {list.periods.map((choice: PeriodChoiceView) => (
@@ -251,10 +273,15 @@ export function Reports() {
         ) : (
           <EmptyState title="Pick a report" body="Choose one from the list on the left." />
         )}
+          </>
+        )}
       </div>
     </div>
   );
 }
+
+/** Not a report id — the one entry on this screen that is a thing to DO. */
+const DAY_CLOSE = 'day_close';
 
 /** The reports in their groups, in the order Rust listed them. */
 function groups(entries: readonly ReportEntryView[]): [string, ReportEntryView[]][] {

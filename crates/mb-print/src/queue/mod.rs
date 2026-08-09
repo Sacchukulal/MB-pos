@@ -84,6 +84,10 @@ pub enum JobKind {
     /// A drawer pulse with nothing to print — when the drawer hangs off a
     /// different printer from the one the bill went to.
     Drawer,
+    /// P18's closing slip — the Z-report. Its own kind rather than a `Test`,
+    /// because the print queue shows a person what each job IS, and "test
+    /// print" against the paper that records a day's cash is audit F8.
+    DayClose,
 }
 
 impl JobKind {
@@ -95,6 +99,7 @@ impl JobKind {
             JobKind::Label => "label",
             JobKind::Test => "test",
             JobKind::Drawer => "drawer",
+            JobKind::DayClose => "day_close",
         }
     }
 
@@ -106,6 +111,7 @@ impl JobKind {
             "label" => Some(JobKind::Label),
             "test" => Some(JobKind::Test),
             "drawer" => Some(JobKind::Drawer),
+            "day_close" => Some(JobKind::DayClose),
             _ => None,
         }
     }
@@ -121,6 +127,9 @@ impl JobKind {
             JobKind::Drawer => 5,
             JobKind::Bill => 10,
             JobKind::Kitchen => 20,
+            // Behind a bill: a customer waiting to pay beats the slip that
+            // closes a day which is already over.
+            JobKind::DayClose => 30,
             JobKind::Test | JobKind::Label => 50,
         }
     }
@@ -394,7 +403,10 @@ impl Queue {
         let allowed = match job.kind {
             JobKind::Bill => printer.role.accepts_bill(),
             JobKind::Kitchen => printer.role.accepts_kitchen(),
-            JobKind::Label | JobKind::Test | JobKind::Drawer => true,
+            // A closing slip goes wherever a bill would, and a shop with only a
+            // kitchen printer must still be able to print one — the alternative
+            // is a day that cannot be closed on paper.
+            JobKind::DayClose | JobKind::Label | JobKind::Test | JobKind::Drawer => true,
         };
         if !allowed {
             return Err(PrintError::invalid(format!(
