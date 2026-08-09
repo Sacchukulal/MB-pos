@@ -100,19 +100,22 @@ impl Pattern {
     }
 }
 
-/// One font for the whole document.
-///
-/// v1 had exactly this and it was right: a receipt with two typefaces looks
-/// broken, and per-block families multiply P07's raster work by the number of
-/// faces it has to carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FontFamily {
-    #[default]
-    Monospace,
-    SansSerif,
-    Serif,
-}
+// **`FontFamily` used to be here, and P17 deleted it — decision D71.**
+//
+// Audit Part 3 lists a font choice, v1 had one, and P06 modelled it. It was
+// written onto every `Document` and **read by nothing**: `layout` does not
+// carry it into `Laid`, and the raster sink draws with the ONE face the queue
+// loaded at start-up (D33 — "one face for every printer, loaded once", because
+// a cold glyph cache costs more than the whole raster). In `Engine::Text` mode
+// the face is the printer's own, so ours could never apply there at all.
+//
+// P17's T1 is what found it: render the bill, change the setting, render again,
+// and the two documents are identical. A setting that changes nothing is a lie
+// on a screen, so the honest choice was to delete it rather than ship it.
+//
+// **It comes back at P23**, which has to ship a second face anyway for Kannada
+// (D31 names that as a known gap needing a shaper). A font choice is a real
+// choice on the day there is more than one font.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -201,7 +204,6 @@ pub enum Block {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Document {
     pub paper: Paper,
-    pub font: FontFamily,
     pub blocks: Vec<Block>,
 }
 
@@ -210,15 +212,8 @@ impl Document {
     pub fn new(paper: Paper) -> Self {
         Document {
             paper,
-            font: FontFamily::Monospace,
             blocks: Vec::new(),
         }
-    }
-
-    #[must_use]
-    pub const fn with_font(mut self, font: FontFamily) -> Self {
-        self.font = font;
-        self
     }
 
     pub fn push(&mut self, block: Block) -> &mut Self {

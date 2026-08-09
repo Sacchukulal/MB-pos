@@ -30,11 +30,16 @@ pub fn store() -> Store {
         name: "Anna Kuteera".to_owned(),
         address: "12 MG Road, Jayanagar, Bengaluru 560011".to_owned(),
         phone: Some("9880012345".to_owned()),
-        gstin: Some("29ABCDE1234F1Z5".to_owned()),
+        // **A GSTIN that would actually pass** — the check character is W, not
+        // 5. P17 built the portal's checksum for the settings screen and this
+        // fixture was the first thing it refused; a fixture describing an
+        // impossible shop is a trap for whoever copies it next.
+        gstin: Some("29ABCDE1234F1ZW".to_owned()),
         fssai: Some("11223344556677".to_owned()),
         state_code: Some("29".to_owned()),
         upi_id: Some("anna@upi".to_owned()),
         upi_merchant_name: Some("Anna Kuteera".to_owned()),
+        upi_reference: Some("MB1".to_owned()),
         is_composition: false,
     }
 }

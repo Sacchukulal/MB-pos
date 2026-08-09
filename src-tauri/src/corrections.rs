@@ -503,7 +503,10 @@ fn print_cancellation(
     table: Option<&str>,
 ) -> UiResult<()> {
     let printer = crate::flows::default_printer(app)?;
-    let settings = mb_print::settings::KitchenSettings::default();
+    // P17: a cancellation slip is a kitchen ticket, so it obeys the shop's
+    // kitchen-ticket settings. A slip that looked different from every other
+    // ticket would be the one the kitchen does not recognise.
+    let settings = app.shop_config().kitchen;
     let ticket: Vec<mb_print::template::TicketLine> = lines
         .iter()
         .map(|(identity, qty)| mb_print::template::TicketLine {
@@ -625,7 +628,7 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
     );
 
     log_info!("{name} voided off the bill by {} — {reason}", who.name);
-    app.with_cart(crate::billing::cart_view)
+    app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
 }
 
 // ---------------------------------------------------------------------------

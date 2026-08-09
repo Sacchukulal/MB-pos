@@ -3,12 +3,12 @@ ESC 3 0     line spacing
 ESC a 0      align
 GS v 0       raster 48 bytes x 512 rows
 GS v 0       raster 48 bytes x 512 rows
-GS v 0       raster 48 bytes x 353 rows
+GS v 0       raster 48 bytes x 377 rows
 ESC a 1      align
 GS ( k       QR model (4 bytes)
 GS ( k       QR module size (3 bytes)
 GS ( k       QR error correction (3 bytes)
-GS ( k       QR store (57 bytes)
+GS ( k       QR store (64 bytes)
 GS ( k       QR print (3 bytes)
 ESC a 0      align
 GS v 0       raster 48 bytes x 75 rows

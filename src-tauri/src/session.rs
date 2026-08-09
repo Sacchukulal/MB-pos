@@ -40,11 +40,30 @@ use std::time::Duration;
 use mb_auth::{Actor, PermissionSet};
 use mb_core::{StaffId, Timestamp};
 
-/// How long the counter may sit untouched before it locks itself.
+/// How long the counter may sit untouched before it locks itself, when the
+/// shop has not said.
 ///
-/// P17 owns the setting. Until then it is a constant with its name on it,
-/// rather than a number buried in a comparison.
+/// **P17 gave it a setting** (`billing.idle_lock_minutes`), and
+/// [`idle_lock_for`] is what the idle thread and the guard actually ask. This
+/// constant is what a shop that has never opened the settings screen gets, and
+/// what the tests in this file measure against.
 pub const IDLE_LOCK: Duration = Duration::from_secs(5 * 60);
+
+/// The shop's answer, as a duration.
+///
+/// **`None` means never** — a kitchen-facing terminal in a locked room has no
+/// use for a screen that keeps asking who is there, and 0 is how the settings
+/// screen says so. Returning `None` rather than a very long duration means the
+/// caller has to decide what "never" means, which is the honest shape: the
+/// idle thread skips, and nothing has to guess.
+#[must_use]
+pub fn idle_lock_for(minutes: u32) -> Option<Duration> {
+    if minutes == 0 {
+        None
+    } else {
+        Some(Duration::from_secs(u64::from(minutes) * 60))
+    }
+}
 
 /// How often the idle thread looks. Fifteen seconds is well inside the
 /// five-minute period and costs nothing measurable — a sleeping thread is not

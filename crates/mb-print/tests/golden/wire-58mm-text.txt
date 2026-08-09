@@ -15,7 +15,7 @@ TEXT "             560011"
 LF
 TEXT "         Ph: 9880012345"
 LF
-TEXT "     GSTIN: 29ABCDE1234F1Z5"
+TEXT "     GSTIN: 29ABCDE1234F1ZW"
 LF
 TEXT "     FSSAI: 11223344556677"
 LF
@@ -81,6 +81,7 @@ TEXT "Exempt value                5.00"
 LF
 TEXT "Round off                   0.31"
 LF
+LF
 TEXT "--------------------------------"
 LF
 GS ! 0x11     character size
@@ -115,7 +116,7 @@ ESC a 1      align
 GS ( k       QR model (4 bytes)
 GS ( k       QR module size (3 bytes)
 GS ( k       QR error correction (3 bytes)
-GS ( k       QR store (57 bytes)
+GS ( k       QR store (64 bytes)
 GS ( k       QR print (3 bytes)
 ESC a 0      align
 TEXT "     Thank you, visit again"

@@ -32,8 +32,41 @@ pub fn now() -> Timestamp {
     )
 }
 
+/// **The shop's day rule, as one number, for the whole process** — decision
+/// D70.
+///
+/// D5 says the business day is stored and never derived, and P17 is where the
+/// owner finally gets to choose when it starts. The question was how to get
+/// their answer to the forty places that ask "which day is this?".
+///
+/// Threading it through every one of them means a `&App` on functions that have
+/// no other reason to want one, and a lock acquired on the billing path — which
+/// budget **B5** (150 ms to settle) exists to keep clear. Reading it from the
+/// database at each call site is worse still.
+///
+/// So it is a static. Honestly: **this is one counter serving one shop**, the
+/// rule is a single `u16`, and every caller in the process wants the same
+/// answer. `App` sets it when the shop's configuration is loaded, and again
+/// whenever it is saved.
+static DAY_START_MINUTES: std::sync::atomic::AtomicU16 =
+    std::sync::atomic::AtomicU16::new(DayRule::DEFAULT.starts_at_minutes());
+
+/// Called by `App` when the shop's configuration is read or written.
+pub fn set_day_rule(rule: DayRule) {
+    DAY_START_MINUTES.store(
+        rule.starts_at_minutes(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+#[must_use]
+pub fn day_rule() -> DayRule {
+    DayRule::new(DAY_START_MINUTES.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(DayRule::DEFAULT)
+}
+
 pub fn today(at: Timestamp) -> BusinessDay {
-    BusinessDay::of(at, DayRule::default(), UtcOffset::INDIA)
+    BusinessDay::of(at, day_rule(), UtcOffset::INDIA)
 }
 
 /// Print what the kitchen has not seen — **the delta, never the order.**
@@ -76,7 +109,8 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
 
     // 2. Build it and hand it to the queue.
     let printer = default_printer(app)?;
-    let settings = mb_print::settings::KitchenSettings::default();
+    // P17: the shop's own, not this crate's idea of a sensible one.
+    let settings = app.shop_config().kitchen;
     let ctx = mb_print::template::KitchenContext {
         kind: mb_print::template::TicketKind::New,
         token: None,
@@ -194,7 +228,7 @@ pub fn complete_bill_on(app: &App) -> UiResult<String> {
                  press Enter, or change the order type.",
             ));
         }
-        let bill = state.bill()?;
+        let bill = state.bill(&app.shop_config())?;
         // **`is_settled`, not `amount_due`.** `amount_due` is what the bill asks
         // for and is positive on every bill that has anything on it — so
         // checking it refused paid bills too, which is what running this found.
@@ -315,8 +349,9 @@ pub(crate) fn queue_bill_print(
     cashier: &str,
 ) -> UiResult<()> {
     let printer = default_printer(app)?;
-    let store = store_for_the_bill(app);
-    let settings = mb_print::settings::ReceiptSettings::default();
+    let config = app.shop_config();
+    let store = config.store.to_print_store();
+    let settings = &config.receipt;
     let order = mb_core::AnyOrder::Settled(settled.clone());
 
     let document = mb_print::template::bill_document(
@@ -325,7 +360,7 @@ pub(crate) fn queue_bill_print(
             bill,
             order: &order,
             store: &store,
-            settings: &settings,
+            settings,
             customer: None,
             cashier: Some(cashier),
             copy: mb_print::template::Copy::Original,
@@ -346,35 +381,14 @@ pub(crate) fn queue_bill_print(
     Ok(())
 }
 
-/// mb-db's stored profile becomes mb-print's header — **the one place those two
-/// vocabularies meet**, for the reason `state::printer_config_for` already
-/// gives.
-///
-/// A shop that has not been set up yet gets an empty `Store`, and the template
-/// already omits every line it has nothing for.
-fn store_for_the_bill(app: &App) -> mb_print::template::Store {
-    let profile = app
-        .with_shop(|shop| {
-            shop.db
-                .transaction(|tx| mb_db::Repos::new(tx).settings().store_profile(OUTLET))
-                .map_err(|e| words::from_db(&e))
-        })
-        .unwrap_or(None);
-
-    profile.map_or_else(mb_print::template::Store::default, |p| {
-        mb_print::template::Store {
-            name: p.name,
-            address: p.address,
-            phone: p.phone,
-            gstin: p.gstin,
-            fssai: p.fssai,
-            state_code: p.state_code,
-            upi_id: p.upi_id,
-            upi_merchant_name: p.upi_merchant_name,
-            is_composition: p.is_composition,
-        }
-    })
-}
+// **`store_for_the_bill` used to be here, and its going is the point of P17.**
+//
+// It read the shop's profile out of the database on every print, and every
+// OTHER setting on that path was `ReceiptSettings::default()` — so a shop could
+// change its name and nothing else. The whole configuration is now loaded once
+// into `App` (`settings::load`), and `settings::Store::to_print_store` is the
+// single place mb-db's vocabulary becomes mb-print's, exactly as
+// `state::printer_config_for` is for a printer.
 
 /// Where a job goes before P17 sets up routing.
 pub(crate) fn default_printer(app: &App) -> UiResult<PrinterConfig> {
@@ -418,8 +432,9 @@ pub(crate) fn queue_bill_copy(
     copy: mb_print::template::Copy,
 ) -> UiResult<()> {
     let printer = default_printer(app)?;
-    let store = store_for_the_bill(app);
-    let settings = mb_print::settings::ReceiptSettings::default();
+    let config = app.shop_config();
+    let store = config.store.to_print_store();
+    let settings = &config.receipt;
     let because = match &copy {
         mb_print::template::Copy::Original => "bill".to_owned(),
         mb_print::template::Copy::Duplicate { number } => format!("copy {number}"),
@@ -432,7 +447,7 @@ pub(crate) fn queue_bill_copy(
             bill,
             order,
             store: &store,
-            settings: &settings,
+            settings,
             customer: None,
             cashier: Some(cashier),
             copy,

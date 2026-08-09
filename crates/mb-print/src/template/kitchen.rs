@@ -100,11 +100,16 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
         if let Some(station) = ctx.station {
             doc.text(station, s.details, Align::Centre);
         }
-        doc.separator(s.pattern);
+        if s.separators.below_title {
+            doc.separator(s.pattern);
+        }
     }
 
     if s.show_token && let Some(token) = ctx.token {
         doc.text(format!("TOKEN {token}"), s.title, Align::Centre);
+        if s.separators.below_token {
+            doc.separator(s.pattern);
+        }
     }
     if s.show_bill_number && let Some(number) = ctx.bill_number {
         doc.row("Bill", number, s.details);
@@ -127,12 +132,52 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     if s.show_time && let Some(time) = ctx.time {
         doc.row("Time", time, s.details);
     }
-    doc.separator(s.pattern);
+    if s.separators.below_details {
+        doc.separator(s.pattern);
+    }
 
-    // Quantity first: the kitchen reads the number, not the name.
+    if s.two_column {
+        two_column_items(&mut doc, ctx);
+    } else {
+        one_column_items(&mut doc, ctx);
+    }
+
+    if s.separators.below_items {
+        doc.separator(s.pattern);
+    }
+    doc.spacer(2);
+
+    Ok(doc)
+}
+
+/// The normal ticket: quantity first, because the kitchen reads the number, not
+/// the name.
+fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
     let columns = vec![Column::fixed(4, Align::Right), Column::fill(Align::Left)];
+
+    if s.show_column_names {
+        doc.push(Block::Columns {
+            columns: columns.clone(),
+            rows: vec![vec!["Qty".to_owned(), "Item".to_owned()]],
+            style: s.details,
+        });
+        if s.separators.below_column_names {
+            doc.separator(s.pattern);
+        }
+    }
+
+    let gap = usize::from(s.row_height.gap());
     let mut rows = Vec::with_capacity(ctx.lines.len());
-    for line in ctx.lines {
+    for (n, line) in ctx.lines.iter().enumerate() {
+        // A blank row between dishes, not after the last one — trailing air is
+        // what `doc.spacer` at the end is for, and doubling it wastes paper on
+        // every ticket of the day.
+        if n > 0 {
+            for _ in 0..gap {
+                rows.push(vec![String::new(), String::new()]);
+            }
+        }
         rows.push(vec![line.qty.to_string(), line.name.clone()]);
         for modifier in &line.modifiers {
             rows.push(vec![String::new(), format!("  + {modifier}")]);
@@ -147,10 +192,63 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
         rows,
         style: s.items,
     });
-    doc.separator(s.pattern);
-    doc.spacer(2);
+}
 
-    Ok(doc)
+/// v1's "2-column packing" — two dishes across, for a kitchen that would rather
+/// have a short ticket than a readable one.
+///
+/// **The whole dish becomes one cell**, quantity, modifiers and note together.
+/// A note on its own row cannot survive being packed beside somebody else's
+/// dish: the ticket would read as though the note belonged to both.
+fn two_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    let columns = vec![Column::fill(Align::Left), Column::fill(Align::Left)];
+
+    if s.show_column_names {
+        doc.push(Block::Columns {
+            columns: columns.clone(),
+            rows: vec![vec!["Item".to_owned(), "Item".to_owned()]],
+            style: s.details,
+        });
+        if s.separators.below_column_names {
+            doc.separator(s.pattern);
+        }
+    }
+
+    let cells: Vec<String> = ctx
+        .lines
+        .iter()
+        .map(|line| {
+            let mut cell = format!("{} {}", line.qty, line.name);
+            for modifier in &line.modifiers {
+                cell.push_str(&format!(" +{modifier}"));
+            }
+            if let Some(note) = &line.note {
+                cell.push_str(&format!(" *{note}"));
+            }
+            cell
+        })
+        .collect();
+
+    let gap = usize::from(s.row_height.gap());
+    let mut rows = Vec::with_capacity(cells.len().div_ceil(2));
+    for (n, pair) in cells.chunks(2).enumerate() {
+        if n > 0 {
+            for _ in 0..gap {
+                rows.push(vec![String::new(), String::new()]);
+            }
+        }
+        rows.push(vec![
+            pair.first().cloned().unwrap_or_default(),
+            pair.get(1).cloned().unwrap_or_default(),
+        ]);
+    }
+
+    doc.push(Block::Columns {
+        columns,
+        rows,
+        style: s.items,
+    });
 }
 
 /// A parcel label (scope 7.9): a small document with its own paper.

@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::doc::{FontFamily, Pattern, Style};
+use crate::doc::{Pattern, Style};
 
 /// Where the logo goes. v1 had exactly these two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -45,14 +45,28 @@ pub enum RowHeight {
 }
 
 impl RowHeight {
-    /// Blank lines after each group. Cheap, and it is what "row height" means
-    /// on a device that cannot vary leading.
+    /// Blank lines after each ITEM. Cheap, and it is what "row height" means on
+    /// a device that cannot vary leading.
     #[must_use]
     pub const fn gap(self) -> u8 {
         match self {
-            RowHeight::Compact => 0,
-            RowHeight::Standard => 0,
+            RowHeight::Compact | RowHeight::Standard => 0,
             RowHeight::Relaxed => 1,
+        }
+    }
+
+    /// Blank lines between one block of the receipt and the next.
+    ///
+    /// **Compact and Standard used to be the same value**, which made the
+    /// setting a lie: a shop could choose Compact, watch nothing change, and
+    /// reasonably conclude the product was broken. P17's T1 is the rule — *a
+    /// toggle that changes nothing is a lie on a screen* — and this is the
+    /// second number the three settings needed in order to be three settings.
+    #[must_use]
+    pub const fn section_gap(self) -> u8 {
+        match self {
+            RowHeight::Compact => 0,
+            RowHeight::Standard | RowHeight::Relaxed => 1,
         }
     }
 }
@@ -152,7 +166,6 @@ impl Default for Sections {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptSettings {
-    pub font: FontFamily,
     pub pattern: Pattern,
     pub row_height: RowHeight,
     pub show: Show,
@@ -171,7 +184,6 @@ pub struct ReceiptSettings {
 impl Default for ReceiptSettings {
     fn default() -> Self {
         ReceiptSettings {
-            font: FontFamily::Monospace,
             pattern: Pattern::Dashed,
             row_height: RowHeight::Standard,
             show: Show::default(),
@@ -188,6 +200,31 @@ impl Default for ReceiptSettings {
     }
 }
 
+/// The kitchen ticket's five separators (audit Part 3, "KOT separators").
+///
+/// By name, for the reason [`Separators`] gives. Five rather than the bill's
+/// seven because a ticket has no totals and no grand total to draw a line under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KitchenSeparators {
+    pub below_title: bool,
+    pub below_token: bool,
+    pub below_details: bool,
+    pub below_column_names: bool,
+    pub below_items: bool,
+}
+
+impl Default for KitchenSeparators {
+    fn default() -> Self {
+        KitchenSeparators {
+            below_title: true,
+            below_token: false,
+            below_details: true,
+            below_column_names: false,
+            below_items: true,
+        }
+    }
+}
+
 /// The kitchen ticket's own toggles (audit Part 3, "KOT visibility").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KitchenSettings {
@@ -197,9 +234,18 @@ pub struct KitchenSettings {
     pub show_order_type: bool,
     pub show_table: bool,
     pub show_time: bool,
+    /// **The eighth toggle, and it is here because the seventh separator asked
+    /// for it.** Audit Part 3 lists a KOT separator "below column names", which
+    /// v1 could only have drawn under a column header — so the header is a
+    /// setting too, rather than a rule under nothing (the mistake
+    /// `narrow_items` already documents on the bill side).
+    pub show_column_names: bool,
     /// v1's "2-column packing".
     pub two_column: bool,
     pub pattern: Pattern,
+    pub separators: KitchenSeparators,
+    /// Part 3's "KOT row height", which the bill has had since P06.
+    pub row_height: RowHeight,
     pub title: Style,
     pub details: Style,
     pub items: Style,
@@ -214,8 +260,13 @@ impl Default for KitchenSettings {
             show_order_type: true,
             show_table: true,
             show_time: true,
+            show_column_names: false,
             two_column: false,
             pattern: Pattern::Dashed,
+            separators: KitchenSeparators::default(),
+            // Relaxed, and on purpose: the kitchen reads this at speed with wet
+            // hands, and a line of air between dishes is worth the paper.
+            row_height: RowHeight::Relaxed,
             // The kitchen reads this across a hot room at speed, so the
             // defaults are deliberately larger than the bill's.
             title: Style::new(2, true),

@@ -541,7 +541,7 @@ use crate::billing::{
 #[tauri::command]
 pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
-    app.with_cart(cart_view)
+    app.with_cart(|state| cart_view(state, &app.shop_config()))
 }
 
 /// Put an item in. **`Cart::add` merges** by `LineIdentity` — same item, same
@@ -577,7 +577,7 @@ pub fn cart_add_on(
                 UiError::new("cart.add", "That item could not be added to the bill.")
                     .with_detail(e.to_string())
             })?;
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -600,7 +600,7 @@ pub fn cart_set_qty(
             UiError::new("cart.qty", "That quantity could not be set.")
                 .with_detail(e.to_string())
         })?;
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -612,7 +612,7 @@ pub fn cart_remove(app: tauri::State<'_, App>, index: usize) -> UiResult<CartVie
             UiError::new("cart.remove", "That line could not be removed.")
                 .with_detail(e.to_string())
         })?;
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -626,7 +626,7 @@ pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
         if keep_type {
             state.order_type = kept;
         }
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -647,7 +647,7 @@ pub fn cart_set_order_type(
             state.table = None;
             state.table_label = None;
         }
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -675,7 +675,7 @@ pub fn cart_add_payment(
             UiError::new("payment.invalid", "That payment could not be taken.")
                 .with_detail(e.to_string())
         })?;
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -684,7 +684,7 @@ pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
         state.settlement = mb_core::Settlement::new();
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 
@@ -712,10 +712,13 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
             &tables,
             &sections,
             &open,
-            loaded.as_deref(),
-            Timestamp::from_millis(now_millis()),
-            warn,
-            late,
+            crate::billing::Room {
+                loaded_order: loaded.as_deref(),
+                now: Timestamp::from_millis(now_millis()),
+                warn_after: warn,
+                late_after: late,
+                config: &app.shop_config(),
+            },
         ))
     })
 }
@@ -898,10 +901,14 @@ pub fn search_items_on(
             .db
             .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
             .map_err(|e| words::from_db(&e))?;
+        // **The shop's setting, not this function's default** (P17). The
+        // argument stays so a caller can override it for one search; without a
+        // caller saying otherwise, "how does search match?" is a thing the
+        // owner chose on the Billing settings screen.
         Ok(crate::search::search(
             &items,
             &text,
-            mode.unwrap_or_default(),
+            mode.unwrap_or(app.shop_config().billing.search_mode),
         ))
     })
 }
@@ -969,7 +976,7 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
                 };
             }
         }
-        cart_view(state)
+        cart_view(state, &app.shop_config())
     })
 }
 

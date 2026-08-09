@@ -46,6 +46,9 @@ mod preview;
 mod push;
 mod search;
 mod session;
+/// P17. **The one table that knows what a setting is**, and the load / save /
+/// reset / export / import that fall out of it.
+mod settings;
 /// P11's flows are sequences, and a sequence that can only be checked by
 /// clicking is a sequence that gets checked once. See the file's own note.
 #[cfg(test)]
@@ -71,6 +74,10 @@ mod floor_tests;
 /// export, edit a cell, import back. Same reasoning as `signin_tests`.
 #[cfg(test)]
 mod menu_tests;
+/// P17's T1 renders the paper twice for every setting on it, and its storage
+/// tests need a real `settings` table to count rows in.
+#[cfg(test)]
+mod settings_tests;
 mod startup;
 mod state;
 mod window;

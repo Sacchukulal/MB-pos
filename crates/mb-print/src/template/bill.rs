@@ -50,6 +50,9 @@ pub struct Store {
     pub state_code: Option<String>,
     pub upi_id: Option<String>,
     pub upi_merchant_name: Option<String>,
+    /// Audit Part 3's third UPI field. It rides in the payload as `tn`, so the
+    /// shop's bank statement says which counter a payment came from.
+    pub upi_reference: Option<String>,
     pub is_composition: bool,
 }
 
@@ -90,7 +93,7 @@ pub struct BillContext<'a> {
 /// Build the document for one bill.
 pub fn bill_document(paper: Paper, ctx: &BillContext<'_>) -> Result<Document, PrintError> {
     let s = ctx.settings;
-    let mut doc = Document::new(paper).with_font(s.font);
+    let mut doc = Document::new(paper);
 
     header(&mut doc, ctx);
     meta(&mut doc, ctx)?;
@@ -269,8 +272,17 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
         doc.separator(s.pattern);
     }
 
+    let gap = usize::from(s.row_height.gap());
     let mut rows = Vec::with_capacity(ctx.bill.lines.len());
-    for line in &ctx.bill.lines {
+    for (n, line) in ctx.bill.lines.iter().enumerate() {
+        // Row height, and it is the only thing "row height" can mean on a
+        // device that cannot vary leading. Between the rows, never after the
+        // last one — the block below already ends with a rule.
+        if n > 0 {
+            for _ in 0..gap {
+                rows.push(vec![String::new(); columns.len()]);
+            }
+        }
         let mut row = vec![line.snapshot.name.clone()];
         if with_hsn {
             row.push(line.snapshot.hsn.clone().unwrap_or_default());
@@ -313,7 +325,10 @@ fn narrow_items(doc: &mut Document, ctx: &BillContext<'_>) {
     // rules in a row — which the golden file showed and nobody would have
     // noticed in code.
 
-    for line in &ctx.bill.lines {
+    for (n, line) in ctx.bill.lines.iter().enumerate() {
+        if n > 0 {
+            doc.spacer(s.row_height.gap());
+        }
         let mut name = line.snapshot.name.clone();
         // Scope 2.5. On this paper the HSN rides with the name rather than
         // taking six columns off it.
@@ -398,6 +413,8 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
         doc.row("Round off", b.round_off.to_plain_string(), style);
     }
 
+    // The air around the one number the customer looks at. Compact says none.
+    doc.spacer(s.row_height.section_gap());
     if s.separators.below_subtotals {
         doc.separator(s.pattern);
     }
@@ -516,7 +533,7 @@ fn footer(doc: &mut Document, ctx: &BillContext<'_>) {
                     .upi_merchant_name
                     .clone()
                     .unwrap_or_else(|| ctx.store.name.clone());
-                let payload = if s.qr == QrMode::Dynamic {
+                let mut payload = if s.qr == QrMode::Dynamic {
                     format!(
                         "upi://pay?pa={upi}&pn={name}&am={}&cu=INR",
                         ctx.bill.grand_total.to_plain_string()
@@ -524,6 +541,14 @@ fn footer(doc: &mut Document, ctx: &BillContext<'_>) {
                 } else {
                     format!("upi://pay?pa={upi}&pn={name}&cu=INR")
                 };
+                // Audit Part 3's "payment reference", and the reason it is a
+                // setting at all: without it a shop's statement shows a column
+                // of identical UPI credits and cannot be reconciled.
+                if let Some(reference) = &ctx.store.upi_reference
+                    && !reference.is_empty()
+                {
+                    payload.push_str(&format!("&tn={reference}"));
+                }
                 doc.push(Block::QrCode {
                     payload,
                     width_pct: s.qr_width_pct,

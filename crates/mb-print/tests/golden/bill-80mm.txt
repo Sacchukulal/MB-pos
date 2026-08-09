@@ -1,7 +1,7 @@
       Anna Kuteera
     12 MG Road, Jayanagar, Bengaluru 560011
                  Ph: 9880012345
-             GSTIN: 29ABCDE1234F1Z5
+             GSTIN: 29ABCDE1234F1ZW
              FSSAI: 11223344556677
 ------------------------------------------------
 Bill No                                 BIR/1207
@@ -32,6 +32,7 @@ SGST                                       12.49
 Non-GST value                             418.00
 Exempt value                                5.00
 Round off                                   0.31
+
 ------------------------------------------------
 TOTAL             948.00
 ------------------------------------------------
@@ -46,7 +47,7 @@ Credit                                    242.00
 Tip                                        20.00
 ------------------------------------------------
 upi://pay?pa=anna@upi&pn=Anna Kuteera&am=948.00&
-cu=INR
+cu=INR&tn=MB1
              Thank you, visit again
 
 

@@ -84,7 +84,7 @@ fn the_drawer_says_what_should_be_in_it() {
     .expect("parcel");
     crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
         .expect("added");
-    let bill = app.with_cart(|state| Ok(state.bill()?.grand_total)).expect("bill");
+    let bill = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total)).expect("bill");
     app.with_cart_mut(|state| {
         let payment = mb_core::Payment::new(mb_core::PaymentMode::Cash, bill)
             .expect("a cash payment");

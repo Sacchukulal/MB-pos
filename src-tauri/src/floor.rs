@@ -154,6 +154,10 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
     let at = now();
     let (warn, late) = thresholds(app)?;
     let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    // Taken once, outside the transaction: a tile's running total is rounded
+    // and charged the way the bill will be, and reading that inside the loop
+    // would be a lock per table.
+    let config = app.shop_config();
 
     app.with_shop(|shop| {
         shop.db
@@ -170,7 +174,18 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                 let numbers = repos.floor().occupancy(OUTLET, day)?;
 
                 let mut tiles =
-                    floor_view(&tables, &sections, &open, loaded.as_deref(), at, warn, late);
+                    floor_view(
+                        &tables,
+                        &sections,
+                        &open,
+                        crate::billing::Room {
+                            loaded_order: loaded.as_deref(),
+                            now: at,
+                            warn_after: warn,
+                            late_after: late,
+                            config: &config,
+                        },
+                    );
                 // The second timer: minutes since the last kitchen ticket.
                 for tile in &mut tiles {
                     if let Some(order_id) = &tile.order_id {
@@ -861,7 +876,7 @@ pub struct EvenSplitView {
 
 pub fn even_split_on(app: &App, ways: u32) -> UiResult<EvenSplitView> {
     guard::require(app, Permission::BillCreate)?;
-    let total = app.with_cart(|state| Ok(state.bill()?.grand_total))?;
+    let total = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))?;
 
     let shares = mb_core::even_shares(total, ways)
         .map_err(|e| UiError::new("floor.even_split", format!("That split is not possible: {e}")))?;

@@ -27,7 +27,7 @@ use std::sync::Mutex;
 
 use mb_core::{
     AnyOrder, Bill, BillInput, Cart, DiscountEntry, ItemSnapshot, Money, OrderType,
-    PlaceOfSupply, RoundingMode, Settlement, TaxTreatment, Timestamp, compute_bill,
+    Settlement, TaxTreatment, Timestamp, compute_bill,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -109,11 +109,22 @@ impl CartState {
     /// Recompute from scratch. **There is no incremental path and there must
     /// not be one:** D4 fixes the order of operations, and a bill that was
     /// patched rather than recomputed is a bill nobody can reason about.
-    pub fn bill(&self) -> UiResult<Bill> {
+    ///
+    /// **P17 put the shop's own answers in here.** The round-off mode, the
+    /// place of supply and the default service / packing / delivery charges
+    /// were all constants written at this line: every shop rounded to the
+    /// nearest rupee, every shop supplied within its own state, and scope 1.14
+    /// was an engine with no caller.
+    pub fn bill(&self, config: &crate::settings::ShopConfig) -> UiResult<Bill> {
+        // Built here rather than stored, because a charge belongs to the ORDER
+        // TYPE and that can change while the cart is open — switching a table
+        // to a parcel must drop the service charge and add the packing one.
+        let charges = config.billing.charges_for(self.order_type);
         let mut input = BillInput::new(&self.cart)
             .with_order_type(self.order_type)
-            .with_place_of_supply(PlaceOfSupply::Intra)
-            .with_rounding(RoundingMode::NearestRupee);
+            .with_place_of_supply(config.store.place_of_supply())
+            .with_rounding(config.billing.rounding)
+            .with_charges(&charges);
         if let Some(discount) = self.bill_discount.clone() {
             input = input.with_bill_discount(discount);
         }
@@ -316,8 +327,11 @@ pub struct MenuItemView {
 // ---------------------------------------------------------------------------
 
 /// The whole cart region, from the cart and its freshly computed bill.
-pub fn cart_view(state: &CartState) -> UiResult<CartView> {
-    let bill = state.bill()?;
+pub fn cart_view(
+    state: &CartState,
+    config: &crate::settings::ShopConfig,
+) -> UiResult<CartView> {
+    let bill = state.bill(config)?;
     let lines = state
         .cart
         .lines()
@@ -465,19 +479,36 @@ fn money_error(e: impl std::fmt::Display) -> UiError {
 /// Takes the open orders and the tables and joins them **here**, because the
 /// join is a screen concern — a table with no order is a tile, and an order
 /// with no table is also a tile, and neither of those is a row in a database.
+/// What is true of the whole ROOM rather than of one table — so `floor_view`
+/// takes four arguments instead of eight, the same trick [`Seat`] plays one
+/// level down.
+pub struct Room<'a> {
+    pub loaded_order: Option<&'a str>,
+    pub now: Timestamp,
+    /// **Both thresholds come from settings** (P14, scope 14.2). A dosa counter
+    /// turns a table in eight minutes and a fine-dining room in ninety; the one
+    /// hard-coded constant that used to live here was wrong for both.
+    pub warn_after: i64,
+    pub late_after: i64,
+    /// P17: the round-off mode and the default charges a running total is
+    /// computed with. A tile that rounded differently from the bill would be a
+    /// second money path (R2).
+    pub config: &'a crate::settings::ShopConfig,
+}
+
 pub fn floor_view(
     tables: &[mb_db::repo::floor::DiningTable],
     sections: &[mb_db::repo::floor::Section],
     open: &[AnyOrder],
-    loaded_order: Option<&str>,
-    now: Timestamp,
-    // **Both thresholds come from settings** (P14, scope 14.2). A dosa
-    // counter turns a table in eight minutes and a fine-dining room in
-    // ninety; the one hard-coded constant that used to live here was wrong
-    // for both.
-    warn_after: i64,
-    late_after: i64,
+    room: Room<'_>,
 ) -> Vec<TableView> {
+    let Room {
+        loaded_order,
+        now,
+        warn_after,
+        late_after,
+        config,
+    } = room;
     let mut out = Vec::with_capacity(tables.len() + open.len());
 
     for table in tables.iter().filter(|t| t.is_active) {
@@ -505,6 +536,7 @@ pub fn floor_view(
                     now,
                     warn_after,
                     late_after,
+                    config,
                 },
             ),
             None => TableView {
@@ -532,7 +564,7 @@ pub fn floor_view(
         let label = order_type_label(order.core().order_type).to_owned();
         out.push(tile_for(
             order,
-            Seat { label, section: None, seats: 0, loaded_order, now, warn_after, late_after },
+            Seat { label, section: None, seats: 0, loaded_order, now, warn_after, late_after, config },
         ));
     }
 
@@ -550,10 +582,11 @@ struct Seat<'a> {
     now: Timestamp,
     warn_after: i64,
     late_after: i64,
+    config: &'a crate::settings::ShopConfig,
 }
 
 fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
-    let Seat { label, section, seats, loaded_order, now, warn_after, late_after } = seat;
+    let Seat { label, section, seats, loaded_order, now, warn_after, late_after, config } = seat;
     let core = order.core();
     let id = core.id.as_str().to_owned();
     let minutes = (now.millis() - core.created_at.millis()).div_euclid(60_000).max(0);
@@ -569,7 +602,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         } else {
             TableState::Occupied
         },
-        total: running_total(order),
+        total: running_total(order, config),
         minutes: Some(crate::ipc::count(minutes)),
                 // The delta ledger (crown jewel 2) answers "is there anything the
         // kitchen has not been told?". An error reading it is not a reason to
@@ -597,13 +630,18 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
 ///
 /// Recomputed from the cart rather than stored: an open order has no bill yet,
 /// and inventing one on the tile would be a second money path (R2).
-fn running_total(order: &AnyOrder) -> Option<MoneyView> {
+fn running_total(
+    order: &AnyOrder,
+    config: &crate::settings::ShopConfig,
+) -> Option<MoneyView> {
     let core = order.core();
+    let charges = config.billing.charges_for(core.order_type);
     compute_bill(
         BillInput::new(&core.cart)
             .with_order_type(core.order_type)
-            .with_place_of_supply(PlaceOfSupply::Intra)
-            .with_rounding(RoundingMode::NearestRupee),
+            .with_place_of_supply(config.store.place_of_supply())
+            .with_rounding(config.billing.rounding)
+            .with_charges(&charges),
     )
     .ok()
     .map(|bill| bill.grand_total.into())
@@ -761,7 +799,7 @@ mod tests {
         state.cart.add(dosa.clone(), one(), None, vec![]).expect("add");
         state.cart.add(dosa, one(), None, vec![]).expect("add");
 
-        let view = cart_view(&state).expect("view");
+        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
         assert_eq!(view.lines.len(), 1, "two presses of one item are one line");
         assert_eq!(view.lines[0].qty, "2");
     }
@@ -777,7 +815,7 @@ mod tests {
             .cart
             .add(dosa, one(), Some("no onion".to_owned()), vec![])
             .expect("add");
-        assert_eq!(cart_view(&state).expect("view").lines.len(), 2);
+        assert_eq!(cart_view(&state, &crate::settings::ShopConfig::default()).expect("view").lines.len(), 2);
     }
 
     /// **T5 — the totals block never collapses** (audit B10 and B11).
@@ -816,7 +854,7 @@ mod tests {
             )
             .expect("add");
 
-        let view = cart_view(&state).expect("view");
+        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
         assert_eq!(view.bill.tax_rows.len(), 2, "two rates means two rows, always");
         assert!(view.bill.tax_rows.iter().any(|r| r.rate_label == "5%"));
         assert!(view.bill.tax_rows.iter().any(|r| r.rate_label == "18%"));
@@ -845,8 +883,8 @@ mod tests {
             )
             .expect("add");
 
-        let bill = state.bill().expect("bill");
-        let view = cart_view(&state).expect("view");
+        let bill = state.bill(&crate::settings::ShopConfig::default()).expect("bill");
+        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
 
         assert_eq!(view.bill.grand_total.paise, bill.grand_total.paise());
         assert_eq!(view.bill.grand_total.text, bill.grand_total.to_plain_string());
@@ -878,9 +916,9 @@ mod tests {
             .expect("add");
 
         // 100.00 @ 5% exclusive = 105.00.
-        let total = state.bill().expect("bill").grand_total;
+        let total = state.bill(&crate::settings::ShopConfig::default()).expect("bill").grand_total;
         assert_eq!(total.paise(), 10_500);
-        assert_eq!(cart_view(&state).expect("view").balance.paise, 10_500);
+        assert_eq!(cart_view(&state, &crate::settings::ShopConfig::default()).expect("view").balance.paise, 10_500);
 
         // Part of it: still owed, and the panel must say how much.
         state
@@ -890,7 +928,7 @@ mod tests {
                     .expect("payment"),
             )
             .expect("add");
-        let view = cart_view(&state).expect("view");
+        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
         assert_eq!(view.paid.paise, 5_000);
         assert_eq!(view.balance.paise, 5_500, "half paid is not paid");
 
@@ -902,7 +940,7 @@ mod tests {
                     .expect("payment"),
             )
             .expect("add");
-        let view = cart_view(&state).expect("view");
+        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
         assert_eq!(view.balance.paise, 0, "the bill is paid in full");
         assert_eq!(view.change.paise, 0);
         assert!(state.settlement.is_settled(total).expect("settled"));
@@ -922,7 +960,7 @@ mod tests {
                 vec![],
             )
             .expect("add");
-        assert_eq!(cart_view(&state).expect("view").lines[0].qty, "0.5");
+        assert_eq!(cart_view(&state, &crate::settings::ShopConfig::default()).expect("view").lines[0].qty, "0.5");
     }
 
     /// A rate is a **label**, and the treatments do not have a percentage at

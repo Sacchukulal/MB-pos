@@ -65,6 +65,11 @@ CREATE TABLE store_profile (
     state_code          TEXT,
     upi_id              TEXT,
     upi_merchant_name   TEXT,
+    -- Audit Part 3, "UPI Payment: UPI ID, merchant name, payment reference".
+    -- It rides in the QR payload as `tn`, so the shop's own bank statement says
+    -- which counter a payment came from. Added at P17, which is the session
+    -- that discovered the third field had nowhere to go.
+    upi_reference       TEXT,
     -- Scope 2.10. A composition dealer charges no GST and must print a
     -- declaration instead, so this changes the bill, not just a report.
     is_composition      INTEGER NOT NULL DEFAULT 0 CHECK (is_composition IN (0, 1)),

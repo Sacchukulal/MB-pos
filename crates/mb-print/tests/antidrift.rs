@@ -83,7 +83,7 @@ fn t1_no_sink_can_drop_anything() {
         "Beer",                         // the non-GST line
         "2201",                         // an HSN code
         "29ZYXWV9876K1Z2",              // the customer's GSTIN (2.6)
-        "29ABCDE1234F1Z5",              // the shop's
+        "29ABCDE1234F1ZW",              // the shop's
         "DUPLICATE",                    // audit D7
         "TOTAL",
         "Non-GST value",                // scope 2.3 — the bar line

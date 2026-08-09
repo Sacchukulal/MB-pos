@@ -62,6 +62,17 @@ pub struct App {
     /// and two separate locks is the cheapest way to make that structural
     /// instead of remembered.
     sessions: Sessions,
+    /// **The shop's settings, loaded once** (P17).
+    ///
+    /// Every one of these used to be `ReceiptSettings::default()` written at
+    /// the point of use, which meant a shop could change none of them. It is
+    /// held here rather than read per print because a kitchen ticket has 50 ms
+    /// (budget B6) and a database round trip inside it would be spent on a
+    /// dozen rows that change once a month.
+    ///
+    /// Replaced **wholesale** on save, so nothing on the printing path can ever
+    /// see half of a change.
+    shop_config: Mutex<crate::settings::ShopConfig>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -99,7 +110,45 @@ impl App {
             cart: Mutex::new(CartState::default()),
             font: Arc::new(font),
             sessions,
+            shop_config: Mutex::new(crate::settings::ShopConfig::default()),
         })
+    }
+
+    /// What this shop has chosen. A clone, because the caller holds it across a
+    /// render and the lock must not be.
+    #[must_use]
+    pub fn shop_config(&self) -> crate::settings::ShopConfig {
+        lock(&self.shop_config).clone()
+    }
+
+    /// Read the configuration from the open shop and publish it.
+    ///
+    /// **A shop whose settings will not read keeps the defaults and says so.**
+    /// D7 forbids a silent default for a value that IS there and is the wrong
+    /// type — `settings::load` returns an error for exactly that — but refusing
+    /// to open the shop at all would mean one bad row stops a restaurant
+    /// billing, and requirement 3 says it must not.
+    pub fn reload_shop_config(&self) {
+        let read = self.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| crate::settings::load(&mb_db::Repos::new(tx), OUTLET))
+                .map_err(|e| words::from_db(&e))
+        });
+        match read {
+            Ok(config) => self.publish_shop_config(config),
+            Err(e) if e.code == "shop.none" => {}
+            Err(e) => log_warn!(
+                "this shop's settings could not be read ({e}); the counter is \
+                 using the standard ones until that is fixed"
+            ),
+        }
+    }
+
+    /// Put a configuration in place, including the one number that lives
+    /// outside this struct (D70).
+    pub fn publish_shop_config(&self, config: crate::settings::ShopConfig) {
+        crate::flows::set_day_rule(config.day.rule());
+        *lock(&self.shop_config) = config;
     }
 
     #[must_use]
@@ -126,6 +175,11 @@ impl App {
         if let Some(old) = previous {
             old.queue.shutdown();
         }
+        // **After the shop is in place**, because reading the settings needs a
+        // shop to read them from. Before this line the counter is on the
+        // standard settings, which is the right state for the seconds a first
+        // run spends with no database.
+        self.reload_shop_config();
         log_info!("the shop at {} is open", path.display());
     }
 

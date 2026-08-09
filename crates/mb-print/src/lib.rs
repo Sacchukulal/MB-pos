@@ -102,7 +102,7 @@ pub mod testprint;
 pub mod text;
 pub mod transport;
 
-pub use doc::{Align, Block, Column, Document, FontFamily, Pattern, Style, Width};
+pub use doc::{Align, Block, Column, Document, Pattern, Style, Width};
 pub use drawer::{DrawerConfig, DrawerPin, should_kick};
 pub use error::PrintError;
 pub use escpos::{EscPos, JobOptions, encode_raster, encode_text};

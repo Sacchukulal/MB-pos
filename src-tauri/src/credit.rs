@@ -532,7 +532,7 @@ pub struct HeadroomView {
 /// What this bill would do to the account, before it is put there.
 pub fn headroom_on(app: &App, customer_id: String) -> UiResult<HeadroomView> {
     guard::require(app, Permission::BillCreate)?;
-    let bill = app.with_cart(|state| Ok(state.bill()?.grand_total))?;
+    let bill = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))?;
     let id = CustomerId::new(customer_id);
 
     app.with_shop(|shop| {
@@ -637,7 +637,7 @@ pub fn put_on_account_on(
     // What is LEFT after any cash or card already taken — a split where the
     // rest goes on the account is an ordinary thing for a regular to ask for.
     let balance = app.with_cart(|state| {
-        let bill = state.bill()?;
+        let bill = state.bill(&app.shop_config())?;
         state.settlement.balance(bill.grand_total).map_err(|e| {
             UiError::new("bill.compute", "This bill could not be worked out.")
                 .with_detail(e.to_string())
@@ -671,7 +671,7 @@ pub fn put_on_account_on(
         Ok(())
     })?;
 
-    app.with_cart(crate::billing::cart_view)
+    app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
 }
 
 // --- the seats -------------------------------------------------------------

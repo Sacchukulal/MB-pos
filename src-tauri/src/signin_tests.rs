@@ -681,7 +681,7 @@ fn order_teas(app: &App, qty: u32) {
 /// Pay it and settle it.
 fn settle_the_cart(app: &App) -> String {
     app.with_cart_mut(|state| {
-        let total = state.bill()?.grand_total;
+        let total = state.bill(&app.shop_config())?.grand_total;
         state
             .settlement
             .add(mb_core::Payment::new(mb_core::PaymentMode::Cash, total).expect("a payment"))

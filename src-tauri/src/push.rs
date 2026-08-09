@@ -111,10 +111,15 @@ pub fn watch_for_idle(app: &AppHandle) {
                 let Some(state) = handle.try_state::<App>() else {
                     return;
                 };
-                if !state
-                    .sessions()
-                    .is_idle(crate::flows::now(), crate::session::IDLE_LOCK)
-                {
+                // P17: the shop's own limit, and **0 means never** — a terminal
+                // in a locked back room has no use for a screen that keeps
+                // asking who is there.
+                let Some(limit) =
+                    crate::session::idle_lock_for(state.shop_config().billing.idle_lock_minutes)
+                else {
+                    continue;
+                };
+                if !state.sessions().is_idle(crate::flows::now(), limit) {
                     continue;
                 }
                 if let Some(who) = state.sessions().end() {

@@ -163,12 +163,15 @@ fn seed_masters(db: &Db) {
                 name: "Anna Kuteera".to_owned(),
                 address: "12 MG Road, Bengaluru".to_owned(),
                 phone: Some("9880012345".to_owned()),
-                gstin: Some("29ABCDE1234F1Z5".to_owned()),
+                // The check character is W, not 5 — see mb-print's fixture.
+                gstin: Some("29ABCDE1234F1ZW".to_owned()),
                 fssai: Some("11223344556677".to_owned()),
                 state_code: Some("29".to_owned()),
                 upi_id: Some("anna@upi".to_owned()),
                 upi_merchant_name: Some("Anna Kuteera".to_owned()),
+                upi_reference: Some("MB1".to_owned()),
                 is_composition: false,
+                default_place_of_supply: "intra".to_owned(),
             },
             at(0),
         )?;
