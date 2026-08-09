@@ -229,3 +229,123 @@
 .mb-settings__paper .mb-receipt__paper {
   --receipt-char: var(--text-xs);
 }
+
+/* --- Printers (audit Part 3's "Printer Settings", scope 3.1 and 7.11) ----- */
+
+.mb-printers,
+.mb-backup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.mb-printers__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mb-printers__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.mb-printers__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+/* The nudge (7.11). Sunk, because it is a correction you make while looking at
+   a piece of paper rather than a setting you choose. */
+.mb-printers__nudge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.mb-printers__routes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
+  gap: var(--space-3);
+}
+
+/* --- Backup (audit group A) ---------------------------------------------- */
+
+/* The one line that has to be read. Bigger than the body text, with a stripe,
+   because "nobody has checked this backup" is not a footnote. */
+.mb-backup__headline {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: var(--space-1) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--text-md);
+  color: var(--text);
+}
+
+.mb-backup__headline--ok {
+  border-left-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.mb-backup__headline--warn {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.mb-backup__headline--danger {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+  font-weight: var(--weight-medium);
+}
+
+.mb-backup__where {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.mb-backup__where dt {
+  color: var(--text-muted);
+}
+
+.mb-backup__where dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.mb-backup__places {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Colour AND a word, never colour alone (§2 rule 2). */
+.mb-backup__unchecked {
+  color: var(--warn);
+  font-weight: var(--weight-medium);
+}
+
+.mb-backup__good {
+  color: var(--ok);
+}
+
+.mb-backup__bad {
+  color: var(--danger);
+  font-weight: var(--weight-medium);
+}

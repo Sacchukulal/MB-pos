@@ -211,4 +211,18 @@ impl<'a> PrintJobRepo<'a> {
         let count: i64 = stmt.query_row([outlet], |row| row.get(0))?;
         Ok(count)
     }
+
+    /// How much paper is still addressed to this printer.
+    ///
+    /// P17 asks before removing one. The foreign key would refuse anyway; the
+    /// point of asking first is that "there are still 3 print jobs against this
+    /// printer" is a sentence and `FOREIGN KEY constraint failed` is not
+    /// (audit F8).
+    pub fn count_for_printer(&self, printer_id: &str) -> Result<i64, DbError> {
+        let mut stmt = self
+            .tx
+            .prepare_cached("SELECT COUNT(*) FROM print_jobs WHERE printer_id = ?1")?;
+        let count: i64 = stmt.query_row([printer_id], |row| row.get(0))?;
+        Ok(count)
+    }
 }

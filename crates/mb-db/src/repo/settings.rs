@@ -303,6 +303,64 @@ impl<'a> SettingsRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "printers", &printer.id, Op::Upsert, at)
     }
 
+    /// **Delete a printer, and let the foreign keys refuse if they must.**
+    ///
+    /// `print_jobs.printer_id` references this row, so a printer with paper in
+    /// the spool cannot go — and that is the right answer: the alternative is a
+    /// job addressed to a printer nobody believes in, which is the bug
+    /// `state::fallback_row` exists to describe.
+    pub fn delete_printer(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        self.tx.execute(
+            "DELETE FROM printers WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "printers", id, Op::Delete, at)
+    }
+
+    /// Scope 3.1 — which printer a category's kitchen tickets go to.
+    ///
+    /// `(category, printer)` pairs. A category with no row goes wherever the
+    /// kitchen tickets go by default, which is `RoutingTable`'s own rule.
+    pub fn category_printers(&self, outlet: &str) -> Result<Vec<(String, String)>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT cp.category_id, cp.printer_id
+               FROM category_printers cp
+               JOIN printers p ON p.id = cp.printer_id
+              WHERE p.outlet_id = ?1",
+        )?;
+        let rows = stmt.query_map([outlet], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Send this category's tickets to that printer, or `None` to stop.
+    ///
+    /// **One printer per category**, so the route is replaced rather than
+    /// added to: the table's primary key allows several, and a category whose
+    /// food printed in two places is a kitchen cooking everything twice.
+    pub fn route_category(
+        &self,
+        outlet: &str,
+        category_id: &str,
+        printer_id: Option<&str>,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        self.tx.execute(
+            "DELETE FROM category_printers WHERE category_id = ?1",
+            [category_id],
+        )?;
+        if let Some(printer) = printer_id {
+            self.tx.execute(
+                "INSERT INTO category_printers (category_id, printer_id) VALUES (?1, ?2)",
+                rusqlite::params![category_id, printer],
+            )?;
+        }
+        OutboxRepo::new(self.tx).enqueue(outlet, "category_printers", category_id, Op::Upsert, at)
+    }
+
     pub fn list_printers(&self, outlet: &str) -> Result<Vec<Printer>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, name, kind, address, paper_mm, is_default, can_kick_drawer,

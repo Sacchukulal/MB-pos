@@ -41,8 +41,10 @@
 //! because it is nine scalars a person types into a form — see
 //! [`Storage::Store`].
 
+pub mod backup;
 pub mod catalog;
 pub mod ipc;
+pub mod printers;
 pub mod sample;
 pub mod value;
 

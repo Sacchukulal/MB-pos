@@ -156,8 +156,8 @@ pub const fn permission_for(group: Group) -> Permission {
         // A tax rate is what the shop owes the government, and the day start
         // decides which day every rupee lands in. Both are `settings.tax`.
         Group::Tax | Group::Day => Permission::SettingsTax,
-        // What comes out of the printer.
-        Group::Receipt | Group::Kitchen => Permission::SettingsPrinter,
+        // What comes out of the printer, and what it comes out of.
+        Group::Receipt | Group::Kitchen | Group::Printers => Permission::SettingsPrinter,
         Group::Backup => Permission::BackupRun,
     }
 }

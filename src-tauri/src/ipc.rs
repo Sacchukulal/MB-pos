@@ -235,7 +235,18 @@ pub fn nudge_print_offset(
     dx_mm: i32,
     dy_mm: i32,
 ) -> UiResult<PrinterView> {
-    guard::require(&app, Permission::SettingsPrinter)?;
+    nudge_offset_on(&app, printer_id, dx_mm, dy_mm)
+}
+
+/// The body (D46), so P17's printer screen nudges through the SAME arithmetic
+/// and the same clamp rather than growing a second one.
+pub fn nudge_offset_on(
+    app: &App,
+    printer_id: String,
+    dx_mm: i32,
+    dy_mm: i32,
+) -> UiResult<PrinterView> {
+    guard::require(app, Permission::SettingsPrinter)?;
     app.with_shop(|shop| {
         let mut rows = shop
             .db
@@ -495,6 +506,18 @@ macro_rules! commands {
             $crate::settings::ipc::save_settings,
             $crate::settings::ipc::settings_defaults_for,
             $crate::settings::ipc::preview_settings,
+            $crate::settings::printers::printer_setup,
+            $crate::settings::printers::save_printer,
+            $crate::settings::printers::delete_printer,
+            $crate::settings::printers::route_category,
+            $crate::settings::printers::print_sample_bill,
+            $crate::settings::printers::nudge_printer,
+            $crate::settings::backup::backup_status,
+            $crate::settings::backup::back_up_now,
+            $crate::settings::backup::verify_backup,
+            $crate::settings::backup::request_restore,
+            $crate::settings::backup::cancel_restore,
+            $crate::settings::backup::find_shops,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

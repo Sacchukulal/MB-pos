@@ -72,6 +72,10 @@ import type { SettingsView } from './generated/SettingsView';
 import type { SettingEdit } from './generated/SettingEdit';
 import type { SavedView } from './generated/SavedView';
 import type { PreviewView } from './generated/PreviewView';
+import type { PrintersView } from './generated/PrintersView';
+import type { PrinterEdit } from './generated/PrinterEdit';
+import type { BackupView } from './generated/BackupView';
+import type { VerifyView } from './generated/VerifyView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -369,6 +373,36 @@ export interface Commands {
     args: { group: string; edits: SettingEdit[] };
     returns: PreviewView;
   };
+
+  // The printers (P17 part 4). A printer is a RECORD, not a scalar, so it has
+  // its own commands rather than a place in the catalogue.
+  printer_setup: { args: void; returns: PrintersView };
+  save_printer: { args: { edit: PrinterEdit }; returns: PrintersView };
+  delete_printer: { args: { id: string }; returns: PrintersView };
+  /** Scope 3.1. An empty printerId means "the default kitchen printer". */
+  route_category: {
+    args: { categoryId: string; printerId: string };
+    returns: PrintersView;
+  };
+  /** A whole sample BILL, not a slip — a slip cannot show whether a bill is
+   *  centred, and that is what somebody at the printer is asking. */
+  print_sample_bill: { args: { printerId: string }; returns: string };
+  /** Scope 7.11 — print, look at the paper, nudge, print again. */
+  nudge_printer: {
+    args: { printerId: string; dxMm: number; dyMm: number };
+    returns: PrintersView;
+  };
+
+  // Backup (audit group A). `request_restore` does NOT restore: D27 says a
+  // restore runs before the database is opened, so it records the request and
+  // start-up carries it out.
+  backup_status: { args: void; returns: BackupView };
+  back_up_now: { args: void; returns: BackupView };
+  verify_backup: { args: { path: string }; returns: VerifyView };
+  request_restore: { args: { path: string }; returns: BackupView };
+  cancel_restore: { args: void; returns: BackupView };
+  /** Audit A5 — the screen somebody opens when everything else is broken. */
+  find_shops: { args: void; returns: string[] };
 }
 
 

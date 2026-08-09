@@ -34,6 +34,11 @@ pub enum Group {
     Tax,
     Receipt,
     Kitchen,
+    /// **No scalar settings at all**, and that is not an oversight: paper,
+    /// connection and role belong to a PRINTER, and a shop has none, one or
+    /// six of them. The section exists so the screen has somewhere to put
+    /// `settings::printers`, which owns the records.
+    Printers,
     Billing,
     Day,
     Backup,
@@ -48,6 +53,7 @@ impl Group {
         Group::Tax,
         Group::Receipt,
         Group::Kitchen,
+        Group::Printers,
         Group::Billing,
         Group::Day,
         Group::Backup,
@@ -60,6 +66,7 @@ impl Group {
             Group::Tax => "Tax",
             Group::Receipt => "The bill",
             Group::Kitchen => "The kitchen ticket",
+            Group::Printers => "Printers",
             Group::Billing => "Billing",
             Group::Day => "The day",
             Group::Backup => "Backup",
@@ -74,6 +81,7 @@ impl Group {
             Group::Tax => "tax",
             Group::Receipt => "receipt",
             Group::Kitchen => "kitchen",
+            Group::Printers => "printers",
             Group::Billing => "billing",
             Group::Day => "day",
             Group::Backup => "backup",

@@ -19,7 +19,7 @@
  * (R8, and D45's argument applied to values rather than to permissions).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import {
   Button,
@@ -41,8 +41,27 @@ import type { PreviewView } from '../ipc/generated/PreviewView';
 import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt } from '../preview/Receipt';
+import { Backup } from './Backup';
+import { Printers } from './Printers';
 
 import './settings.css';
+
+/**
+ * Sections that carry a screen as well as (or instead of) a form.
+ *
+ * A printer and a backup are **records and actions** — a list you add to, a
+ * button that takes a snapshot — and the catalogue describes scalars. Rather
+ * than bend one into the other, these two sections get a component under their
+ * settings, and the frame keeps the section list, the search and the guard.
+ *
+ * Backup has both: four settings (where, how often, how many) and then the
+ * buttons. Printers has no scalar settings at all — paper belongs to a
+ * printer, not to a shop.
+ */
+const OWN_SCREEN: Record<string, () => ReactNode> = {
+  printers: () => <Printers />,
+  backup: () => <Backup />,
+};
 
 /**
  * Which sections show the paper beside them.
@@ -280,12 +299,17 @@ export function Settings() {
             onClear={() => onSearch('')}
           />
         ) : active ? (
-          <Section
-            section={active}
-            edits={edits}
-            onChange={(key, value) => setEdits({ ...edits, [key]: value })}
-            onReset={onResetSection}
-          />
+          <div className="mb-stack">
+            {active.settings.length > 0 ? (
+              <Section
+                section={active}
+                edits={edits}
+                onChange={(key, value) => setEdits({ ...edits, [key]: value })}
+                onReset={onResetSection}
+              />
+            ) : null}
+            {OWN_SCREEN[active.code]?.()}
+          </div>
         ) : (
           <EmptyState
             title="Nothing here for you"

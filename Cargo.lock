@@ -2010,6 +2010,7 @@ dependencies = [
  "mb-core",
  "mb-db",
  "mb-print",
+ "mb-winprint",
  "serde",
  "serde_json",
  "tauri",

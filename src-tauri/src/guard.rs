@@ -220,6 +220,23 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // touches a real one.
     ("preview_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
 
+    // --- the printers, the backup and where the shop is (P17 part 4) -------
+    ("printer_setup", Access::Needs(Permission::SettingsPrinter)),
+    ("save_printer", Access::Needs(Permission::SettingsPrinter)),
+    ("delete_printer", Access::Needs(Permission::SettingsPrinter)),
+    ("route_category", Access::Needs(Permission::SettingsPrinter)),
+    ("print_sample_bill", Access::Needs(Permission::SettingsPrinter)),
+    ("nudge_printer", Access::Needs(Permission::SettingsPrinter)),
+    // Backup is its own permission, and audit A1 is why: the person who may
+    // REPLACE a shop's whole database is not automatically the person who may
+    // change its footer message.
+    ("backup_status", Access::Needs(Permission::BackupRun)),
+    ("back_up_now", Access::Needs(Permission::BackupRun)),
+    ("verify_backup", Access::Needs(Permission::BackupRun)),
+    ("request_restore", Access::Needs(Permission::BackupRun)),
+    ("cancel_restore", Access::Needs(Permission::BackupRun)),
+    ("find_shops", Access::Needs(Permission::BackupRun)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -488,7 +505,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 8] = [
+        const SOURCES: [&str; 10] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
@@ -497,6 +514,8 @@ mod tests {
             include_str!("credit.rs"),
             include_str!("expenses.rs"),
             include_str!("settings/ipc.rs"),
+            include_str!("settings/printers.rs"),
+            include_str!("settings/backup.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {

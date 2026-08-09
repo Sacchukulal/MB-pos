@@ -18,6 +18,13 @@ mb-core = { path = "../crates/mb-core" }
 mb-db = { path = "../crates/mb-db" }
 mb-print = { path = "../crates/mb-print" }
 
+# P17. "Which printers does this machine have?" is an operating-system
+# question, and this is the crate that talks to the operating system â it
+# already owns the window, the single-instance lock and the config folder.
+# mb-winprint is where D31 put all the `unsafe`, and it is already linked in
+# through mb-print, so this costs nothing in the binary.
+mb-winprint = { path = "../crates/mb-winprint" }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
