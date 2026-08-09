@@ -66,6 +66,8 @@ import type { CustomerView } from './generated/CustomerView';
 import type { CustomerEdit } from './generated/CustomerEdit';
 import type { AccountView } from './generated/AccountView';
 import type { HeadroomView } from './generated/HeadroomView';
+import type { ExpensesView } from './generated/ExpensesView';
+import type { ExpenseEdit } from './generated/ExpenseEdit';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -310,7 +312,38 @@ export interface Commands {
     args: { customerId: string; overrideLimit: boolean };
     returns: CartView;
   };
+
+  // P16 — money going out, and the drawer. Audit A2 / ANDROID-D1: v1 never
+  // sent expenses anywhere, so every owner's phone showed a profit that was
+  // too high, every day.
+  expenses: { args: void; returns: ExpensesView };
+  save_expense: { args: { edit: ExpenseEdit }; returns: ExpensesView };
+  delete_expense: { args: { id: string }; returns: ExpensesView };
+  /** The float, a top-up, a payout, a bank drop. A purchase is NOT one. */
+  save_cash_movement: {
+    args: { kind: string; amount: string; reason: string };
+    returns: ExpensesView;
+  };
+  save_expense_category: {
+    args: { id: string; name: string; isActive: boolean };
+    returns: ExpensesView;
+  };
+  save_recurring_expense: {
+    args: {
+      id: string;
+      description: string;
+      amount: string;
+      mode: string;
+      every: string;
+      categoryId: string | null;
+    };
+    returns: ExpensesView;
+  };
+  /** The only way a reminder becomes money. */
+  confirm_recurring_expense: { args: { id: string }; returns: ExpensesView };
+  export_expenses: { args: void; returns: string };
 }
+
 
 
 

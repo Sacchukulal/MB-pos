@@ -479,6 +479,14 @@ macro_rules! commands {
             $crate::credit::save_credit_adjustment,
             $crate::credit::credit_headroom,
             $crate::credit::put_on_account,
+            $crate::expenses::expenses,
+            $crate::expenses::save_expense,
+            $crate::expenses::delete_expense,
+            $crate::expenses::save_cash_movement,
+            $crate::expenses::save_expense_category,
+            $crate::expenses::save_recurring_expense,
+            $crate::expenses::confirm_recurring_expense,
+            $crate::expenses::export_expenses,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

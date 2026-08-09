@@ -53,6 +53,11 @@ fn main() {
               WHERE p.mode = 'credit'",
             "SELECT customer_id, amount, mode, reference, business_day FROM customer_payments",
             "SELECT customer_id, amount, increases, reason, made_by FROM credit_adjustments",
+            // P16. Money going out, and the drawer. There is no cash-movement
+            // row for a cash expense on purpose — the position is a query.
+            "SELECT id, category_id, description, amount, mode, paid_to, gst_amount \n               FROM expenses",
+            "SELECT kind, amount, reason, business_day FROM cash_movements",
+            "SELECT id, description, amount, every, next_due, is_active FROM recurring_expenses",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();

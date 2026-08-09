@@ -254,7 +254,11 @@ fn export_table(conn: &rusqlite::Connection, table: &str) -> Result<Csv, DbError
 }
 
 /// Rule 3 lives here: `None` writes nothing at all, `Some("")` writes `""`.
-pub(crate) fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = Option<&'a str>>) {
+/// One CSV row, escaped the one way this product escapes CSV.
+///
+/// `pub` since P16, which exports expenses: a second writer is how audit G7's
+/// four escaping bugs were four rather than one.
+pub fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = Option<&'a str>>) {
     let mut first = true;
     for cell in cells {
         if !first {

@@ -36,6 +36,7 @@ mod config;
 mod corrections;
 mod credit;
 mod floor;
+mod expenses;
 mod flows;
 mod guard;
 mod ipc;
@@ -54,6 +55,10 @@ mod signin_tests;
 /// PERFORMANCE.md §4.
 #[cfg(test)]
 mod perf_tests;
+/// P16's cash position is the figure P18 leans on, so the sequence that
+/// produces it is driven with the real commands.
+#[cfg(test)]
+mod expense_tests;
 /// P15's credit account is a sequence too: bill a regular, take money back,
 /// and the statement has to add up at every step.
 #[cfg(test)]

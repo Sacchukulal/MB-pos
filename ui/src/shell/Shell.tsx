@@ -29,6 +29,7 @@ import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
 import { Bills } from '../corrections/Bills';
 import { Credit } from '../credit/Credit';
+import { Expenses } from '../expenses/Expenses';
 import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
 
@@ -83,6 +84,15 @@ const SCREENS: readonly Screen[] = [
     icon: '☰',
     render: () => <Credit />,
     needs: 'customers.manage',
+  },
+  {
+    // "Spends", not "Expenses": the rail is read at a glance and the shorter
+    // word is the one a shopkeeper uses.
+    id: 'expenses',
+    label: 'Spends',
+    icon: '⌁',
+    render: () => <Expenses />,
+    needs: 'expenses.manage',
   },
   {
     id: 'bills',

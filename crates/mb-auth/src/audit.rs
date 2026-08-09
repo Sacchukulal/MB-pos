@@ -73,6 +73,12 @@ pub mod action {
     pub const CREDIT_ADJUSTED: AuditAction = "credit.adjusted";
     /// P15, scope 5.2 — somebody approved a bill past the limit.
     pub const CREDIT_LIMIT_OVERRIDDEN: AuditAction = "credit.limit_overridden";
+    /// P16, scope 10.6 — money the shop spent. Audit B15: v1 could neither
+    /// edit an expense nor account for an edit.
+    pub const EXPENSE_SAVED: AuditAction = "expense.saved";
+    pub const EXPENSE_DELETED: AuditAction = "expense.deleted";
+    /// P16 — the float, a top-up, a payout, a bank drop.
+    pub const CASH_MOVED: AuditAction = "cash.moved";
     pub const ITEM_VOIDED: AuditAction = "item.voided";
     pub const DISCOUNT_GIVEN: AuditAction = "discount.given";
     pub const DISCOUNT_REFUSED: AuditAction = "discount.refused";
@@ -106,6 +112,9 @@ pub mod action {
         CREDIT_TAKEN,
         CREDIT_ADJUSTED,
         CREDIT_LIMIT_OVERRIDDEN,
+        EXPENSE_SAVED,
+        EXPENSE_DELETED,
+        CASH_MOVED,
         ITEM_VOIDED,
         DISCOUNT_GIVEN,
         DISCOUNT_REFUSED,
@@ -142,6 +151,9 @@ pub mod action {
             CREDIT_TAKEN => "Took a credit repayment",
             CREDIT_ADJUSTED => "Adjusted what a customer owes",
             CREDIT_LIMIT_OVERRIDDEN => "Approved a bill past the credit limit",
+            EXPENSE_SAVED => "Recorded an expense",
+            EXPENSE_DELETED => "Deleted an expense",
+            CASH_MOVED => "Moved cash in or out of the drawer",
             ITEM_VOIDED => "Voided an item",
             DISCOUNT_GIVEN => "Gave a discount",
             DISCOUNT_REFUSED => "Tried to give too big a discount",

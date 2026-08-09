@@ -1,0 +1,62 @@
+/*
+ * Money going out — scope 10.6. Every value is a token.
+ */
+
+.mb-expenses {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+/* Quick add. The whole point of the screen: two fields and Enter, because a
+   cashier records a 40-rupee milk purchase mid-service or does not record it
+   at all. */
+.mb-expenses__quick {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.mb-expenses__cash,
+.mb-expenses__totals,
+.mb-expenses__movements,
+.mb-expenses__due {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* The arithmetic, spelled out. A shopkeeper counting a drawer wants to see
+   which number they disagree with. */
+.mb-expenses__sum {
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+}
+
+/* A reminder is a prompt, never a posting. */
+.mb-expenses__due {
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.mb-expenses__reminder {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mb-expenses__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

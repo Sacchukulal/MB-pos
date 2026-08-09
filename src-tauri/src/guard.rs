@@ -180,6 +180,19 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("credit_headroom", Access::Needs(Permission::BillCreate)),
     ("put_on_account", Access::Needs(Permission::BillCreate)),
 
+    // --- money going out, and the drawer (P16) ------------------------------
+    // All `expenses.manage`. A cashier who records a 40-rupee milk purchase
+    // mid-service is doing the thing this feature exists for, so the
+    // permission is on the role rather than on the till.
+    ("expenses", Access::Needs(Permission::ExpensesManage)),
+    ("save_expense", Access::Needs(Permission::ExpensesManage)),
+    ("delete_expense", Access::Needs(Permission::ExpensesManage)),
+    ("save_cash_movement", Access::Needs(Permission::ExpensesManage)),
+    ("save_expense_category", Access::Needs(Permission::ExpensesManage)),
+    ("save_recurring_expense", Access::Needs(Permission::ExpensesManage)),
+    ("confirm_recurring_expense", Access::Needs(Permission::ExpensesManage)),
+    ("export_expenses", Access::Needs(Permission::ExpensesManage)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -408,13 +421,14 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 6] = [
+        const SOURCES: [&str; 7] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
             include_str!("menu.rs"),
             include_str!("floor.rs"),
             include_str!("credit.rs"),
+            include_str!("expenses.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {
