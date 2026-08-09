@@ -158,6 +158,11 @@ pub const fn permission_for(group: Group) -> Permission {
         Group::Tax | Group::Day => Permission::SettingsTax,
         // What comes out of the printer, and what it comes out of.
         Group::Receipt | Group::Kitchen | Group::Printers => Permission::SettingsPrinter,
+        // A bill number is what a GST return is a list of, so moving one is
+        // the same authority as changing a tax rate.
+        Group::Numbering => Permission::SettingsTax,
+        // The look and the language are "how this shop presents itself".
+        Group::Appearance => Permission::SettingsStore,
         Group::Backup => Permission::BackupRun,
     }
 }
@@ -525,8 +530,142 @@ pub fn reload_on(app: &App) -> UiResult<SettingsView> {
 }
 
 // ---------------------------------------------------------------------------
+// The whole configuration, out and in — so a dealer sets up the second shop in
+// a minute instead of an afternoon.
+// ---------------------------------------------------------------------------
+
+/// What an import WOULD do, before anything is written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigPlanView {
+    pub changes: Vec<ChangeView>,
+    /// Keys this build has never heard of. **Reported, not refused** — a file
+    /// written by a NEWER Magic Bill must still be usable, and dropping the two
+    /// keys it gained is the honest outcome.
+    pub unknown: Vec<String>,
+    /// Why it cannot be used. Non-empty means nothing will be written.
+    pub problems: Vec<String>,
+    pub usable: bool,
+}
+
+/// Where the file goes. Beside the database, which is the folder a support call
+/// already asks for.
+fn config_file(app: &App) -> std::path::PathBuf {
+    app.with_shop(|shop| {
+        Ok(shop
+            .path
+            .parent()
+            .map_or_else(|| std::path::PathBuf::from("."), std::path::Path::to_path_buf)
+            .join("magic-bill-settings.json"))
+    })
+    .unwrap_or_else(|_| mb_db::locate::default_config_dir().join("magic-bill-settings.json"))
+}
+
+/// **Export.** Every setting as `key: value`, sorted, with a version line.
+///
+/// Sorted because a configuration file two shops compare has to diff cleanly,
+/// and `BTreeMap` is what `to_map` already returns.
+pub fn export_on(app: &App) -> UiResult<String> {
+    guard::require(app, Permission::SettingsStore)?;
+    let map = super::to_map(&app.shop_config());
+    let text = serde_json::to_string_pretty(&map).map_err(|e| {
+        UiError::new(
+            "settings.export",
+            "This shop's settings could not be written out.",
+        )
+        .with_detail(e.to_string())
+    })?;
+
+    let path = config_file(app);
+    std::fs::write(&path, &text).map_err(|e| {
+        UiError::new(
+            "settings.export",
+            format!("The settings could not be written to {}.", path.display()),
+        )
+        .with_detail(e.to_string())
+    })?;
+    log_info!("the settings were written to {}", path.display());
+    Ok(path.display().to_string())
+}
+
+fn read_config_file(text: &str) -> UiResult<std::collections::BTreeMap<String, serde_json::Value>> {
+    serde_json::from_str(text).map_err(|e| {
+        UiError::new(
+            "settings.import",
+            "That file is not a Magic Bill settings file.",
+        )
+        .with_detail(e.to_string())
+    })
+}
+
+/// **The dry run is the feature** — the same shape as P13's CSV import, and for
+/// the same reason: the difference between "it failed" and "the logo width in
+/// this file is 400" is the difference between a support call and a fix.
+pub fn plan_config_import_on(app: &App, text: String) -> UiResult<ConfigPlanView> {
+    guard::require_any(app, guard::SETTINGS_PERMISSIONS)?;
+    let file = read_config_file(&text)?;
+    let (_, plan) = super::plan_import(&app.shop_config(), &file);
+    Ok(ConfigPlanView {
+        changes: plan.changes.iter().map(ChangeView::from).collect(),
+        unknown: plan.unknown.clone(),
+        problems: plan.problems.clone(),
+        usable: plan.is_usable(),
+    })
+}
+
+/// **An import writes tax rates and printer setup, so it needs ALL FOUR
+/// permissions**, not the one that happens to cover the first key in the file.
+pub fn run_config_import_on(app: &App, text: String) -> UiResult<SavedView> {
+    for need in guard::SETTINGS_PERMISSIONS {
+        guard::require(app, *need)?;
+    }
+    let file = read_config_file(&text)?;
+    let before = app.shop_config();
+    let (wanted, plan) = super::plan_import(&before, &file);
+    if !plan.is_usable() {
+        return Err(UiError::new(
+            "settings.import",
+            format!(
+                "This file cannot be used, so nothing has been changed: {}",
+                plan.problems.join(" ")
+            ),
+        ));
+    }
+
+    // Straight through `save_on`, so an import obeys exactly the rules a person
+    // typing obeys — the cross-field GSTIN check, the audit row, the diff.
+    let edits = catalog::CATALOG
+        .iter()
+        .map(|entry| SettingEdit {
+            key: entry.key.to_owned(),
+            value: on_the_wire(&(entry.read)(&wanted)),
+        })
+        .collect();
+    save_on(app, edits)
+}
+
+// ---------------------------------------------------------------------------
 // The seats (D46).
 // ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn export_settings(app: tauri::State<'_, App>) -> UiResult<String> {
+    export_on(&app)
+}
+
+#[tauri::command]
+pub fn plan_settings_import(
+    app: tauri::State<'_, App>,
+    text: String,
+) -> UiResult<ConfigPlanView> {
+    plan_config_import_on(&app, text)
+}
+
+#[tauri::command]
+pub fn run_settings_import(app: tauri::State<'_, App>, text: String) -> UiResult<SavedView> {
+    run_config_import_on(&app, text)
+}
 
 #[tauri::command]
 pub fn settings_all(app: tauri::State<'_, App>) -> UiResult<SettingsView> {

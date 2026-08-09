@@ -39,9 +39,13 @@ pub enum Group {
     /// six of them. The section exists so the screen has somewhere to put
     /// `settings::printers`, which owns the records.
     Printers,
+    /// Also no scalar settings of its own: the counters are records, one per
+    /// terminal per series, and P27 adds terminals.
+    Numbering,
     Billing,
     Day,
     Backup,
+    Appearance,
 }
 
 impl Group {
@@ -54,9 +58,11 @@ impl Group {
         Group::Receipt,
         Group::Kitchen,
         Group::Printers,
+        Group::Numbering,
         Group::Billing,
         Group::Day,
         Group::Backup,
+        Group::Appearance,
     ];
 
     #[must_use]
@@ -67,9 +73,11 @@ impl Group {
             Group::Receipt => "The bill",
             Group::Kitchen => "The kitchen ticket",
             Group::Printers => "Printers",
+            Group::Numbering => "Bill and token numbers",
             Group::Billing => "Billing",
             Group::Day => "The day",
             Group::Backup => "Backup",
+            Group::Appearance => "How it looks",
         }
     }
 
@@ -82,9 +90,11 @@ impl Group {
             Group::Receipt => "receipt",
             Group::Kitchen => "kitchen",
             Group::Printers => "printers",
+            Group::Numbering => "numbering",
             Group::Billing => "billing",
             Group::Day => "day",
             Group::Backup => "backup",
+            Group::Appearance => "appearance",
         }
     }
 
@@ -178,6 +188,12 @@ const ORDER_TYPES: &[Choice] = &[
 const PLACES_OF_SUPPLY: &[Choice] = &[
     Choice { value: "intra", label: "In my own state — CGST and SGST" },
     Choice { value: "inter", label: "Another state — IGST" },
+];
+
+const LANGUAGES: &[Choice] = &[
+    Choice { value: "en", label: "English" },
+    Choice { value: "hi", label: "Hindi — not installed yet (P23)" },
+    Choice { value: "kn", label: "Kannada — not installed yet (P23)" },
 ];
 
 const GST_RATES: &[Choice] = &[
@@ -816,6 +832,17 @@ pub const CATALOG: &[Entry] = &[
         "Older ones are deleted to save disk space.",
         ["backup", "keep", "retention", "delete", "old"], 1..=365 "backups", u32,
         backup.keep_count),
+
+    // --- how it looks (scope 13.11, 13.12) ----------------------------------
+    // The THEME and the TEXT SIZE are deliberately NOT here. They live in
+    // `AppConfig`, on the machine: they are applied before the first paint and
+    // they have to work when the database will not open. A shop's LANGUAGE is
+    // the shop's — it is on the receipt — so it is a setting like any other.
+    pick_text!("appearance.language", Appearance, Row, "Language",
+        "English is the only one installed today. Hindi and Kannada need a \
+         second typeface and a text shaper, which is P23.",
+        ["language", "hindi", "kannada", "english", "bhasha"], LANGUAGES,
+        appearance.language),
 ];
 
 /// The entry for a key, or `None` if this build has never heard of it.

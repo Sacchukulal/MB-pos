@@ -151,6 +151,115 @@ pub fn last_issued(
     }
 }
 
+/// A counter, whole, for the settings screen (P17).
+///
+/// **`last_issued` is `None` until something has been issued**, which is not
+/// the same as zero — see the column's own comment. The screen shows "nothing
+/// yet" rather than "0", because "0" reads as a number that was used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Counter {
+    pub kind: CounterKind,
+    pub prefix: String,
+    pub pad_width: i64,
+    pub reset_daily: bool,
+    pub start: i64,
+    pub last_issued: Option<i64>,
+}
+
+/// Both counters for a terminal.
+pub fn counters(
+    tx: &Transaction<'_>,
+    outlet: &str,
+    terminal: &str,
+) -> Result<Vec<Counter>, DbError> {
+    let mut stmt = tx.prepare_cached(
+        "SELECT kind, prefix, pad_width, reset_daily, start, last_issued
+           FROM counters
+          WHERE outlet_id = ?1 AND terminal_id = ?2
+          ORDER BY kind DESC",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![outlet, terminal], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, Option<i64>>(5)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (kind, prefix, pad_width, reset_daily, start, last_issued) = row?;
+        out.push(Counter {
+            kind: match kind.as_str() {
+                "token" => CounterKind::Token,
+                _ => CounterKind::Bill,
+            },
+            prefix,
+            pad_width,
+            reset_daily: reset_daily != 0,
+            start,
+            last_issued,
+        });
+    }
+    Ok(out)
+}
+
+/// The shape of a series: what a number LOOKS like and when it starts over.
+///
+/// Four values in a struct rather than four arguments, because
+/// `set_format(tx, outlet, terminal, kind, "", 4, false, 1)` is a line nobody
+/// can read and two of those numbers are interchangeable at the call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Format {
+    pub prefix: String,
+    pub pad_width: i64,
+    pub reset_daily: bool,
+    pub start: i64,
+}
+
+/// Write the shape of a series — prefix, padding, daily reset, starting number.
+///
+/// **Not `last_issued`.** That is what has been handed out, and moving it is a
+/// different and far more dangerous act: [`set_next`] owns it, and P17's screen
+/// refuses to move it backwards past a number a customer is holding.
+pub fn set_format(
+    tx: &Transaction<'_>,
+    outlet: &str,
+    terminal: &str,
+    kind: CounterKind,
+    format: &Format,
+) -> Result<(), DbError> {
+    let Format {
+        prefix,
+        pad_width,
+        reset_daily,
+        start,
+    } = format;
+    let changed = tx.execute(
+        "UPDATE counters
+            SET prefix = ?4, pad_width = ?5, reset_daily = ?6, start = ?7
+          WHERE outlet_id = ?1 AND terminal_id = ?2 AND kind = ?3",
+        rusqlite::params![
+            outlet,
+            terminal,
+            kind.as_sql(),
+            prefix,
+            pad_width,
+            i64::from(*reset_daily),
+            start,
+        ],
+    )?;
+    if changed == 0 {
+        return Err(DbError::invariant(format!(
+            "there is no {} counter for terminal {terminal}",
+            kind.as_sql()
+        )));
+    }
+    Ok(())
+}
+
 /// The settings edit. Names itself as a write, so it reads nothing like a
 /// claim.
 ///

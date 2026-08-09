@@ -219,6 +219,14 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // The live preview. Reading only â it renders a SAMPLE bill and never
     // touches a real one.
     ("preview_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    ("export_settings", Access::Needs(Permission::SettingsStore)),
+    ("plan_settings_import", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    // **All four**, and the command re-checks each one: an import writes tax
+    // rates and printer setup, so it is not a store edit.
+    ("run_settings_import", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    // The counters. A bill number is what a GST return is a list of.
+    ("numbering", Access::Needs(Permission::SettingsTax)),
+    ("save_counter", Access::Needs(Permission::SettingsTax)),
 
     // --- the printers, the backup and where the shop is (P17 part 4) -------
     ("printer_setup", Access::Needs(Permission::SettingsPrinter)),
@@ -505,7 +513,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 10] = [
+        const SOURCES: [&str; 11] = [
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
@@ -516,6 +524,7 @@ mod tests {
             include_str!("settings/ipc.rs"),
             include_str!("settings/printers.rs"),
             include_str!("settings/backup.rs"),
+            include_str!("settings/numbering.rs"),
         ];
         let mut found = BTreeSet::new();
         for source in SOURCES {

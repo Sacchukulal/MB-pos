@@ -76,6 +76,9 @@ import type { PrintersView } from './generated/PrintersView';
 import type { PrinterEdit } from './generated/PrinterEdit';
 import type { BackupView } from './generated/BackupView';
 import type { VerifyView } from './generated/VerifyView';
+import type { ConfigPlanView } from './generated/ConfigPlanView';
+import type { NumberingView } from './generated/NumberingView';
+import type { CounterEdit } from './generated/CounterEdit';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -403,6 +406,19 @@ export interface Commands {
   cancel_restore: { args: void; returns: BackupView };
   /** Audit A5 — the screen somebody opens when everything else is broken. */
   find_shops: { args: void; returns: string[] };
+
+  // The whole configuration, out and in — a dealer sets up the second shop by
+  // copying one file. The import is a DRY RUN first, the same shape P13's CSV
+  // import uses and for the same reason.
+  export_settings: { args: void; returns: string };
+  plan_settings_import: { args: { text: string }; returns: ConfigPlanView };
+  run_settings_import: { args: { text: string }; returns: SavedView };
+
+  // The counters (audit Part 3's two numbering blocks). A bill number that
+  // goes backwards is a GST return the department will reject, so Rust
+  // refuses it and says why.
+  numbering: { args: void; returns: NumberingView };
+  save_counter: { args: { edit: CounterEdit }; returns: NumberingView };
 }
 
 

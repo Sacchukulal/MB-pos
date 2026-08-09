@@ -44,6 +44,7 @@
 pub mod backup;
 pub mod catalog;
 pub mod ipc;
+pub mod numbering;
 pub mod printers;
 pub mod sample;
 pub mod value;
@@ -308,6 +309,30 @@ impl Day {
     }
 }
 
+/// Scope 13.11 and 13.12 — the look and the language.
+///
+/// **Only the language is here.** The theme and the text size live in
+/// `AppConfig`, on the machine, and that is deliberate: they have to be applied
+/// before the first paint and they have to work when the database will not
+/// open. A shop's language is the shop's — it is on the receipt — so it is a
+/// setting like any other.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// `en`, `hi` or `kn`. **Only English is installed today** (P23 does the
+    /// rest), and the screen says so rather than offering a choice that
+    /// silently does nothing — which is audit F8.
+    pub language: String,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Appearance {
+            language: "en".to_owned(),
+        }
+    }
+}
+
 /// What a new menu item and a new bill assume about tax.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -358,6 +383,7 @@ pub struct ShopConfig {
     pub day: Day,
     pub tax: Tax,
     pub backup: BackupPolicy,
+    pub appearance: Appearance,
 }
 
 /// One setting that changed, for the audit trail and for the screen's summary.

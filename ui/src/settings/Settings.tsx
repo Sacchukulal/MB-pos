@@ -28,6 +28,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Input,
+  Modal,
   NumberInput,
   SaveBar,
   SearchField,
@@ -37,11 +38,14 @@ import {
 } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
 import type { GroupView } from '../ipc/generated/GroupView';
+import type { ConfigPlanView } from '../ipc/generated/ConfigPlanView';
 import type { PreviewView } from '../ipc/generated/PreviewView';
 import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt } from '../preview/Receipt';
+import { Appearance } from './Appearance';
 import { Backup } from './Backup';
+import { Numbering } from './Numbering';
 import { Printers } from './Printers';
 
 import './settings.css';
@@ -60,7 +64,9 @@ import './settings.css';
  */
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
+  numbering: () => <Numbering />,
   backup: () => <Backup />,
+  appearance: () => <Appearance />,
 };
 
 /**
@@ -85,6 +91,10 @@ export function Settings() {
   /** Where the unsaved-changes guard was heading when it stopped us. */
   const [leavingTo, setLeavingTo] = useState<string | null>(null);
   const [paper, setPaper] = useState<PreviewView | null>(null);
+  /** A configuration file that has been read and planned, waiting for a yes. */
+  const [importing, setImporting] = useState<{ text: string; plan: ConfigPlanView } | null>(
+    null,
+  );
   const body = useRef<HTMLDivElement>(null);
   const toast = useToast();
 
@@ -223,6 +233,20 @@ export function Settings() {
     }
   }, [active, edits, toast]);
 
+  /** Read the file, ask Rust what it WOULD do, and show that. */
+  const onImport = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        setImporting({ text, plan: await call('plan_settings_import', { text }) });
+      } catch (cause) {
+        if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+        else toast.show('danger', 'That file could not be read.');
+      }
+    },
+    [toast],
+  );
+
   if (!view) {
     return (
       <div className="mb-settings">
@@ -230,6 +254,7 @@ export function Settings() {
       </div>
     );
   }
+
 
   // **No shop, no form** — found by running it. The configuration lives in
   // Rust and starts as the standard one, so on a machine whose database would
@@ -259,22 +284,63 @@ export function Settings() {
           placeholder="Search every setting"
           onChange={(event) => onSearch(event.currentTarget.value)}
         />
-        {groups.map((section) => (
-          <button
-            key={section.code}
-            type="button"
-            className="mb-settings__section"
-            aria-current={section.code === active?.code ? 'page' : undefined}
-            onClick={() => go(section.code)}
+        {/* **Only the sections scroll.** Ten of them plus the export block was
+            taller than the column, so the block sat below the fold and nobody
+            would ever have found it — found by looking, after the tenth
+            section was added. */}
+        <div className="mb-settings__sections">
+          {groups.map((section) => (
+            <button
+              key={section.code}
+              type="button"
+              className="mb-settings__section"
+              aria-current={section.code === active?.code ? 'page' : undefined}
+              onClick={() => go(section.code)}
+            >
+              <span>{section.label}</span>
+              {section.canEdit ? null : (
+                <span className="mb-settings__locked" title="You may look but not change this">
+                  read only
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* **The whole configuration, out and in.** A dealer setting up a
+            second shop copies one file instead of retyping ninety settings —
+            and the import is a DRY RUN first, the same shape P13's CSV import
+            uses and for the same reason. */}
+        <div className="mb-settings__moving">
+          <Button
+            small
+            variant="quiet"
+            wide
+            onClick={() =>
+              void call('export_settings')
+                .then((path) =>
+                  toast.show('ok', 'These settings have been written out.', path),
+                )
+                .catch((cause) => {
+                  if (isUiError(cause)) toast.show('danger', cause.message);
+                })
+            }
           >
-            <span>{section.label}</span>
-            {section.canEdit ? null : (
-              <span className="mb-settings__locked" title="You may look but not change this">
-                read only
-              </span>
-            )}
-          </button>
-        ))}
+            Write these settings out
+          </Button>
+          <label className="mb-settings__load">
+            <span>Load settings from a file</span>
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void onImport(file);
+              }}
+            />
+          </label>
+        </div>
       </nav>
 
       {/* **Back to the top when the section changes**, and this was a bug found
@@ -361,6 +427,67 @@ export function Settings() {
           if (to) setGroup(to);
         }}
       />
+
+      {/* **The dry run**, and it is the feature. Nothing is written until this
+          says what would change and somebody agrees to it. */}
+      <Modal
+        open={importing !== null}
+        title="Load these settings?"
+        onClose={() => setImporting(null)}
+        wide
+        actions={
+          <>
+            <Button onClick={() => setImporting(null)}>Do not load them</Button>
+            <Button
+              variant="primary"
+              disabled={!importing?.plan.usable || importing.plan.changes.length === 0}
+              onClick={() => {
+                const chosen = importing;
+                setImporting(null);
+                if (!chosen) return;
+                void call('run_settings_import', { text: chosen.text })
+                  .then((saved) => {
+                    setView(saved.settings);
+                    setEdits({});
+                    toast.show('ok', `Loaded. ${saved.changed.length} settings changed.`);
+                  })
+                  .catch((cause) => {
+                    if (isUiError(cause)) toast.show('danger', cause.message);
+                  });
+              }}
+            >
+              Change {importing?.plan.changes.length ?? 0} settings
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-stack">
+          {importing?.plan.problems.length ? (
+            <p className="mb-settings__problem">
+              This file cannot be used, so nothing will be changed:{' '}
+              {importing.plan.problems.join(' ')}
+            </p>
+          ) : null}
+          {importing?.plan.changes.length === 0 ? (
+            <p className="mb-field__hint">
+              Every setting in that file already matches this shop. Nothing to do.
+            </p>
+          ) : null}
+          <ul className="mb-settings__changes">
+            {importing?.plan.changes.map((change) => (
+              <li key={change.label}>
+                {change.label}: <s>{change.before}</s> → <strong>{change.after}</strong>
+              </li>
+            ))}
+          </ul>
+          {importing?.plan.unknown.length ? (
+            <p className="mb-field__hint">
+              {importing.plan.unknown.length} setting(s) in that file are from a newer
+              Magic Bill and will be left out.
+            </p>
+          ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }

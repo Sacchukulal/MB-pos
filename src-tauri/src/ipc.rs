@@ -518,6 +518,11 @@ macro_rules! commands {
             $crate::settings::backup::request_restore,
             $crate::settings::backup::cancel_restore,
             $crate::settings::backup::find_shops,
+            $crate::settings::ipc::export_settings,
+            $crate::settings::ipc::plan_settings_import,
+            $crate::settings::ipc::run_settings_import,
+            $crate::settings::numbering::numbering,
+            $crate::settings::numbering::save_counter,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

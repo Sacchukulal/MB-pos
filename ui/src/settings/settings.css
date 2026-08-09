@@ -28,12 +28,22 @@
   grid-column: 1 / -1;
 }
 
-/* The sections, and the one search box that reaches all of them. */
+/* The sections, the one search box that reaches all of them, and the block
+   that moves a whole configuration. Three rows: only the MIDDLE one scrolls,
+   so the export/import stays reachable however many sections there are. */
 .mb-settings__rail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+}
+
+.mb-settings__sections {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -349,3 +359,79 @@
   color: var(--danger);
   font-weight: var(--weight-medium);
 }
+
+/* --- Numbering, appearance, and moving a configuration ------------------- */
+
+.mb-numbering,
+.mb-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* What the next bill will actually say. The consequence, not the field. */
+.mb-numbering__next {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.mb-numbering__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.mb-appearance__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/* Export / import, at the foot of the section list — a thing you do to the
+   whole configuration rather than to a section of it. */
+.mb-settings__moving {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--border);
+}
+
+.mb-settings__load {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mb-settings__load input {
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.mb-settings__changes {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.mb-settings__problem {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--danger-soft);
+  border-left: var(--space-1) solid var(--danger);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
