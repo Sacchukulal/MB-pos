@@ -360,13 +360,7 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         .and_then(|n| n.shared.desk.showing(now()));
     let (qr, code) = match (&network, &showing) {
         (Some(n), Some((token, code))) => {
-            let uri = mb_lan::qr::pairing_uri(
-                &n.address,
-                n.port,
-                &n.fingerprint,
-                token,
-                &n.server_id,
-            );
+            let uri = mb_lan::qr::pairing_uri(&n.address, n.port, &n.fingerprint, token);
             let rows = mb_lan::qr::matrix(&uri)
                 .map(|m| {
                     m.iter()
@@ -392,9 +386,18 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                 .to_owned(),
             "danger".to_owned(),
         ),
+        // **"Listening" is not "reachable", and this sentence must not pretend
+        // otherwise.** Found by running it: the very first launch raised a
+        // Windows Firewall prompt, and a shopkeeper who presses Cancel has a
+        // counter that is listening perfectly and that no phone can see. The
+        // panel cannot tell the difference from inside the process — an
+        // inbound packet that never arrives looks exactly like no phone
+        // trying — so it says what it knows and then says what to check.
         Some(n) => (
             format!(
-                "Phones can reach this counter at {} on port {}.",
+                "This counter is waiting for phones at {} on port {}. If a \
+                 phone cannot find it, Windows Firewall is the usual reason: \
+                 allow Magic Bill on private networks.",
                 n.address, n.port
             ),
             "ok".to_owned(),

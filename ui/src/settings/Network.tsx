@@ -49,18 +49,29 @@ export function Network() {
   // The first version ran a `setInterval` while the code was showing, and
   // `guards.test.ts` failed the build over it. That is D40 working: the rules
   // that erode are enforced by scripts, not by agreement.
+  // **Subscribed once, and the empty dependency list is deliberate.** The
+  // first version depended on `complain`, which depends on the toast context
+  // and therefore changes identity whenever anything above this component
+  // re-renders — so the listener was torn down and re-attached repeatedly and
+  // the push landed in the gap. Found by pairing a real phone against the
+  // running counter and watching the panel not move while the log said the
+  // counter had told it.
   useEffect(() => {
     if (!inApp()) return undefined;
     let stop: (() => void) | undefined;
-    void subscribe((message) => {
+    subscribe((message) => {
       if (message.kind === 'pairing') {
-        call('network').then(setView).catch(complain);
+        call('network')
+          .then(setView)
+          .catch(() => undefined);
       }
-    }).then((off) => {
-      stop = off;
-    });
+    })
+      .then((off) => {
+        stop = off;
+      })
+      .catch(() => undefined);
     return () => stop?.();
-  }, [complain]);
+  }, []);
 
   const act = (
     command: 'open_pairing' | 'close_pairing' | 'allow_device' | 'refuse_device',

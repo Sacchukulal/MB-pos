@@ -55,6 +55,7 @@ pub use identity::Identity;
 pub use limit::{Limiter, Rate};
 pub use pairing::{Desk, Waiting};
 pub use server::{
+    start_on,
     Missed, PROTOCOL_VERSION, Push, Running, Shared, TlsConfig, Where, require, router, start,
     upgrade_message,
 };

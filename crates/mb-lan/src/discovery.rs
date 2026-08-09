@@ -67,15 +67,34 @@ impl Advertisement {
         // The host name has to end in `.local.` and must not contain spaces —
         // a shop called "Anna Kuteera (Jayanagar)" is an entirely ordinary
         // name and an entirely invalid host name.
+        //
+        // **And it must not be empty**, which is what a shop that has not typed
+        // its name in yet produces. Found by running a fresh install: the log
+        // read *"The part of the hostname before '.local.' cannot be empty"* and
+        // discovery was off on exactly the shops that have just been set up —
+        // the ones most likely to be adding their first phone.
         let safe: String = instance
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
             .collect();
-        let host = format!("{}.local.", safe.trim_matches('-'));
+        let trimmed = safe.trim_matches('-');
+        let name = if trimmed.is_empty() {
+            "magic-bill"
+        } else {
+            trimmed
+        };
+        let host = format!("{name}.local.");
+        // The instance is what a phone SHOWS in its list, so it keeps the shop's
+        // real name — brackets, spaces and all — unless there isn't one.
+        let shown = if instance.trim().is_empty() {
+            "Magic Bill counter"
+        } else {
+            instance
+        };
 
         let info = mdns_sd::ServiceInfo::new(
             SERVICE,
-            instance,
+            shown,
             &host,
             ips,
             port,
@@ -140,6 +159,26 @@ mod tests {
                 assert!(
                     said.contains("mDNS"),
                     "the failure has to name the thing that failed: {said}"
+                );
+            }
+        }
+    }
+
+    /// **A shop that has not typed its name in yet.**
+    ///
+    /// Found by running a fresh install: the empty name produced the host
+    /// `.local.`, mDNS refused it, and discovery was off on exactly the shops
+    /// most likely to be adding their first phone.
+    #[test]
+    fn a_shop_with_no_name_still_advertises() {
+        let ip: std::net::IpAddr = "127.0.0.1".parse().expect("an address");
+        match Advertisement::start("", 7331, &[ip], &[("v", "1")]) {
+            Ok(ad) => assert!(ad.full_name().contains("Magic Bill counter"), "{}", ad.full_name()),
+            Err(e) => {
+                let said = e.to_string();
+                assert!(
+                    !said.contains("cannot be empty"),
+                    "an unnamed shop still cannot advertise: {said}"
                 );
             }
         }

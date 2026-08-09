@@ -598,6 +598,26 @@ impl Drop for Running {
 /// [`LanError::Listen`] when the port is taken — which on a shop PC means a
 /// second copy of Magic Bill, and the panel says so with the port in it.
 pub fn start(shared: Shared, port: u16, tls: Option<TlsConfig>) -> Result<Running, LanError> {
+    start_on(shared, Ipv4Addr::UNSPECIFIED, port, tls)
+}
+
+/// The same, on one interface.
+///
+/// **The tests use loopback and the counter uses every interface**, and the
+/// difference is not cosmetic: binding `0.0.0.0` is what makes Windows raise
+/// its firewall prompt, so a test suite that binds it leaves a stack of
+/// dialogs on a developer machine every time it runs. Found by running the
+/// app after a test run and finding five of them holding the keyboard.
+///
+/// # Errors
+///
+/// [`LanError::Listen`] when the port is taken.
+pub fn start_on(
+    shared: Shared,
+    interface: Ipv4Addr,
+    port: u16,
+    tls: Option<TlsConfig>,
+) -> Result<Running, LanError> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u16, LanError>>();
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -618,7 +638,7 @@ pub fn start(shared: Shared, port: u16, tls: Option<TlsConfig>) -> Result<Runnin
                     return;
                 }
             };
-            runtime.block_on(serve(shared, port, tls, ready_tx, stop_rx));
+            runtime.block_on(serve(shared, interface, port, tls, ready_tx, stop_rx));
         })
         .map_err(|e| LanError::Io(e.to_string()))?;
 
@@ -686,12 +706,13 @@ fn key_der(pem: &str) -> Option<Vec<u8>> {
 
 async fn serve(
     shared: Shared,
+    interface: Ipv4Addr,
     port: u16,
     tls: Option<TlsConfig>,
     ready: std::sync::mpsc::Sender<Result<u16, LanError>>,
     mut stop: tokio::sync::oneshot::Receiver<()>,
 ) {
-    let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
+    let address = SocketAddr::new(IpAddr::V4(interface), port);
     let listener = match tokio::net::TcpListener::bind(address).await {
         Ok(l) => l,
         Err(e) => {

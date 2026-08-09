@@ -73,6 +73,13 @@ fn main() {
             "SELECT business_day, opening_float, expected_cash, counted_cash, variance,
                     is_locked, closed_by, note
                FROM day_closes ORDER BY business_day",
+            // P19. Which phones this counter serves, and — the column that
+            // matters — that a revoked one is still HERE, as a state and not a
+            // deletion (D47).
+            "SELECT id, name, platform, staff_id, last_ip,
+                    CASE WHEN revoked_at IS NULL THEN 'live' ELSE 'removed' END AS state,
+                    substr(secret_hash, 1, 20) AS credential
+               FROM lan_devices ORDER BY paired_at",
             "SELECT day_close_id, denomination, count
                FROM day_close_denominations ORDER BY denomination DESC",
         ] {

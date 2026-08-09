@@ -136,13 +136,24 @@ pub fn watch_for_pairing(app: &AppHandle) {
                 let Some(network) = state.network() else {
                     continue;
                 };
-                // Asleep unless somebody is deliberately watching for a phone.
-                if network.shared.desk.showing(crate::flows::now()).is_none() {
+                let waiting =
+                    u32::try_from(network.shared.desk.waiting().len()).unwrap_or(u32::MAX);
+
+                // **Asleep unless somebody is deliberately watching for a
+                // phone — OR a phone is already standing there.**
+                //
+                // The second half was missing and the whole feature did not
+                // work: presenting a token CONSUMES it (a token that stayed
+                // live while somebody decided would let a second phone in
+                // behind the first), so `showing()` goes to `None` at exactly
+                // the moment a phone arrives — and this loop stopped watching
+                // one tick before the thing it exists to watch for. Found by
+                // pairing a real phone against the running counter and
+                // watching nothing appear.
+                if waiting == 0 && network.shared.desk.showing(crate::flows::now()).is_none() {
                     last = 0;
                     continue;
                 }
-                let waiting =
-                    u32::try_from(network.shared.desk.waiting().len()).unwrap_or(u32::MAX);
                 if waiting != last {
                     last = waiting;
                     emit_pairing(&handle);

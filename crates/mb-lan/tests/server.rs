@@ -199,7 +199,7 @@ impl Harness {
             ;
         // Port 0: the OS picks a free one, so two tests running at once cannot
         // collide — which they do, because cargo runs them in parallel.
-        let running = mb_lan::start(shared.clone(), 0, config).expect("it listens");
+        let running = mb_lan::start_on(shared.clone(), std::net::Ipv4Addr::LOCALHOST, 0, config).expect("it listens");
         let scheme = if tls { "https" } else { "http" };
         let base = format!("{scheme}://127.0.0.1:{}", running.port);
 
@@ -552,7 +552,7 @@ async fn a_restart_does_not_cost_a_pairing() {
 
     // Up again — a new listener, a new port (DHCP moves a shop's counter too),
     // the same identity and the same register.
-    let running = mb_lan::start(h.shared.clone(), 0, None).expect("it listens again");
+    let running = mb_lan::start_on(h.shared.clone(), std::net::Ipv4Addr::LOCALHOST, 0, None).expect("it listens again");
     let base = format!("http://127.0.0.1:{}", running.port);
     h.running = running;
     h.base = base;

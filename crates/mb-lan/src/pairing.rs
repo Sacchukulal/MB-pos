@@ -85,7 +85,10 @@ impl Desk {
     /// **Opening a second one closes the first**: two live tokens is two ways
     /// in and only one of them is on the screen somebody is watching.
     pub fn open(&self, now: Timestamp) -> (String, String) {
-        let token = mb_auth::random_token(24);
+        // 16 bytes is 128 bits for a token that lives five minutes and is used
+        // once. Twenty-four made the QR two versions denser for security
+        // nothing was buying — see `qr::pairing_uri`.
+        let token = mb_auth::random_token(16);
         let code = mb_auth::short_code();
         let mut inner = lock(&self.inner);
         inner.open = Some(OpenToken {

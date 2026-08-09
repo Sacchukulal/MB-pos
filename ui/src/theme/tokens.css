@@ -177,8 +177,10 @@
   --dash-stat: 13rem;
 
   /* P19 pairing QR. A version-2 code is 25 modules; 8px each makes it 200px
-     across, which every phone camera reads from arm length. */
-  --qr-dot: 8px;
+     across, which every phone camera reads from arm length. Six, not eight:
+     a real fingerprint makes a 33-module code, and 8px ran it off the bottom
+     of the panel — which is a code the camera sees half of. */
+  --qr-dot: 6px;
   /* **The two values in this file that a theme must NOT change.** A QR is read
      by a camera, not by a person: it needs real black on real white, and a
      dark-mode QR is a QR that does not scan. They are tokens anyway, because
