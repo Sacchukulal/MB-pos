@@ -631,3 +631,92 @@ fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
          write a retention rule into PERFORMANCE.md and give it to P18's day close"
     );
 }
+
+// ---------------------------------------------------------------------------
+// R1, R2, R3 — the report budgets (P18)
+// ---------------------------------------------------------------------------
+
+/// **R1 500 ms for today, R2 2.5 s for a year, R3 1.5 s for the day close.**
+///
+/// The reports are the one part of this product a shop runs *while* the
+/// counter is billing, so `PERFORMANCE.md` §5's rules R1–R3 are what make the
+/// numbers hold: they read on a reader connection, they never take the writer,
+/// and every one of them is filtered by `idx_orders_day`.
+///
+/// **Three readings, not one.** The master plan records a single B4 run taken
+/// straight after a build that read 23.3 µs and looked like a 55% regression;
+/// three clean runs gave 15.5–15.8. A stopwatch started on a cold cache is
+/// measuring the cache.
+#[test]
+fn r1_r2_r3_the_report_budgets() {
+    use mb_db::repo::reports::{Period, SalesBy};
+
+    let scratch = Scratch::new("perf-reports");
+    let db = scratch.open();
+
+    seed_a_shop(&db);
+    // The same sample the M5 test uses, spread across a year, so the day index
+    // has real cardinality rather than one hot page.
+    for n in 0..SAMPLE_BILLS {
+        write_one_bill(&db, n);
+    }
+    db.checkpoint().expect("checkpoint");
+
+    let year = Period::new(
+        BusinessDay::from_days_since_epoch(20_000),
+        BusinessDay::from_days_since_epoch(20_000 + 365),
+    );
+    let today = Period::one_day(BusinessDay::from_days_since_epoch(20_100));
+
+    // The projection: the sample is SAMPLE_BILLS, a year is BILLS_PER_YEAR.
+    // Reporting the measured time AND the projection, because a 2,000-bill
+    // database is not a year and pretending otherwise is the mistake M5's own
+    // comment warns about.
+    // Both are small round constants; the cast is exact and the lint is about
+    // values this file does not have.
+    #[allow(clippy::cast_precision_loss, reason = "2,000 and 75,000 are exact in f64")]
+    let scale = BILLS_PER_YEAR as f64 / SAMPLE_BILLS as f64;
+
+    let mut day_best = f64::MAX;
+    let mut year_best = f64::MAX;
+    for _ in 0..3 {
+        let start = Instant::now();
+        db.transaction(|tx| {
+            let reports = mb_db::Repos::new(tx).reports();
+            reports.sales_by(common::OUTLET, today, SalesBy::Item)?;
+            reports.tax_by_rate(common::OUTLET, today)?;
+            Ok(())
+        })
+        .expect("today's report");
+        day_best = day_best.min(start.elapsed().as_secs_f64() * 1000.0);
+
+        let start = Instant::now();
+        db.transaction(|tx| {
+            let reports = mb_db::Repos::new(tx).reports();
+            reports.sales_by(common::OUTLET, year, SalesBy::Day)?;
+            reports.sales_by(common::OUTLET, year, SalesBy::Item)?;
+            reports.tax_by_rate(common::OUTLET, year)?;
+            reports.tax_by_hsn(common::OUTLET, year)?;
+            Ok(())
+        })
+        .expect("the year's report");
+        year_best = year_best.min(start.elapsed().as_secs_f64() * 1000.0);
+    }
+    let projected_year = year_best * scale;
+
+    println!("\n--- R1 / R2: the report budgets (P18) ---");
+    println!("  bills in the sample  {SAMPLE_BILLS}");
+    println!("  R1 today             {day_best:.1} ms   (budget 500, ceiling 1500)");
+    println!("  R2 a year, measured  {year_best:.1} ms over {SAMPLE_BILLS} bills");
+    println!("  R2 a year, projected {projected_year:.1} ms at {BILLS_PER_YEAR} bills");
+    println!("     (budget 2500 ms, ceiling 6000)");
+
+    #[cfg(not(debug_assertions))]
+    {
+        assert!(day_best < 1_500.0, "R1's ceiling: today took {day_best:.1} ms");
+        assert!(
+            projected_year < 6_000.0,
+            "R2's ceiling: a year projects to {projected_year:.1} ms"
+        );
+    }
+}

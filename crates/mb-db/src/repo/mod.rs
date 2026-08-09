@@ -39,6 +39,10 @@ pub mod order;
 pub mod outbox;
 pub mod people;
 pub mod print_jobs;
+/// P18. Every report, and every one of them groups by the STORED business day
+/// (D5) â which is audit B1, the bill that appeared on two different days on
+/// two different screens.
+pub mod reports;
 pub mod settings;
 pub mod taxclass;
 
@@ -136,6 +140,12 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn corrections(&self) -> CorrectionsRepo<'a> {
         CorrectionsRepo::new(self.tx)
+    }
+
+    /// Every report (P18), grouped by the stored business day.
+    #[must_use]
+    pub fn reports(&self) -> crate::repo::reports::ReportsRepo<'a> {
+        crate::repo::reports::ReportsRepo::new(self.tx)
     }
 
     /// What happened to an order and when (P14) — the first writer of

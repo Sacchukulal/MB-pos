@@ -1,0 +1,668 @@
+//! **Every report, and every one of them groups by the STORED business day.**
+//!
+//! # The finding this module exists to close
+//!
+//! Audit **B1**: the day-wise report bucketed by **UTC** date while the range
+//! filter used local time, *"so the same bill appeared on two different days on
+//! two different screens"*. P03 fixed the cause by storing `business_day` on
+//! the order; this is where every report finally reads it. **There is no
+//! `date(created_at)` anywhere in this file and there must never be one.**
+//!
+//! Audit **B11** is the other one: *"the tax report splits GST 50/50 into
+//! CGST/SGST always. No IGST, no inter-state, no HSN summary, and nothing that
+//! can be filed directly."* [`Reports::tax_by_rate`] sums `bill_lines`, which
+//! are the per-line figures `compute_bill` produced and P05 stored — so the
+//! report cannot disagree with the paper, because it is not doing the sum
+//! again.
+//!
+//! # Why the reports live in mb-db
+//!
+//! Audit **E3**: *"business rules live inside screen files."* What counts as a
+//! sale — settled but not voided, the bill's own total rather than the sum of
+//! its payments, the merged-away order excluded because its food was sold on
+//! another bill (D61) — is a rule, and a rule in a screen is the finding.
+//!
+//! They are not in mb-core either: these are aggregates over stored rows, and
+//! mb-core has no storage.
+//!
+//! # What makes the budgets hold
+//!
+//! `PERFORMANCE.md` R2 is 2.5 s for a year, about 75,000 bills, and §5's rules
+//! R1–R3 are how:
+//!
+//! * every query here is filtered by `(outlet_id, business_day)`, which is
+//!   **`idx_orders_day`** — the index is named in a comment on each query, and
+//!   a query that cannot name its index has not been thought about;
+//! * a report runs on a **reader** connection (P04's `conn.rs` has one writer
+//!   and four readers), so a year-long scan never takes the writer a settle
+//!   needs;
+//! * nothing here is a running total kept somewhere. A running total is a
+//!   second source of truth, and this schema has already refused one of those
+//!   (`customers` has no balance column, D65).
+
+use mb_core::{BusinessDay, Money, Qty};
+use rusqlite::Transaction;
+
+use crate::encode;
+use crate::error::DbError;
+
+/// A stretch of business days, inclusive at both ends.
+///
+/// **Days, not instants.** A report is asked for "this month", and a month is
+/// a set of business days — the moment anything here takes a `Timestamp`, B1
+/// has a way back in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Period {
+    pub from: BusinessDay,
+    pub to: BusinessDay,
+}
+
+impl Period {
+    #[must_use]
+    pub const fn new(from: BusinessDay, to: BusinessDay) -> Period {
+        Period { from, to }
+    }
+
+    #[must_use]
+    pub const fn one_day(day: BusinessDay) -> Period {
+        Period { from: day, to: day }
+    }
+
+    /// How many days this is, counting both ends.
+    #[must_use]
+    pub const fn days(self) -> i32 {
+        self.from.days_until(self.to) + 1
+    }
+
+    /// **The same number of days, ending the day before this one starts.**
+    ///
+    /// Scope 10.9, audit **G2**: *"today vs yesterday, this month vs last —
+    /// the phone app has it, the till does not."*
+    ///
+    /// Deliberately NOT "the previous calendar month". A seven-day window
+    /// compares against the seven days before it, and a single day against the
+    /// day before — which is what an owner means by "up 8% on last Tuesday",
+    /// and which is right across a month end and a leap year without knowing
+    /// anything about either (T9).
+    #[must_use]
+    pub fn previous(self) -> Period {
+        let length = self.days();
+        let to = self.from.previous();
+        Period {
+            from: BusinessDay::from_days_since_epoch(to.days_since_epoch() - (length - 1)),
+            to,
+        }
+    }
+}
+
+/// What a sales report can be grouped by.
+///
+/// One query with a different `GROUP BY`, because that is what these reports
+/// genuinely are. Eight hand-written queries would be eight places for the
+/// definition of "a sale" to drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SalesBy {
+    Day,
+    /// Audit **G4** — the peak hour, which the phone app had and the till did
+    /// not. The hour is taken from `settled_at` in **local** time, because a
+    /// shop asks "when is my rush?" about the clock on its wall.
+    Hour,
+    OrderType,
+    PaymentMode,
+    Cashier,
+    Section,
+    Item,
+    Category,
+}
+
+/// One row of a grouped sales report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bucket {
+    /// The stable key: a staff id, a rate in basis points, an hour number.
+    pub key: String,
+    /// What a person reads. For a cashier this is their name, resolved by the
+    /// query rather than by the caller — a report that hands back ids and
+    /// expects the screen to join them is a screen writing SQL by post.
+    pub label: String,
+    pub bills: i64,
+    /// The bill's own grand total. **Not the sum of its payments** — an
+    /// overpayment is change handed back, and change is not takings.
+    pub gross: Money,
+    pub discount: Money,
+    pub tax: Money,
+    /// Only for item and category reports; `None` elsewhere, because a
+    /// quantity of "dine-in" is not a thing.
+    pub qty: Option<Qty>,
+}
+
+/// One rate in the rate-wise tax report — **audit B11's answer.**
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaxBucket {
+    pub rate_bp: i64,
+    pub treatment: String,
+    pub taxable: Money,
+    pub cgst: Money,
+    pub sgst: Money,
+    pub igst: Money,
+}
+
+/// One HSN code, for the summary a GSTR-1 wants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HsnBucket {
+    pub hsn: String,
+    pub qty: Qty,
+    pub taxable: Money,
+    pub cgst: Money,
+    pub sgst: Money,
+    pub igst: Money,
+}
+
+/// One line of the control report: something a person did that an owner may
+/// want to ask about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlRow {
+    pub business_day: BusinessDay,
+    pub at: i64,
+    /// `void`, `cancel`, `discount`, `reprint`, `refund`.
+    pub kind: String,
+    pub reference: String,
+    pub who: String,
+    pub reason: String,
+    pub amount: Money,
+}
+
+/// One item, with what it earned and what it cost — scope 10.3, audit **G5**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemMargin {
+    pub item_id: String,
+    pub name: String,
+    pub qty: Qty,
+    pub revenue: Money,
+    /// **`None` means the cost price is not known**, and the report says so
+    /// rather than treating the item as pure margin. An owner who reads 100%
+    /// margin on a dish they have not costed will make a decision on it.
+    pub cost: Option<Money>,
+}
+
+#[derive(Debug)]
+pub struct ReportsRepo<'a> {
+    tx: &'a Transaction<'a>,
+}
+
+impl<'a> ReportsRepo<'a> {
+    #[must_use]
+    pub(crate) fn new(tx: &'a Transaction<'a>) -> Self {
+        ReportsRepo { tx }
+    }
+
+    /// **What counts as a sale**, written once.
+    ///
+    /// Settled or voided — a voided bill is still in the day's record and the
+    /// report shows it as a deduction rather than pretending it never
+    /// happened (D47: a correction is a state, never a deletion). A CANCELLED
+    /// order is not here: it was never sold, and a merged-away order is
+    /// cancelled precisely so its food is not counted twice (D61).
+    const SOLD: &'static str = "o.state = 'settled'";
+
+    /// Every grouped sales report.
+    ///
+    /// Uses **`idx_orders_day`** — `(outlet_id, business_day)` — for the scan,
+    /// then joins by primary key.
+    pub fn sales_by(
+        &self,
+        outlet: &str,
+        period: Period,
+        by: SalesBy,
+    ) -> Result<Vec<Bucket>, DbError> {
+        let (from, to) = (
+            encode::business_day_to_sql(period.from),
+            encode::business_day_to_sql(period.to),
+        );
+        let sold = Self::SOLD;
+
+        // Item and category read `order_lines`, so they are a different shape:
+        // a bill's grand total cannot be attributed to one line, and pretending
+        // otherwise is how an item report stops adding up. They report the
+        // LINE's own figures, which is what "item sales" means.
+        let sql = match by {
+            SalesBy::Item | SalesBy::Category => {
+                let (key, label) = match by {
+                    SalesBy::Item => ("COALESCE(l.item_id, l.name)", "l.name"),
+                    _ => (
+                        "COALESCE(l.category_id, '')",
+                        "COALESCE(c.name, 'No category')",
+                    ),
+                };
+                format!(
+                    "SELECT {key} AS k, {label} AS lbl,
+                            COUNT(DISTINCT o.id),
+                            COALESCE(SUM(bl.gross_including_tax), 0),
+                            COALESCE(SUM(bl.line_discount + bl.bill_discount_share), 0),
+                            COALESCE(SUM(bl.cgst + bl.sgst + bl.igst), 0),
+                            COALESCE(SUM(l.qty), 0)
+                       FROM orders o
+                       JOIN order_lines l ON l.order_id = o.id
+                       JOIN bill_lines bl ON bl.order_line_id = l.id
+                  LEFT JOIN categories c  ON c.id = l.category_id
+                      WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                        AND {sold}
+                   GROUP BY k
+                   ORDER BY SUM(bl.gross_including_tax) DESC"
+                )
+            }
+            _ => {
+                let (key, label, extra_join) = match by {
+                    SalesBy::Day => ("o.business_day", "o.business_day", ""),
+                    // Local time: `settled_at` is UTC milliseconds and the
+                    // shop's clock is +05:30, so the offset is added before the
+                    // hour is taken. A peak hour in UTC is a peak hour in a
+                    // country the shop is not in.
+                    SalesBy::Hour => (
+                        "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
+                        "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
+                        "",
+                    ),
+                    SalesBy::OrderType => ("o.order_type", "o.order_type", ""),
+                    SalesBy::Cashier => (
+                        "o.settled_by",
+                        "COALESCE(s.name, 'Unknown')",
+                        "LEFT JOIN staff s ON s.id = o.settled_by",
+                    ),
+                    SalesBy::Section => (
+                        "COALESCE(t.section_id, '')",
+                        "COALESCE(sec.name, 'No table')",
+                        "LEFT JOIN dining_tables t ON t.id = o.table_id \
+                         LEFT JOIN sections sec ON sec.id = t.section_id",
+                    ),
+                    // A payment mode is a property of the PAYMENT, not of the
+                    // bill: one bill can be cash and UPI at once (scope 1.15).
+                    // So this one sums payments and its "bills" is a distinct
+                    // count — the totals will not equal the sales summary, and
+                    // that is correct rather than a bug.
+                    _ => (
+                        "p.mode",
+                        "p.mode",
+                        "JOIN payments p ON p.order_id = o.id",
+                    ),
+                };
+                let amount = if by == SalesBy::PaymentMode {
+                    "COALESCE(SUM(p.amount), 0)"
+                } else {
+                    "COALESCE(SUM(b.grand_total), 0)"
+                };
+                format!(
+                    "SELECT {key} AS k, {label} AS lbl,
+                            COUNT(DISTINCT o.id),
+                            {amount},
+                            COALESCE(SUM(DISTINCT b.total_discount), 0),
+                            COALESCE(SUM(DISTINCT b.total_cgst + b.total_sgst + b.total_igst), 0),
+                            0
+                       FROM orders o
+                       JOIN bills b ON b.order_id = o.id
+                       {extra_join}
+                      WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                        AND {sold}
+                   GROUP BY k
+                   ORDER BY k"
+                )
+            }
+        };
+
+        let mut stmt = self.tx.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params![outlet, from, to], |row| {
+            Ok((
+                row.get::<_, rusqlite::types::Value>(0)?,
+                row.get::<_, rusqlite::types::Value>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?;
+
+        let wants_qty = matches!(by, SalesBy::Item | SalesBy::Category);
+        let mut out = Vec::new();
+        for row in rows {
+            let (key, label, bills, gross, discount, tax, qty) = row?;
+            out.push(Bucket {
+                key: text_of(&key),
+                label: label_for(by, &label),
+                bills,
+                gross: encode::money_from_sql(gross),
+                discount: encode::money_from_sql(discount),
+                tax: encode::money_from_sql(tax),
+                qty: wants_qty.then(|| Qty::from_thousandths(qty.max(0))),
+            });
+        }
+        Ok(out)
+    }
+
+    /// **Audit B11.** Rate-wise taxable value and tax, from the per-line
+    /// figures `compute_bill` produced — never recomputed here.
+    pub fn tax_by_rate(&self, outlet: &str, period: Period) -> Result<Vec<TaxBucket>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT bl.rate_bp, bl.treatment,
+                    COALESCE(SUM(bl.taxable), 0),
+                    COALESCE(SUM(bl.cgst), 0),
+                    COALESCE(SUM(bl.sgst), 0),
+                    COALESCE(SUM(bl.igst), 0)
+               FROM orders o
+               JOIN bill_lines bl ON bl.order_id = o.id
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled'
+           GROUP BY bl.rate_bp, bl.treatment
+           ORDER BY bl.rate_bp",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(period.from),
+                encode::business_day_to_sql(period.to),
+            ],
+            |row| {
+                Ok(TaxBucket {
+                    rate_bp: row.get(0)?,
+                    treatment: row.get(1)?,
+                    taxable: encode::money_from_sql(row.get(2)?),
+                    cgst: encode::money_from_sql(row.get(3)?),
+                    sgst: encode::money_from_sql(row.get(4)?),
+                    igst: encode::money_from_sql(row.get(5)?),
+                })
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// The HSN summary a GSTR-1 asks for (scope 2.8).
+    ///
+    /// Lines with no HSN are grouped under an empty code and the screen says
+    /// how many — a shop below the turnover threshold has none, and silently
+    /// dropping them would make the taxable values disagree with the rate-wise
+    /// report.
+    pub fn tax_by_hsn(&self, outlet: &str, period: Period) -> Result<Vec<HsnBucket>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT COALESCE(l.hsn, ''),
+                    COALESCE(SUM(l.qty), 0),
+                    COALESCE(SUM(bl.taxable), 0),
+                    COALESCE(SUM(bl.cgst), 0),
+                    COALESCE(SUM(bl.sgst), 0),
+                    COALESCE(SUM(bl.igst), 0)
+               FROM orders o
+               JOIN order_lines l ON l.order_id = o.id
+               JOIN bill_lines bl ON bl.order_line_id = l.id
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled'
+           GROUP BY COALESCE(l.hsn, '')
+           ORDER BY 1",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(period.from),
+                encode::business_day_to_sql(period.to),
+            ],
+            |row| {
+                Ok(HsnBucket {
+                    hsn: row.get(0)?,
+                    qty: Qty::from_thousandths(row.get::<_, i64>(1)?.max(0)),
+                    taxable: encode::money_from_sql(row.get(2)?),
+                    cgst: encode::money_from_sql(row.get(3)?),
+                    sgst: encode::money_from_sql(row.get(4)?),
+                    igst: encode::money_from_sql(row.get(5)?),
+                })
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// **The report an owner uses to spot a problem at the counter** (10.5).
+    ///
+    /// Voids, cancellations, refunds, reprints and bill discounts, in one list
+    /// with who and why. Four `SELECT`s in a `UNION ALL` rather than four
+    /// reports, because the question is "what happened here today?" and the
+    /// answer is one column of time.
+    pub fn control_log(&self, outlet: &str, period: Period) -> Result<Vec<ControlRow>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT o.business_day, o.voided_at, 'void',
+                    COALESCE(o.bill_number_formatted, o.id),
+                    COALESCE(s.name, ''), COALESCE(o.void_reason, ''),
+                    COALESCE(b.grand_total, 0)
+               FROM orders o
+          LEFT JOIN bills b ON b.order_id = o.id
+          LEFT JOIN staff s ON s.id = o.voided_by
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'voided'
+             UNION ALL
+             SELECT o.business_day, o.cancelled_at, 'cancel',
+                    COALESCE(o.token_formatted, o.id),
+                    COALESCE(s.name, ''), COALESCE(o.cancel_reason, ''), 0
+               FROM orders o
+          LEFT JOIN staff s ON s.id = o.cancelled_by
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'cancelled'
+             UNION ALL
+             SELECT r.business_day, r.refunded_at, 'refund',
+                    COALESCE(o.bill_number_formatted, r.order_id),
+                    COALESCE(s.name, ''), COALESCE(r.reason, ''), r.amount
+               FROM refunds r
+               JOIN orders o ON o.id = r.order_id
+          LEFT JOIN staff s ON s.id = r.refunded_by
+              WHERE r.outlet_id = ?1 AND r.business_day BETWEEN ?2 AND ?3
+             UNION ALL
+             SELECT p.business_day, p.printed_at, 'reprint',
+                    COALESCE(o.bill_number_formatted, p.order_id),
+                    COALESCE(s.name, ''), COALESCE(p.reason, ''), 0
+               FROM reprints p
+               JOIN orders o ON o.id = p.order_id
+          LEFT JOIN staff s ON s.id = p.printed_by
+              WHERE p.business_day BETWEEN ?2 AND ?3
+             UNION ALL
+             SELECT o.business_day, o.settled_at, 'discount',
+                    COALESCE(o.bill_number_formatted, o.id),
+                    COALESCE(s.name, ''), COALESCE(b.bill_discount_reason, ''),
+                    b.total_discount
+               FROM orders o
+               JOIN bills b ON b.order_id = o.id
+          LEFT JOIN staff s ON s.id = b.bill_discount_by
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled' AND b.total_discount > 0
+           ORDER BY 2 DESC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(period.from),
+                encode::business_day_to_sql(period.to),
+            ],
+            |row| {
+                Ok(ControlRow {
+                    business_day: encode::business_day_from_sql(
+                        row.get(0)?,
+                        "orders.business_day",
+                    )
+                    .unwrap_or_else(|_| BusinessDay::from_days_since_epoch(0)),
+                    at: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    kind: row.get(2)?,
+                    reference: row.get(3)?,
+                    who: row.get(4)?,
+                    reason: row.get(5)?,
+                    amount: encode::money_from_sql(row.get(6)?),
+                })
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Scope 10.3 — volume against margin, from P13's cost price.
+    pub fn menu_engineering(
+        &self,
+        outlet: &str,
+        period: Period,
+    ) -> Result<Vec<ItemMargin>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT COALESCE(l.item_id, l.name), l.name,
+                    COALESCE(SUM(l.qty), 0),
+                    COALESCE(SUM(bl.gross_including_tax), 0),
+                    -- MAX rather than an aggregate over rows: the cost is a
+                    -- property of the ITEM, and it is NULL for an item nobody
+                    -- has costed. `SUM` over a NULL would read as zero cost,
+                    -- which is the lie this column exists to avoid.
+                    MAX(i.cost_price),
+                    COUNT(i.cost_price)
+               FROM orders o
+               JOIN order_lines l ON l.order_id = o.id
+               JOIN bill_lines bl ON bl.order_line_id = l.id
+          LEFT JOIN items i ON i.id = l.item_id
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled'
+           GROUP BY COALESCE(l.item_id, l.name)
+           ORDER BY SUM(bl.gross_including_tax) DESC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(period.from),
+                encode::business_day_to_sql(period.to),
+            ],
+            |row| {
+                let qty: i64 = row.get(2)?;
+                let cost: Option<i64> = row.get(4)?;
+                let costed: i64 = row.get(5)?;
+                Ok(ItemMargin {
+                    item_id: row.get(0)?,
+                    name: row.get(1)?,
+                    qty: Qty::from_thousandths(qty.max(0)),
+                    revenue: encode::money_from_sql(row.get(3)?),
+                    // The count guards the MAX: an item with no costed row at
+                    // all must be `None`, not `Some(0)`.
+                    cost: if costed > 0 {
+                        cost.map(encode::money_from_sql)
+                    } else {
+                        None
+                    },
+                })
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Audit **G5** — *"top items that stopped selling"*.
+    ///
+    /// Items that sold in the period BEFORE this one and not in it. A shop
+    /// notices a dish disappearing from the till long after it stopped being
+    /// ordered, and this is the list that says so.
+    pub fn stopped_selling(
+        &self,
+        outlet: &str,
+        period: Period,
+    ) -> Result<Vec<Bucket>, DbError> {
+        let before = period.previous();
+        let mut stmt = self.tx.prepare(
+            "SELECT COALESCE(l.item_id, l.name) AS k, l.name,
+                    COUNT(DISTINCT o.id),
+                    COALESCE(SUM(bl.gross_including_tax), 0),
+                    COALESCE(SUM(l.qty), 0)
+               FROM orders o
+               JOIN order_lines l ON l.order_id = o.id
+               JOIN bill_lines bl ON bl.order_line_id = l.id
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled'
+                AND COALESCE(l.item_id, l.name) NOT IN (
+                        SELECT COALESCE(l2.item_id, l2.name)
+                          FROM orders o2 JOIN order_lines l2 ON l2.order_id = o2.id
+                         WHERE o2.outlet_id = ?1
+                           AND o2.business_day BETWEEN ?4 AND ?5
+                           AND o2.state = 'settled')
+           GROUP BY k
+           ORDER BY SUM(bl.gross_including_tax) DESC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(before.from),
+                encode::business_day_to_sql(before.to),
+                encode::business_day_to_sql(period.from),
+                encode::business_day_to_sql(period.to),
+            ],
+            |row| {
+                Ok(Bucket {
+                    key: row.get(0)?,
+                    label: row.get(1)?,
+                    bills: row.get(2)?,
+                    gross: encode::money_from_sql(row.get(3)?),
+                    discount: Money::ZERO,
+                    tax: Money::ZERO,
+                    qty: Some(Qty::from_thousandths(row.get::<_, i64>(4)?.max(0))),
+                })
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+}
+
+/// A SQLite value as text, whatever type it came back as.
+///
+/// `business_day` and the hour are integers, a staff id is text. One function
+/// rather than a per-report cast, because the alternative is a `CAST` in nine
+/// queries and one of them being forgotten.
+fn text_of(value: &rusqlite::types::Value) -> String {
+    match value {
+        rusqlite::types::Value::Integer(n) => n.to_string(),
+        rusqlite::types::Value::Real(f) => f.to_string(),
+        rusqlite::types::Value::Text(t) => t.clone(),
+        _ => String::new(),
+    }
+}
+
+/// The words a person reads for a grouped key.
+///
+/// **Crown jewel 14 at the report layer**: a report that says `dine_in` and
+/// `14` has handed its reader two tags and a puzzle.
+fn label_for(by: SalesBy, raw: &rusqlite::types::Value) -> String {
+    let text = text_of(raw);
+    match by {
+        SalesBy::Day => encode::business_day_from_sql(text.parse().unwrap_or(0), "orders.business_day")
+            .map_or_else(|_| text.clone(), |day| day.to_string()),
+        SalesBy::Hour => {
+            let hour: i64 = text.parse().unwrap_or(0);
+            let next = (hour + 1) % 24;
+            format!("{hour:02}:00–{next:02}:00")
+        }
+        SalesBy::OrderType => match text.as_str() {
+            "dine_in" => "Dine in".to_owned(),
+            "parcel" => "Parcel".to_owned(),
+            "self_service" => "Self service".to_owned(),
+            "delivery" => "Delivery".to_owned(),
+            other => other.to_owned(),
+        },
+        SalesBy::PaymentMode => match text.as_str() {
+            "cash" => "Cash".to_owned(),
+            "card" => "Card".to_owned(),
+            "upi" => "UPI".to_owned(),
+            "credit" => "Credit".to_owned(),
+            other => other.to_owned(),
+        },
+        _ => text,
+    }
+}
