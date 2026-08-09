@@ -46,13 +46,16 @@ const FONT_SIZE: f64 = 10.0;
 const CHAR_WIDTH: f64 = FONT_SIZE * 0.6;
 const LINE_HEIGHT: f64 = FONT_SIZE * 1.25;
 
-/// Render a laid-out document as a single-page PDF.
+/// Render a laid-out document as a PDF, **across as many pages as it needs.**
 ///
-/// Content past one page is dropped at the bottom rather than paginated — a
-/// receipt is one page by nature, and an invoice long enough to need two is a
-/// real requirement that belongs with P18's report export, where multi-page
-/// tables have to be solved anyway. Left as a named limitation rather than a
-/// half-done pagination.
+/// Until P18 this dropped everything past the first page, with a note saying
+/// the day reports arrived was the day pagination had to be real. That day is
+/// this one: a month of item sales is four hundred rows, and a report that
+/// silently stops at row sixty-two is worse than no export at all — nothing on
+/// the page says it is incomplete.
+///
+/// Every page carries "Page n of m" at the foot, so a printed stack that gets
+/// dropped can be put back in order.
 #[must_use]
 pub fn to_pdf(laid: &Laid) -> Vec<u8> {
     let mut sink = PdfSink::default();
@@ -60,9 +63,10 @@ pub fn to_pdf(laid: &Laid) -> Vec<u8> {
     sink.finish_document()
 }
 
-/// One placed line: where it starts, how big it is, and what it says.
+/// One placed line: which page, where it starts, how big it is, what it says.
 #[derive(Debug)]
 struct Placed {
+    page: usize,
     x: f64,
     y: f64,
     size: f64,
@@ -72,9 +76,11 @@ struct Placed {
 #[derive(Debug)]
 struct PdfSink {
     placed: Vec<Placed>,
-    /// Points down from the top margin. A cursor rather than a row index,
-    /// because a 2× line is twice as tall and a row index cannot say that.
+    /// Points down from the top margin **of the current page**. A cursor rather
+    /// than a row index, because a 2× line is twice as tall and a row index
+    /// cannot say that.
     cursor: f64,
+    page: usize,
 }
 
 impl Default for PdfSink {
@@ -82,9 +88,14 @@ impl Default for PdfSink {
         PdfSink {
             placed: Vec::new(),
             cursor: 0.0,
+            page: 0,
         }
     }
 }
+
+/// How much of a page a line may occupy — the foot is kept clear for the page
+/// number.
+const BODY_HEIGHT: f64 = PAGE_HEIGHT - MARGIN - MARGIN - LINE_HEIGHT * 2.0;
 
 impl PdfSink {
     /// **Scale is honoured here**, and the first version of this file did not
@@ -95,10 +106,17 @@ impl PdfSink {
     fn place(&mut self, indent: usize, text: &str, scale: u8) {
         let scale = f64::from(scale.clamp(1, 3));
         let size = FONT_SIZE * scale;
+        // The break happens BEFORE the line is placed, so a line is never cut in
+        // half by the page edge.
+        if self.cursor + LINE_HEIGHT * scale > BODY_HEIGHT {
+            self.page += 1;
+            self.cursor = 0.0;
+        }
         if !text.trim().is_empty() {
             #[allow(clippy::cast_precision_loss)]
             let x = MARGIN + (indent as f64) * CHAR_WIDTH;
             self.placed.push(Placed {
+                page: self.page,
                 x,
                 y: PAGE_HEIGHT - MARGIN - self.cursor - size,
                 size,
@@ -108,13 +126,11 @@ impl PdfSink {
         self.cursor += LINE_HEIGHT * scale;
     }
 
-    fn finish_document(&self) -> Vec<u8> {
+    /// One page's content stream.
+    fn stream_for(&self, page: usize, of: usize) -> String {
         let mut content = String::from("BT\n");
         let mut current = 0.0_f64;
-        for line in &self.placed {
-            if line.y < MARGIN {
-                break;
-            }
+        for line in self.placed.iter().filter(|l| l.page == page) {
             if (line.size - current).abs() > f64::EPSILON {
                 content.push_str(&format!("/F1 {:.1} Tf\n", line.size));
                 current = line.size;
@@ -126,25 +142,55 @@ impl PdfSink {
                 escape(&line.text)
             ));
         }
+        // The foot. Only when there is more than one page: a single-sheet
+        // receipt with "Page 1 of 1" on it looks like a form.
+        if of > 1 {
+            let label = format!("Page {} of {of}", page + 1);
+            #[allow(clippy::cast_precision_loss)]
+            let x = (PAGE_WIDTH - (label.len() as f64) * CHAR_WIDTH) / 2.0;
+            content.push_str(&format!(
+                "/F1 {FONT_SIZE:.1} Tf\n1 0 0 1 {x:.2} {MARGIN:.2} Tm\n({}) Tj\n",
+                escape(&label)
+            ));
+        }
         content.push_str("ET\n");
+        content
+    }
 
-        let mut objects: Vec<String> = Vec::new();
-        objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_owned());
-        objects.push("<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned());
-        objects.push(format!(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] \
-             /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
-        ));
-        // Courier is one of the base-14 fonts every reader carries, so nothing
-        // has to be embedded.
-        objects.push(
+    fn finish_document(&self) -> Vec<u8> {
+        let pages = self.page + 1;
+        // Object numbering, and it has to be laid out before anything is
+        // written: 1 catalog, 2 the page tree, 3 the font, then one page object
+        // and one content object per page, interleaved so a page and its stream
+        // are next to each other in the file.
+        const FONT: usize = 3;
+        let page_object = |i: usize| FONT + 1 + i * 2;
+        let content_object = |i: usize| FONT + 2 + i * 2;
+
+        let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", page_object(i))).collect();
+        let mut objects: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+                kids.join(" ")
+            ),
+            // Courier is one of the base-14 fonts every reader carries, so
+            // nothing has to be embedded.
             "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>"
                 .to_owned(),
-        );
-        objects.push(format!(
-            "<< /Length {} >>\nstream\n{content}endstream",
-            content.len()
-        ));
+        ];
+        for i in 0..pages {
+            let stream = self.stream_for(i, pages);
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] \
+                 /Resources << /Font << /F1 {FONT} 0 R >> >> /Contents {} 0 R >>",
+                content_object(i)
+            ));
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{stream}endstream",
+                stream.len()
+            ));
+        }
 
         let mut out = String::from("%PDF-1.4\n");
         let mut offsets = Vec::with_capacity(objects.len());
@@ -253,6 +299,45 @@ mod tests {
 
         assert!(text.contains("/F1 20.0 Tf"), "the 2x heading is not 20pt");
         assert!(text.contains("/F1 10.0 Tf"), "the normal line is not 10pt");
+    }
+
+    /// **P18.** A month of item sales is four hundred rows. Before this, row
+    /// sixty-three onwards was silently dropped and nothing on the page said so.
+    #[test]
+    fn a_long_report_gets_more_pages_rather_than_a_shorter_report() {
+        let mut doc = Document::new(Paper::new(PaperKind::A4));
+        for n in 0..400 {
+            doc.row(format!("Item number {n}"), "240.00", Style::NORMAL);
+        }
+        let pdf = to_pdf(&layout(&doc).expect("lays out"));
+        let text = String::from_utf8_lossy(&pdf);
+
+        // Roughly 62 lines fit on A4 at 10pt, so 400 rows is seven pages.
+        assert!(text.contains("/Count 7"), "the page count is wrong");
+        assert_eq!(text.matches("/Type /Page\n").count(), 0);
+        assert_eq!(
+            text.matches("/Type /Page ").count(),
+            7,
+            "there should be seven page objects"
+        );
+        // And the LAST row is really in the file — the whole point.
+        assert!(text.contains("Item number 399"), "the last row was dropped");
+        // Each sheet says where it belongs in the stack.
+        assert!(text.contains("Page 1 of 7"));
+        assert!(text.contains("Page 7 of 7"));
+        // Every object the xref promises must actually be there, or a reader
+        // rejects the file. 3 fixed + 2 per page.
+        assert!(text.contains(&format!("xref\n0 {}\n", 3 + 7 * 2 + 1)));
+    }
+
+    /// A receipt is one page and must not grow a page number.
+    #[test]
+    fn a_short_document_is_still_one_clean_page() {
+        let mut doc = Document::new(Paper::new(PaperKind::A4));
+        doc.line("Masala Dosa");
+        let text = String::from_utf8_lossy(&to_pdf(&layout(&doc).expect("lays out"))).into_owned();
+        assert!(text.contains("/Count 1"));
+        assert!(!text.contains("Page 1 of"), "a one-page slip got a page number");
     }
 
     #[test]

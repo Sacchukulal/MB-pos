@@ -78,6 +78,10 @@ import type { BackupView } from './generated/BackupView';
 import type { VerifyView } from './generated/VerifyView';
 import type { ConfigPlanView } from './generated/ConfigPlanView';
 import type { NumberingView } from './generated/NumberingView';
+import type { PeriodArg } from './generated/PeriodArg';
+import type { ReportListView } from './generated/ReportListView';
+import type { ReportView } from './generated/ReportView';
+import type { SavedFileView } from './generated/SavedFileView';
 import type { CounterEdit } from './generated/CounterEdit';
 
 /**
@@ -419,6 +423,14 @@ export interface Commands {
   // refuses it and says why.
   numbering: { args: void; returns: NumberingView };
   save_counter: { args: { edit: CounterEdit }; returns: NumberingView };
+
+  // P18 — thirteen reports behind four commands, because the report list is
+  // the screen. A period crosses as two `YYYY-MM-DD` strings: TypeScript does
+  // no date arithmetic on the value every report is keyed by.
+  report_list: { args: void; returns: ReportListView };
+  report: { args: { id: string; period: PeriodArg }; returns: ReportView };
+  report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
+  report_pdf: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
 }
 
 

@@ -44,6 +44,9 @@ mod logging;
 mod menu;
 mod preview;
 mod push;
+/// P18. **One shape for every report**, so one screen renders all of them and
+/// adding a report never touches a `.tsx` file.
+mod reports;
 mod search;
 mod session;
 /// P17. **The one table that knows what a setting is**, and the load / save /

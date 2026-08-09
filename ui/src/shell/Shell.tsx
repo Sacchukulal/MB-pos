@@ -32,6 +32,7 @@ import { Credit } from '../credit/Credit';
 import { Expenses } from '../expenses/Expenses';
 import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
+import { Reports } from '../reports/Reports';
 import { Settings } from '../settings/Settings';
 
 import './shell.css';
@@ -109,6 +110,15 @@ const SCREENS: readonly Screen[] = [
     label: 'Bills',
     icon: '❐',
     render: () => <Bills />,
+    needs: 'reports.view',
+  },
+  {
+    // Directly under Bills, because the two answer the same person's
+    // questions: "what did that customer pay?" and "how did the month go?"
+    id: 'reports',
+    label: 'Reports',
+    icon: '◫',
+    render: () => <Reports />,
     needs: 'reports.view',
   },
   {

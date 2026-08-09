@@ -523,6 +523,12 @@ macro_rules! commands {
             $crate::settings::ipc::run_settings_import,
             $crate::settings::numbering::numbering,
             $crate::settings::numbering::save_counter,
+            // P18 — thirteen reports behind three commands, for the same reason
+            // the settings screen is one component: the list is the screen.
+            $crate::reports::report_list,
+            $crate::reports::report,
+            $crate::reports::report_csv,
+            $crate::reports::report_pdf,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

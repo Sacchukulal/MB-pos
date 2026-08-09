@@ -1,0 +1,151 @@
+/*
+ * The reports screen — scope 10, audit G1–G7.
+ *
+ * Two regions, like Settings: the list of reports on the left, the report on
+ * the right. Only the right side scrolls vertically, and the SHEET is the only
+ * thing allowed to scroll sideways — §1 forbids the page itself doing it, and a
+ * six-column tax report on a 1366-wide till is exactly how that happens.
+ *
+ * Every value is a token (D21).
+ */
+
+.mb-reports {
+  display: grid;
+  grid-template-columns: var(--settings-rail) minmax(0, 1fr);
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-4);
+}
+
+.mb-reports__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mb-reports__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mb-reports__grouptitle {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-reports__pick {
+  width: 100%;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-reports__pick:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* The report you are on. A left stripe as well as a fill — colour is never the
+   only signal (§2 rule 2). */
+.mb-reports__pick--on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  box-shadow: inset var(--space-1) 0 0 0 var(--accent);
+}
+
+/* Three rows: the period picker and the heading stay, the sheet scrolls. */
+.mb-reports__body {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+}
+
+.mb-reports__when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.mb-reports__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mb-reports__exports {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mb-reports__compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.mb-reports__against {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* **The only thing on this screen that scrolls sideways.** */
+.mb-reports__sheet {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The totals row, kept out of the table body so sorting or virtualising the
+   rows later cannot carry it away with them. */
+.mb-reports__totals {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: var(--border-width) solid var(--border-strong);
+}
+
+.mb-reports__total {
+  padding: var(--space-2) var(--space-3);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
+.mb-reports__total--numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mb-reports__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}

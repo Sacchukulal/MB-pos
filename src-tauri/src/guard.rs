@@ -245,6 +245,15 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("cancel_restore", Access::Needs(Permission::BackupRun)),
     ("find_shops", Access::Needs(Permission::BackupRun)),
 
+    // --- the reports (P18) ---------------------------------------------------
+    // `reports.view` is the gate on the list and on every report in it; the
+    // control log asks for `audit.view` a SECOND time inside the command,
+    // because "who voided what and why" is the history, not a sales figure.
+    ("report_list", Access::Needs(Permission::ReportsView)),
+    ("report", Access::Needs(Permission::ReportsView)),
+    ("report_csv", Access::Needs(Permission::ReportsView)),
+    ("report_pdf", Access::Needs(Permission::ReportsView)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -513,7 +522,8 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 11] = [
+        const SOURCES: [&str; 12] = [
+            include_str!("reports.rs"),
             include_str!("ipc.rs"),
             include_str!("flows.rs"),
             include_str!("corrections.rs"),

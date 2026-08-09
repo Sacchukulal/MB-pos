@@ -156,6 +156,35 @@ impl Db {
         f(lease.conn())
     }
 
+    /// Runs `f` inside a **read-only** transaction on a pooled reader.
+    ///
+    /// P18's reports need a [`Transaction`] because that is what a
+    /// [`crate::Repos`] borrows — but a report must never take the writer, or a
+    /// year-long scan stands in front of the next bill. That is scope 16.6 and
+    /// audit E1 in one sentence, and `read` alone could not satisfy it because
+    /// it hands out a bare `Connection`.
+    ///
+    /// The transaction is rolled back, never committed. Nothing here may write,
+    /// and a rollback on a connection that wrote nothing costs nothing.
+    pub fn read_transaction<T>(
+        &self,
+        f: impl FnOnce(&Transaction<'_>) -> Result<T, DbError>,
+    ) -> Result<T, DbError> {
+        let lease = self.readers.acquire();
+        let tx = lease.conn().unchecked_transaction()?;
+        match f(&tx) {
+            // Explicit, so a rollback failure surfaces instead of being eaten
+            // by a destructor.
+            Ok(value) => {
+                tx.rollback()?;
+                Ok(value)
+            }
+            // Dropping the transaction rolls it back; returning the caller's
+            // error unchanged matters more than reporting the rollback.
+            Err(e) => Err(e),
+        }
+    }
+
     /// Runs `f` inside a transaction on the single writer connection.
     ///
     /// Commits if `f` returns `Ok`, rolls back otherwise. A settle is ONE

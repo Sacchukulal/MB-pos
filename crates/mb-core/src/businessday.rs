@@ -136,6 +136,33 @@ impl BusinessDay {
     }
 }
 
+/// **`YYYY-MM-DD` back into a day**, so the screen never does date arithmetic.
+///
+/// P18: a report's period comes from two `<input type="date">` boxes, and those
+/// produce exactly this format in every browser and every locale. The
+/// alternative is TypeScript computing days-since-epoch — which is arithmetic
+/// on a value the whole reporting layer is keyed by, in the one language this
+/// product does not let do arithmetic (R8, §6).
+///
+/// Round-trips with [`fmt::Display`], and a test says so.
+impl std::str::FromStr for BusinessDay {
+    type Err = crate::time::TimeError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let mut parts = text.split('-');
+        let year: i32 = parts.next().ok_or(crate::time::TimeError::Overflow)?
+            .parse().map_err(|_| crate::time::TimeError::Overflow)?;
+        let month: u32 = parts.next().ok_or(crate::time::TimeError::Overflow)?
+            .parse().map_err(|_| crate::time::TimeError::Overflow)?;
+        let day: u32 = parts.next().ok_or(crate::time::TimeError::Overflow)?
+            .parse().map_err(|_| crate::time::TimeError::Overflow)?;
+        if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return Err(crate::time::TimeError::Overflow);
+        }
+        Ok(BusinessDay::from_ymd(year, month, day))
+    }
+}
+
 impl fmt::Display for BusinessDay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (year, month, day) = self.to_ymd();
@@ -146,6 +173,24 @@ impl fmt::Display for BusinessDay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The period picker's format, both ways. P18.
+    #[test]
+    fn a_date_box_round_trips_through_a_business_day() {
+        for day in [
+            BusinessDay::from_ymd(2026, 8, 9),
+            BusinessDay::from_ymd(2024, 2, 29), // a leap day
+            BusinessDay::from_ymd(1970, 1, 1),
+            BusinessDay::from_ymd(2099, 12, 31),
+        ] {
+            let text = day.to_string();
+            assert_eq!(text.parse::<BusinessDay>().expect("it parses"), day, "{text}");
+        }
+        // And nonsense is refused rather than silently becoming some day.
+        for bad in ["", "2026", "2026-08", "2026-08-09-01", "2026-13-01", "2026-08-00", "x-y-z"] {
+            assert!(bad.parse::<BusinessDay>().is_err(), "{bad} was accepted");
+        }
+    }
 
     /// An instant from a local wall-clock time in India.
     fn ist(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Timestamp {
