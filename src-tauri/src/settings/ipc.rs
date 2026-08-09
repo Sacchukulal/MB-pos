@@ -296,6 +296,90 @@ pub fn search_on(app: &App, text: String) -> UiResult<Vec<String>> {
 }
 
 // ---------------------------------------------------------------------------
+// The live preview — audit D1, and the reason the design section is usable.
+// ---------------------------------------------------------------------------
+
+/// The sample bill or ticket, laid out with the settings **as they are on
+/// screen right now**, saved or not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewView {
+    pub doc: crate::preview::PreviewDoc,
+    /// Which paper this is, in the owner's words: "80 mm (3 inch)".
+    pub paper: String,
+    /// **Settings that could not be used yet, by name.**
+    ///
+    /// The preview redraws on every keystroke, and half-typed is a normal
+    /// state: a logo width of `4` on its way to `40` is below the minimum for
+    /// one keypress. Blanking the preview would punish typing and erroring on
+    /// every character would be noise — so the last usable value is drawn and
+    /// this says what was skipped. Nothing is silent (R3) and nothing blocks.
+    pub not_usable_yet: Vec<String>,
+}
+
+/// Which paper the preview is drawn on — **the shop's own default printer's**.
+///
+/// Not always 80 mm: a 58 mm shop tuning its receipt against a 48-column
+/// preview is tuning the wrong receipt, and `narrow_items` makes those two
+/// genuinely different documents.
+fn preview_paper(app: &App) -> (mb_print::paper::Paper, String) {
+    use mb_print::paper::{Paper, PaperKind};
+    let mm = crate::flows::default_printer(app)
+        .map(|printer| match printer.paper.kind {
+            PaperKind::Mm58 => 58,
+            PaperKind::Mm100 => 100,
+            _ => 80,
+        })
+        .unwrap_or(80);
+    let kind = match mm {
+        58 => PaperKind::Mm58,
+        100 => PaperKind::Mm100,
+        _ => PaperKind::Mm80,
+    };
+    let inches = match mm {
+        58 => "2 inch",
+        100 => "4 inch",
+        _ => "3 inch",
+    };
+    (Paper::new(kind), format!("{mm} mm ({inches})"))
+}
+
+pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult<PreviewView> {
+    guard::require_any(app, guard::SETTINGS_PERMISSIONS)?;
+
+    let mut wanted = app.shop_config();
+    let mut not_usable_yet = Vec::new();
+    for edit in &edits {
+        let Some(entry) = catalog::find(&edit.key) else {
+            continue;
+        };
+        match off_the_wire(entry, &edit.value)
+            .and_then(|value| (entry.write)(&mut wanted, &value).map_err(UiError::from))
+        {
+            Ok(()) => {}
+            Err(_) => not_usable_yet.push(entry.label.to_owned()),
+        }
+    }
+
+    let (paper, paper_label) = preview_paper(app);
+    let doc = match Group::from_code(&group) {
+        Some(Group::Kitchen) => super::sample::kitchen_preview(&wanted, paper),
+        // Everything else previews the BILL, and on purpose: a shop changing
+        // its name or its GST number wants to see where that lands on paper
+        // just as much as one changing a separator.
+        _ => super::sample::bill_preview(&wanted, paper),
+    }
+    .map_err(|e| words::from_print(&e))?;
+
+    Ok(PreviewView {
+        doc,
+        paper: paper_label,
+        not_usable_yet,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Writing.
 // ---------------------------------------------------------------------------
 
@@ -452,6 +536,15 @@ pub fn settings_all(app: tauri::State<'_, App>) -> UiResult<SettingsView> {
 #[tauri::command]
 pub fn search_settings(app: tauri::State<'_, App>, text: String) -> UiResult<Vec<String>> {
     search_on(&app, text)
+}
+
+#[tauri::command]
+pub fn preview_settings(
+    app: tauri::State<'_, App>,
+    group: String,
+    edits: Vec<SettingEdit>,
+) -> UiResult<PreviewView> {
+    preview_on(&app, group, edits)
 }
 
 #[tauri::command]

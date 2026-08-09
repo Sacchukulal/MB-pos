@@ -37,10 +37,21 @@ import {
 } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
 import type { GroupView } from '../ipc/generated/GroupView';
+import type { PreviewView } from '../ipc/generated/PreviewView';
 import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
+import { Receipt } from '../preview/Receipt';
 
 import './settings.css';
+
+/**
+ * Which sections show the paper beside them.
+ *
+ * The bill and the kitchen ticket obviously; **the shop's details too**,
+ * because the name, the address, the GST number and the UPI id all print, and
+ * "where does that land?" is the same question there as it is for a separator.
+ */
+const SHOWS_PAPER = new Set(['store', 'receipt', 'kitchen']);
 
 /** The edits a person has made and not yet saved, by key. */
 type Edits = Record<string, string>;
@@ -54,6 +65,7 @@ export function Settings() {
   const [matches, setMatches] = useState<readonly string[] | null>(null);
   /** Where the unsaved-changes guard was heading when it stopped us. */
   const [leavingTo, setLeavingTo] = useState<string | null>(null);
+  const [paper, setPaper] = useState<PreviewView | null>(null);
   const body = useRef<HTMLDivElement>(null);
   const toast = useToast();
 
@@ -93,6 +105,34 @@ export function Settings() {
 
   const groups = view?.groups ?? [];
   const active = groups.find((g) => g.code === group) ?? groups[0];
+  const showsPaper = active !== undefined && SHOWS_PAPER.has(active.code) && matches === null;
+
+  // **The live preview — audit D1's fix, and it renders the REAL document.**
+  //
+  // It redraws whenever a setting moves, saved or not, which is the whole
+  // point: v1's worst design fault was a hand-drawn imitation beside the
+  // settings, and *"this is the single biggest source of 'the preview does not
+  // match the paper'"*. Rust lays it out; `Receipt` maps lines to spans.
+  //
+  // Keyed on the EDITS, not on a timer. There is no debounce because there is
+  // nothing to debounce: laying out a forty-line bill is budget P1's 2 ms, and
+  // a timer here would be a second clock (§5 rule 10).
+  useEffect(() => {
+    if (!inApp() || !showsPaper || !active) return;
+    const list = Object.entries(edits).map(([key, value]) => ({ key, value }));
+    let stale = false;
+    call('preview_settings', { group: active.code, edits: list })
+      .then((next) => {
+        if (!stale) setPaper(next);
+      })
+      .catch(() => {
+        // A preview that will not draw must not take the screen down with it.
+        if (!stale) setPaper(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [active, edits, showsPaper]);
 
   const go = useCallback(
     (code: string) => {
@@ -222,7 +262,15 @@ export function Settings() {
           by looking: the body kept the previous section's scroll position, so
           clicking "Your shop" after scrolling through the bill landed halfway
           down the shop's form with its heading off screen. */}
-      <div className="mb-settings__body" ref={body}>
+      <div
+        className={[
+          'mb-settings__body',
+          showsPaper ? 'mb-settings__body--paper' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        ref={body}
+      >
         {matches ? (
           <Found
             view={view}
@@ -244,6 +292,8 @@ export function Settings() {
             body="You do not have permission to change any of this shop's settings."
           />
         )}
+
+        {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
       </div>
 
       {/* **Its own row, spanning both columns**, and this was a bug found by
@@ -339,6 +389,56 @@ function Section({
         </section>
       ))}
     </Card>
+  );
+}
+
+/**
+ * **The paper, beside the settings that change it.**
+ *
+ * Audit D1 is why this is a sink and not a drawing:
+ *
+ * > *"The same bill is drawn three separate times, by hand, in three places…
+ * > the three **will** drift apart. This is the single biggest source of 'the
+ * > preview does not match the paper'."*
+ *
+ * So Rust builds the document, lays it out and hands down lines; `Receipt`
+ * maps them to spans and measures nothing. What is on the left of this panel
+ * and what comes out of the printer are the same `Laid`, and a test asserts it
+ * character for character.
+ */
+function Paper({
+  preview,
+  kitchen,
+}: {
+  preview: PreviewView | null;
+  kitchen: boolean;
+}) {
+  return (
+    <aside className="mb-settings__paper" aria-label="Preview of what prints">
+      <div className="mb-settings__paperhead">
+        <span className="mb-settings__papertitle">
+          {kitchen ? 'The kitchen ticket' : 'The bill'}
+        </span>
+        <span className="mb-settings__papernote">
+          {preview ? `Sample · ${preview.paper}` : 'Sample'}
+        </span>
+      </div>
+
+      {preview ? (
+        <>
+          <Receipt doc={preview.doc} />
+          {/* Half-typed is a normal state, and saying which box is not usable
+              yet beats blanking the paper or shouting on every keystroke. */}
+          {preview.notUsableYet.length > 0 ? (
+            <p className="mb-settings__papernote">
+              Not used yet: {preview.notUsableYet.join(', ')}.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <Spinner label="Drawing the sample" />
+      )}
+    </aside>
   );
 }
 

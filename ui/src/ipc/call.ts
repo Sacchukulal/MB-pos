@@ -71,6 +71,7 @@ import type { ExpenseEdit } from './generated/ExpenseEdit';
 import type { SettingsView } from './generated/SettingsView';
 import type { SettingEdit } from './generated/SettingEdit';
 import type { SavedView } from './generated/SavedView';
+import type { PreviewView } from './generated/PreviewView';
 
 /**
  * Every command, with what it takes and what it gives back.
@@ -360,6 +361,14 @@ export interface Commands {
   /** What "reset this section" WOULD set. It does not save — the screen shows
    *  them as unsaved edits, so a reset can be looked at and cancelled. */
   settings_defaults_for: { args: { group: string }; returns: SettingEdit[] };
+  /** The sample bill or ticket, laid out with the settings as they are on
+   *  screen RIGHT NOW — saved or not. It renders the real mb-print document
+   *  (audit D1: a hand-drawn imitation is how the preview and the paper come
+   *  to disagree), on the shop's own paper width. */
+  preview_settings: {
+    args: { group: string; edits: SettingEdit[] };
+    returns: PreviewView;
+  };
 }
 
 

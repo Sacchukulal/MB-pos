@@ -68,17 +68,18 @@ function Line({ line }: { line: PreviewLine }) {
   switch (line.kind) {
     case 'text':
       return (
-        <span
-          className={[
-            'mb-receipt__line',
-            line.scale > 1 ? `mb-receipt__line--x${line.scale}` : '',
-            line.bold ? 'mb-receipt__line--bold' : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {indent(line.indent)}
-          {line.text}
+        <span className="mb-receipt__line">
+          <Indent columns={line.indent} />
+          <span
+            className={[
+              line.scale > 1 ? `mb-receipt__line--x${line.scale}` : '',
+              line.bold ? 'mb-receipt__line--bold' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {line.text}
+          </span>
           {'\n'}
         </span>
       );
@@ -86,7 +87,7 @@ function Line({ line }: { line: PreviewLine }) {
     case 'rule':
       return (
         <span className="mb-receipt__line">
-          {indent(line.indent)}
+          <Indent columns={line.indent} />
           {line.glyph.repeat(line.width)}
           {'\n'}
         </span>
@@ -98,7 +99,7 @@ function Line({ line }: { line: PreviewLine }) {
       // the same reason: a URI you can read beats a blank space.
       return (
         <span className="mb-receipt__qr">
-          {indent(line.indent)}
+          <Indent columns={line.indent} />
           {line.payload}
           {'\n'}
         </span>
@@ -107,7 +108,7 @@ function Line({ line }: { line: PreviewLine }) {
     case 'logo':
       return (
         <span className="mb-receipt__logo">
-          {indent(line.indent)}[ logo ]{'\n'}
+          <Indent columns={line.indent} />[ logo ]{'\n'}
         </span>
       );
 
@@ -116,6 +117,19 @@ function Line({ line }: { line: PreviewLine }) {
   }
 }
 
-function indent(columns: number): string {
-  return ' '.repeat(columns);
+/**
+ * **The indent is in PAPER columns, so it is drawn in paper columns.**
+ *
+ * It used to be spaces inside the line's own span, and a `2×` heading made
+ * those spaces `2×` too — so a centred shop name was pushed sideways by twice
+ * what the layout asked for, and a big line could push the whole preview wider
+ * than the paper it claims to be. Found by putting a kitchen ticket (whose
+ * items are `2×` by default) next to its settings.
+ *
+ * `mb_print::layout` decided this number against a 48-column grid; this span
+ * renders it at the base character width and never at the line's.
+ */
+function Indent({ columns }: { columns: number }) {
+  if (columns === 0) return null;
+  return <span className="mb-receipt__indent">{' '.repeat(columns)}</span>;
 }

@@ -173,3 +173,59 @@
   align-items: center;
   justify-content: center;
 }
+
+/* --- The paper, beside the settings that change it (audit D1) ------------- */
+
+/* Two columns when there is paper to show: the settings, then the sample. The
+   sample column is fixed at the width of a 48-column receipt in the mono face,
+   so the paper is the size the paper is and never stretches. */
+.mb-settings__body--paper {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--settings-paper);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+/* It stays put while the settings scroll — the whole point is watching a
+   change land, and a preview you have to scroll back to is a preview nobody
+   looks at. */
+.mb-settings__paper {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.mb-settings__paperhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.mb-settings__papertitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.mb-settings__papernote {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* The paper beside the settings has less room than the gallery does, so it
+   sets ONE value — the character width — and the receipt's own multipliers
+   follow it. 48 columns of --text-xs is about 350px, which fits 28rem with
+   room to spare; at --text-sm it did not, and the panel grew a sideways
+   scrollbar that UI_GUIDELINES §1 forbids. */
+.mb-settings__paper .mb-receipt__paper {
+  --receipt-char: var(--text-xs);
+}

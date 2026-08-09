@@ -154,12 +154,25 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
 /// the name.
 fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
     let s = ctx.settings;
-    let columns = vec![Column::fixed(4, Align::Right), Column::fill(Align::Left)];
+    // **The middle column is a gutter, and it has to be a column.**
+    //
+    // `lay_row` writes cells end to end with nothing between them, so a
+    // right-aligned quantity butts straight into a left-aligned name: the
+    // ticket read "2Paneer Butter Masala" from P06 until P17 put it on screen.
+    // Putting a space at the front of the name cell does NOT work — `wrap`
+    // splits on spaces and drops empty words, so a leading space disappears.
+    // On a character grid a gap is a character, and a character in a row of
+    // columns is a column.
+    let columns = vec![
+        Column::fixed(4, Align::Right),
+        Column::fixed(1, Align::Left),
+        Column::fill(Align::Left),
+    ];
 
     if s.show_column_names {
         doc.push(Block::Columns {
             columns: columns.clone(),
-            rows: vec![vec!["Qty".to_owned(), "Item".to_owned()]],
+            rows: vec![vec!["Qty".to_owned(), String::new(), "Item".to_owned()]],
             style: s.details,
         });
         if s.separators.below_column_names {
@@ -175,15 +188,23 @@ fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
         // every ticket of the day.
         if n > 0 {
             for _ in 0..gap {
-                rows.push(vec![String::new(), String::new()]);
+                rows.push(vec![String::new(), String::new(), String::new()]);
             }
         }
-        rows.push(vec![line.qty.to_string(), line.name.clone()]);
+        rows.push(vec![
+            line.qty.to_string(),
+            String::new(),
+            line.name.clone(),
+        ]);
         for modifier in &line.modifiers {
-            rows.push(vec![String::new(), format!("  + {modifier}")]);
+            rows.push(vec![
+                String::new(),
+                String::new(),
+                format!("+ {modifier}"),
+            ]);
         }
         if let Some(note) = &line.note {
-            rows.push(vec![String::new(), format!("  * {note}")]);
+            rows.push(vec![String::new(), String::new(), format!("* {note}")]);
         }
     }
 

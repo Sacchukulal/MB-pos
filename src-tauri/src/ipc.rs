@@ -494,6 +494,7 @@ macro_rules! commands {
             $crate::settings::ipc::search_settings,
             $crate::settings::ipc::save_settings,
             $crate::settings::ipc::settings_defaults_for,
+            $crate::settings::ipc::preview_settings,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

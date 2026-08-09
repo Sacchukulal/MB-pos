@@ -6,11 +6,23 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  align-items: flex-start;
+  /* `flex-start` shrink-wrapped the paper to its content, which is right in the
+     gallery and wrong everywhere narrow: a flex item's min-width is `auto`, so
+     the `<pre>` refused to shrink, its own `overflow-x` never engaged, and the
+     WHOLE SCREEN scrolled sideways instead. UI_GUIDELINES §1 forbids that
+     outright — "no horizontal scrolling, ever" — and P17 found it by putting
+     the preview beside the settings. */
+  align-items: stretch;
+  min-width: 0;
 }
 
 .mb-receipt__paper {
   margin: 0;
+  /* The other half of the same fix. Without this the `overflow-x` below is
+     decoration: a `<pre>` inside a grid or flex parent is sized by its content
+     unless it is told it may be smaller. */
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-4);
   background: var(--surface);
   color: var(--text);
@@ -22,7 +34,11 @@
      column. */
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--text-sm);
+  /* **One character width, and every other size is a multiple of it.**
+     A caller that has less room sets this and nothing else — the settings
+     screen does, so a 48-column bill fits beside its own settings. */
+  --receipt-char: var(--text-sm);
+  font-size: var(--receipt-char);
   line-height: var(--line-tight);
   white-space: pre;
   /* Never wraps. If something is too wide for the box the box scrolls — the
@@ -35,13 +51,17 @@
   font-weight: var(--weight-bold);
 }
 
-/* The ESC/POS size multipliers, shown as they will print. */
+/* The ESC/POS size multipliers, shown as they will print.
+   **Actual multiples**, and they were not: x2 was `--text-lg`, which is 1.29
+   times `--text-sm`, so the preview showed "Large" as a third bigger when the
+   printer makes it twice as big. A preview that understates the one setting it
+   is there to demonstrate is worse than no preview. */
 .mb-receipt__line--x2 {
-  font-size: var(--text-lg);
+  font-size: calc(var(--receipt-char) * 2);
 }
 
 .mb-receipt__line--x3 {
-  font-size: var(--text-2xl);
+  font-size: calc(var(--receipt-char) * 3);
 }
 
 .mb-receipt__qr {
@@ -57,4 +77,10 @@
   padding-left: var(--space-5);
   color: var(--text-muted);
   font-size: var(--text-sm);
+}
+
+/* The indent is in PAPER columns (see `Indent`), so it is always drawn at the
+   base character width — never at the size of the line it precedes. */
+.mb-receipt__indent {
+  font-size: var(--receipt-char);
 }

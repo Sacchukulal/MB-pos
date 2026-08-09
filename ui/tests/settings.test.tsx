@@ -122,6 +122,21 @@ beforeEach(() => {
     if (name === 'settings_defaults_for') {
       return Promise.resolve([{ key: 'store.name', value: '' }]);
     }
+    if (name === 'preview_settings') {
+      return Promise.resolve({
+        paper: '80 mm (3 inch)',
+        notUsableYet: [],
+        doc: {
+          columns: 48,
+          notes: [],
+          lines: [
+            { kind: 'text', text: 'Anna Kuteera', indent: 18, scale: 2, bold: true },
+            { kind: 'rule', glyph: '-', width: 48, indent: 0 },
+            { kind: 'text', text: 'Come back soon', indent: 17, scale: 1, bold: false },
+          ],
+        },
+      });
+    }
     return Promise.resolve(null);
   });
 });
@@ -229,6 +244,83 @@ describe('the settings screen', () => {
     // "The bill" twice: once in the section list, once above the hit saying
     // where it lives. The second one is the point.
     expect(screen.getAllByText('The bill')).toHaveLength(2);
+  });
+
+  /**
+   * **The live preview — audit D1.**
+   *
+   * The document is Rust's; this proves the screen asks for it with the
+   * UNSAVED edits, which is the whole point of a live preview.
+   */
+  it('draws the sample paper and redraws it as a setting is typed', async () => {
+    draw();
+    await screen.findByLabelText('Shop name');
+    expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
+    expect(screen.getByText(/80 mm/)).toBeTruthy();
+
+    call.mockClear();
+    fireEvent.change(screen.getByLabelText('Shop name'), {
+      target: { value: 'Anna Kuteera Veg' },
+    });
+
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith('preview_settings', {
+        group: 'store',
+        edits: [{ key: 'store.name', value: 'Anna Kuteera Veg' }],
+      }),
+    );
+  });
+
+  it('asks for the KITCHEN sample on the kitchen section', async () => {
+    const withKitchen: SettingsView = {
+      ...view,
+      groups: [...view.groups, { ...view.groups[1]!, code: 'kitchen', label: 'The kitchen ticket' }],
+    };
+    call.mockImplementation((name: string) => {
+      if (name === 'settings_all') return Promise.resolve(withKitchen);
+      if (name === 'preview_settings') {
+        return Promise.resolve({
+          paper: '80 mm (3 inch)',
+          notUsableYet: [],
+          doc: { columns: 48, notes: [], lines: [] },
+        });
+      }
+      return Promise.resolve(null);
+    });
+    draw();
+    await screen.findByLabelText('Shop name');
+    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith('preview_settings', {
+        group: 'kitchen',
+        edits: [],
+      }),
+    );
+  });
+
+  /** Half-typed is a normal state, and the screen says so rather than blanking. */
+  it('says which box is not usable yet instead of blanking the paper', async () => {
+    call.mockImplementation((name: string) => {
+      if (name === 'settings_all') return Promise.resolve(view);
+      if (name === 'preview_settings') {
+        return Promise.resolve({
+          paper: '80 mm (3 inch)',
+          notUsableYet: ['Logo width'],
+          doc: {
+            columns: 48,
+            notes: [],
+            lines: [{ kind: 'text', text: 'Anna Kuteera', indent: 0, scale: 1, bold: false }],
+          },
+        });
+      }
+      return Promise.resolve(null);
+    });
+    draw();
+    // The paper is still drawn...
+    expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
+    // ...and the box that could not be used is named.
+    expect(screen.getByText(/Not used yet: Logo width/)).toBeTruthy();
   });
 
   /** Reset is shown as unsaved edits, so it can be looked at and cancelled. */

@@ -160,6 +160,11 @@
      stops ninety settings becoming a mile of scrolling. */
   --settings-rail: 15rem;
   --settings-field: 20rem;
+  /* Wide enough that a 48-column receipt FITS: 48 characters of --text-sm mono
+     is about 25rem, plus the paper's own padding and border. 26rem was not,
+     and the bill came out with "SAMPL", "Dine I" and "478.8" cut off — which
+     is a preview that lies about the one thing it exists to show. */
+  --settings-paper: 28rem;
 
   /* The lock screen and the people screens (P11). The card is narrow on
      purpose: a PIN pad the width of a monitor is a PIN pad you have to look

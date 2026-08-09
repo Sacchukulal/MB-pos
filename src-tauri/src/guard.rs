@@ -216,6 +216,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("search_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("save_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("settings_defaults_for", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    // The live preview. Reading only â it renders a SAMPLE bill and never
+    // touches a real one.
+    ("preview_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
 
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It

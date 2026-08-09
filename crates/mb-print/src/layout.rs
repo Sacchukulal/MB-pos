@@ -449,6 +449,12 @@ fn lay_row(columns: &[Column], widths: &[usize], cells: &[String]) -> Vec<String
 
 /// Wrap on spaces, and break a word that is longer than the whole line rather
 /// than letting it overflow. Nothing is ever dropped (rule one).
+///
+/// **Leading and repeated spaces ARE dropped**, and that is what wrapping on
+/// spaces means. It is written down here because P17 tried to put a gutter
+/// between two columns by starting a cell with a space, watched it vanish, and
+/// had to be told why: a gap between columns is a **column**, not a character
+/// somebody typed into a cell.
 fn wrap(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_owned()];

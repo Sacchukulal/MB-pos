@@ -43,6 +43,7 @@
 
 pub mod catalog;
 pub mod ipc;
+pub mod sample;
 pub mod value;
 
 use mb_core::{Money, Timestamp};
