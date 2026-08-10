@@ -314,6 +314,17 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("health", Access::Needs(Permission::ReportsView)),
     ("diagnostics_plan", Access::Needs(Permission::BackupRun)),
     ("write_diagnostics", Access::Needs(Permission::BackupRun)),
+    // Looking for an update is reading. Dismissing one, or going back a
+    // version, changes what this computer runs — and I1 is a counter left on
+    // 1.4.0 because a dismissal was too easy, so it is not a cashier's button.
+    ("look_for_an_update", Access::Needs(Permission::ReportsView)),
+    ("dismiss_update", Access::Needs(Permission::SettingsStore)),
+    ("go_back_a_version", Access::Needs(Permission::SettingsStore)),
+    // **Public, and it is a decision.** On a first run the stand-in is who is
+    // standing there, and a set-up list that refuses to draw until somebody has
+    // a PIN is a list nobody can use to create the PIN — the same shape as the
+    // first-run bug P11 shipped. It reads counts and shows no shop data.
+    ("setup_list", Access::Public),
 
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
@@ -583,12 +594,14 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 18] = [
+        const SOURCES: [&str; 20] = [
             include_str!("orders.rs"),
             include_str!("lan.rs"),
             include_str!("licensing.rs"),
             include_str!("health.rs"),
             include_str!("diagnostics.rs"),
+            include_str!("updates.rs"),
+            include_str!("setup.rs"),
             include_str!("dayclose.rs"),
             include_str!("reports.rs"),
             include_str!("ipc.rs"),

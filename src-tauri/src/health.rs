@@ -79,7 +79,7 @@ impl HealthRow {
         }
     }
 
-    fn go(mut self, screen: &str) -> HealthRow {
+    pub fn go(mut self, screen: &str) -> HealthRow {
         self.go_to = Some(screen.to_owned());
         self
     }
@@ -95,6 +95,9 @@ impl HealthRow {
 #[must_use]
 pub fn look(app: &App) -> HealthView {
     let rows = vec![
+        // First, because on a new counter it is the only one that matters and
+        // it is the one somebody can act on today.
+        crate::setup::health_row(&crate::setup::look(app)),
         licence_row(app),
         update_row(app),
         printers_row(app),
@@ -148,7 +151,17 @@ fn licence_row(app: &App) -> HealthRow {
     match crate::words::licence_banner(&entitlement, today) {
         // P21 already writes the sentence, and it already ends by saying what
         // still works. Two versions of it would drift.
-        Some(says) => HealthRow::warn("licence", "Licence", says).go("account"),
+        //
+        // **And the TONE is P21's too.** The first version made every licence
+        // fault a warning, so this panel called a revoked licence amber while
+        // the account screen two clicks away called it red — found by a test
+        // that broke the licence for real rather than building the row by hand.
+        // One state, one severity, one place that decides it.
+        Some(says) => HealthRow {
+            tone: crate::licensing::tone_for(entitlement.standing).to_owned(),
+            ..HealthRow::warn("licence", "Licence", says)
+        }
+        .go("account"),
         None => HealthRow::ok(
             "licence",
             "Licence",

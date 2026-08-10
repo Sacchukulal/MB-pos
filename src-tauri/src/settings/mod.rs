@@ -367,6 +367,14 @@ pub struct BackupPolicy {
     /// 0 means only when somebody presses the button.
     pub every_hours: u32,
     pub keep_count: u32,
+    /// **May we be told when the counter stops unexpectedly?** (P22, audit E8.)
+    ///
+    /// Off until the shop says otherwise, and it is genuinely their decision.
+    /// **The report is written either way** — D95: whether a crash report
+    /// exists on this computer is not a question about telemetry, it is what
+    /// makes the shop's own support call solvable. This flag is only about
+    /// sending it, and there is nowhere to send it until Phase 8.
+    pub send_crash_reports: bool,
 }
 
 impl Default for BackupPolicy {
@@ -376,6 +384,9 @@ impl Default for BackupPolicy {
             second_folder: String::new(),
             every_hours: 24,
             keep_count: 30,
+            // **Off.** Consent is given, not assumed — and the report exists
+            // on this computer whichever way this is set (D95).
+            send_crash_reports: false,
         }
     }
 }

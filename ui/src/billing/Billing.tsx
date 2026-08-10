@@ -32,6 +32,7 @@ import {
   Spinner,
   useToast,
 } from '../kit';
+import { Setup } from '../setup/Setup';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
@@ -57,7 +58,7 @@ import './billing.css';
 
 const ORDER_TYPES = ['Dine in', 'Parcel', 'Self service', 'Delivery'] as const;
 
-export function Billing() {
+export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const toast = useToast();
   const [cart, setCart] = useState<CartView | null>(null);
   const [tables, setTables] = useState<readonly TableView[]>([]);
@@ -495,6 +496,17 @@ export function Billing() {
 
       <div className="mb-billing__body">
         <div className="mb-billing__floor">
+          {/*
+            **P22's set-up list, and where it is matters.**
+
+            Beside the till, above the floor, and it removes itself once the
+            shop is set up. PERFORMANCE S5 gives three minutes from installing
+            to a printable bill — a wizard in front of this screen would spend
+            all three of them, so this is a list a shopkeeper can work through
+            between customers instead. D102.
+          */}
+          {onGoTo ? <Setup onGoTo={onGoTo} /> : null}
+
           {tables.length === 0 && menu.length === 0 ? (
             <EmptyState
               title="This shop has no menu or tables yet"

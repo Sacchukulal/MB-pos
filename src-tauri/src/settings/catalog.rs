@@ -848,6 +848,19 @@ pub const CATALOG: &[Entry] = &[
         "Older ones are deleted to save disk space.",
         ["backup", "keep", "retention", "delete", "old"], 1..=365 "backups", u32,
         backup.keep_count),
+    // **P22, audit E8 — and it is off until the shop says otherwise.**
+    //
+    // The help text is the consent: it says what is sent and what is not, in
+    // the words a shopkeeper would use, because a switch whose meaning has to
+    // be guessed is not consent. **The report is written on this computer
+    // either way** (D95) — this is only about sending it.
+    flag!("backup.send_crash_reports", Backup, Row, "Tell us if the counter stops unexpectedly",
+        "Sends us what went wrong — the version, what the counter was doing, and \
+         nothing else. Never your bills, your customers or your licence key. \
+         A record is kept on this computer whichever way you set this, so you \
+         can always send it yourself with Copy diagnostics.",
+        ["crash", "report", "telemetry", "send", "error", "diagnostics", "privacy"],
+        backup.send_crash_reports),
 
     // --- how it looks (scope 13.11, 13.12) ----------------------------------
     // The THEME and the TEXT SIZE are deliberately NOT here. They live in

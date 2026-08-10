@@ -580,6 +580,16 @@ macro_rules! commands {
             $crate::health::health,
             $crate::diagnostics::diagnostics_plan,
             $crate::diagnostics::write_diagnostics,
+            // P22 — the update, and the way back. Looking is `reports.view`;
+            // dismissing one or going back a version changes what this computer
+            // runs, so both are `settings.store`.
+            $crate::updates::look_for_an_update,
+            $crate::updates::dismiss_update,
+            $crate::updates::go_back_a_version,
+            // Deliberately Public: on a first run the stand-in is who is
+            // standing there, and a set-up list that refuses to draw until
+            // somebody has a PIN is a list nobody can use to create the PIN.
+            $crate::setup::setup_list,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

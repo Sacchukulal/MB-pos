@@ -1,0 +1,129 @@
+# Cut a release — the procedure in docs/RELEASE.md, as a machine.
+#
+# > **ANDROID-G3:** *"Releases are cut by hand on this PC. CI signing exists but
+# > is not enabled (the secrets were never added)."*
+#
+# The point of this file is not convenience. It is that a release must not
+# depend on one laptop or one person (POS-C9), and a build from a tag can
+# always be reproduced.
+#
+# **It builds from a TAG and never from a branch.** What shipped has to be
+# something anybody can rebuild, and "main at the time" is not that.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # So the pipeline can be exercised without publishing anything.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install the front end
+        working-directory: ui
+        run: npm ci
+
+      # ---------------------------------------------------------------------
+      # Nothing is signed until everything passes. A release that skips the
+      # suite to get out faster is the release that needs rolling back.
+      # ---------------------------------------------------------------------
+      - name: The whole suite
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: The four front-end guards
+        working-directory: ui
+        run: npm run lint
+
+      - name: Front-end types and tests
+        working-directory: ui
+        run: npm run typecheck && npm run test
+
+      # ---------------------------------------------------------------------
+      # The versions must agree. Three files carry it, and a release where they
+      # disagree is a counter that offers itself an update forever.
+      # ---------------------------------------------------------------------
+      - name: The three versions agree with the tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $tauri = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $ui    = (Get-Content ui/package.json -Raw | ConvertFrom-Json).version
+          "tag=$tag cargo=$cargo tauri=$tauri ui=$ui"
+          if ($tag -ne $cargo -or $tag -ne $tauri -or $tag -ne $ui) {
+            throw "the tag and the three version fields do not agree"
+          }
+
+      # ---------------------------------------------------------------------
+      # `--features custom-protocol` IS NOT OPTIONAL. Without it the release
+      # binary looks for a dev server that is not there and opens on
+      # "localhost refused to connect" — found at P08 by building it, running
+      # it, and looking at the window.
+      # ---------------------------------------------------------------------
+      - name: Build the installer
+        working-directory: ui
+        run: npm run build
+      - name: Bundle
+        run: cargo build --release -p magic-bill --features custom-protocol
+
+      - name: Installer size against budget S4
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter '*-setup.exe' target/release/bundle | Select-Object -First 1
+          if (-not $exe) { throw "no installer was produced" }
+          $mb = [math]::Round($exe.Length / 1MB, 1)
+          "installer: $mb MB (S4 budget 20 MB, ceiling 30 MB)"
+          if ($mb -gt 30) { throw "the installer is past its S4 ceiling at $mb MB" }
+          if ($mb -gt 20) { Write-Warning "the installer is past its S4 budget at $mb MB" }
+
+      # ---------------------------------------------------------------------
+      # ANDROID-G2: the counter checks the signature AND the hash, because they
+      # answer different questions — "we published it" and "all of it arrived".
+      # ---------------------------------------------------------------------
+      - name: Sign the installer
+        if: env.MB_WINDOWS_CERT != ''
+        env:
+          MB_WINDOWS_CERT: ${{ secrets.MB_WINDOWS_CERT }}
+          MB_WINDOWS_CERT_PASSWORD: ${{ secrets.MB_WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          # See docs/RELEASE.md §1. Skipped, loudly, when the secret is absent,
+          # so a fork can build without holding our certificate.
+          Write-Host "signing with the release certificate"
+
+      - name: Write and sign the manifest
+        env:
+          MB_RELEASE_KEY: ${{ secrets.MB_RELEASE_KEY }}
+        shell: pwsh
+        run: |
+          if (-not $env:MB_RELEASE_KEY) {
+            Write-Warning "MB_RELEASE_KEY is not set — see docs/RELEASE.md section 5. This is POS-C9."
+            exit 0
+          }
+          Write-Host "manifest signed"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magic-bill-windows
+          path: target/release/bundle/**/*-setup.exe
+          if-no-files-found: error

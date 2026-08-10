@@ -84,6 +84,8 @@ import type { DayCloseView } from './generated/DayCloseView';
 import type { LicenceView } from './generated/LicenceView';
 import type { HealthView } from './generated/HealthView';
 import type { BundlePlanView } from './generated/BundlePlanView';
+import type { SetupView } from './generated/SetupView';
+import type { UpdateState } from './generated/UpdateState';
 import type { NetworkView } from './generated/NetworkView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
@@ -484,6 +486,13 @@ export interface Commands {
   // is separate from the write on purpose (D94): a person sees the manifest
   // before the zip exists.
   health: { args: void; returns: HealthView };
+  // Public in Rust, deliberately: on a first run nobody has a PIN yet, and a
+  // set-up list that will not draw until somebody does is a list nobody can
+  // use to create one.
+  setup_list: { args: void; returns: SetupView };
+  look_for_an_update: { args: void; returns: UpdateState };
+  dismiss_update: { args: void; returns: UpdateState };
+  go_back_a_version: { args: void; returns: string };
   diagnostics_plan: { args: void; returns: BundlePlanView };
   write_diagnostics: { args: void; returns: string };
 }

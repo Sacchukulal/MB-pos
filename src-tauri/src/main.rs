@@ -69,9 +69,16 @@ mod diagnostics;
 mod health;
 /// P22. **A shop must be able to go back** — audit E9, I1 and ANDROID-G2/G4.
 mod updates;
+/// P22. Setting a shop up — a checklist that READS the shop rather than a
+/// wizard that remembers a position (D102), and never in front of the till.
+mod setup;
 /// P22's T5: drive everything that touches a secret, then read the log back.
 #[cfg(test)]
 mod log_tests;
+/// P22's T7 and T8: break each thing in turn and read the bundle back out of
+/// a real zip.
+#[cfg(test)]
+mod health_tests;
 mod orders;
 mod push;
 /// P18. **One shape for every report**, so one screen renders all of them and

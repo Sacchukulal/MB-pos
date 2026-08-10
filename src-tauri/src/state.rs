@@ -180,6 +180,14 @@ impl App {
         *lock(&self.updates) = state;
     }
 
+    /// **Where releases come from.** There is no release server until Phase 8,
+    /// and `NoReleaseServerYet` says so rather than pretending to have looked
+    /// — the same treatment P21 gave the cloud.
+    #[must_use]
+    pub fn releases(&self) -> &dyn crate::updates::Releases {
+        &crate::updates::NoReleaseServerYet
+    }
+
     /// **What this shop is entitled to, right now.**
     ///
     /// Reads a value. No network, no database, no shop lock — this is what

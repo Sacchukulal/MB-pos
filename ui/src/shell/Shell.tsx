@@ -44,7 +44,12 @@ export interface Screen {
   id: string;
   label: string;
   icon: string;
-  render: () => ReactNode;
+  /**
+   * `go` opens another screen — P22's set-up list and health panel both send
+   * somebody to the screen that does the job, rather than being a seventh
+   * editor (D102).
+   */
+  render: (go: (screen: string) => void) => ReactNode;
   /**
    * The permission this screen's commands check in Rust.
    *
@@ -77,7 +82,9 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     id: "billing",
     label: "Billing",
     icon: "₹",
-    render: () => <Billing />,
+    // The set-up list lives on this screen and needs to be able to send
+    // somebody to Settings or Menu — see `Setup` and D102.
+    render: (go) => <Billing onGoTo={go} />,
   },
   {
     // The floor answers a different question from the billing grid: not
@@ -170,7 +177,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     id: 'health',
     label: 'Health',
     icon: '✚',
-    render: () => <Health />,
+    render: (go) => <Health onGoTo={go} />,
     needs: 'reports.view',
   },
 ];
@@ -381,7 +388,7 @@ export function Shell() {
               </button>
             </div>
           ) : null}
-          {active?.render()}
+          {active?.render(setScreen)}
         </main>
       </div>
 

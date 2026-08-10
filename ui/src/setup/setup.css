@@ -1,0 +1,64 @@
+/*
+ * The set-up list — P22. Beside the till, never in front of it.
+ * Every value is a token (D21).
+ */
+
+.mb-setup {
+  flex-shrink: 0;
+}
+
+.mb-setup__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* `.mb-card` is a COLUMN — a row inside one says so, or it stacks and centres
+   the way P18's three did. */
+.mb-setup__step {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* Progress is one line, not six rows — see the note in `Setup.tsx` about what
+   the full list did to the billing pane. */
+.mb-setup__done {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-setup__tick {
+  flex-shrink: 0;
+  width: var(--space-4);
+  text-align: center;
+  color: var(--ok);
+}
+
+.mb-setup__step:not(.mb-setup__step--done) .mb-setup__tick {
+  color: var(--text-muted);
+}
+
+.mb-setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.mb-setup__title {
+  font-weight: var(--weight-medium);
+}
+
+/* The REASON, not the label. "Store details" tells a shopkeeper nothing. */
+.mb-setup__why {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 52ch;
+}
