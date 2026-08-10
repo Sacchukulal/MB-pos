@@ -96,6 +96,9 @@ pub mod action {
     /// months later and has to be able to search for.
     pub const DEVICE_PAIRED: AuditAction = "device.paired";
     pub const DEVICE_REVOKED: AuditAction = "device.revoked";
+    /// P20 — something a phone asked the counter to do. "Who cancelled that
+    /// item?" has to be answerable a month later; v1 kept two days.
+    pub const INTENT_APPLIED: AuditAction = "intent.applied";
     pub const BACKUP_RESTORED: AuditAction = "backup.restored";
 
     /// Every one of the above, for the screen's filter.
@@ -135,6 +138,7 @@ pub mod action {
         DAY_REOPENED,
         DEVICE_PAIRED,
         DEVICE_REVOKED,
+        INTENT_APPLIED,
         BACKUP_RESTORED,
     ];
 
@@ -177,6 +181,7 @@ pub mod action {
             DAY_REOPENED => "Opened a closed day again",
             DEVICE_PAIRED => "Added a phone to the counter",
             DEVICE_REVOKED => "Removed a phone from the counter",
+            INTENT_APPLIED => "Changed an order from a phone",
             BACKUP_RESTORED => "Restored a backup",
             _ => "Did something this version does not know about",
         }

@@ -115,6 +115,22 @@ pub fn emit_pairing(app: &AppHandle) {
     }
 }
 
+/// **The floor changed the order the cashier has open** (P20, D83).
+///
+/// Pushed, and it has to be: the alternative is the cashier finding out when
+/// they next happen to press something, and the thing they are most likely to
+/// press next is Complete bill. Found by looking at the screen — the note was
+/// sitting in the cart and nothing had asked for it.
+pub fn emit_floor_change(app: &AppHandle) {
+    let Some(state) = app.try_state::<App>() else {
+        return;
+    };
+    let waiting = state.floor_changes_waiting();
+    if let Err(e) = app.emit(CHANNEL, Pushed::FloorChanged { waiting }) {
+        log_warn!("the counter could not be told what the floor did: {e}");
+    }
+}
+
 /// Watch the pairing desk while it is open.
 ///
 /// **This is not a poll of the SCREEN** — nothing crosses to React unless the

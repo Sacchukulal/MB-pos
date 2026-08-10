@@ -49,6 +49,7 @@ mod lan;
 mod logging;
 mod menu;
 mod preview;
+mod orders;
 mod push;
 /// P18. **One shape for every report**, so one screen renders all of them and
 /// adding a report never touches a `.tsx` file.
@@ -91,6 +92,10 @@ mod settings_tests;
 /// produces has to be real — so it is driven with the real commands.
 #[cfg(test)]
 mod dayclose_tests;
+/// P20 drives the intent applier against a real database: the counter is the
+/// authority, so a test that stubs the counter is testing nothing.
+#[cfg(test)]
+mod order_tests;
 mod startup;
 mod state;
 mod window;

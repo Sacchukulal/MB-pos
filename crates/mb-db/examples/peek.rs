@@ -80,6 +80,11 @@ fn main() {
                     CASE WHEN revoked_at IS NULL THEN 'live' ELSE 'removed' END AS state,
                     substr(secret_hash, 1, 20) AS credential
                FROM lan_devices ORDER BY paired_at",
+            // P20. The idempotency ledger — crown jewel 11. One row per intent,
+            // carrying what the counter answered, so a retry gets the same
+            // sentence and never a second order.
+            "SELECT event_id, source, substr(result, 1, 55) AS answered
+               FROM applied_events ORDER BY applied_at",
             "SELECT day_close_id, denomination, count
                FROM day_close_denominations ORDER BY denomination DESC",
         ] {

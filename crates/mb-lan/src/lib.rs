@@ -44,6 +44,7 @@ pub mod counter;
 pub mod discovery;
 pub mod error;
 pub mod identity;
+pub mod intent;
 pub mod limit;
 pub mod pairing;
 pub mod qr;
@@ -51,6 +52,7 @@ pub mod server;
 
 pub use counter::{Counter, Device, DeviceRow, PairRequest, PairedDevice, Refusal};
 pub use error::LanError;
+pub use intent::{Batch, BatchResult, Catalogue, Intent, LineView, Outcome, What};
 pub use identity::Identity;
 pub use limit::{Limiter, Rate};
 pub use pairing::{Desk, Waiting};

@@ -259,7 +259,81 @@ pub fn router(shared: Shared) -> Router {
         .route("/v1/pair/{request_id}", get(pair_status))
         .route("/v1/me", get(me))
         .route("/v1/stream", get(stream))
+        // P20 — what a phone came here to do. See `docs/LAN_PROTOCOL.md`.
+        .route("/v1/intent", post(intent))
+        .route("/v1/batch", post(batch))
+        .route("/v1/catalogue", get(catalogue))
         .with_state(shared)
+}
+
+/// One intent. Idempotent by its own id, so a phone that lost the reply
+/// retries this exact request and gets the same answer.
+async fn intent(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    Json(intent): Json<crate::intent::Intent>,
+) -> Response {
+    let device = match authenticate(&shared, &headers, from) {
+        Ok(d) => d,
+        Err(response) => return response,
+    };
+    let outcome = shared.counter.apply(&device, &intent);
+    answered(&outcome)
+}
+
+/// A batch a phone queued while it could not reach us.
+async fn batch(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    Json(batch): Json<crate::intent::Batch>,
+) -> Response {
+    let device = match authenticate(&shared, &headers, from) {
+        Ok(d) => d,
+        Err(response) => return response,
+    };
+    Json(shared.counter.apply_batch(&device, &batch)).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogueQuery {
+    version: Option<String>,
+}
+
+async fn catalogue(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    axum::extract::Query(query): axum::extract::Query<CatalogueQuery>,
+) -> Response {
+    if let Err(response) = authenticate(&shared, &headers, from) {
+        return response;
+    }
+    match shared.counter.catalogue(query.version.as_deref()) {
+        // **304, and it is the point of the version.** 400 items to fifteen
+        // phones on every reconnect is a shop whose WiFi is the bottleneck.
+        None => StatusCode::NOT_MODIFIED.into_response(),
+        Some(catalogue) => Json(catalogue).into_response(),
+    }
+}
+
+/// An outcome, with the status its own kind implies.
+///
+/// **Always a body with a sentence in it**, including on a refusal: the phone
+/// shows that string to a waiter who has a customer in front of them.
+fn answered(outcome: &crate::intent::Outcome) -> Response {
+    use crate::intent::Outcome;
+    let status = match outcome {
+        Outcome::Ok { .. } => StatusCode::OK,
+        // 409 and not 400: nothing was malformed. The counter's state and the
+        // phone's disagreed, which is what a conflict status means, and a
+        // phone can use it to decide whether to refresh.
+        Outcome::Refused { .. } => StatusCode::CONFLICT,
+        // 202: taken, not applied, waiting for a person.
+        Outcome::Held { .. } => StatusCode::ACCEPTED,
+    };
+    (status, Json(outcome)).into_response()
 }
 
 /// Unauthenticated on purpose: this is how a phone finds out what it is

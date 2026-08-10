@@ -32,7 +32,7 @@ import {
   Spinner,
   useToast,
 } from '../kit';
-import { call, inApp, isUiError } from '../ipc/call';
+import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
@@ -133,6 +133,31 @@ export function Billing() {
     call('current_cart').then(setCart).catch(report);
     call('menu_items').then(setMenu).catch(report);
   }, [report]);
+
+  // **The floor changed the order this cart has open** (P20, D83).
+  //
+  // Pushed, and subscribed once — the empty dependency list is deliberate, the
+  // same lesson P19's panel learned: a listener that depends on anything that
+  // changes identity is a listener that is torn down and re-attached, and the
+  // push lands in the gap. Without this the cashier finds out when they next
+  // press something, and the thing they are most likely to press is Complete
+  // bill.
+  useEffect(() => {
+    if (!inApp()) return undefined;
+    let stop: (() => void) | undefined;
+    subscribe((message) => {
+      if (message.kind === 'floorChanged') {
+        call('current_cart')
+          .then(setCart)
+          .catch(() => undefined);
+      }
+    })
+      .then((off) => {
+        stop = off;
+      })
+      .catch(() => undefined);
+    return () => stop?.();
+  }, []);
 
   // The floor re-reads on every tick, which is how a timer that lives on the
   // ORDER reaches the screen without the screen counting anything itself.
@@ -522,6 +547,42 @@ export function Billing() {
                 : `${cart?.lines.length ?? 0} ${cart?.lines.length === 1 ? 'line' : 'lines'}`
             }
           />
+
+          {/* **What the floor did while this was being typed** (P20, D83).
+              The counter already took the change — it is the authority — and
+              this offers to bring the lines into the bill on screen. Nothing
+              here touches the payment somebody may be halfway through
+              counting out. */}
+          {cart && cart.fromTheFloor.length > 0 ? (
+            <div className="mb-cart__floor">
+              {cart.fromTheFloor.map((change) => (
+                // The whole sentence, written in Rust.
+                <p className="mb-cart__floorsays" key={`${change.itemId}-${change.qty}`}>
+                  {change.says}
+                </p>
+              ))}
+              <div className="mb-row--end">
+                <Button
+                  small
+                  variant="quiet"
+                  onClick={() => {
+                    call('dismiss_the_floors_items').then(setCart).catch(report);
+                  }}
+                >
+                  Not now
+                </Button>
+                <Button
+                  small
+                  variant="primary"
+                  onClick={() => {
+                    call('take_the_floors_items').then(setCart).catch(report);
+                  }}
+                >
+                  Add them to this bill
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mb-cart__lines">
             {cart && cart.lines.length > 0 ? (

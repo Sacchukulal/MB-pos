@@ -17,4 +17,4 @@ stand_in: boolean, } | { "kind": "licence", state: string, } | { "kind": "sync",
 /**
  * How many phones are waiting for somebody to press Allow.
  */
-waiting: number, };
+waiting: number, } | { "kind": "floorChanged", waiting: number, };

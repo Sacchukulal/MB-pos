@@ -76,6 +76,63 @@ impl<'a> EventsRepo<'a> {
         Ok(())
     }
 
+    // -----------------------------------------------------------------------
+    // P20: applied_events — crown jewel 11, and the table P04 reserved for it.
+    //
+    // > *"Every phone request is applied exactly once, guarded by a local
+    // > ledger, so a re-delivered message never double-prints a KOT."*
+    //
+    // v1 had this and it was right. What it did not have is the rule below:
+    // the id and the EFFECT go into the same transaction. Recording the id
+    // first swallows an intent on a crash; recording it afterwards applies one
+    // twice. There is no third option and no safe ordering outside a
+    // transaction.
+    // -----------------------------------------------------------------------
+
+    /// What the counter answered the first time, if this intent has been seen.
+    ///
+    /// **The original outcome, byte for byte** — not "already applied". The
+    /// phone is going to show this to a waiter, and two different sentences
+    /// for one event is how a waiter stops trusting the screen.
+    pub fn recall(&self, event_id: &str) -> Result<Option<String>, DbError> {
+        let mut stmt = self
+            .tx
+            .prepare_cached("SELECT result FROM applied_events WHERE event_id = ?1")?;
+        let mut rows = stmt.query(rusqlite::params![event_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get::<_, Option<String>>(0)?.unwrap_or_default())),
+            None => Ok(None),
+        }
+    }
+
+    /// Remember that this intent was applied, and what was said about it.
+    ///
+    /// `INSERT` and not `INSERT OR REPLACE`: a second insert of the same id is
+    /// a **constraint violation and should be**, because reaching here twice
+    /// means the check above was skipped, and turning that into a silent
+    /// overwrite is exactly the double-apply this table exists to stop.
+    pub fn remember(
+        &self,
+        outlet: &str,
+        event_id: &str,
+        source: &str,
+        result: &str,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        self.tx.execute(
+            "INSERT INTO applied_events (event_id, outlet_id, applied_at, source, result)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                event_id,
+                outlet,
+                encode::timestamp_to_sql(at),
+                source,
+                result,
+            ],
+        )?;
+        Ok(())
+    }
+
     /// When this order last did that. `None` if it never has.
     pub fn last_at(&self, order_id: &str, event: &str) -> Result<Option<Timestamp>, DbError> {
         Ok(self

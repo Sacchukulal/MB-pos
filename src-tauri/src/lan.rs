@@ -231,6 +231,76 @@ impl mb_lan::Counter for Bridge {
             server_id: handle.lan_server_id(),
         })
     }
+
+    // -----------------------------------------------------------------------
+    // P20. What a phone came here to do.
+    //
+    // Three one-line delegations, and that is the shape the seam was built
+    // for: `crate::orders` owns every decision and `mb-lan` owns none.
+    // -----------------------------------------------------------------------
+
+    fn apply(&self, device: &mb_lan::Device, intent: &mb_lan::Intent) -> mb_lan::Outcome {
+        let Some(app) = self.app() else {
+            return mb_lan::Outcome::Refused {
+                message: "The counter is closing.".to_owned(),
+            };
+        };
+        let staff = device
+            .staff_id
+            .clone()
+            .map_or_else(|| StaffId::new(crate::state::DEFAULT_STAFF), StaffId::new);
+
+        match crate::orders::apply(&app, &device.id, &staff, &device.permissions, intent) {
+            Ok(applied) => {
+                // **The cashier is told, never overwritten** (D83). This is
+                // outside the transaction because it touches the screen's
+                // state, and it is the reason `apply` hands the change back
+                // rather than writing it itself.
+                if let Some(change) = applied.tell_the_cashier {
+                    app.note_floor_change(change);
+                    // **And tell the screen**, because a note the cashier has
+                    // to press something to discover is a note they find
+                    // after they have taken the money.
+                    crate::push::emit_floor_change(&self.handle);
+                }
+                applied.outcome
+            }
+            // A database failure is the one thing that is not a business
+            // refusal, and it still reaches the waiter as a sentence.
+            Err(e) => mb_lan::Outcome::Refused { message: e.message },
+        }
+    }
+
+    fn apply_batch(&self, device: &mb_lan::Device, batch: &mb_lan::Batch) -> mb_lan::BatchResult {
+        let Some(app) = self.app() else {
+            return mb_lan::BatchResult {
+                outcomes: Vec::new(),
+                says: "The counter is closing. Nothing was sent.".to_owned(),
+            };
+        };
+        let staff = device
+            .staff_id
+            .clone()
+            .map_or_else(|| StaffId::new(crate::state::DEFAULT_STAFF), StaffId::new);
+
+        crate::orders::apply_batch(&app, &device.id, &staff, &device.permissions, batch)
+            .unwrap_or_else(|e| mb_lan::BatchResult {
+                outcomes: Vec::new(),
+                says: e.message,
+            })
+    }
+
+    fn catalogue(&self, held: Option<&str>) -> Option<mb_lan::Catalogue> {
+        let app = self.app()?;
+        let fresh = crate::orders::catalogue(&app).ok()?;
+        // **Unchanged is a real answer**, and the whole reason the version
+        // exists: 400 items to fifteen phones on every reconnect is a shop
+        // whose WiFi is the bottleneck.
+        if held == Some(fresh.version.as_str()) {
+            return None;
+        }
+        Some(fresh)
+    }
 }
 
 fn row_of(device: &LanDevice) -> mb_lan::DeviceRow {

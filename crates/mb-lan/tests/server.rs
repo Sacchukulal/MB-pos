@@ -45,6 +45,9 @@ struct FakeCounter {
     /// is read on every request rather than trusted from a cached claim.
     reads: AtomicU32,
     seen: Mutex<Vec<(String, String)>>,
+    /// P20 — which intents reached the counter, so a test can prove an
+    /// unpaired phone got nowhere near the applier.
+    applied: Mutex<Vec<String>>,
 }
 
 impl FakeCounter {
@@ -54,6 +57,7 @@ impl FakeCounter {
             limit: AtomicU32::new(5),
             reads: AtomicU32::new(0),
             seen: Mutex::new(Vec::new()),
+            applied: Mutex::new(Vec::new()),
         })
     }
 
@@ -144,6 +148,48 @@ impl Counter for FakeCounter {
             device_id: id,
             secret,
             server_id: "srv_test".to_owned(),
+        })
+    }
+
+    /// P20's operations, as a fake shop.
+    ///
+    /// **Deliberately trivial.** What P20's real behaviour is — idempotency,
+    /// the conflicts, the kitchen delta — is tested in `magic-bill`'s
+    /// `order_tests.rs` against a real database, because the counter is the
+    /// authority and a test that stubs the counter is testing nothing. What
+    /// this file tests is the ROAD: that an authenticated device reaches these
+    /// and an unauthenticated one does not.
+    fn apply(&self, device: &Device, intent: &mb_lan::Intent) -> mb_lan::Outcome {
+        self.applied.lock().unwrap().push(intent.id.clone());
+        mb_lan::Outcome::Ok {
+            order_id: format!("ord_for_{}", device.id),
+            total: "0.00".to_owned(),
+            lines: vec![],
+            token: None,
+            note: None,
+        }
+    }
+
+    fn apply_batch(&self, device: &Device, batch: &mb_lan::Batch) -> mb_lan::BatchResult {
+        let outcomes = batch
+            .intents
+            .iter()
+            .map(|i| (i.id.clone(), self.apply(device, i)))
+            .collect::<Vec<_>>();
+        let says = format!("{} went through.", outcomes.len());
+        mb_lan::BatchResult { outcomes, says }
+    }
+
+    fn catalogue(&self, held: Option<&str>) -> Option<mb_lan::Catalogue> {
+        // The one behaviour worth faking, because it is a status code and not
+        // a business rule: an unchanged version is answered 304.
+        if held == Some("v1") {
+            return None;
+        }
+        Some(mb_lan::Catalogue {
+            version: "v1".to_owned(),
+            items: vec![],
+            tables: vec![],
         })
     }
 }
@@ -761,6 +807,90 @@ async fn the_device_limit_refuses_in_a_sentence_with_the_number() {
     assert!(said.contains('2'), "the number is not in the sentence: {said}");
     assert!(said.contains("phones"), "{said}");
     assert!(said.contains("Remove one"), "it does not say what to do: {said}");
+}
+
+/// **P20 on the road**: an authenticated phone reaches the applier, an
+/// unauthenticated one does not get near it, and an unchanged catalogue is a
+/// 304 rather than four hundred items.
+#[tokio::test]
+async fn an_intent_needs_a_credential_and_a_stale_catalogue_is_not_resent() {
+    let h = Harness::start();
+    let device = pair_a_phone(&h, "Ravi's phone").await;
+
+    let one = serde_json::json!({
+        "id": "i-1",
+        "order_id": null,
+        "at": 0,
+        "what": { "do": "open_order", "order_type": "parcel",
+                  "table_id": null, "covers": null }
+    });
+
+    // Without a credential: refused, and the counter never sees it.
+    let refused = h
+        .client
+        .post(h.url("/v1/intent"))
+        .json(&one)
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(refused.status(), 401);
+    assert!(
+        h.counter.applied.lock().unwrap().is_empty(),
+        "an unpaired phone reached the order applier"
+    );
+
+    // With one: applied.
+    let ok = h
+        .client
+        .post(h.url("/v1/intent"))
+        .header("authorization", bearer(&device))
+        .json(&one)
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(ok.status(), 200);
+    assert_eq!(h.counter.applied.lock().unwrap().len(), 1);
+
+    // A batch, same gate.
+    let batch = serde_json::json!({ "intents": [one.clone(), one] });
+    let done = h
+        .client
+        .post(h.url("/v1/batch"))
+        .header("authorization", bearer(&device))
+        .json(&batch)
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(done.status(), 200);
+    let body: serde_json::Value = done.json().await.expect("json");
+    assert_eq!(
+        body["outcomes"].as_array().map(Vec::len),
+        Some(2),
+        "the batch reported fewer results than it was given"
+    );
+
+    // The catalogue, and the 304 that is the whole reason it has a version.
+    let fresh = h
+        .client
+        .get(h.url("/v1/catalogue"))
+        .header("authorization", bearer(&device))
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(fresh.status(), 200);
+
+    let unchanged = h
+        .client
+        .get(h.url("/v1/catalogue?version=v1"))
+        .header("authorization", bearer(&device))
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(
+        unchanged.status(),
+        304,
+        "the counter re-sent a menu the phone already had"
+    );
 }
 
 /// The reconnection model: a phone that dropped gets what it missed, and one

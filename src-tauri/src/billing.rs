@@ -72,6 +72,13 @@ pub struct CartState {
     pub covers: Option<u32>,
     /// Scope 1.26 — a note on the whole order, printed on the bill.
     pub note: Option<String>,
+    /// **What the floor did while the cashier had this open** (P20, D83).
+    ///
+    /// Never merged into `cart` by the applier: a phone that adds a dosa must
+    /// not silently rewrite what somebody is halfway through settling. The
+    /// screen shows these and offers to take them in, and the payments and the
+    /// discount are untouched either way.
+    pub from_the_floor: Vec<crate::orders::FloorChange>,
     /// **Who put the first line on this bill** (P11).
     ///
     /// It becomes `orders.created_by`, while whoever is signed in when the
@@ -101,6 +108,7 @@ impl Default for CartState {
             covers: None,
             note: None,
             opened_by: None,
+            from_the_floor: Vec::new(),
         }
     }
 }
@@ -161,6 +169,14 @@ pub struct CartView {
     /// ticket, or complete the bill. It comes from the order's own ledger, so
     /// it is right after a merge and after a restart.
     pub kitchen_up_to_date: bool,
+    /// **What the floor did to this order while the cashier had it open**
+    /// (P20, D83).
+    ///
+    /// Not merged into the lines above: a phone that adds a dosa must not
+    /// silently rewrite what somebody is halfway through settling. The screen
+    /// shows these and offers to take them in, and the cashier's payments and
+    /// discounts are untouched either way.
+    pub from_the_floor: Vec<crate::orders::FloorChange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -395,6 +411,7 @@ pub fn cart_view(
             .kitchen
             .pending(&state.cart)
             .is_ok_and(|pending| pending.is_empty()),
+        from_the_floor: state.from_the_floor.clone(),
     })
 }
 

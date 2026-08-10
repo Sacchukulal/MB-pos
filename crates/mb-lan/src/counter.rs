@@ -164,6 +164,33 @@ pub trait Counter: Send + Sync + 'static {
     /// A sentence, when the counter refuses.
     fn pair(&self, request: &PairRequest, name: &str, platform: &str)
     -> Result<PairedDevice, Refusal>;
+
+    // -----------------------------------------------------------------------
+    // P20. What a phone actually came here to do.
+    //
+    // Still no business rule in this crate: these hand the message over and
+    // take an answer back. Every decision — the numbers, the money, what the
+    // kitchen has been told, every conflict — is made on the other side of
+    // this trait, which is what lets P20's tests run against a real database
+    // and mb-lan's run against no database at all.
+    // -----------------------------------------------------------------------
+
+    /// Apply one intent. **Idempotent by its `id`** — see `LAN_PROTOCOL.md` §6.
+    fn apply(&self, device: &Device, intent: &crate::intent::Intent) -> crate::intent::Outcome;
+
+    /// Apply a queued batch, in order.
+    fn apply_batch(
+        &self,
+        device: &Device,
+        batch: &crate::intent::Batch,
+    ) -> crate::intent::BatchResult;
+
+    /// The menu and the floor, with a version.
+    ///
+    /// `held` is the version the phone already has; `None` means it has none.
+    /// Returning `None` means **unchanged** — which is the whole reason the
+    /// version exists.
+    fn catalogue(&self, held: Option<&str>) -> Option<crate::intent::Catalogue>;
 }
 
 /// One row of the panel's device list.

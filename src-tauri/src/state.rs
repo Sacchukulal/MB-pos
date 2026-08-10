@@ -122,6 +122,27 @@ impl App {
         })
     }
 
+    /// Remember that the floor changed the order the cashier has open.
+    ///
+    /// **It does not touch the lines.** That is the whole rule (D83): the
+    /// cashier's unsaved typing is theirs, and this only puts a note beside
+    /// it for the screen to offer.
+    pub fn note_floor_change(&self, change: crate::orders::FloorChange) {
+        let _ = self.with_cart_mut(|state| {
+            state.from_the_floor.push(change);
+            Ok(())
+        });
+    }
+
+    /// How many floor changes the cashier has not looked at.
+    #[must_use]
+    pub fn floor_changes_waiting(&self) -> u32 {
+        self.with_cart(|state| {
+            Ok(u32::try_from(state.from_the_floor.len()).unwrap_or(u32::MAX))
+        })
+        .unwrap_or(0)
+    }
+
     /// The counter as a server, if it is on. A clone of the `Arc`, so nothing
     /// holds this lock while a phone is being served.
     #[must_use]
@@ -650,6 +671,15 @@ pub enum Pushed {
     /// phone is standing at the counter waiting for the name to appear.
     Pairing {
         /// How many phones are waiting for somebody to press Allow.
+        waiting: u32,
+    },
+    /// **The floor changed the order the cashier has open** (P20, D83).
+    ///
+    /// Pushed, because the alternative is the cashier finding out when they
+    /// happen to press something — and the thing they are most likely to press
+    /// next is Complete bill. Found by looking: the note was there and the
+    /// screen had not asked for it.
+    FloorChanged {
         waiting: u32,
     },
 }

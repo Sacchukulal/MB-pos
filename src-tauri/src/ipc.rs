@@ -542,6 +542,9 @@ macro_rules! commands {
             $crate::lan::allow_device,
             $crate::lan::refuse_device,
             $crate::lan::revoke_device,
+            // P20 — the floor's items, into the cashier's bill or not.
+            $crate::orders::take_the_floors_items,
+            $crate::orders::dismiss_the_floors_items,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

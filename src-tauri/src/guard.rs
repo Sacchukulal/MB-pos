@@ -281,6 +281,13 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("refuse_device", Access::Needs(Permission::DevicesPair)),
     ("revoke_device", Access::Needs(Permission::DevicesPair)),
 
+    // --- what the floor did while the cashier was typing (P20) -------------
+    // Billing work, on the cashier's own cart. The floor already changed the
+    // ORDER — the counter is the authority and took it — and these two only
+    // decide whether the lines join the bill being typed.
+    ("take_the_floors_items", Access::Needs(Permission::BillCreate)),
+    ("dismiss_the_floors_items", Access::Needs(Permission::BillCreate)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -549,7 +556,8 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 14] = [
+        const SOURCES: [&str; 15] = [
+            include_str!("orders.rs"),
             include_str!("lan.rs"),
             include_str!("dayclose.rs"),
             include_str!("reports.rs"),

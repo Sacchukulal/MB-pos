@@ -117,6 +117,10 @@ export interface Commands {
   // the bill is recomputed in Rust from the cart every time (D4, 14 us), so a
   // delta would only be a way of being stale.
   current_cart: { args: void; returns: CartView };
+  // P20 — the floor added lines to the order this cart has open. The counter
+  // already took them; these decide whether they join the bill on screen.
+  take_the_floors_items: { args: void; returns: CartView };
+  dismiss_the_floors_items: { args: void; returns: CartView };
   cart_add: {
     args: { itemId: string; qty: string | null; note: string | null };
     returns: CartView;

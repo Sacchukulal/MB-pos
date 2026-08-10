@@ -491,3 +491,24 @@
 .mb-tile--waiting {
   border-left-color: var(--warn);
 }
+
+/* What the floor did while this bill was being typed (P20, D83).
+
+   Deliberately above the lines and deliberately not styled as an error: the
+   counter already took the change and nothing is wrong. It is an offer. */
+.mb-cart__floor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.mb-cart__floorsays {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
