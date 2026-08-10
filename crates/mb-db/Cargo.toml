@@ -31,5 +31,11 @@ thiserror = "2"
 # budget in docs/PERFORMANCE.md.
 rusqlite = { version = "0.37", features = ["bundled"] }
 
+# P24. The kitchen ticket keeps its individually-bumped lines as a small JSON
+# array in its own row — read and written only with that row, never queried
+# across tickets, which is the same shape `audit_log.before_json` already has.
+# It was already a dev-dependency here; this promotes it.
+serde_json = "1"
+
 [dev-dependencies]
 serde_json = "1"

@@ -85,6 +85,7 @@ import type { LicenceView } from './generated/LicenceView';
 import type { HealthView } from './generated/HealthView';
 import type { BundlePlanView } from './generated/BundlePlanView';
 import type { SetupView } from './generated/SetupView';
+import type { KitchenView } from './generated/KitchenView';
 import type { UpdateState } from './generated/UpdateState';
 import type { NetworkView } from './generated/NetworkView';
 import type { PeriodArg } from './generated/PeriodArg';
@@ -490,6 +491,17 @@ export interface Commands {
   // set-up list that will not draw until somebody does is a list nobody can
   // use to create one.
   setup_list: { args: void; returns: SetupView };
+
+  // P24 — the kitchen screen. Every one of them returns the WHOLE view, so a
+  // cook's tap and another waiter's new order can never leave the screen
+  // showing half of each.
+  kitchen: { args: { station: string | null }; returns: KitchenView };
+  kitchen_shown: { args: { id: string }; returns: KitchenView };
+  kitchen_bump: { args: { id: string }; returns: KitchenView };
+  kitchen_bump_line: { args: { id: string; key: string }; returns: KitchenView };
+  kitchen_recall: { args: { id: string }; returns: KitchenView };
+  kitchen_acknowledge: { args: { id: string }; returns: KitchenView };
+  kitchen_fire: { args: { orderId: string; course: string }; returns: KitchenView };
   look_for_an_update: { args: void; returns: UpdateState };
   dismiss_update: { args: void; returns: UpdateState };
   go_back_a_version: { args: void; returns: string };

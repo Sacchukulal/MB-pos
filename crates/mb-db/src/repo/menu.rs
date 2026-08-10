@@ -23,6 +23,13 @@ pub struct Category {
     pub name: String,
     pub sort_order: i64,
     pub is_active: bool,
+    /// **Which kitchen screen this category's food goes to** (P24, scope 3.3).
+    ///
+    /// `None` is the shop's one screen, which is the normal case. A shop
+    /// splits its kitchen by typing a section name here — there is no separate
+    /// station screen to learn, and adding, renaming or removing a section is
+    /// editing the categories that belong to it.
+    pub station: Option<String>,
 }
 
 /// An item as it stands on today's menu.
@@ -33,7 +40,7 @@ pub struct MenuItem {
     pub name: String,
     pub unit_price: Money,
     /// **What the owner CHOSE** (P13). The rate and treatment below are what
-    /// that choice currently resolves to â denormalised so the billing path
+    /// that choice currently resolves to — denormalised so the billing path
     /// never joins for a rate, and rewritten by `TaxClassRepo::save` when the
     /// class changes. A past bill is untouched by any of it: its line froze
     /// its own copy (crown jewel 4, D52).
@@ -48,6 +55,9 @@ pub struct MenuItem {
     pub short_code: Option<String>,
     /// Scope 3.6, the KDS prep-time target.
     pub prep_minutes: Option<i64>,
+    /// Scope 3.5 — which course this dish belongs to. `None` means no course,
+    /// and a shop where every dish is `None` fires the whole order at once.
+    pub course: Option<String>,
     pub is_open_price: bool,
     pub is_available: bool,
     pub sort_order: i64,
@@ -96,12 +106,13 @@ impl<'a> MenuRepo<'a> {
         at: Timestamp,
     ) -> Result<(), DbError> {
         self.tx.execute(
-            "INSERT INTO categories (id, outlet_id, name, sort_order, is_active, created_at,
-                                     updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            "INSERT INTO categories (id, outlet_id, name, sort_order, is_active, station,
+                                     created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6, ?6)
              ON CONFLICT (id) DO UPDATE SET name = excluded.name,
                                             sort_order = excluded.sort_order,
                                             is_active = excluded.is_active,
+                                            station = excluded.station,
                                             updated_at = excluded.updated_at",
             rusqlite::params![
                 category.id.as_str(),
@@ -110,6 +121,7 @@ impl<'a> MenuRepo<'a> {
                 category.sort_order,
                 encode::bool_to_sql(category.is_active),
                 encode::timestamp_to_sql(at),
+                category.station,
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "categories", category.id.as_str(), Op::Upsert, at)
@@ -117,7 +129,7 @@ impl<'a> MenuRepo<'a> {
 
     pub fn list_categories(&self, outlet: &str) -> Result<Vec<Category>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT id, name, sort_order, is_active FROM categories
+            "SELECT id, name, sort_order, is_active, station FROM categories
               WHERE outlet_id = ?1 ORDER BY sort_order, name",
         )?;
         let rows = stmt.query_map([outlet], |row| {
@@ -126,16 +138,18 @@ impl<'a> MenuRepo<'a> {
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, name, sort_order, is_active) = row?;
+            let (id, name, sort_order, is_active, station) = row?;
             out.push(Category {
                 id: CategoryId::new(id),
                 name,
                 sort_order,
                 is_active: encode::bool_from_sql(is_active, "categories.is_active")?,
+                station,
             });
         }
         Ok(out)
@@ -144,9 +158,9 @@ impl<'a> MenuRepo<'a> {
     pub fn save_item(&self, outlet: &str, item: &MenuItem, at: Timestamp) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id, tax_rate_bp,
-                                tax_treatment, hsn, cost_price, short_code, prep_minutes,
+                                tax_treatment, hsn, cost_price, short_code, prep_minutes, course,
                                 is_open_price, is_available, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?16, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?16, ?6, ?7, ?8, ?9, ?10, ?11, ?17, ?12, ?13, ?14, ?15, ?15)
              ON CONFLICT (id) DO UPDATE SET category_id   = excluded.category_id,
                                             name          = excluded.name,
                                             unit_price    = excluded.unit_price,
@@ -157,6 +171,7 @@ impl<'a> MenuRepo<'a> {
                                             cost_price    = excluded.cost_price,
                                             short_code    = excluded.short_code,
                                             prep_minutes  = excluded.prep_minutes,
+                                            course        = excluded.course,
                                             is_open_price = excluded.is_open_price,
                                             is_available  = excluded.is_available,
                                             sort_order    = excluded.sort_order,
@@ -178,6 +193,7 @@ impl<'a> MenuRepo<'a> {
                 item.sort_order,
                 encode::timestamp_to_sql(at),
                 item.tax_class_id.as_ref().map(TaxClassId::as_str),
+                item.course,
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "items", item.id.as_str(), Op::Upsert, at)
@@ -186,11 +202,11 @@ impl<'a> MenuRepo<'a> {
     pub fn list_items(&self, outlet: &str, available_only: bool) -> Result<Vec<MenuItem>, DbError> {
         let sql = if available_only {
             "SELECT id, category_id, name, unit_price, tax_class_id, tax_rate_bp, tax_treatment, hsn,
-                    cost_price, short_code, prep_minutes, is_open_price, is_available, sort_order
+                    cost_price, short_code, prep_minutes, course, is_open_price, is_available, sort_order
                FROM items WHERE outlet_id = ?1 AND is_available = 1 ORDER BY sort_order, name"
         } else {
             "SELECT id, category_id, name, unit_price, tax_class_id, tax_rate_bp, tax_treatment, hsn,
-                    cost_price, short_code, prep_minutes, is_open_price, is_available, sort_order
+                    cost_price, short_code, prep_minutes, course, is_open_price, is_available, sort_order
                FROM items WHERE outlet_id = ?1 ORDER BY sort_order, name"
         };
         let mut stmt = self.tx.prepare_cached(sql)?;
@@ -207,9 +223,10 @@ impl<'a> MenuRepo<'a> {
                 cost_price: row.get(8)?,
                 short_code: row.get(9)?,
                 prep_minutes: row.get(10)?,
-                is_open_price: row.get(11)?,
-                is_available: row.get(12)?,
-                sort_order: row.get(13)?,
+                course: row.get(11)?,
+                is_open_price: row.get(12)?,
+                is_available: row.get(13)?,
+                sort_order: row.get(14)?,
             })
         })?;
 
@@ -228,6 +245,7 @@ impl<'a> MenuRepo<'a> {
                 cost_price: row.cost_price.map(encode::money_from_sql),
                 short_code: row.short_code,
                 prep_minutes: row.prep_minutes,
+                course: row.course,
                 is_open_price: encode::bool_from_sql(row.is_open_price, "items.is_open_price")?,
                 is_available: encode::bool_from_sql(row.is_available, "items.is_available")?,
                 sort_order: row.sort_order,
@@ -321,6 +339,7 @@ struct ItemRow {
     cost_price: Option<i64>,
     short_code: Option<String>,
     prep_minutes: Option<i64>,
+    course: Option<String>,
     is_open_price: i64,
     is_available: i64,
     sort_order: i64,

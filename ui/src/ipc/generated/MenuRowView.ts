@@ -15,4 +15,15 @@ cost: MoneyView | null,
 /**
  * Only when the cost is known and visible. Preformatted (R8).
  */
-margin: string | null, isOpenPrice: boolean, isAvailable: boolean, variants: bigint, };
+margin: string | null, isOpenPrice: boolean, isAvailable: boolean, 
+/**
+ * Scope 3.5 — which course this dish belongs to, for the kitchen screen.
+ * Blank means no course, and a menu where every dish is blank fires the
+ * whole order at once (P24).
+ */
+course: string | null, 
+/**
+ * Scope 3.6 — how many minutes the kitchen is expected to take. Blank
+ * means no target, and a ticket with no target never turns late.
+ */
+prepMinutes: string | null, variants: bigint, };

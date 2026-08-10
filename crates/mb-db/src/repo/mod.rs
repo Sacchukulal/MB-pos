@@ -31,6 +31,7 @@ pub mod audit;
 pub mod composition;
 pub mod corrections;
 pub mod devices;
+pub mod kitchen;
 pub mod events;
 pub mod floor;
 pub mod menu;
@@ -41,7 +42,7 @@ pub mod outbox;
 pub mod people;
 pub mod print_jobs;
 /// P18. Every report, and every one of them groups by the STORED business day
-/// (D5) â which is audit B1, the bill that appeared on two different days on
+/// (D5) — which is audit B1, the bill that appeared on two different days on
 /// two different screens.
 pub mod reports;
 pub mod settings;
@@ -147,6 +148,12 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn devices(&self) -> devices::DevicesRepo<'a> {
         devices::DevicesRepo::new(self.tx)
+    }
+
+    /// P24 — what the kitchen was told, and what became of it.
+    #[must_use]
+    pub fn kitchen(&self) -> kitchen::KitchenRepo<'a> {
+        kitchen::KitchenRepo::new(self.tx)
     }
 
     /// Every report (P18), grouped by the stored business day.

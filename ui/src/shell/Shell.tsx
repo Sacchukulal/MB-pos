@@ -25,6 +25,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Account } from '../account/Account';
 import { Billing } from '../billing/Billing';
 import { Health } from '../health/Health';
+import { Kitchen } from '../kitchen/Kitchen';
 import { Gallery } from '../gallery/Gallery';
 import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
@@ -170,6 +171,16 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     icon: '◇',
     render: () => <Account />,
     needs: 'reports.view',
+  },
+  {
+    // **P24.** On the counter it is a screen like any other, so a shop with one
+    // machine can run the kitchen from it. On a wall tablet it is the whole
+    // window — same page, same code.
+    id: 'kitchen',
+    label: 'Kitchen',
+    icon: '◉',
+    render: () => <Kitchen />,
+    needs: 'bill.create',
   },
   {
     // Beside Account, because the two answer "is my counter all right?" from

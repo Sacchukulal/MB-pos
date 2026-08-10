@@ -65,6 +65,14 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
+  /* **How narrow a kitchen ticket may get before it wraps** (P24).
+     Four columns on a wall monitor, two on a tablet, one on a phone — decided
+     by the screen rather than by a breakpoint somebody has to maintain. It is
+     a token because it is a size, and every size in this product is one (D21);
+     it lives here so a shop with an unusually small screen has one number to
+     change. */
+  --kds-card-min: 18rem;
+
   /* Radius. "Middle": modest, not soft, not sharp. */
   --radius-sm: 4px;
   --radius-md: 6px;

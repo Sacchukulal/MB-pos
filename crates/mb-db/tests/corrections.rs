@@ -39,6 +39,9 @@ fn tea() -> ItemSnapshot {
         tax_treatment: TaxTreatment::Exclusive,
         hsn: None,
         category_id: None,
+        station: None,
+        course: None,
+        prep_minutes: None,
     }
 }
 

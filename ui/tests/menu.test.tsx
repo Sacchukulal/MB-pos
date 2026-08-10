@@ -45,6 +45,10 @@ const dosa: MenuRowView = {
   margin: null,
   isOpenPrice: false,
   isAvailable: true,
+  // P24 — a dish with no course and no target, which is what a shop that has
+  // not set up its kitchen screen has, and must keep working with.
+  course: null,
+  prepMinutes: null,
   variants: 1n,
 };
 

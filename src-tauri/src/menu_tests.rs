@@ -74,6 +74,7 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
                     cost_price: None,
                     short_code: None,
                     prep_minutes: None,
+                    course: None,
                     is_open_price: false,
                     is_available: true,
                     sort_order: 0,
@@ -458,6 +459,8 @@ fn a_combo_shares_its_price_across_two_different_tax_rates() {
             cost: None,
             is_open_price: false,
             is_available: true,
+            course: None,
+            prep_minutes: None,
         },
     )
     .expect("the water went up");

@@ -1,0 +1,299 @@
+/*
+ * The kitchen display — P24. Read from two metres, in a bright hot room.
+ * Every value is a token (D21).
+ *
+ * The type here is deliberately larger than anywhere else in the product. A
+ * counter screen is 60 cm from a cashier's eyes; this one is across a kitchen.
+ */
+
+.mb-kds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-3);
+  background: var(--surface-1);
+}
+
+/* --- the bar ------------------------------------------------------------- */
+
+.mb-kds__bar {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  flex-shrink: 0;
+}
+
+.mb-kds__station {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.mb-kds__headline {
+  font-size: var(--text-lg);
+  color: var(--text-muted);
+}
+
+.mb-kds__pick {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.mb-kds__tab {
+  border: var(--border-width) solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-lg);
+  cursor: pointer;
+}
+
+.mb-kds__tab--on {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+/* --- firing a course ----------------------------------------------------- */
+
+.mb-kds__fire {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.mb-kds__fire-label {
+  font-size: var(--text-base);
+  color: var(--text-muted);
+}
+
+/* --- the cards ----------------------------------------------------------- */
+
+.mb-kds__empty {
+  margin: auto;
+  font-size: var(--text-2xl);
+  color: var(--text-muted);
+}
+
+/* A wall screen is wide. Cards fill it and wrap, so four fit on a monitor and
+   two on a tablet without anybody choosing a layout. */
+.mb-kds__grid {
+  display: grid;
+  /* Four columns on a wall monitor, two on a tablet, one on a phone — decided
+     by the screen rather than by a breakpoint anybody has to maintain. The
+     minimum is a token, because a raw size here is what the token guard
+     rejects and rightly (D21). */
+  grid-template-columns: repeat(auto-fill, minmax(var(--kds-card-min), 1fr));
+  gap: var(--space-3);
+  align-content: start;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.mb-kds__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  /* **The state is a thick left edge as well as a colour** — §2. A card is
+     recognisable across a room by its shape before its colour is read. */
+  border-left-width: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.mb-kds__card--new {
+  border-left-color: var(--ok);
+}
+
+.mb-kds__card--cooking {
+  border-left-color: var(--border);
+}
+
+.mb-kds__card--late {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Already on paper: present so a cook can see what is on the rail, and quiet
+   so it is not mistaken for new work. */
+.mb-kds__card--printed {
+  border-left-color: var(--text-muted);
+  opacity: 0.72;
+}
+
+/* **The one thing on this screen allowed to shout** (D107). */
+.mb-kds__card--cancelled {
+  border-color: var(--danger);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.mb-kds__head {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.mb-kds__place {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+}
+
+.mb-kds__token {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-kds__meta {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.mb-kds__waiting {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-kds__says,
+.mb-kds__target,
+.mb-kds__course {
+  font-size: var(--text-base);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.mb-kds__who {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* --- the dishes ---------------------------------------------------------- */
+
+.mb-kds__lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.mb-kds__line {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A ticked dish stays legible — a cook needs to see what has been done as much
+   as what has not. Struck through, not hidden. */
+.mb-kds__line--done .mb-kds__name {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+/* The whole dish is the touch target: hands are full and fingers are big. */
+.mb-kds__tick {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  border: none;
+  background: none;
+  padding: var(--space-1) 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-kds__qty {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  min-width: var(--space-5);
+}
+
+.mb-kds__name {
+  font-size: var(--text-xl);
+}
+
+/* **An addition a cook must not miss.** It comes from the kitchen ledger, not
+   from comparing timestamps. */
+.mb-kds__new {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--ok);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* "no onion", "extra spicy" — the line a cook must read. */
+.mb-kds__note {
+  padding-left: var(--space-6);
+  font-size: var(--text-lg);
+  font-style: italic;
+  color: var(--warn);
+}
+
+/* --- what a cook presses ------------------------------------------------- */
+
+.mb-kds__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: auto;
+}
+
+/* The undo, on the bar rather than on a card — the card is gone by the time
+   anybody wants it back. Quiet, because it is used a few times a service, but
+   a real touch target: a cook is pressing it with the back of a knuckle. */
+.mb-kds__recall {
+  margin-left: auto;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  padding: var(--space-2) var(--space-3);
+  min-height: var(--target-min);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mb-kds__recall:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}

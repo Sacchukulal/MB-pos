@@ -80,6 +80,15 @@ pub struct MenuRowView {
     pub margin: Option<String>,
     pub is_open_price: bool,
     pub is_available: bool,
+    /// Scope 3.5 — which course this dish belongs to, for the kitchen screen.
+    /// Blank means no course, and a menu where every dish is blank fires the
+    /// whole order at once (P24).
+    #[serde(default)]
+    pub course: Option<String>,
+    /// Scope 3.6 — how many minutes the kitchen is expected to take. Blank
+    /// means no target, and a ticket with no target never turns late.
+    #[serde(default)]
+    pub prep_minutes: Option<String>,
     pub variants: i64,
 }
 
@@ -99,6 +108,12 @@ pub struct MenuEdit {
     pub cost: Option<String>,
     pub is_open_price: bool,
     pub is_available: bool,
+    /// Scope 3.5 — the course. Blank means no course.
+    #[serde(default)]
+    pub course: Option<String>,
+    /// Scope 3.6 — minutes, typed by a person and parsed in Rust (D39).
+    #[serde(default)]
+    pub prep_minutes: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +220,11 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
                         cost: cost.map(MoneyView::from),
                         is_open_price: item.is_open_price,
                         is_available: item.is_available,
+                        // P24 — what the kitchen screen needs to know about
+                        // this dish. Formatted here, so the menu screen shows
+                        // "12 min" without doing arithmetic (R8).
+                        course: item.course.clone(),
+                        prep_minutes: item.prep_minutes.map(|m| m.to_string()),
                         variants,
                     });
                 }
@@ -292,7 +312,31 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                     hsn: edit.hsn.clone().filter(|h| !h.trim().is_empty()),
                     cost_price: cost,
                     short_code: edit.short_code.clone().filter(|s| !s.trim().is_empty()),
-                    prep_minutes: before.as_ref().and_then(|b| b.prep_minutes),
+                    // Scope 3.6 — the kitchen screen's target. Typed as text
+                    // and parsed HERE, because D39 says a number a person
+                    // types is parsed in Rust and never in the browser.
+                    // Unreadable text keeps whatever was there rather than
+                    // silently clearing a target the kitchen depends on.
+                    prep_minutes: edit
+                        .prep_minutes
+                        .as_ref()
+                        .map(|text| text.trim())
+                        .filter(|text| !text.is_empty())
+                        .map_or_else(
+                            || before.as_ref().and_then(|b| b.prep_minutes),
+                            |text| {
+                                text.parse::<i64>()
+                                    .ok()
+                                    .or_else(|| before.as_ref().and_then(|b| b.prep_minutes))
+                            },
+                        ),
+                    // Scope 3.5 — the course. Blank means no course, and a
+                    // blank menu fires the whole order at once.
+                    course: edit
+                        .course
+                        .clone()
+                        .map(|c| c.trim().to_owned())
+                        .filter(|c| !c.is_empty()),
                     is_open_price: edit.is_open_price,
                     is_available: edit.is_available,
                     sort_order: before.as_ref().map_or(0, |b| b.sort_order),
@@ -379,6 +423,9 @@ pub fn save_category_on(
     id: String,
     name: String,
     is_active: bool,
+    // P24 — which kitchen screen this category's food goes to. `None` keeps
+    // what is already set; blank text means the shop's one screen.
+    station: Option<String>,
 ) -> UiResult<Vec<CategoryView>> {
     guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -416,8 +463,18 @@ pub fn save_category_on(
                     &Category {
                         id: category,
                         name: name.trim().to_owned(),
-                        sort_order: existing.map_or(0, |c| c.sort_order),
+                        sort_order: existing.as_ref().map_or(0, |c| c.sort_order),
                         is_active,
+                        // **This is how a shop makes a second kitchen screen**
+                        // (P24). Blank means the one screen; typing "Tandoor"
+                        // here sends this category's food to a screen of that
+                        // name. Adding, renaming and removing a section is
+                        // therefore editing the categories that belong to it —
+                        // there is no separate station screen to learn.
+                        station: station
+                            .map(|s| s.trim().to_owned())
+                            .filter(|s| !s.is_empty())
+                            .or_else(|| existing.as_ref().and_then(|c| c.station.clone())),
                     },
                     at,
                 )
@@ -624,8 +681,9 @@ pub fn save_menu_category(
     id: String,
     name: String,
     is_active: bool,
+    station: Option<String>,
 ) -> UiResult<Vec<CategoryView>> {
-    save_category_on(&app, id, name, is_active)
+    save_category_on(&app, id, name, is_active, station)
 }
 
 #[tauri::command]

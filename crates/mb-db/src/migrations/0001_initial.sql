@@ -170,6 +170,17 @@ CREATE TABLE categories (
     -- P14's grid uses it; stored here because it is a property of the
     -- category, not of the screen.
     colour     TEXT,
+    -- **Which kitchen screen this category's food appears on** (P24).
+    --
+    -- NULL means the shop's one screen, which is the normal case and must stay
+    -- invisible to a shop that never thinks about sections.
+    --
+    -- A category belongs to exactly ONE station, and that is not a
+    -- simplification — paneer tikka goes to the tandoor, not to the tandoor
+    -- AND the chinese range. Making it a column rather than a join table means
+    -- an owner adds, renames or removes a section by typing on the category
+    -- they already edit, with no separate screen to learn.
+    station    TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
@@ -209,6 +220,17 @@ CREATE TABLE items (
     short_code    TEXT,
     -- Scope 3.6 — the KDS prep-time target.
     prep_minutes  INTEGER,
+    -- **Scope 3.5 — which course this dish belongs to** (P24).
+    --
+    -- NULL means "no course", and that is the default ON PURPOSE: a shop that
+    -- does not serve in courses must never discover that this exists. When
+    -- every dish is NULL the whole order fires at once, exactly as it does
+    -- today, and nothing about the kitchen changes.
+    --
+    -- Free text rather than an enum: "starter" and "main" are the common pair,
+    -- but a thali house has its own words and a coined list nobody uses is
+    -- worse than the shop's own.
+    course        TEXT,
     -- Sold by weight; the cashier types the price (sweets, meat).
     is_open_price INTEGER NOT NULL DEFAULT 0 CHECK (is_open_price IN (0, 1)),
     is_available  INTEGER NOT NULL DEFAULT 1 CHECK (is_available IN (0, 1)),
@@ -565,8 +587,18 @@ CREATE TABLE order_lines (
     -- Thousandths of a unit, so 0.5 kg is 500 (scope 1.10).
     qty  INTEGER NOT NULL,
     note TEXT,
-    -- Scope 3.5 — course firing. NULL means "with everything else".
-    course_no INTEGER,
+    -- P24, and both are part of the SNAPSHOT above rather than looked up on
+    -- the item — crown jewel 4. An owner who changes a dish's course or its
+    -- cooking time this evening must not change what the kitchen was told this
+    -- afternoon, and an order can sit open for an hour between the starters
+    -- being fired and the mains.
+    --
+    -- Scope 3.5 — course firing. NULL means "with everything else", which is
+    -- what every line in a shop that does not use courses is.
+    course        TEXT,
+    -- Scope 3.6 — how long this dish takes. NULL means "no target", and the
+    -- screen falls back to one number for the shop.
+    prep_minutes  INTEGER CHECK (prep_minutes IS NULL OR prep_minutes >= 0),
 
     -- The line discount as given (D15: the capped flag reaches the bill, so it
     -- has to reach the disk). kind/value are the tag+payload pair from
@@ -1369,6 +1401,90 @@ CREATE TABLE lan_devices (
 -- The authentication path reads this on EVERY request (revocation has to bite
 -- on the next request, not the next login), so it is an index and not a scan.
 CREATE INDEX idx_lan_devices_live ON lan_devices (outlet_id) WHERE revoked_at IS NULL;
+
+-- ===========================================================================
+-- THE KITCHEN DISPLAY (P24)
+--
+-- One row per ticket sent to one station. The kitchen LEDGER (crown jewel 2)
+-- already knows what the kitchen was told; this knows what happened to it
+-- afterwards — was it drawn on a screen, did it fall back to paper, has a cook
+-- finished it.
+--
+-- **Bump state belongs here and not in the screen's memory.** A cook bumps a
+-- ticket, the tablet reloads, and the ticket must not come back; a counter that
+-- reopens that table must see the same thing the kitchen sees.
+-- ===========================================================================
+
+CREATE TABLE kitchen_deliveries (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    order_id     TEXT    NOT NULL REFERENCES orders (id),
+    -- **The station this went to** — P07's category routing, read a second
+    -- way. A column rather than a lookup because a shop can rename or delete a
+    -- station and last Tuesday's ticket still has to say where it went.
+    --
+    -- It is here from the first day ON PURPOSE. A shop with one screen never
+    -- notices it; a shop that splits the kitchen into tandoor and chinese later
+    -- costs nothing, because no ticket has to be rewritten.
+    station      TEXT    NOT NULL,
+    -- **Which course this firing is** (scope 3.5). NULL means the whole order,
+    -- which is what a shop that does not use courses always sends.
+    --
+    -- A delivery IS a firing: "fire the mains" creates a second delivery for
+    -- the same order carrying only the mains. That is why the course lives
+    -- here and not on the order — the same order can be fired three times and
+    -- each firing is its own ticket with its own clock.
+    course       TEXT,
+    -- How long the kitchen is expected to take, from the slowest dish on this
+    -- firing (P13's `prep_minutes`). Stored rather than recomputed so the
+    -- screen and the report agree, and so editing an item's prep time next
+    -- month does not silently rewrite last Tuesday's performance.
+    expected_minutes INTEGER,
+    -- 'pending', 'shown', 'bumped', 'printed'. See mb-core's
+    -- `kitchen_delivery` — the state machine is there, pure and tested, and
+    -- this column only stores its answer.
+    state        TEXT    NOT NULL CHECK (state IN ('pending','shown','bumped','printed')),
+    -- When the counter told the kitchen. Every timer on the screen and every
+    -- figure in the kitchen-speed report is measured from this.
+    sent_at      INTEGER NOT NULL,
+    -- **D5, and audit B1 is why.** Every report in this product filters the
+    -- STORED business day, never a date re-derived from a timestamp — B1 was
+    -- the day-wise report bucketing by UTC while the filter used local time,
+    -- and the kitchen-speed report (3.7) must not reintroduce it. Stamped from
+    -- the order this firing belongs to.
+    business_day INTEGER NOT NULL,
+    -- When a SCREEN DREW it — not when the bytes arrived. An ack meaning "the
+    -- bytes arrived" lies when a tablet's power saver has frozen the tab, and
+    -- that is the exact failure the paper fallback exists for.
+    shown_at     INTEGER,
+    bumped_at    INTEGER,
+    bumped_by    TEXT REFERENCES staff (id),
+    -- Which device the cook was standing at. "Who marked that done?" is a
+    -- question an owner asks when a dish never reached a table.
+    bumped_on    TEXT REFERENCES lan_devices (id),
+    -- **Lines a cook has ticked off individually**, as a JSON array of line
+    -- keys. The owner asked for both: tick one dish as it comes off the pass,
+    -- or clear the whole card.
+    --
+    -- JSON rather than its own table because it is a small list read and
+    -- written only with its parent row, and never queried across tickets — the
+    -- same reasoning `audit_log.before_json` already carries.
+    bumped_lines TEXT    NOT NULL DEFAULT '[]',
+    -- A cancellation the kitchen has not acknowledged yet. This is the one
+    -- thing on the screen allowed to interrupt: food already cooking gets
+    -- thrown away, and food not started gets cooked for nobody.
+    cancelled_at INTEGER,
+    acked_at     INTEGER
+) STRICT;
+
+-- The screen asks "what is outstanding at my station" several times a minute,
+-- and it must not scan a year of tickets to answer.
+CREATE INDEX idx_kitchen_live ON kitchen_deliveries (outlet_id, station)
+    WHERE state <> 'bumped';
+
+-- The kitchen-speed report (scope 3.7) reads finished tickets by day.
+CREATE INDEX idx_kitchen_done ON kitchen_deliveries (outlet_id, bumped_at)
+    WHERE bumped_at IS NOT NULL;
 
 -- ===========================================================================
 -- VIEWS

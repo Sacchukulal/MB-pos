@@ -694,6 +694,15 @@ pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
     if let Some(category) = item.category_id.clone() {
         snapshot = snapshot.with_category(category);
     }
+    // P24, and crown jewel 4 is why they are copied rather than looked up
+    // later: an owner who changes a dish's course or its cooking time this
+    // evening must not change what the kitchen was already told this
+    // afternoon. Leaving these behind is not a small miss — it silently
+    // switches off every timer and every course on the kitchen screen.
+    snapshot.course = item.course.clone();
+    // A negative or absurd number in the column becomes "no target" rather than
+    // a panic — the timer is a help, never a reason a bill cannot be rung up.
+    snapshot.prep_minutes = item.prep_minutes.and_then(|m| u32::try_from(m).ok());
     snapshot
 }
 

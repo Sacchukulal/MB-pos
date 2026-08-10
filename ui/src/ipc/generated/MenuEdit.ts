@@ -7,4 +7,12 @@ export type MenuEdit = { id: string, name: string, categoryId: string | null,
 /**
  * Typed by a person: "120", "120.50". Parsed by Rust (D39).
  */
-price: string, taxClassId: string | null, hsn: string | null, shortCode: string | null, cost: string | null, isOpenPrice: boolean, isAvailable: boolean, };
+price: string, taxClassId: string | null, hsn: string | null, shortCode: string | null, cost: string | null, isOpenPrice: boolean, isAvailable: boolean, 
+/**
+ * Scope 3.5 — the course. Blank means no course.
+ */
+course: string | null, 
+/**
+ * Scope 3.6 — minutes, typed by a person and parsed in Rust (D39).
+ */
+prepMinutes: string | null, };

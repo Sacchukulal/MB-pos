@@ -66,6 +66,23 @@ pub struct ItemSnapshot {
     /// is not required to print one.
     pub hsn: Option<String>,
     pub category_id: Option<CategoryId>,
+    /// **Which kitchen screen this dish belongs on** (P24), frozen at the
+    /// moment it was added — crown jewel 4's rule, the same one the tax rate
+    /// follows (D52).
+    ///
+    /// Moving a category to a different station tonight must not move food
+    /// that is already cooking. `None` is the shop's one screen.
+    #[serde(default)]
+    pub station: Option<String>,
+    /// **Which course** (scope 3.5), also frozen. `None` means no course, and a
+    /// shop where every dish is `None` fires the whole order at once — which is
+    /// how a kitchen works unless somebody has said otherwise.
+    #[serde(default)]
+    pub course: Option<String>,
+    /// How long the kitchen is expected to take on this dish (scope 3.6, set in
+    /// P13). The ticket's target is the slowest dish on it.
+    #[serde(default)]
+    pub prep_minutes: Option<u32>,
 }
 
 impl ItemSnapshot {
@@ -80,6 +97,12 @@ impl ItemSnapshot {
             tax_treatment: TaxTreatment::Exclusive,
             hsn: None,
             category_id: None,
+            // The shop's one screen, no course, no target — which is the
+            // everyday case and the one a shop that never opens these settings
+            // stays in for ever.
+            station: None,
+            course: None,
+            prep_minutes: None,
         }
     }
 

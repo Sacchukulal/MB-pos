@@ -659,6 +659,7 @@ fn shop_item() -> mb_db::repo::menu::MenuItem {
         cost_price: None,
         short_code: None,
         prep_minutes: None,
+        course: None,
         is_open_price: false,
         is_available: true,
         sort_order: 99,

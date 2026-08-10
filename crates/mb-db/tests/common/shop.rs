@@ -139,6 +139,9 @@ fn seed_masters(db: &Db) {
                 name: "Food".to_owned(),
                 sort_order: 0,
                 is_active: true,
+                // P24 — the test shop has one kitchen screen, like a real
+                // small shop. `kitchen.rs` has its own tests for two.
+                station: None,
             },
             at(0),
         )?;
@@ -149,6 +152,7 @@ fn seed_masters(db: &Db) {
                 name: "Bar".to_owned(),
                 sort_order: 1,
                 is_active: true,
+                station: None,
             },
             at(0),
         )?;
@@ -237,6 +241,7 @@ fn menu() -> Vec<MenuItem> {
             cost_price: Some(Money::from_paise(4_000)),
             short_code: Some("MD".to_owned()),
             prep_minutes: Some(8),
+            course: None,
             is_open_price: false,
             is_available: true,
             sort_order: 0,
@@ -259,6 +264,7 @@ fn menu() -> Vec<MenuItem> {
             cost_price: None,
             short_code: None,
             prep_minutes: None,
+            course: None,
             is_open_price: false,
             is_available: true,
             sort_order: 1,
@@ -275,6 +281,7 @@ fn menu() -> Vec<MenuItem> {
             cost_price: Some(Money::from_paise(14_000)),
             short_code: Some("BR".to_owned()),
             prep_minutes: None,
+            course: None,
             is_open_price: false,
             is_available: true,
             sort_order: 2,
@@ -291,6 +298,7 @@ fn menu() -> Vec<MenuItem> {
             cost_price: None,
             short_code: None,
             prep_minutes: None,
+            course: None,
             is_open_price: true,
             is_available: false,
             sort_order: 3,

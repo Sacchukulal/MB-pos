@@ -44,6 +44,9 @@ fn dosa() -> ItemSnapshot {
         tax_treatment: TaxTreatment::Exclusive,
         hsn: Some("2106".to_owned()),
         category_id: None,
+        station: None,
+        course: None,
+        prep_minutes: None,
     }
 }
 
@@ -58,6 +61,9 @@ fn water() -> ItemSnapshot {
         tax_treatment: TaxTreatment::NonGst,
         hsn: Some("2201".to_owned()),
         category_id: None,
+        station: None,
+        course: None,
+        prep_minutes: None,
     }
 }
 

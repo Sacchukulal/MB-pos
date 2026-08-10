@@ -310,6 +310,12 @@ impl<'a> MenuCsvRepo<'a> {
                 short_code: cell(index_of("short_code"))
                     .or_else(|| found.and_then(|i| i.short_code.clone())),
                 prep_minutes: found.and_then(|i| i.prep_minutes),
+                // **Kept from the existing item, not taken from the CSV.**
+                // The import's columns are the ones a shopkeeper types in a
+                // spreadsheet — name, price, tax. A course is set on the menu
+                // screen, and an import that blanked it would quietly undo the
+                // kitchen's set-up every time somebody re-imported prices.
+                course: found.and_then(|i| i.course.clone()),
                 is_open_price: found.is_some_and(|i| i.is_open_price),
                 is_available: available,
                 sort_order: found.map_or(0, |i| i.sort_order),

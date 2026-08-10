@@ -590,6 +590,17 @@ macro_rules! commands {
             // standing there, and a set-up list that refuses to draw until
             // somebody has a PIN is a list nobody can use to create the PIN.
             $crate::setup::setup_list,
+            // P24 — the kitchen screen. All `bill.create`: a cook clearing a
+            // ticket is doing the shop's work, and a kitchen that needed a
+            // manager's permission to say "done" would be a kitchen that
+            // stopped using the screen by Tuesday.
+            $crate::kitchen::kitchen,
+            $crate::kitchen::kitchen_shown,
+            $crate::kitchen::kitchen_bump,
+            $crate::kitchen::kitchen_bump_line,
+            $crate::kitchen::kitchen_recall,
+            $crate::kitchen::kitchen_acknowledge,
+            $crate::kitchen::kitchen_fire,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]
@@ -929,6 +940,10 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                         name: "Food".to_owned(),
                         sort_order: 0,
                         is_active: true,
+                        // The demo shop has one kitchen screen, which is what
+                        // a real small shop has. A second station is a word
+                        // typed on a category — see P24.
+                        station: None,
                     },
                     at,
                 )?;
@@ -972,7 +987,15 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                             hsn: Some("2106".to_owned()),
                             cost_price: None,
                             short_code: None,
-                            prep_minutes: None,
+                            // **The demo shop gets real prep times and
+                            // courses**, so the kitchen screen has something
+                            // to show the first time somebody opens it. A
+                            // dosa takes longer than a coffee, and that is the
+                            // difference the timer exists to make visible.
+                            prep_minutes: Some(if *paise > 8_000 { 12 } else { 4 }),
+                            course: Some(
+                                if *paise > 8_000 { "Main" } else { "Starter" }.to_owned(),
+                            ),
                             is_open_price: false,
                             is_available: true,
                             sort_order: index as i64,

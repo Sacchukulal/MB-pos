@@ -78,6 +78,7 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
                             cost_price: None,
                             short_code: None,
                             prep_minutes: None,
+                            course: None,
                             is_open_price: false,
                             is_available: true,
                             sort_order: 0,

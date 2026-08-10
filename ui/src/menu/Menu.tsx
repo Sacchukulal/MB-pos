@@ -220,6 +220,8 @@ export function Menu() {
                 margin: null,
                 isOpenPrice: false,
                 isAvailable: true,
+                course: null,
+                prepMinutes: null,
                 variants: 0n,
               })
             }
@@ -436,6 +438,9 @@ function EditItem({
   const [taxClassId, setTaxClassId] = useState(row.taxClassId ?? '');
   const [hsn, setHsn] = useState(row.hsn ?? '');
   const [shortCode, setShortCode] = useState(row.shortCode ?? '');
+  // P24 — what the kitchen screen needs to know about this dish.
+  const [course, setCourse] = useState(row.course ?? '');
+  const [prepMinutes, setPrepMinutes] = useState(row.prepMinutes ?? '');
   const [openPrice, setOpenPrice] = useState(row.isOpenPrice);
   const [available, setAvailable] = useState(row.isAvailable);
 
@@ -452,6 +457,8 @@ function EditItem({
         cost: cost.trim() === '' ? null : cost.trim(),
         isOpenPrice: openPrice,
         isAvailable: available,
+        course: course.trim() === '' ? null : course.trim(),
+        prepMinutes: prepMinutes.trim() === '' ? null : prepMinutes.trim(),
       },
     })
       .then(onSaved)
@@ -497,6 +504,22 @@ function EditItem({
         hint="Typed at the counter instead of the name."
         value={shortCode}
         onChange={(e) => setShortCode(e.target.value)}
+      />
+      {/* P24 — the kitchen screen. Both are optional, and a shop that leaves
+          them blank gets a screen that still works: no course means the whole
+          order fires at once, and no target means the ticket never turns
+          late. */}
+      <Input
+        label="Course"
+        hint="Starter, Main, Dessert — or leave blank if you send the whole order together."
+        value={course}
+        onChange={(e) => setCourse(e.target.value)}
+      />
+      <Input
+        label="Minutes to cook"
+        hint="The kitchen screen turns this ticket red after this long. Leave blank for no target."
+        value={prepMinutes}
+        onChange={(e) => setPrepMinutes(e.target.value)}
       />
       {row.cost !== null || row.margin !== null || cost !== '' ? (
         <Input

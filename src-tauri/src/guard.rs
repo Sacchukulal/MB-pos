@@ -216,7 +216,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("search_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("save_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("settings_defaults_for", Access::NeedsAny(SETTINGS_PERMISSIONS)),
-    // The live preview. Reading only â it renders a SAMPLE bill and never
+    // The live preview. Reading only — it renders a SAMPLE bill and never
     // touches a real one.
     ("preview_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("export_settings", Access::Needs(Permission::SettingsStore)),
@@ -325,6 +325,22 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // a PIN is a list nobody can use to create the PIN — the same shape as the
     // first-run bug P11 shipped. It reads counts and shows no shop data.
     ("setup_list", Access::Public),
+
+    // --- the kitchen screen (P24) -------------------------------------------
+    // All `bill.create`. A cook clearing a ticket is doing the shop's work, and
+    // a kitchen that needed a manager's permission to say "done" is a kitchen
+    // that stops using the screen by Tuesday and goes back to paper.
+    //
+    // Every one of them is still AUDITED with the person and the device, which
+    // is the control that matters here — "who marked that done?" is the
+    // question an owner asks when a dish never reached a table.
+    ("kitchen", Access::Needs(Permission::BillCreate)),
+    ("kitchen_shown", Access::Needs(Permission::BillCreate)),
+    ("kitchen_bump", Access::Needs(Permission::BillCreate)),
+    ("kitchen_bump_line", Access::Needs(Permission::BillCreate)),
+    ("kitchen_recall", Access::Needs(Permission::BillCreate)),
+    ("kitchen_acknowledge", Access::Needs(Permission::BillCreate)),
+    ("kitchen_fire", Access::Needs(Permission::BillCreate)),
 
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
@@ -594,7 +610,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 20] = [
+        const SOURCES: [&str; 21] = [
             include_str!("orders.rs"),
             include_str!("lan.rs"),
             include_str!("licensing.rs"),
@@ -602,6 +618,7 @@ mod tests {
             include_str!("diagnostics.rs"),
             include_str!("updates.rs"),
             include_str!("setup.rs"),
+            include_str!("kitchen.rs"),
             include_str!("dayclose.rs"),
             include_str!("reports.rs"),
             include_str!("ipc.rs"),

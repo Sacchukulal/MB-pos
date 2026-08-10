@@ -99,6 +99,17 @@ pub enum Kind {
     Control,
     MenuEngineering,
     StoppedSelling,
+    /// P24, scope 3.7 — how long the kitchen takes.
+    KitchenSpeed(SpeedBy),
+}
+
+/// How the kitchen-speed report is grouped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpeedBy {
+    Station,
+    /// The hour of the day, in the shop's own time (D19's fixed +05:30) — which
+    /// is how a shop finds out that seven o'clock is where it loses people.
+    Hour,
 }
 
 /// **The list, and it is the screen.**
@@ -119,6 +130,11 @@ pub const CATALOGUE: &[Entry] = &[
     Entry { id: "tax_rate", title: "Tax, rate-wise", group: "Tax", needs: Permission::ReportsView, kind: Kind::TaxByRate },
     Entry { id: "tax_hsn", title: "Tax, HSN-wise", group: "Tax", needs: Permission::ReportsView, kind: Kind::TaxByHsn },
     Entry { id: "control", title: "Voids, discounts, refunds and reprints", group: "Control", needs: Permission::AuditView, kind: Kind::Control },
+    // **Scope 3.7, and it is the first real measure of kitchen speed this
+    // owner has ever had.** Two rows and no new screen: adding a report is a
+    // line here plus a function in mb-db, which is P18's whole shape.
+    Entry { id: "kitchen_station", title: "Kitchen speed, by station", group: "Kitchen", needs: Permission::ReportsView, kind: Kind::KitchenSpeed(SpeedBy::Station) },
+    Entry { id: "kitchen_hour", title: "Kitchen speed, by hour", group: "Kitchen", needs: Permission::ReportsView, kind: Kind::KitchenSpeed(SpeedBy::Hour) },
 ];
 
 #[must_use]
@@ -313,7 +329,7 @@ pub fn report_on(app: &App, id: String, period: PeriodArg) -> UiResult<ReportVie
     // front of a bill, and a year-long scan on the writer connection would.
     app.with_shop(|shop| {
         shop.db
-            .read_transaction(|tx| build(&mb_db::Repos::new(tx).reports(), entry, period))
+            .read_transaction(|tx| build(&mb_db::Repos::new(tx), entry, period))
             .map_err(|e| words::from_db(&e))
     })
 }
@@ -324,10 +340,11 @@ pub fn report_on(app: &App, id: String, period: PeriodArg) -> UiResult<ReportVie
               shape further from the query it comes from"
 )]
 fn build(
-    reports: &mb_db::repo::reports::ReportsRepo<'_>,
+    repos: &mb_db::Repos<'_>,
     entry: &Entry,
     period: Period,
 ) -> Result<ReportView, mb_db::DbError> {
+    let reports = repos.reports();
     let mut notes = Vec::new();
     let (columns, rows, totals, compare_view) = match entry.kind {
         Kind::Sales(by) => {
@@ -561,6 +578,58 @@ fn build(
                 .collect();
             (columns, rows, None, None)
         }
+
+        // **Scope 3.7.** Time from "the kitchen was told" to "it came off the
+        // pass", which is the only definition that ties back to a bill (T10).
+        Kind::KitchenSpeed(by) => {
+            // **The STORED business day**, like every other report here — audit
+            // B1 was a report bucketing by UTC while its filter used local
+            // time, and a new report is exactly where that comes back.
+            let kitchen = repos.kitchen();
+            let speed = match by {
+                SpeedBy::Station => {
+                    kitchen.speed_by_station(OUTLET, period.from, period.to)?
+                }
+                SpeedBy::Hour => kitchen.speed_by_hour(OUTLET, period.from, period.to)?,
+            };
+            let columns = vec![
+                column(if by == SpeedBy::Station { "Station" } else { "Hour" }, false),
+                column("Tickets", true),
+                column("Average", true),
+                column("Slowest", true),
+                column("Late", true),
+            ];
+            notes.push(
+                "Measured from the moment the kitchen was told to the moment a \
+                 cook pressed Done. \"Late\" counts tickets that took longer \
+                 than the dishes on them were expected to."
+                    .to_owned(),
+            );
+            if speed.is_empty() {
+                notes.push(
+                    "Nothing here yet. This fills in once the kitchen screen has \
+                     been used for a service."
+                        .to_owned(),
+                );
+            }
+            let rows = speed
+                .iter()
+                .map(|row| {
+                    vec![
+                        if by == SpeedBy::Hour {
+                            format!("{}:00", row.label)
+                        } else {
+                            row.label.clone()
+                        },
+                        row.tickets.to_string(),
+                        minutes_and_seconds(row.average_ms),
+                        minutes_and_seconds(row.slowest_ms),
+                        row.late.to_string(),
+                    ]
+                })
+                .collect();
+            (columns, rows, None, None)
+        }
     };
 
     Ok(ReportView {
@@ -573,6 +642,19 @@ fn build(
         compare: compare_view,
         notes,
     })
+}
+
+/// `8:20` — a duration a shopkeeper reads, not a number of milliseconds.
+///
+/// R8 and crown jewel 14: the formatting happens here so the screen shows a
+/// string, and the CSV, the PDF and the screen can never disagree about it.
+#[allow(
+    clippy::integer_division,
+    reason = "a clock, not money — the same note logging.rs carries"
+)]
+fn minutes_and_seconds(millis: i64) -> String {
+    let total = millis.max(0) / 1_000;
+    format!("{}:{:02}", total / 60, total % 60)
 }
 
 const fn label_for(by: SalesBy) -> &'static str {

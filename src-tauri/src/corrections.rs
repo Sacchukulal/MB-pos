@@ -492,6 +492,26 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
         log_warn!("order {order_id} was cancelled but the kitchen slip failed: {e}");
     }
 
+    // **P24 — and this is the one thing on the kitchen screen that is allowed
+    // to interrupt.** Food already cooking gets thrown away, and food not
+    // started gets cooked for nobody, so the ticket does not vanish: it turns
+    // red and stays until a cook presses "Got it" (D107).
+    //
+    // Not fatal — the order is already cancelled, and a screen that could not
+    // be told is a screen somebody has to be told about in person. It is
+    // logged so that conversation can start.
+    if let Err(e) = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .kitchen()
+                    .cancel_order(&order_id, at)
+            })
+            .map_err(|e| words::from_db(&e))
+    }) {
+        log_warn!("order {order_id} was cancelled but the kitchen screen was not told: {e}");
+    }
+
     log_info!("order {order_id} cancelled by {} — {reason}", who.name);
     Ok(())
 }

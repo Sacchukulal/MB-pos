@@ -345,9 +345,11 @@ impl<'a> OrderRepo<'a> {
             self.tx.execute(
                 "INSERT INTO order_lines (id, order_id, seq, item_id, name, unit_price,
                                           tax_rate_bp, tax_treatment, hsn, category_id, qty, note,
+                                          course, prep_minutes,
                                           discount_kind, discount_value, discount_reason,
                                           discount_by, was_discount_capped)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                         ?17, ?18, 0)",
                 rusqlite::params![
                     line_id,
                     order_id,
@@ -361,6 +363,9 @@ impl<'a> OrderRepo<'a> {
                     line.snapshot.category_id.as_ref().map(CategoryId::as_str),
                     encode::qty_to_sql(line.qty),
                     line.note,
+                    // P24. Part of the snapshot, so they are written with it.
+                    line.snapshot.course,
+                    line.snapshot.prep_minutes.map(i64::from),
                     kind,
                     value,
                     discount.and_then(|d| d.reason.clone()),
@@ -626,6 +631,12 @@ impl<'a> OrderRepo<'a> {
             if let Some(category) = &line.category_id {
                 snapshot = snapshot.with_category(CategoryId::new(category.clone()));
             }
+            // P24. The snapshot is not the snapshot if these come back empty:
+            // an order read from disk is what `kitchen::send` fires from, so
+            // losing them here would silently switch off every course and
+            // every timer after a restart.
+            snapshot.course = line.course.clone();
+            snapshot.prep_minutes = line.prep_minutes.and_then(|m| u32::try_from(m).ok());
 
             let index = cart
                 .add(
@@ -668,8 +679,8 @@ impl<'a> OrderRepo<'a> {
     fn read_line_rows(&self, order_id: &str) -> Result<Vec<LineRow>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, seq, item_id, name, unit_price, tax_rate_bp, tax_treatment, hsn,
-                    category_id, qty, note, discount_kind, discount_value, discount_reason,
-                    discount_by
+                    category_id, qty, note, course, prep_minutes,
+                    discount_kind, discount_value, discount_reason, discount_by
                FROM order_lines WHERE order_id = ?1 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
@@ -685,10 +696,12 @@ impl<'a> OrderRepo<'a> {
                 category_id: row.get(8)?,
                 qty: row.get(9)?,
                 note: row.get(10)?,
-                discount_kind: row.get(11)?,
-                discount_value: row.get(12)?,
-                discount_reason: row.get(13)?,
-                discount_by: row.get(14)?,
+                course: row.get(11)?,
+                prep_minutes: row.get(12)?,
+                discount_kind: row.get(13)?,
+                discount_value: row.get(14)?,
+                discount_reason: row.get(15)?,
+                discount_by: row.get(16)?,
             })
         })?;
         let mut out = Vec::new();
@@ -1079,6 +1092,8 @@ struct LineRow {
     category_id: Option<String>,
     qty: i64,
     note: Option<String>,
+    course: Option<String>,
+    prep_minutes: Option<i64>,
     discount_kind: Option<String>,
     discount_value: Option<i64>,
     discount_reason: Option<String>,

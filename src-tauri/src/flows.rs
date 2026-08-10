@@ -69,6 +69,75 @@ pub fn today(at: Timestamp) -> BusinessDay {
     BusinessDay::of(at, day_rule(), UtcOffset::INDIA)
 }
 
+/// **Print a kitchen ticket for an order that is already on disk** — P24's
+/// paper fallback.
+///
+/// `print_kitchen_ticket_on` prints the CART's delta, which is right when a
+/// cashier presses the button. This prints a whole saved order, which is what
+/// is needed when no kitchen screen drew a ticket in time: there is no cart
+/// involved and the cashier may be three orders further on.
+///
+/// **The kitchen must never go blind.** That is the whole reason this exists,
+/// and it is why it takes an order id rather than looking at the screen.
+pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
+    let at = now();
+    let printer = default_printer(app)?;
+    let settings = app.shop_config().kitchen;
+
+    let order = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .orders()
+                    .find(&mb_core::OrderId::new(order_id.to_owned()))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    let Some(order) = order else {
+        return Err(UiError::new(
+            "kitchen.no_order",
+            "That order is no longer on this counter.",
+        ));
+    };
+    let core = order.core();
+
+    let lines: Vec<mb_print::template::TicketLine> = core
+        .cart
+        .lines()
+        .iter()
+        .map(|line| mb_print::template::TicketLine {
+            name: line.snapshot.name.clone(),
+            qty: line.qty,
+            note: line.identity().note.clone(),
+            modifiers: Vec::new(),
+        })
+        .collect();
+
+    let table = core.table.as_ref().map(|t| t.as_str().to_owned());
+    let ctx = mb_print::template::KitchenContext {
+        kind: mb_print::template::TicketKind::New,
+        token: order.token().map(|t| t.formatted.as_str()),
+        bill_number: None,
+        order_type: core.order_type,
+        table: table.as_deref(),
+        time: None,
+        station: None,
+        lines: &lines,
+        settings: &settings,
+    };
+    let document = mb_print::template::kitchen_document(printer.paper, &ctx)
+        .map_err(|e| words::from_print(&e))?;
+
+    app.with_shop(|shop| {
+        shop.queue
+            .enqueue(
+                Job::new(JobKind::Kitchen, &printer.id, document, today(at))
+                    .because("no kitchen screen drew this in time".to_owned()),
+            )
+            .map_err(|e| words::from_print(&e))
+    })
+}
+
 /// Print what the kitchen has not seen — **the delta, never the order.**
 ///
 /// > Crown jewel 2: *"only what the kitchen has not seen gets printed, and what
@@ -167,6 +236,22 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     //    empty. The order was on disk and what the kitchen knew was not.
     if let Err(e) = park_open_order(app) {
         log_warn!("the kitchen ledger could not be saved: {e}");
+    }
+
+    // 4b. **And the kitchen SCREEN is told too** (P24).
+    //
+    // Here, beside the paper, so screen and printer can never disagree about
+    // what the kitchen knows. A shop with no screen has one ticket sitting
+    // pending, nobody draws it, and twenty seconds later the counter prints it
+    // — which is exactly the behaviour a shop with no screen wants, and it
+    // costs one row.
+    //
+    // Not fatal: a kitchen screen that cannot be told is a shop that still has
+    // paper, and the print above has already happened.
+    if let Some(order_id) = app.with_cart(|state| Ok(state.order_id.clone()))?
+        && let Err(e) = crate::kitchen::send(app, &order_id, None)
+    {
+        log_warn!("order={order_id} the kitchen screen could not be told: {e}");
     }
 
     // 5. **And WHEN it was told** (P14, scope 14.2). The floor's second timer

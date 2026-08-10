@@ -56,6 +56,14 @@ mod licence_tests;
 mod logging;
 mod menu;
 mod preview;
+/// P24. **The kitchen display** — a screen on the kitchen wall instead of a
+/// paper ticket, and the paper fallback that means the kitchen never goes
+/// blind.
+mod kitchen;
+/// P24 tests: the right station, both failure directions, courses and the
+/// cancellation that cannot be waved away.
+#[cfg(test)]
+mod kitchen_tests;
 /// P22. **A secret cannot be in the log**, and this is the half a script
 /// enforces (D93). Audit E7 asks a shopkeeper to email us that file.
 mod redact;
@@ -237,6 +245,11 @@ fn main() {
             // be a poll against M4 and would be bypassed by any screen that is
             // not open.
             push::watch_for_idle(app.handle());
+            // P24. **The kitchen must never go blind.** One sleeping thread
+            // that prints any ticket no screen drew in time. Not a React timer
+            // — a screen that is not open would not run one, and the whole
+            // point is that this works when the screen is dead.
+            kitchen::watch_for_undrawn_tickets(app.handle());
             // P19. Last, because it is the only thing here that opens a socket
             // — and it never stops the window opening if it cannot.
             lan::start(app.handle());

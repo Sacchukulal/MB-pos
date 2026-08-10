@@ -62,7 +62,7 @@ pub struct BundlePlanView {
 
 /// Bytes as a person reads them. Not a general-purpose formatter: a diagnostics
 /// bundle is between a few KB and a few MB and nothing else needs to be right.
-/// **`words::bytes` is the one size formatter** â see its note, and the
+/// **`words::bytes` is the one size formatter** — see its note, and the
 /// health panel that disagreed with this one.
 fn size(bytes: u64) -> String {
     crate::words::bytes(bytes)

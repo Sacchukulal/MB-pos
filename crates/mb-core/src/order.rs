@@ -198,6 +198,22 @@ impl AnyOrder {
             AnyOrder::Voided(o) => Some(&o.bill_number),
         }
     }
+
+    /// The kitchen token, once one has been claimed.
+    ///
+    /// **This is the number a cook shouts, not the bill number.** They are
+    /// different on purpose: a token is small and resets daily so it can be
+    /// called across a room, and P24's screen shows it for exactly that reason.
+    #[must_use]
+    pub fn token(&self) -> Option<&Claimed> {
+        match self {
+            AnyOrder::Draft(_) => None,
+            AnyOrder::Open(o) => Some(&o.token),
+            AnyOrder::Settled(o) => Some(&o.token),
+            AnyOrder::Cancelled(o) => Some(&o.token),
+            AnyOrder::Voided(o) => Some(&o.token),
+        }
+    }
 }
 
 /// A reason that is blank is not a reason.

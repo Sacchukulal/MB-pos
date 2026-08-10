@@ -58,6 +58,7 @@ fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
                         cost_price: None,
                         short_code: None,
                         prep_minutes: None,
+                        course: None,
                         is_open_price: false,
                         is_available: true,
                         sort_order: 0,

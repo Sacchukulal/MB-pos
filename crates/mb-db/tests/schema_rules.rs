@@ -293,6 +293,15 @@ fn t8_every_named_index_exists() {
         // on the next login (D77's sibling). Partial, so it is the size of the
         // phones in use rather than the size of every phone ever paired.
         "idx_lan_devices_live",
+        // P24: the kitchen screen asks "what is outstanding at my station"
+        // several times a minute, and it must not scan a year of tickets to
+        // answer. Partial on `state <> 'bumped'`, so it is the size of the
+        // kitchen's current work rather than of every ticket ever sent.
+        "idx_kitchen_live",
+        // And the kitchen-speed report (scope 3.7) reads finished tickets by
+        // day. Partial on a bumped_at that exists, because an unfinished
+        // ticket has no time to report.
+        "idx_kitchen_done",
     ];
 
     let db = Scratch::new("t8").open();
