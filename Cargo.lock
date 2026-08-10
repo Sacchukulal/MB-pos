@@ -2235,6 +2235,7 @@ dependencies = [
  "mb-core",
  "mb-db",
  "mb-lan",
+ "mb-license",
  "mb-print",
  "mb-winprint",
  "serde",
@@ -2314,6 +2315,19 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "mb-license"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "mb-core",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "winreg",
 ]
 
 [[package]]

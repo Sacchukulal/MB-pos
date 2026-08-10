@@ -1424,7 +1424,12 @@ INSERT INTO permissions (code, description) VALUES
     -- P19. Letting a phone onto the counter is its own decision: the person who
     -- may take an order is not automatically the person who may add a device to
     -- the shop's network.
-    ('devices.pair',       'Let a phone onto this counter, and take it off again');
+    ('devices.pair',       'Let a phone onto this counter, and take it off again'),
+    -- P21. Audit C1's own list of what anybody behind the counter could reach
+    -- ends with "or deactivate the licence". READING the account screen is
+    -- reports.view; deactivating, transferring or typing an emergency unlock
+    -- code is this.
+    ('licence.manage',     'Activate, move or deactivate this shop''s licence');
 
 -- ===========================================================================
 -- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).

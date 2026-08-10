@@ -93,6 +93,18 @@ pub struct AppStatus {
     /// Where the logs are, so "send me the log" is a button and not a phone
     /// call about file paths (audit E7).
     pub logs_path: Option<String>,
+    /// **The licence banner, or empty** (P21).
+    ///
+    /// It rides on `app_status` rather than on `account` because `account`
+    /// needs `reports.view` — and the person who needs to be told the plan ran
+    /// out is whoever is standing at the counter, who is usually a cashier.
+    /// A warning only the owner can see is a warning nobody reads.
+    ///
+    /// It never says billing has stopped, because billing never stops; every
+    /// sentence `words::licence_banner` writes ends by saying what still works.
+    pub licence: String,
+    /// `ok`, `warn` or `danger`. The sentence says it too (§2).
+    pub licence_tone: String,
 }
 
 #[tauri::command]
@@ -107,6 +119,12 @@ pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
         text_size: config.text_size,
         version: env!("CARGO_PKG_VERSION").to_owned(),
         logs_path: crate::logging::directory().map(|p| p.display().to_string()),
+        licence: {
+            let at = crate::flows::now();
+            crate::words::licence_banner(&app.entitlement(), crate::flows::today(at))
+                .unwrap_or_default()
+        },
+        licence_tone: crate::licensing::tone_for(app.entitlement().standing).to_owned(),
     }
 }
 
@@ -545,6 +563,16 @@ macro_rules! commands {
             // P20 — the floor's items, into the cashier's bill or not.
             $crate::orders::take_the_floors_items,
             $crate::orders::dismiss_the_floors_items,
+            // P21 — the licence. Reading the screen is `reports.view`; every
+            // one of the others is `licence.manage`, and none of them is
+            // Public: the lock screen has no business changing a licence.
+            $crate::licensing::account,
+            $crate::licensing::activate,
+            $crate::licensing::start_trial,
+            $crate::licensing::deactivate,
+            $crate::licensing::transfer_here,
+            $crate::licensing::use_emergency_code,
+            $crate::licensing::refresh_licence,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

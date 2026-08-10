@@ -9,7 +9,8 @@
 
 import { readFileSync } from 'node:fs';
 
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -242,6 +243,47 @@ describe('a dialog and the caret (§1, keyboard-first)', () => {
     // watching it vanish (P13).
     const name = screen.getByLabelText('Name') as HTMLInputElement;
     expect(document.activeElement).toBe(name);
+  });
+
+  /**
+   * **P21, and the other half of the same bug.**
+   *
+   * The focus effect used to depend on `onClose` as well as `open`, and every
+   * caller in the product passes `onClose={() => setSomething(null)}` — a new
+   * function on every render. So every keystroke re-ran it and dragged the
+   * caret back to the FIRST field. Latent since P13 because every dialog until
+   * P21's had one field, where putting the focus back where it already was is
+   * invisible.
+   *
+   * Found by typing a licence key and then a code into the account screen and
+   * getting "MB-STUB-000123456" in one box and "1" in the other.
+   */
+  it('leaves the caret where the person put it when the dialog re-renders', () => {
+    function TwoFields() {
+      const [key, setKey] = useState('');
+      const [code, setCode] = useState('');
+      return (
+        // The inline arrow is the point: this is what every call site does.
+        <Modal open title="Enter your licence key" onClose={() => undefined}>
+          <Input label="Licence key" value={key} onChange={(e) => setKey(e.target.value)} autoFocus />
+          <Input label="Code" value={code} onChange={(e) => setCode(e.target.value)} />
+        </Modal>
+      );
+    }
+    render(<TwoFields />);
+
+    const licence = screen.getByLabelText('Licence key') as HTMLInputElement;
+    const code = screen.getByLabelText('Code') as HTMLInputElement;
+    expect(document.activeElement).toBe(licence);
+
+    // Move to the second field and type into it, one character at a time.
+    code.focus();
+    for (const character of '123456') {
+      fireEvent.change(code, { target: { value: code.value + character } });
+      expect(document.activeElement).toBe(code);
+    }
+    expect(code.value).toBe('123456');
+    expect(licence.value).toBe('');
   });
 
   it('still takes the focus itself when there is nothing to type into', () => {

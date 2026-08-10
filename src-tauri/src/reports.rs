@@ -302,6 +302,11 @@ pub fn report_on(app: &App, id: String, period: PeriodArg) -> UiResult<ReportVie
         .with_detail(id));
     };
     guard::require(app, entry.needs)?;
+    // **P21's gate, in the core rather than on the screen.** `report_csv` and
+    // `report_pdf` both come through here, so all three are covered by one
+    // line — and T10 calls this function directly with a not-entitled
+    // entitlement, which is the same shape as `guard`'s own test.
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let period = period.parse()?;
 
     // **A reader, not the writer.** Scope 16.6: a report must never stand in
@@ -611,6 +616,7 @@ const fn control_words(kind: &str) -> &str {
 /// The list, filtered to what this person may open.
 pub fn list_on(app: &App) -> UiResult<ReportListView> {
     let who = guard::require(app, Permission::ReportsView)?;
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     Ok(ReportListView {
         periods: choices(crate::flows::today(crate::flows::now())),
         reports: CATALOGUE
@@ -710,6 +716,7 @@ fn needs_you(tone: &str, title: &str, detail: String) -> AttentionView {
 /// for a figure to disagree — which is audit G1 with more steps.
 pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
     let who = guard::require(app, Permission::ReportsView)?;
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let day = crate::flows::today(crate::flows::now());
     let period = Period::one_day(day);
     let yesterday = day.previous();

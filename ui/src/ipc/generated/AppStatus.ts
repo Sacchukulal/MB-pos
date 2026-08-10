@@ -10,4 +10,20 @@ hasShop: boolean, shopPath: string | null, theme: string, textSize: string, vers
  * Where the logs are, so "send me the log" is a button and not a phone
  * call about file paths (audit E7).
  */
-logsPath: string | null, };
+logsPath: string | null, 
+/**
+ * **The licence banner, or empty** (P21).
+ *
+ * It rides on `app_status` rather than on `account` because `account`
+ * needs `reports.view` — and the person who needs to be told the plan ran
+ * out is whoever is standing at the counter, who is usually a cashier.
+ * A warning only the owner can see is a warning nobody reads.
+ *
+ * It never says billing has stopped, because billing never stops; every
+ * sentence `words::licence_banner` writes ends by saying what still works.
+ */
+licence: string, 
+/**
+ * `ok`, `warn` or `danger`. The sentence says it too (§2).
+ */
+licenceTone: string, };

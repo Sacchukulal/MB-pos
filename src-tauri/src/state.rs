@@ -80,6 +80,26 @@ pub struct App {
     /// Dropping it stops the server and withdraws the mDNS advertisement, so
     /// closing the window really does take the counter off the network.
     network: Mutex<Option<Arc<crate::lan::Network>>>,
+    /// **The licence, and everything that talks to the cloud about it** (P21).
+    ///
+    /// Behind its own lock, and **never taken while the shop lock is held**.
+    /// P18 and P20 each spent a session on the same deadlock — `with_shop`
+    /// inside `with_shop`, on one thread, and a suite that hung instead of
+    /// failing. `crate::licensing` takes this one and the shop's one at a time,
+    /// in that order, and never nested.
+    licensing: Mutex<mb_license::Licensing>,
+    /// **The decided entitlement, held.**
+    ///
+    /// PERFORMANCE §2.2: *"nothing in this table may ever be blocked by a
+    /// report, a sync, a print job, **a licence check** or a backup."* The
+    /// cheapest way to keep that promise is for the billing path to have
+    /// nothing to call — so the decision is made on a timer and read from here,
+    /// and `the_billing_path_does_not_ask_about_the_licence` reads the sources
+    /// and proves nothing on that path does.
+    ///
+    /// An `RwLock` and not a `Mutex`: this is read by the network panel, the
+    /// shell banner and every gated command, and written about once an hour.
+    entitlement: std::sync::RwLock<mb_license::Entitlement>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -111,6 +131,20 @@ impl App {
             crate::flows::now(),
             true,
         );
+        let now = crate::flows::now();
+        // **A test must not read the licence of whoever is running it.**
+        //
+        // `licensing::start()` reads `%APPDATA%\MagicBill\licence.json`, which
+        // on a developer's machine is a real activated licence — so without
+        // this every test in the crate would behave differently depending on
+        // who ran it, and the P21 tests would pass on one laptop and fail on
+        // another. `for_tests` is the same type on a scratch folder;
+        // `use_licensing` is how a test then installs the state it wants.
+        #[cfg(test)]
+        let licensing = crate::licensing::for_tests();
+        #[cfg(not(test))]
+        let licensing = crate::licensing::start();
+        let entitlement = licensing.entitlement(now, crate::flows::today(now));
         Ok(App {
             shop: Mutex::new(None),
             config: Mutex::new(config),
@@ -119,7 +153,67 @@ impl App {
             sessions,
             shop_config: Mutex::new(crate::settings::ShopConfig::default()),
             network: Mutex::new(None),
+            licensing: Mutex::new(licensing),
+            entitlement: std::sync::RwLock::new(entitlement),
         })
+    }
+
+    /// **What this shop is entitled to, right now.**
+    ///
+    /// Reads a value. No network, no database, no shop lock — this is what
+    /// budget L1 measures, and it is why a gate can be put in front of a
+    /// command without anybody having to think about whether it is on the
+    /// billing path.
+    #[must_use]
+    pub fn entitlement(&self) -> mb_license::Entitlement {
+        match self.entitlement.read() {
+            Ok(held) => held.clone(),
+            // A poisoned lock means another thread panicked while holding it.
+            // The shop still has to work, and an unactivated entitlement still
+            // bills — requirement 3 does not have an exception for our bugs.
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Do something with the licence, and re-decide afterwards.
+    ///
+    /// Every licensing command goes through here, so there is exactly one place
+    /// that can leave the held entitlement disagreeing with the file on disk.
+    pub fn with_licensing<T>(
+        &self,
+        f: impl FnOnce(&mut mb_license::Licensing) -> T,
+    ) -> T {
+        let outcome = {
+            let mut held = lock(&self.licensing);
+            f(&mut held)
+        };
+        self.re_decide();
+        outcome
+    }
+
+    /// Put a licensing subsystem in, and decide again. **Tests only.**
+    #[cfg(test)]
+    pub fn use_licensing(&self, licensing: mb_license::Licensing) {
+        *lock(&self.licensing) = licensing;
+        self.re_decide();
+    }
+
+    /// Read the licence without changing it.
+    pub fn with_licence<T>(&self, f: impl FnOnce(&mb_license::Licensing) -> T) -> T {
+        let held = lock(&self.licensing);
+        f(&held)
+    }
+
+    /// Decide again from the cached snapshot, and hold the answer.
+    pub fn re_decide(&self) {
+        let now = crate::flows::now();
+        let fresh = {
+            let held = lock(&self.licensing);
+            held.entitlement(now, crate::flows::today(now))
+        };
+        if let Ok(mut slot) = self.entitlement.write() {
+            *slot = fresh;
+        }
     }
 
     /// Remember that the floor changed the order the cashier has open.

@@ -100,6 +100,23 @@ pub mod action {
     /// item?" has to be answerable a month later; v1 kept two days.
     pub const INTENT_APPLIED: AuditAction = "intent.applied";
     pub const BACKUP_RESTORED: AuditAction = "backup.restored";
+    /// P21 — the licence. **These are the shop's history and they go in the
+    /// hash chain**, which is why this session adds no `licence_events` table:
+    /// the audit trail already is that table, it is already append-only by
+    /// trigger and tamper-evident by hash (D43), and a second history of the
+    /// same events is a second answer to the same question.
+    ///
+    /// What is NOT here is the licence itself — that lives beside the config
+    /// and never in the shop's database, because a backup is restored onto
+    /// other machines (D85, and D27 before it).
+    pub const LICENCE_ACTIVATED: AuditAction = "licence.activated";
+    pub const LICENCE_DEACTIVATED: AuditAction = "licence.deactivated";
+    pub const LICENCE_TRANSFERRED: AuditAction = "licence.transferred";
+    pub const LICENCE_EMERGENCY: AuditAction = "licence.emergency";
+    /// A licensing action that was refused — a wrong emergency code, a transfer
+    /// inside its cooldown. Recorded because five of these in a row is the
+    /// thing an owner would want to have been able to see afterwards.
+    pub const LICENCE_REFUSED: AuditAction = "licence.refused";
 
     /// Every one of the above, for the screen's filter.
     pub const ALL: &[AuditAction] = &[
@@ -140,6 +157,11 @@ pub mod action {
         DEVICE_REVOKED,
         INTENT_APPLIED,
         BACKUP_RESTORED,
+        LICENCE_ACTIVATED,
+        LICENCE_DEACTIVATED,
+        LICENCE_TRANSFERRED,
+        LICENCE_EMERGENCY,
+        LICENCE_REFUSED,
     ];
 
     /// What the owner reads, rather than the tag. UI_GUIDELINES §6.
@@ -183,6 +205,11 @@ pub mod action {
             DEVICE_REVOKED => "Removed a phone from the counter",
             INTENT_APPLIED => "Changed an order from a phone",
             BACKUP_RESTORED => "Restored a backup",
+            LICENCE_ACTIVATED => "Activated the licence",
+            LICENCE_DEACTIVATED => "Deactivated the licence on this computer",
+            LICENCE_TRANSFERRED => "Moved the licence to this computer",
+            LICENCE_EMERGENCY => "Used an emergency unlock code",
+            LICENCE_REFUSED => "A licensing action was refused",
             _ => "Did something this version does not know about",
         }
     }

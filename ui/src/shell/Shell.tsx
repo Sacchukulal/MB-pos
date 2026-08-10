@@ -22,6 +22,7 @@ import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import { useTheme } from '../theme/ThemeProvider';
+import { Account } from '../account/Account';
 import { Billing } from '../billing/Billing';
 import { Gallery } from '../gallery/Gallery';
 import { Lock } from '../auth/Lock';
@@ -152,6 +153,15 @@ const SCREENS: readonly Screen[] = [
     icon: '⚙',
     render: () => <Settings />,
     needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
+  },
+  {
+    // Below Settings, because it is opened once a year — and above the Kit,
+    // because the Kit is not a screen a shop has any use for.
+    id: 'account',
+    label: 'Account',
+    icon: '◇',
+    render: () => <Account />,
+    needs: 'reports.view',
   },
   {
     id: 'gallery',
@@ -318,7 +328,37 @@ export function Shell() {
           <span className="mb-rail__spacer" />
         </nav>
 
-        <main className="mb-main">{active?.render()}</main>
+        <main className="mb-main">
+          {/*
+            **The licence banner** (P21). A quiet line above the screen, never a
+            modal — a dialog a cashier has to dismiss before every bill is how a
+            licence system stops a restaurant trading without meaning to.
+
+            It rides on `app_status`, which is `Access::Public`, because the
+            person who needs to know the plan ran out is whoever is standing at
+            the counter. Every sentence in it ends by saying what still works.
+
+            **Not on the Account screen**, found by looking: that screen shows
+            the same sentence in its own first card, so the banner made it
+            appear twice, four centimetres apart.
+          */}
+          {status?.licence && screen !== 'account' ? (
+            <div
+              className={`mb-licence-note mb-licence-note--${status.licenceTone}`}
+              role="status"
+            >
+              <span>{status.licence}</span>
+              <button
+                type="button"
+                className="mb-licence-note__go"
+                onClick={() => setScreen('account')}
+              >
+                Open Account
+              </button>
+            </div>
+          ) : null}
+          {active?.render()}
+        </main>
       </div>
 
       <PrintQueuePanel

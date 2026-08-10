@@ -1,0 +1,123 @@
+/*
+ * The account screen — scope 2.10. Every value is a token (D38).
+ */
+
+.mb-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+/* `.mb-card` is a COLUMN — P18 shipped three rows inside Cards stacked and
+   centred because of it. Any row inside a Card says so. */
+.mb-account__top {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-direction: row;
+}
+
+.mb-account__who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-account__shop {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+.mb-account__plan {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* The banner sentence. It is the thing an owner opens this screen to read, so
+   it is body text and not a tooltip. */
+.mb-account__headline {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-base);
+  color: var(--text);
+  max-width: 62ch;
+}
+
+.mb-account__renews {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Something the owner has to act on. Bordered rather than coloured-in: colour
+   is never the only carrier (§2), and the sentence inside already says it. */
+.mb-account__warn {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-left: var(--space-1) solid var(--warn);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text);
+  max-width: 62ch;
+}
+
+.mb-account__note {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 52ch;
+}
+
+.mb-account__actions {
+  margin-top: var(--space-3);
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Label above value, wrapping — a 1366 x 768 screen is the reference machine
+   and four facts in a row is what fits. */
+.mb-account__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.mb-account__facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mb-account__facts dt {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-muted);
+}
+
+.mb-account__facts dd {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--text);
+}
+
+/* Read out over the phone to support, so it is monospaced and spaced out. */
+.mb-account__machine {
+  font-family: var(--font-mono);
+  letter-spacing: var(--tracking-wide);
+}
+
+.mb-account__included {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

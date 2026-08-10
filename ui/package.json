@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "lint:tokens": "node scripts/check-tokens.mjs",
     "lint:money": "node scripts/check-no-money.mjs",
-    "lint": "npm run lint:tokens && npm run lint:money",
+    "lint:views": "node scripts/check-view-names.mjs",
+    "lint": "npm run lint:tokens && npm run lint:money && npm run lint:views",
     "check": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {

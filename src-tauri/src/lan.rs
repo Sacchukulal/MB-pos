@@ -107,10 +107,25 @@ impl mb_lan::Counter for Bridge {
     }
 
     fn device_limit(&self) -> u32 {
-        // P21 owns licensing. Until it lands this is the ceiling, and the seam
-        // is named rather than built — which is the same treatment the recovery
-        // code's support path got at P11.
-        DEFAULT_DEVICE_LIMIT
+        // **P21 landed, and this stopped being 15.**
+        //
+        // > **WEBSITE-C5:** *"The phone limit is shown and stored but only
+        // > checked at the moment a new phone first joins — never afterwards.
+        // > Lowering a customer's limit does not cut off phones already
+        // > enrolled."*
+        //
+        // Asking the entitlement here, on every pairing attempt, is that
+        // finding's fix: the number is read from the live plan rather than
+        // remembered from enrolment, so a plan that drops from four phones to
+        // two refuses the next join. `App::entitlement` reads a held value, so
+        // this costs a lock and no I/O.
+        //
+        // The fallback is the old ceiling and not zero: a counter whose `App`
+        // has gone away is a counter that is shutting down, and answering "no
+        // phones at all" would refuse a waiter mid-order for a reason that is
+        // not about their shop's licence.
+        self.app()
+            .map_or(DEFAULT_DEVICE_LIMIT, |h| h.entitlement().limits.devices)
     }
 
     fn devices(&self) -> Vec<mb_lan::DeviceRow> {
@@ -546,6 +561,9 @@ fn staff_name(app: &App, staff_id: &str) -> Option<String> {
 /// that a person then has to walk somebody through.
 pub fn open_pairing_on(app: &App) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
+    // P21's gate. A shop whose plan does not include phone ordering — or whose
+    // plan has run out — cannot open the pairing desk, and hears why.
+    crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
     let network = app.network().ok_or_else(|| {
         UiError::new(
             "lan.off",
@@ -569,6 +587,11 @@ pub fn close_pairing_on(app: &App) -> UiResult<NetworkView> {
 /// both be true, and it is the one that matters — see `mb_lan::pairing`.
 pub fn allow_on(app: &App, request_id: String) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
+    // **The gate is here as well as on `open_pairing`, deliberately.** A desk
+    // that was opened while the plan was live and is still open a minute after
+    // it lapsed would otherwise let a phone through — which is WEBSITE-C5's
+    // shape exactly: a check at the start of a flow is not a check.
+    crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
     let network = app.network().ok_or_else(|| {
         UiError::new("lan.off", "The counter's network is switched off.")
     })?;

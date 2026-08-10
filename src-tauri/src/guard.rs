@@ -288,6 +288,24 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("take_the_floors_items", Access::Needs(Permission::BillCreate)),
     ("dismiss_the_floors_items", Access::Needs(Permission::BillCreate)),
 
+    // --- the licence (P21) ---------------------------------------------------
+    // READING it is `reports.view`: the plan, the renewal date and this
+    // computer's id are shop information, and an owner who cannot open Reports
+    // is not the person who chases a renewal. **Every write is
+    // `licence.manage`** — audit C1's own list of what anybody behind the
+    // counter could reach ends with "or deactivate the licence".
+    //
+    // Nothing here is Public. The lock screen has no business changing a
+    // licence, and `app_status` already carries the one fact the shell needs
+    // before anybody has signed in.
+    ("account", Access::Needs(Permission::ReportsView)),
+    ("refresh_licence", Access::Needs(Permission::ReportsView)),
+    ("activate", Access::Needs(Permission::LicenceManage)),
+    ("start_trial", Access::Needs(Permission::LicenceManage)),
+    ("deactivate", Access::Needs(Permission::LicenceManage)),
+    ("transfer_here", Access::Needs(Permission::LicenceManage)),
+    ("use_emergency_code", Access::Needs(Permission::LicenceManage)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -556,9 +574,10 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 15] = [
+        const SOURCES: [&str; 16] = [
             include_str!("orders.rs"),
             include_str!("lan.rs"),
+            include_str!("licensing.rs"),
             include_str!("dayclose.rs"),
             include_str!("reports.rs"),
             include_str!("ipc.rs"),

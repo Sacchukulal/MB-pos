@@ -50,29 +50,46 @@ export function Modal({
 }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null);
 
-  // Escape closes, and focus moves into the dialog when it opens — the
-  // keyboard-first rule (§1) does not stop at the edge of a modal.
+  // Escape closes — the keyboard-first rule (§1) does not stop at the edge of a
+  // modal. This one needs the LATEST `onClose`, so it re-runs freely.
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
 
-    // **The field, if there is one; the panel only if there is not.**
-    //
-    // Focusing the panel unconditionally looked right and was not: it ran
-    // AFTER the browser had honoured `autoFocus` on the first input, so it
-    // took the caret straight back out again. Typing into a freshly opened
-    // dialog then went nowhere until you pressed Tab — caught by opening
-    // "Add a size" and typing a name that never arrived (P13).
+  // **Focus moves into the dialog ONCE, when it opens.** `[open]` and nothing
+  // else, and the separation from the Escape listener above is the whole point.
+  //
+  // *The field, if there is one; the panel only if there is not.* Focusing the
+  // panel unconditionally looked right and was not: it ran AFTER the browser
+  // had honoured `autoFocus` on the first input, so it took the caret straight
+  // back out again. Typing into a freshly opened dialog then went nowhere until
+  // you pressed Tab — caught at P13 by opening "Add a size" and typing a name
+  // that never arrived.
+  //
+  // **And then P21 found the other half of it, by driving a dialog with TWO
+  // fields.** This used to be one effect with `[open, onClose]`, and every
+  // caller in the product passes `onClose={() => setSomething(null)}` — a new
+  // function on every render. So every keystroke re-ran the effect and dragged
+  // the caret back to the FIRST input: typing a licence key and then a
+  // verification code produced "MB-STUB-000123456" in one box and "1" in the
+  // other.
+  //
+  // It had been latent since P13 because every dialog until now had one field,
+  // where "put the focus back where it already is" is invisible. A memoised
+  // `onClose` at each call site would also fix it, and would be a rule twenty
+  // screens have to remember — D40 says those are the rules that erode.
+  useEffect(() => {
+    if (!open) return;
     const first = panel.current?.querySelector<HTMLElement>(
       'input:not([type="hidden"]), select, textarea',
     );
     (first ?? panel.current)?.focus();
-
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

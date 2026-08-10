@@ -81,6 +81,7 @@ import type { NumberingView } from './generated/NumberingView';
 import type { CountArg } from './generated/CountArg';
 import type { DashboardView } from './generated/DashboardView';
 import type { DayCloseView } from './generated/DayCloseView';
+import type { LicenceView } from './generated/LicenceView';
 import type { NetworkView } from './generated/NetworkView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
@@ -463,6 +464,19 @@ export interface Commands {
     returns: DayCloseView;
   };
   reopen_day: { args: { reason: string }; returns: DayCloseView };
+
+  // P21 — the licence. Reading the screen is reports.view (the plan and the
+  // renewal date are shop information); every write is licence.manage, which
+  // is audit C1's own last example of what anybody behind the counter could
+  // reach. **Every one of these returns the whole view**, so the screen never
+  // has to work out what changed.
+  account: { args: void; returns: LicenceView };
+  refresh_licence: { args: void; returns: LicenceView };
+  activate: { args: { key: string; proof: string }; returns: LicenceView };
+  start_trial: { args: { contact: string }; returns: LicenceView };
+  deactivate: { args: void; returns: LicenceView };
+  transfer_here: { args: { key: string; proof: string }; returns: LicenceView };
+  use_emergency_code: { args: { code: string }; returns: LicenceView };
 }
 
 

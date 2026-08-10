@@ -212,9 +212,283 @@ pub fn when(at: mb_core::Timestamp) -> String {
     format!("{day} {month_name}, {hour}:{minute:02} {suffix}")
 }
 
+/// A date a person reads: **"12 September"**, not `2026-09-12`.
+///
+/// > *2.10:* the account screen showed a "next billing date" field. **"Your
+/// > plan renews on 12 September" beats a date field**, and the difference is
+/// > that one of them is a sentence.
+///
+/// The year is left off deliberately when it is this year — a renewal date is
+/// always within twelve months, and "12 September 2026" reads like a contract.
+#[must_use]
+pub fn day(business_day: mb_core::BusinessDay, today: mb_core::BusinessDay) -> String {
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let (year, month, date) = business_day.to_ymd();
+    let (this_year, _, _) = today.to_ymd();
+    let name = MONTHS
+        .get(usize::try_from(month.saturating_sub(1)).unwrap_or(0))
+        .copied()
+        .unwrap_or("?");
+    if year == this_year {
+        format!("{date} {name}")
+    } else {
+        format!("{date} {name} {year}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The licence (P21).
+//
+// **These sentences live here and nowhere else.** `mb-license` carries facts —
+// a standing, a feature, a number of days — and this file is the one place a
+// machine state becomes words. It is also the only place `count` is reachable
+// from, which is D78: a number goes next to a noun through one function.
+// ---------------------------------------------------------------------------
+
+/// **The banner, or nothing at all.**
+///
+/// Escalating and honest, and never alarming: every one of these ends by saying
+/// what still works, because the single most common support call a licensing
+/// system generates is a shopkeeper who thinks they have been cut off.
+#[must_use]
+pub fn licence_banner(
+    entitlement: &mb_license::Entitlement,
+    today: mb_core::BusinessDay,
+) -> Option<String> {
+    let renews = entitlement
+        .renews_on
+        .map(|on| day(on, today))
+        .unwrap_or_else(|| "recently".to_owned());
+    Some(match entitlement.standing {
+        // Nothing to say. A banner on a shop that has paid is noise, and noise
+        // is what makes the real one invisible.
+        mb_license::Standing::Fine => return None,
+        mb_license::Standing::InGrace { days_left } => format!(
+            "Your plan ended on {renews}. Everything keeps working for another {}.",
+            count(i64::from(days_left), "day", "days")
+        ),
+        mb_license::Standing::Expired => format!(
+            "Your plan ran out on {renews}. Reports and phone ordering are paused \
+             until it is renewed — billing and printing are not affected."
+        ),
+        mb_license::Standing::Suspended => {
+            "This licence has been suspended. Please call us. You can still bill \
+             and print as usual."
+                .to_owned()
+        }
+        mb_license::Standing::Revoked => {
+            "This licence has been stopped. Please call us. You can still bill \
+             and print as usual."
+                .to_owned()
+        }
+        // Their choice. Do not scold them for it.
+        mb_license::Standing::Cancelled => {
+            "Your plan is cancelled. Billing and printing carry on working — \
+             choose a plan whenever you are ready."
+                .to_owned()
+        }
+        mb_license::Standing::TrialEnded => format!(
+            "Your trial ended on {renews}. Billing and printing carry on working \
+             — choose a plan to get the rest back."
+        ),
+        // **No "open Account" in it**, and that is a fix from looking at the
+        // screen: this sentence is shown BOTH in the shell banner and on the
+        // account screen itself, and on the account screen it was telling the
+        // owner to go where they already were.
+        //
+        // The alternative — two sentences, one per place — is two sentences
+        // that drift. The banner carries an "Open Account" link beside the
+        // words, which is the navigation; the words are the same either way.
+        mb_license::Standing::NeverActivated => {
+            "This computer has no licence yet. You can bill and print — enter \
+             your licence key, or start a free trial."
+                .to_owned()
+        }
+        // **Not "expired".** We do not know that, and saying it would be the
+        // same class of claim as v1's Suspend button.
+        mb_license::Standing::NeedsChecking => {
+            "We have not been able to check your licence for a while. Reports \
+             and phone ordering are paused until we can — billing and printing \
+             are not affected."
+                .to_owned()
+        }
+        mb_license::Standing::BoundElsewhere => {
+            "This licence belongs to another computer. Billing and printing work \
+             here — open Account to move the licence to this one."
+                .to_owned()
+        }
+        mb_license::Standing::Emergency { until } => format!(
+            "Emergency unlock: everything works until {}. Please renew or move \
+             your licence before then.",
+            when(until)
+        ),
+    })
+}
+
+/// **A refusal, when the gate said no.**
+///
+/// Two conversations, and they must not read alike: "your plan has expired" is
+/// a bill to pay, "your plan does not include phone ordering" is a plan to
+/// upgrade. v1 showed one message for both.
+#[must_use]
+pub fn licence_refusal(
+    refusal: &mb_license::Refusal,
+    entitlement: &mb_license::Entitlement,
+    today: mb_core::BusinessDay,
+) -> UiError {
+    let message = match refusal.why {
+        mb_license::Why::NotInThePlan => format!(
+            "Your plan does not include {}.",
+            refusal.feature.in_words()
+        ),
+        // The banner already says this well, and saying it the same way twice
+        // is what makes a person believe it.
+        mb_license::Why::NotOperating(_) => licence_banner(entitlement, today).unwrap_or_else(|| {
+            format!("{} is not available right now.", refusal.feature.in_words())
+        }),
+    };
+    UiError::new(refusal.code(), message).with_detail(format!(
+        "{} · {}",
+        refusal.feature.code(),
+        entitlement.standing.code()
+    ))
+}
+
+/// A licensing error — the cloud, the file, the emergency code, the cooldown.
+#[must_use]
+pub fn from_licence(error: &mb_license::LicenceError) -> UiError {
+    let message = match error {
+        mb_license::LicenceError::TooSoon { days_left } => format!(
+            "This licence was moved recently. It can be moved again in {}.",
+            count(i64::from(*days_left), "day", "days")
+        ),
+        mb_license::LicenceError::Timedout => {
+            "Our server did not answer. Nothing has changed — please try again \
+             in a moment."
+                .to_owned()
+        }
+        mb_license::LicenceError::Cloud(mb_license::CloudError::Unreachable) => {
+            "We could not reach our server. Check the internet connection and \
+             try again — billing is not affected."
+                .to_owned()
+        }
+        // **The server's own sentence, shown as-is.** The reason a licence was
+        // refused is a thing only the cloud knows, so the cloud writes the
+        // words — D84's rule, one system along.
+        mb_license::LicenceError::Cloud(mb_license::CloudError::Refused(said)) => said.clone(),
+        mb_license::LicenceError::Cloud(mb_license::CloudError::BoundElsewhere { machine }) => {
+            format!(
+                "This licence is being used on another computer ({machine}). \
+                 Use Move it here to bring it over."
+            )
+        }
+        // BACKEND-C6's refusal. **Its own arm rather than the fallback**, found
+        // by driving it: the fallback produced "That licence key and code did
+        // not match" with no full stop and no next step, which reads like a
+        // system message beside every other sentence in the product (§6).
+        mb_license::LicenceError::Cloud(mb_license::CloudError::NotRecognised) => {
+            "That licence key and code did not match. Check both — and ask for \
+             a new code if it has been more than a few minutes."
+                .to_owned()
+        }
+        other => sentence(&other.to_string()),
+    };
+    UiError::new(error.code(), message)
+}
+
+/// An error's `Display` turned into a sentence: a capital at the front and a
+/// full stop at the end.
+///
+/// A `thiserror` message is written to read inside a log line, so it starts
+/// lower case and stops without punctuation. Shown to a shopkeeper as-is it is
+/// the thing audit **F8** is about — *"some messages are still technical"* —
+/// and the tell is exactly that missing full stop, which is what makes a
+/// sentence look like output rather than like somebody talking to you.
+fn sentence(text: &str) -> String {
+    let mut chars = text.chars();
+    let capitalised = match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => return String::new(),
+    };
+    if capitalised.ends_with(['.', '!', '?']) {
+        capitalised
+    } else {
+        format!("{capitalised}.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Found by driving the activation dialog.** A `thiserror` message shown
+    /// as-is reads like output, and the tell is the missing full stop.
+    #[test]
+    fn an_error_becomes_a_sentence() {
+        assert_eq!(
+            sentence("that licence key and code did not match"),
+            "That licence key and code did not match."
+        );
+        // Already a sentence: left alone rather than given two full stops.
+        assert_eq!(sentence("We could not reach our server."), "We could not reach our server.");
+        assert_eq!(sentence("Is that right?"), "Is that right?");
+        assert_eq!(sentence(""), "");
+    }
+
+    /// **Every licensing sentence says what still works.**
+    ///
+    /// The commonest support call a licence gate produces is an owner who
+    /// thinks they have been cut off entirely — so no banner in this product is
+    /// allowed to leave that question open.
+    #[test]
+    fn every_licence_banner_says_billing_carries_on() {
+        let today = mb_core::BusinessDay::from_ymd(2026, 8, 10);
+        for standing in [
+            mb_license::Standing::InGrace { days_left: 3 },
+            mb_license::Standing::Expired,
+            mb_license::Standing::Suspended,
+            mb_license::Standing::Revoked,
+            mb_license::Standing::Cancelled,
+            mb_license::Standing::TrialEnded,
+            mb_license::Standing::NeverActivated,
+            mb_license::Standing::NeedsChecking,
+            mb_license::Standing::BoundElsewhere,
+        ] {
+            let mut entitlement =
+                mb_license::Entitlement::unactivated(mb_core::Timestamp::EPOCH);
+            entitlement.standing = standing;
+            entitlement.renews_on = Some(mb_core::BusinessDay::from_ymd(2026, 8, 2));
+            let banner = licence_banner(&entitlement, today)
+                .unwrap_or_else(|| panic!("{standing:?} had nothing to say"));
+            // Either it names billing, or it says everything still works —
+            // which is the stronger claim and the one grace makes.
+            let says = banner.to_lowercase();
+            assert!(
+                says.contains("bill") || says.contains("everything keeps working"),
+                "{standing:?} does not tell the owner what still works: {banner}"
+            );
+            assert!(banner.ends_with('.'), "{standing:?}: {banner}");
+        }
+        // And a shop that has paid is told nothing at all. A banner on a
+        // healthy counter is noise, and noise is what makes the real one
+        // invisible.
+        let mut fine = mb_license::Entitlement::unactivated(mb_core::Timestamp::EPOCH);
+        fine.standing = mb_license::Standing::Fine;
+        assert_eq!(licence_banner(&fine, today), None);
+    }
 
     /// **The bug this function exists to make impossible.** Three shipped:
     /// "1 have been issued" (P17), "in the 1 days before" and "0 bill(s)"

@@ -46,6 +46,13 @@ mod ipc;
 /// P19. **The counter as a server** — D9: the phone talks to the till over the
 /// shop's own WiFi, and the cloud is never the road an order travels.
 mod lan;
+/// P21. **The licence** — one entitlement, decided in one place, and a gate
+/// that structurally cannot reach billing (D86).
+mod licensing;
+/// P21's T1 and T10. Five bills in five states of the licence, and every gated
+/// command called directly rather than hidden.
+#[cfg(test)]
+mod licence_tests;
 mod logging;
 mod menu;
 mod preview;

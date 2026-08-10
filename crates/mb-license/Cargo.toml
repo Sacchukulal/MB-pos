@@ -1,0 +1,62 @@
+[package]
+name = "mb-license"
+description = "Magic Bill's entitlement: may this shop operate right now, and what may it use."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The only thing this crate knows about the shop is what a day is and what an
+# instant is. It holds no Tauri, no SQLite and no HTTP client: everything that
+# has to leave the machine goes through the `Cloud` trait, which is why every
+# test in here runs with no database and no network — the same shape mb-lan
+# earned at P19.
+mb-core = { path = "../mb-core" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# ---------------------------------------------------------------------------
+# R6 — the crates this session adds, and why each of them earns its place.
+#
+# The short version: **this session adds no new compiled code to the binary.**
+# Both of the crates below are already in `Cargo.lock` and already linked —
+# `ring` through rustls and rcgen (P19), `winreg` through Tauri. Choosing them
+# is choosing nothing new, which on a 4 GB reference machine with a 20 MB
+# installer budget (S4) is the strongest argument available.
+# ---------------------------------------------------------------------------
+
+# Ed25519 for the snapshot signature, HMAC-SHA256 for the emergency code, and
+# SHA-256 for the code's single-use record.
+#
+# **Not ed25519-dalek, and not hmac + sha2**, both of which would be perfectly
+# good crates and neither of which is already here. P19 chose ring over
+# aws-lc-rs for rustls precisely because ring needs no C toolchain and no NASM
+# on Windows; that reasoning has not changed and this crate inherits it.
+#
+# ring also SIGNS, which matters more than it looks: the test stub for the
+# cloud has to mint real signatures, so T13's "a broken signature is refused"
+# is tested against the real verifier rather than against a mock of one.
+ring = "0.17"
+
+# Base64 for the signature and the payload in `licence.json`. Already here via
+# mb-lan.
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+# `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` — step 1 of the machine-id
+# chain, and the only step that needs anything outside std.
+#
+# The alternative is `unsafe` (the workspace forbids it, and mb-winprint owns
+# the one exception — D33) or shelling out to `reg.exe`, which costs a process
+# launch on the startup path that budget L2 has 30 ms for. winreg is a thin
+# safe wrapper over the same call and is already in the tree behind Tauri.
+winreg = "0.55"
+
+[dev-dependencies]
+serde_json = "1"

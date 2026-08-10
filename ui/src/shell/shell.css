@@ -236,3 +236,47 @@
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
 }
+
+/* --- The licence banner (P21) -------------------------------------------- */
+
+/* A quiet line above the screen, never a modal. A dialog a cashier has to
+   dismiss before every bill is how a licence system stops a restaurant
+   trading without meaning to. */
+.mb-licence-note {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: calc(var(--space-5) * -1) calc(var(--space-5) * -1) var(--space-4);
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+/* Colour is never the only carrier (§2): the sentence already says it, and
+   this is a stripe rather than a fill so it cannot swallow the words. */
+.mb-licence-note--warn {
+  border-left: var(--space-1) solid var(--warn);
+}
+
+.mb-licence-note--danger {
+  border-left: var(--space-1) solid var(--danger);
+}
+
+.mb-licence-note__go {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}

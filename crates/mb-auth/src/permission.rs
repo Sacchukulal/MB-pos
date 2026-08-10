@@ -55,6 +55,15 @@ pub enum Permission {
     /// who may take an order is not automatically the person who may add a
     /// device to the shop's network.
     DevicesPair,
+    /// P21. **Audit C1's own list ends with this one**: *"anybody who walks
+    /// behind the counter can open Reports and see the whole day's cash, change
+    /// the bill number, delete menu items, delete credit customers, or
+    /// deactivate the licence."*
+    ///
+    /// READING the account screen is `reports.view` — the plan and the renewal
+    /// date are shop information. Deactivating, transferring, or typing an
+    /// emergency code is this.
+    LicenceManage,
 }
 
 impl Permission {
@@ -83,6 +92,7 @@ impl Permission {
         Permission::AuditView,
         Permission::BackupRun,
         Permission::DevicesPair,
+        Permission::LicenceManage,
     ];
 
     /// The stored form. **This string is a database value**: changing one is a
@@ -113,6 +123,7 @@ impl Permission {
             Permission::AuditView => "audit.view",
             Permission::BackupRun => "backup.run",
             Permission::DevicesPair => "devices.pair",
+            Permission::LicenceManage => "licence.manage",
         }
     }
 
@@ -145,6 +156,7 @@ impl Permission {
             Permission::AuditView => "read the history",
             Permission::BackupRun => "take or restore a backup",
             Permission::DevicesPair => "let a phone onto this counter",
+            Permission::LicenceManage => "change this shop's licence",
         }
     }
 
@@ -245,9 +257,9 @@ mod tests {
         // to iterate an enum in Rust without a dependency, and this test is
         // cheaper than one: a variant added below ALL has no row, no screen and
         // no check, and nothing else would notice.
-        assert_eq!(Permission::ALL.len(), 23);
+        assert_eq!(Permission::ALL.len(), 24);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 23, "two permissions share a code");
+        assert_eq!(codes.len(), 24, "two permissions share a code");
     }
 
     #[test]
