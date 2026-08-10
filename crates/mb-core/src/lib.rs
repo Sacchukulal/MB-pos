@@ -53,6 +53,7 @@ pub mod ids;
 pub mod item;
 pub mod money;
 pub mod numbering;
+pub mod kitchen_delivery;
 pub mod order;
 pub mod payment;
 pub mod qty;
@@ -74,6 +75,9 @@ pub use ids::{CategoryId, CustomerId, ItemId, ModifierId, OrderId, StaffId, Tabl
 pub use item::{ItemSnapshot, Modifier, OrderType};
 pub use money::{Money, MoneyError, RoundingMode};
 pub use numbering::{Claimed, Counter, Numbering};
+pub use kitchen_delivery::{
+    ACK_SECONDS, Action as DeliveryAction, Delivery, DeliveryError, State as DeliveryState,
+};
 pub use order::{
     AnyOrder, CancelledOrder, DraftOrder, KitchenLedger, OpenOrder, OrderCore, OrderError,
     SettledOrder, VoidedOrder,
