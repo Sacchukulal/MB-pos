@@ -573,6 +573,13 @@ macro_rules! commands {
             $crate::licensing::transfer_here,
             $crate::licensing::use_emergency_code,
             $crate::licensing::refresh_licence,
+            // P22 — is this counter healthy, and what can we send to support.
+            // Reading health is `reports.view`; the bundle is `backup.run`,
+            // because it is the other end of the same support conversation as
+            // replacing a database.
+            $crate::health::health,
+            $crate::diagnostics::diagnostics_plan,
+            $crate::diagnostics::write_diagnostics,
             // Development only — see its own documentation. It does not exist
             // in a release build.
             #[cfg(debug_assertions)]

@@ -56,6 +56,22 @@ mod licence_tests;
 mod logging;
 mod menu;
 mod preview;
+/// P22. **A secret cannot be in the log**, and this is the half a script
+/// enforces (D93). Audit E7 asks a shopkeeper to email us that file.
+mod redact;
+/// P22. A crash writes a report whether or not anybody agreed to send it
+/// (D95) — audit E8.
+mod crash;
+/// P22. The button that turns a phone call into a fix, and the manifest a
+/// person sees before it exists (D94) — audit E7.
+mod diagnostics;
+/// P22. "Is this counter healthy?", with a fix on every unhealthy row (D100).
+mod health;
+/// P22. **A shop must be able to go back** — audit E9, I1 and ANDROID-G2/G4.
+mod updates;
+/// P22's T5: drive everything that touches a secret, then read the log back.
+#[cfg(test)]
+mod log_tests;
 mod orders;
 mod push;
 /// P18. **One shape for every report**, so one screen renders all of them and
@@ -121,6 +137,29 @@ fn main() {
     logging::start(&config_dir.join("logs"));
     log_info!("Magic Bill {} starting", env!("CARGO_PKG_VERSION"));
 
+    // Step 1b, immediately after — audit E8. A panic before this point has the
+    // log and nothing else, which is why logging goes first and this second.
+    crash::install();
+
+    // Step 1c. **D98: count this attempt before anything can fail.**
+    //
+    // Incremented here and cleared only once the counter is genuinely up
+    // (`window` + a shop, or the first-run state). Two attempts on one version
+    // with no clear in between means the new release does not start on this
+    // machine, and the shop gets its old one back rather than a Saturday night
+    // with no till.
+    let running = updates::Version::running();
+    if updates::Starts::should_roll_back(&config_dir, running) {
+        // The rollback itself is the installer we kept; running it is Phase
+        // 8's other half. What matters here is that the state is DETECTED and
+        // said out loud rather than the counter looping on a broken version.
+        log_error!(
+            "version {running} has failed to start repeatedly — the previous \
+             version should be restored (Settings > Go back)"
+        );
+    }
+    updates::Starts::attempted(&config_dir, running);
+
     // Step 2. The look, so the window is painted correctly the first time
     // rather than flashing light and then going dark.
     let app_config = AppConfig::load();
@@ -144,8 +183,19 @@ fn main() {
                 log_info!("a backup was restored during start-up");
             }
             app_state.open_shop(*db, path);
+            // **The counter is up.** D98's clear, and it is deliberately here
+            // rather than after the window paints: a build that opens a window
+            // and then cannot read the shop's data is a build that must roll
+            // back, and clearing on paint alone would let it keep starting.
+            updates::Starts::healthy(&config_dir);
         }
-        Startup::FirstRun => log_info!("first run — the window opens to set-up"),
+        Startup::FirstRun => {
+            log_info!("first run — the window opens to set-up");
+            // A counter with no shop yet is still a counter that started, so
+            // this start counts as healthy (D98). Withholding it would roll
+            // back a perfectly good release on a brand-new machine.
+            updates::Starts::healthy(&config_dir);
+        }
         Startup::FoundCandidates { candidates, .. } => {
             log_info!(
                 "{} possible data file(s) found — the window opens and asks",

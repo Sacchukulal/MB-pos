@@ -100,6 +100,12 @@ pub struct App {
     /// An `RwLock` and not a `Mutex`: this is read by the network panel, the
     /// shell banner and every gated command, and written about once an hour.
     entitlement: std::sync::RwLock<mb_license::Entitlement>,
+    /// **What the counter knows about updates** (P22).
+    ///
+    /// Held rather than asked for, like the entitlement and for the same
+    /// reason: the health panel and the shell both read it, and neither is
+    /// allowed to make a network call to draw a row.
+    updates: Mutex<crate::updates::UpdateState>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -155,7 +161,23 @@ impl App {
             network: Mutex::new(None),
             licensing: Mutex::new(licensing),
             entitlement: std::sync::RwLock::new(entitlement),
+            updates: Mutex::new(crate::updates::UpdateState {
+                running: crate::updates::Version::running().to_string(),
+                is_dev_build: !crate::updates::is_a_release_build(),
+                ..crate::updates::UpdateState::default()
+            }),
         })
+    }
+
+    /// What the counter knows about updates (P22). A copy of a held value.
+    #[must_use]
+    pub fn updates(&self) -> crate::updates::UpdateState {
+        lock(&self.updates).clone()
+    }
+
+    /// Replace it — after a check, or after a dismissal.
+    pub fn set_updates(&self, state: crate::updates::UpdateState) {
+        *lock(&self.updates) = state;
     }
 
     /// **What this shop is entitled to, right now.**

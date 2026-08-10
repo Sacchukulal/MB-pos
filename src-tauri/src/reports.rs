@@ -978,18 +978,28 @@ pub struct SavedFileView {
     pub message: String,
 }
 
-/// **`Documents\Magic Bill reports\`, and D76 says why it is not `%APPDATA%`.**
-fn export_folder() -> std::path::PathBuf {
+/// **A folder in the owner's Documents, and D76 says why it is not
+/// `%APPDATA%`.**
+///
+/// Generalised at P22, which needed the same rule for the diagnostics bundle:
+/// *an export lands where a person can find it*. Two copies of this would be
+/// two answers to "where did my file go", and the second one would be wrong
+/// first.
+pub(crate) fn documents_folder(under: &str) -> std::path::PathBuf {
     if let Some(profile) = std::env::var_os("USERPROFILE") {
         let documents = std::path::PathBuf::from(profile).join("Documents");
         if documents.is_dir() {
-            return documents.join("Magic Bill reports");
+            return documents.join(under);
         }
     }
     if let Some(home) = std::env::var_os("HOME") {
-        return std::path::PathBuf::from(home).join("Magic Bill reports");
+        return std::path::PathBuf::from(home).join(under);
     }
     crate::config::AppConfig::directory().join("exports")
+}
+
+fn export_folder() -> std::path::PathBuf {
+    documents_folder("Magic Bill reports")
 }
 
 fn save(name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {

@@ -212,6 +212,35 @@ pub fn when(at: mb_core::Timestamp) -> String {
     format!("{day} {month_name}, {hour}:{minute:02} {suffix}")
 }
 
+/// **A size a person reads.** "820 B", "12 KB", "1.4 MB".
+///
+/// One formatter, in the one place that turns machine states into words. P22
+/// wrote two — one in the diagnostics bundle and one in the health panel — and
+/// they disagreed immediately: the panel floored to whole megabytes, so a log
+/// with real content in it reported "0 MB today, 0 MB in all", which reads as
+/// "there is no log" on the screen whose job is to say whether there is one.
+///
+/// Found by looking at it.
+#[must_use]
+#[allow(
+    clippy::integer_division,
+    reason = "a file size for a person, not money"
+)]
+pub fn bytes(count: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * 1024 * 1024;
+    if count < KB {
+        format!("{count} B")
+    } else if count < MB {
+        format!("{} KB", count / KB)
+    } else if count < GB {
+        format!("{}.{} MB", count / MB, (count % MB) / (MB / 10))
+    } else {
+        format!("{}.{} GB", count / GB, (count % GB) / (GB / 10))
+    }
+}
+
 /// A date a person reads: **"12 September"**, not `2026-09-12`.
 ///
 /// > *2.10:* the account screen showed a "next billing date" field. **"Your

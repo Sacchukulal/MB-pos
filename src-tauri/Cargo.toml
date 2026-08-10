@@ -41,6 +41,32 @@ thiserror = "2"
 # S4 budgets 20 MB for the whole installer, which rules out the alternative.
 tauri = { version = "2", features = [] }
 
+# ---------------------------------------------------------------------------
+# P22. Both of these are already in `Cargo.lock` — `regex` behind Tauri's own
+# tooling and `flate2` (which `zip` uses) behind the bundler — so neither is
+# new compiled code in a meaningful sense. S4 is a 20 MB installer budget and
+# that is the number these have to justify themselves against.
+# ---------------------------------------------------------------------------
+
+# The log's secret scanner (`redact.rs`). Six patterns, each of which has to be
+# exactly right about word boundaries — the first hand-rolled version of the
+# phone rule matched every millisecond timestamp in the file. This is the same
+# argument `mb-lan` makes for taking `base64` rather than writing an encoder
+# whose only interesting property is being correct.
+regex = "1"
+
+# SHA-256 for the update package's fingerprint (ANDROID-G2). Already in the
+# tree through rustls and `mb-license`; taking it here rather than adding a
+# second hashing crate keeps one implementation of one algorithm.
+ring = "0.17"
+
+# The diagnostics bundle. Writing a ZIP central directory by hand is about two
+# hundred lines whose only job is to be byte-exact, and a bundle a shopkeeper
+# cannot open is a support call that got worse. `default-features = false` plus
+# `deflate` keeps it to the one compression method Windows Explorer opens
+# natively, over the flate2 already in the tree.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 # One instance per PC. Two counters on one machine fight over the database, the
 # licence and the numbering — and the second one must FOCUS the first window,
 # not die quietly, because "it won't open" is the bug report that follows.

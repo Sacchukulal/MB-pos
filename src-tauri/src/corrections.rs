@@ -314,7 +314,8 @@ pub fn void_bill_on(
             .map_err(|e| words::from_db(&e))
     })?;
 
-    log_info!(
+    crate::log_bill!(
+        voided.core.id,
         "bill {} voided by {} — {reason}",
         voided.bill_number.formatted,
         who.name

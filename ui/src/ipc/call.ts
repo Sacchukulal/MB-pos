@@ -82,6 +82,8 @@ import type { CountArg } from './generated/CountArg';
 import type { DashboardView } from './generated/DashboardView';
 import type { DayCloseView } from './generated/DayCloseView';
 import type { LicenceView } from './generated/LicenceView';
+import type { HealthView } from './generated/HealthView';
+import type { BundlePlanView } from './generated/BundlePlanView';
 import type { NetworkView } from './generated/NetworkView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
@@ -477,6 +479,13 @@ export interface Commands {
   deactivate: { args: void; returns: LicenceView };
   transfer_here: { args: { key: string; proof: string }; returns: LicenceView };
   use_emergency_code: { args: { code: string }; returns: LicenceView };
+
+  // P22 — is this counter healthy, and what can we send to support. The plan
+  // is separate from the write on purpose (D94): a person sees the manifest
+  // before the zip exists.
+  health: { args: void; returns: HealthView };
+  diagnostics_plan: { args: void; returns: BundlePlanView };
+  write_diagnostics: { args: void; returns: string };
 }
 
 

@@ -306,6 +306,15 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("transfer_here", Access::Needs(Permission::LicenceManage)),
     ("use_emergency_code", Access::Needs(Permission::LicenceManage)),
 
+    // --- is this counter healthy (P22) --------------------------------------
+    // The panel is the day's state on a screen, like every other read: audit
+    // C1's rule. The BUNDLE is `backup.run` — it leaves the shop by email, and
+    // the person who may send us the counter's whole history is the same person
+    // who may replace its database.
+    ("health", Access::Needs(Permission::ReportsView)),
+    ("diagnostics_plan", Access::Needs(Permission::BackupRun)),
+    ("write_diagnostics", Access::Needs(Permission::BackupRun)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -574,10 +583,12 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 16] = [
+        const SOURCES: [&str; 18] = [
             include_str!("orders.rs"),
             include_str!("lan.rs"),
             include_str!("licensing.rs"),
+            include_str!("health.rs"),
+            include_str!("diagnostics.rs"),
             include_str!("dayclose.rs"),
             include_str!("reports.rs"),
             include_str!("ipc.rs"),

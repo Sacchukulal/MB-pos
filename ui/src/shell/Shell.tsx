@@ -24,6 +24,7 @@ import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import { useTheme } from '../theme/ThemeProvider';
 import { Account } from '../account/Account';
 import { Billing } from '../billing/Billing';
+import { Health } from '../health/Health';
 import { Gallery } from '../gallery/Gallery';
 import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
@@ -71,7 +72,7 @@ export interface Screen {
  * and is finished. Lazily rendered — nothing that is not on screen is built,
  * which is budget S1 and scope 16.14.
  */
-const SCREENS: readonly Screen[] = [
+const SHIPPED_SCREENS: readonly Screen[] = [
   {
     id: "billing",
     label: "Billing",
@@ -164,12 +165,35 @@ const SCREENS: readonly Screen[] = [
     needs: 'reports.view',
   },
   {
-    id: 'gallery',
-    label: 'Kit',
-    icon: '◑',
-    render: () => <Gallery />,
+    // Beside Account, because the two answer "is my counter all right?" from
+    // the two directions an owner asks it.
+    id: 'health',
+    label: 'Health',
+    icon: '✚',
+    render: () => <Health />,
+    needs: 'reports.view',
   },
 ];
+
+/**
+ * **The component gallery is not a screen a shop has any use for.**
+ *
+ * It was in the rail from P08 because there was nothing else to look at. A
+ * released counter shows twelve rail items on a 1366x768 screen and this is the
+ * one a shopkeeper would open once, by accident, and never understand — so it
+ * goes where it belongs, which is a development build. P22.
+ */
+const SCREENS: readonly Screen[] = import.meta.env.DEV
+  ? [
+      ...SHIPPED_SCREENS,
+      {
+        id: 'gallery',
+        label: 'Kit',
+        icon: '◑',
+        render: () => <Gallery />,
+      },
+    ]
+  : SHIPPED_SCREENS;
 
 export function Shell() {
   const [screen, setScreen] = useState<string>('billing');

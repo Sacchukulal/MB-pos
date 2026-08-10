@@ -296,7 +296,10 @@ pub fn complete_bill_on(app: &App) -> UiResult<String> {
         Ok((formatted, settled))
     })?;
 
-    log_info!("bill {number} settled by {}", who.name);
+    // P22: a line about a bill carries the order id, so a support call that
+    // begins "the bill I printed at about half past eight" can reach a line in
+    // a file. See `log_bill!`.
+    crate::log_bill!(settled.core.id, "settled as {number} by {}", who.name);
     app.record(
         &mb_auth::AuditEntry::new(
             at,
@@ -313,7 +316,10 @@ pub fn complete_bill_on(app: &App) -> UiResult<String> {
     if let Err(e) = queue_bill_print(app, &number, &settled, &bill, &who.name) {
         // Deliberately not fatal: the money is recorded. The failure belongs in
         // the print queue's indicator, which is where a cashier looks.
-        log_warn!("bill {number} settled but could not be queued to print: {e}");
+        log_warn!(
+            "order={} bill {number} settled but could not be queued to print: {e}",
+            settled.core.id
+        );
     }
 
     app.with_cart_mut(|state| {

@@ -145,24 +145,50 @@ pub fn sign(snapshot: &Snapshot, key: &Ed25519KeyPair) -> Result<SignedSnapshot,
 /// [`VerifyError`], and **every one of them is survivable** — the caller falls
 /// back to [`crate::Entitlement::unactivated`] and the shop keeps billing (T13).
 pub fn verify(signed: &SignedSnapshot, keys: &[Vec<u8>]) -> Result<Snapshot, VerifyError> {
+    verify_detached(signed.payload.as_bytes(), &signed.signature, keys)?;
+    serde_json::from_str(&signed.payload).map_err(|_| VerifyError::NotJson)
+}
+
+/// Sign arbitrary bytes. The other half of [`verify_detached`], and what a
+/// release-signing tool will use.
+#[must_use]
+pub fn sign_detached(payload: &[u8], key: &Ed25519KeyPair) -> String {
+    base64::engine::general_purpose::STANDARD.encode(key.sign(payload).as_ref())
+}
+
+/// **Ed25519, once, for the whole product.**
+///
+/// P22's update manifests are signed by a different key for a different reason,
+/// and a second copy of these eight lines is a second place to get the
+/// `is_ok()` the wrong way round. The keys differ; the check does not.
+///
+/// # Errors
+///
+/// [`VerifyError`], and every one of them is survivable by the caller.
+pub fn verify_detached(
+    payload: &[u8],
+    signature_b64: &str,
+    keys: &[Vec<u8>],
+) -> Result<(), VerifyError> {
     if keys.is_empty() {
         return Err(VerifyError::NoTrustedKey);
     }
     let signature = base64::engine::general_purpose::STANDARD
-        .decode(&signed.signature)
+        .decode(signature_b64)
         .map_err(|_| VerifyError::MalformedSignature)?;
 
     // Any trusted key. There will be two of them for exactly as long as it
     // takes P34 to ship, and a fleet mid-rotation is the other case.
     let accepted = keys.iter().any(|key| {
         UnparsedPublicKey::new(&signature::ED25519, key)
-            .verify(signed.payload.as_bytes(), &signature)
+            .verify(payload, &signature)
             .is_ok()
     });
-    if !accepted {
-        return Err(VerifyError::BadSignature);
+    if accepted {
+        Ok(())
+    } else {
+        Err(VerifyError::BadSignature)
     }
-    serde_json::from_str(&signed.payload).map_err(|_| VerifyError::NotJson)
 }
 
 impl Snapshot {

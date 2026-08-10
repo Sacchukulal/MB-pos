@@ -1,0 +1,120 @@
+/*
+ * "Is this counter healthy?" — P22. Every value is a token (D38).
+ */
+
+.mb-health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+/* `.mb-card` is a COLUMN, so a row inside one says so — P18 shipped three
+   stacked and centred because of it. */
+.mb-health__top {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mb-health__headline {
+  margin: 0;
+  font-size: var(--text-lg);
+  color: var(--text);
+  max-width: 62ch;
+}
+
+.mb-health__actions {
+  margin-top: var(--space-3);
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mb-health__name {
+  font-weight: var(--weight-medium);
+}
+
+/* The sentence is the row. It wraps, and the "open that screen" link sits
+   under it rather than squeezing it. */
+.mb-health__says {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 70ch;
+}
+
+.mb-health__go,
+.mb-health__file {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+}
+
+.mb-health__go {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+/* The bundle's manifest — D94: a person sees this before the zip exists. */
+.mb-health__bundle {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mb-health__bundle li {
+  display: grid;
+  /* Fractions rather than a fixed first column: the file names are short and
+     the descriptions are the part worth the room. A raw `14rem` here is also
+     what the token guard rejects, and rightly (D21). */
+  grid-template-columns: 1fr 2fr auto;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--text-sm);
+}
+
+.mb-health__file {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.mb-health__what {
+  color: var(--text-muted);
+}
+
+.mb-health__size {
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The sentence that answers "what did I just send you?" It is the reassurance,
+   so it is body text rather than fine print. */
+.mb-health__excludes {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text);
+  max-width: 62ch;
+}
+
+.mb-health__where {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

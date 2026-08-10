@@ -81,6 +81,6 @@ pub use error::LicenceError;
 pub use gate::{Feature, Refusal, Why};
 pub use machine::{Derivation, MachineId};
 pub use plan::{FeatureSet, Limits, Plan};
-pub use snapshot::{SignedSnapshot, Snapshot, VerifyError};
+pub use snapshot::{SignedSnapshot, Snapshot, VerifyError, verify_detached};
 pub use state::{LicenceFile, Licensing, PendingRelease, TRANSFER_COOLDOWN_DAYS};
 pub use status::{Licence, Standing, Status};
