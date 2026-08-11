@@ -118,6 +118,26 @@ pub mod action {
     /// thing an owner would want to have been able to see afterwards.
     pub const LICENCE_REFUSED: AuditAction = "licence.refused";
 
+    // --- P25, the stock book -------------------------------------------------
+    //
+    // **Only the things a person DECIDED are here.** A sale deducting rice is
+    // not an audit row — it is the ledger, which already says who settled the
+    // bill, and one audit row per material per bill would bury the trail this
+    // table exists to be. What IS here is somebody changing a recipe, moving a
+    // number by hand, or throwing food away.
+    pub const MATERIAL_SAVED: AuditAction = "material.saved";
+    pub const RECIPE_SAVED: AuditAction = "recipe.saved";
+    /// **The one that needs watching.** An adjustment is how a real correction
+    /// is made and also how a theft is covered up.
+    pub const STOCK_ADJUSTED: AuditAction = "stock.adjusted";
+    pub const STOCK_WASTED: AuditAction = "stock.wasted";
+    /// Somebody recorded making a batch of a sub-recipe.
+    pub const STOCK_PRODUCED: AuditAction = "stock.produced";
+    /// The balance cache was rebuilt from the ledger (D114). Rare, and worth
+    /// knowing about afterwards: it is what somebody does when a figure looks
+    /// wrong, and the next question is always "what changed just before it".
+    pub const STOCK_REBUILT: AuditAction = "stock.rebuilt";
+
     /// Every one of the above, for the screen's filter.
     pub const ALL: &[AuditAction] = &[
         LOGIN_OK,
@@ -162,6 +182,12 @@ pub mod action {
         LICENCE_TRANSFERRED,
         LICENCE_EMERGENCY,
         LICENCE_REFUSED,
+        MATERIAL_SAVED,
+        RECIPE_SAVED,
+        STOCK_ADJUSTED,
+        STOCK_WASTED,
+        STOCK_PRODUCED,
+        STOCK_REBUILT,
     ];
 
     /// What the owner reads, rather than the tag. UI_GUIDELINES §6.
@@ -210,6 +236,12 @@ pub mod action {
             LICENCE_TRANSFERRED => "Moved the licence to this computer",
             LICENCE_EMERGENCY => "Used an emergency unlock code",
             LICENCE_REFUSED => "A licensing action was refused",
+            MATERIAL_SAVED => "Changed a material",
+            RECIPE_SAVED => "Changed what a dish is made of",
+            STOCK_ADJUSTED => "Adjusted stock by hand",
+            STOCK_WASTED => "Recorded wastage",
+            STOCK_PRODUCED => "Recorded making a batch",
+            STOCK_REBUILT => "Rebuilt the stock balances from the ledger",
             _ => "Did something this version does not know about",
         }
     }

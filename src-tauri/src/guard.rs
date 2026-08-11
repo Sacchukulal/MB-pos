@@ -342,6 +342,31 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("kitchen_acknowledge", Access::Needs(Permission::BillCreate)),
     ("kitchen_fire", Access::Needs(Permission::BillCreate)),
 
+    // --- the stock book (P25) -----------------------------------------------
+    // **Four permissions, because these are four jobs.** Reading the low-stock
+    // list is not reading the day's cash, which is why `inventory.view` is not
+    // `reports.view`. Editing a recipe decides every stock and food-cost figure
+    // in the product, so it is the strongest. Recording wastage is deliberately
+    // WEAKER than adjusting: writing down that a pan was burnt is a normal
+    // evening for a cook, and a shop where only the owner may do it is a shop
+    // where nobody does. Adjusting is how a real correction is made and also
+    // how a theft is covered up, so it stands alone and always writes an audit
+    // row.
+    //
+    // The command itself picks between `stock.waste` and `stock.adjust` from
+    // the KIND of movement, which is why `record_stock_movement` is listed at
+    // the stronger of the two — this table is the floor, never the ceiling.
+    ("inventory", Access::Needs(Permission::InventoryView)),
+    ("recipe", Access::Needs(Permission::InventoryView)),
+    ("stock_variance", Access::Needs(Permission::InventoryView)),
+    ("buy_list_text", Access::Needs(Permission::InventoryView)),
+    ("save_material", Access::Needs(Permission::InventoryManage)),
+    ("save_recipe", Access::Needs(Permission::InventoryManage)),
+    ("delete_recipe", Access::Needs(Permission::InventoryManage)),
+    ("resolve_stock_problem", Access::Needs(Permission::InventoryManage)),
+    ("record_stock_movement", Access::Needs(Permission::StockWaste)),
+    ("rebuild_stock_balances", Access::Needs(Permission::StockAdjust)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -610,8 +635,9 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 21] = [
+        const SOURCES: [&str; 22] = [
             include_str!("orders.rs"),
+            include_str!("inventory.rs"),
             include_str!("lan.rs"),
             include_str!("licensing.rs"),
             include_str!("health.rs"),

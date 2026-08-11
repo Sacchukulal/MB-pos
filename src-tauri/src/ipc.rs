@@ -517,6 +517,17 @@ macro_rules! commands {
             $crate::expenses::save_recurring_expense,
             $crate::expenses::confirm_recurring_expense,
             $crate::expenses::export_expenses,
+            // P25 — the stock book.
+            $crate::inventory::inventory,
+            $crate::inventory::recipe,
+            $crate::inventory::save_material,
+            $crate::inventory::save_recipe,
+            $crate::inventory::delete_recipe,
+            $crate::inventory::record_stock_movement,
+            $crate::inventory::rebuild_stock_balances,
+            $crate::inventory::resolve_stock_problem,
+            $crate::inventory::stock_variance,
+            $crate::inventory::buy_list_text,
             // P17 — the settings. Five commands for ninety settings, because
             // the catalogue is the screen.
             $crate::settings::ipc::settings_all,

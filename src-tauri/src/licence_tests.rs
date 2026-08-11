@@ -73,7 +73,7 @@ fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
 }
 
 /// Install a licence in a given state, through the **real** activate path.
-fn licence_in(scratch: &Scratch, label: &str, status: Status, renews_in_days: i32) -> Licensing {
+pub(crate) fn licence_in(scratch: &Scratch, label: &str, status: Status, renews_in_days: i32) -> Licensing {
     let dir = scratch.dir().join(label);
     let _ = std::fs::create_dir_all(&dir);
     let at = crate::flows::now();

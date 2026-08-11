@@ -123,6 +123,23 @@ pub const GATED: &[(&str, Feature)] = &[
     // Phones. P19's pairing desk and P20's intents.
     ("open_pairing", Feature::MobileOrdering),
     ("allow_device", Feature::MobileOrdering),
+    // **The stock book (P25) — the SCREENS, and only the screens.**
+    //
+    // `settle` deducts through `mb_db::repo::stock` and never asks this gate.
+    // A shop whose licence lapsed on Tuesday must not have Wednesday's stock
+    // quietly stop moving: the day they pay again the book would be a week
+    // wrong with nothing saying so. Deducting costs nothing and keeps the books
+    // straight; looking at them is what is sold.
+    ("inventory", Feature::Inventory),
+    ("recipe", Feature::Inventory),
+    ("save_material", Feature::Inventory),
+    ("save_recipe", Feature::Inventory),
+    ("delete_recipe", Feature::Inventory),
+    ("record_stock_movement", Feature::Inventory),
+    ("rebuild_stock_balances", Feature::Inventory),
+    ("resolve_stock_problem", Feature::Inventory),
+    ("stock_variance", Feature::Inventory),
+    ("buy_list_text", Feature::Inventory),
 ];
 
 // ---------------------------------------------------------------------------

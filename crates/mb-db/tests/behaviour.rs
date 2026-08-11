@@ -17,6 +17,7 @@
 
 mod common;
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -728,6 +729,49 @@ fn the_orders_table_refuses_what_mb_core_refuses() {
         Ok(())
     })
     .expect("a draft may be incomplete");
+}
+
+/// **Every table is counted in a backup manifest, or is named as one that is
+/// not.**
+///
+/// `backup::COUNTED` opens with *"every table in the schema, hand-listed rather
+/// than discovered, so that a new table has to be added here on purpose"* — and
+/// by P25 it had drifted by **eleven tables**, including every one of P19's
+/// paired phones and every one of P24's kitchen tickets. A backup of a shop that
+/// used either could lose them and still verify clean, which is the exact
+/// failure the manifest exists to catch.
+///
+/// A sentence in a doc comment is not a mechanism. This is D40 — *the rules that
+/// erode are enforced by scripts, not by agreement* — applied to the rule that
+/// says a table cannot go missing.
+#[test]
+fn every_table_is_counted_or_named_as_not() {
+    let scratch = Scratch::new("counted");
+    let db = scratch.open();
+
+    db.read(|conn| {
+        let live: BTreeSet<String> = mb_db::schema::tables(conn)?.into_iter().collect();
+        let counted: BTreeSet<String> =
+            mb_db::backup::COUNTED.iter().map(|t| (*t).to_owned()).collect();
+        let uncounted: BTreeSet<String> =
+            mb_db::backup::UNCOUNTED.iter().map(|t| (*t).to_owned()).collect();
+
+        let missed: Vec<&String> =
+            live.iter().filter(|t| !counted.contains(*t) && !uncounted.contains(*t)).collect();
+        assert!(
+            missed.is_empty(),
+            "these tables are in the database and in neither COUNTED nor UNCOUNTED, \
+             so a backup would not notice losing them: {missed:?}"
+        );
+
+        let phantom: Vec<&String> = counted.union(&uncounted).filter(|t| !live.contains(*t)).collect();
+        assert!(
+            phantom.is_empty(),
+            "these are listed and no longer exist — delete the line: {phantom:?}"
+        );
+        Ok(())
+    })
+    .expect("read the schema");
 }
 
 // ---------------------------------------------------------------------------

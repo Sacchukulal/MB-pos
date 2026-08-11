@@ -227,7 +227,13 @@
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
-  overflow: auto;
+  /* **The PANEL does not scroll — the body does.** It scrolled as a whole
+     until P25, which was invisible for seventeen sessions because no dialog had
+     ever been taller than 85% of the window. The recipe editor is, and Save
+     went below the fold: an owner could fill in a recipe and have no way to
+     keep it. This is P17's "export/import below the fold" in the kit rather
+     than in one screen. Found by opening the editor and looking at it. */
+  overflow: hidden;
 }
 
 .mb-modal--wide {
@@ -239,11 +245,17 @@
   margin: 0;
   font-size: var(--text-xl);
   font-weight: var(--weight-bold);
+  flex-shrink: 0;
 }
 
 .mb-modal__body {
   color: var(--text-muted);
   white-space: pre-line;
+  /* A flex child will not shrink below its content unless it is told to, so
+     without `min-height` the scrollbar never appears and the panel grows past
+     the window instead. */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* **It wraps, and P18 is why.**
@@ -257,6 +269,8 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
+  /* Never scrolled away with the body. See `.mb-modal`. */
+  flex-shrink: 0;
 }
 
 /* --- Toasts: ONE system, stacked --------------------------------------- */

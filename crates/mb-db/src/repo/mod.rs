@@ -46,6 +46,10 @@ pub mod print_jobs;
 /// two different screens.
 pub mod reports;
 pub mod settings;
+/// P25. Materials, recipes and the append-only stock ledger — and the one
+/// function in this crate that is deliberately incapable of refusing a bill
+/// (D112).
+pub mod stock;
 pub mod taxclass;
 
 pub use audit::{AuditFilter, AuditRepo};
@@ -60,6 +64,9 @@ pub use outbox::{Op, OutboxRepo, OutboxRow};
 pub use people::{PeopleRepo, StaffMember};
 pub use print_jobs::{PrintJobRepo, PrintJobRow};
 pub use settings::{SettingValue, SettingsRepo};
+pub use stock::{
+    ConsumptionRow, Material, Movement, MovementKind, MovementRow, OnHand, ProblemRow, StockRepo,
+};
 pub use taxclass::TaxClassRepo;
 
 /// Every repository, over one transaction.
@@ -154,6 +161,13 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn kitchen(&self) -> kitchen::KitchenRepo<'a> {
         kitchen::KitchenRepo::new(self.tx)
+    }
+
+    /// P25 — materials, recipes and the stock ledger. **The one repository
+    /// whose main function cannot refuse a bill** (D112).
+    #[must_use]
+    pub fn stock(&self) -> StockRepo<'a> {
+        StockRepo::new(self.tx)
     }
 
     /// Every report (P18), grouped by the stored business day.

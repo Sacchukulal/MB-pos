@@ -69,7 +69,28 @@ pub fn settle(
         .map_err(|e| DbError::invariant(format!("this bill cannot be settled: {e}")))?;
 
     let any = mb_core::AnyOrder::Settled(settled.clone());
-    db.transaction(|tx| Repos::new(tx).orders().save(outlet, terminal, &any))?;
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos.orders().save(outlet, terminal, &any)?;
+        // **P25, and it is deliberately here rather than after the commit.**
+        //
+        // "Deduction must never slow a sale" reads like an argument for doing
+        // it afterwards, and it is the opposite: this is the SAME commit and
+        // therefore the same single fsync (D23), which on a 5400 rpm disk is
+        // the entire cost of a settle. A background deduction would cost a
+        // second fsync and be slower — and would need its own exactly-once
+        // machinery, its own retry, and a story for a crash in between.
+        //
+        // **It cannot refuse this bill.** `mb_core::recipe::explode` has no
+        // error return at all (D112): a missing material, a negative shelf, a
+        // deleted recipe or a loop all become `stock_problems` rows. The
+        // `Result` below is a disk failure, which would have rolled the bill
+        // back anyway.
+        //
+        // A shop that has never written a recipe leaves through one `EXISTS`
+        // on an empty index — see `StockRepo::deduct_for_bill`.
+        repos.stock().deduct_for_bill(outlet, &settled, at)
+    })?;
     Ok(settled)
 }
 

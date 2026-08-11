@@ -41,6 +41,15 @@ pub enum Feature {
     MobileOrdering,
     /// More than one till on the same shop (P27). A seam today.
     MultiTerminal,
+    /// **The stock book** (P25) — materials, recipes, food cost and the
+    /// variance report. A paid tier in MARKET_GAP_ANALYSIS's own pricing table.
+    ///
+    /// **It gates the SCREENS and is never consulted on the settle path.** A
+    /// shop whose licence lapsed on Tuesday must not have Wednesday's stock
+    /// quietly stop moving: the day they pay again the book would be a week
+    /// wrong with nothing saying so. Deducting costs nothing and keeps the
+    /// books straight; looking at them is what is sold.
+    Inventory,
 }
 
 impl Feature {
@@ -50,6 +59,7 @@ impl Feature {
         Feature::CloudBackup,
         Feature::MobileOrdering,
         Feature::MultiTerminal,
+        Feature::Inventory,
     ];
 
     /// **Closing the day is not a report, and this constant is where that
@@ -75,6 +85,7 @@ impl Feature {
             Feature::CloudBackup => "cloud-backup",
             Feature::MobileOrdering => "mobile-ordering",
             Feature::MultiTerminal => "multi-terminal",
+            Feature::Inventory => "inventory",
         }
     }
 
@@ -87,6 +98,7 @@ impl Feature {
             Feature::CloudBackup => "cloud backup",
             Feature::MobileOrdering => "phone ordering",
             Feature::MultiTerminal => "extra tills",
+            Feature::Inventory => "stock and recipes",
         }
     }
 
@@ -161,7 +173,7 @@ mod tests {
         let codes: Vec<&str> = Feature::ALL.iter().map(|f| f.code()).collect();
         assert_eq!(
             codes,
-            vec!["reports", "cloud-backup", "mobile-ordering", "multi-terminal"],
+            vec!["reports", "cloud-backup", "mobile-ordering", "multi-terminal", "inventory"],
             "the list of gateable features changed"
         );
         for banned in ["billing", "bill", "printing", "print", "local-backup", "drawer"] {

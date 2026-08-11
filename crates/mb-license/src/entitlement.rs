@@ -317,7 +317,7 @@ mod tests {
             assert!(entitlement.may(*feature).is_err(), "{feature:?}");
         }
         // ...and billing is not one of the things it can be asked.
-        assert_eq!(Feature::ALL.len(), 4);
+        assert_eq!(Feature::ALL.len(), 5);
     }
 
     /// **T3 — BACKEND-C3, all three steps.**

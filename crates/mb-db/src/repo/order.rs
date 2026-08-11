@@ -354,7 +354,13 @@ impl<'a> OrderRepo<'a> {
                     line_id,
                     order_id,
                     seq_sql,
-                    line.snapshot.item_id.as_str(),
+                    // **An empty item id is NULL, not `''`.** The column is
+                    // nullable on purpose — an ad-hoc line typed at the counter
+                    // belongs to no menu row — and `''` would be a foreign key
+                    // to an item that does not exist, which SQLite refuses and
+                    // which would make an ad-hoc line impossible to bill.
+                    // Found at P25, by settling one.
+                    Some(line.snapshot.item_id.as_str()).filter(|id| !id.is_empty()),
                     line.snapshot.name,
                     encode::money_to_sql(line.snapshot.unit_price),
                     encode::tax_rate_to_sql(line.snapshot.tax_rate),
@@ -1100,7 +1106,12 @@ struct LineRow {
     discount_by: Option<String>,
 }
 
-fn line_id(order_id: &str, seq: usize) -> String {
+/// **The id of one order line, derived rather than generated.**
+///
+/// P25 reads it from outside this module: a stock movement points at the line it
+/// came from, so a per-line void reverses only its own share. Derived means the
+/// stock walk can name a line before the row is read back.
+pub(crate) fn line_id(order_id: &str, seq: usize) -> String {
     format!("{order_id}_ln_{seq}")
 }
 

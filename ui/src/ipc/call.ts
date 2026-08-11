@@ -67,6 +67,12 @@ import type { CustomerEdit } from './generated/CustomerEdit';
 import type { AccountView } from './generated/AccountView';
 import type { HeadroomView } from './generated/HeadroomView';
 import type { ExpensesView } from './generated/ExpensesView';
+import type { InventoryView } from './generated/InventoryView';
+import type { MaterialEdit } from './generated/MaterialEdit';
+import type { MovementEdit } from './generated/MovementEdit';
+import type { RecipeEdit } from './generated/RecipeEdit';
+import type { RecipeView } from './generated/RecipeView';
+import type { VarianceView } from './generated/VarianceView';
 import type { ExpenseEdit } from './generated/ExpenseEdit';
 import type { SettingsView } from './generated/SettingsView';
 import type { SettingEdit } from './generated/SettingEdit';
@@ -371,6 +377,27 @@ export interface Commands {
   /** The only way a reminder becomes money. */
   confirm_recurring_expense: { args: { id: string }; returns: ExpensesView };
   export_expenses: { args: void; returns: string };
+
+  // --- P25, the stock book --------------------------------------------------
+  // MARKET_GAP_ANALYSIS calls inventory "the biggest single hole". Every
+  // quantity below crosses as a SENTENCE — "1.712 bag", "−180 g" — because
+  // units are where inventory actually fails (D108), and the only thing this
+  // side ever sends back is what a person typed and which unit they typed it
+  // in (D109).
+  inventory: { args: { material: string | null }; returns: InventoryView };
+  recipe: { args: { ownerKind: string; ownerId: string }; returns: RecipeView };
+  save_material: { args: { edit: MaterialEdit }; returns: InventoryView };
+  save_recipe: { args: { edit: RecipeEdit }; returns: RecipeView };
+  delete_recipe: { args: { ownerKind: string; ownerId: string }; returns: RecipeView };
+  /** An opening balance, a purchase before P26, a wastage entry, an adjustment. */
+  record_stock_movement: { args: { edit: MovementEdit }; returns: InventoryView };
+  /** D114 — work the balances out again from the movements. */
+  rebuild_stock_balances: { args: void; returns: InventoryView };
+  resolve_stock_problem: { args: { id: string }; returns: InventoryView };
+  /** Scope 4.9, D115 — theoretical against actual, and what nobody has counted. */
+  stock_variance: { args: { from: string; to: string }; returns: VarianceView[] };
+  /** Scope 4.6 — the buy list as text a person can send. */
+  buy_list_text: { args: void; returns: string };
 
   // --- P17, the settings ----------------------------------------------------
   // Five commands for ninety settings, because the catalogue IS the screen:

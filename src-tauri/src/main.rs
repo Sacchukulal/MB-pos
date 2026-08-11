@@ -42,6 +42,15 @@ mod floor;
 mod expenses;
 mod flows;
 mod guard;
+/// P25. **The stock book** — materials, recipes, wastage, the buy list and
+/// food cost. Every unit conversion and every sentence is made here, because a
+/// screen that divided a quantity by a pack size would be a second answer to
+/// D108.
+mod inventory;
+/// P25 tests: the units worked through, the sale that always completes, and
+/// the cache that has to agree with the ledger.
+#[cfg(test)]
+mod inventory_tests;
 mod ipc;
 /// P19. **The counter as a server** — D9: the phone talks to the till over the
 /// shop's own WiFi, and the cloud is never the road an order travels.

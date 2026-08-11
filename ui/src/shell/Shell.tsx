@@ -33,6 +33,7 @@ import { Audit } from '../auth/Audit';
 import { Bills } from '../corrections/Bills';
 import { Credit } from '../credit/Credit';
 import { Expenses } from '../expenses/Expenses';
+import { Stock } from '../stock/Stock';
 import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
 import { Reports } from '../reports/Reports';
@@ -114,6 +115,16 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     icon: '⌁',
     render: () => <Expenses />,
     needs: 'expenses.manage',
+  },
+  {
+    // Next to Spends, because they are the same question from two sides: what
+    // left as money, and what left as food. MARKET_GAP_ANALYSIS calls this
+    // "the biggest single hole" in the product.
+    id: 'stock',
+    label: 'Stock',
+    icon: '⬒',
+    render: () => <Stock />,
+    needs: 'inventory.view',
   },
   {
     id: 'bills',

@@ -881,8 +881,11 @@ CREATE TABLE refunds (
 CREATE TABLE reasons (
     id         TEXT    NOT NULL PRIMARY KEY,
     outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
+    -- 'wastage' is P25's, and it is a fifth KIND rather than a fifth table:
+    -- this is already the editable-list mechanism, and scope 4.7 asks for
+    -- exactly what it does.
     kind       TEXT    NOT NULL
-        CHECK (kind IN ('void', 'cancel', 'item_void', 'reprint')),
+        CHECK (kind IN ('void', 'cancel', 'item_void', 'reprint', 'wastage')),
     text       TEXT    NOT NULL CHECK (trim(text) <> ''),
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
@@ -1487,6 +1490,290 @@ CREATE INDEX idx_kitchen_done ON kitchen_deliveries (outlet_id, bumped_at)
     WHERE bumped_at IS NOT NULL;
 
 -- ===========================================================================
+-- THE STOCK BOOK (P25) — materials, recipes and an append-only ledger.
+--
+-- **The till is sacred; the stock book is not.** Nothing in these eight tables
+-- is worth one refused sale, and the code that writes them (mb_core::recipe)
+-- deliberately has no error return at all — see D112.
+--
+-- **A number nobody can trace is worse than no number.** An owner buys this to
+-- find out where ₹40,000 a month of raw material goes. A stock figure that is a
+-- column somebody can type over answers nothing; it is the same figure they
+-- already have in a diary with a login screen in front of it. So every quantity
+-- here is the sum of rows that each say who, when and why (D114), which is D67
+-- and P15's credit ledger applied a third time.
+--
+-- **All quantities are INTEGER thousandths of the material's BASE UNIT**, which
+-- is `g`, `ml` or `piece` and is decided by the dimension rather than chosen
+-- (D108). A pack — a bag, a tin, a tray — belongs to the MATERIAL and not to
+-- the unit, because a bag is 25 kg of rice and 50 kg of flour.
+-- ===========================================================================
+
+-- Scope 4.2. What a kitchen consumes, as opposed to what a customer buys.
+--
+-- **P26 will ADD `supplier_id` to this table, and that is allowed.** D22's
+-- "reserve the module, never alter a table" rule is about tables with 600,000
+-- rows in them; this one holds a few hundred, and an ALTER on it chooses a
+-- value for nobody. `buy_from` is the free-text answer until then (D116) and is
+-- also what a shop with one owner and one scooter actually says.
+CREATE TABLE materials (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
+    name       TEXT    NOT NULL CHECK (trim(name) <> ''),
+    -- 'weight', 'volume' or 'count'. The BASE UNIT follows from this and is not
+    -- a column: a shop that could pick kg for rice and g for masala has two
+    -- rice figures the day somebody converts one (D108).
+    dimension  TEXT    NOT NULL CHECK (dimension IN ('weight', 'volume', 'count')),
+    -- Free text, like the expense categories: a starting point a shop edits,
+    -- never a hardcoded list in the source (audit B14).
+    category   TEXT    NOT NULL DEFAULT '',
+    -- **D116** — where you buy it. The buy list groups by this.
+    buy_from   TEXT    NOT NULL DEFAULT '',
+    -- Scope 4.6. Base units, both of them, entered in the shop's own pack.
+    reorder_level INTEGER NOT NULL DEFAULT 0 CHECK (reorder_level >= 0),
+    reorder_qty   INTEGER NOT NULL DEFAULT 0 CHECK (reorder_qty >= 0),
+    -- **D117** — a property that warns, NOT batch tracking. FIFO lots need a
+    -- purchase receipt per lot and a kitchen that records which lot it took,
+    -- and no small Indian restaurant does the second one. A batch system nobody
+    -- feeds produces confident wrong numbers, which is worse than none.
+    is_perishable   INTEGER NOT NULL DEFAULT 0 CHECK (is_perishable IN (0, 1)),
+    shelf_life_days INTEGER CHECK (shelf_life_days IS NULL OR shelf_life_days > 0),
+    -- Scope 4.10, DESIGN. Where in the shop it is kept. A transfer between two
+    -- locations is the same shape as a transfer between two outlets, which is
+    -- why this is here on the first day and why no UI reads it yet.
+    location   TEXT    NOT NULL DEFAULT 'Store',
+    -- **D118** — the WEIGHTED AVERAGE of what actually came in, in paise per
+    -- 1,000 base units. ₹60 a kilo of rice is 6000, which is the number the
+    -- shopkeeper already says out loud.
+    --
+    -- Per THOUSAND base units and not per base unit because water at ₹5 for 20
+    -- litres is 0.025 paise a millilitre, which per base unit rounds to zero
+    -- and makes every recipe that uses it free.
+    avg_cost   INTEGER NOT NULL DEFAULT 0 CHECK (avg_cost >= 0),
+    cost_changed_at INTEGER,
+    -- **D115** — "never counted" is a real answer and the variance report says
+    -- so out loud. P26's physical count writes this; until then it stays NULL
+    -- and every variance figure for this material is marked as unchecked.
+    last_counted_at INTEGER,
+    -- D47: a material is never deleted. Last month's ledger rows point at it.
+    is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE (outlet_id, name)
+) STRICT;
+
+-- The shop's OWN packs. **The standard units are not here** — kg, litre and
+-- dozen come from the dimension and nobody types them (D108). This table is
+-- only for the words a particular shop uses: bag, tin, tray, crate.
+CREATE TABLE material_units (
+    material_id   TEXT    NOT NULL REFERENCES materials (id),
+    name          TEXT    NOT NULL CHECK (trim(name) <> ''),
+    -- Thousandths of the base unit. A 25 kg bag of rice is 25000000.
+    base_per_unit INTEGER NOT NULL CHECK (base_per_unit > 0),
+    -- Which one the buy list and the recipe screen default to. Two separate
+    -- answers on purpose: rice is BOUGHT in bags and COOKED in grams, and a
+    -- screen that offers one where the other belongs is the screen an owner
+    -- abandons.
+    is_purchase_default INTEGER NOT NULL DEFAULT 0 CHECK (is_purchase_default IN (0, 1)),
+    is_recipe_default   INTEGER NOT NULL DEFAULT 0 CHECK (is_recipe_default IN (0, 1)),
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (material_id, name)
+) STRICT;
+
+-- Scope 4.3. What one of something is made of.
+--
+-- **D111 — a sub-recipe is a MATERIAL that has a recipe.** Gravy base, masala
+-- mix, dough: things on a shelf, made in batches, capable of going off. Not a
+-- second kind of entity.
+--
+-- **There is no `variant` owner kind**, and that is P13's doing rather than an
+-- omission: a variant is its own `items` row ("Dosa (Half)" and "Dosa (Full)"
+-- are two things to cook), so scope 4.3's "a recipe per variant" needs no code
+-- at all.
+CREATE TABLE recipes (
+    id          TEXT    NOT NULL PRIMARY KEY,
+    outlet_id   TEXT    NOT NULL REFERENCES outlets (id),
+    owner_kind  TEXT    NOT NULL CHECK (owner_kind IN ('item', 'modifier', 'material')),
+    -- Three real foreign keys rather than one loose `owner_id`, so that the
+    -- database refuses a recipe for a dish that is not on the menu. Exactly one
+    -- is set, and the CHECKs below are what make "exactly" true.
+    item_id     TEXT REFERENCES items (id),
+    modifier_id TEXT REFERENCES modifiers (id),
+    material_id TEXT REFERENCES materials (id),
+    -- **How much one batch makes**, in the OWNER's base units. For a dish or a
+    -- modifier it is one serving (1000) and no screen shows it; for a made
+    -- material it is the chef's sentence — "this batch makes 4 kg".
+    batch_yield INTEGER NOT NULL DEFAULT 1000 CHECK (batch_yield > 0),
+    notes       TEXT    NOT NULL DEFAULT '',
+    updated_at  INTEGER NOT NULL,
+    CHECK ((item_id     IS NOT NULL) = (owner_kind = 'item')),
+    CHECK ((modifier_id IS NOT NULL) = (owner_kind = 'modifier')),
+    CHECK ((material_id IS NOT NULL) = (owner_kind = 'material'))
+) STRICT;
+
+CREATE TABLE recipe_lines (
+    recipe_id     TEXT    NOT NULL REFERENCES recipes (id),
+    seq           INTEGER NOT NULL,
+    material_id   TEXT    NOT NULL REFERENCES materials (id),
+    -- What REACHES THE DISH, in base units. What leaves the shelf is more than
+    -- this whenever the yield is under 100.
+    base_qty      INTEGER NOT NULL CHECK (base_qty > 0),
+    -- **D110 — one percentage, and it is "how much survives".** Onions peeled
+    -- at 90 means issuing 222 g to get 200 g into the pot.
+    --
+    -- There is deliberately no second "wastage percent" column: two fields
+    -- answering one question is D78's `(s)` problem in arithmetic form, and the
+    -- two conventions do not even agree. Compound losses are a SUB-RECIPE.
+    yield_percent INTEGER NOT NULL DEFAULT 100 CHECK (yield_percent BETWEEN 1 AND 100),
+    -- **D109 — the label half.** What the person typed and in which unit, so
+    -- the screen shows back "1 bag" and not "25000000". Nothing computes with
+    -- these two columns.
+    typed_qty     INTEGER NOT NULL,
+    typed_unit    TEXT    NOT NULL,
+    PRIMARY KEY (recipe_id, seq)
+) STRICT;
+
+-- **THE LEDGER. Append-only, and current stock is derived from it.**
+--
+-- The same reasoning as P15's credit ledger and D67's cash position: a balance
+-- you can edit is not evidence. This is the table the whole module is worth
+-- anything because of.
+CREATE TABLE stock_movements (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    material_id   TEXT    NOT NULL REFERENCES materials (id),
+    -- 'opening'        somebody said what was on the shelf on day one
+    -- 'purchase'       P26 writes these; the kind is defined here so P26 adds
+    --                  no column to this table
+    -- 'sale'           a bill took it (D112)
+    -- 'reversal'       a void put it back — D113, by NEGATING a row and never
+    --                  by re-running the recipe
+    -- 'wastage'        scope 4.7, the report that catches theft
+    -- 'adjustment'     a person changed the figure, with a reason
+    -- 'production_in'  a made material came into existence (D111)
+    -- 'production_out' an input consumed by making one
+    -- 'transfer_in'/'transfer_out'  scope 4.10, DESIGN
+    kind          TEXT    NOT NULL CHECK (kind IN (
+                      'opening', 'purchase', 'sale', 'reversal', 'wastage',
+                      'adjustment', 'production_in', 'production_out',
+                      'transfer_in', 'transfer_out')),
+    -- **Signed** thousandths of the base unit. Out is negative, in is positive,
+    -- and the balance is the SUM. There is no separate "in" and "out" column,
+    -- because two columns is two places for a sign error to hide.
+    base_qty      INTEGER NOT NULL CHECK (base_qty <> 0),
+    -- D109 again: the label, for every screen that shows this row back.
+    typed_qty     INTEGER NOT NULL,
+    typed_unit    TEXT    NOT NULL,
+    -- Paise per 1,000 base units AT THE TIME, and the resulting value in paise,
+    -- signed the same way as base_qty. Stored rather than recomputed for
+    -- exactly the reason `bills` is: a cost that changes next month must not
+    -- silently rewrite what last month's wastage was worth.
+    unit_cost     INTEGER NOT NULL DEFAULT 0,
+    total_cost    INTEGER NOT NULL DEFAULT 0,
+    -- **D5, and audit B1 is why.** Every report filters the STORED business
+    -- day, never one re-derived from a timestamp.
+    business_day  INTEGER NOT NULL,
+    at            INTEGER NOT NULL,
+    staff_id      TEXT REFERENCES staff (id),
+    order_id      TEXT REFERENCES orders (id),
+    order_line_id TEXT REFERENCES order_lines (id),
+    reason_id     TEXT REFERENCES reasons (id),
+    note          TEXT,
+    -- **D113.** A reversal points at the row it reverses, so "put back exactly
+    -- what was taken" is a join and not a recomputation.
+    reverses_id   TEXT REFERENCES stock_movements (id),
+    -- Which made material this input fed, for a 'production_out' row. It is
+    -- what lets the ledger read "3 kg tomato → gravy base" instead of leaving
+    -- somebody to work out why the tomato moved.
+    produced_for  TEXT REFERENCES materials (id),
+    -- **D111** — this row happened because a sale needed a made material that
+    -- nobody had recorded making. Visible, never hidden.
+    was_automatic INTEGER NOT NULL DEFAULT 0 CHECK (was_automatic IN (0, 1)),
+    -- Scope 4.10, DESIGN. A transfer is TWO rows sharing one id — out of here,
+    -- into there — which is the same shape whether it crosses a wall or a city.
+    transfer_id           TEXT,
+    counterpart_outlet_id TEXT REFERENCES outlets (id),
+    location      TEXT    NOT NULL DEFAULT 'Store'
+) STRICT;
+
+-- **D114 — the ledger is the truth and this is a CACHE.**
+--
+-- D67 says a balance is a query, and it is right; but the cash book has a few
+-- hundred rows a month and this has five thousand a DAY (250 bills × 4 lines ×
+-- 5 materials). Summing a year to draw a screen is not a design.
+--
+-- So this row is written in the SAME transaction as every movement, a test
+-- rebuilds it from the ledger over a generated month and asserts it agrees to
+-- the base unit, there is a visible "rebuild" action, and Health checks the
+-- two. A cache nobody verifies is a stored balance with extra words.
+CREATE TABLE material_balances (
+    outlet_id        TEXT    NOT NULL REFERENCES outlets (id),
+    material_id      TEXT    NOT NULL REFERENCES materials (id),
+    base_qty         INTEGER NOT NULL DEFAULT 0,
+    last_movement_at INTEGER,
+    PRIMARY KEY (outlet_id, material_id)
+) STRICT;
+
+-- **What the stock book could not do, which did not stop the sale.**
+--
+-- Grouped on (kind, subject) with a count, NOT one row per bill. A shop with
+-- 400 items and 3 recipes would otherwise write four rows every bill for ever,
+-- and the one thing an owner needs to read — "Chicken Biryani has no recipe" —
+-- would be buried under its own repetitions.
+CREATE TABLE stock_problems (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    kind          TEXT    NOT NULL CHECK (kind IN (
+                      'no_recipe', 'retired_material', 'unknown_material',
+                      'went_negative', 'zero_yield', 'too_deep', 'absurd')),
+    -- What it is about: a material id, or "item:itm_x". The grouping key.
+    subject       TEXT    NOT NULL,
+    -- **A whole sentence an owner can act on** — D100's rule, that an unhealthy
+    -- row carries its own fix. Written by `mb_core::recipe::Problem::sentence`.
+    sentence      TEXT    NOT NULL,
+    occurrences   INTEGER NOT NULL DEFAULT 1 CHECK (occurrences > 0),
+    first_at      INTEGER NOT NULL,
+    last_at       INTEGER NOT NULL,
+    last_order_id TEXT REFERENCES orders (id),
+    -- Cleared by fixing the thing, or by the void that undid the bill.
+    resolved_at   INTEGER,
+    UNIQUE (outlet_id, kind, subject)
+) STRICT;
+
+-- The closing figure per material per business day, written by the day close
+-- (P18). It is what makes "what did I have on the 3rd" answerable, what a
+-- period's theoretical-vs-actual is measured between, and what P26's physical
+-- stock count will compare against.
+CREATE TABLE stock_day_closes (
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    business_day INTEGER NOT NULL,
+    material_id  TEXT    NOT NULL REFERENCES materials (id),
+    closing_qty  INTEGER NOT NULL,
+    unit_cost    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (outlet_id, business_day, material_id)
+) STRICT;
+
+-- One recipe per owner. Partial unique indexes rather than a UNIQUE
+-- constraint, because SQLite treats NULLs as distinct and two of the three
+-- owner columns are always NULL.
+CREATE UNIQUE INDEX idx_recipes_item     ON recipes (outlet_id, item_id)     WHERE item_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_recipes_modifier ON recipes (outlet_id, modifier_id) WHERE modifier_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_recipes_material ON recipes (outlet_id, material_id) WHERE material_id IS NOT NULL;
+
+-- "What uses this material?" — asked before deactivating one, and by the
+-- where-used panel on the material screen.
+CREATE INDEX idx_recipe_lines_material ON recipe_lines (material_id);
+
+-- The movements list for one material, newest first. Without this, opening a
+-- material's history is a full scan of the largest table in the module.
+CREATE INDEX idx_stock_movements_material ON stock_movements (outlet_id, material_id, at);
+-- Every period report, filtering the STORED business day (D5).
+CREATE INDEX idx_stock_movements_day ON stock_movements (outlet_id, business_day);
+-- **The void path.** D113 finds the rows a bill wrote and negates them, and it
+-- must not scan a year to do it.
+CREATE INDEX idx_stock_movements_order ON stock_movements (order_id) WHERE order_id IS NOT NULL;
+
+-- ===========================================================================
 -- VIEWS
 --
 -- Timestamps are INTEGER milliseconds, which is the right thing to store and
@@ -1545,7 +1832,16 @@ INSERT INTO permissions (code, description) VALUES
     -- ends with "or deactivate the licence". READING the account screen is
     -- reports.view; deactivating, transferring or typing an emergency unlock
     -- code is this.
-    ('licence.manage',     'Activate, move or deactivate this shop''s licence');
+    ('licence.manage',     'Activate, move or deactivate this shop''s licence'),
+    -- P25. Four, because these are four different jobs in a real kitchen.
+    -- Reading the low-stock list is not reading the day's cash; a cook writing
+    -- down that a pan was burnt is a normal evening; and changing a stock
+    -- figure with no bill and no bin behind it is how a real correction is made
+    -- AND how a theft is covered up.
+    ('inventory.view',     'See stock, recipes and food cost'),
+    ('inventory.manage',   'Add materials and change what a dish is made of'),
+    ('stock.waste',        'Record wastage'),
+    ('stock.adjust',       'Change a stock figure by hand');
 
 -- ===========================================================================
 -- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).
@@ -1592,7 +1888,19 @@ INSERT INTO reasons (id, outlet_id, kind, text, sort_order) VALUES
     ('rsn_rep_customer',  'outlet_default', 'reprint',   'Customer asked for a copy', 0),
     ('rsn_rep_jam',       'outlet_default', 'reprint',   'Printer jammed',            1),
     ('rsn_rep_faded',     'outlet_default', 'reprint',   'Print came out faded',      2),
-    ('rsn_rep_lost',      'outlet_default', 'reprint',   'Bill was lost',             3);
+    ('rsn_rep_lost',      'outlet_default', 'reprint',   'Bill was lost',             3),
+
+    -- P25, scope 4.7. **Wastage is the report that catches theft**, so the
+    -- reasons have to cover the honest evening as well as the suspicious one —
+    -- a list of only blameworthy reasons is a list nobody fills in.
+    ('rsn_wst_spoiled',   'outlet_default', 'wastage',   'Went bad',                  0),
+    ('rsn_wst_burnt',     'outlet_default', 'wastage',   'Burnt or overcooked',       1),
+    ('rsn_wst_spilled',   'outlet_default', 'wastage',   'Spilled or dropped',        2),
+    ('rsn_wst_expired',   'outlet_default', 'wastage',   'Past its date',             3),
+    ('rsn_wst_portion',   'outlet_default', 'wastage',   'Over-portioned',            4),
+    ('rsn_wst_returned',  'outlet_default', 'wastage',   'Sent back by a customer',   5),
+    ('rsn_wst_staff',     'outlet_default', 'wastage',   'Staff meal',                6),
+    ('rsn_wst_trial',     'outlet_default', 'wastage',   'Tasting or trial',          7);
 
 -- ===========================================================================
 -- SEED: the tax classes a shop starts with (P13, audit B10/B11/B14).

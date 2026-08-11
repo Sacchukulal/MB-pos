@@ -292,6 +292,20 @@ pub fn void_bill_on(
                     crate::billing::TERMINAL,
                     &AnyOrder::Voided(voided.clone()),
                 )?;
+                // **P25, D113 — put back exactly what was taken.**
+                //
+                // By NEGATING the rows this bill wrote, never by re-running the
+                // recipe: voiding Tuesday's bill on Friday must return
+                // Tuesday's quantities at Tuesday's costs, and if the chef
+                // changed the gravy on Wednesday, re-exploding would leave the
+                // rice balance permanently richer by the difference.
+                repos.stock().reverse_for_bill(
+                    OUTLET,
+                    &voided.core.id,
+                    at,
+                    day,
+                    Some(&who.staff_id),
+                )?;
                 // **R11 — the same transaction as the thing it describes.**
                 repos.audit().append(
                     OUTLET,

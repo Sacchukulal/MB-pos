@@ -75,6 +75,13 @@ id_type!(StaffId, "Identifies a staff member. P11 gives them roles and PINs.");
 id_type!(CustomerId, "Identifies a customer. P15 gives them a credit ledger.");
 id_type!(OrderId, "Identifies one order, through every state it passes.");
 id_type!(TableId, "Identifies a table. P14 gives it a position on the floor.");
+id_type!(
+    MaterialId,
+    "Identifies a raw material or a made material (P25). \
+     **Not an `ItemId`** — an item is something a customer buys and a material is \
+     something a kitchen consumes, and the day somebody sells a kilo of rice over \
+     the counter those are still two different rows with two different prices."
+);
 
 #[cfg(test)]
 mod tests {

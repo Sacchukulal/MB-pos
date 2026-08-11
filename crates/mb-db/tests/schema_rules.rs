@@ -302,6 +302,21 @@ fn t8_every_named_index_exists() {
         // day. Partial on a bumped_at that exists, because an unfinished
         // ticket has no time to report.
         "idx_kitchen_done",
+        // P25. One recipe per owner, three partial unique indexes rather than
+        // one constraint, because SQLite treats NULLs as distinct and two of a
+        // recipe's three owner columns are always NULL.
+        "idx_recipes_item",
+        "idx_recipes_modifier",
+        "idx_recipes_material",
+        // "What uses this material?" — asked before deactivating one.
+        "idx_recipe_lines_material",
+        // One material's history. Without this, opening a material is a full
+        // scan of the largest table in the module.
+        "idx_stock_movements_material",
+        "idx_stock_movements_day",
+        // **The void path.** D113 finds the rows a bill wrote and negates them,
+        // and must not scan a year of movements to do it.
+        "idx_stock_movements_order",
     ];
 
     let db = Scratch::new("t8").open();

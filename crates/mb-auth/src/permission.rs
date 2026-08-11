@@ -1,4 +1,7 @@
-//! **The vocabulary of "no" — twenty-two words, and there are no others.**
+//! **The vocabulary of "no", and there are no other words.**
+//!
+//! (The count lives in `every_variant_is_in_all` and nowhere else. It was
+//! written into this sentence at P11 and was wrong by P21.)
 //!
 //! > BACKEND-**G7**: *"The staff permission map is free-form. Any key can be
 //! > written; a typo in a permission name silently means 'denied'. There is no
@@ -64,6 +67,28 @@ pub enum Permission {
     /// date are shop information. Deactivating, transferring, or typing an
     /// emergency code is this.
     LicenceManage,
+    /// P25. Reading the stock book: what is on the shelf, what a dish costs,
+    /// what went in the bin. Separate from `ReportsView` because an owner who
+    /// wants a chef to see the low-stock list does not thereby want the chef to
+    /// see the day's cash.
+    InventoryView,
+    /// P25. Changing what a dish is MADE OF, and what a material costs.
+    ///
+    /// The strongest of the four. A recipe decides every stock figure and every
+    /// food-cost figure in the product, so somebody who can edit one can make a
+    /// shortage disappear from the books without touching a single quantity.
+    InventoryManage,
+    /// P25. Recording wastage — the report that catches theft, and therefore
+    /// the one a cook has to be able to feed. Deliberately weaker than
+    /// `StockAdjust`: writing down that a pan was burnt is a normal evening,
+    /// and a shop where only the owner may do it is a shop where nobody does.
+    StockWaste,
+    /// P25. Changing a stock figure with no bill and no bin behind it.
+    ///
+    /// The one that needs watching: an adjustment is how a real correction is
+    /// made and also how a theft is covered up, which is why it is its own
+    /// permission and always writes an audit row.
+    StockAdjust,
 }
 
 impl Permission {
@@ -93,6 +118,10 @@ impl Permission {
         Permission::BackupRun,
         Permission::DevicesPair,
         Permission::LicenceManage,
+        Permission::InventoryView,
+        Permission::InventoryManage,
+        Permission::StockWaste,
+        Permission::StockAdjust,
     ];
 
     /// The stored form. **This string is a database value**: changing one is a
@@ -124,6 +153,10 @@ impl Permission {
             Permission::BackupRun => "backup.run",
             Permission::DevicesPair => "devices.pair",
             Permission::LicenceManage => "licence.manage",
+            Permission::InventoryView => "inventory.view",
+            Permission::InventoryManage => "inventory.manage",
+            Permission::StockWaste => "stock.waste",
+            Permission::StockAdjust => "stock.adjust",
         }
     }
 
@@ -157,6 +190,10 @@ impl Permission {
             Permission::BackupRun => "take or restore a backup",
             Permission::DevicesPair => "let a phone onto this counter",
             Permission::LicenceManage => "change this shop's licence",
+            Permission::InventoryView => "see stock and food cost",
+            Permission::InventoryManage => "change materials and recipes",
+            Permission::StockWaste => "record wastage",
+            Permission::StockAdjust => "adjust stock by hand",
         }
     }
 
@@ -257,9 +294,9 @@ mod tests {
         // to iterate an enum in Rust without a dependency, and this test is
         // cheaper than one: a variant added below ALL has no row, no screen and
         // no check, and nothing else would notice.
-        assert_eq!(Permission::ALL.len(), 24);
+        assert_eq!(Permission::ALL.len(), 28);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 24, "two permissions share a code");
+        assert_eq!(codes.len(), 28, "two permissions share a code");
     }
 
     #[test]

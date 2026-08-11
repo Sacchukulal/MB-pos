@@ -38,6 +38,8 @@
 //! | [`businessday`] | the trading day, stamped once and stored (D5) |
 //! | [`numbering`] | token and bill numbers, claimed atomically (D6) |
 //! | [`order`] | the lifecycle, as types the compiler enforces |
+//! | [`units`] | base units, the shop's own packs, and what a unit costs (D108) |
+//! | [`recipe`] | what a dish is made of, and what a sale takes off the shelf |
 
 #![deny(missing_debug_implementations)]
 
@@ -57,11 +59,16 @@ pub mod kitchen_delivery;
 pub mod order;
 pub mod payment;
 pub mod qty;
+/// P25. Recipes, and what a sale takes off the shelf — pure, and deliberately
+/// incapable of returning an error (D112).
+pub mod recipe;
 pub mod table;
 pub mod tax;
 pub mod taxclass;
 pub mod time;
 pub mod transfer;
+/// P25. Units, packs and the cost of a unit — where inventory actually fails.
+pub mod units;
 
 pub use bill::{Bill, BillError, BillInput, BillLine, compute_bill};
 pub use businessday::{BusinessDay, DayRule};
@@ -71,7 +78,7 @@ pub use charge::{BillCharge, Charge, ChargeBasis, ChargeKind};
 pub use discount::{
     Discount, DiscountEntry, DiscountOutcome, DiscountPolicy, DiscountPolicyError,
 };
-pub use ids::{CategoryId, CustomerId, ItemId, ModifierId, OrderId, StaffId, TableId};
+pub use ids::{CategoryId, CustomerId, ItemId, MaterialId, ModifierId, OrderId, StaffId, TableId};
 pub use item::{ItemSnapshot, Modifier, OrderType};
 pub use money::{Money, MoneyError, RoundingMode};
 pub use numbering::{Claimed, Counter, Numbering};
@@ -84,7 +91,12 @@ pub use order::{
 };
 pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
 pub use qty::{Qty, QtyError};
+pub use recipe::{
+    Costed, CostedLine, Draw, Explosion, MAX_DEPTH, MaterialFacts, Problem, Production, Recipe,
+    RecipeLine, RecipeOwner, Recipes, Sold, cost_of, explode,
+};
 pub use time::{Timestamp, TimeError, UtcOffset};
+pub use units::{Dimension, Pack, UnitCost, UnitError, Units};
 pub use taxclass::{OrderTypeRate, TaxClass, TaxClassId, starting_classes};
 pub use table::{SubTable, TableError, clashes_with, printed_name, printed_seat, same_table};
 pub use transfer::{Pick, Portion, TransferError, even_shares, merge_into, take_lines};

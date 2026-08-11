@@ -80,6 +80,21 @@ impl Qty {
         self.0 < 0
     }
 
+    /// The size of the quantity, ignoring its sign.
+    ///
+    /// Added at P25: a stock balance is the one quantity in this product that
+    /// is allowed to go negative (a shop that sold food it never recorded
+    /// buying), and "which unit should I show this in" is a question about how
+    /// big it is, not which way round it is.
+    ///
+    /// Saturating rather than checked, because `-i64::MIN` is the only input
+    /// that cannot be represented and one thousandth of a unit either way at
+    /// nine quintillion is not a distinction anybody can act on.
+    #[must_use]
+    pub const fn abs(self) -> Self {
+        Qty(self.0.saturating_abs())
+    }
+
     /// Not `std::ops::Add`, for the same reason `Money::add` is not: that trait
     /// cannot fail, and a quantity that wraps is a bill that wraps (D7).
     #[allow(clippy::should_implement_trait, reason = "addition here must be able to fail (D7)")]
@@ -283,6 +298,16 @@ mod tests {
             let q = Qty::from_thousandths(thousandths);
             assert_eq!(Qty::parse(&q.to_string()), Ok(q), "{thousandths} did not round trip");
         }
+    }
+
+    #[test]
+    fn abs_ignores_the_sign_and_cannot_wrap() {
+        assert_eq!(Qty::from_thousandths(-500).abs(), Qty::from_thousandths(500));
+        assert_eq!(Qty::from_thousandths(500).abs(), Qty::from_thousandths(500));
+        assert_eq!(Qty::ZERO.abs(), Qty::ZERO);
+        // The one input that has no positive counterpart. Saturating, not
+        // panicking, because a stock screen must not crash on a corrupt row.
+        assert_eq!(Qty::from_thousandths(i64::MIN).abs(), Qty::from_thousandths(i64::MAX));
     }
 
     #[test]

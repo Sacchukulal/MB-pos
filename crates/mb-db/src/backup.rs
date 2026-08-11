@@ -25,18 +25,28 @@ use crate::migrate;
 /// Every table in the schema, hand-listed rather than discovered, so that a new
 /// table has to be added here on purpose. A table nobody counted is a table
 /// whose loss a verify would not notice.
-const COUNTED: &[&str] = &[
+///
+/// **P25 found that the list had drifted** and made the rule a test rather than
+/// a sentence — `tests/behaviour.rs::every_table_is_counted_or_named_as_not`
+/// fails the build for a table that is in neither this list nor [`UNCOUNTED`].
+/// Eleven tables had gone missing since P12, including every one of P19's paired
+/// phones and every one of P24's kitchen tickets, so a backup of a shop that
+/// used either could lose them and still verify clean. This is D40 again: *the
+/// rules that erode are enforced by scripts, not by agreement.*
+pub const COUNTED: &[&str] = &[
     "applied_events",
     "audit_log",
     "bill_charges",
     "bill_lines",
     "bill_tax_rows",
     "bills",
+    "cash_movements",
     "categories",
     "category_printers",
     "combo_components",
     "combos",
     "counters",
+    "credit_adjustments",
     "customer_payments",
     "customers",
     "day_close_denominations",
@@ -47,7 +57,12 @@ const COUNTED: &[&str] = &[
     "item_modifier_groups",
     "item_variants",
     "items",
+    "kitchen_deliveries",
     "kitchen_ledger",
+    "lan_devices",
+    "material_balances",
+    "material_units",
+    "materials",
     "modifier_groups",
     "modifiers",
     "order_events",
@@ -58,6 +73,11 @@ const COUNTED: &[&str] = &[
     "payments",
     "permissions",
     "printers",
+    "reasons",
+    "recipe_lines",
+    "recipes",
+    "recurring_expenses",
+    "refunds",
     "reprints",
     "reservations",
     "role_permissions",
@@ -65,10 +85,28 @@ const COUNTED: &[&str] = &[
     "sections",
     "settings",
     "staff",
+    "stock_day_closes",
+    "stock_movements",
+    "stock_problems",
     "store_profile",
     "sync_outbox",
+    "tax_class_rates",
+    "tax_classes",
     "terminals",
     "waitlist",
+];
+
+/// Tables deliberately left out of the manifest, each with its reason.
+///
+/// Being on this list is a decision, which is the whole point of having it.
+pub const UNCOUNTED: &[&str] = &[
+    // The migration ledger. It is written by the engine before any of this
+    // exists, and a restore checks the schema version on its own.
+    "schema_version",
+    // **D35: the print spool is a SPOOL, not a log.** Rows leave it when they
+    // print, so its count is whatever happened to be queued at the second the
+    // backup ran — a number that would differ on every verify for no reason.
+    "print_jobs",
 ];
 
 /// What sits beside a backup file.

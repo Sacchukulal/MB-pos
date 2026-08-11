@@ -87,6 +87,30 @@ fn main() {
                FROM applied_events ORDER BY applied_at",
             "SELECT day_close_id, denomination, count
                FROM day_close_denominations ORDER BY denomination DESC",
+            // P25. **The stock book, and the point of reading it back is that a
+            // balance is DERIVED.** The second query sums the ledger; the third
+            // is the cache. If those two ever disagree, D114 is broken and the
+            // screen saying "1.712 bag" is not evidence of anything.
+            "SELECT m.id, m.name, m.dimension, m.avg_cost AS paise_per_1000,
+                    m.reorder_level, m.buy_from, m.is_active
+               FROM materials m ORDER BY m.name",
+            "SELECT u.material_id, u.name, u.base_per_unit, u.is_purchase_default
+               FROM material_units u ORDER BY u.material_id",
+            "SELECT r.owner_kind,
+                    COALESCE(r.item_id, r.modifier_id, r.material_id) AS owner,
+                    r.batch_yield, l.material_id, l.base_qty, l.yield_percent,
+                    l.typed_qty || ' ' || l.typed_unit AS as_typed
+               FROM recipes r LEFT JOIN recipe_lines l ON l.recipe_id = r.id
+              ORDER BY r.id, l.seq",
+            "SELECT material_id, kind, base_qty, typed_qty || ' ' || typed_unit AS as_typed,
+                    unit_cost, total_cost, was_automatic, produced_for, order_id
+               FROM stock_movements ORDER BY at, id LIMIT 40",
+            "SELECT material_id, SUM(base_qty) AS summed_from_the_ledger
+               FROM stock_movements GROUP BY material_id ORDER BY material_id",
+            "SELECT material_id, base_qty AS the_cached_balance FROM material_balances
+              ORDER BY material_id",
+            "SELECT kind, subject, occurrences, substr(sentence, 1, 60) AS says
+               FROM stock_problems WHERE resolved_at IS NULL ORDER BY occurrences DESC",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();
