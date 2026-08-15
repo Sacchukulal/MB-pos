@@ -883,9 +883,10 @@ CREATE TABLE reasons (
     outlet_id  TEXT    NOT NULL REFERENCES outlets (id),
     -- 'wastage' is P25's, and it is a fifth KIND rather than a fifth table:
     -- this is already the editable-list mechanism, and scope 4.7 asks for
-    -- exactly what it does.
+    -- exactly what it does. 'count' is P26's, a sixth, for the same reason —
+    -- why the shelf and the book disagree.
     kind       TEXT    NOT NULL
-        CHECK (kind IN ('void', 'cancel', 'item_void', 'reprint', 'wastage')),
+        CHECK (kind IN ('void', 'cancel', 'item_void', 'reprint', 'wastage', 'count')),
     text       TEXT    NOT NULL CHECK (trim(text) <> ''),
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
@@ -1552,9 +1553,16 @@ CREATE TABLE materials (
     avg_cost   INTEGER NOT NULL DEFAULT 0 CHECK (avg_cost >= 0),
     cost_changed_at INTEGER,
     -- **D115** — "never counted" is a real answer and the variance report says
-    -- so out loud. P26's physical count writes this; until then it stays NULL
-    -- and every variance figure for this material is marked as unchecked.
+    -- so out loud. P26's physical count writes this (`stock_counts`); until a
+    -- shop runs one it stays NULL and every variance figure for this material is
+    -- marked as unchecked.
     last_counted_at INTEGER,
+    -- **P26, and it is the ALTER the comment above licenses.** Who you buy it
+    -- from, when the shop has said. NULL is the everyday answer and `buy_from`
+    -- above is still what the buy list groups by (D116) — a shop with one owner
+    -- and one scooter buys from "the vegetable market" and never names a
+    -- supplier. Setting this is what lets a purchase order be raised.
+    supplier_id     TEXT REFERENCES suppliers (id),
     -- D47: a material is never deleted. Last month's ledger rows point at it.
     is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -1753,6 +1761,351 @@ CREATE TABLE stock_day_closes (
     PRIMARY KEY (outlet_id, business_day, material_id)
 ) STRICT;
 
+-- ===========================================================================
+-- P26 — BUYING: SUPPLIERS, PURCHASES, THE SUPPLIER LEDGER, ORDERS AND THE
+-- PHYSICAL STOCK COUNT. Scope 4.5 and 4.8.
+--
+-- **ONE RUPEE, ONE ROW. ONE KILO, ONE ROW.** (D120.) A delivery of ₹4,200 of
+-- vegetables paid from the till touches four ledgers at once — the shelf
+-- (P25), the drawer (P16), the tax return (P13/P18) and what the shop owes
+-- other people (here) — and the only way they can never disagree is that each
+-- fact is written exactly ONCE, in one transaction, and everything else is a
+-- query over those rows.
+--
+-- So there is **no `expenses` row and no `cash_movements` row** for a
+-- purchase. `cash_position` gains one more term instead. P16's own schema
+-- comment already says this one table further in: two rows for one fact can
+-- disagree, and the day they do nobody can tell which is right.
+--
+-- **No column here holds a balance.** `supplier_balance` is a SUM every time,
+-- exactly as `customer_balance` is (P15).
+-- ===========================================================================
+
+-- Scope 4.5. Who you buy from.
+--
+-- D47: retired, never deleted. Last year's invoices point at this row, and a
+-- retired supplier's ledger still opens.
+CREATE TABLE suppliers (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    name         TEXT    NOT NULL CHECK (trim(name) <> ''),
+    phone        TEXT,
+    -- Checked with P17's Luhn mod 36 before it gets here, exactly as a
+    -- customer's is. A wrong GSTIN on a purchase is a wrong input-credit claim.
+    gstin        TEXT,
+    address      TEXT,
+    -- **Days.** 0 means cash-and-carry: due the day it arrives. This is the
+    -- only supplier-shaped input to ageing, because D131 makes a payment term a
+    -- SHIFT OF THE DATE and not a second algorithm.
+    terms_days   INTEGER NOT NULL DEFAULT 0 CHECK (terms_days >= 0),
+    note         TEXT,
+    is_active    INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    created_at   INTEGER NOT NULL,
+    UNIQUE (outlet_id, name)
+) STRICT;
+
+-- What a supplier sells and what they last charged for it — used to pre-fill a
+-- purchase line and to answer "who is cheapest for paneer".
+--
+-- `last_rate` is per PACK and is deliberately NOT a cost: D122 says the cost is
+-- the weighted average of what came in, and this column is a memory of a price
+-- list. A screen may show it; nothing values stock with it.
+CREATE TABLE supplier_materials (
+    supplier_id TEXT    NOT NULL REFERENCES suppliers (id),
+    material_id TEXT    NOT NULL REFERENCES materials (id),
+    -- The pack that rate is quoted in, by name — "bag", "tin", or the base
+    -- unit. D108: a pack belongs to the MATERIAL, so this is a lookup key and
+    -- never a conversion.
+    pack        TEXT    NOT NULL DEFAULT '',
+    last_rate   INTEGER NOT NULL DEFAULT 0 CHECK (last_rate >= 0),
+    last_bought_day INTEGER,
+    PRIMARY KEY (supplier_id, material_id)
+) STRICT;
+
+-- **The paper.** One row per invoice, kept as it was typed.
+--
+-- A stock movement cannot answer "what did the invoice say", which is the
+-- question a CA and a supplier's clerk both ask, so the document is stored
+-- beside the effect and not instead of it.
+--
+-- **D125 — a purchase is never edited.** It has moved the average cost of five
+-- materials and some of that stock has already been cooked and sold; an edit
+-- would be a rewrite of the past with no record. The one correction path is
+-- cancel-with-a-reason and re-enter, and `is_cancelled` is that state (D47).
+CREATE TABLE purchases (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    -- **NOT NULL on purpose.** The money half of a purchase is "who do I now
+    -- owe", and an invoice with nobody on it cannot be aged, paid or argued
+    -- about. A shop buying loose vegetables makes one supplier called
+    -- "Vegetable market" once, and the screen offers to create it inline.
+    supplier_id   TEXT    NOT NULL REFERENCES suppliers (id),
+    -- 'purchase' or 'return'. **D126 — a return is its own document pointing
+    -- at its parent**, never a negative line edited onto the original, because
+    -- the original is a photograph of something that happened.
+    kind          TEXT    NOT NULL CHECK (kind IN ('purchase', 'return')),
+    parent_id     TEXT REFERENCES purchases (id),
+    invoice_no    TEXT,
+    -- **D5, and audit B1 is why.** Every report filters the STORED business
+    -- day. The invoice's own printed date can differ from the day it was
+    -- entered, and this is the day the shop counts it in.
+    business_day  INTEGER NOT NULL,
+    received_at   INTEGER NOT NULL,
+    -- **The due day, frozen** (D131). supplier.terms_days at the moment of
+    -- entry, applied to business_day — stored rather than recomputed, because
+    -- changing a supplier's terms next month must not re-age last month.
+    due_day       INTEGER NOT NULL,
+    -- Every figure in paise, all of them stored, none of them re-derived. A
+    -- total that is recomputed next year from a rate column is a total that
+    -- changes when a rounding rule does.
+    lines_value       INTEGER NOT NULL DEFAULT 0,
+    line_discounts    INTEGER NOT NULL DEFAULT 0,
+    invoice_discount  INTEGER NOT NULL DEFAULT 0,
+    charges           INTEGER NOT NULL DEFAULT 0,
+    tax_total         INTEGER NOT NULL DEFAULT 0,
+    -- **D124.** How much of that tax the shop may actually claim back. Zero for
+    -- a 5%-scheme shop, and the difference is inside the landed cost.
+    tax_creditable    INTEGER NOT NULL DEFAULT 0,
+    round_off         INTEGER NOT NULL DEFAULT 0,
+    total             INTEGER NOT NULL DEFAULT 0,
+    -- What the person typed on the paper's total line, when they typed one. Kept
+    -- so the report can say "the invoice says ₹4,210 and the lines make ₹4,208"
+    -- rather than silently believing either.
+    stated_total      INTEGER,
+    po_id         TEXT REFERENCES purchase_orders (id),
+    attachment_id TEXT REFERENCES attachments (id),
+    note          TEXT,
+    created_by    TEXT REFERENCES staff (id),
+    is_cancelled  INTEGER NOT NULL DEFAULT 0 CHECK (is_cancelled IN (0, 1)),
+    cancelled_at  INTEGER,
+    cancelled_by  TEXT REFERENCES staff (id),
+    cancel_reason TEXT,
+    CHECK ((kind = 'return') = (parent_id IS NOT NULL)),
+    CHECK ((is_cancelled = 1) = (cancelled_at IS NOT NULL))
+) STRICT;
+
+-- One line of the paper, and **the landed cost that came out of it**.
+--
+-- **D123 — the free bag is in the DENOMINATOR.** Buy 10 bags at ₹1,000 and get
+-- 1 free: eleven bags arrived, ₹10,000 was paid, and a bag cost ₹909.09. A
+-- product that books the free bag at zero cost produces a material whose
+-- average sags after every scheme and a stock valuation wrong by the same
+-- amount.
+CREATE TABLE purchase_lines (
+    purchase_id   TEXT    NOT NULL REFERENCES purchases (id),
+    seq           INTEGER NOT NULL,
+    material_id   TEXT    NOT NULL REFERENCES materials (id),
+    -- **D109 — both numbers, always.** What was typed and in which unit, and
+    -- the base-unit truth everything computes with.
+    typed_qty     INTEGER NOT NULL CHECK (typed_qty > 0),
+    typed_unit    TEXT    NOT NULL,
+    base_qty      INTEGER NOT NULL CHECK (base_qty > 0),
+    -- The scheme's free quantity, in the same unit. Charged at nothing and
+    -- received all the same.
+    free_typed_qty INTEGER NOT NULL DEFAULT 0 CHECK (free_typed_qty >= 0),
+    free_base_qty  INTEGER NOT NULL DEFAULT 0 CHECK (free_base_qty >= 0),
+    -- Paise per TYPED unit — ₹1,000 a bag is 100000 — because that is what the
+    -- invoice says and what the person types.
+    rate          INTEGER NOT NULL DEFAULT 0 CHECK (rate >= 0),
+    line_value    INTEGER NOT NULL DEFAULT 0,
+    discount      INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0),
+    tax_rate_bp   INTEGER NOT NULL DEFAULT 0 CHECK (tax_rate_bp >= 0),
+    tax_amount    INTEGER NOT NULL DEFAULT 0,
+    -- This line's share of the invoice's charges and of its whole-invoice
+    -- discount, both split by line value under **D14's largest remainder** so
+    -- the parts sum EXACTLY to the charge. A second rounding rule is a second
+    -- answer, and one of them is wrong.
+    charge_share  INTEGER NOT NULL DEFAULT 0,
+    discount_share INTEGER NOT NULL DEFAULT 0,
+    -- The numerator: what this line really cost, all in.
+    landed_value  INTEGER NOT NULL DEFAULT 0,
+    -- Paise per 1,000 base units, the same scale as `materials.avg_cost`, so
+    -- ₹40 a kilo is 4000 — the number the shopkeeper says out loud.
+    landed_unit_cost INTEGER NOT NULL DEFAULT 0,
+    -- The ledger row this line wrote. **This is what makes D126 exact**: a
+    -- return goes out at what these goods cost when they came, read from here.
+    movement_id   TEXT REFERENCES stock_movements (id),
+    -- On a RETURN line: which line of the parent invoice is going back. What is
+    -- left to return is then a query, not a cache anybody can drift.
+    returns_seq   INTEGER,
+    PRIMARY KEY (purchase_id, seq)
+) STRICT;
+
+-- **D121 — what was bought and what was paid are two facts.**
+--
+-- "Paid cash at the door" is one press on the purchase screen and two rows
+-- here. The flag it replaces cannot express paying half now, paying three old
+-- invoices with one note on Sunday, paying by UPI two days later, or paying
+-- somebody you have no invoice from yet — and all four happen weekly.
+CREATE TABLE supplier_payments (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    supplier_id  TEXT    NOT NULL REFERENCES suppliers (id),
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    -- The real mode — audit B12: never the string "Full Settlement". **'cash'
+    -- is the one the drawer reads**, which is why one boolean was not enough
+    -- here either (P16 said the same about expenses).
+    mode         TEXT    NOT NULL CHECK (mode IN ('cash', 'bank', 'upi', 'card')),
+    reference    TEXT,
+    -- Set when the money went over with the delivery. NULL is the normal
+    -- weekly-settlement case, and the ageing applies it oldest-first (D131)
+    -- rather than making anybody allocate it by hand.
+    purchase_id  TEXT REFERENCES purchases (id),
+    paid_at      INTEGER NOT NULL,
+    business_day INTEGER NOT NULL,
+    paid_by      TEXT REFERENCES staff (id),
+    note         TEXT
+) STRICT;
+
+-- An opening balance, a write-off, or a correction — the supplier side of
+-- `credit_adjustments`, and the same shape for the same reason.
+CREATE TABLE supplier_adjustments (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    supplier_id  TEXT    NOT NULL REFERENCES suppliers (id),
+    -- Always positive; `increases` is the direction. A negative amount in a
+    -- ledger is how a subtraction becomes an addition in somebody's report six
+    -- months later.
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    increases    INTEGER NOT NULL CHECK (increases IN (0, 1)),
+    reason       TEXT    NOT NULL CHECK (trim(reason) <> ''),
+    at           INTEGER NOT NULL,
+    business_day INTEGER NOT NULL,
+    made_by      TEXT REFERENCES staff (id)
+) STRICT;
+
+-- **D130 — a purchase order is optional, and the proof is that nothing reads
+-- one.** The purchase screen never asks for a PO and never mentions one. A shop
+-- that never raises one never meets this table.
+CREATE TABLE purchase_orders (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    supplier_id  TEXT    NOT NULL REFERENCES suppliers (id),
+    number       TEXT    NOT NULL,
+    state        TEXT    NOT NULL
+        CHECK (state IN ('draft', 'sent', 'received', 'closed', 'cancelled')),
+    expected_day INTEGER,
+    note         TEXT,
+    created_at   INTEGER NOT NULL,
+    created_by   TEXT REFERENCES staff (id),
+    sent_at      INTEGER,
+    closed_at    INTEGER,
+    UNIQUE (outlet_id, number)
+) STRICT;
+
+CREATE TABLE purchase_order_lines (
+    po_id       TEXT    NOT NULL REFERENCES purchase_orders (id),
+    seq         INTEGER NOT NULL,
+    material_id TEXT    NOT NULL REFERENCES materials (id),
+    typed_qty   INTEGER NOT NULL CHECK (typed_qty > 0),
+    typed_unit  TEXT    NOT NULL,
+    base_qty    INTEGER NOT NULL CHECK (base_qty > 0),
+    rate        INTEGER NOT NULL DEFAULT 0 CHECK (rate >= 0),
+    PRIMARY KEY (po_id, seq)
+) STRICT;
+
+-- Scope 4.8. **The monthly reality check, and the reason the whole module is
+-- worth paying for**: recipes tell you what SHOULD have gone, and only a person
+-- with a clipboard can tell you what DID.
+--
+-- **D127 — the count freezes the book and posts a DELTA.** The manager counts
+-- at 11 pm on Sunday; the owner approves on Monday at 9 am, after Monday's
+-- 25 kg of rice has arrived. A system that SETS the balance to Sunday's figure
+-- erases the delivery and nobody notices for a month. So every line carries the
+-- book quantity as it was at the moment that line was counted, and approval
+-- posts `counted − book_at_that_moment`.
+--
+-- **D129** — draft → approved, or draft → abandoned with a reason. An approved
+-- count is sealed for ever and is never deleted; its adjustments are ordinary
+-- ledger rows carrying its id, so the variance history is a query.
+CREATE TABLE stock_counts (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    -- Scope 4.10's `location`, which is why the count sheet groups by it.
+    location      TEXT    NOT NULL DEFAULT 'Store',
+    state         TEXT    NOT NULL CHECK (state IN ('draft', 'approved', 'abandoned')),
+    business_day  INTEGER NOT NULL,
+    opened_at     INTEGER NOT NULL,
+    opened_by     TEXT REFERENCES staff (id),
+    approved_at   INTEGER,
+    -- Approving needs `stock.adjust`, not a permission of its own: approving a
+    -- count IS adjusting stock by hand, at scale, and a separate one would let a
+    -- shop grant the big power while denying the small one.
+    approved_by   TEXT REFERENCES staff (id),
+    ended_reason  TEXT,
+    note          TEXT,
+    CHECK ((state = 'approved') = (approved_at IS NOT NULL))
+) STRICT;
+
+CREATE TABLE stock_count_lines (
+    count_id      TEXT    NOT NULL REFERENCES stock_counts (id),
+    seq           INTEGER NOT NULL,
+    material_id   TEXT    NOT NULL REFERENCES materials (id),
+    -- **The frozen book figure and when it was frozen** — D127. Without these
+    -- two columns the variance is computed against whatever the shelf says at
+    -- approval time, which is the bug.
+    book_qty      INTEGER NOT NULL,
+    book_at       INTEGER NOT NULL,
+    counted_qty   INTEGER NOT NULL,
+    -- D109 again: what the person actually wrote on the sheet.
+    typed_qty     INTEGER NOT NULL,
+    typed_unit    TEXT    NOT NULL,
+    -- counted − book, and its value at the material's cost. **A variance in
+    -- kilos is one nobody reads; a variance in rupees is the one that finds the
+    -- person taking the paneer home.**
+    variance_qty  INTEGER NOT NULL,
+    unit_cost     INTEGER NOT NULL DEFAULT 0,
+    variance_value INTEGER NOT NULL DEFAULT 0,
+    reason_id     TEXT REFERENCES reasons (id),
+    note          TEXT,
+    -- The adjustment this line posted when the count was approved.
+    movement_id   TEXT REFERENCES stock_movements (id),
+    PRIMARY KEY (count_id, seq)
+) STRICT;
+
+-- **D132 — D69 answered. The photograph is a FILE beside the database, and its
+-- metadata is this row.**
+--
+-- A photographed invoice, downscaled in the webview (D37's precedent — canvas,
+-- 1600 px, JPEG 0.7, and therefore NO image dependency in Rust), is ~200 KB. A
+-- shop takes ~100 deliveries a month, so inside the database that is 240 MB a
+-- year: `VACUUM INTO` would copy all of it and R5/R6 would blow up on the
+-- reference machine's 5400 rpm disk, every second of it spent copying pictures
+-- no query reads.
+--
+-- So the bytes live in `attachments\` beside the database, named by content
+-- hash, and **a backup is now a folder** — the .db, the pictures, and a
+-- manifest. A row here with no file is then a DETECTABLE fact and not a
+-- mystery, which is the whole reason the metadata is in the database at all.
+CREATE TABLE attachments (
+    id          TEXT    NOT NULL PRIMARY KEY,
+    outlet_id   TEXT    NOT NULL REFERENCES outlets (id),
+    kind        TEXT    NOT NULL CHECK (kind IN ('purchase')),
+    -- What it is a picture of. Not a foreign key: the attachment is written
+    -- before the purchase row exists (a person photographs the paper, then
+    -- types the lines), and a constraint that forces the other order would put
+    -- a modal in the middle of the fastest screen in the module.
+    subject_id  TEXT,
+    -- The name on disk, which is `<sha256>.jpg`. Stored rather than derived so
+    -- that a future format change cannot orphan today's files.
+    filename    TEXT    NOT NULL,
+    byte_count  INTEGER NOT NULL CHECK (byte_count > 0),
+    sha256      TEXT    NOT NULL,
+    created_at  INTEGER NOT NULL,
+    created_by  TEXT REFERENCES staff (id)
+) STRICT;
+
+-- The ledger, oldest first, for one supplier's account.
+CREATE INDEX idx_purchases_supplier ON purchases (supplier_id, business_day);
+-- Every period report, on the STORED business day (D5).
+CREATE INDEX idx_purchases_day ON purchases (outlet_id, business_day);
+-- "What did I pay for onions, and when did it go up" — the price-trend report.
+CREATE INDEX idx_purchase_lines_material ON purchase_lines (material_id);
+CREATE INDEX idx_supplier_payments_supplier ON supplier_payments (supplier_id, business_day);
+CREATE INDEX idx_supplier_adjustments_supplier ON supplier_adjustments (supplier_id, business_day);
+CREATE INDEX idx_stock_counts_day ON stock_counts (outlet_id, business_day);
+CREATE INDEX idx_attachments_subject ON attachments (subject_id) WHERE subject_id IS NOT NULL;
+
 -- One recipe per owner. Partial unique indexes rather than a UNIQUE
 -- constraint, because SQLite treats NULLs as distinct and two of the three
 -- owner columns are always NULL.
@@ -1841,7 +2194,15 @@ INSERT INTO permissions (code, description) VALUES
     ('inventory.view',     'See stock, recipes and food cost'),
     ('inventory.manage',   'Add materials and change what a dish is made of'),
     ('stock.waste',        'Record wastage'),
-    ('stock.adjust',       'Change a stock figure by hand');
+    ('stock.adjust',       'Change a stock figure by hand'),
+    -- P26. Three, and the split is the same reasoning as P25's four. Entering a
+    -- delivery is a daily job for whoever is at the counter; deciding what the
+    -- shop owes and paying it is not. And COUNTING is a helper with a clipboard,
+    -- while APPROVING a count moves the book — so approval reuses `stock.adjust`
+    -- and no fourth permission is invented for it.
+    ('suppliers.manage',   'Add suppliers and record what is owed and paid'),
+    ('purchases.manage',   'Enter deliveries, returns and purchase orders'),
+    ('stock.count',        'Walk the store and write down what is there');
 
 -- ===========================================================================
 -- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).
@@ -1900,7 +2261,19 @@ INSERT INTO reasons (id, outlet_id, kind, text, sort_order) VALUES
     ('rsn_wst_portion',   'outlet_default', 'wastage',   'Over-portioned',            4),
     ('rsn_wst_returned',  'outlet_default', 'wastage',   'Sent back by a customer',   5),
     ('rsn_wst_staff',     'outlet_default', 'wastage',   'Staff meal',                6),
-    ('rsn_wst_trial',     'outlet_default', 'wastage',   'Tasting or trial',          7);
+    ('rsn_wst_trial',     'outlet_default', 'wastage',   'Tasting or trial',          7),
+
+    -- P26, scope 4.8. Why the shelf and the book disagree. The honest reasons
+    -- come first for the same reason the wastage list does: a list of only
+    -- blameworthy reasons is a list nobody fills in, and then the variance
+    -- report has no reasons on it at all.
+    ('rsn_cnt_unrecorded', 'outlet_default', 'count', 'Used but never written down', 0),
+    ('rsn_cnt_wastage',    'outlet_default', 'count', 'Wastage nobody recorded',     1),
+    ('rsn_cnt_recipe',     'outlet_default', 'count', 'The recipe is not accurate',  2),
+    ('rsn_cnt_weight',     'outlet_default', 'count', 'Delivery weighed short',      3),
+    ('rsn_cnt_unit',       'outlet_default', 'count', 'Entered in the wrong unit',   4),
+    ('rsn_cnt_miscount',   'outlet_default', 'count', 'Counted wrong last time',     5),
+    ('rsn_cnt_missing',    'outlet_default', 'count', 'Missing — cannot explain it', 6);
 
 -- ===========================================================================
 -- SEED: the tax classes a shop starts with (P13, audit B10/B11/B14).

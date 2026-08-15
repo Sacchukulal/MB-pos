@@ -55,6 +55,15 @@ tauri = { version = "2", features = [] }
 # whose only interesting property is being correct.
 regex = "1"
 
+# P26, D132. The photograph of a paper invoice arrives from the webview as a
+# data URL, because that is where it is downscaled (D37 put the logo conversion
+# in the browser for the same reason, and it is what keeps an image crate out of
+# Rust entirely). A base64 decoder whose only interesting property is being
+# correct is exactly the argument `mb-lan`, `mb-auth` and `mb-license` already
+# made — and this crate is already in the binary behind all three, so it adds
+# **no new compiled code**.
+base64 = "0.22"
+
 # SHA-256 for the update package's fingerprint (ANDROID-G2). Already in the
 # tree through rustls and `mb-license`; taking it here rather than adding a
 # second hashing crate keeps one implementation of one algorithm.

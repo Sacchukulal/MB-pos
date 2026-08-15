@@ -103,6 +103,7 @@ pub fn look(app: &App) -> HealthView {
         printers_row(app),
         network_row(app),
         disk_row(app),
+        photos_row(app),
         log_row(),
         crashes_row(),
     ];
@@ -334,6 +335,82 @@ fn crashes_row() -> HealthRow {
         ),
     )
     .go("settings")
+}
+
+/// **The photographs — D132, and the row exists because a backup that quietly
+/// left them behind would be a promise the product does not keep.**
+///
+/// Two things it can say, and both carry their own fix (D100): the folder is
+/// getting big, or the last backup did not carry it. Nothing is ever deleted
+/// automatically — a shop's own invoices are not ours to tidy.
+fn photos_row(app: &App) -> HealthRow {
+    let Ok((dir, rows)) = app.with_shop(|shop| {
+        let dir = mb_db::backup::attachments_dir(shop.db.path());
+        let rows = shop
+            .db
+            .read_transaction(|tx| mb_db::Repos::new(tx).buying().attachments(crate::state::OUTLET))
+            .unwrap_or_default();
+        Ok((dir, rows))
+    }) else {
+        return HealthRow::ok("photos", "Invoice photographs", "Nothing photographed yet.");
+    };
+
+    if rows.is_empty() {
+        return HealthRow::ok(
+            "photos",
+            "Invoice photographs",
+            "No photographs of paper invoices yet. You can attach one when you enter a \
+             delivery.",
+        );
+    }
+
+    // A row with no file is the failure the metadata exists to make visible.
+    let missing = rows.iter().filter(|a| !dir.join(&a.filename).exists()).count();
+    let total: u64 = rows.iter().filter_map(|a| u64::try_from(a.byte_count).ok()).sum();
+
+    if missing > 0 {
+        return HealthRow::bad(
+            "photos",
+            "Invoice photographs",
+            format!(
+                "{} recorded but not on the disk. Restore from a backup that has them, or \
+                 photograph those invoices again.",
+                crate::words::count(
+                    i64::try_from(missing).unwrap_or(0),
+                    "photograph is",
+                    "photographs are"
+                )
+            ),
+        )
+        .go("settings");
+    }
+    if total > crate::buying::PHOTO_FOLDER_WARN_BYTES {
+        return HealthRow::warn(
+            "photos",
+            "Invoice photographs",
+            format!(
+                "{} of photographs, {}. They are backed up with your data, so the backup \
+                 takes longer the more there are. Nothing is deleted automatically — move \
+                 the old ones out of {} yourself if you want to.",
+                crate::words::bytes(total),
+                crate::words::count(
+                    i64::try_from(rows.len()).unwrap_or(0),
+                    "picture",
+                    "pictures"
+                ),
+                dir.display()
+            ),
+        );
+    }
+    HealthRow::ok(
+        "photos",
+        "Invoice photographs",
+        format!(
+            "{}, {}. They go into your backup with everything else.",
+            crate::words::count(i64::try_from(rows.len()).unwrap_or(0), "picture", "pictures"),
+            crate::words::bytes(total)
+        ),
+    )
 }
 
 /// **Gone — `words::bytes` is the one formatter.**

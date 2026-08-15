@@ -42,6 +42,7 @@ import {
   useToast,
   type Column,
 } from '../kit';
+import { Count } from '../buying/Count';
 import { call, isUiError } from '../ipc/call';
 import type { BuyGroupView } from '../ipc/generated/BuyGroupView';
 import type { DishCostView } from '../ipc/generated/DishCostView';
@@ -219,8 +220,14 @@ export function Stock() {
           { id: 'buy', label: 'What to buy' },
           { id: 'moves', label: 'Movements' },
           { id: 'problems', label: `Needs a look${view.problems.length > 0 ? ` (${view.problems.length})` : ''}` },
+          // **P26, scope 4.8.** The count belongs here and not on Buying: it is
+          // a question about the shelf, and this is where the person already is
+          // when they ask it.
+          { id: 'count', label: 'Count' },
         ]}
       />
+
+      {tab === 'count' ? <Count /> : null}
 
       {tab === 'shelf' ? (
         shown.length === 0 ? (

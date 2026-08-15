@@ -34,6 +34,7 @@ import { Bills } from '../corrections/Bills';
 import { Credit } from '../credit/Credit';
 import { Expenses } from '../expenses/Expenses';
 import { Stock } from '../stock/Stock';
+import { Buying } from '../buying/Buying';
 import { Floor } from '../floor/Floor';
 import { Menu } from '../menu/Menu';
 import { Reports } from '../reports/Reports';
@@ -125,6 +126,17 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     icon: '⬒',
     render: () => <Stock />,
     needs: 'inventory.view',
+  },
+  {
+    // Next to Stock, because they are the same shelf from two ends: what came
+    // in, and what is on it. Buying holds deliveries, suppliers and orders;
+    // the COUNT is a tab on Stock, because a count is a question about the
+    // shelf and that is where the person already is.
+    id: 'buying',
+    label: 'Buying',
+    icon: '⇩',
+    render: () => <Buying />,
+    needs: 'purchases.manage',
   },
   {
     id: 'bills',

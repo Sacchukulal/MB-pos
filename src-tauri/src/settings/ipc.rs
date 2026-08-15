@@ -161,6 +161,12 @@ pub const fn permission_for(group: Group) -> Permission {
         // A bill number is what a GST return is a list of, so moving one is
         // the same authority as changing a tax rate.
         Group::Numbering => Permission::SettingsTax,
+        // P26. The threshold at which a count variance needs explaining is a
+        // stock-book decision, so it is behind the permission that lets
+        // somebody move a stock figure at all — not `settings.store`. A shop
+        // where the person who can hide a shortage can also raise the bar for
+        // being asked about one has given away the same power twice.
+        Group::Stock => Permission::StockAdjust,
         // The look and the language are "how this shop presents itself".
         Group::Appearance => Permission::SettingsStore,
         Group::Backup => Permission::BackupRun,

@@ -40,6 +40,7 @@
 //! | [`order`] | the lifecycle, as types the compiler enforces |
 //! | [`units`] | base units, the shop's own packs, and what a unit costs (D108) |
 //! | [`recipe`] | what a dish is made of, and what a sale takes off the shelf |
+//! | [`purchase`] | what a delivery actually cost, free bags and tempo included |
 
 #![deny(missing_debug_implementations)]
 
@@ -58,6 +59,9 @@ pub mod numbering;
 pub mod kitchen_delivery;
 pub mod order;
 pub mod payment;
+/// P26. What a delivery actually cost — pure, and the free bag is a
+/// denominator (D123).
+pub mod purchase;
 pub mod qty;
 /// P25. Recipes, and what a sale takes off the shelf — pure, and deliberately
 /// incapable of returning an error (D112).
@@ -90,6 +94,12 @@ pub use order::{
     SettledOrder, VoidedOrder,
 };
 pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
+// **Not `Costed` or `CostedLine`** — `recipe` already exports both, and two
+// types with one name in the prelude is how a caller ends up costing a delivery
+// with a recipe's arithmetic. `mb_core::purchase::Costed` is spelled out.
+pub use purchase::{
+    CostedInvoice, Entry as PurchaseEntry, Invoice, PurchaseError, cost_invoice,
+};
 pub use qty::{Qty, QtyError};
 pub use recipe::{
     Costed, CostedLine, Draw, Explosion, MAX_DEPTH, MaterialFacts, Problem, Production, Recipe,

@@ -44,6 +44,10 @@ pub enum Group {
     Numbering,
     Billing,
     Day,
+    /// P26. The stock book has exactly one scalar setting: the threshold a
+    /// count variance has to pass before the screen asks why. Everything else
+    /// about stock is a record, not a preference.
+    Stock,
     Backup,
     Appearance,
 }
@@ -61,6 +65,7 @@ impl Group {
         Group::Numbering,
         Group::Billing,
         Group::Day,
+        Group::Stock,
         Group::Backup,
         Group::Appearance,
     ];
@@ -76,6 +81,7 @@ impl Group {
             Group::Numbering => "Bill and token numbers",
             Group::Billing => "Billing",
             Group::Day => "The day",
+            Group::Stock => "Stock",
             Group::Backup => "Backup",
             Group::Appearance => "How it looks",
         }
@@ -93,6 +99,7 @@ impl Group {
             Group::Numbering => "numbering",
             Group::Billing => "billing",
             Group::Day => "day",
+            Group::Stock => "stock",
             Group::Backup => "backup",
             Group::Appearance => "appearance",
         }
@@ -818,6 +825,16 @@ pub const CATALOG: &[Entry] = &[
     // P18's day close. The threshold is the shop's own tolerance: a stall that
     // deals in tens does not want a form every time it is ₹2 out, and a
     // restaurant taking ₹80,000 a day wants one at ₹100.
+    // P26, scope 4.8. The sibling of the drawer's threshold below, and worded
+    // the same way on purpose: a shop that has learnt what one means has
+    // learnt what the other means.
+    cash!("stock.count_reason_above", Stock, Row, "Ask why if a counted item is out by more than",
+        "When a stock count finds a material short or over by more than this in \
+         value, it asks for a reason before it can be approved. Zero asks every \
+         time.",
+        ["count", "variance", "short", "reason", "stock"],
+        0..=1_000_000, stock.count_reason_above),
+
     cash!("day.variance_reason_above", Day, Row, "Ask for a reason if the drawer is out by more than",
         "When the counted cash differs from the expected cash by more than \
          this, closing the day asks why. Zero asks every time.",

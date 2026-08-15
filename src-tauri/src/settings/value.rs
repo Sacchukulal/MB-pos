@@ -241,7 +241,10 @@ fn check_shape(shape: Shape, text: &str) -> Result<(), Invalid> {
 ///
 /// The **state code is not checked here** — it is checked against the shop's
 /// own state in `catalog.rs`, because only there is the other half known.
-fn check_gstin(text: &str) -> Result<(), Invalid> {
+/// **P26 made this `pub(crate)`, and that is the point of it.** A supplier's
+/// GSTIN goes on an input-credit claim, so it needs exactly the check the
+/// shop's own number gets. Writing a second one is how the two drift.
+pub(crate) fn check_gstin(text: &str) -> Result<(), Invalid> {
     if text.chars().count() != 15 {
         return Err(Invalid::new(format!(
             "A GST number is fifteen characters and that one is {}.",

@@ -138,6 +138,28 @@ pub mod action {
     /// wrong, and the next question is always "what changed just before it".
     pub const STOCK_REBUILT: AuditAction = "stock.rebuilt";
 
+    // --- P26, buying ---------------------------------------------------------
+    //
+    // The same rule as P25's: only what a person DECIDED. A purchase moving five
+    // materials is not five rows; it is one, and the paper it points at names
+    // every line.
+    pub const SUPPLIER_SAVED: AuditAction = "supplier.saved";
+    pub const PURCHASE_SAVED: AuditAction = "purchase.saved";
+    /// **D125 — the only correction path a purchase has**, and therefore the row
+    /// somebody will be asked about.
+    pub const PURCHASE_CANCELLED: AuditAction = "purchase.cancelled";
+    pub const PURCHASE_RETURNED: AuditAction = "purchase.returned";
+    pub const SUPPLIER_PAID: AuditAction = "supplier.paid";
+    pub const SUPPLIER_ADJUSTED: AuditAction = "supplier.adjusted";
+    pub const ORDER_PLACED: AuditAction = "purchase.ordered";
+    /// A count was started. Cheap, and it is what answers "who was in the store
+    /// that night".
+    pub const COUNT_OPENED: AuditAction = "count.opened";
+    /// **The one that moves the book.** Approving a count is adjusting stock by
+    /// hand at scale, so it is watched exactly as `stock.adjusted` is.
+    pub const COUNT_APPROVED: AuditAction = "count.approved";
+    pub const COUNT_ABANDONED: AuditAction = "count.abandoned";
+
     /// Every one of the above, for the screen's filter.
     pub const ALL: &[AuditAction] = &[
         LOGIN_OK,
@@ -188,6 +210,16 @@ pub mod action {
         STOCK_WASTED,
         STOCK_PRODUCED,
         STOCK_REBUILT,
+        SUPPLIER_SAVED,
+        PURCHASE_SAVED,
+        PURCHASE_CANCELLED,
+        PURCHASE_RETURNED,
+        SUPPLIER_PAID,
+        SUPPLIER_ADJUSTED,
+        ORDER_PLACED,
+        COUNT_OPENED,
+        COUNT_APPROVED,
+        COUNT_ABANDONED,
     ];
 
     /// What the owner reads, rather than the tag. UI_GUIDELINES §6.
@@ -242,6 +274,16 @@ pub mod action {
             STOCK_WASTED => "Recorded wastage",
             STOCK_PRODUCED => "Recorded making a batch",
             STOCK_REBUILT => "Rebuilt the stock balances from the ledger",
+            SUPPLIER_SAVED => "Changed a supplier",
+            PURCHASE_SAVED => "Entered a delivery",
+            PURCHASE_CANCELLED => "Cancelled a delivery",
+            PURCHASE_RETURNED => "Sent goods back to a supplier",
+            SUPPLIER_PAID => "Paid a supplier",
+            SUPPLIER_ADJUSTED => "Corrected what a supplier is owed",
+            ORDER_PLACED => "Sent a purchase order",
+            COUNT_OPENED => "Started counting the store",
+            COUNT_APPROVED => "Approved a stock count",
+            COUNT_ABANDONED => "Gave up on a stock count",
             _ => "Did something this version does not know about",
         }
     }

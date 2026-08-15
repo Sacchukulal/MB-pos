@@ -82,8 +82,11 @@ const view: ExpensesView = {
     cashExpenses: money(40_000, '400.00'),
     payouts: money(30_000, '300.00'),
     bankDrops: money(100_000, '1,000.00'),
+    // **P26, D120** — a purchase paid at the door writes no expense row, so the
+    // drawer reads the supplier payment itself.
+    suppliersPaid: money(0, '0.00'),
     expected: money(42_600, '426.00'),
-    says: '2,000.00 float + 126.00 cash sales + 0.00 top-ups − 400.00 expenses − 300.00 payouts − 1,000.00 to the bank',
+    says: '2,000.00 float + 126.00 cash sales + 0.00 top-ups − 400.00 expenses − 300.00 payouts − 1,000.00 to the bank − 0.00 to suppliers',
   },
   total: money(158_000, '1,580.00'),
   thisMonth: money(158_000, '1,580.00'),

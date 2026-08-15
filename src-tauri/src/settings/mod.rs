@@ -404,8 +404,32 @@ pub struct ShopConfig {
     pub billing: Billing,
     pub day: Day,
     pub tax: Tax,
+    /// P26. One setting, and D72's test walks every leaf of this JSON both ways
+    /// — so a field here with no catalogue entry fails the build, and so does a
+    /// catalogue entry with no field.
+    pub stock: Stock,
     pub backup: BackupPolicy,
     pub appearance: Appearance,
+}
+
+/// The stock book's only preference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Stock {
+    /// **How big a count variance has to be before the screen asks why.**
+    ///
+    /// In rupees and not in a percentage, because a shop thinks in rupees and
+    /// because 5% of a cheap material is noise while ₹500 of paneer is a
+    /// question. Zero asks every time.
+    pub count_reason_above: Money,
+}
+
+impl Default for Stock {
+    fn default() -> Self {
+        Stock {
+            count_reason_above: Money::from_paise(50_000),
+        }
+    }
 }
 
 /// One setting that changed, for the audit trail and for the screen's summary.

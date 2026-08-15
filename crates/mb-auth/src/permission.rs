@@ -89,6 +89,20 @@ pub enum Permission {
     /// made and also how a theft is covered up, which is why it is its own
     /// permission and always writes an audit row.
     StockAdjust,
+    /// P26. Who the shop buys from, what it owes them, and paying it.
+    ///
+    /// Separate from `PurchasesManage` because they are two different jobs: the
+    /// person at the counter enters the delivery that just arrived, and the
+    /// person who decides which supplier gets paid this week is the owner.
+    SuppliersManage,
+    /// P26. Entering deliveries, returns and purchase orders — a daily job.
+    PurchasesManage,
+    /// P26. Walking the store with a clipboard and writing down what is there.
+    ///
+    /// **Approving that count is `StockAdjust`, not this**, because approving is
+    /// adjusting stock by hand at scale. A separate `count.approve` would let a
+    /// shop grant the big power while denying the small one.
+    StockCount,
 }
 
 impl Permission {
@@ -122,6 +136,9 @@ impl Permission {
         Permission::InventoryManage,
         Permission::StockWaste,
         Permission::StockAdjust,
+        Permission::SuppliersManage,
+        Permission::PurchasesManage,
+        Permission::StockCount,
     ];
 
     /// The stored form. **This string is a database value**: changing one is a
@@ -157,6 +174,9 @@ impl Permission {
             Permission::InventoryManage => "inventory.manage",
             Permission::StockWaste => "stock.waste",
             Permission::StockAdjust => "stock.adjust",
+            Permission::SuppliersManage => "suppliers.manage",
+            Permission::PurchasesManage => "purchases.manage",
+            Permission::StockCount => "stock.count",
         }
     }
 
@@ -194,6 +214,9 @@ impl Permission {
             Permission::InventoryManage => "change materials and recipes",
             Permission::StockWaste => "record wastage",
             Permission::StockAdjust => "adjust stock by hand",
+            Permission::SuppliersManage => "manage suppliers and pay them",
+            Permission::PurchasesManage => "enter deliveries and returns",
+            Permission::StockCount => "count what is on the shelves",
         }
     }
 
@@ -294,9 +317,9 @@ mod tests {
         // to iterate an enum in Rust without a dependency, and this test is
         // cheaper than one: a variant added below ALL has no row, no screen and
         // no check, and nothing else would notice.
-        assert_eq!(Permission::ALL.len(), 28);
+        assert_eq!(Permission::ALL.len(), 31);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 28, "two permissions share a code");
+        assert_eq!(codes.len(), 31, "two permissions share a code");
     }
 
     #[test]

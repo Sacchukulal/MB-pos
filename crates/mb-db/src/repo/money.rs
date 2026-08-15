@@ -123,7 +123,11 @@ pub struct CashPosition {
     pub cash_expenses: Money,
     pub payouts: Money,
     pub bank_drops: Money,
-    /// float + sales + top-ups − expenses − payouts − drops.
+    /// **P26, D120.** Cash handed to suppliers at the door. Before this term
+    /// existed the day close told a shop to expect money it had already paid the
+    /// vegetable man.
+    pub suppliers_paid: Money,
+    /// float + sales + top-ups − expenses − payouts − drops − suppliers paid.
     pub expected: Money,
 }
 
@@ -965,6 +969,18 @@ impl<'a> MoneyRepo<'a> {
         let payouts = moved("payout")?;
         let drops = moved("bank_drop")?;
 
+        // **P26, D120 — the term this query was missing.** A shop that pays the
+        // vegetable man from the till was being told to expect money it had
+        // already handed over. A purchase deliberately writes no `expenses` row
+        // and no `cash_movements` row (one rupee, one row), so the drawer reads
+        // the payment itself.
+        let paid_out: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM supplier_payments
+              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'",
+            rusqlite::params![outlet, day_sql],
+            |r| r.get(0),
+        )?;
+
         Ok(CashPosition {
             opening_float: encode::money_from_sql(float),
             cash_sales: encode::money_from_sql(taken),
@@ -972,8 +988,9 @@ impl<'a> MoneyRepo<'a> {
             cash_expenses: encode::money_from_sql(spent),
             payouts: encode::money_from_sql(payouts),
             bank_drops: encode::money_from_sql(drops),
+            suppliers_paid: encode::money_from_sql(paid_out),
             expected: encode::money_from_sql(
-                float + taken + top_ups - spent - payouts - drops,
+                float + taken + top_ups - spent - payouts - drops - paid_out,
             ),
         })
     }

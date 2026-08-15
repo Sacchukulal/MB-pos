@@ -619,6 +619,150 @@ impl<'a> ReportsRepo<'a> {
         }
         Ok(out)
     }
+
+    /// **The profit statement — P26, D133, and audit B14's answer.**
+    ///
+    /// > *v1 subtracted expenses from revenue and printed the result. It never
+    /// > knew what the food cost, so the number it printed was not wrong by a
+    /// > percentage — it was a different quantity altogether.*
+    ///
+    /// Three blocks, and the middle one is the whole point:
+    ///
+    /// ```text
+    ///   Sales (net of tax)
+    /// − Cost of food actually used     <- the stock ledger
+    /// = Gross margin
+    /// − Running costs                  <- expenses
+    /// = What is left
+    /// ```
+    ///
+    /// **Money paid for stock is NOT a running cost.** Rice bought on the 3rd is
+    /// not a cost on the 3rd; it is a cost when it is eaten. That is the entire
+    /// difference between this number and v1's.
+    ///
+    /// The double count is real and is caught rather than assumed away: a shop
+    /// that starts using purchases while still typing "Vegetables ₹2,000" into
+    /// Spends counts it twice, so [`Profit::double_counted`] carries what those
+    /// categories came to and the screen says so (D100 — an unhealthy row
+    /// carries its own fix).
+    pub fn profit(&self, outlet: &str, period: Period) -> Result<Profit, DbError> {
+        let from = encode::business_day_to_sql(period.from);
+        let to = encode::business_day_to_sql(period.to);
+
+        let (gross, tax): (i64, i64) = self.tx.query_row(
+            // There is no `bills.tax_total` and there must not be: the three
+            // GST columns are what a rate-wise return is filed from, and a
+            // fourth column holding their sum is a fourth place for them to
+            // disagree. Liquor's `non_gst_value` is deliberately not here —
+            // it is not tax, it is money the shop keeps.
+            "SELECT COALESCE(SUM(b.grand_total), 0),
+                    COALESCE(SUM(b.total_cgst + b.total_sgst + b.total_igst), 0)
+               FROM bills b JOIN orders o ON o.id = b.order_id
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled'",
+            rusqlite::params![outlet, from, to],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        // **What the kitchen actually used**, from the ledger and nothing else:
+        // what a sale took, what went in the bin, and what a count found
+        // missing. `total_cost` is negative on the way out, so this reads as a
+        // positive cost.
+        let cost_of = |kinds: &str| -> Result<i64, DbError> {
+            Ok(self.tx.query_row(
+                &format!(
+                    "SELECT COALESCE(-SUM(total_cost), 0) FROM stock_movements
+                      WHERE outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3
+                        AND base_qty < 0 AND kind IN ({kinds})"
+                ),
+                rusqlite::params![outlet, from, to],
+                |row| row.get(0),
+            )?)
+        };
+        let food = cost_of("'sale', 'reversal'")?;
+        let wastage = cost_of("'wastage'")?;
+        let shrinkage = cost_of("'adjustment'")?;
+
+        let expenses: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM expenses
+              WHERE outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3",
+            rusqlite::params![outlet, from, to],
+            |row| row.get(0),
+        )?;
+
+        // **The double count.** An expense in a category the shop also buys
+        // through Purchases is money that may be in both blocks. Matched on the
+        // category NAME against a material's own category, because that is the
+        // word the shopkeeper used in both places.
+        let double_counted: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(e.amount), 0)
+               FROM expenses e JOIN expense_categories c ON c.id = e.category_id
+              WHERE e.outlet_id = ?1 AND e.business_day BETWEEN ?2 AND ?3
+                AND EXISTS (SELECT 1 FROM materials m
+                             WHERE m.outlet_id = ?1 AND m.category <> ''
+                               AND lower(m.category) = lower(c.name))",
+            rusqlite::params![outlet, from, to],
+            |row| row.get(0),
+        )?;
+
+        let net_sales = gross - tax;
+        let used = food + wastage + shrinkage;
+        Ok(Profit {
+            gross_sales: encode::money_from_sql(gross),
+            tax: encode::money_from_sql(tax),
+            net_sales: encode::money_from_sql(net_sales),
+            food_used: encode::money_from_sql(food),
+            wastage: encode::money_from_sql(wastage),
+            shrinkage: encode::money_from_sql(shrinkage),
+            cost_of_food: encode::money_from_sql(used),
+            gross_margin: encode::money_from_sql(net_sales - used),
+            running_costs: encode::money_from_sql(expenses),
+            left: encode::money_from_sql(net_sales - used - expenses),
+            double_counted: encode::money_from_sql(double_counted),
+        })
+    }
+}
+
+/// **D133** — the five numbers, and the two warnings that go under them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Profit {
+    pub gross_sales: Money,
+    pub tax: Money,
+    /// What the shop kept of what it billed, before anything was spent.
+    pub net_sales: Money,
+    /// What the bills' recipes actually took off the shelf, at cost.
+    pub food_used: Money,
+    pub wastage: Money,
+    /// What a stock count found missing — the honest part of the cost, and the
+    /// one nobody wants to look at.
+    pub shrinkage: Money,
+    /// food + wastage + shrinkage.
+    pub cost_of_food: Money,
+    pub gross_margin: Money,
+    pub running_costs: Money,
+    pub left: Money,
+    /// **The catch, not an assumption.** Expenses typed into Spends in a
+    /// category the shop also buys through Purchases: money that may be counted
+    /// in both blocks, named out loud so somebody can go and look.
+    pub double_counted: Money,
+}
+
+impl Profit {
+    /// Gross margin as a percentage of net sales, in basis points. `None` when
+    /// nothing was sold, because a percentage of nothing is not a number.
+    #[must_use]
+    #[allow(
+        clippy::integer_division,
+        reason = "a percentage in basis points IS a division; the guard above \
+                  is the only case that could lose anything"
+    )]
+    pub fn margin_bp(&self) -> Option<i64> {
+        if self.net_sales.is_zero() {
+            return None;
+        }
+        let scaled = i128::from(self.gross_margin.paise()) * 10_000;
+        i64::try_from(scaled / i128::from(self.net_sales.paise())).ok()
+    }
 }
 
 /// A SQLite value as text, whatever type it came back as.

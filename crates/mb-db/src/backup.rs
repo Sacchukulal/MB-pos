@@ -35,6 +35,7 @@ use crate::migrate;
 /// rules that erode are enforced by scripts, not by agreement.*
 pub const COUNTED: &[&str] = &[
     "applied_events",
+    "attachments",
     "audit_log",
     "bill_charges",
     "bill_lines",
@@ -73,6 +74,10 @@ pub const COUNTED: &[&str] = &[
     "payments",
     "permissions",
     "printers",
+    "purchase_lines",
+    "purchase_order_lines",
+    "purchase_orders",
+    "purchases",
     "reasons",
     "recipe_lines",
     "recipes",
@@ -85,10 +90,16 @@ pub const COUNTED: &[&str] = &[
     "sections",
     "settings",
     "staff",
+    "stock_count_lines",
+    "stock_counts",
     "stock_day_closes",
     "stock_movements",
     "stock_problems",
     "store_profile",
+    "supplier_adjustments",
+    "supplier_materials",
+    "supplier_payments",
+    "suppliers",
     "sync_outbox",
     "tax_class_rates",
     "tax_classes",
@@ -119,6 +130,12 @@ pub struct Manifest {
     pub checksum: String,
     /// `(table, rows)`, in table order.
     pub counts: Vec<(String, i64)>,
+    /// **D132 — the photographs.** `(filename, bytes, checksum)`.
+    ///
+    /// Empty on every backup taken before P26 and on every shop that has never
+    /// photographed an invoice, which is what makes an old single-file backup
+    /// still restore.
+    pub attachments: Vec<(String, u64, String)>,
 }
 
 impl Manifest {
@@ -133,6 +150,9 @@ impl Manifest {
         for (table, rows) in &self.counts {
             s.push_str(&format!("count {table} {rows}\n"));
         }
+        for (name, bytes, checksum) in &self.attachments {
+            s.push_str(&format!("attachment {name} {bytes} {checksum}\n"));
+        }
         s
     }
 
@@ -144,10 +164,12 @@ impl Manifest {
         let mut bytes = None;
         let mut checksum = None;
         let mut counts = Vec::new();
+        let mut attachments = Vec::new();
 
         for line in text.lines() {
             let mut parts = line.split_whitespace();
-            match (parts.next(), parts.next(), parts.next()) {
+            let (first, second, third) = (parts.next(), parts.next(), parts.next());
+            match (first, second, third) {
                 (Some("taken_at_ms"), Some(v), _) => taken_at_ms = v.parse().ok(),
                 (Some("schema_version"), Some(v), _) => schema_version = v.parse().ok(),
                 (Some("app_version"), Some(v), _) => app_version = Some(v.to_owned()),
@@ -155,6 +177,15 @@ impl Manifest {
                 (Some("checksum"), Some(v), _) => checksum = Some(v.to_owned()),
                 (Some("count"), Some(table), Some(n)) => {
                     counts.push((table.to_owned(), n.parse().unwrap_or(-1)));
+                }
+                // **D132.** A manifest written before P26 has none of these, and
+                // the empty vector is exactly what makes such a backup restore.
+                (Some("attachment"), Some(name), Some(size)) => {
+                    attachments.push((
+                        name.to_owned(),
+                        size.parse().unwrap_or(0),
+                        parts.next().unwrap_or_default().to_owned(),
+                    ));
                 }
                 _ => {}
             }
@@ -167,8 +198,62 @@ impl Manifest {
             bytes: bytes.ok_or_else(|| bad("bytes"))?,
             checksum: checksum.ok_or_else(|| bad("checksum"))?,
             counts,
+            attachments,
         })
     }
+}
+
+/// **D132 — where the photographs live: beside the database, never inside it.**
+///
+/// A photographed invoice is ~200 KB and a shop takes ~100 deliveries a month.
+/// Inside the database that is 240 MB a year that `VACUUM INTO` would copy on
+/// every backup, spending R5 and R6 on pictures no query reads. So they are
+/// files, and the backup carries the folder.
+#[must_use]
+pub fn attachments_dir(db: &Path) -> PathBuf {
+    match db.parent() {
+        Some(parent) => parent.join("attachments"),
+        None => PathBuf::from("attachments"),
+    }
+}
+
+/// The photographs that belong to one backup file.
+#[must_use]
+pub fn backup_attachments_dir(backup: &Path) -> PathBuf {
+    let mut p = backup.as_os_str().to_os_string();
+    p.push(".attachments");
+    PathBuf::from(p)
+}
+
+/// Copy every file in `from` into `to`, returning `(name, bytes, checksum)` for
+/// each. A folder that does not exist is not an error: it is a shop that has
+/// never photographed an invoice.
+fn copy_attachments(from: &Path, to: &Path) -> Result<Vec<(String, u64, String)>, DbError> {
+    let Ok(entries) = std::fs::read_dir(from) else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    let mut made = false;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        if !made {
+            std::fs::create_dir_all(to).map_err(|e| {
+                DbError::invariant(format!("could not create {}: {e}", to.display()))
+            })?;
+            made = true;
+        }
+        std::fs::copy(&path, to.join(&name)).map_err(|e| {
+            DbError::invariant(format!("could not copy the photograph {name}: {e}"))
+        })?;
+        let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        out.push((name, bytes, file_checksum(&path)?));
+    }
+    out.sort();
+    Ok(out)
 }
 
 /// One backup on disk.
@@ -216,6 +301,13 @@ pub fn take(db: &Db, to: &Path, app_version: &str) -> Result<Backup, DbError> {
 
     db.backup_to(to)?;
 
+    // **D132 — a backup is the database AND the photographs.** They are copied
+    // before the manifest is written, because the manifest is what says they
+    // are there and a manifest that promises a file it has not written is worse
+    // than no manifest at all.
+    let attachments =
+        copy_attachments(&attachments_dir(db.path()), &backup_attachments_dir(to))?;
+
     let conn = open_read_only(to)?;
     let manifest = Manifest {
         taken_at_ms: now_ms(),
@@ -224,6 +316,7 @@ pub fn take(db: &Db, to: &Path, app_version: &str) -> Result<Backup, DbError> {
         bytes: std::fs::metadata(to).map(|m| m.len()).unwrap_or(0),
         checksum: file_checksum(to)?,
         counts: count_rows(&conn)?,
+        attachments,
     };
     drop(conn);
 
@@ -254,6 +347,12 @@ pub fn copy_to_second_location(backup: &Backup, dir: &Path) -> Result<PathBuf, D
         .map_err(|e| DbError::invariant(format!("could not copy the backup: {e}")))?;
     std::fs::copy(backup.manifest_path(), manifest_path(&target))
         .map_err(|e| DbError::invariant(format!("could not copy the manifest: {e}")))?;
+    // D132: the second copy carries the photographs too, or it is not a second
+    // copy of the same thing.
+    copy_attachments(
+        &backup_attachments_dir(&backup.path),
+        &backup_attachments_dir(&target),
+    )?;
     Ok(target)
 }
 
@@ -268,6 +367,12 @@ pub struct VerifyReport {
     /// actual)`.
     pub count_mismatches: Vec<(String, i64, i64)>,
     pub schema_version: u32,
+    /// **D132.** Photographs the manifest promises that are missing or do not
+    /// match their checksum. A picture of a ₹40,000 invoice that silently rots
+    /// is exactly the failure a verify exists to find.
+    pub bad_attachments: Vec<String>,
+    /// How many photographs this backup carries, for the health line.
+    pub attachment_count: usize,
 }
 
 impl VerifyReport {
@@ -277,6 +382,7 @@ impl VerifyReport {
             && self.foreign_keys_ok
             && self.checksum_ok
             && self.count_mismatches.is_empty()
+            && self.bad_attachments.is_empty()
     }
 
     /// One line an owner could read, for the health panel (P22).
@@ -297,6 +403,12 @@ impl VerifyReport {
         }
         if !self.count_mismatches.is_empty() {
             why.push(format!("{} table(s) have the wrong row count", self.count_mismatches.len()));
+        }
+        if !self.bad_attachments.is_empty() {
+            why.push(format!(
+                "{} photograph(s) are missing or damaged",
+                self.bad_attachments.len()
+            ));
         }
         format!("{} FAILED: {}", self.path.display(), why.join("; "))
     }
@@ -326,25 +438,41 @@ pub fn verify(path: &Path) -> Result<VerifyReport, DbError> {
     let actual = count_rows(&conn)?;
     drop(conn);
 
-    let (checksum_ok, count_mismatches) = match read_manifest(path) {
-        Ok(manifest) => {
-            let checksum_ok = file_checksum(path)? == manifest.checksum;
-            let mut mismatches = Vec::new();
-            for (table, expected) in &manifest.counts {
-                let found = actual
-                    .iter()
-                    .find(|(t, _)| t == table)
-                    .map_or(-1, |(_, n)| *n);
-                if found != *expected {
-                    mismatches.push((table.clone(), *expected, found));
+    let (checksum_ok, count_mismatches, bad_attachments, attachment_count) =
+        match read_manifest(path) {
+            Ok(manifest) => {
+                let checksum_ok = file_checksum(path)? == manifest.checksum;
+                let mut mismatches = Vec::new();
+                for (table, expected) in &manifest.counts {
+                    let found = actual
+                        .iter()
+                        .find(|(t, _)| t == table)
+                        .map_or(-1, |(_, n)| *n);
+                    if found != *expected {
+                        mismatches.push((table.clone(), *expected, found));
+                    }
                 }
+
+                // **D132** — and this is the check that makes a photograph a
+                // promise rather than a hope. A file that is there but no longer
+                // hashes the same is the failure nobody would otherwise see.
+                let dir = backup_attachments_dir(path);
+                let mut bad = Vec::new();
+                for (name, bytes, checksum) in &manifest.attachments {
+                    let file = dir.join(name);
+                    let size = std::fs::metadata(&file).map(|m| m.len()).ok();
+                    let matches = size == Some(*bytes)
+                        && file_checksum(&file).map(|c| &c == checksum).unwrap_or(false);
+                    if !matches {
+                        bad.push(name.clone());
+                    }
+                }
+                (checksum_ok, mismatches, bad, manifest.attachments.len())
             }
-            (checksum_ok, mismatches)
-        }
-        // No manifest is itself a failure: an unverifiable backup is not a
-        // backup, and quietly passing it is how a rumour becomes a policy.
-        Err(_) => (false, Vec::new()),
-    };
+            // No manifest is itself a failure: an unverifiable backup is not a
+            // backup, and quietly passing it is how a rumour becomes a policy.
+            Err(_) => (false, Vec::new(), Vec::new(), 0),
+        };
 
     Ok(VerifyReport {
         path: path.to_path_buf(),
@@ -353,6 +481,8 @@ pub fn verify(path: &Path) -> Result<VerifyReport, DbError> {
         checksum_ok,
         count_mismatches,
         schema_version,
+        bad_attachments,
+        attachment_count,
     })
 }
 
@@ -539,6 +669,11 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
             counts: Vec::new(),
         });
     }
+
+    // **D132 — the photographs come back too**, and only once the database is
+    // known good. They are copied and never moved, so a failed restore that
+    // rolls back still leaves the backup complete.
+    copy_attachments(&backup_attachments_dir(from), &attachments_dir(to))?;
 
     // The outbox knows nothing about what the cloud has seen since this backup
     // was taken. See `OutboxRepo::requeue_everything` for why the whole thing

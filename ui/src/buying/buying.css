@@ -1,0 +1,178 @@
+/*
+ * Buying and the stock count — P26. Every value is a token (D38, audit E11).
+ */
+
+.mb-buying {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+/* **The count does NOT scroll itself.** It is a tab INSIDE the stock screen,
+   which already scrolls, and giving it its own `height: 100%` and `overflow-y`
+   produced two scrollbars side by side with the Approve button trapped under
+   the fold of the inner one. Same shape as P17's `<pre>` in a flex parent.
+   Found by looking at it. */
+.mb-count {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+/* A row inside a Card must say so: `.mb-card` is a COLUMN, and three things
+   placed in one shipped stacked and centred at P18. */
+.mb-buying__top {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.mb-buying__figures {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* No width here on purpose. P08 shipped every dialog 64 px wide because a
+   SPACING token was used where a width belonged, and there is no width token —
+   so the card sizes to its content and the row wraps. */
+.mb-buying__figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-buying__label,
+.mb-count__label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.mb-buying__value {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+}
+
+/* A sentence that needs somebody. Never colour alone (§2). */
+.mb-buying__attention,
+.mb-count__attention {
+  border-left: calc(var(--border-width) * 3) solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.mb-buying__note,
+.mb-buying__hint,
+.mb-buying__says,
+.mb-count__says {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.mb-buying__says,
+.mb-count__says {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.mb-buying__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The line grid. It scrolls sideways on its own rather than taking the page
+   with it — UI_GUIDELINES §3, and P17 found the `<pre>` version of this bug. */
+.mb-buying__lines {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.mb-buying__lines th {
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  padding: var(--space-1) var(--space-2);
+  white-space: nowrap;
+}
+
+.mb-buying__lines td {
+  padding: var(--space-1) var(--space-2);
+  vertical-align: bottom;
+}
+
+/* A select holds itself as wide as its longest option, so a flex child needs
+   this or the row grows a horizontal scrollbar (P13 part 2e). */
+.mb-buying__lines select,
+.mb-buying__lines input {
+  min-width: 0;
+}
+
+.mb-buying__totals,
+.mb-buying__ageing,
+.mb-count__totals {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-buying__grand {
+  color: var(--text);
+  font-weight: var(--weight-bold);
+}
+
+.mb-buying__file {
+  display: none;
+}
+
+.mb-buying__photo {
+  display: block;
+  max-width: 100%;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--border);
+}
+
+/* The count sheet, as text a person can read before printing it. It scrolls
+   inside itself for the same reason the line grid does. */
+.mb-count__sheet {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre;
+  /* Sideways only. The MODAL BODY scrolls vertically — P25 found `.mb-modal`
+     scrolling as a whole and taking its own Save button off the screen, and a
+     second scrolling box inside it is how that comes back. */
+  overflow-x: auto;
+  background: var(--surface-sunk);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin: 0;
+}
+
+.mb-count__short {
+  color: var(--danger);
+}
+
+.mb-count__over {
+  color: var(--warn);
+}

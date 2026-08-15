@@ -68,6 +68,17 @@ import type { AccountView } from './generated/AccountView';
 import type { HeadroomView } from './generated/HeadroomView';
 import type { ExpensesView } from './generated/ExpensesView';
 import type { InventoryView } from './generated/InventoryView';
+import type { BuyingView } from './generated/BuyingView';
+import type { SupplierAccountView } from './generated/SupplierAccountView';
+import type { SupplierEdit } from './generated/SupplierEdit';
+import type { PurchaseView } from './generated/PurchaseView';
+import type { PurchaseEdit } from './generated/PurchaseEdit';
+import type { PoEdit } from './generated/PoEdit';
+import type { PhotoView } from './generated/PhotoView';
+import type { StockCountView } from './generated/StockCountView';
+import type { CountEdit } from './generated/CountEdit';
+import type { ShareView } from './generated/ShareView';
+import type { Channel } from './generated/Channel';
 import type { MaterialEdit } from './generated/MaterialEdit';
 import type { MovementEdit } from './generated/MovementEdit';
 import type { RecipeEdit } from './generated/RecipeEdit';
@@ -398,6 +409,56 @@ export interface Commands {
   stock_variance: { args: { from: string; to: string }; returns: VarianceView[] };
   /** Scope 4.6 — the buy list as text a person can send. */
   buy_list_text: { args: void; returns: string };
+
+  // --- P26, buying and the count --------------------------------------------
+  // **One rupee, one row** (D120). Saving a delivery moves the shelf, the paper
+  // and what the shop owes in one transaction, and writes no expense row — so
+  // there is no second command here for "also record it as a spend", and there
+  // must never be one.
+  buying: { args: { supplier: string | null }; returns: BuyingView };
+  supplier_account: { args: { id: string }; returns: SupplierAccountView };
+  purchase: { args: { id: string }; returns: PurchaseView };
+  save_supplier: { args: { edit: SupplierEdit }; returns: BuyingView };
+  save_purchase: { args: { edit: PurchaseEdit }; returns: BuyingView };
+  /** D125 — a purchase is never edited. This is the only correction path. */
+  cancel_purchase: { args: { id: string; reason: string }; returns: BuyingView };
+  record_supplier_payment: {
+    args: { supplierId: string; amount: string; mode: string; reference: string };
+    returns: SupplierAccountView;
+  };
+  save_supplier_adjustment: {
+    args: { supplierId: string; amount: string; increases: boolean; reason: string };
+    returns: SupplierAccountView;
+  };
+  save_purchase_order: { args: { edit: PoEdit }; returns: BuyingView };
+  set_order_state: { args: { id: string; state: string }; returns: BuyingView };
+  /**
+   * D132 — the photograph, already downscaled by this side (canvas, 1600 px,
+   * JPEG 0.7). Rust checks the size, hashes it and writes the file; there is no
+   * image library on that side at all.
+   */
+  attach_photo: { args: { dataUrl: string }; returns: PhotoView };
+  purchase_photo: { args: { id: string }; returns: PhotoView };
+
+  /** D127 — the count freezes the book and approving posts a DELTA. */
+  stock_count: { args: { id: string | null }; returns: StockCountView };
+  open_stock_count: { args: { location: string }; returns: StockCountView };
+  record_count_line: { args: { edit: CountEdit }; returns: StockCountView };
+  explain_count_line: {
+    args: { countId: string; materialId: string; reasonId: string | null; note: string };
+    returns: StockCountView;
+  };
+  remove_count_line: { args: { countId: string; materialId: string }; returns: StockCountView };
+  approve_stock_count: { args: { id: string }; returns: StockCountView };
+  abandon_stock_count: { args: { id: string; reason: string }; returns: StockCountView };
+  /** D128 — and the book quantity is deliberately not on it. */
+  count_sheet: { args: { location: string }; returns: string };
+
+  /** D134 — scope 10.13. The summary is composed in Rust; this side sends it. */
+  share_report: {
+    args: { id: string; period: PeriodArg; channel: Channel };
+    returns: ShareView;
+  };
 
   // --- P17, the settings ----------------------------------------------------
   // Five commands for ninety settings, because the catalogue IS the screen:

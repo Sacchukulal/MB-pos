@@ -54,8 +54,13 @@ pub struct Material {
     pub name: String,
     pub dimension: Dimension,
     pub category: String,
-    /// **D116** — where you buy it. The buy list groups by this.
+    /// **D116** — where you buy it. The buy list groups by this, and it stays
+    /// the answer even after P26 brought suppliers: a shop with one owner and
+    /// one scooter buys from "the vegetable market".
     pub buy_from: String,
+    /// **P26.** Who you buy it from, when the shop has said. `None` is the
+    /// everyday answer; setting it is what lets a purchase order be raised.
+    pub supplier_id: Option<String>,
     pub reorder_level: Qty,
     pub reorder_qty: Qty,
     /// **D117** — a property that warns, not batch tracking.
@@ -88,6 +93,7 @@ impl Material {
             dimension,
             category: String::new(),
             buy_from: String::new(),
+            supplier_id: None,
             reorder_level: Qty::ZERO,
             reorder_qty: Qty::ZERO,
             is_perishable: false,
@@ -423,7 +429,7 @@ pub struct StockRepo<'a> {
 
 const MATERIAL_COLUMNS: &str = "id, name, dimension, category, buy_from, reorder_level, \
      reorder_qty, is_perishable, shelf_life_days, location, avg_cost, cost_changed_at, \
-     last_counted_at, is_active, sort_order";
+     last_counted_at, is_active, sort_order, supplier_id";
 
 impl<'a> StockRepo<'a> {
     #[must_use]
@@ -449,13 +455,15 @@ impl<'a> StockRepo<'a> {
             "INSERT INTO materials
                  (id, outlet_id, name, dimension, category, buy_from, reorder_level, reorder_qty,
                   is_perishable, shelf_life_days, location, avg_cost, cost_changed_at,
-                  last_counted_at, is_active, sort_order, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                  last_counted_at, is_active, sort_order, created_at, supplier_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  dimension = excluded.dimension,
                  category = excluded.category,
                  buy_from = excluded.buy_from,
+                 supplier_id = excluded.supplier_id,
                  reorder_level = excluded.reorder_level,
                  reorder_qty = excluded.reorder_qty,
                  is_perishable = excluded.is_perishable,
@@ -481,6 +489,7 @@ impl<'a> StockRepo<'a> {
                 encode::bool_to_sql(material.is_active),
                 material.sort_order,
                 encode::timestamp_to_sql(at),
+                material.supplier_id,
             ],
         )?;
 
@@ -1546,6 +1555,7 @@ fn read_material(row: &rusqlite::Row<'_>) -> rusqlite::Result<Material> {
         last_counted_at: counted.map(encode::timestamp_from_sql),
         is_active: row.get::<_, i64>(13)? == 1,
         sort_order: row.get(14)?,
+        supplier_id: row.get(15)?,
         packs: Vec::new(),
         purchase_unit: None,
         recipe_unit: None,

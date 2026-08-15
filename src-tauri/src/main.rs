@@ -32,6 +32,12 @@
 #![allow(dead_code, reason = "P08's Rust half landed before its React half")]
 
 mod billing;
+/// P26. Suppliers, the paper, the supplier ledger and purchase orders — and
+/// **one rupee, one row** (D120).
+mod buying;
+/// P26. The physical stock count, which freezes the book and posts a delta
+/// rather than setting the balance (D127).
+mod counting;
 mod config;
 mod corrections;
 mod credit;
@@ -103,6 +109,10 @@ mod push;
 mod reports;
 mod search;
 mod session;
+/// P26, scope 10.13. Sharing a summary through the operating system, with the
+/// limit printed on the screen (D134). It does not need a channel; it needs an
+/// honest one.
+mod share;
 /// P17. **The one table that knows what a setting is**, and the load / save /
 /// reset / export / import that fall out of it.
 mod settings;
@@ -139,6 +149,11 @@ mod settings_tests;
 /// produces has to be real — so it is driven with the real commands.
 #[cfg(test)]
 mod dayclose_tests;
+/// P26 drives the buying commands in sequence: a delivery moves four ledgers
+/// at once, and the count has to survive a delivery arriving in the middle of
+/// it (D127).
+#[cfg(test)]
+mod buying_tests;
 /// P20 drives the intent applier against a real database: the counter is the
 /// authority, so a test that stubs the counter is testing nothing.
 #[cfg(test)]

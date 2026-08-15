@@ -317,6 +317,22 @@ fn t8_every_named_index_exists() {
         // **The void path.** D113 finds the rows a bill wrote and negates them,
         // and must not scan a year of movements to do it.
         "idx_stock_movements_order",
+        // P26. A supplier's ledger, oldest first — read every time somebody
+        // asks "what do I owe him", and it must not scan a year of every
+        // supplier's invoices to answer for one.
+        "idx_purchases_supplier",
+        // Every buying report, on the STORED business day (D5).
+        "idx_purchases_day",
+        // "What did I pay for onions, and when did it go up" — the price-trend
+        // report, which is the finding an owner acts on fastest.
+        "idx_purchase_lines_material",
+        "idx_supplier_payments_supplier",
+        "idx_supplier_adjustments_supplier",
+        "idx_stock_counts_day",
+        // D132. Finding the photograph of one invoice, and listing what a
+        // backup has to carry. Partial, because most attachments will belong to
+        // something and a row with no subject is a stray this must not index.
+        "idx_attachments_subject",
     ];
 
     let db = Scratch::new("t8").open();

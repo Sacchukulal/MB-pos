@@ -367,6 +367,38 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("record_stock_movement", Access::Needs(Permission::StockWaste)),
     ("rebuild_stock_balances", Access::Needs(Permission::StockAdjust)),
 
+    // --- buying, and the count (P26) ----------------------------------------
+    // **Three permissions, and the split is P25's reasoning one module along.**
+    // Entering the delivery that just arrived is a daily job for whoever is at
+    // the counter; deciding which supplier gets paid this week is the owner's.
+    // And walking the store with a clipboard is a helper's job, while APPROVING
+    // what they wrote moves the book — so approval reuses `stock.adjust` rather
+    // than inventing a fourth permission that would let a shop grant the big
+    // power while denying the small one.
+    ("buying", Access::Needs(Permission::PurchasesManage)),
+    ("purchase", Access::Needs(Permission::PurchasesManage)),
+    ("supplier_account", Access::Needs(Permission::PurchasesManage)),
+    ("save_purchase", Access::Needs(Permission::PurchasesManage)),
+    ("cancel_purchase", Access::Needs(Permission::PurchasesManage)),
+    ("save_purchase_order", Access::Needs(Permission::PurchasesManage)),
+    ("set_order_state", Access::Needs(Permission::PurchasesManage)),
+    ("attach_photo", Access::Needs(Permission::PurchasesManage)),
+    ("purchase_photo", Access::Needs(Permission::PurchasesManage)),
+    ("save_supplier", Access::Needs(Permission::SuppliersManage)),
+    ("record_supplier_payment", Access::Needs(Permission::SuppliersManage)),
+    ("save_supplier_adjustment", Access::Needs(Permission::SuppliersManage)),
+    ("stock_count", Access::Needs(Permission::InventoryView)),
+    ("open_stock_count", Access::Needs(Permission::StockCount)),
+    ("record_count_line", Access::Needs(Permission::StockCount)),
+    ("explain_count_line", Access::Needs(Permission::StockCount)),
+    ("remove_count_line", Access::Needs(Permission::StockCount)),
+    ("abandon_stock_count", Access::Needs(Permission::StockCount)),
+    ("count_sheet", Access::Needs(Permission::StockCount)),
+    ("approve_stock_count", Access::Needs(Permission::StockAdjust)),
+    // D134. Sharing a report is reading it, so it is the report's own
+    // permission and nothing weaker â `report_on` checks it again anyway.
+    ("share_report", Access::Needs(Permission::ReportsView)),
+
     // --- development only ---------------------------------------------------
     // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
     // still needs a permission, because a dev build is what a support engineer
@@ -635,8 +667,11 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 22] = [
+        const SOURCES: [&str; 25] = [
             include_str!("orders.rs"),
+            include_str!("buying.rs"),
+            include_str!("counting.rs"),
+            include_str!("share.rs"),
             include_str!("inventory.rs"),
             include_str!("lan.rs"),
             include_str!("licensing.rs"),

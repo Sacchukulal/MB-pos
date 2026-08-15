@@ -111,6 +111,55 @@ fn main() {
               ORDER BY material_id",
             "SELECT kind, subject, occurrences, substr(sentence, 1, 60) AS says
                FROM stock_problems WHERE resolved_at IS NULL ORDER BY occurrences DESC",
+
+            // **P26 — the paper, and the four ledgers it moves** (D120). The
+            // screen saying "saved" is the thing being tested, so it is not
+            // evidence; these rows are.
+            "SELECT id, name, terms_days, gstin, is_active FROM suppliers ORDER BY name",
+            "SELECT p.id, p.kind, p.invoice_no, p.business_day, p.due_day, p.lines_value,
+                    p.charges, p.tax_total, p.tax_creditable, p.total, p.is_cancelled,
+                    p.cancel_reason, p.attachment_id
+               FROM purchases p ORDER BY p.business_day, p.received_at LIMIT 40",
+            // The landed cost is the number this whole module exists to get
+            // right, so it is in the dump beside what was typed (D109, D123).
+            "SELECT pl.purchase_id, pl.seq, pl.material_id,
+                    pl.typed_qty || ' ' || pl.typed_unit AS as_typed,
+                    pl.base_qty, pl.free_base_qty, pl.rate, pl.discount,
+                    pl.charge_share, pl.tax_amount, pl.landed_value,
+                    pl.landed_unit_cost AS paise_per_1000, pl.movement_id, pl.returns_seq
+               FROM purchase_lines pl ORDER BY pl.purchase_id, pl.seq LIMIT 60",
+            "SELECT supplier_id, amount, mode, purchase_id, business_day
+               FROM supplier_payments ORDER BY business_day, id",
+            "SELECT supplier_id, amount, increases, reason, business_day
+               FROM supplier_adjustments ORDER BY business_day, id",
+            // **The balance is a SUM and never a column** — this is the query
+            // that proves it, exactly as P15's does for a customer.
+            "SELECT s.name,
+                    (SELECT COALESCE(SUM(CASE WHEN p.kind = 'purchase' THEN p.total
+                                              ELSE -p.total END), 0)
+                       FROM purchases p
+                      WHERE p.supplier_id = s.id AND p.is_cancelled = 0)
+                  - (SELECT COALESCE(SUM(amount), 0) FROM supplier_payments sp
+                      WHERE sp.supplier_id = s.id)
+                    AS owed_summed_from_the_rows
+               FROM suppliers s ORDER BY s.name",
+            "SELECT po.number, po.state, po.supplier_id, l.material_id,
+                    l.typed_qty || ' ' || l.typed_unit AS as_typed, l.rate
+               FROM purchase_orders po LEFT JOIN purchase_order_lines l ON l.po_id = po.id
+              ORDER BY po.created_at, l.seq",
+            // **D127 — the frozen book, and the delta it posted.** A count line
+            // whose `book_qty` equals today's balance is the bug this decision
+            // exists to prevent, and it is visible right here.
+            "SELECT c.id, c.location, c.state, c.business_day, c.approved_at, c.ended_reason
+               FROM stock_counts c ORDER BY c.business_day, c.opened_at",
+            "SELECT l.count_id, l.material_id, l.book_qty AS book_when_counted,
+                    l.counted_qty, l.variance_qty, l.variance_value, l.reason_id,
+                    l.movement_id
+               FROM stock_count_lines l ORDER BY l.count_id, l.seq",
+            // D132: a row here with no file beside the database is a detectable
+            // fact, which is the whole reason the metadata is in the database.
+            "SELECT id, kind, subject_id, filename, byte_count FROM attachments
+              ORDER BY created_at",
         ] {
             let mut stmt = tx.prepare(sql).expect("prepare");
             let cols = stmt.column_count();

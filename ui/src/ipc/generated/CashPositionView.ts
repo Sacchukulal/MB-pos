@@ -4,10 +4,17 @@ import type { MoneyView } from "./MoneyView";
 /**
  * The drawer, in the order a shopkeeper counts it.
  */
-export type CashPositionView = { openingFloat: MoneyView, cashSales: MoneyView, topUps: MoneyView, cashExpenses: MoneyView, payouts: MoneyView, bankDrops: MoneyView, expected: MoneyView, 
+export type CashPositionView = { openingFloat: MoneyView, cashSales: MoneyView, topUps: MoneyView, cashExpenses: MoneyView, payouts: MoneyView, bankDrops: MoneyView, 
+/**
+ * **P26, D120.** Cash handed to suppliers at the door. Before this term
+ * existed the day close told a shop to expect money it had already paid
+ * the vegetable man — and a purchase writes no expense row on purpose, so
+ * this is the only place the drawer sees it.
+ */
+suppliersPaid: MoneyView, expected: MoneyView, 
 /**
  * The whole sum as one sentence, so the screen never assembles it:
  * "2,000.00 float + 3,450.00 cash sales + 0.00 top-ups − 400.00 expenses
- * − 300.00 payouts − 1,000.00 to the bank".
+ * − 300.00 payouts − 1,000.00 to the bank − 2,000.00 to suppliers".
  */
 says: string, };

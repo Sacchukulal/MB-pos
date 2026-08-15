@@ -31,7 +31,7 @@ use crate::state::{App, OUTLET};
 // A shop, and a licence in whatever state the test needs.
 // ---------------------------------------------------------------------------
 
-fn machine() -> MachineId {
+pub(crate) fn machine() -> MachineId {
     MachineId::for_tests("4c4c4544-0043-4a10-8033-b8c04f4d3132")
 }
 

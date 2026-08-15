@@ -101,6 +101,30 @@ pub enum Kind {
     StoppedSelling,
     /// P24, scope 3.7 — how long the kitchen takes.
     KitchenSpeed(SpeedBy),
+    /// P26, scope 4.5 — what went out to suppliers, grouped two ways.
+    Buying(BuyingBy),
+    /// **The rise is the finding**: onion is up 46% on its three-month average.
+    PriceTrend,
+    /// D124. Rows for a claiming shop; one honest sentence for a 5%-scheme one.
+    InputCredit,
+    /// Who the shop owes, oldest first (D131).
+    SupplierOutstanding,
+    /// What is on the shelf, at what it actually cost (D118).
+    StockValuation,
+    /// P26, scope 4.8 — is this always short, or was it one bad month?
+    CountVariance,
+    /// **P26, D133, and audit B14's answer.** The number v1 printed was not
+    /// wrong by a percentage; it was a different quantity.
+    Profit,
+}
+
+/// How the buying report is grouped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuyingBy {
+    Supplier,
+    /// *"Where does ₹40,000 a month of raw material go?"* — the question the
+    /// whole inventory module exists to answer.
+    Material,
 }
 
 /// How the kitchen-speed report is grouped.
@@ -129,12 +153,33 @@ pub const CATALOGUE: &[Entry] = &[
     Entry { id: "margin", title: "Menu engineering — volume against margin", group: "Items", needs: Permission::ReportsView, kind: Kind::MenuEngineering },
     Entry { id: "tax_rate", title: "Tax, rate-wise", group: "Tax", needs: Permission::ReportsView, kind: Kind::TaxByRate },
     Entry { id: "tax_hsn", title: "Tax, HSN-wise", group: "Tax", needs: Permission::ReportsView, kind: Kind::TaxByHsn },
+    // **Beside the other two, and that is not cosmetic.** The report list
+    // groups by consecutive runs of `group`, so an entry added at the end with
+    // an existing group name draws a SECOND heading with the same word on it.
+    // Found by looking at the list.
+    Entry { id: "input_credit", title: "Input tax credit on purchases", group: "Tax", needs: Permission::ReportsView, kind: Kind::InputCredit },
     Entry { id: "control", title: "Voids, discounts, refunds and reprints", group: "Control", needs: Permission::AuditView, kind: Kind::Control },
     // **Scope 3.7, and it is the first real measure of kitchen speed this
     // owner has ever had.** Two rows and no new screen: adding a report is a
     // line here plus a function in mb-db, which is P18's whole shape.
     Entry { id: "kitchen_station", title: "Kitchen speed, by station", group: "Kitchen", needs: Permission::ReportsView, kind: Kind::KitchenSpeed(SpeedBy::Station) },
     Entry { id: "kitchen_hour", title: "Kitchen speed, by hour", group: "Kitchen", needs: Permission::ReportsView, kind: Kind::KitchenSpeed(SpeedBy::Hour) },
+    // **P26 — nine reports and not one `.tsx` file changed.** That is P18's
+    // whole shape: a report is a line here plus a function in mb-db.
+    //
+    // They sit behind `inventory.view` and not `reports.view`, because P25
+    // already decided that reading the stock book is not reading the day's
+    // cash — a chef who may see the buy list is not thereby someone who may see
+    // the takings. The profit statement is the exception and says why.
+    Entry { id: "buying_supplier", title: "What you bought, by supplier", group: "Buying", needs: Permission::PurchasesManage, kind: Kind::Buying(BuyingBy::Supplier) },
+    Entry { id: "buying_material", title: "What you bought, by material", group: "Buying", needs: Permission::InventoryView, kind: Kind::Buying(BuyingBy::Material) },
+    Entry { id: "price_trend", title: "Price trend — what is going up", group: "Buying", needs: Permission::InventoryView, kind: Kind::PriceTrend },
+    Entry { id: "supplier_outstanding", title: "Who you owe", group: "Buying", needs: Permission::PurchasesManage, kind: Kind::SupplierOutstanding },
+    Entry { id: "stock_value", title: "Stock on hand, at cost", group: "Stock", needs: Permission::InventoryView, kind: Kind::StockValuation },
+    Entry { id: "count_variance", title: "Stock counts — what keeps going missing", group: "Stock", needs: Permission::InventoryView, kind: Kind::CountVariance },
+    // **The one that makes the word "profit" mean something** (audit B14). It
+    // is behind `reports.view` because it puts the day's takings on a screen.
+    Entry { id: "profit", title: "Profit — sales, food cost and running costs", group: "Money", needs: Permission::ReportsView, kind: Kind::Profit },
 ];
 
 #[must_use]
@@ -630,6 +675,340 @@ fn build(
                 .collect();
             (columns, rows, None, None)
         }
+
+        // -- P26 ------------------------------------------------------------
+        Kind::Buying(by) => {
+            let buying = repos.buying();
+            let list = match by {
+                BuyingBy::Supplier => buying.by_supplier(OUTLET, period.from, period.to)?,
+                BuyingBy::Material => buying.by_material(OUTLET, period.from, period.to)?,
+            };
+            let mut columns = vec![
+                column(if by == BuyingBy::Supplier { "Supplier" } else { "Material" }, false),
+                column("Deliveries", true),
+            ];
+            if by == BuyingBy::Material {
+                columns.push(column("Quantity", true));
+            }
+            columns.push(column("Value", true));
+            if by == BuyingBy::Supplier {
+                columns.push(column("GST on it", true));
+            }
+            let total = Money::try_sum(list.iter().map(|r| r.value)).unwrap_or(Money::ZERO);
+            notes.push(
+                "What you paid, all in — the rate less discounts, plus transport and \
+                 any GST you cannot claim back. Cancelled invoices are left out; goods \
+                 you sent back are subtracted."
+                    .to_owned(),
+            );
+            // **"275 kg", never "275000 g".** P25 found this exact bug on the
+            // buy list — a report that tells somebody they bought five thousand
+            // grams of paneer is one nobody reads. The units come from the
+            // material, so the report has to ask it.
+            let materials = repos.stock().materials(OUTLET, true)?;
+            let rows = list
+                .iter()
+                .map(|row| {
+                    let mut cells =
+                        vec![row.label.clone(), row.count.to_string()];
+                    if by == BuyingBy::Material {
+                        cells.push(match row.qty {
+                            Some(qty) => materials
+                                .iter()
+                                .find(|m| m.id.as_str() == row.key)
+                                .map_or_else(
+                                    || format!("{qty} {}", row.unit),
+                                    |m| m.units().say(qty),
+                                ),
+                            None => String::new(),
+                        });
+                    }
+                    cells.push(row.value.to_plain_string());
+                    if by == BuyingBy::Supplier {
+                        cells.push(row.tax.to_plain_string());
+                    }
+                    cells
+                })
+                .collect();
+            let mut totals = vec!["Total".to_owned(), String::new()];
+            if by == BuyingBy::Material {
+                totals.push(String::new());
+            }
+            totals.push(total.to_plain_string());
+            if by == BuyingBy::Supplier {
+                totals.push(String::new());
+            }
+            (columns, rows, Some(totals), None)
+        }
+
+        // **The rise is the finding.** A table of rates is something nobody
+        // reads; "onion is up 46%" is something an owner acts on this morning.
+        Kind::PriceTrend => {
+            let trend = repos.buying().price_trend(OUTLET, period.from, period.to)?;
+            let columns = vec![
+                column("Material", false),
+                column("Deliveries", true),
+                column("Cheapest", true),
+                column("Dearest", true),
+                column("Average", true),
+                column("Last", true),
+                column("Change", false),
+            ];
+            notes.push(
+                "Per kilo, litre or piece, and it is what the food ACTUALLY cost — \
+                 transport and non-claimable GST included. \"Change\" compares the last \
+                 delivery with the average over this period."
+                    .to_owned(),
+            );
+            let rows = trend
+                .iter()
+                .map(|row| {
+                    vec![
+                        row.name.clone(),
+                        row.deliveries.to_string(),
+                        Money::from_paise(row.cheapest.paise_per_thousand()).to_plain_string(),
+                        Money::from_paise(row.dearest.paise_per_thousand()).to_plain_string(),
+                        Money::from_paise(row.average.paise_per_thousand()).to_plain_string(),
+                        Money::from_paise(row.latest.paise_per_thousand()).to_plain_string(),
+                        change_words(row.change_bp()),
+                    ]
+                })
+                .collect();
+            (columns, rows, None, None)
+        }
+
+        // **D124 — and the sentence IS the report for most shops.**
+        Kind::InputCredit => {
+            let claims = !app_is_composition(repos)?;
+            let rows_in = repos.buying().input_credit(OUTLET, period.from, period.to)?;
+            let columns = vec![
+                column("Rate", false),
+                column("Invoices", true),
+                column("Taxable value", true),
+                column("GST paid", true),
+            ];
+            if claims {
+                let claimable =
+                    repos.buying().creditable_total(OUTLET, period.from, period.to)?;
+                notes.push(format!(
+                    "You can claim {} of this back. Set it against the GST you collected \
+                     on sales (Tax, rate-wise).",
+                    claimable.to_plain_string()
+                ));
+            } else {
+                notes.push(
+                    "You bill under the 5% scheme, so purchase GST is a cost and not a \
+                     credit. It is already inside your food cost, and there is nothing \
+                     to claim. Change this in Settings → Tax if it is wrong."
+                        .to_owned(),
+                );
+            }
+            let rows = rows_in
+                .iter()
+                .map(|row| {
+                    vec![
+                        row.label.clone(),
+                        row.count.to_string(),
+                        row.value.to_plain_string(),
+                        row.tax.to_plain_string(),
+                    ]
+                })
+                .collect();
+            (columns, rows, None, None)
+        }
+
+        Kind::SupplierOutstanding => {
+            let owing = repos.buying().outstanding(OUTLET, period.to)?;
+            let columns = vec![
+                column("Supplier", false),
+                column("Owed", true),
+                column("Not due yet", true),
+                column("30 days", true),
+                column("60 days", true),
+                column("90 days +", true),
+                column("Oldest", false),
+            ];
+            notes.push(
+                "Aged from the day each invoice falls DUE, using the payment terms you \
+                 gave that supplier — so \"not due yet\" means exactly that."
+                    .to_owned(),
+            );
+            let total = Money::try_sum(owing.iter().map(|o| o.balance)).unwrap_or(Money::ZERO);
+            let rows = owing
+                .iter()
+                .map(|o| {
+                    vec![
+                        o.supplier.name.clone(),
+                        o.balance.to_plain_string(),
+                        o.ageing.current.to_plain_string(),
+                        o.ageing.days_30.to_plain_string(),
+                        o.ageing.days_60.to_plain_string(),
+                        o.ageing.days_90.to_plain_string(),
+                        match o.ageing.oldest_days {
+                            Some(n) if n > 0 => format!("{n} days overdue"),
+                            Some(_) => "not due yet".to_owned(),
+                            None => String::new(),
+                        },
+                    ]
+                })
+                .collect();
+            (
+                columns,
+                rows,
+                Some(vec![
+                    "Total".to_owned(),
+                    total.to_plain_string(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ]),
+                None,
+            )
+        }
+
+        Kind::StockValuation => {
+            let held = repos.stock().on_hand(OUTLET, false)?;
+            let columns = vec![
+                column("Material", false),
+                column("On hand", true),
+                column("Cost", true),
+                column("Value", true),
+                column("Last counted", false),
+            ];
+            notes.push(
+                "Valued at the weighted average of what actually came in, never at a \
+                 price somebody typed. A material nobody has counted is what the software \
+                 worked out, not what is on the shelf."
+                    .to_owned(),
+            );
+            let total = Money::try_sum(held.iter().map(mb_db::repo::stock::OnHand::value))
+                .unwrap_or(Money::ZERO);
+            let rows = held
+                .iter()
+                .map(|row| {
+                    let units = row.material.units();
+                    vec![
+                        row.material.name.clone(),
+                        units.say(row.base_qty),
+                        Money::from_paise(row.material.avg_cost.paise_per_thousand())
+                            .to_plain_string(),
+                        row.value().to_plain_string(),
+                        // **D115** — "never" is a real answer and this says it.
+                        match row.material.last_counted_at {
+                            Some(_) => "counted".to_owned(),
+                            None => "never counted".to_owned(),
+                        },
+                    ]
+                })
+                .collect();
+            (
+                columns,
+                rows,
+                Some(vec![
+                    "Total".to_owned(),
+                    String::new(),
+                    String::new(),
+                    total.to_plain_string(),
+                    String::new(),
+                ]),
+                None,
+            )
+        }
+
+        Kind::CountVariance => {
+            let history = repos.counts().variance_history(OUTLET, period.from, period.to)?;
+            let columns = vec![
+                column("Material", false),
+                column("Counts", true),
+                column("Out by", true),
+                column("Worth", true),
+                column("Last counted", false),
+            ];
+            if history.is_empty() {
+                notes.push(
+                    "No count has been approved in this period. Until somebody walks the \
+                     store with a clipboard, every stock figure is what the software \
+                     worked out — Stock → Count."
+                        .to_owned(),
+                );
+            } else {
+                notes.push(
+                    "Approved counts only. A material that is short month after month is \
+                     the finding; one bad month is usually a recipe that needs correcting."
+                        .to_owned(),
+                );
+            }
+            let rows = history
+                .iter()
+                .map(|row| {
+                    vec![
+                        row.name.clone(),
+                        row.counts.to_string(),
+                        format!("{} {}", row.variance_qty, row.unit),
+                        row.variance_value.to_plain_string(),
+                        row.last_counted.to_string(),
+                    ]
+                })
+                .collect();
+            (columns, rows, None, None)
+        }
+
+        // **D133 — three blocks, and the double count is named out loud.**
+        Kind::Profit => {
+            let profit = repos.reports().profit(OUTLET, period)?;
+            let columns = vec![column("", false), column("Amount", true)];
+            // **The deductions are shown NEGATIVE, and the labels say "less".**
+            //
+            // The first version printed "Found missing when counted 600.00" as
+            // a positive figure between two totals, which reads as if it ADDED
+            // ₹600 to the margin — and the two leading spaces meant to indent
+            // it were collapsed by the browser, so the seven rows looked like
+            // seven equal facts. A column an owner checks by adding it up has
+            // to add up on the page. Found by looking at it.
+            let mut rows = vec![
+                vec!["Sales, less the GST on them".to_owned(), profit.net_sales.to_plain_string()],
+                vec!["less what the food cost".to_owned(), profit.food_used.neg().to_plain_string()],
+                vec!["less wastage".to_owned(), profit.wastage.neg().to_plain_string()],
+                vec![
+                    "less what a count found missing".to_owned(),
+                    profit.shrinkage.neg().to_plain_string(),
+                ],
+                vec!["Gross margin".to_owned(), profit.gross_margin.to_plain_string()],
+                vec!["less running costs".to_owned(), profit.running_costs.neg().to_plain_string()],
+                vec!["What is left".to_owned(), profit.left.to_plain_string()],
+            ];
+            if let Some(bp) = profit.margin_bp() {
+                rows.push(vec![
+                    "Gross margin as a share of sales".to_owned(),
+                    margin_words(bp),
+                ]);
+            }
+            notes.push(
+                // No markdown: a report note is printed as it is, and the first
+                // version showed a shopkeeper literal asterisks. Found by
+                // looking at the screen.
+                "Money you paid for stock is not a running cost. Rice bought on the \
+                 3rd is a cost when it is eaten, not when it is paid for — which is the \
+                 whole difference between this number and the one every till prints."
+                    .to_owned(),
+            );
+            if profit.double_counted.is_positive() {
+                notes.push(format!(
+                    "{} of your running costs are in categories you also buy through \
+                     Purchases. That money may be counted twice — open Spends and check.",
+                    profit.double_counted.to_plain_string()
+                ));
+            }
+            notes.push(
+                "It excludes anything nobody recorded. Where a material has never been \
+                 counted, the food cost is what your recipes say rather than what the \
+                 shelf says."
+                    .to_owned(),
+            );
+            (columns, rows, None, None)
+        }
     };
 
     Ok(ReportView {
@@ -655,6 +1034,39 @@ fn build(
 fn minutes_and_seconds(millis: i64) -> String {
     let total = millis.max(0) / 1_000;
     format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// "64.8%" â a margin to one decimal place, from basis points and with no
+/// float in sight (D2 governs the money path, and a margin is on it).
+#[allow(
+    clippy::integer_division,
+    reason = "basis points to a percent and one decimal, by remainder; a float \n              here would be the only one in the money path"
+)]
+fn margin_words(bp: i64) -> String {
+    format!("{}.{}%", bp / 100, (bp.abs() % 100) / 10)
+}
+
+/// "up 46%", "down 8%", or nothing at all when there is no average to compare
+/// with — **a percentage of nothing is not a number** (P25's `variance_bp` and
+/// D115 said the same in two other places).
+#[allow(
+    clippy::integer_division,
+    reason = "basis points to whole percent for a screen; the remainder is \
+              noise a shopkeeper does not read"
+)]
+fn change_words(bp: Option<i64>) -> String {
+    match bp {
+        None => String::new(),
+        Some(n) if n.abs() < 100 => "about the same".to_owned(),
+        Some(n) if n > 0 => format!("up {}%", n / 100),
+        Some(n) => format!("down {}%", -n / 100),
+    }
+}
+
+/// **D124 — a property of the shop.** Read here rather than passed in, because
+/// `build` has the transaction and the store profile is one row.
+fn app_is_composition(repos: &mb_db::Repos<'_>) -> Result<bool, mb_db::DbError> {
+    Ok(repos.settings().store_profile(OUTLET)?.is_some_and(|p| p.is_composition))
 }
 
 const fn label_for(by: SalesBy) -> &'static str {
@@ -912,6 +1324,31 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         ));
     }
 
+    // 5. **P26** — suppliers who have been waiting, and a store nobody has ever
+    //    counted. Both are D100's shape: the row carries its own fix.
+    if who.must(Permission::PurchasesManage).is_ok()
+        && let Ok(buying) = crate::buying::buying_on(app, None)
+    {
+        for line in buying.attention {
+            attention.push(needs_you("warn", "Buying", line));
+        }
+    }
+
+    // **D133 on the dashboard.** `None` when the shop has no recipes at all,
+    // because a gross margin computed against a food cost of zero is 100% and
+    // is a lie the tile would tell every day.
+    let margin = app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                if !repos.stock().has_any_recipe(OUTLET)? {
+                    return Ok(None);
+                }
+                Ok(Some(repos.reports().profit(OUTLET, period)?))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
     // The comparison against yesterday, through the same report the screen
     // would run.
     let compare_view = app.with_shop(|shop| {
@@ -956,6 +1393,22 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
                 label: "Voided".to_owned(),
                 value: totals.voids.to_plain_string(),
                 note: words::count(totals.voided_bills, "bill", "bills"),
+            },
+            // **P26, D133 — and this tile is audit B14's answer in four
+            // words.** "Takings" is what came in; this is what is left after
+            // the food it took to earn it, from the stock ledger rather than
+            // from a guess. A shop with no recipes sees an honest dash instead
+            // of a confident number.
+            StatView {
+                label: "Gross margin".to_owned(),
+                value: match margin {
+                    Some(profit) => profit.gross_margin.to_plain_string(),
+                    None => "—".to_owned(),
+                },
+                note: match margin.and_then(|p| p.margin_bp().map(|bp| (p, bp))) {
+                    Some((_, bp)) => format!("{} of what you sold", margin_words(bp)),
+                    None => "Add recipes to your dishes and this fills in.".to_owned(),
+                },
             },
         ],
         compare: Some(compare_view),
@@ -1080,7 +1533,7 @@ pub(crate) fn documents_folder(under: &str) -> std::path::PathBuf {
     crate::config::AppConfig::directory().join("exports")
 }
 
-fn export_folder() -> std::path::PathBuf {
+pub(crate) fn export_folder() -> std::path::PathBuf {
     documents_folder("Magic Bill reports")
 }
 

@@ -28,7 +28,13 @@
 use rusqlite::Transaction;
 
 pub mod audit;
+/// P26. Suppliers, the paper, the supplier ledger and purchase orders —
+/// **one rupee, one row** (D120).
+pub mod buying;
 pub mod composition;
+/// P26. The physical stock count, which **freezes the book and posts a delta**
+/// (D127).
+pub mod counts;
 pub mod corrections;
 pub mod devices;
 pub mod kitchen;
@@ -53,6 +59,11 @@ pub mod stock;
 pub mod taxclass;
 
 pub use audit::{AuditFilter, AuditRepo};
+pub use buying::{
+    Attachment, BuyingRepo, OrderLine, OrderState, Outstanding, Purchase, PurchaseKind,
+    PurchaseLine, PurchaseOrder, Supplier, SupplierAdjustment, SupplierMaterial, SupplierPayment,
+};
+pub use counts::{CountLine, CountRepo, CountState, StockCount, Written};
 pub use composition::{Combo, ComboPart, CompositionRepo, Modifier, ModifierGroup, Variant};
 pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
 pub use floor::FloorRepo;
@@ -168,6 +179,20 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn stock(&self) -> StockRepo<'a> {
         StockRepo::new(self.tx)
+    }
+
+    /// P26 — suppliers, the paper and what the shop owes. **Writes the shelf,
+    /// the paper and the ledger in one transaction, and no `expenses` row**
+    /// (D120).
+    #[must_use]
+    pub fn buying(&self) -> BuyingRepo<'a> {
+        BuyingRepo::new(self.tx)
+    }
+
+    /// P26 — the physical stock count (D127).
+    #[must_use]
+    pub fn counts(&self) -> CountRepo<'a> {
+        CountRepo::new(self.tx)
     }
 
     /// Every report (P18), grouped by the stored business day.

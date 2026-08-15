@@ -86,10 +86,15 @@ pub struct CashPositionView {
     pub cash_expenses: MoneyView,
     pub payouts: MoneyView,
     pub bank_drops: MoneyView,
+    /// **P26, D120.** Cash handed to suppliers at the door. Before this term
+    /// existed the day close told a shop to expect money it had already paid
+    /// the vegetable man — and a purchase writes no expense row on purpose, so
+    /// this is the only place the drawer sees it.
+    pub suppliers_paid: MoneyView,
     pub expected: MoneyView,
     /// The whole sum as one sentence, so the screen never assembles it:
     /// "2,000.00 float + 3,450.00 cash sales + 0.00 top-ups − 400.00 expenses
-    /// − 300.00 payouts − 1,000.00 to the bank".
+    /// − 300.00 payouts − 1,000.00 to the bank − 2,000.00 to suppliers".
     pub says: String,
 }
 
@@ -301,15 +306,17 @@ pub fn expenses_on(app: &App) -> UiResult<ExpensesView> {
                         cash_expenses: MoneyView::from(position.cash_expenses),
                         payouts: MoneyView::from(position.payouts),
                         bank_drops: MoneyView::from(position.bank_drops),
+                        suppliers_paid: MoneyView::from(position.suppliers_paid),
                         expected: MoneyView::from(position.expected),
                         says: format!(
-                            "{} float + {} cash sales + {} top-ups − {} expenses − {} payouts − {} to the bank",
+                            "{} float + {} cash sales + {} top-ups − {} expenses − {} payouts − {} to the bank − {} to suppliers",
                             position.opening_float.to_plain_string(),
                             position.cash_sales.to_plain_string(),
                             position.top_ups.to_plain_string(),
                             position.cash_expenses.to_plain_string(),
                             position.payouts.to_plain_string(),
                             position.bank_drops.to_plain_string(),
+                            position.suppliers_paid.to_plain_string(),
                         ),
                     },
                     total: MoneyView::from(total),
