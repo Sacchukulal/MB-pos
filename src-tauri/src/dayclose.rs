@@ -141,6 +141,14 @@ pub struct DayCloseView {
     pub carry_says: String,
     /// Whether the person looking may close it, and may reopen it.
     pub may_close: bool,
+    /// **Which tills are in the shop's day, and which are not** (P27, D140).
+    ///
+    /// Empty in a one-till shop, which is every shop until somebody buys a
+    /// second computer. In a two-till shop it is the sentence that stops a
+    /// manager going home believing the day is closed: the shop's total is the
+    /// SUM of the drawers, so a drawer nobody counted is a total that is short
+    /// by whatever is in it.
+    pub tills_say: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +169,7 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
     app.with_shop(|shop| {
         // **One trip.** Everything this screen needs, including the closer's
         // name — see `closed_words` for what looking it up separately cost.
-        let (position, totals, existing, stored_counts, closer) = shop
+        let (position, totals, existing, stored_counts, closer, (how_many_tills, still_open)) = shop
             .db
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
@@ -187,6 +195,10 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                     existing,
                     stored,
                     closer.unwrap_or_else(|| "somebody".to_owned()),
+                    (
+                        repos.terminals().count(OUTLET)?,
+                        repos.money().tills_still_open(OUTLET, day)?,
+                    ),
                 ))
             })
             .map_err(|e| words::from_db(&e))?;
@@ -275,8 +287,29 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                 String::new()
             },
             may_close,
+            tills_say: tills_say(how_many_tills, &still_open),
         })
     })
+}
+
+/// **Which tills are in the shop's day** (D140) — and it is silent in a one-till
+/// shop, because there is nothing there worth saying.
+fn tills_say(how_many: u32, still_open: &[String]) -> String {
+    if how_many < 2 {
+        return String::new();
+    }
+    if still_open.is_empty() {
+        return "Every till has counted its drawer. Closing now closes the \
+                shop's day."
+            .to_owned();
+    }
+    format!(
+        "{} still to count: {}. The shop's day stays open until they have — its \
+         total is the sum of the drawers, so closing without them would be short \
+         by whatever is in them.",
+        words::count(still_open.len() as i64, "till", "tills"),
+        crate::words::list(still_open)
+    )
 }
 
 fn line(label: &str, amount: Money) -> SlipLineView {
@@ -723,5 +756,36 @@ mod tests {
         let rows = grid(&[CountArg { value: 200_000, count: 5 }]);
         assert!(rows.iter().all(|r| r.count == 0));
         assert_eq!(rows.iter().map(|r| r.total.paise).sum::<i64>(), 0);
+    }
+
+    /// **P27, D140 — the sentence that names the drawers nobody has counted.**
+    ///
+    /// The first assertion is the one that matters most: a one-till shop is
+    /// every shop until somebody buys a second computer, and a night-time
+    /// sentence about "tills" in a shop with one till is noise a person learns
+    /// to skip past — which is how they come to skip past it when it matters.
+    #[test]
+    fn the_day_close_names_the_tills_that_have_not_counted_and_is_silent_with_one() {
+        assert_eq!(tills_say(1, &[]), "");
+        assert_eq!(tills_say(1, &["Counter 1".to_owned()]), "");
+
+        let done = tills_say(2, &[]);
+        assert!(done.contains("Every till"), "{done}");
+        assert!(done.contains("closes the shop's day"), "{done}");
+
+        let one = tills_say(2, &["Counter 2".to_owned()]);
+        assert!(one.starts_with("1 till still to count: Counter 2."), "{one}");
+        // **Why it matters, not just that it is true.** A manager who reads
+        // only "1 till still to count" has no reason not to close anyway.
+        assert!(one.contains("sum of the drawers"), "{one}");
+
+        let three = tills_say(
+            4,
+            &["Counter 2".to_owned(), "Counter 3".to_owned(), "Parcel".to_owned()],
+        );
+        assert!(
+            three.contains("Counter 2, Counter 3 and Parcel"),
+            "the list does not read out loud: {three}"
+        );
     }
 }

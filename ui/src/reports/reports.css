@@ -356,3 +356,15 @@
 .mb-dayclose__banner .mb-dayclose__closed {
   margin: 0;
 }
+
+/* **P27, D140 — which tills are in the shop's day.**
+   The accent and not the warning colour: a drawer nobody has counted yet at
+   nine in the evening is an ordinary evening, not a problem. It becomes one
+   only if somebody closes without it, and the sentence says that. */
+.mb-dayclose__tills {
+  border-left: var(--space-1) solid var(--accent);
+}
+
+.mb-dayclose__tills .mb-dayclose__closed {
+  margin: 0;
+}

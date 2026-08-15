@@ -185,6 +185,22 @@ pub fn count(how_many: i64, one: &str, many: &str) -> String {
     }
 }
 
+/// **"Counter 2", "Counter 2 and the parcel window", "A, B and C"** — a list a
+/// person reads out loud rather than one a program prints.
+///
+/// The "and" before the last one is not decoration: a manager scanning
+/// *"Counter 1, Counter 2, Counter 3"* at eleven at night reads three names; the
+/// same list with an "and" reads as a finished sentence, which is what tells
+/// them nothing has been cut off.
+#[must_use]
+pub fn list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 #[must_use]
 #[allow(
     clippy::integer_division,

@@ -293,6 +293,12 @@ fn main() {
             // touches the settle path — it only reads a queue the settle
             // already wrote.
             forwarding::start_sender(app.handle());
+            // D139. A till that was switched off while somebody moved the main
+            // till finds out here, on its own, because the machine that failed
+            // is exactly the one that could not be told at the time.
+            if let Some(state) = app.handle().try_state::<App>() {
+                terminals::check_the_master_at_startup(&state);
+            }
             push::watch_for_pairing(app.handle());
             push::emit_session(app.handle());
             if let Some(main) = app.get_webview_window("main") {

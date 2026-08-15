@@ -58,6 +58,9 @@ const view: DayCloseView = {
   closedSays: '',
   carrySays: '',
   mayClose: true,
+  // P27, D140. A one-till shop says nothing here, which is every shop in this
+  // file â the two-till sentence is proved in Rust, where the arithmetic is.
+  tillsSay: '',
 };
 
 /** What Rust sends back once twenty ₹500 notes are counted. */

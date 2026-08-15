@@ -160,6 +160,9 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
     };
     let waiting = crate::forwarding::waiting_on(app).map(|w| w.len()).unwrap_or(0);
     let allowed = app.entitlement().limits.terminals;
+    // D139's other half: this machine may have been the master until somebody
+    // moved it while this one was switched off.
+    let stood_down = stood_down_says(app).unwrap_or_default();
 
     app.with_shop(|shop| {
         shop.db
@@ -195,7 +198,12 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
                     // away — nothing else leaves them queued — so this needs
                     // no heartbeat, no timeout and no third state that could
                     // disagree with the queue.
-                    away_says: if is_master || waiting == 0 {
+                    away_says: if !stood_down.is_empty() {
+                        // The louder of the two: a till that does not know it
+                        // has been replaced is a till whose book is stranded,
+                        // and that has to be read before "the main till is off".
+                        stood_down.clone()
+                    } else if is_master || waiting == 0 {
                         String::new()
                     } else {
                         "The main till is off. This till can take counter and parcel \
@@ -464,24 +472,52 @@ pub fn send_now_on(app: &App) -> UiResult<TillsView> {
     tills_on(app)
 }
 
-/// **Stand down if somebody else has been made master since.**
+/// **Stand down if somebody else has been made master since** (D139).
 ///
-/// Called at start-up. The old master is the machine that failed, so nothing in
-/// the handover may require it to be reachable — this is how it finds out, on
-/// its own, the next time it opens.
-pub fn stand_down_if_replaced(app: &App) -> UiResult<bool> {
+/// The machine that failed is exactly the one that cannot hand over gracefully,
+/// so nothing in the handover requires it to be reachable — it finds out on its
+/// own, here, the next time it opens.
+///
+/// Returns the sentence a person must read, or nothing when this machine's idea
+/// of itself matches the shop's. **It cannot fix itself**, and saying so is the
+/// honest answer: the shop moved the master while this till was off, and to
+/// forward its book to the new one somebody has to join it — which needs a
+/// person at the other counter to press Allow. Pretending otherwise would be a
+/// till that quietly believes it is still the book of record.
+pub fn stood_down_says(app: &App) -> UiResult<String> {
     let mine = me(&crate::config::AppConfig::directory());
-    app.with_shop(|shop| {
+    let id = app.terminal_id().to_owned();
+    let master = app.with_shop(|shop| {
         shop.db
-            .read_transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let Some(master) = repos.terminals().master(OUTLET)? else {
-                    return Ok(false);
-                };
-                Ok(master.id != mine.terminal_id && mine.master.is_some())
-            })
+            .read_transaction(|tx| mb_db::Repos::new(tx).terminals().master(OUTLET))
             .map_err(|e| words::from_db(&e))
-    })
+    })?;
+
+    let Some(master) = master else {
+        return Ok(String::new()); // A shop with one till and no roles.
+    };
+    if master.id == id || mine.master.is_some() {
+        // Either this IS the master, or it already knows it is a secondary and
+        // holds the credential to reach one.
+        return Ok(String::new());
+    }
+    Ok(format!(
+        "{} is the main till now. This one keeps billing and keeps its own \
+         numbers, but its bills stay here until somebody joins it to {} again \
+         on the Tills screen.",
+        master.name, master.name
+    ))
+}
+
+/// Say it once at start-up, into the log, so support can see it.
+pub fn check_the_master_at_startup(app: &App) {
+    match stood_down_says(app) {
+        Ok(says) if !says.is_empty() => crate::log_warn!("{says}"),
+        Ok(_) => {}
+        // A shop that will not answer is a shop that has not opened yet. There
+        // is nothing to say and nothing to do about it here.
+        Err(e) => crate::log_warn!("the tills could not be read at start-up: {}", e.message),
+    }
 }
 
 // ---------------------------------------------------------------------------

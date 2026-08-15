@@ -100,6 +100,16 @@ export function DayClose() {
         }
       />
 
+      {/* **Which tills are in this day** (P27, D140). Silent in a one-till
+          shop, and in a two-till shop it is what stops a manager going home
+          believing the day is closed: the shop's total is the SUM of the
+          drawers, so a drawer nobody counted is a total that is short. */}
+      {view.tillsSay ? (
+        <Card className="mb-dayclose__tills">
+          <p className="mb-dayclose__closed">{view.tillsSay}</p>
+        </Card>
+      ) : null}
+
       {view.isClosed ? (
         // The sentence and the way out, side by side. A quiet button on its
         // own line came out centred with no chrome and read as a heading —

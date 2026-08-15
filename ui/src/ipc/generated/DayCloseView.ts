@@ -45,4 +45,14 @@ carrySays: string,
 /**
  * Whether the person looking may close it, and may reopen it.
  */
-mayClose: boolean, };
+mayClose: boolean, 
+/**
+ * **Which tills are in the shop's day, and which are not** (P27, D140).
+ *
+ * Empty in a one-till shop, which is every shop until somebody buys a
+ * second computer. In a two-till shop it is the sentence that stops a
+ * manager going home believing the day is closed: the shop's total is the
+ * SUM of the drawers, so a drawer nobody counted is a total that is short
+ * by whatever is in it.
+ */
+tillsSay: string, };
