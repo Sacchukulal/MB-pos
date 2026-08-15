@@ -856,16 +856,46 @@ fn per_till_drawers_sum_exactly_to_the_shops_day() {
 // T11 — the budget that must NOT have moved.
 // ---------------------------------------------------------------------------
 
-/// **T11. BUDGET R7, and the proof that B5 did not move.**
+/// **T11, the half that cannot be flaky: the settle path names no client.**
 ///
-/// A settle on a secondary, measured with a master and with none. If the two
-/// differ, D135 has been broken by something — because the whole design is that
-/// billing gains no network call at all, so an unreachable master cannot
-/// possibly be slower.
+/// The whole of D135 is that billing gains no network call, and the strongest
+/// way to say that is not a stopwatch — it is that the words are not in the
+/// source. Read the billing files and prove none of them can reach the wire.
 ///
-/// It asserts a RATIO rather than a wall-clock number: a test machine under
-/// load is not a shop's counter, and the claim here is "these are the same
-/// path", not "this is 150 ms".
+/// This is `the_billing_path_does_not_ask_about_the_licence` one module along,
+/// for the same reason PERFORMANCE §2.2 gave: a promise about a hot path is
+/// kept by there being nothing there to call.
+#[test]
+fn the_billing_path_cannot_reach_the_main_till() {
+    for (name, source) in [
+        ("billing.rs", include_str!("billing.rs")),
+        ("flows.rs", include_str!("flows.rs")),
+        ("orders.rs", include_str!("orders.rs")),
+    ] {
+        for (number, line) in source.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            for forbidden in ["mb_lan::Master", "forwarding::send", "forward_blocking"] {
+                assert!(
+                    !code.contains(forbidden),
+                    "{name} line {} can reach the main till, and it is on the \
+                     billing path — D135 exists so that it cannot: {}",
+                    number + 1,
+                    code.trim()
+                );
+            }
+        }
+    }
+}
+
+/// **T11's other half — budget R9, measured.**
+///
+/// A settle on a secondary, timed with a master and with none. If a network
+/// call ever appears on this path the difference is not subtle: an unreachable
+/// master costs a two-second connect timeout against a bill that takes
+/// milliseconds, so the bound is deliberately generous. It is here to catch a
+/// thousand-fold regression, not to police the scheduler — `cargo test` runs
+/// this suite in parallel with four hundred others, and a tight ratio here
+/// failed on nothing but a busy machine.
 #[test]
 fn a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not() {
     let scratch = Scratch::new("term_budget");
@@ -894,11 +924,14 @@ fn a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not() {
     // and the settle never asks it anything.
     let alone = time_ten();
 
-    let slower = with_master.max(alone).as_secs_f64();
-    let faster = with_master.min(alone).as_secs_f64().max(0.000_001);
-    assert!(
-        slower / faster < 3.0,
-        "settling costs {with_master:?} with a master and {alone:?} without — \
-         something put the network on the billing path"
-    );
+    // Ten bills. A single connect timeout on the settle path would add two
+    // seconds to one of these runs, so a whole run under half a second is proof
+    // that neither of them waited on a socket.
+    for (what, took) in [("with the main till up", with_master), ("with it off", alone)] {
+        assert!(
+            took < std::time::Duration::from_millis(500),
+            "ten bills {what} took {took:?} — that is long enough to be waiting \
+             on a network, and nothing on this path may"
+        );
+    }
 }

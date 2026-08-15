@@ -40,6 +40,29 @@
 //! The **store profile** IS here, even though it lives in its own table,
 //! because it is nine scalars a person types into a form — see
 //! [`Storage::Store`].
+//!
+//! # Per-terminal settings (P27, scope 11.1) — and why there is no third scope
+//!
+//! P27 asked for a till to have its own printers, its own drawer, its own
+//! default order type and its own numbering prefix. Every one of those is
+//! already true, and **not one of them needed a scope on a key**:
+//!
+//! * **printers** and **the drawer** are rows in `printers`, and a secondary
+//!   till has its own database — so they are its own by construction. Two tills
+//!   have never been able to share a printer row.
+//! * **the default order type** is `billing.lock_order_type` /
+//!   `billing.locked_order_type`, and the same argument applies: they are read
+//!   out of the database this machine opened. The parcel window opens on Parcel
+//!   because *that machine* was set that way.
+//! * **the numbering prefix** is on `counters`, which has been keyed on
+//!   `(outlet, terminal, kind)` since P04, and D135 is what made it matter.
+//!
+//! So there is no `till:<id>:<key>` scope, and adding one would have been a
+//! third way of saying where a value lives, to hold nothing. The thing a shop
+//! actually notices — that the two tills' settings can drift apart — is honest
+//! and expected until P33 gives them a way to be told about each other; a
+//! secondary that silently inherited the master's printer would be a till
+//! printing to a machine in another room.
 
 pub mod backup;
 pub mod catalog;

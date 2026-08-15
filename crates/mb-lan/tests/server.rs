@@ -779,6 +779,108 @@ async fn tls_only_lets_in_a_client_that_pinned_the_certificate() {
     );
 }
 
+/// **P27 — a second till, over the real wire, from meeting to forwarding.**
+///
+/// `src-tauri`'s eleven prove what happens to a shop's MONEY when two machines
+/// write bills at once, and they hand the batch straight to the master's
+/// receiver. This is the other half: the whole client, over TLS, against a real
+/// socket, doing the three things a till does in order.
+///
+/// 1. **Meet.** The till has only what a person carried from the QR — an
+///    address and a fingerprint. It fetches the certificate over a connection
+///    that trusts nothing, checks the fingerprint by hand, and pins it. Nothing
+///    on the wire made that safe; the person holding the code did.
+/// 2. **Join.** P19's pairing, with `platform: "till"`, waiting for somebody at
+///    the other counter to press Allow.
+/// 3. **Forward.** A settled bill, as a fact — and sent twice, because a real
+///    sender retries and the second send must change nothing.
+///
+/// And the refusal that matters: a fingerprint one character out is a stranger
+/// answering on the master's address, and the join stops before a credential is
+/// ever asked for.
+#[tokio::test]
+async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
+    let h = Harness::start_with(true);
+    let real = mb_lan::identity::fingerprint_of(&h.shared.identity.certificate_pem)
+        .expect("a fingerprint");
+
+    // **The refusal first**, because it is the one that would be quietly
+    // skipped. One digit different is somebody else on this address.
+    let mut wrong: Vec<char> = real.chars().collect();
+    let last = wrong.len() - 1;
+    wrong[last] = if wrong[last] == '0' { '1' } else { '0' };
+    let stranger = mb_lan::Master::meet(&h.base, &wrong.iter().collect::<String>()).await;
+    assert!(
+        matches!(stranger, Err(mb_lan::ClientError::Refused { .. })),
+        "a certificate whose fingerprint did not match the code was accepted"
+    );
+
+    // 1. Meet, with the fingerprint from the code.
+    let master = mb_lan::Master::meet(&h.base, &real)
+        .await
+        .expect("the till recognised the main one");
+    // The certificate it pinned is the one it checked — not one it fetched
+    // again afterwards, which would be a second chance for a stranger.
+    assert_eq!(master.certificate_pem(), h.shared.identity.certificate_pem);
+
+    // 2. Join. A person at the other counter presses Allow while the till
+    //    waits, so the approval is driven from here on its own task.
+    let (token, _code) = h.shared.desk.open(h.clock.now());
+    let desk = h.shared.desk.clone();
+    let counter = Arc::clone(&h.counter);
+    let allowing = tokio::spawn(async move {
+        // Poll for the request to arrive, exactly as the panel's operator would
+        // wait for the name to appear on their screen.
+        for _ in 0..100 {
+            if let Some(waiting) = desk.waiting().first().cloned() {
+                let device = counter
+                    .pair(
+                        &PairRequest {
+                            name: waiting.name.clone(),
+                            platform: waiting.platform.clone(),
+                            token: String::new(),
+                        },
+                        &waiting.name,
+                        &waiting.platform,
+                    )
+                    .expect("paired");
+                desk.approve(&waiting.request_id, device);
+                return waiting.platform;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        String::new()
+    });
+
+    let credential = master
+        .join(&token, "Counter 2", std::time::Duration::from_secs(10))
+        .await
+        .expect("it joined");
+    assert!(!credential.device_id.is_empty());
+    assert!(!credential.secret.is_empty());
+    // **The panel saw a till and not a phone**, which is what the person
+    // pressing Allow reads and what D141 counts against a different line.
+    assert_eq!(allowing.await.expect("the operator"), "till");
+
+    // 3. Forward, twice.
+    let master = master.as_device(credential);
+    let batch = mb_lan::Forwarded {
+        terminal_id: "term_2".to_owned(),
+        terminal_name: "Counter 2".to_owned(),
+        series_prefix: "B/".to_owned(),
+        orders: vec![serde_json::json!({ "core": { "id": "ord_b1" } })],
+    };
+    let first = master.forward(&batch).await.expect("it went across");
+    assert!(first.all_stored(), "{first:?}");
+    assert_eq!(first.stored, vec![("ord_b1".to_owned(), true)]);
+
+    // **A repeat is a success**, byte for byte, which is what lets a secondary
+    // retry for ever without keeping track of what it has already sent.
+    let again = master.forward(&batch).await.expect("it went across again");
+    assert_eq!(again.stored, first.stored);
+    assert_eq!(again.says, first.says);
+}
+
 /// **T11.** Covered in `pairing.rs`'s unit tests for the token's own rules;
 /// this is the same property through the socket, because a rule that only holds
 /// below the HTTP layer is a rule with a way around it.
