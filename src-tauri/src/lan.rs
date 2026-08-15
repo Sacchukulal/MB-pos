@@ -839,11 +839,34 @@ pub fn start(handle: &tauri::AppHandle) {
         }
     };
 
-    let running = match mb_lan::start(shared.clone(), mb_lan::DEFAULT_PORT, Some(tls)) {
+    // **The usual port, and then any port** (P27, found by running it).
+    //
+    // 7331 is what the QR and the mDNS record carry, so a shop where it is free
+    // gets a predictable address a person can read out. But the port is not the
+    // identity — the certificate's fingerprint is (D80) — and both the QR and
+    // the advertisement carry whichever one this counter actually got. So a
+    // counter that cannot have 7331 takes what it can get instead of going off
+    // the network entirely.
+    //
+    // Found by P27's two-process run: the second till reported *"Only one usage
+    // of each socket address is normally permitted"* and served nothing. Two
+    // tills on one machine is a bench, but **anything else on a shop's PC
+    // holding 7331 produced exactly the same dead counter**, with an error in a
+    // log nobody reads and no way out.
+    let running = match mb_lan::start(shared.clone(), mb_lan::DEFAULT_PORT, Some(tls.clone())) {
         Ok(running) => running,
-        Err(e) => {
-            crate::log_error!("the counter could not go onto the network: {e}");
-            return;
+        Err(first) => {
+            crate::log_warn!(
+                "port {} is taken, so this counter is asking for any free one: {first}",
+                mb_lan::DEFAULT_PORT
+            );
+            match mb_lan::start(shared.clone(), 0, Some(tls)) {
+                Ok(running) => running,
+                Err(e) => {
+                    crate::log_error!("the counter could not go onto the network: {e}");
+                    return;
+                }
+            }
         }
     };
 

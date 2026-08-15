@@ -181,9 +181,19 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
                         prefix: t.series_prefix.clone(),
                         is_master: t.is_master,
                         is_this_one: t.id == mine.terminal_id,
-                        last_seen: match t.last_seen_at {
-                            Some(seen) => words::when(seen),
-                            None => "never".to_owned(),
+                        // **The machine drawing this screen is here by
+                        // definition**, and saying "never" about it is a lie
+                        // the very first run tells: the heartbeat below runs
+                        // AFTER this read, so a till's own row always said
+                        // never until somebody opened the screen twice. Found
+                        // by looking at it.
+                        last_seen: if t.id == mine.terminal_id {
+                            "just now".to_owned()
+                        } else {
+                            match t.last_seen_at {
+                                Some(seen) => words::when(seen),
+                                None => "never".to_owned(),
+                            }
                         },
                         numbers_say: numbers_say(t),
                     })
@@ -242,18 +252,30 @@ fn numbers_say(terminal: &Terminal) -> String {
 }
 
 /// **D141 — the licence counts tills at the door.**
+///
+/// Three cases and not two, and the third is the one a real shop hits: a plan
+/// that used to allow three tills and now allows one leaves a shop **over** the
+/// limit with every till still billing (D141's other half). Saying "all of them
+/// are in use" there is a sentence that does not describe what the owner is
+/// looking at — found by running two tills against an unlicensed machine, whose
+/// plan allows one.
 fn limit_says(have: usize, allowed: u32) -> String {
     let have = u32::try_from(have).unwrap_or(u32::MAX);
+    let plan = words::count(i64::from(allowed), "till", "tills");
     if have < allowed {
+        return format!("Your plan allows {plan}. You are using {have}.");
+    }
+    if have == allowed {
         return format!(
-            "Your plan allows {}. You are using {have}.",
-            words::count(i64::from(allowed), "till", "tills")
+            "Your plan allows {plan}, and all of them are in use. Another till \
+             can only join on a bigger plan — the ones you have keep billing \
+             either way."
         );
     }
     format!(
-        "Your plan allows {}, and all of them are in use. Another till can only \
-         join on a bigger plan — the ones you have keep billing either way.",
-        words::count(i64::from(allowed), "till", "tills")
+        "You are using {}, and your plan allows {plan}. Every one of them keeps \
+         billing — nothing stops. A bigger plan is what lets you add another.",
+        words::count(i64::from(have), "till", "tills")
     )
 }
 
@@ -575,6 +597,15 @@ mod tests {
 
         let full = limit_says(3, 3);
         assert!(full.contains("keep billing"), "{full}");
+
+        // **And the case a real shop hits: OVER the limit, everything still
+        // billing.** A plan that drops from three tills to one leaves a shop
+        // here, and "all of them are in use" would not describe what the owner
+        // is looking at. Found by running two tills on an unlicensed machine.
+        let over = limit_says(2, 1);
+        assert!(over.starts_with("You are using 2 tills"), "{over}");
+        assert!(over.contains("allows 1 till"), "{over}");
+        assert!(over.contains("nothing stops"), "{over}");
     }
 
     /// D135's sentence, and the empty case a one-till shop actually has.
