@@ -7,12 +7,14 @@
  */
 
 .mb-menu {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: grid;
   grid-template-columns: var(--menu-categories-width) minmax(0, 1fr);
   gap: var(--space-4);
   min-height: 0;
   height: 100%;
-  padding: var(--space-4);
   overflow: hidden;
 }
 
@@ -171,4 +173,19 @@
 .mb-comp__choice select {
   /* A long option must ellipsise rather than widen its own dialog. */
   text-overflow: ellipsis;
+}
+
+/* The two columns, under the page header. They used to BE the screen, which is
+   why the Menu had no title — there was nowhere to put one. */
+.mb-menu__body {
+  display: grid;
+  grid-template-columns: var(--menu-categories-width) minmax(0, 1fr);
+  gap: var(--gap-group);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mb-menu__find {
+  width: var(--find-width);
 }

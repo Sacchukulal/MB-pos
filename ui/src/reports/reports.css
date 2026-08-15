@@ -10,12 +10,14 @@
  */
 
 .mb-reports {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: grid;
   grid-template-columns: var(--settings-rail) minmax(0, 1fr);
   gap: var(--space-4);
   height: 100%;
   min-height: 0;
-  padding: var(--space-4);
 }
 
 .mb-reports__rail {
@@ -140,12 +142,14 @@
    --------------------------------------------------------------------------- */
 
 .mb-dayclose {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: var(--space-4);
 }
 
 .mb-dayclose__columns {
@@ -256,12 +260,14 @@
    --------------------------------------------------------------------------- */
 
 .mb-dash {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: var(--space-4);
 }
 
 .mb-dash__title {

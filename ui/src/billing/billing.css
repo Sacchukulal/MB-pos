@@ -1,53 +1,29 @@
 /* The billing screen. Four regions that never move (UI_GUIDELINES §4).
    Tokens only — `npm run lint:tokens` fails the build otherwise. */
 
+/* `Page` supplies the margin and the flex column (P27.5); this only says how
+   the billing screen divides what it is given. The two rows are the bar and
+   the body, and neither ever moves (§1). */
 .mb-billing {
   display: grid;
   grid-template-rows: auto 1fr;
-  gap: var(--space-3);
-  height: 100%;
+  gap: var(--gap-field);
   min-height: 0;
 }
 
 /* --- Top bar: order type, lock, search. Always in the same place (§1). --- */
 
-.mb-topbar {
+.mb-billbar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
 }
 
-.mb-segment {
-  display: inline-flex;
-  border: var(--border-width) solid var(--border-strong);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
+/* The segmented control moved to kit.css at P27.5 — the floor screen uses it
+   for which room, and a component two screens share is a kit component. */
 
-.mb-segment__option {
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-4);
-  background: var(--surface);
-  color: var(--text-muted);
-  border: none;
-  border-right: var(--border-width) solid var(--border);
-  font: inherit;
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.mb-segment__option:last-child {
-  border-right: none;
-}
-
-.mb-segment__option[aria-pressed='true'] {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-
-.mb-topbar__search {
+.mb-billbar__search {
   flex: 1;
   min-width: var(--panel-width);
 }
@@ -75,7 +51,7 @@
      `1fr` alone loses to the auto rows when the panel is tall (a bill with
      several payments), and the list a cashier is reading disappears at exactly
      the moment they are taking money. It scrolls inside that floor instead. */
-  grid-template-rows: auto minmax(var(--cart-lines-min), 1fr) minmax(0, auto) auto auto;
+  grid-template-rows: auto minmax(var(--cart-lines-min), 1fr) minmax(var(--totals-min), auto) auto auto;
   gap: var(--space-3);
   min-height: 0;
   /* **THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT.**
@@ -92,10 +68,13 @@
      a bill has six tax rates is having all six visible at once, which is the
      right thing to lose. */
   overflow: hidden;
-  padding: var(--space-4);
+  padding: var(--gap-group);
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
+  /* RAISED, per the elevation contract — the cart is a panel sitting on the
+     page, and it is the one thing on this screen that never moves. */
+  box-shadow: var(--level-raised);
 }
 
 /* --- The table grid — the ONLY view of open orders (scope 1.4) -----------
@@ -111,12 +90,26 @@
   gap: var(--space-2);
 }
 
+/* A section name on the floor is a LABEL, not a headline: it tells you which
+   room you are looking at and then gets out of the way. It used to be
+   uppercase and letterspaced at --text-sm, which made "A/C ROOM" shout louder
+   than the table numbers underneath it. */
 .mb-floor__heading {
-  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  font-size: var(--type-caption);
   font-weight: var(--weight-medium);
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
+  color: var(--text-muted);
+}
+
+/* A hairline running to the right of the name, so the eye reads it as the
+   start of a band rather than as a floating word. */
+.mb-floor__heading::after {
+  content: '';
+  flex: 1;
+  height: var(--border-width);
+  background: var(--border);
 }
 
 .mb-floor__grid {
@@ -206,8 +199,17 @@
   color: var(--danger);
 }
 
+/* **The kitchen has not been told about this table.**
+   A drawn dot rather than the character `●`, which arrived at whatever size
+   and vertical position the substituted font felt like — on the same tile as
+   the timer, so the two never sat on the same line. Warn, not danger: nothing
+   is wrong yet, somebody just has not pressed Kitchen ticket. */
 .mb-tile__kitchen {
-  font-size: var(--text-xs);
+  flex-shrink: 0;
+  width: var(--space-2);
+  height: var(--space-2);
+  background: var(--warn);
+  border-radius: var(--radius-pill);
 }
 
 /* --- The cart region ---------------------------------------------------- */
@@ -317,12 +319,17 @@
   color: var(--text-muted);
 }
 
+/* **The number the cashier reads out to the customer.** It gets the biggest
+   type on the screen and its own rule above it, because on a busy bill it is
+   competing with fifteen other figures and it is the only one that is said out
+   loud. */
 .mb-totals__row--grand {
-  padding-top: var(--space-2);
+  padding-top: var(--gap-field);
   margin-top: var(--space-1);
   border-top: var(--border-width) solid var(--border-strong);
-  font-size: var(--text-lg);
+  font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
 }
 
 .mb-totals__tax {
@@ -425,7 +432,7 @@
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
 }
 
-.mb-topbar__search {
+.mb-billbar__search {
   position: relative;
 }
 

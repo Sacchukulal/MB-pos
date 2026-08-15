@@ -20,7 +20,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, EmptyState, StatCard, Table, useToast, type Column } from '../kit';
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Page,
+  PageHeader,
+  Panel,
+  StatCard,
+  Table,
+  useToast,
+  type Column,
+} from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { BillRowView } from '../ipc/generated/BillRowView';
 import type { DayTotalsView } from '../ipc/generated/DayTotalsView';
@@ -133,9 +144,15 @@ export function Bills() {
   ];
 
   return (
-    <div className="mb-screen">
+    <Page className="mb-screen">
+      <PageHeader
+        title="Bills"
+        subtitle="Every bill settled today — and where a wrong one is voided or reprinted."
+        count={bills.length}
+      />
+
       {totals ? (
-        <div className="mb-row">
+        <div className="mb-bills__stats">
           <StatCard label="Taken today" value={totals.gross.text} />
           <StatCard label="Voided" value={totals.voids.text} />
           <StatCard label="Net" value={totals.net.text} />
@@ -151,7 +168,9 @@ export function Bills() {
           body="Every bill you settle appears here, and this is where you void or reprint one."
         />
       ) : (
-        <Table rows={bills} columns={columns} rowKey={(b) => b.orderId} />
+        <Panel flush>
+          <Table rows={bills} columns={columns} rowKey={(b) => b.orderId} />
+        </Panel>
       )}
 
       <p className="mb-muted">
@@ -172,7 +191,7 @@ export function Bills() {
           onFailed={(message, detail) => toast.show('danger', message, detail)}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
 

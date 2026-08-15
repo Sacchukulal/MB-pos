@@ -27,6 +27,7 @@ import {
   Button,
   DateRangePicker,
   EmptyState,
+  Icon,
   SectionHeader,
   Spinner,
   Table,
@@ -229,11 +230,16 @@ export function Reports() {
                         : 'neutral'
                   }
                 >
-                  {report.compare.direction === 'up'
-                    ? '▲'
-                    : report.compare.direction === 'down'
-                      ? '▼'
-                      : '='}
+                  <Icon
+                    name={
+                      report.compare.direction === 'up'
+                        ? 'chevron-up'
+                        : report.compare.direction === 'down'
+                          ? 'chevron-down'
+                          : 'minus'
+                    }
+                    size="sm"
+                  />
                 </Badge>
                 {/* The whole sentence, written in Rust. */}
                 <span>{report.compare.summary}</span>

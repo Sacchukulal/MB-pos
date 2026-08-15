@@ -81,25 +81,59 @@ pub fn look(app: &App) -> SetupView {
     let has_shop_name = !config.store.name.trim().is_empty();
     let has_gstin = !config.store.gstin.trim().is_empty();
 
-    let counts = app
-        .with_shop(|shop| {
-            shop.db
-                .transaction(|tx| {
-                    let one = |sql: &str| -> Result<i64, mb_db::DbError> {
-                        let mut statement = tx.prepare(sql)?;
-                        Ok(statement.query_row([], |row| row.get(0))?)
-                    };
-                    Ok(Counts {
-                        items: one("SELECT COUNT(*) FROM menu_items WHERE is_active = 1")?,
-                        tables: one("SELECT COUNT(*) FROM dining_tables WHERE is_active = 1")?,
-                        printers: one("SELECT COUNT(*) FROM printers")?,
-                        with_pin: one("SELECT COUNT(*) FROM staff WHERE pin_hash IS NOT NULL")?,
-                        backups: one("SELECT COUNT(*) FROM backups")?,
-                    })
+    // **Backups are FILES, not rows.** P05 made a backup a folder on a disk
+    // that is deliberately not this one — the whole point is that it survives
+    // this database — so the only honest way to count them is to look.
+    let backups = i64::try_from(
+        mb_db::backup::list(&crate::settings::backup::folder_for(app, &config))
+            .unwrap_or_default()
+            .len(),
+    )
+    .unwrap_or(i64::MAX);
+
+    let read = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let one = |sql: &str| -> Result<i64, mb_db::DbError> {
+                    let mut statement = tx.prepare(sql)?;
+                    Ok(statement.query_row([], |row| row.get(0))?)
+                };
+                Ok(Counts {
+                    // `items`, and `is_available` — **found by P27.5 running the
+                    // app and looking at it (D55).** This read named a table
+                    // that has never existed (`menu_items`) and a column on it
+                    // that has never existed (`is_active`), so it errored, and
+                    // the `unwrap_or_default` below turned the error into five
+                    // zeros. A shop with a full menu, a full room, a printer, a
+                    // PIN and a backup was told it had done none of it, on the
+                    // billing screen, for ever. Nineteen sessions of green tests
+                    // never saw it because nothing rendered this against a shop
+                    // that had anything in it.
+                    items: one("SELECT COUNT(*) FROM items WHERE is_available = 1")?,
+                    tables: one("SELECT COUNT(*) FROM dining_tables WHERE is_active = 1")?,
+                    printers: one("SELECT COUNT(*) FROM printers")?,
+                    with_pin: one("SELECT COUNT(*) FROM staff WHERE pin_hash IS NOT NULL")?,
+                    backups,
                 })
-                .map_err(|e| crate::words::from_db(&e))
-        })
-        .unwrap_or_default();
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    });
+
+    // Still never fails (the doc comment above is a promise a first run
+    // depends on) — but **no longer silently** (R3). A checklist that cannot
+    // read the shop says everything is outstanding, which is the safe answer;
+    // the log is how anybody ever finds out it happened.
+    let counts = match read {
+        Ok(counts) => counts,
+        Err(e) if e.code == "shop.none" => Counts::default(),
+        Err(e) => {
+            crate::log_warn!(
+                "the set-up list could not read this shop ({e}); it is showing \
+                 every step as still to do, which may not be true"
+            );
+            Counts::default()
+        }
+    };
 
     let steps = vec![
         SetupStep {
@@ -249,6 +283,81 @@ pub fn setup_list(app: tauri::State<'_, App>) -> UiResult<SetupView> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The test that was missing, and the bug it would have caught.**
+    ///
+    /// Every other test in this module builds a `SetupView` by hand and checks
+    /// the words. Not one of them ever ran [`look`] against a real database, so
+    /// nothing noticed that its SQL named a table (`menu_items`) and a column
+    /// (`is_active`) that have never existed in this product — the read errored,
+    /// the error was swallowed, and the counts came back as five zeros.
+    ///
+    /// The shop below has a menu and a room. If either step reads as still to
+    /// do, the read is broken again.
+    #[test]
+    fn a_shop_that_has_a_menu_and_a_room_is_not_told_to_add_them() {
+        let scratch = crate::signin_tests::Scratch::new("setup_counts");
+        let path = scratch.dir().join("setup.db");
+        let db = mb_db::Db::open(&mb_db::DbConfig::new(path.clone())).expect("open");
+
+        db.transaction(|tx| {
+            let repos = mb_db::Repos::new(tx);
+            repos.menu().save_item(
+                OUTLET,
+                &mb_db::repo::menu::MenuItem {
+                    id: mb_core::ItemId::new("itm_dosa"),
+                    category_id: None,
+                    name: "Masala Dosa".to_owned(),
+                    unit_price: mb_core::Money::from_paise(8_000),
+                    tax_rate: mb_core::TaxRate::GST_5,
+                    tax_treatment: mb_core::TaxTreatment::Inclusive,
+                    tax_class_id: None,
+                    hsn: None,
+                    cost_price: None,
+                    short_code: None,
+                    prep_minutes: None,
+                    course: None,
+                    is_open_price: false,
+                    is_available: true,
+                    sort_order: 0,
+                },
+                crate::flows::now(),
+            )?;
+            repos.floor().save_table(
+                OUTLET,
+                &mb_db::repo::floor::DiningTable {
+                    id: mb_core::TableId::new("tbl_1"),
+                    section_id: None,
+                    label: "1".to_owned(),
+                    seats: 4,
+                    pos: None,
+                    sort_order: 1,
+                    is_active: true,
+                },
+                crate::flows::now(),
+            )?;
+            Ok(())
+        })
+        .expect("a menu and a room");
+
+        let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
+        app.open_shop(db, path);
+
+        let view = look(&app);
+        let done = |id: &str| {
+            view.steps.iter().any(|s| s.id == id && s.done)
+        };
+
+        assert!(done("menu"), "a shop with an item on its menu was told to put its menu in");
+        assert!(done("tables"), "a shop with a table was told to add its tables");
+        // And what it genuinely has NOT done is still outstanding, so the fix
+        // is a fix rather than a blanket "everything is fine". Nobody has a
+        // PIN here, and that is the step that matters most after the shop's own
+        // details — it is what stops a stranger opening the reports.
+        // (`printer` is not asserted: `open_shop` seeds a default one, so it
+        // reads as done on any shop and proves nothing either way.)
+        assert!(!done("staff"), "nobody has a PIN, so that step stands");
+    }
 
     fn a_view(done: &[&str]) -> SetupView {
         let mut view = SetupView {

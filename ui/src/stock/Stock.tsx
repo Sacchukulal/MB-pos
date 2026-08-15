@@ -33,11 +33,15 @@ import {
   Card,
   Checkbox,
   EmptyState,
+  Icon,
   Input,
   Modal,
+  Page,
+  PageHeader,
   SearchField,
   Select,
   Table,
+  Toolbar,
   Tabs,
   useToast,
   type Column,
@@ -171,22 +175,36 @@ export function Stock() {
   ];
 
   return (
-    <div className="mb-stock">
-      <div className="mb-row mb-stock__head">
-        <SearchField
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          what="Find a material"
-        />
-        <div className="mb-stock__summary mb-muted">{view.summary}</div>
-        <div className="mb-stock__worth">
-          <span className="mb-muted">Stock worth</span>{' '}
-          <span className="mb-mono">{view.totalValue.text}</span>
+    <Page className="mb-stock">
+      <PageHeader
+        title="Stock"
+        subtitle={view.summary}
+        actions={
+          view.mayManage ? (
+            <Button variant="primary" onClick={() => setEditing({ material: null, isNew: true })}>
+              <Icon name="plus" size="sm" />
+              Add a material
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <Toolbar
+        end={
+          <div className="mb-stock__worth">
+            <span className="mb-muted">Stock worth</span>{' '}
+            <span className="mb-mono">{view.totalValue.text}</span>
+          </div>
+        }
+      >
+        <div className="mb-stock__find">
+          <SearchField
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            what="Find a material"
+          />
         </div>
-        {view.mayManage ? (
-          <Button onClick={() => setEditing({ material: null, isNew: true })}>Add a material</Button>
-        ) : null}
-      </div>
+      </Toolbar>
 
       {/* **D114.** The cache disagreed with the ledger, and the sentence carries
           the button that fixes it (D100). */}
@@ -306,7 +324,7 @@ export function Stock() {
           onReport={report}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
 

@@ -25,11 +25,16 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  Icon,
   Input,
   Modal,
+  Page,
+  PageHeader,
+  Panel,
   SearchField,
   Select,
   Table,
+  Toolbar,
   useToast,
   type Column,
 } from '../kit';
@@ -116,47 +121,75 @@ export function Credit() {
     },
   ];
 
+  const addCustomer = () =>
+    setEditing({
+      id: `cus_${Date.now().toString(36)}`,
+      name: '',
+      phone: null,
+      gstin: null,
+      address: null,
+      creditLimit: null,
+      isActive: true,
+      balance: { paise: 0n, text: '0.00' },
+      oldest: '—',
+    });
+
   return (
-    <div className="mb-credit">
-      <div className="mb-row">
-        <SearchField
-          value={find}
-          placeholder="Find a customer, or a number"
-          onChange={(event) => setFind(event.target.value)}
-        />
-        <Button
-          small
-          variant={everybody ? 'quiet' : 'primary'}
-          onClick={() => setEverybody(false)}
-        >
-          Who owes me
-        </Button>
-        <Button
-          small
-          variant={everybody ? 'primary' : 'quiet'}
-          onClick={() => setEverybody(true)}
-        >
-          Everybody
-        </Button>
-        <Button
-          variant="primary"
-          onClick={() =>
-            setEditing({
-              id: `cus_${Date.now().toString(36)}`,
-              name: '',
-              phone: null,
-              gstin: null,
-              address: null,
-              creditLimit: null,
-              isActive: true,
-              balance: { paise: 0n, text: '0.00' },
-              oldest: '—',
-            })
-          }
-        >
-          Add a customer
-        </Button>
-      </div>
+    <Page className="mb-credit">
+      {/*
+        **A title, an action, and a filter — and each in its own place** (P27.5).
+
+        Before this the screen opened with one row holding a search box, two
+        view buttons and "Add a customer", all `Button`s, two of them filled
+        accent. So the thing that CHANGES THE SHOP (adding a customer) and the
+        thing that changes what you are LOOKING AT (who owes me / everybody)
+        were the same shape, the same colour, and eight pixels apart. The
+        screen also had no title at all.
+      */}
+      <PageHeader
+        title="Credit"
+        subtitle="Who owes this shop money, and how long they have owed it."
+        count={shown.length}
+        actions={
+          <Button variant="primary" onClick={addCustomer}>
+            <Icon name="plus" size="sm" />
+            Add a customer
+          </Button>
+        }
+      />
+
+      <Toolbar
+        end={
+          <div className="mb-tabs" role="tablist" aria-label="Which customers">
+            <button
+              type="button"
+              role="tab"
+              className="mb-tab"
+              aria-selected={!everybody}
+              onClick={() => setEverybody(false)}
+            >
+              Who owes me
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className="mb-tab"
+              aria-selected={everybody}
+              onClick={() => setEverybody(true)}
+            >
+              Everybody
+            </button>
+          </div>
+        }
+      >
+        <div className="mb-credit__find">
+          <SearchField
+            value={find}
+            placeholder="Find a customer, or a number"
+            onChange={(event) => setFind(event.target.value)}
+          />
+        </div>
+      </Toolbar>
 
       {shown.length === 0 ? (
         <EmptyState
@@ -168,7 +201,9 @@ export function Credit() {
           }
         />
       ) : (
-        <Table rows={[...shown]} columns={columns} rowKey={(c) => c.id} />
+        <Panel flush>
+          <Table rows={[...shown]} columns={columns} rowKey={(c) => c.id} />
+        </Panel>
       )}
 
       {open ? (
@@ -195,7 +230,7 @@ export function Credit() {
           onFailed={report}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
 

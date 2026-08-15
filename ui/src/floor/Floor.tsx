@@ -31,10 +31,12 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  Icon,
   Input,
   Modal,
   Select,
   Table,
+  Toolbar,
   useToast,
   type Column,
 } from '../kit';
@@ -99,34 +101,59 @@ export function Floor() {
 
   return (
     <div className="mb-floor">
-      <div className="mb-row mb-floor__bar">
-        {sections.map((name) => (
-          <Button
-            key={name}
-            small
-            variant={
-              (name === 'All' && section === null) || section === name ? 'primary' : 'quiet'
-            }
-            onClick={() => setSection(name === 'All' ? null : name)}
-          >
-            {name}
-          </Button>
-        ))}
-        <span className="mb-floor__spacer" />
-        {(['all', 'busy', 'attention'] as const).map((which) => (
-          <Button
-            key={which}
-            small
-            variant={filter === which ? 'primary' : 'quiet'}
-            onClick={() => setFilter(which)}
-          >
-            {which === 'all' ? 'Everything' : which === 'busy' ? 'Busy' : 'Needs attention'}
-          </Button>
-        ))}
-        <Button small variant="quiet" onClick={() => setMaster(true)}>
-          Set up the room
-        </Button>
-      </div>
+      {/*
+        **Two choices, and they must not look like one choice.**
+
+        WHICH ROOM you are looking at, and WHICH TABLES within it. Before P27.5
+        both were rendered as `Button`s with the selected one filled solid
+        accent, side by side on one row — so the screen showed two identical
+        highlighted pills, four inches apart, meaning completely different
+        things. That is the specific failure UI_GUIDELINES §5 is about, and it
+        was on the second-most-used screen in the product.
+
+        Now: the ROOM is a segmented control (one of these, always exactly one,
+        like the order type on the billing screen) and the VIEW is a set of
+        tabs (a lens over what the segment chose). Different shapes, because
+        they are different questions.
+      */}
+      <Toolbar
+        end={
+          <>
+            <div className="mb-tabs" role="tablist" aria-label="Which tables">
+              {(['all', 'busy', 'attention'] as const).map((which) => (
+                <button
+                  key={which}
+                  type="button"
+                  role="tab"
+                  className="mb-tab"
+                  aria-selected={filter === which}
+                  onClick={() => setFilter(which)}
+                >
+                  {which === 'all' ? 'Everything' : which === 'busy' ? 'Busy' : 'Needs attention'}
+                </button>
+              ))}
+            </div>
+            <Button small variant="secondary" onClick={() => setMaster(true)}>
+              <Icon name="settings" size="sm" />
+              Set up the room
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-segment" role="group" aria-label="Which room">
+          {sections.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className="mb-segment__option"
+              aria-pressed={(name === 'All' && section === null) || section === name}
+              onClick={() => setSection(name === 'All' ? null : name)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </Toolbar>
 
       {/* Scope 14.3, and it is the line an owner glances at. */}
       <div className="mb-floor__numbers">
@@ -300,7 +327,13 @@ function Tile({ tile, onOpen }: { tile: TableView; onOpen: () => void }) {
         {tile.kitchenMinutes === null ? null : (
           <span className="mb-floor__kitchen">· food {tile.kitchenMinutes}m</span>
         )}
-        {tile.orderId && !tile.kitchenTold ? <span title="The kitchen has not been told">●</span> : null}
+        {tile.orderId && !tile.kitchenTold ? (
+          <span
+            className="mb-tile__kitchen"
+            title="The kitchen has not been told"
+            aria-label="The kitchen has not been told"
+          />
+        ) : null}
       </span>
     </button>
   );

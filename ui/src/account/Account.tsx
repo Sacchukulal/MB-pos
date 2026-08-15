@@ -28,7 +28,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Card, Input, Modal, SectionHeader, useToast, type BadgeTone } from '../kit';
+import { Badge, Button, Card, Input, Modal, SectionHeader, useToast, type BadgeTone,
+  Page,
+  PageHeader,
+} from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
 
@@ -100,10 +103,10 @@ export function Account() {
   const tone = TONES[view.tone] ?? 'neutral';
 
   return (
-    <div className="mb-account">
-      <SectionHeader
+    <Page className="mb-account">
+      <PageHeader
         title="Account"
-        note="Your plan, this computer, and how to move your licence."
+        subtitle="Your plan, this computer, and how to move your licence."
       />
 
       {/* The state of things, in one card. */}
@@ -386,6 +389,6 @@ export function Account() {
           </Button>
         </div>
       </Modal>
-    </div>
+    </Page>
   );
 }

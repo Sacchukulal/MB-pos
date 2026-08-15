@@ -87,6 +87,55 @@
   width: 100%;
 }
 
+/* --- Segmented control ---------------------------------------------------
+   ONE of these, always exactly one: which order type, which room. Distinct in
+   SHAPE from tabs, which are a lens over what a segment chose — two different
+   questions must not look like the same question (§5).                     */
+
+/* **The order-type switch.** A segmented control: the whole thing sits in a
+   sunk track and the chosen one RISES out of it. P27.5 changed this from four
+   bordered boxes with the chosen one filled solid accent — which put a heavy
+   coloured slab in the top-left corner of the busiest screen in the product,
+   competing with the search box next to it for the eye, every second of the
+   day. The selection still carries three signals (the raised surface, the
+   weight, the ink) so it survives grey-scale. */
+.mb-segment {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.mb-segment__option {
+  min-height: var(--space-8);
+  padding: var(--space-2) var(--gap-field);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--type-label);
+  font-weight: var(--type-label-weight);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.mb-segment__option:hover {
+  color: var(--text);
+}
+
+.mb-segment__option[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: var(--weight-bold);
+  box-shadow: var(--level-raised);
+}
+
 /* --- Fields ------------------------------------------------------------- */
 
 .mb-field {
@@ -320,19 +369,25 @@
 .mb-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4);
+  gap: var(--gap-field);
+  padding: var(--gap-group);
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
+  /* RAISED, per the elevation contract in tokens.css. A card IS a panel — the
+     two names are historical — and everything raised in this product is raised
+     by the same amount. */
+  box-shadow: var(--level-raised);
 }
 
 /* Group by proximity, separate by space, not by boxes — avoid cards inside
-   cards (§5). A nested card loses its border and keeps its spacing. */
+   cards (§5). A nested card loses its border, its shadow and its padding, and
+   keeps only its spacing. Nothing in this product is elevated twice. */
 .mb-card .mb-card {
   border: none;
   padding: var(--space-0);
   background: transparent;
+  box-shadow: var(--level-flat);
 }
 
 .mb-stat {
@@ -342,7 +397,8 @@
 }
 
 .mb-stat__label {
-  font-size: var(--text-sm);
+  font-size: var(--type-label);
+  font-weight: var(--type-label-weight);
   color: var(--text-muted);
 }
 
@@ -352,6 +408,16 @@
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
+  /* Tightened, because at this size the mono face's default tracking makes a
+     five-figure takings number look like a licence key. */
+  letter-spacing: var(--tracking-title);
+}
+
+/* **In the UI font, deliberately.** This is a sentence, not a figure, and it
+   is the sibling of the value rather than a child of it — see `StatCard`. */
+.mb-stat__note {
+  font-size: var(--type-caption);
+  color: var(--text-muted);
 }
 
 .mb-section {
@@ -441,9 +507,39 @@
   border-bottom: var(--border-width) solid var(--border);
 }
 
+/* **A column header is a LABEL, not a figure.**
+   `.mb-numeric` carries the mono face so a column of rupees lines up (§3), and
+   the Table component puts it on the header cell too — so "On the shelf",
+   "Costs" and "Worth" were all set like a terminal, above columns of numbers
+   that were correctly monospaced. Right-aligned, yes; monospaced, no. Found by
+   opening the Stock screen with eighteen rows in it and looking (D55) — the
+   same class of mistake as the stat card's note. */
 .mb-table td.mb-numeric,
 .mb-table th.mb-numeric {
   text-align: right;
+}
+
+.mb-table th.mb-numeric {
+  font-family: var(--font-ui);
+}
+
+/* **An actions cell takes only the room it needs.**
+ *
+ * A table's columns divide the width evenly by default, so a trailing "Open /
+ * Edit" column got the same share as the customer's name — which left a wide
+ * empty channel between the last figure and the first button, on every table
+ * screen in the product. `width: 1%` is the standard way to say "shrink to
+ * content" in a table; the slack then goes to the columns that have something
+ * to say.
+ *
+ * Matched by `:has()` rather than by a flag each screen has to remember to
+ * pass: the shape of the cell IS the fact — a cell containing a row of buttons
+ * is an actions cell.
+ */
+.mb-table td:last-child:has(> .mb-row),
+.mb-table th:last-child:empty {
+  width: 1%;
+  white-space: nowrap;
 }
 
 .mb-table tbody tr:hover {
@@ -559,28 +655,12 @@
 
 /* --- Shared helpers ----------------------------------------------------- */
 
-.mb-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-/* The action row at the foot of a dialog: the way out on the right, which is
-   where a hand goes for it.
-
-   This was used in sixteen places and defined in none of them, so every Cancel
-   and Save in the app sat on the left — invisible to every test, obvious the
-   moment somebody opened a dialog and looked (P13). The guard below it now
-   fails the build for the next class that goes missing. */
-.mb-row--end {
-  justify-content: flex-end;
-}
-
-.mb-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
+/* `.mb-row`, `.mb-row--end` and `.mb-stack` MOVED TO layout.css at P27.5.
+   They are layout, and layout now lives in one file. The comment that was here
+   is worth keeping, because the bug it records is the one this whole session is
+   about: they were used in sixteen places and defined in none of them, so every
+   Cancel and Save in the app sat on the left — invisible to every test, obvious
+   the moment somebody opened a dialog and looked (P13). */
 
 .mb-muted {
   color: var(--text-muted);

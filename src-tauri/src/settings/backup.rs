@@ -78,7 +78,7 @@ pub struct VerifyView {
 ///
 /// Beside the database, because that is the folder a support call already asks
 /// for — and because a default that needs a dialog is a default nobody sets.
-fn folder_for(app: &App, config: &super::ShopConfig) -> std::path::PathBuf {
+pub(crate) fn folder_for(app: &App, config: &super::ShopConfig) -> std::path::PathBuf {
     if !config.backup.folder.trim().is_empty() {
         return std::path::PathBuf::from(config.backup.folder.trim());
     }

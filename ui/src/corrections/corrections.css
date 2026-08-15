@@ -29,3 +29,13 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/* The four figures at the top of the Bills screen. A grid rather than a plain
+   row, so they are equal widths and their labels start on the same line —
+   `mb-row` let each card size to its own number, which put "Taken today" and
+   "Voided" at different heights whenever one figure was longer than the other. */
+.mb-bills__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));
+  gap: var(--gap-field);
+}

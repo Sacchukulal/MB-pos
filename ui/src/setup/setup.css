@@ -1,47 +1,103 @@
-/*
- * The set-up list — P22. Beside the till, never in front of it.
- * Every value is a token (D21).
- */
+/* The set-up strip on the billing screen (P22, made collapsible at P27.5).
+   Tokens only, and gaps named from the spacing contract. */
 
 .mb-setup {
   flex-shrink: 0;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  /* The stripe is the form half of the signal, so this still reads on a bad
+     monitor and in grey-scale (§2 rule 2). */
+  border-left: var(--space-1) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Something that MATTERS MOST is outstanding — the shop's own details, its
+   menu, its printer. A shop that has really not set itself up is still shouted
+   at; a working shop with only the optional tail left gets the quiet version. */
+.mb-setup--urgent {
+  background: var(--warn-soft);
+  border-left-color: var(--warn);
+}
+
+.mb-setup__line {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  width: 100%;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--gap-field);
+  background: transparent;
+  color: var(--text);
+  border: none;
+  font: inherit;
+  font-size: var(--type-label);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-setup__line:hover {
+  background: var(--surface-2);
+}
+
+.mb-setup--urgent .mb-setup__line:hover {
+  /* On the warning ground the ordinary hover would wash it out. */
+  filter: brightness(0.98);
+  background: transparent;
+}
+
+.mb-setup__icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.mb-setup--urgent .mb-setup__icon {
+  color: var(--warn);
+}
+
+.mb-setup__says {
+  flex: 1;
+  min-width: 0;
+  /* One line, and the names are what gets cut if the window is narrow — the
+     count is never the part worth keeping. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mb-setup__names {
+  color: var(--text-muted);
+}
+
+.mb-setup__count {
+  flex-shrink: 0;
+  font-size: var(--type-caption);
+  color: var(--text-muted);
 }
 
 .mb-setup__steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--gap-field);
+  margin: 0;
+  /* **Capped, so "Do it" lands next to the words it acts on.** On the old
+     panel the button was flushed to the far right edge of a full-width row —
+     six centimetres from its own title — which is exactly the alignment
+     failure §5 describes. A measure is a design decision, not a leftover. */
+  max-width: 76ch;
+  padding: var(--gap-field) var(--gap-field) var(--gap-field);
+  list-style: none;
+  border-top: var(--border-width) solid var(--border);
 }
 
-/* `.mb-card` is a COLUMN — a row inside one says so, or it stacks and centres
-   the way P18's three did. */
+/* The action sits with its step, not in a far-right column of its own. On the
+   old panel every "Do it" was flushed to the right edge, six centimetres from
+   the words it acted on, which is the alignment failure §5 is about. */
 .mb-setup__step {
   display: flex;
-  flex-direction: row;
   align-items: flex-start;
-  gap: var(--space-3);
-}
-
-/* Progress is one line, not six rows — see the note in `Setup.tsx` about what
-   the full list did to the billing pane. */
-.mb-setup__done {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.mb-setup__tick {
-  flex-shrink: 0;
-  width: var(--space-4);
-  text-align: center;
-  color: var(--ok);
-}
-
-.mb-setup__step:not(.mb-setup__step--done) .mb-setup__tick {
-  color: var(--text-muted);
+  justify-content: space-between;
+  gap: var(--gap-group);
 }
 
 .mb-setup__body {
@@ -49,16 +105,15 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
-  flex: 1;
 }
 
 .mb-setup__title {
+  font-size: var(--type-body);
   font-weight: var(--weight-medium);
 }
 
-/* The REASON, not the label. "Store details" tells a shopkeeper nothing. */
 .mb-setup__why {
-  font-size: var(--text-sm);
+  font-size: var(--type-caption);
   color: var(--text-muted);
-  max-width: 52ch;
+  max-width: 60ch;
 }

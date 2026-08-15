@@ -65,6 +65,77 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
+  /* -----------------------------------------------------------------------
+     THE SPACING CONTRACT — P27.5, and it is the fix for the owner's actual
+     complaint.
+
+     The scale above was never the problem. Every screen already used it, and
+     `check-tokens.mjs` made sure of that for nineteen sessions. The problem is
+     that NOBODY EVER DECIDED WHAT A STEP MEANS, so seventeen feature CSS files
+     each answered that question for themselves: account reached for 1–5,
+     billing for 1,2,3,4,6,8, corrections for 1,2,3, credit for 2,3,4. Every one
+     of them legal. None of them the same. **That is what "it looks here and
+     there" is** — the owner is describing the absence of this block.
+
+     So from here on a screen does not choose a NUMBER, it names a JOB. There
+     is exactly one answer for each job, and there are only five jobs. A screen
+     that needs a sixth has found a missing layout primitive, not a missing
+     value — go and add the primitive.
+     ----------------------------------------------------------------------- */
+
+  /** Icon to its label, a number to its unit — inside one thing. */
+  --gap-inline: var(--space-2);
+  /** Between two controls that belong to each other. */
+  --gap-field: var(--space-3);
+  /** Between two groups of controls under one heading. */
+  --gap-group: var(--space-5);
+  /** Between two sections of a page. */
+  --gap-section: var(--space-6);
+  /** The page's own margin. Set by `Page` and by nothing else, ever. */
+  --page-pad-x: var(--space-6);
+  --page-pad-y: var(--space-5);
+
+  /* -----------------------------------------------------------------------
+     THE TYPE CONTRACT — the same argument as spacing.
+
+     Six sizes existed and no screen was ever told which one a page title is,
+     which a section header, which a field label, which a table cell. So the
+     eye had nothing to follow down a screen. These name the job; the sizes
+     stay on the one scale, and the text-size setting still scales all of it.
+     ----------------------------------------------------------------------- */
+
+  --type-page: var(--text-xl);
+  --type-page-weight: var(--weight-bold);
+  --type-section: var(--text-md);
+  --type-section-weight: var(--weight-bold);
+  --type-label: var(--text-sm);
+  --type-label-weight: var(--weight-medium);
+  --type-body: var(--text-md);
+  --type-cell: var(--text-sm);
+  --type-caption: var(--text-xs);
+
+  /* -----------------------------------------------------------------------
+     THE ELEVATION CONTRACT — three levels, and no fourth.
+
+     `--shadow` and `--shadow-pop` existed and seven of seventeen screens used
+     one of them, on no principle at all. These say what is raised and what is
+     not, so depth means something: FLAT is the page's own content (a table, a
+     grid); RAISED is a panel that sits on the page; POP is something over the
+     page that the page cannot be used until you deal with (a dialog, a toast,
+     a menu). Nothing is raised twice.
+     ----------------------------------------------------------------------- */
+
+  --level-flat: none;
+  /* --level-raised and --level-pop are per-theme: a shadow is a colour. */
+
+  /* Icons (P27.5). Sized off the type scale rather than in pixels, so the
+     text-size setting moves an icon with the word beside it — an icon that
+     stayed put while its label grew is the thing that looks broken. */
+  --icon-sm: 1rem;
+  --icon-md: 1.25rem;
+  --icon-lg: 1.75rem;
+  --icon-stroke: 1.75;
+
   /* **How narrow a kitchen ticket may get before it wraps** (P24).
      Four columns on a wall monitor, two on a tablet, one on a phone — decided
      by the screen rather than by a breakpoint somebody has to maintain. It is
@@ -73,10 +144,11 @@
      change. */
   --kds-card-min: 18rem;
 
-  /* Radius. "Middle": modest, not soft, not sharp. */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  /* Radius. "Middle": modest, not soft, not sharp. Lifted a step at P27.5 —
+     4/6/10 read as a Windows dialog from 2012 next to anything made since. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
   /* Type.
@@ -107,6 +179,19 @@
   --weight-bold: 650;
 
   --tracking-caps: 0.06em;
+  /* A page title at --text-xl and weight 650 looks loose on the OS UI font
+     without this. Optical, not mathematical (§5). */
+  --tracking-title: -0.01em;
+
+  /* **How far an icon drops to sit on the text baseline.** An icon box is
+     centred on the line box, not on the baseline, so a 20px icon next to 16px
+     text floats. This one number is most of the difference between icons that
+     sit with their words and icons that hover above them (§5). */
+  --icon-baseline: -0.15em;
+  /* The same nudge the other way, for an icon at the top of a wrapping block
+     (a notice), where it must line up with the FIRST line rather than centre
+     itself against three. */
+  --icon-nudge: 0.15em;
 
   --line-tight: 1.25;
   --line-normal: 1.5;
@@ -125,9 +210,27 @@
   /* Component widths. Here rather than in a component, because "the rail is
      too narrow" and "that dialog is cramped" are look complaints, and look
      complaints are answered in this file. */
-  --rail-width: 76px;
-  --rail-width-open: 200px;
-  --titlebar-height: 36px;
+  /* **The navigation runs ACROSS THE TOP** — the owner's instruction of
+     2026-08-15: *"the verticll left menu bars i didnt like, i wish to see that
+     in horizontal top side"*. The left rail is gone.
+
+     A top bar normally costs vertical room, and at 1366x768 vertical room is
+     the scarce one — so it does not get a row of its own. It shares the title
+     bar: the shop's name and the window buttons sit at the two ends of the
+     same 48px strip the navigation runs along. Net cost against the old rail:
+     nothing, and the billing screen gets 76px of width back. */
+  --topbar-height: 48px;
+  --topbar-item-gap: var(--space-1);
+  --titlebar-height: var(--topbar-height);
+  /* The "More" sheet. Wide enough for the longest label plus its icon with
+     room to spare — "Settings" and "History" both sit comfortably, and a sheet
+     that hugs its text reads as cramped rather than as tidy. */
+  --rail-sheet-width: 13rem;
+  /* A "find something on this screen" box. One width for all of them, because
+     a search box that is a different size on every screen is the alignment
+     complaint in miniature. Wide enough that the longest placeholder in the
+     product — "Find a customer, or a number" — is not cut off. */
+  --find-width: 20rem;
   --modal-width: 26rem;
   --modal-width-wide: 42rem;
   --panel-width: 22rem;
@@ -159,7 +262,22 @@
      content first — so when payments appeared the item list was squeezed to
      nothing while it still said "2 lines". Found by paying a bill and looking
      at it. Four lines is a floor, not a height. */
-  --cart-lines-min: 8rem;
+  /* Lowered from 8rem at P27.5: of the two floors below, this is the one that
+     should give way first. A cashier can scroll a list of items they are
+     reading; they cannot scroll a tax breakdown they have not been shown. */
+  --cart-lines-min: 6rem;
+  /* And the same floor for the TOTALS block, found the same way at P27.5.
+     The cart column is a grid of auto rows around one flexible one; the items
+     row had a floor and the totals row did not, so on a 768px screen with the
+     set-up strip open the breakdown was squeezed to about fifteen pixels —
+     a tax block that exists to show CGST and SGST per rate, showing neither.
+
+     **9rem, not 6.5rem** — the second number came from counting rows and the
+     first from looking at a real bill. An ordinary one is subtotal, taxable,
+     CGST, SGST, round off and TOTAL, and TOTAL alone is --text-2xl; at 6.5rem
+     the breakdown got about fifty pixels and scrolled away the very thing
+     UI_GUIDELINES §4 calls "a feature, not a footer". */
+  --totals-min: 9rem;
 
   /* The settings screen (P17). The section list is fixed at a width that holds
      "The kitchen ticket" plus its read-only mark; the fields flow into as many
@@ -217,6 +335,11 @@
   --z-lock: 300;
 
   --focus-ring-width: 2px;
+  /* The rule under the current screen in the top bar. A token because it is a
+     size, and every size in this product is one (D21) — the lint does not scan
+     inside box-shadow, which is exactly why this needs saying rather than
+     enforcing. */
+  --nav-underline: 2px;
   --border-width: 1px;
 }
 
@@ -227,45 +350,58 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  /* ground */
-  --bg: #f4f5f7;
+  /* ground — a neutral grey ramp with the faintest cool cast. The old one was
+     bluer, and on a cheap counter monitor a blue-grey page reads as dirty
+     rather than as calm. */
+  --bg: #f6f7f9;
   --surface: #ffffff;
-  --surface-2: #f8f9fb;
-  --surface-sunk: #eceef2;
+  --surface-2: #f9fafb;
+  --surface-sunk: #eef0f3;
 
-  /* line */
-  --border: #dcdfe5;
-  --border-strong: #b9bec9;
+  /* line — two weights and they do different jobs. `--border` separates
+     things that belong together (rows in a table); `--border-strong` outlines
+     things you can act on (an input, a secondary button). */
+  --border: #e4e7ec;
+  --border-strong: #cfd4dc;
 
-  /* text */
-  --text: #14171f;
-  --text-muted: #545b68;
-  --text-faint: #858c99;
+  /* text — three steps, and the gap between them is deliberate. Muted is for
+     a label, faint is for a hint nobody has to read. */
+  --text: #101828;
+  --text-muted: #5b6474;
+  --text-faint: #8b94a3;
 
   /* accent — PROVISIONAL DEFAULT, indigo.
      Chosen so that green, amber and red stay free for paid / warning /
      void (rule 1 above): an accent in any of those families makes a
      semantic state ambiguous the first time they sit side by side.
+     Deepened at P27.5 from #3d55c8 — the old one was light enough that white
+     text on it only just cleared the contrast floor, which is why every
+     primary button looked slightly washed out.
      THE OWNER WILL NAME A DIFFERENT ONE. Change these two lines. */
-  --accent: #3d55c8;
+  --accent: #4a45c4;
   --accent-ink: #ffffff;
-  --accent-soft: #e7eaf9;
-  --accent-line: #b6c0ee;
+  --accent-hover: #3d38a8;
+  --accent-soft: #ecebfa;
+  --accent-line: #c3c0ee;
 
   /* semantic — never rendered with --accent, never the only signal */
-  --ok: #1a7f4b;
-  --ok-soft: #e2f4ea;
-  --warn: #9a6400;
-  --warn-soft: #fbf0d9;
-  --danger: #c02626;
-  --danger-soft: #fbe6e6;
-  --info: #1f6f8b;
-  --info-soft: #e2f0f5;
+  --ok: #177a48;
+  --ok-soft: #e3f5ea;
+  --warn: #96601a;
+  --warn-soft: #fcf1dc;
+  --danger: #bc2222;
+  --danger-soft: #fce8e8;
+  --info: #1c6a86;
+  --info-soft: #e3f1f6;
 
-  /* elevation */
-  --shadow: 0 1px 2px rgb(16 20 30 / 8%), 0 1px 3px rgb(16 20 30 / 6%);
-  --shadow-pop: 0 8px 24px rgb(16 20 30 / 14%);
-  --overlay: rgb(16 20 30 / 40%);
+  /* elevation — the contract above, given colour. Two layers each, because a
+     single blurred shadow reads as fog and a shadow with a tight first layer
+     reads as an edge. */
+  --level-raised: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
+  --level-pop: 0 4px 8px rgb(16 24 40 / 6%), 0 16px 32px rgb(16 24 40 / 14%);
+  --shadow: var(--level-raised);
+  --shadow-pop: var(--level-pop);
+  --overlay: rgb(16 24 40 / 45%);
 }
 
 /* ==========================================================================
@@ -274,37 +410,47 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #14161c;
-  --surface: #1c1f27;
-  --surface-2: #232732;
-  --surface-sunk: #101219;
+  /* Dark is NOT the light theme inverted. The page is the darkest thing and
+     surfaces rise out of it, which is the opposite of light — there, the page
+     is grey and surfaces are white. Getting that backwards is what makes a
+     dark mode look like a bug. */
+  --bg: #0e1015;
+  --surface: #171a21;
+  --surface-2: #1e222b;
+  --surface-sunk: #0a0c10;
 
-  --border: #313745;
-  --border-strong: #4a5162;
+  --border: #272c36;
+  --border-strong: #3a414f;
 
-  --text: #eef0f5;
-  --text-muted: #a3abbb;
-  --text-faint: #767e8f;
+  --text: #e9ecf2;
+  --text-muted: #98a1b2;
+  --text-faint: #6c7484;
 
   /* The same indigo, lifted so it holds its contrast on a dark ground.
      Change these two lines with the light ones above. */
-  --accent: #7d90ee;
-  --accent-ink: #10131c;
-  --accent-soft: #262c46;
-  --accent-line: #414d80;
+  --accent: #8b8cf5;
+  --accent-ink: #0e1015;
+  --accent-hover: #a3a4f8;
+  --accent-soft: #232445;
+  --accent-line: #3f4079;
 
-  --ok: #4cc98a;
-  --ok-soft: #16301f;
-  --warn: #e0a943;
-  --warn-soft: #332609;
-  --danger: #f2706c;
-  --danger-soft: #3a1414;
-  --info: #5fb8d6;
-  --info-soft: #102831;
+  --ok: #45c489;
+  --ok-soft: #10281c;
+  --warn: #dda54a;
+  --warn-soft: #2c210b;
+  --danger: #f0736f;
+  --danger-soft: #331414;
+  --info: #5cb5d4;
+  --info-soft: #0e2530;
 
-  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 1px 3px rgb(0 0 0 / 30%);
-  --shadow-pop: 0 8px 24px rgb(0 0 0 / 55%);
-  --overlay: rgb(0 0 0 / 60%);
+  /* On a dark ground a shadow is nearly invisible, so elevation is carried by
+     the SURFACE getting lighter — the shadow only stops a panel's edge from
+     dissolving. Which is why `--surface` and `--surface-2` step up above. */
+  --level-raised: 0 1px 2px rgb(0 0 0 / 45%), 0 1px 3px rgb(0 0 0 / 35%);
+  --level-pop: 0 4px 8px rgb(0 0 0 / 35%), 0 16px 32px rgb(0 0 0 / 55%);
+  --shadow: var(--level-raised);
+  --shadow-pop: var(--level-pop);
+  --overlay: rgb(0 0 0 / 65%);
 }
 
 /* ==========================================================================
@@ -330,6 +476,7 @@
 
   --accent: #0033b3;
   --accent-ink: #ffffff;
+  --accent-hover: #002685;
   --accent-soft: #dfe6fb;
   --accent-line: #0033b3;
 
@@ -384,6 +531,49 @@ textarea {
   outline: var(--focus-ring-width) solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
+}
+
+/* **The scrollbars** — P27.5, and they are not a detail.
+   WebView2 draws the Windows default: a wide grey trough with a square thumb
+   and stepper arrows. On a dark theme it stays light grey, so every scrolling
+   region on the billing screen had a pale stripe down its edge that belonged
+   to a different application. There are three of them visible at once on a
+   busy bill. Themed here rather than per-screen, because a scrollbar is a
+   colour and every colour in this product lives in this file (D21). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: var(--space-3);
+  height: var(--space-3);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+  /* The border is transparent and the background is clipped to the padding
+     box, which is how a thumb gets inset from its track without a second
+     element to do it with. */
+  border: var(--space-1) solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  background-clip: padding-box;
+}
+
+/* A scrollbar in a corner where two meet, and the stepper buttons: neither
+   earns its space at this size. */
+*::-webkit-scrollbar-corner,
+*::-webkit-scrollbar-button {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

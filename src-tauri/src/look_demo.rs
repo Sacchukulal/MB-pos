@@ -1,0 +1,804 @@
+//! **A whole shop, so the look can be designed against a real screen** — P27.5.
+//!
+//! Every earlier demo seeder fills one screen: `demo_stock` fills stock,
+//! `demo_buying` fills buying, `demo_kitchen` fills the pass. That is right for
+//! a feature session, which is looking at one thing.
+//!
+//! A DESIGN session is looking at all of them, next to each other, and the
+//! thing it is judging — alignment, density, hierarchy, rhythm — is invisible
+//! on an empty screen. A floor with no tables says nothing about whether forty
+//! tables read well. A report with no rows says nothing about whether a column
+//! of rupees lines up. The first look at this app during P27.5 found a "Nothing
+//! here" empty state on the floor and an onboarding checklist on billing, which
+//! between them tell you nothing about the product.
+//!
+//! So this seeds a plausible Bengaluru vegetarian restaurant at about half past
+//! eight on a Saturday evening: a menu of forty-odd dishes across seven
+//! categories, forty-six tables in four sections, fourteen of them occupied at
+//! different ages so the floor shows free, busy, warned and late at once, a
+//! day's settled bills behind it in every payment mode, six credit customers
+//! with one of them over the limit, and the evening's expenses.
+//!
+//! It is **not part of the suite** and it changes nothing the product does. It
+//! writes into the folder `MB_DEMO` names, which becomes the app's whole
+//! `APPDATA`, so it can never touch a real shop's data.
+//!
+//! ```text
+//! $env:MB_DEMO="C:\some\scratch\demo"
+//! cargo test -p magic-bill --bin magic-bill demo_look -- --ignored --nocapture
+//! $env:APPDATA="C:\some\scratch\demo"
+//! cargo run -p magic-bill
+//! ```
+
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::too_many_lines,
+    reason = "a demo seeder: expect is the assertion, and the shop is a long list"
+)]
+
+use mb_core::{
+    AnyOrder, Cart, DraftOrder, ItemSnapshot, ItemId, Money, OrderId, OrderType, Qty, StaffId,
+    TableId, TaxRate, TaxTreatment, Timestamp,
+};
+use mb_db::repo::floor::{DiningTable, Section};
+use mb_db::repo::menu::{Category, MenuItem};
+use mb_db::{Db, DbConfig, Repos};
+
+use crate::credit::{CustomerEdit, put_on_account_on, save_customer_on};
+use crate::inventory::{MaterialEdit, MovementEdit, PackEdit, record_movement_on, save_material_on};
+use crate::expenses::{ExpenseEdit, save_expense_on, save_movement_on};
+use crate::state::{App, OUTLET};
+
+/// The menu. Name, price in rupees, tax rate, and the category it sits in.
+///
+/// Real prices from a real menu board, because a design judged against
+/// `₹100.00` twelve times learns nothing about a column of rupees — it is the
+/// ragged ones (`₹1,240.00` under `₹40.00`) that show whether the numbers line
+/// up.
+const MENU: &[(&str, &str, i64, u8, &str)] = &[
+    // Tiffin
+    ("itm_dosa_plain", "Plain Dosa", 60, 5, "cat_tiffin"),
+    ("itm_dosa_masala", "Masala Dosa", 80, 5, "cat_tiffin"),
+    ("itm_dosa_ghee", "Ghee Roast", 120, 5, "cat_tiffin"),
+    ("itm_dosa_paneer", "Paneer Dosa", 140, 5, "cat_tiffin"),
+    ("itm_idli", "Idli (2 pcs)", 50, 5, "cat_tiffin"),
+    ("itm_idli_sambar", "Sambar Idli", 70, 5, "cat_tiffin"),
+    ("itm_vada", "Medu Vada", 55, 5, "cat_tiffin"),
+    ("itm_upma", "Rava Upma", 60, 5, "cat_tiffin"),
+    ("itm_pongal", "Khara Pongal", 75, 5, "cat_tiffin"),
+    ("itm_poori", "Poori Saagu", 90, 5, "cat_tiffin"),
+    // Rice and curry
+    ("itm_meals", "Full Meals", 180, 5, "cat_rice"),
+    ("itm_bisibele", "Bisi Bele Bath", 110, 5, "cat_rice"),
+    ("itm_curd_rice", "Curd Rice", 80, 5, "cat_rice"),
+    ("itm_lemon_rice", "Lemon Rice", 85, 5, "cat_rice"),
+    ("itm_veg_pulao", "Veg Pulao", 160, 5, "cat_rice"),
+    ("itm_jeera_rice", "Jeera Rice", 130, 5, "cat_rice"),
+    ("itm_curry_pbm", "Paneer Butter Masala", 240, 5, "cat_rice"),
+    ("itm_curry_kadai", "Kadai Vegetable", 210, 5, "cat_rice"),
+    ("itm_curry_dal", "Dal Tadka", 160, 5, "cat_rice"),
+    ("itm_curry_palak", "Palak Paneer", 230, 5, "cat_rice"),
+    // Tandoor
+    ("itm_paneer_tikka", "Paneer Tikka", 280, 5, "cat_tandoor"),
+    ("itm_mushroom_tikka", "Mushroom Tikka", 260, 5, "cat_tandoor"),
+    ("itm_veg_seekh", "Veg Seekh Kebab", 240, 5, "cat_tandoor"),
+    ("itm_gobi_65", "Gobi 65", 190, 5, "cat_tandoor"),
+    // Chinese
+    ("itm_noodles", "Veg Hakka Noodles", 170, 5, "cat_chinese"),
+    ("itm_fried_rice", "Veg Fried Rice", 165, 5, "cat_chinese"),
+    ("itm_manchurian", "Gobi Manchurian", 180, 5, "cat_chinese"),
+    ("itm_chilli_paneer", "Chilli Paneer", 220, 5, "cat_chinese"),
+    // Breads
+    ("itm_chapati", "Chapati", 25, 5, "cat_bread"),
+    ("itm_naan", "Butter Naan", 55, 5, "cat_bread"),
+    ("itm_naan_garlic", "Garlic Naan", 70, 5, "cat_bread"),
+    ("itm_roti_tandoori", "Tandoori Roti", 35, 5, "cat_bread"),
+    ("itm_kulcha", "Amritsari Kulcha", 95, 5, "cat_bread"),
+    // Drinks — the packaged ones are 12% and 18%, which is the point: a bill
+    // with one rate on it proves nothing about the tax block (UI_GUIDELINES §4).
+    ("itm_filter_coffee", "Filter Coffee", 40, 5, "cat_drinks"),
+    ("itm_tea", "Tea", 30, 5, "cat_drinks"),
+    ("itm_badam_milk", "Badam Milk", 60, 5, "cat_drinks"),
+    ("itm_lassi", "Sweet Lassi", 90, 12, "cat_drinks"),
+    ("itm_buttermilk", "Masala Buttermilk", 45, 12, "cat_drinks"),
+    ("itm_soft_drink", "Soft Drink (bottle)", 40, 18, "cat_drinks"),
+    ("itm_water", "Mineral Water 1L", 20, 18, "cat_drinks"),
+    // Desserts
+    ("itm_gulab", "Gulab Jamun (2 pcs)", 70, 5, "cat_sweet"),
+    ("itm_rasmalai", "Rasmalai", 90, 5, "cat_sweet"),
+    ("itm_ice_cream", "Ice Cream Cup", 60, 18, "cat_sweet"),
+];
+
+const CATEGORIES: &[(&str, &str, Option<&str>)] = &[
+    ("cat_tiffin", "Tiffin", None),
+    ("cat_rice", "Rice & Curry", None),
+    ("cat_tandoor", "Tandoor", Some("Tandoor")),
+    ("cat_chinese", "Chinese", Some("Chinese")),
+    ("cat_bread", "Breads", Some("Tandoor")),
+    ("cat_drinks", "Drinks", Some("Drinks")),
+    ("cat_sweet", "Desserts", None),
+];
+
+/// The tables that are busy right now: table, minutes ago it was seated, what
+/// is on it, and how many of the first line the kitchen has already been told.
+///
+/// **The ages are the point.** The floor's whole job is telling a manager which
+/// table has been sitting too long, and it cannot be judged with every table
+/// the same age. Twelve of these are inside the warning threshold, three are
+/// past it, and two are properly late.
+/// One busy table in [`BUSY`]: which table, how long ago it was seated, what is
+/// on it, and how much of the first line the kitchen has been told about.
+///
+/// A named alias rather than the tuple inline — clippy is right that four
+/// levels of tuple is unreadable, and naming it is also the only place the
+/// meaning of each position is written down.
+type BusyTable = (&'static str, i64, &'static [(&'static str, i64)], Option<i64>);
+
+const BUSY: &[BusyTable] = &[
+    ("tbl_H2", 6, &[("itm_dosa_masala", 2), ("itm_filter_coffee", 2)], Some(2)),
+    ("tbl_H5", 11, &[("itm_meals", 4), ("itm_buttermilk", 4)], Some(4)),
+    ("tbl_H7", 14, &[("itm_idli_sambar", 2), ("itm_vada", 1), ("itm_tea", 3)], Some(2)),
+    ("tbl_H11", 18, &[("itm_paneer_tikka", 1), ("itm_naan_garlic", 4), ("itm_curry_dal", 1)], None),
+    ("tbl_H14", 22, &[("itm_noodles", 2), ("itm_manchurian", 1), ("itm_soft_drink", 3)], Some(2)),
+    ("tbl_H18", 9, &[("itm_dosa_ghee", 1), ("itm_badam_milk", 1)], Some(1)),
+    ("tbl_T1", 27, &[("itm_curry_pbm", 1), ("itm_naan", 6), ("itm_jeera_rice", 2)], Some(1)),
+    ("tbl_T4", 33, &[("itm_veg_pulao", 2), ("itm_curry_palak", 1), ("itm_lassi", 2)], Some(2)),
+    ("tbl_T8", 16, &[("itm_gobi_65", 1), ("itm_chilli_paneer", 1), ("itm_water", 2)], Some(1)),
+    ("tbl_A2", 41, &[("itm_curry_kadai", 1), ("itm_kulcha", 3), ("itm_curd_rice", 2)], Some(1)),
+    ("tbl_A5", 12, &[("itm_fried_rice", 2), ("itm_manchurian", 1)], Some(2)),
+    ("tbl_A7", 52, &[("itm_meals", 2), ("itm_gulab", 2), ("itm_filter_coffee", 2)], Some(2)),
+    ("tbl_F1", 63, &[("itm_bisibele", 3), ("itm_rasmalai", 3), ("itm_tea", 3)], Some(3)),
+    ("tbl_F4", 8, &[("itm_poori", 2), ("itm_upma", 1), ("itm_tea", 2)], None),
+];
+
+/// The bills already settled today, so reports and the day close have a day
+/// behind them. Item, quantity, payment mode.
+const SETTLED: &[(&str, i64, &str)] = &[
+    ("itm_meals", 2, "cash"),
+    ("itm_dosa_masala", 3, "upi"),
+    ("itm_idli_sambar", 2, "cash"),
+    ("itm_curry_pbm", 1, "card"),
+    ("itm_filter_coffee", 4, "cash"),
+    ("itm_noodles", 2, "upi"),
+    ("itm_meals", 4, "card"),
+    ("itm_dosa_ghee", 2, "cash"),
+    ("itm_paneer_tikka", 1, "upi"),
+    ("itm_pongal", 2, "cash"),
+    ("itm_veg_pulao", 1, "upi"),
+    ("itm_lassi", 3, "cash"),
+    ("itm_chilli_paneer", 1, "card"),
+    ("itm_curd_rice", 2, "cash"),
+    ("itm_gulab", 4, "upi"),
+    ("itm_meals", 3, "cash"),
+    ("itm_soft_drink", 6, "cash"),
+    ("itm_fried_rice", 2, "upi"),
+    ("itm_dosa_plain", 5, "cash"),
+    ("itm_curry_dal", 2, "card"),
+    ("itm_naan_garlic", 8, "upi"),
+    ("itm_tea", 6, "cash"),
+    ("itm_upma", 2, "cash"),
+    ("itm_manchurian", 1, "upi"),
+    ("itm_rasmalai", 2, "card"),
+    ("itm_meals", 2, "cash"),
+    ("itm_bisibele", 3, "upi"),
+    ("itm_vada", 3, "cash"),
+    ("itm_kulcha", 2, "card"),
+    ("itm_water", 4, "cash"),
+];
+
+#[test]
+#[ignore = "D55: run by hand to look at the screens, not part of the suite"]
+fn demo_look() {
+    let Some(root) = std::env::var_os("MB_DEMO").map(std::path::PathBuf::from) else {
+        panic!("set MB_DEMO to the folder that should become the demo's APPDATA");
+    };
+    let home = root.join("MagicBill");
+    std::fs::create_dir_all(&home).expect("the demo folder");
+    let db_path = home.join("magicbill.db");
+
+    // Loudly, not `let _ =` — the same trap demo_stock documents: seeding on
+    // top of the last one doubles every figure, and the usual cause is the app
+    // still being open.
+    for suffix in ["", "-wal", "-shm"] {
+        let path = std::path::PathBuf::from(format!("{}{suffix}", db_path.display()));
+        if path.exists() && std::fs::remove_file(&path).is_err() {
+            panic!("{} is still open — close the app before seeding", path.display());
+        }
+    }
+
+    let db = Db::open(&DbConfig::new(db_path.clone())).expect("open");
+    let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
+    app.open_shop(db, db_path.clone());
+
+    // A trial, so the screens behind a feature gate (stock, buying, the kitchen
+    // display) open rather than showing a licence wall. Rooted at the demo's own
+    // folder, so the licence.json this writes is the one the running app reads.
+    let machine = mb_license::MachineId::of(&home);
+    let mut licensing = mb_license::Licensing::new(
+        home.clone(),
+        machine.clone(),
+        std::sync::Arc::new(mb_license::cloud::Stub::active(
+            &machine,
+            crate::flows::today(crate::flows::now()),
+            crate::flows::now(),
+        )) as std::sync::Arc<dyn mb_license::Cloud>,
+        env!("CARGO_PKG_VERSION"),
+    );
+    licensing
+        .start_trial("+91 90000 00000", crate::flows::now(), std::time::Duration::from_secs(5))
+        .expect("the stub starts a trial");
+    app.use_licensing(licensing);
+
+    seed_identity(&app);
+    seed_menu(&app);
+    seed_room(&app);
+    let settled = seed_settled_bills(&app);
+    seed_open_orders(&app);
+    seed_credit(&app);
+    seed_expenses(&app);
+    seed_shelf(&app);
+
+    std::fs::write(mb_db::locate::config_path(&home), db_path.display().to_string())
+        .expect("the location file");
+
+    println!("demo ready: {}", db_path.display());
+    println!("  {} menu items in {} categories", MENU.len(), CATEGORIES.len());
+    println!("  46 tables, {} of them busy", BUSY.len());
+    println!("  {settled} bills settled today");
+    println!("  6 credit customers, 8 expenses");
+    println!("  {} materials on the shelf", MATERIALS.len());
+    println!();
+    println!("now: $env:APPDATA=\"{}\"; cargo run -p magic-bill", root.display());
+}
+
+/// The shop's own name on its own bill. A design judged against "SAMPLE" in the
+/// header is a design judged against a placeholder twice over.
+fn seed_identity(app: &App) {
+    let old = app.shop_config();
+    let mut new = old.clone();
+    new.store.name = "Anna Kuteera".to_owned();
+    new.store.address = "12, 4th Block, Jayanagar, Bengaluru 560011".to_owned();
+    new.store.phone = "9880012345".to_owned();
+    new.store.gstin = "29ABCDE1234F1ZW".to_owned();
+    new.store.fssai = "11223344556677".to_owned();
+    new.store.state_code = "29".to_owned();
+    new.store.upi_id = "annakuteera@okaxis".to_owned();
+    new.store.upi_merchant_name = "Anna Kuteera".to_owned();
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                crate::settings::save_changes(
+                    &Repos::new(tx),
+                    OUTLET,
+                    &old,
+                    &new,
+                    crate::flows::now(),
+                    None,
+                )
+                .map(|_| ())
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("the shop's own name");
+
+    app.reload_shop_config();
+}
+
+fn seed_menu(app: &App) {
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = Repos::new(tx);
+                for (n, (id, name, station)) in CATEGORIES.iter().enumerate() {
+                    repos.menu().save_category(
+                        OUTLET,
+                        &Category {
+                            id: mb_core::CategoryId::new(*id),
+                            name: (*name).to_owned(),
+                            sort_order: i64::try_from(n).expect("seven categories"),
+                            is_active: true,
+                            station: station.map(str::to_owned),
+                        },
+                        crate::flows::now(),
+                    )?;
+                }
+                for (n, (id, name, rupees, rate, category)) in MENU.iter().enumerate() {
+                    repos.menu().save_item(
+                        OUTLET,
+                        &MenuItem {
+                            id: ItemId::new(*id),
+                            category_id: Some(mb_core::CategoryId::new(*category)),
+                            name: (*name).to_owned(),
+                            unit_price: Money::from_paise(rupees * 100),
+                            tax_rate: rate_of(*rate),
+                            tax_treatment: TaxTreatment::Inclusive,
+                            tax_class_id: None,
+                            hsn: None,
+                            // A cost on the food, so the food-cost and profit
+                            // screens are not a column of dashes. About a third
+                            // of the price, which is roughly a real kitchen.
+                            cost_price: Some(Money::from_paise(rupees * 34)),
+                            short_code: None,
+                            prep_minutes: None,
+                            course: None,
+                            is_open_price: false,
+                            is_available: true,
+                            sort_order: i64::try_from(n).expect("forty items"),
+                        },
+                        crate::flows::now(),
+                    )?;
+                }
+                Ok(())
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("a menu");
+}
+
+fn rate_of(percent: u8) -> TaxRate {
+    match percent {
+        12 => TaxRate::GST_12,
+        18 => TaxRate::GST_18,
+        _ => TaxRate::GST_5,
+    }
+}
+
+/// Four sections and forty-six tables — because the density problem
+/// UI_GUIDELINES §4 names ("a busy shop has 40+ tables") cannot be looked at
+/// with four.
+fn seed_room(app: &App) {
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = Repos::new(tx);
+                for (n, (id, name)) in [
+                    ("sec_hall", "Main Hall"),
+                    ("sec_terrace", "Terrace"),
+                    ("sec_ac", "A/C Room"),
+                    ("sec_family", "Family"),
+                ]
+                .iter()
+                .enumerate()
+                {
+                    repos.floor().save_section(
+                        OUTLET,
+                        &Section {
+                            id: (*id).to_owned(),
+                            name: (*name).to_owned(),
+                            sort_order: i64::try_from(n).expect("four sections"),
+                            is_active: true,
+                        },
+                        crate::flows::now(),
+                    )?;
+                }
+                Ok(())
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("four sections");
+
+    // Written directly rather than through `add_tables_on`, for one reason:
+    // that helper derives the id from a slug of the label, and this seeder has
+    // to be able to NAME the table it seats an order on. The rows are identical.
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = Repos::new(tx);
+                let mut sort = 0_i64;
+                for (section, prefix, count, seats) in [
+                    ("sec_hall", "H", 20_u32, 4_i64),
+                    ("sec_terrace", "T", 12, 4),
+                    ("sec_ac", "A", 8, 6),
+                    ("sec_family", "F", 6, 8),
+                ] {
+                    for n in 1..=count {
+                        sort += 1;
+                        repos.floor().save_table(
+                            OUTLET,
+                            &DiningTable {
+                                id: TableId::new(format!("tbl_{prefix}{n}")),
+                                section_id: Some(section.to_owned()),
+                                label: format!("{prefix}{n}"),
+                                seats,
+                                pos: None,
+                                sort_order: sort,
+                                is_active: true,
+                            },
+                            crate::flows::now(),
+                        )?;
+                    }
+                }
+                Ok(())
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("forty-six tables");
+}
+
+/// The bills already taken today, through the real billing path — so the
+/// reports show figures the product produced rather than figures a fixture
+/// typed, and the day close has a drawer to count.
+fn seed_settled_bills(app: &App) -> usize {
+    let mut done = 0;
+    for (item, qty, mode) in SETTLED {
+        app.with_cart_mut(|state| {
+            state.order_type = OrderType::Parcel;
+            Ok(())
+        })
+        .expect("parcel");
+        crate::ipc::cart_add_on(app, (*item).to_owned(), Some(qty.to_string()), None)
+            .expect("added");
+        let total = app
+            .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
+            .expect("bill");
+        app.with_cart_mut(|state| {
+            let payment = mb_core::Payment::new(mode_of(mode), total).expect("a payment");
+            state.settlement.add(payment).map_err(|e| {
+                crate::words::UiError::new("bill.pay", "That payment could not be taken.")
+                    .with_detail(e.to_string())
+            })
+        })
+        .expect("paid");
+        crate::flows::complete_bill_on(app).expect("settled");
+        done += 1;
+    }
+    done
+}
+
+fn mode_of(tag: &str) -> mb_core::PaymentMode {
+    match tag {
+        "card" => mb_core::PaymentMode::Card,
+        "upi" => mb_core::PaymentMode::Upi,
+        _ => mb_core::PaymentMode::Cash,
+    }
+}
+
+/// Fourteen tables occupied at different ages, plus two parcels and a
+/// self-service order so the grid's "No table" group is not empty either.
+fn seed_open_orders(app: &App) {
+    let now = crate::flows::now();
+    let day = crate::flows::today(now);
+
+    for (n, (table, minutes_ago, items, told)) in BUSY.iter().enumerate() {
+        let at = Timestamp::from_millis(now.millis() - minutes_ago * 60_000);
+        let mut cart = Cart::new();
+        for (item, qty) in items.iter() {
+            let Some(price) = price_of(item) else {
+                continue;
+            };
+            cart.add(
+                ItemSnapshot::new(ItemId::new(*item), name_of(item), price, rate_for(item)),
+                Qty::from_whole(*qty).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        }
+        if cart.lines().is_empty() {
+            continue;
+        }
+
+        let mut draft = DraftOrder::new(
+            OrderId::new(format!("ord_demo_{n}")),
+            day,
+            at,
+            OrderType::DineIn,
+            StaffId::new(crate::state::DEFAULT_STAFF),
+        )
+        .on_table(TableId::new(*table));
+        draft.core.cart = cart;
+
+        if let Some(told) = told {
+            let identity = draft.core.cart.lines()[0].identity();
+            draft
+                .core
+                .kitchen
+                .mark_printed(&[(identity, Qty::from_whole(*told).expect("qty"))])
+                .expect("told");
+        }
+
+        save_open(app, draft);
+    }
+
+    // Two parcels and a self-service order, waiting. These are the orders that
+    // are invisible in a floor plan and the reason the grid has a "No table"
+    // group at all (UI_GUIDELINES §4).
+    for (n, (kind, minutes_ago, items)) in [
+        (OrderType::Parcel, 4_i64, &[("itm_dosa_masala", 2_i64), ("itm_vada", 2)][..]),
+        (OrderType::Parcel, 9, &[("itm_meals", 3)][..]),
+        (OrderType::SelfService, 2, &[("itm_filter_coffee", 2), ("itm_gulab", 2)][..]),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let at = Timestamp::from_millis(now.millis() - minutes_ago * 60_000);
+        let mut cart = Cart::new();
+        for (item, qty) in items.iter() {
+            let Some(price) = price_of(item) else { continue };
+            cart.add(
+                ItemSnapshot::new(ItemId::new(*item), name_of(item), price, rate_for(item)),
+                Qty::from_whole(*qty).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        }
+        let mut draft = DraftOrder::new(
+            OrderId::new(format!("ord_demo_nt_{n}")),
+            day,
+            at,
+            *kind,
+            StaffId::new(crate::state::DEFAULT_STAFF),
+        );
+        draft.core.cart = cart;
+        save_open(app, draft);
+    }
+}
+
+fn save_open(app: &App, draft: DraftOrder) {
+    let day = draft.core.business_day;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = Repos::new(tx);
+                let token = mb_db::numbering::claim(
+                    tx,
+                    OUTLET,
+                    crate::billing::TERMINAL,
+                    mb_db::numbering::CounterKind::Token,
+                    day,
+                )?;
+                let bill_number = mb_db::numbering::claim(
+                    tx,
+                    OUTLET,
+                    crate::billing::TERMINAL,
+                    mb_db::numbering::CounterKind::Bill,
+                    day,
+                )?;
+                repos.orders().save(
+                    OUTLET,
+                    crate::billing::TERMINAL,
+                    &AnyOrder::Open(mb_core::OpenOrder {
+                        core: draft.core.clone(),
+                        token,
+                        bill_number,
+                    }),
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("seated");
+}
+
+fn price_of(id: &str) -> Option<Money> {
+    MENU.iter().find(|(i, ..)| *i == id).map(|(_, _, r, ..)| Money::from_paise(r * 100))
+}
+
+fn name_of(id: &str) -> &'static str {
+    MENU.iter().find(|(i, ..)| *i == id).map_or("Item", |(_, n, ..)| *n)
+}
+
+fn rate_for(id: &str) -> TaxRate {
+    MENU.iter().find(|(i, ..)| *i == id).map_or(TaxRate::GST_5, |(.., r, _)| rate_of(*r))
+}
+
+/// Six credit customers, one of them over the limit — because "over the limit"
+/// is a state with its own words and its own colour, and it cannot be looked at
+/// if nobody is over.
+fn seed_credit(app: &App) {
+    for (id, name, phone, limit) in [
+        ("cus_ramesh", "Ramesh Kumar", "9845012345", "5000"),
+        ("cus_lakshmi", "Lakshmi Stores", "9886054321", "10000"),
+        ("cus_infosys", "Infotech Park Canteen", "9900011122", "25000"),
+        ("cus_suresh", "Suresh (Auto stand)", "9741023456", "2000"),
+        ("cus_meena", "Meena Aunty", "9448099887", ""),
+        ("cus_arvind", "Arvind Textiles", "9535066778", "8000"),
+    ] {
+        save_customer_on(
+            app,
+            CustomerEdit {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                phone: phone.to_owned(),
+                gstin: String::new(),
+                address: String::new(),
+                credit_limit: limit.to_owned(),
+                is_active: true,
+            },
+        )
+        .expect("a customer");
+    }
+
+    // Balances, put there the way a shop puts them there: a bill on account.
+    for (customer, item, qty, override_limit) in [
+        ("cus_ramesh", "itm_meals", 4_i64, false),
+        ("cus_lakshmi", "itm_curry_pbm", 3, false),
+        ("cus_infosys", "itm_meals", 20, false),
+        ("cus_suresh", "itm_meals", 2, false),
+        // Over the limit on purpose, and approved — so the screen has the
+        // state it otherwise never shows.
+        ("cus_suresh", "itm_paneer_tikka", 6, true),
+        ("cus_arvind", "itm_veg_pulao", 4, false),
+    ] {
+        app.with_cart_mut(|state| {
+            state.order_type = OrderType::Parcel;
+            Ok(())
+        })
+        .expect("parcel");
+        crate::ipc::cart_add_on(app, item.to_owned(), Some(qty.to_string()), None).expect("added");
+        if put_on_account_on(app, customer.to_owned(), override_limit).is_err() {
+            // A refusal here is the product working. Clear the cart and move on.
+            app.with_cart_mut(|state| {
+                *state = Default::default();
+                Ok(())
+            })
+            .expect("cleared");
+            continue;
+        }
+        crate::flows::complete_bill_on(app).expect("on account");
+    }
+}
+
+fn seed_expenses(app: &App) {
+    // An opening float, so the drawer figure is not the day's takings alone.
+    save_movement_on(
+        app,
+        "float".to_owned(),
+        "3000".to_owned(),
+        "Opening float for the evening".to_owned(),
+    )
+    .expect("the opening float");
+
+    for (id, what, amount, mode, who, gst) in [
+        ("exp_veg", "Vegetables — morning market", "2450", "cash", "Vegetable market", ""),
+        ("exp_milk", "Milk and curd", "1180", "cash", "Milk van", ""),
+        ("exp_gas", "Gas cylinder refill", "1850", "upi", "Bharat Gas", "5"),
+        ("exp_rent", "Shop rent — August", "45000", "bank", "Landlord", ""),
+        ("exp_power", "Electricity bill", "8640", "bank", "BESCOM", ""),
+        ("exp_wages", "Casual staff — evening", "1200", "cash", "Ravi", ""),
+        ("exp_packing", "Parcel boxes and covers", "2200", "upi", "Sri Packaging", "18"),
+        ("exp_repair", "Mixer repair", "650", "cash", "Kumar Electricals", ""),
+    ] {
+        save_expense_on(
+            app,
+            ExpenseEdit {
+                id: id.to_owned(),
+                category_id: None,
+                description: what.to_owned(),
+                amount: amount.to_owned(),
+                mode: mode.to_owned(),
+                paid_to: who.to_owned(),
+                reference: String::new(),
+                gst_percent: gst.to_owned(),
+                note: String::new(),
+            },
+        )
+        .expect("an expense");
+    }
+}
+
+/// The shelf: what the kitchen buys, in the packs a shop actually buys it in.
+///
+/// Id, name, dimension, the pack it arrives in, who it comes from, the reorder
+/// level in that pack, and what one pack costs.
+const MATERIALS: &[(&str, &str, &str, Option<(&str, &str, &str)>, &str, &str, &str)] = &[
+    ("mat_rice", "Sona Masoori Rice", "weight", Some(("bag", "25", "kg")), "Metro", "2", "1450"),
+    ("mat_atta", "Wheat Atta", "weight", Some(("bag", "10", "kg")), "Metro", "2", "420"),
+    ("mat_paneer", "Paneer", "weight", None, "The milk van", "3", "340"),
+    ("mat_milk", "Milk", "volume", Some(("crate", "12", "l")), "The milk van", "1", "660"),
+    ("mat_curd", "Curd", "weight", None, "The milk van", "5", "70"),
+    ("mat_oil", "Sunflower Oil", "volume", Some(("tin", "15", "l")), "Metro", "1", "2250"),
+    ("mat_ghee", "Ghee", "weight", None, "Metro", "2", "620"),
+    ("mat_onion", "Onion", "weight", Some(("sack", "50", "kg")), "Vegetable market", "1", "1400"),
+    ("mat_tomato", "Tomato", "weight", None, "Vegetable market", "10", "38"),
+    ("mat_potato", "Potato", "weight", Some(("sack", "50", "kg")), "Vegetable market", "1", "1150"),
+    ("mat_gobi", "Cauliflower", "count", None, "Vegetable market", "10", "35"),
+    ("mat_capsicum", "Capsicum", "weight", None, "Vegetable market", "3", "80"),
+    ("mat_maida", "Maida", "weight", Some(("bag", "25", "kg")), "Metro", "1", "1180"),
+    ("mat_sugar", "Sugar", "weight", Some(("bag", "25", "kg")), "Metro", "1", "1080"),
+    ("mat_coffee", "Coffee Powder", "weight", None, "Coffee Works", "2", "540"),
+    ("mat_tea", "Tea Powder", "weight", None, "Coffee Works", "2", "480"),
+    ("mat_dal", "Toor Dal", "weight", Some(("bag", "30", "kg")), "Metro", "1", "4200"),
+    ("mat_gaspacket", "LPG (commercial)", "count", None, "Bharat Gas", "1", "1850"),
+];
+
+/// What is actually on the shelf right now, in the material's own unit — with
+/// two deliberately low so the "what to buy" list is not empty, and one that
+/// has gone below zero, which is a real thing that happens and has its own
+/// sentence on the screen.
+const ON_HAND: &[(&str, &str, &str)] = &[
+    ("mat_rice", "48", "kg"),
+    ("mat_atta", "16", "kg"),
+    ("mat_paneer", "2.4", "kg"),
+    ("mat_milk", "22", "l"),
+    ("mat_curd", "8", "kg"),
+    ("mat_oil", "19", "l"),
+    ("mat_ghee", "3.5", "kg"),
+    ("mat_onion", "34", "kg"),
+    ("mat_tomato", "6", "kg"),
+    ("mat_potato", "41", "kg"),
+    ("mat_gobi", "14", "piece"),
+    ("mat_capsicum", "1.8", "kg"),
+    ("mat_maida", "12", "kg"),
+    ("mat_sugar", "19", "kg"),
+    ("mat_coffee", "3.2", "kg"),
+    ("mat_tea", "1.4", "kg"),
+    ("mat_dal", "22", "kg"),
+    ("mat_gaspacket", "2", "piece"),
+];
+
+/// **Eighteen materials, because the stock screen is a TABLE and a table with
+/// three rows says nothing about a table.**
+///
+/// The Stock and Buying screens were the two P27.5 first looked at empty, and
+/// an empty table is a header and an empty state — neither of which is the
+/// thing being designed.
+fn seed_shelf(app: &App) {
+    for (id, name, dimension, pack, buy_from, reorder, _cost) in MATERIALS {
+        save_material_on(
+            app,
+            MaterialEdit {
+                id: (*id).to_owned(),
+                name: (*name).to_owned(),
+                dimension: (*dimension).to_owned(),
+                category: "Kitchen".to_owned(),
+                buy_from: (*buy_from).to_owned(),
+                reorder_level: (*reorder).to_owned(),
+                reorder_qty: (*reorder).to_owned(),
+                reorder_unit: pack.map_or_else(
+                    || base_unit(dimension).to_owned(),
+                    |(n, _, _)| n.to_owned(),
+                ),
+                is_perishable: matches!(*id, "mat_paneer" | "mat_curd" | "mat_milk"),
+                shelf_life_days: match *id {
+                    "mat_paneer" => Some(3),
+                    "mat_curd" | "mat_milk" => Some(2),
+                    _ => None,
+                },
+                is_active: true,
+                packs: pack
+                    .map(|(n, size, unit)| {
+                        vec![PackEdit {
+                            name: (*n).to_owned(),
+                            size: (*size).to_owned(),
+                            unit: (*unit).to_owned(),
+                        }]
+                    })
+                    .unwrap_or_default(),
+                purchase_unit: pack.map_or(String::new(), |(n, _, _)| (*n).to_owned()),
+                recipe_unit: String::new(),
+            },
+        )
+        .expect("a material");
+    }
+
+    for (id, qty, unit) in ON_HAND {
+        let cost = MATERIALS
+            .iter()
+            .find(|(m, ..)| m == id)
+            .map(|(.., c)| (*c).to_owned());
+        record_movement_on(
+            app,
+            MovementEdit {
+                material_id: (*id).to_owned(),
+                kind: "purchase".to_owned(),
+                qty: (*qty).to_owned(),
+                unit: (*unit).to_owned(),
+                reason_id: None,
+                note: None,
+                cost,
+            },
+        )
+        .expect("stock in");
+    }
+}
+
+fn base_unit(dimension: &str) -> &'static str {
+    match dimension {
+        "volume" => "l",
+        "count" => "piece",
+        _ => "kg",
+    }
+}

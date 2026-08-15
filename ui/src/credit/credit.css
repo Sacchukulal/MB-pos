@@ -6,12 +6,14 @@
  */
 
 .mb-credit {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
   height: 100%;
-  padding: var(--space-4);
   overflow-y: auto;
 }
 
@@ -71,4 +73,12 @@
 .mb-ledger th {
   color: var(--text-muted);
   font-weight: var(--weight-medium);
+}
+
+/* The search box on the toolbar. Wide enough for a customer's whole name —
+   it used to sit in a plain `mb-row` and shrink to about 240px, so the
+   placeholder itself ("Find a customer, or a number") was cut off, which is a
+   search box that cannot say what it searches. */
+.mb-credit__find {
+  width: var(--find-width);
 }

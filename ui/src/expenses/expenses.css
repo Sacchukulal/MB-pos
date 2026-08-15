@@ -3,12 +3,14 @@
  */
 
 .mb-expenses {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
   height: 100%;
-  padding: var(--space-4);
   overflow-y: auto;
 }
 

@@ -72,15 +72,29 @@ export function Numeric({ children }: { children: ReactNode }) {
 export function StatCard({
   label,
   value,
+  note,
 }: {
   label: string;
   value: ReactNode;
+  /**
+   * The sentence under the figure — *"What the till expects, before
+   * counting."*
+   *
+   * **A parameter of its own, and P27.5 is why.** The dashboard used to pass
+   * its note inside `value`, which is the element that carries
+   * `font-family: var(--font-mono)` so that a column of rupees lines up (§3).
+   * So every explanatory sentence on the reports screen rendered in a
+   * monospace face — prose set like a terminal, on the screen an owner reads
+   * most carefully. Found by opening the screen and looking at it (D55).
+   */
+  note?: ReactNode;
 }) {
   return (
     <Card>
       <div className="mb-stat">
         <span className="mb-stat__label">{label}</span>
         <span className="mb-stat__value">{value}</span>
+        {note ? <span className="mb-stat__note">{note}</span> : null}
       </div>
     </Card>
   );

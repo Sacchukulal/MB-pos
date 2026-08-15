@@ -14,8 +14,9 @@
     "lint:tokens": "node scripts/check-tokens.mjs",
     "lint:money": "node scripts/check-no-money.mjs",
     "lint:views": "node scripts/check-view-names.mjs",
-    "lint": "npm run lint:tokens && npm run lint:money && npm run lint:views",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "lint": "npm run lint:tokens && npm run lint:layout && npm run lint:money && npm run lint:views",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "lint:layout": "node scripts/check-layout.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

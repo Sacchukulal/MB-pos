@@ -30,6 +30,8 @@ import {
   Tabs,
   useToast,
   type Column,
+  Page,
+  PageHeader,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
@@ -40,7 +42,11 @@ import './auth.css';
 export function Staff() {
   const [tab, setTab] = useState('people');
   return (
-    <div className="mb-screen">
+    <Page className="mb-screen">
+      <PageHeader
+        title="Staff"
+        subtitle="Who works here, what each of them may do, and their PIN."
+      />
       <Tabs
         tabs={[
           { id: 'people', label: 'People' },
@@ -50,7 +56,7 @@ export function Staff() {
         onChange={setTab}
       />
       {tab === 'people' ? <People /> : <Roles />}
-    </div>
+    </Page>
   );
 }
 

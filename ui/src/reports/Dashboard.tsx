@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { Badge, Card, Spinner, StatCard } from '../kit';
+import { Badge, Card, Icon, Spinner, StatCard } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { AttentionView } from '../ipc/generated/AttentionView';
 import type { DashboardView } from '../ipc/generated/DashboardView';
@@ -47,12 +47,8 @@ export function Dashboard() {
           <StatCard
             key={stat.label}
             label={stat.label}
-            value={
-              <>
-                <span className="mb-numeric">{stat.value}</span>
-                {stat.note ? <small className="mb-dash__note">{stat.note}</small> : null}
-              </>
-            }
+            value={stat.value}
+            note={stat.note}
           />
         ))}
       </div>
@@ -68,7 +64,16 @@ export function Dashboard() {
                   : 'neutral'
             }
           >
-            {view.compare.direction === 'up' ? '▲' : view.compare.direction === 'down' ? '▼' : '='}
+            <Icon
+              name={
+                view.compare.direction === 'up'
+                  ? 'chevron-up'
+                  : view.compare.direction === 'down'
+                    ? 'chevron-down'
+                    : 'minus'
+              }
+              size="sm"
+            />
           </Badge>
           {/* The whole sentence, written in Rust. */}
           {view.compare.summary}
@@ -85,7 +90,10 @@ export function Dashboard() {
           {view.attention.map((item: AttentionView) => (
             <Card key={item.title} className={`mb-dash__item mb-dash__item--${item.tone}`}>
               <Badge tone={item.tone === 'danger' ? 'danger' : item.tone === 'warn' ? 'warn' : 'info'}>
-                {item.tone === 'danger' ? '!' : item.tone === 'warn' ? '▲' : 'i'}
+                <Icon
+                  name={item.tone === 'info' ? 'info' : 'warning'}
+                  size="sm"
+                />
               </Badge>
               <div>
                 <strong>{item.title}</strong>

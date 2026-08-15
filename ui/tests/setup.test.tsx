@@ -87,8 +87,46 @@ it('shows what is left and counts what is done in a line', async () => {
   expect(await screen.findByText('Put your menu in')).toBeTruthy();
   // The finished step is a number, not a row.
   expect(screen.queryByText('Tell us about your shop')).toBeNull();
-  expect(screen.getByText('1 of 3 done.')).toBeTruthy();
+  // P27.5 made this a collapsible strip, so the count moved from a paragraph
+  // of its own ("1 of 3 done.") onto the summary line ("1 of 3 done"). The
+  // CLAIM is unchanged and is what this test is about: what is finished is a
+  // number, and only what is left gets a row.
+  expect(screen.getByText('1 of 3 done')).toBeTruthy();
   expect(screen.getAllByRole('button', { name: 'Do it' })).toHaveLength(2);
+});
+
+/**
+ * **The strip collapses, and it starts closed once the urgent steps are done.**
+ *
+ * P22 already cut this from "every step" to "only what is left", because six
+ * rows filled the billing pane. P27.5 found that two rows still take a quarter
+ * of the screen a cashier looks at all day, for the life of the shop — and the
+ * steps that survive longest are the optional ones a shop may never do, so the
+ * panel is biggest exactly when it matters least.
+ */
+it('opens itself only while something that matters most is outstanding', async () => {
+  call.mockResolvedValue(halfway);
+  const { unmount } = render(<Setup onGoTo={vi.fn()} />);
+
+  // `menu` is outstanding and mattersMost, so the reasons are showing.
+  expect(await screen.findByText('Type the items, or import a spreadsheet.')).toBeTruthy();
+  unmount();
+
+  // With only the optional tail left, it is a single line until pressed.
+  call.mockResolvedValue({
+    ...halfway,
+    steps: halfway.steps.map((s) => (s.mattersMost ? { ...s, done: true } : s)),
+  });
+  render(<Setup onGoTo={vi.fn()} />);
+
+  const line = await screen.findByRole('button', { expanded: false });
+  // The names are still on the line, so a collapsed strip still says what.
+  expect(screen.getByText(/Add your tables/)).toBeTruthy();
+  // But not the reasons, and not a "Do it" for each.
+  expect(screen.queryByText('Only if you have table service.')).toBeNull();
+
+  fireEvent.click(line);
+  expect(screen.getByText('Only if you have table service.')).toBeTruthy();
 });
 
 it('sends somebody to the screen that already does the job', async () => {

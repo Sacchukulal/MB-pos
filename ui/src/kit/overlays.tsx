@@ -30,6 +30,7 @@ import {
 } from 'react';
 
 import { Button } from './controls';
+import { Icon } from './Icon';
 
 export interface ModalProps {
   open: boolean;
@@ -281,7 +282,7 @@ function ToastList({
             onClick={() => onDismiss(toast.id)}
             aria-label="Dismiss"
           >
-            ✕
+            <Icon name="x" size="sm" />
           </Button>
         </div>
       ))}

@@ -1,0 +1,368 @@
+/* =========================================================================
+   THE LAYOUT PRIMITIVES — P27.5.
+   =========================================================================
+   The shape of a page, decided ONCE. Every value here names a job from the
+   spacing contract in tokens.css (--gap-inline, --gap-field, --gap-group,
+   --gap-section, --page-pad-*), never a step off the raw scale — because
+   reaching for `--space-4` here would be repeating the exact mistake this
+   file exists to end.
+   ========================================================================= */
+
+/* --- Page ---------------------------------------------------------------
+   THE STRUCTURE of a page: a column, with the section gap between its parts.
+
+   **It does not own the margin.** `.mb-main` in shell.css does, once, for
+   every screen — including the ones that predate this file and do not use
+   `Page` at all. That was the deciding argument: a primitive only the screens
+   that adopt it obey is a primitive that leaves the other twelve crooked, and
+   the owner opens all of them.
+
+   So there is exactly one page margin in the product, it is in the shell, and
+   `check-layout.mjs` fails the build if a feature CSS file sets one of its
+   own — which is how seventeen screens ended up with seventeen different left
+   edges in the first place.                                                */
+
+/* The GROUP gap, not the section gap: a page's header, its toolbar and its
+   content are one apparatus, not three sections. `Sections` is what puts the
+   bigger gap between actual sections of content, and it does it INSIDE this. */
+.mb-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-group);
+  flex: 1;
+  min-height: 0;
+}
+
+/* The header stays; the body under it scrolls. A page title that scrolls away
+   from the table it names is a table with no name. */
+.mb-page--scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* --- Page header --------------------------------------------------------- */
+
+.mb-pagehead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-group);
+  flex-shrink: 0;
+}
+
+.mb-pagehead__what {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-pagehead__titleline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-inline);
+}
+
+.mb-pagehead__title {
+  margin: 0;
+  font-size: var(--type-page);
+  font-weight: var(--type-page-weight);
+  line-height: var(--line-tight);
+  /* Tightened, because a page title at this size and weight looks loose on the
+     OS UI font otherwise. Optical, not mathematical (§5). */
+  letter-spacing: var(--tracking-title);
+}
+
+/* The count is set APART from the title, not glued into it: "Menu (43)" is a
+   string a translator cannot move and a number the eye has to dig out of a
+   word. */
+.mb-pagehead__count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--type-label);
+  font-weight: var(--type-label-weight);
+  color: var(--text-muted);
+  padding: 0 var(--space-2);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-pill);
+}
+
+.mb-pagehead__sub {
+  margin: 0;
+  font-size: var(--type-label);
+  color: var(--text-muted);
+}
+
+.mb-pagehead__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  flex-shrink: 0;
+}
+
+/* --- Toolbar ------------------------------------------------------------- */
+
+.mb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-group);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* **There is no negative margin here, and there was.**
+   The first version pulled the toolbar up against the header by a fixed
+   amount, on the reasoning that they are one apparatus. Fixed is the word that
+   was wrong: a header with a subtitle is taller than one without, so on the
+   Credit screen the search box was hoisted straight through the sentence
+   underneath the title. Two elements overlapping because one of them guessed
+   the other's height is the kind of thing that only ever shows up when you
+   look at the screen (D55). The gap is now the page's own, once, for
+   everything in it. */
+
+.mb-toolbar__start,
+.mb-toolbar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  min-width: 0;
+}
+
+/* --- Panel: the ONE raised surface --------------------------------------- */
+
+.mb-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--level-raised);
+}
+
+/* A panel inside a panel is not raised again — it is a group. Nothing in this
+   product is elevated twice (§5: avoid cards inside cards). */
+.mb-panel .mb-panel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: var(--level-flat);
+}
+
+.mb-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-group);
+  padding: var(--gap-field) var(--gap-group);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.mb-panel .mb-panel > .mb-panel__head {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.mb-panel__what {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-inline);
+  min-width: 0;
+}
+
+.mb-panel__title {
+  margin: 0;
+  font-size: var(--type-section);
+  font-weight: var(--type-section-weight);
+  line-height: var(--line-tight);
+}
+
+.mb-panel__note {
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+}
+
+.mb-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  flex-shrink: 0;
+}
+
+.mb-panel__body {
+  padding: var(--gap-group);
+  min-width: 0;
+}
+
+/* A panel whose whole content is a table: the table draws its own rows right
+   to the edge, and padding would put it in a box inside a box. */
+.mb-panel--flush > .mb-panel__body {
+  padding: 0;
+}
+
+/* --- Runs ---------------------------------------------------------------- */
+
+.mb-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section);
+  min-width: 0;
+}
+
+.mb-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+  min-width: 0;
+}
+
+.mb-fields--columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
+  gap: var(--gap-field) var(--gap-group);
+}
+
+/* The default gap is on the base class, not only on the modifier: `mb-row` and
+   `mb-stack` are used bare in dozens of places that predate this file, and a
+   base class with no gap would have collapsed every one of them into a
+   run-on. The modifiers below override it. */
+.mb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  min-width: 0;
+}
+
+.mb-row--wrap {
+  flex-wrap: wrap;
+}
+
+.mb-row--gap-inline {
+  gap: var(--gap-inline);
+}
+.mb-row--gap-field {
+  gap: var(--gap-field);
+}
+.mb-row--gap-group {
+  gap: var(--gap-group);
+}
+
+.mb-row--end {
+  justify-content: flex-end;
+}
+
+.mb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+  min-width: 0;
+}
+
+.mb-stack--gap-inline {
+  gap: var(--gap-inline);
+}
+.mb-stack--gap-field {
+  gap: var(--gap-field);
+}
+.mb-stack--gap-group {
+  gap: var(--gap-group);
+}
+.mb-stack--gap-section {
+  gap: var(--gap-section);
+}
+
+/* --- Notice: a machine state, in a sentence ------------------------------ */
+
+.mb-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-field);
+  padding: var(--gap-field) var(--gap-group);
+  border: var(--border-width) solid var(--border);
+  /* The stripe is the FORM half of the signal, so this still reads on a bad
+     monitor and in grey-scale (§2 rule 2). */
+  border-left-width: var(--space-1);
+  border-radius: var(--radius-md);
+  font-size: var(--type-label);
+  color: var(--text);
+}
+
+.mb-notice__icon {
+  flex-shrink: 0;
+  /* Aligned to the first line's baseline, not to the top of the box (§5). */
+  margin-top: var(--icon-nudge);
+}
+
+.mb-notice__says {
+  flex: 1;
+  min-width: 0;
+}
+
+.mb-notice__action {
+  flex-shrink: 0;
+}
+
+.mb-notice--info {
+  background: var(--info-soft);
+  border-color: var(--info);
+  color: var(--text);
+}
+.mb-notice--info .mb-notice__icon {
+  color: var(--info);
+}
+
+.mb-notice--ok {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+}
+.mb-notice--ok .mb-notice__icon {
+  color: var(--ok);
+}
+
+.mb-notice--warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+}
+.mb-notice--warn .mb-notice__icon {
+  color: var(--warn);
+}
+
+.mb-notice--danger {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+.mb-notice--danger .mb-notice__icon {
+  color: var(--danger);
+}
+
+.mb-notice--accent {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.mb-notice--accent .mb-notice__icon {
+  color: var(--accent);
+}
+
+/* --- Icons --------------------------------------------------------------- */
+
+.mb-icon {
+  flex-shrink: 0;
+  /* Aligned to the TEXT baseline rather than to the box (§5) — this one
+     declaration is most of the difference between icons that sit with their
+     words and icons that float above them. */
+  vertical-align: var(--icon-baseline);
+}
+
+.mb-icon--sm {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.mb-icon--md {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.mb-icon--lg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}

@@ -18,7 +18,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Card, SectionHeader, Table, useToast, type BadgeTone, type Column } from '../kit';
+import { Badge, Button, Card, SectionHeader, Table, useToast, type BadgeTone, type Column,
+  Icon,
+  Page,
+  PageHeader,
+} from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { BundlePlanView } from '../ipc/generated/BundlePlanView';
 import type { HealthRow } from '../ipc/generated/HealthRow';
@@ -94,8 +98,17 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   if (!view) return null;
 
   return (
-    <div className="mb-health">
-      <SectionHeader title="Health" note="Everything worth knowing about this counter." />
+    <Page className="mb-health">
+      <PageHeader
+        title="Health"
+        subtitle="Everything worth knowing about this counter."
+        actions={
+          <Button variant="secondary" onClick={load}>
+            <Icon name="refresh" size="sm" />
+            Look again
+          </Button>
+        }
+      />
 
       <Card>
         <div className="mb-health__top mb-row">
@@ -169,6 +182,6 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           </div>
         )}
       </Card>
-    </div>
+    </Page>
   );
 }

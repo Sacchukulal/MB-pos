@@ -57,7 +57,17 @@ const CHECKS = [
   },
 ];
 
-/** Lines saying `mb-tokens-allow: <why>` exempt themselves, and are counted. */
+/**
+ * Lines saying `mb-tokens-allow: <why>` exempt themselves, and are counted.
+ *
+ * **Checked against the RAW line, not the comment-stripped one** — P27.5 found
+ * that the escape was unusable in a CSS file, because CSS has no line-comment
+ * syntax, so the only way to write the reason is inside a `/* … *\/` that
+ * `stripComments` blanks before the check ever runs. The one legitimate raw
+ * value in this product is a media-query breakpoint (a media condition is
+ * evaluated before the cascade, so `var()` is invalid there), and it could not
+ * be declared. An escape hatch that cannot be reached is not an escape hatch.
+ */
 const ESCAPE = 'mb-tokens-allow:';
 
 /**
@@ -98,9 +108,11 @@ let escapes = 0;
 
 for (const file of walk(ROOT)) {
   if (isAllowed(file)) continue;
-  const lines = stripComments(readFileSync(file, 'utf8')).split(/\r?\n/);
+  const source = readFileSync(file, 'utf8');
+  const raw = source.split(/\r?\n/);
+  const lines = stripComments(source).split(/\r?\n/);
   lines.forEach((line, index) => {
-    if (line.includes(ESCAPE)) {
+    if ((raw[index] ?? '').includes(ESCAPE)) {
       escapes += 1;
       return;
     }

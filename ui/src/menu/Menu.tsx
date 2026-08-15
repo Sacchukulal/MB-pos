@@ -30,8 +30,11 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  Icon,
   Input,
   Modal,
+  Page,
+  PageHeader,
   SearchField,
   Select,
   Table,
@@ -156,8 +159,63 @@ export function Menu() {
     },
   ];
 
+  const addItem = () =>
+    setEditing({
+      id: `itm_${Date.now()}`,
+      name: '',
+      categoryId: chosen,
+      price: { paise: 0n, text: '0.00' },
+      taxClassId: classes[0]?.id ?? null,
+      rate: '',
+      hsn: null,
+      shortCode: null,
+      cost: null,
+      margin: null,
+      isOpenPrice: false,
+      isAvailable: true,
+      course: null,
+      prepMinutes: null,
+      variants: 0n,
+    });
+
   return (
-    <div className="mb-menu">
+    <Page className="mb-menu">
+      <PageHeader
+        title="Menu"
+        subtitle="What this shop sells, what it costs, and which tax class each thing is in."
+        count={rows.length}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setBulkOpen(true)}>
+              Change prices
+            </Button>
+            <Button variant="secondary" onClick={() => setImportOpen(true)}>
+              <Icon name="upload" size="sm" />
+              Import
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                call('export_menu')
+                  .then((text) => {
+                    void navigator.clipboard.writeText(text);
+                    toast.show('ok', 'The menu is on the clipboard — paste it into a spreadsheet.');
+                  })
+                  .catch(report);
+              }}
+            >
+              <Icon name="download" size="sm" />
+              Export
+            </Button>
+            <Button variant="primary" onClick={addItem}>
+              <Icon name="plus" size="sm" />
+              Add an item
+            </Button>
+          </>
+        }
+      />
+
+      <div className="mb-menu__body">
       <aside className="mb-menu__categories">
         <Button
           variant={chosen === null ? 'primary' : 'quiet'}
@@ -179,55 +237,12 @@ export function Menu() {
       </aside>
 
       <section className="mb-menu__items">
-        <div className="mb-row">
+        <div className="mb-menu__find">
           <SearchField
             value={find}
             placeholder="Find an item"
             onChange={(event) => setFind(event.target.value)}
           />
-          <Button variant="quiet" onClick={() => setBulkOpen(true)}>
-            Change prices
-          </Button>
-          <Button variant="quiet" onClick={() => setImportOpen(true)}>
-            Import
-          </Button>
-          <Button
-            variant="quiet"
-            onClick={() => {
-              call('export_menu')
-                .then((text) => {
-                  void navigator.clipboard.writeText(text);
-                  toast.show('ok', 'The menu is on the clipboard — paste it into a spreadsheet.');
-                })
-                .catch(report);
-            }}
-          >
-            Export
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() =>
-              setEditing({
-                id: `itm_${Date.now()}`,
-                name: '',
-                categoryId: chosen,
-                price: { paise: 0n, text: '0.00' },
-                taxClassId: classes[0]?.id ?? null,
-                rate: '',
-                hsn: null,
-                shortCode: null,
-                cost: null,
-                margin: null,
-                isOpenPrice: false,
-                isAvailable: true,
-                course: null,
-                prepMinutes: null,
-                variants: 0n,
-              })
-            }
-          >
-            Add an item
-          </Button>
         </div>
 
         {shown.length === 0 ? (
@@ -247,6 +262,7 @@ export function Menu() {
         <ModifierGroups onFailed={report} />
         <Combos rows={rows} onFailed={report} />
       </section>
+      </div>
 
       {madeOf ? (
         <Composition
@@ -299,7 +315,7 @@ export function Menu() {
           onFailed={report}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
 

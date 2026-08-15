@@ -161,6 +161,10 @@ mod buying_tests;
 /// authority, so a test that stubs the counter is testing nothing.
 #[cfg(test)]
 mod order_tests;
+/// P27.5. **A whole shop, so the look can be designed against a real screen.**
+/// Not a test of anything — a seeder, ignored by the suite (D55).
+#[cfg(test)]
+mod look_demo;
 mod startup;
 mod state;
 /// P27. **The tills** â who this machine is, who the master is, and the

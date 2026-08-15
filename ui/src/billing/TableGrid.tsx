@@ -152,9 +152,11 @@ function Tile({
             </span>
           )}
           {table.orderId && !table.kitchenTold ? (
-            <span className="mb-tile__kitchen" title="The kitchen has not been told">
-              ●
-            </span>
+            <span
+              className="mb-tile__kitchen"
+              title="The kitchen has not been told"
+              aria-label="The kitchen has not been told"
+            />
           ) : null}
         </span>
       )}

@@ -20,7 +20,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, EmptyState, Select, Table, useToast, type Column } from '../kit';
+import { Badge, Button, EmptyState, Select, Table, useToast, type Column,
+  Page,
+  PageHeader,
+} from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { AuditEntryView } from '../ipc/generated/AuditEntryView';
 import type { AuditView } from '../ipc/generated/AuditView';
@@ -89,7 +92,12 @@ export function Audit() {
   ];
 
   return (
-    <div className="mb-screen">
+    <Page className="mb-screen">
+      <PageHeader
+        title="History"
+        subtitle="Everything anybody did on this counter, and when."
+      />
+
       {view?.tampered ? (
         <div className="mb-audit__alarm" role="alert">
           <Badge tone="danger">Check this</Badge>
@@ -147,6 +155,6 @@ export function Audit() {
           rowKey={(e) => String(e.seq)}
         />
       )}
-    </div>
+    </Page>
   );
 }

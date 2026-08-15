@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, Modal, useToast } from '../kit';
+import { Button, Icon, Modal, Notice, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -46,7 +46,27 @@ import '../auth/auth.css';
 export interface Screen {
   id: string;
   label: string;
-  icon: string;
+  /**
+   * A name from the kit's icon set, not a character. **P27.5 changed this from
+   * `string`** — it used to hold a Unicode glyph (`▦`, `☰`, `⌁`), so which
+   * picture a shop actually saw depended on which font Windows substituted,
+   * and they arrived at three different weights. A union type means a mistyped
+   * name is now a compile error rather than a hole in the navigation.
+   */
+  icon: IconName;
+  /**
+   * **True for a screen the counter uses every day.** Those get a place in the
+   * top bar; everything else lives behind "More".
+   *
+   * Thirteen destinations do not fit across 1366px with a readable label on
+   * each, and §5 forbids the usual escape — *"icon-only is fast for a daily
+   * user and hostile to a new one"*. So the split is by how often a shop opens
+   * the screen rather than by what fits: billing, the floor, the day's bills,
+   * credit, spends and reports are the counter's day; stock, buying, the menu,
+   * staff, history, settings and the account are things somebody sits down to
+   * do. Both halves keep their words.
+   */
+  daily?: boolean;
   /**
    * `go` opens another screen — P22's set-up list and health panel both send
    * somebody to the screen that does the job, rather than being a seventh
@@ -76,15 +96,16 @@ export interface Screen {
 /**
  * Every screen in the product.
  *
- * P09 adds `{ id: 'billing', label: 'Billing', icon: '₹', render: () => <Billing /> }`
+ * P09 adds `{ id: 'billing', label: 'Billing', icon: 'receipt', render: … }`
  * and is finished. Lazily rendered — nothing that is not on screen is built,
  * which is budget S1 and scope 16.14.
  */
-const SHIPPED_SCREENS: readonly Screen[] = [
+export const SHIPPED_SCREENS: readonly Screen[] = [
   {
     id: "billing",
+    daily: true,
     label: "Billing",
-    icon: "₹",
+    icon: 'receipt',
     // The set-up list lives on this screen and needs to be able to send
     // somebody to Settings or Menu — see `Setup` and D102.
     render: (go) => <Billing onGoTo={go} />,
@@ -94,8 +115,9 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // "which table am I putting this dosa on" but "which table needs me".
     // Audit F5 is the second one going unanswered.
     id: 'floor',
+    daily: true,
     label: 'Floor',
-    icon: '▦',
+    icon: 'grid',
     render: () => <Floor />,
   },
   {
@@ -103,8 +125,9 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // "who owes me money", which is why that is its default view rather than
     // an alphabetical list nobody opens.
     id: 'credit',
+    daily: true,
     label: 'Credit',
-    icon: '☰',
+    icon: 'wallet',
     render: () => <Credit />,
     needs: 'customers.manage',
   },
@@ -112,8 +135,9 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // "Spends", not "Expenses": the rail is read at a glance and the shorter
     // word is the one a shopkeeper uses.
     id: 'expenses',
+    daily: true,
     label: 'Spends',
-    icon: '⌁',
+    icon: 'banknote',
     render: () => <Expenses />,
     needs: 'expenses.manage',
   },
@@ -123,7 +147,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // "the biggest single hole" in the product.
     id: 'stock',
     label: 'Stock',
-    icon: '⬒',
+    icon: 'boxes',
     render: () => <Stock />,
     needs: 'inventory.view',
   },
@@ -134,14 +158,15 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // shelf and that is where the person already is.
     id: 'buying',
     label: 'Buying',
-    icon: '⇩',
+    icon: 'truck',
     render: () => <Buying />,
     needs: 'purchases.manage',
   },
   {
     id: 'bills',
+    daily: true,
     label: 'Bills',
-    icon: '❐',
+    icon: 'file',
     render: () => <Bills />,
     needs: 'reports.view',
   },
@@ -149,22 +174,23 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // Directly under Bills, because the two answer the same person's
     // questions: "what did that customer pay?" and "how did the month go?"
     id: 'reports',
+    daily: true,
     label: 'Reports',
-    icon: '◫',
+    icon: 'chart',
     render: () => <Reports />,
     needs: 'reports.view',
   },
   {
     id: 'menu',
     label: 'Menu',
-    icon: '≣',
+    icon: 'book',
     render: () => <Menu />,
     needs: 'menu.manage',
   },
   {
     id: 'staff',
     label: 'Staff',
-    icon: '☺',
+    icon: 'users',
     render: () => <Staff />,
     needs: 'staff.manage',
   },
@@ -173,7 +199,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // Not "Audit". The owner must be able to answer "who voided that bill?"
     // without knowing our word for it (UI_GUIDELINES §6).
     label: 'History',
-    icon: '☷',
+    icon: 'clock',
     render: () => <Audit />,
     needs: 'audit.view',
   },
@@ -182,7 +208,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // month, so they must not sit where a cashier's hand goes.
     id: 'settings',
     label: 'Settings',
-    icon: '⚙',
+    icon: 'settings',
     render: () => <Settings />,
     needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
   },
@@ -191,7 +217,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // because the Kit is not a screen a shop has any use for.
     id: 'account',
     label: 'Account',
-    icon: '◇',
+    icon: 'badge',
     render: () => <Account />,
     needs: 'reports.view',
   },
@@ -201,7 +227,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // window — same page, same code.
     id: 'kitchen',
     label: 'Kitchen',
-    icon: '◉',
+    icon: 'flame',
     render: () => <Kitchen />,
     needs: 'bill.create',
   },
@@ -210,7 +236,7 @@ const SHIPPED_SCREENS: readonly Screen[] = [
     // the two directions an owner asks it.
     id: 'health',
     label: 'Health',
-    icon: '✚',
+    icon: 'pulse',
     render: (go) => <Health onGoTo={go} />,
     needs: 'reports.view',
   },
@@ -230,7 +256,7 @@ const SCREENS: readonly Screen[] = import.meta.env.DEV
       {
         id: 'gallery',
         label: 'Kit',
-        icon: '◑',
+        icon: 'tag',
         render: () => <Gallery />,
       },
     ]
@@ -359,8 +385,11 @@ export function Shell() {
 
   return (
     <div className="mb-shell">
-      <TitleBar
-        shop={status?.shopPath ?? null}
+      <TopBar
+        shopPath={status?.shopPath ?? null}
+        screens={allowed}
+        current={screen}
+        onGo={setScreen}
         themeIcon={theme.icon}
         themeName={theme.name}
         onToggleTheme={toggle}
@@ -374,45 +403,33 @@ export function Shell() {
         }}
       />
 
-      {/* Audit C1, on a shop that has not fixed it yet. NOT dismissible: a
-          dismissed banner is a fixed bug that was never fixed. */}
+      {/* The two standing banners. Both are `Notice` from the kit at P27.5
+          rather than two hand-written strips that happened to look similar —
+          §6: ONE place turns a machine state into words. Neither is
+          dismissible, and for the same reason: a dismissed banner is a fixed
+          bug that was never fixed. */}
       {lock?.nobodyHasAPin ? (
-        <div className="mb-nopin" role="status">
-          <strong>Anybody can open this shop&rsquo;s reports and settings.</strong>
-          <span>Add a PIN in Staff so the counter locks itself.</span>
+        <div className="mb-shell__banner">
+          {/* Audit C1, on a shop that has not fixed it yet. */}
+          <Notice tone="warn" icon="lock">
+            <strong>Anybody can open this shop&rsquo;s reports and settings.</strong>{' '}
+            Add a PIN in Staff so the counter locks itself.
+          </Notice>
         </div>
       ) : null}
 
-      {/* P27, D138. Also not dismissible, and for the same reason as the
-          banner above: the state is real until it stops being real. It says
-          "nothing is lost" out loud, because the fear it answers is the shop
-          thinking those bills have gone. */}
+      {/* P27, D138. The accent tone and not the warning one, because nothing
+          is wrong — the money is safe and it is going across — and a red bar
+          over an ordinary Tuesday teaches a shop to ignore red bars. */}
       {tillsSay ? (
-        <div className="mb-tillqueue" role="status">
-          <strong>{tillsSay}</strong>
+        <div className="mb-shell__banner">
+          <Notice tone="accent" icon="refresh">
+            {tillsSay}
+          </Notice>
         </div>
       ) : null}
 
       <div className="mb-body">
-        <nav className="mb-rail" aria-label="Screens">
-          {allowed.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="mb-rail__item"
-              aria-current={item.id === screen ? 'page' : undefined}
-              onClick={() => setScreen(item.id)}
-            >
-              {/* Icon AND label — §5: bare icons are hostile to a new cashier. */}
-              <span className="mb-rail__icon" aria-hidden="true">
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-            </button>
-          ))}
-          <span className="mb-rail__spacer" />
-        </nav>
-
         <main className="mb-main">
           {/*
             **The licence banner** (P21). A quiet line above the screen, never a
@@ -428,18 +445,23 @@ export function Shell() {
             appear twice, four centimetres apart.
           */}
           {status?.licence && screen !== 'account' ? (
-            <div
-              className={`mb-licence-note mb-licence-note--${status.licenceTone}`}
-              role="status"
-            >
-              <span>{status.licence}</span>
-              <button
-                type="button"
-                className="mb-licence-note__go"
-                onClick={() => setScreen('account')}
+            <div className="mb-shell__banner mb-shell__banner--inmain">
+              <Notice
+                tone={
+                  status.licenceTone === 'danger'
+                    ? 'danger'
+                    : status.licenceTone === 'warn'
+                      ? 'warn'
+                      : 'info'
+                }
+                action={
+                  <Button small variant="quiet" onClick={() => setScreen('account')}>
+                    Open Account
+                  </Button>
+                }
               >
-                Open Account
-              </button>
+                {status.licence}
+              </Notice>
             </div>
           ) : null}
           {active?.render(setScreen)}
@@ -469,9 +491,74 @@ export function Shell() {
     </div>
   );
 }
+/**
+ * **The top bar** — P27.5, and it replaces the left rail entirely.
+ *
+ * The owner, 2026-08-15: *"the verticll left menu bars i didnt like, i wish to
+ * see that in horizontal top side"*.
+ *
+ * # Why it is ONE strip and not two
+ *
+ * A navigation bar across the top normally costs a row of vertical space, and
+ * at 1366x768 — the reference machine, D12 — vertical space is the scarce
+ * dimension: it is what the cart, the table grid and every report are fighting
+ * over. So the navigation does not get a row of its own. It shares the title
+ * bar we already draw ourselves (audit F7): the wordmark at one end, the window
+ * buttons at the other, and the screens along the middle. Against the old rail
+ * this costs nothing vertically and gives the billing screen back 76px of
+ * width.
+ *
+ * # Why six screens and then "More"
+ *
+ * Thirteen destinations do not fit across 1366px with a readable word under
+ * each, and UI_GUIDELINES §5 rules out the usual escape: *"icon-only is fast
+ * for a daily user and hostile to a new one. Solve it — do not just ship bare
+ * icons."* Hiding the labels would have been shipping bare icons with extra
+ * steps.
+ *
+ * So the split is by **how often a shop opens the screen**, and both halves
+ * keep their words. Billing, Floor, Bills, Credit, Spends and Reports are the
+ * counter's day and sit in the bar. Stock, Buying, Menu, Staff, History,
+ * Settings and Account are things somebody sits down to do, and live one click
+ * away behind More — which shows them as a proper labelled list, not a row of
+ * mystery glyphs.
+ *
+ * The current screen is always visible with its label, even when it came from
+ * More: a navigation that cannot show you where you are is worse than no
+ * navigation.
+ */
+/**
+ * **How the thirteen screens divide between the bar and the More sheet.**
+ *
+ * Pure, exported and tested (`tests/look.test.tsx`), because it is a rule
+ * rather than a rendering detail — and because the first version of it was
+ * wrong in a way only a running app showed.
+ *
+ * That first version added the current screen to the bar when it came from
+ * More, so the bar always said where you were. Opening Stock proved it: eight
+ * items plus the More button plus the tools is wider than 1366px, and "More"
+ * ran straight over the signed-in name in the corner. **A navigation that
+ * breaks the moment you use it is worse than one that is merely long.**
+ *
+ * So the bar is a FIXED six — the screens a counter opens every day — and the
+ * More button itself carries the answer: inside Stock it reads "Stock", with
+ * Stock's icon, marked as the current page. Nothing moves, nothing overflows,
+ * and "where am I" still has an answer on screen.
+ */
+export function splitScreens(
+  screens: readonly Screen[],
+  current: string,
+): { inBar: Screen[]; inMore: Screen[]; elsewhere: Screen | null } {
+  const inBar = screens.filter((s) => s.daily);
+  const inMore = screens.filter((s) => !s.daily);
+  return { inBar, inMore, elsewhere: inMore.find((s) => s.id === current) ?? null };
+}
 
-function TitleBar({
-  shop,
+function TopBar({
+  shopPath,
+  screens,
+  current,
+  onGo,
   themeIcon,
   themeName,
   onToggleTheme,
@@ -482,7 +569,10 @@ function TitleBar({
   role,
   onLock,
 }: {
-  shop: string | null;
+  shopPath: string | null;
+  screens: readonly Screen[];
+  current: string;
+  onGo: (screen: string) => void;
   themeIcon: string;
   themeName: string;
   onToggleTheme: () => void;
@@ -494,38 +584,119 @@ function TitleBar({
   onLock: () => void;
 }) {
   const window = inApp() ? getCurrentWindow() : null;
-  const face = themeIcon === 'moon' ? '☾' : themeIcon === 'contrast' ? '◐' : '☀';
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const face: IconName =
+    themeIcon === 'moon' ? 'moon' : themeIcon === 'contrast' ? 'contrast' : 'sun';
+
+  const { inBar, inMore, elsewhere } = splitScreens(screens, current);
+
+  // Close More on Escape and on going somewhere. A popover that outlives its
+  // purpose is the thing that ends up covering the Complete Bill button.
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoreOpen(false);
+    };
+    window_addEscape(onKey);
+    return () => window_removeEscape(onKey);
+  }, [moreOpen]);
+
+  const go = (id: string) => {
+    setMoreOpen(false);
+    onGo(id);
+  };
 
   return (
-    <header className="mb-titlebar" data-tauri-drag-region>
-      <span className="mb-titlebar__name" data-tauri-drag-region>
-        Magic Bill
-      </span>
-      {shop ? (
-        <span className="mb-titlebar__name" data-tauri-drag-region>
-          · {shop}
+    <header className="mb-topbar" data-tauri-drag-region>
+      {/* The wordmark. **Not the database path** — that used to be printed
+          across the title bar in full, which is developer output on a
+          shopkeeper's screen. It is still reachable for a support call: it is
+          the tooltip here, and it is on the Health screen in words. */}
+      <div className="mb-topbar__brand" data-tauri-drag-region title={shopPath ?? undefined}>
+        <span className="mb-topbar__mark" aria-hidden="true">
+          <Icon name="receipt" size="sm" />
         </span>
-      ) : null}
-      <span className="mb-titlebar__spacer" data-tauri-drag-region />
+        <span className="mb-topbar__name">Magic Bill</span>
+      </div>
 
-      <div className="mb-titlebar__tools">
+      <nav className="mb-nav" aria-label="Screens">
+        {inBar.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="mb-nav__item"
+            aria-current={item.id === current ? 'page' : undefined}
+            onClick={() => go(item.id)}
+          >
+            {/* Icon AND label — §5: bare icons are hostile to a new cashier. */}
+            <Icon name={item.icon} size="md" />
+            <span className="mb-nav__label">{item.label}</span>
+          </button>
+        ))}
+
+        {inMore.length > 0 ? (
+          <div className="mb-nav__more">
+            <button
+              type="button"
+              className="mb-nav__item mb-nav__item--more"
+              aria-expanded={moreOpen}
+              aria-haspopup="menu"
+              aria-current={elsewhere ? 'page' : undefined}
+              onClick={() => setMoreOpen((was) => !was)}
+            >
+              <Icon name={elsewhere?.icon ?? 'more'} size="md" />
+              <span className="mb-nav__label">{elsewhere?.label ?? 'More'}</span>
+              <Icon name={moreOpen ? 'chevron-up' : 'chevron-down'} size="sm" />
+            </button>
+
+            {moreOpen ? (
+              <>
+                {/* Clicking anywhere else closes it, including on the screen
+                    behind — without this the only way out is the button, and
+                    that is the popover people learn to dread. */}
+                <button
+                  type="button"
+                  className="mb-nav__scrim"
+                  aria-label="Close"
+                  onClick={() => setMoreOpen(false)}
+                />
+                <div className="mb-nav__sheet" role="menu">
+                  {inMore.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="mb-nav__sheetitem"
+                      role="menuitem"
+                      aria-current={item.id === current ? 'page' : undefined}
+                      onClick={() => go(item.id)}
+                    >
+                      <Icon name={item.icon} size="md" />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </nav>
+
+      <div className="mb-topbar__tools">
         {/* Whose till this is, right now. Audit C3's other half: the name on
             the bill and the name on the screen are one fact. */}
         {who ? (
-          <span className="mb-who">
-            <span className="mb-who__name">{who}</span>
-            {role ? <span>{role}</span> : null}
-          </span>
-        ) : null}
-        {who ? (
           <button
             type="button"
-            className="mb-titlebar__button"
+            className="mb-who"
             onClick={onLock}
-            aria-label="Lock the counter (Ctrl+L)"
+            aria-label={`Signed in as ${who}. Lock the counter (Ctrl+L)`}
             title="Lock the counter — Ctrl+L"
           >
-            <span aria-hidden="true">⌧</span>
+            <Icon name="user" size="sm" />
+            <span className="mb-who__name">{who}</span>
+            {role ? <span className="mb-who__role">{role}</span> : null}
+            <Icon name="lock" size="sm" className="mb-who__lock" />
           </button>
         ) : null}
 
@@ -533,10 +704,7 @@ function TitleBar({
             not "the cashier can see it". */}
         <button
           type="button"
-          className={[
-            'mb-queue',
-            needsAttention ? 'mb-queue--attention' : '',
-          ]
+          className={['mb-queue', needsAttention ? 'mb-queue--attention' : '']
             .filter(Boolean)
             .join(' ')}
           onClick={onOpenQueue}
@@ -546,7 +714,7 @@ function TitleBar({
               : 'Print queue'
           }
         >
-          <span aria-hidden="true">🖨</span>
+          <Icon name={needsAttention ? 'warning' : 'printer'} size="sm" />
           <span>
             {needsAttention
               ? 'NOT PRINTED'
@@ -559,41 +727,61 @@ function TitleBar({
         {/* The sun/moon toggle the owner asked for by name. */}
         <button
           type="button"
-          className="mb-titlebar__button"
+          className="mb-topbar__button"
           onClick={onToggleTheme}
           aria-label={`Theme: ${themeName}. Switch.`}
           title={`Theme: ${themeName}`}
         >
-          <span aria-hidden="true">{face}</span>
+          <Icon name={face} size="md" />
         </button>
 
-        <button
-          type="button"
-          className="mb-titlebar__button"
-          onClick={() => window?.minimize()}
-          aria-label="Minimise"
-        >
-          –
-        </button>
-        <button
-          type="button"
-          className="mb-titlebar__button"
-          onClick={() => window?.toggleMaximize()}
-          aria-label="Maximise"
-        >
-          □
-        </button>
-        <button
-          type="button"
-          className="mb-titlebar__button mb-titlebar__button--close"
-          onClick={() => window?.close()}
-          aria-label="Close"
-        >
-          ✕
-        </button>
+        {/* The window buttons, drawn on the same grid as every other icon —
+            they used to be "–", "□" and "✕" typed as characters, from three
+            different fonts, and they never lined up with each other. */}
+        <span className="mb-topbar__windows">
+          <button
+            type="button"
+            className="mb-topbar__button"
+            onClick={() => window?.minimize()}
+            aria-label="Minimise"
+          >
+            <Icon name="minimise" size="sm" />
+          </button>
+          <button
+            type="button"
+            className="mb-topbar__button"
+            onClick={() => window?.toggleMaximize()}
+            aria-label="Maximise"
+          >
+            <Icon name="maximise" size="sm" />
+          </button>
+          <button
+            type="button"
+            className="mb-topbar__button mb-topbar__button--close"
+            onClick={() => window?.close()}
+            aria-label="Close"
+          >
+            <Icon name="close" size="sm" />
+          </button>
+        </span>
       </div>
     </header>
   );
+}
+
+/**
+ * Escape, on the document.
+ *
+ * A pair of one-line helpers rather than `document.addEventListener` inline,
+ * because `window` is shadowed in `TopBar` by the Tauri window handle — and a
+ * listener registered on the wrong object is a popover that never closes.
+ */
+function window_addEscape(handler: (event: KeyboardEvent) => void) {
+  document.addEventListener('keydown', handler);
+}
+
+function window_removeEscape(handler: (event: KeyboardEvent) => void) {
+  document.removeEventListener('keydown', handler);
 }
 
 function PrintQueuePanel({

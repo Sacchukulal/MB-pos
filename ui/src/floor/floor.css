@@ -6,12 +6,14 @@
  */
 
 .mb-floor {
+  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
+     set their own here and they disagreed — space-3, space-4 and space-5 —
+     so the left edge of the app moved as you walked through it. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
   height: 100%;
-  padding: var(--space-4);
   overflow: hidden;
 }
 
@@ -27,16 +29,30 @@
 
 /* Scope 14.3. Small, one line, glanceable — an owner reads this on the way
    past, not sitting down. */
+/* **The line an owner glances at** (scope 14.3).
+   A row of facts, not a filled bar. It used to be a grey slab the full width of
+   the screen with four phrases run together inside it, which gave a quiet piece
+   of information the visual weight of a warning. Now the numbers are separated
+   by rules rather than by a box, so the eye can count them. */
 .mb-floor__numbers {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-2);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  align-items: center;
+  gap: var(--gap-field) var(--gap-group);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--border);
+  font-size: var(--type-caption);
   color: var(--text-muted);
+}
+
+.mb-floor__numbers > span:not(:last-child) {
+  padding-right: var(--gap-group);
+  border-right: var(--border-width) solid var(--border);
+}
+
+/* A figure inside the sentence reads as a figure. */
+.mb-floor__numbers > span {
+  font-variant-numeric: tabular-nums;
 }
 
 /* The fallback, and it is NOT a degraded mode: a shop that has never drawn a

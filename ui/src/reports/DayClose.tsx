@@ -26,6 +26,7 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  Icon,
   Input,
   Modal,
   SectionHeader,
@@ -175,7 +176,16 @@ export function DayClose() {
             view.varianceKind === 'exact' ? 'ok' : view.varianceKind === 'short' ? 'danger' : 'warn'
           }
         >
-          {view.varianceKind === 'exact' ? '✓' : view.varianceKind === 'short' ? '▼' : '▲'}
+          <Icon
+            name={
+              view.varianceKind === 'exact'
+                ? 'check'
+                : view.varianceKind === 'short'
+                  ? 'chevron-down'
+                  : 'chevron-up'
+            }
+            size="sm"
+          />
         </Badge>
         {/* The sentence, written in Rust. */}
         <strong>{view.varianceSays}</strong>

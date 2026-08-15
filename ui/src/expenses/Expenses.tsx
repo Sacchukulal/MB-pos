@@ -23,8 +23,11 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  Icon,
   Input,
   Modal,
+  Page,
+  PageHeader,
   Select,
   Table,
   useToast,
@@ -135,7 +138,19 @@ export function Expenses() {
   ];
 
   return (
-    <div className="mb-expenses">
+    <Page className="mb-expenses">
+      <PageHeader
+        title="Spends"
+        subtitle="What left the shop as money today, and what is in the drawer."
+        count={view.rows.length}
+        actions={
+          <Button variant="secondary" onClick={() => setDrawer(true)}>
+            <Icon name="cash" size="sm" />
+            Move cash
+          </Button>
+        }
+      />
+
       {/* Two fields and Enter. Everything else is optional detail on a row
           that already exists. */}
       <div className="mb-row mb-expenses__quick">
@@ -184,9 +199,6 @@ export function Expenses() {
           <strong className="mb-mono">{view.cash.expected.text}</strong>
         </span>
         <span className="mb-expenses__sum">{view.cash.says}</span>
-        <Button small variant="quiet" onClick={() => setDrawer(true)}>
-          Move cash
-        </Button>
       </div>
 
       {view.due.length > 0 ? (
@@ -289,7 +301,7 @@ export function Expenses() {
           onFailed={report}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
 

@@ -21,27 +21,21 @@
   background: var(--bg);
 }
 
-.mb-shell > .mb-titlebar,
-.mb-shell > .mb-nopin {
+.mb-shell > .mb-topbar {
   flex: 0 0 auto;
 }
 
-/* **P27, D138 — the bills this till is holding for the main one.**
-   The same shape as the no-PIN banner above and for the same reason (audit
-   D4): a state a shop cannot see is a state the software is hiding. The accent
-   colour and not the warning one, because nothing is wrong — the money is safe
-   and it is going across — and a red bar over an ordinary Tuesday teaches a
-   shop to ignore red bars. */
-.mb-shell > .mb-tillqueue {
+/* The standing banners (no PIN, held bills, the licence line). All three are
+   `Notice` from the kit at P27.5; this only decides where they sit. */
+.mb-shell__banner {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-bottom: var(--border-width) solid var(--border);
-  font-size: var(--text-sm);
+  padding: var(--gap-field) var(--page-pad-x) 0;
+}
+
+/* The licence line rides INSIDE the screen rather than above it, so it scrolls
+   away with the page instead of permanently eating a strip of a 768px window. */
+.mb-shell__banner--inmain {
+  padding: 0 0 var(--gap-field);
 }
 
 .mb-shell > .mb-body {
@@ -51,125 +45,298 @@
   min-height: 0;
 }
 
-/* --- Title bar — audit F7, "the plain Windows title bar" ----------------- */
+/* --- The top bar — audit F7 (we draw it ourselves) and P27.5 (it is also
+       the navigation now).
 
-.mb-titlebar {
+   ONE strip, 48px, holding three things: the wordmark, the screens, and the
+   window buttons. It is one strip and not two because at 1366x768 the scarce
+   dimension is vertical, and a navigation row of its own would have taken 48px
+   away from the cart and the table grid for ever.                          */
+
+.mb-topbar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding-left: var(--space-3);
+  gap: var(--gap-group);
+  height: var(--topbar-height);
+  padding: 0 var(--space-2) 0 var(--gap-field);
   background: var(--surface);
   border-bottom: var(--border-width) solid var(--border);
   /* Tauri drags the window by anything carrying this attribute. */
   -webkit-app-region: drag;
 }
 
-.mb-titlebar__name {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--text-muted);
-}
-
-.mb-titlebar__spacer {
-  flex: 1;
-}
-
-.mb-titlebar__tools {
+.mb-topbar__brand {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  -webkit-app-region: no-drag;
+  gap: var(--gap-inline);
+  flex-shrink: 0;
+  /* The wordmark is the first thing to give up room when the window is
+     narrow — it is decoration, and the navigation is not. */
+  min-width: 0;
 }
 
-.mb-titlebar__button {
+.mb-topbar__mark {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-7);
-  height: var(--titlebar-height);
-  background: transparent;
-  color: var(--text-muted);
-  border: none;
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.mb-titlebar__button:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.mb-titlebar__button--close:hover {
-  background: var(--danger);
+  width: var(--space-6);
+  height: var(--space-6);
+  background: var(--accent);
   color: var(--accent-ink);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
 }
 
-/* --- Body --------------------------------------------------------------- */
-
-.mb-body {
-  display: grid;
-  grid-template-columns: var(--rail-width) 1fr;
-  min-height: 0;
+.mb-topbar__name {
+  /* The first thing to give up room, and then to go entirely. The product name
+     is on the taskbar and in the window title; the navigation is not. */
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: var(--type-label);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* --- The left rail ------------------------------------------------------
-   §5: "icon-only is fast for a daily user and hostile to a new one. Solve
-   it — do not just ship bare icons." So: icon AND label, always. The rail is
-   76px because a label under an icon needs the room, and a counter has one
-   rail for its whole life — the pixels are cheaper than the confusion.     */
+/* --- The navigation ----------------------------------------------------- */
 
-.mb-rail {
+.mb-nav {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-1);
-  background: var(--surface);
-  border-right: var(--border-width) solid var(--border);
-  overflow-y: auto;
-}
-
-.mb-rail__item {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-1);
+  gap: var(--topbar-item-gap);
+  flex: 1;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.mb-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  height: var(--space-8);
+  /* Not --target-min: this sits in a 48px strip, and the touch requirement is
+     met by the WIDTH plus the full height of the bar. A 44px-tall pill inside
+     a 48px bar leaves a 2px seam above and below that reads as a mistake. */
+  padding: 0 var(--gap-inline);
   background: transparent;
   color: var(--text-muted);
   border: none;
   border-radius: var(--radius-md);
   font: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--type-label);
+  font-weight: var(--type-label-weight);
+  line-height: var(--line-tight);
+  white-space: nowrap;
   cursor: pointer;
-  text-align: center;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
 }
 
-.mb-rail__item:hover {
+.mb-nav__item:hover {
   background: var(--surface-2);
   color: var(--text);
 }
 
-/* Selected is carried by the fill AND the weight, not by colour alone. */
-.mb-rail__item[aria-current='page'] {
+/* **Where you are.** Carried by the fill, the weight AND the underline — three
+   signals, because this is the single most important piece of state on the
+   screen and it has to survive a bad monitor and a colour-blind cashier (§2
+   rule 2). Grey-scale it: the fill and the rule are both still there. */
+.mb-nav__item[aria-current='page'] {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: var(--weight-bold);
+  box-shadow: inset 0 calc(var(--nav-underline) * -1) 0 0 var(--accent);
 }
 
-.mb-rail__icon {
-  font-size: var(--text-xl);
-  line-height: var(--line-tight);
+.mb-nav__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.mb-rail__spacer {
-  flex: 1;
+/* --- More: the screens a shop opens sitting down ------------------------- */
+
+.mb-nav__more {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
+.mb-nav__item--more {
+  color: var(--text-muted);
+}
+
+/* Anywhere else closes it. Without this the only way out is the button again,
+   which is the popover people learn to dread. */
+.mb-nav__scrim {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+  z-index: 40;
+}
+
+.mb-nav__sheet {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--rail-sheet-width);
+  padding: var(--space-2);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  /* POP, per the elevation contract: it is over the page and the page cannot
+     be used until you deal with it. */
+  box-shadow: var(--level-pop);
+}
+
+.mb-nav__sheetitem {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--gap-field);
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--type-body);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mb-nav__sheetitem:hover {
+  background: var(--surface-2);
+}
+
+.mb-nav__sheetitem .mb-icon {
+  color: var(--text-muted);
+}
+
+/* --- The tools at the right end ----------------------------------------- */
+
+.mb-topbar__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.mb-topbar__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-7);
+  height: var(--space-8);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-md);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mb-topbar__button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* The window buttons are square, tight to each other and hard against the
+   corner — that is where Windows puts them and where a hand goes for them. */
+.mb-topbar__windows {
+  display: flex;
+  align-items: center;
+  margin-left: var(--space-2);
+}
+
+.mb-topbar__windows .mb-topbar__button {
+  border-radius: 0;
+  height: var(--topbar-height);
+}
+
+.mb-topbar__button--close:hover {
+  background: var(--danger);
+  color: var(--accent-ink);
+}
+
+/* Whose till this is. A button, because pressing it locks the counter — the
+   name and the lock are one thing, not a label next to a mystery icon. */
+.mb-who {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  height: var(--space-8);
+  padding: 0 var(--gap-field);
+  background: transparent;
+  color: var(--text-muted);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: var(--type-caption);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mb-who:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.mb-who__name {
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.mb-who__role {
+  color: var(--text-faint);
+}
+
+.mb-who__lock {
+  color: var(--text-faint);
+}
+
+/* --- Body --------------------------------------------------------------- */
+
+.mb-body {
+  display: flex;
+  min-height: 0;
+}
+
+/* **THE PAGE MARGIN LIVES HERE, AND NOWHERE ELSE.**
+   One declaration, for every screen in the product — the ones that use `Page`
+   and the ones that have not been converted to it. That is the whole point:
+   before P27.5 this was `padding: var(--space-5)` and screens added their own
+   on top of it, so the left edge moved as you walked through the app. Now it
+   cannot. `check-layout.mjs` fails the build on a feature file that tries. */
 .mb-main {
-  padding: var(--space-5);
-  overflow: auto;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--page-pad-y) var(--page-pad-x);
+  overflow: hidden;
+}
+
+/* Every screen's own root fills what it is given and scrolls inside it, rather
+   than each one deciding for itself whether it is `height: 100%` (billing) or
+   a document that grows (reports). The shell is the thing that knows how tall
+   the window is. */
+.mb-main > * {
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- The print-queue indicator -----------------------------------------
@@ -297,4 +464,53 @@
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* The item you are on, inside the More sheet. */
+.mb-nav__sheetitem[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--weight-bold);
+}
+
+.mb-nav__sheetitem[aria-current='page'] .mb-icon {
+  color: var(--accent);
+}
+
+/* **The nav never pushes the tools off the bar.** It may give up room; the
+   signed-in name, the print queue and the window buttons may not. Found by
+   opening a screen from More and watching "More" run over "Counter".
+
+   NOT with "overflow: hidden" on the nav, which was the first attempt and
+   clipped the More sheet out of existence — the sheet is absolutely positioned
+   INSIDE the nav, so hiding the nav's overflow hides the menu. Found in four
+   seconds by pressing More and looking at the screen (D55).
+
+   The honest fix is "min-width: 0" on the items: a flex item with
+   "white-space: nowrap" will not shrink below its own text unless it is told
+   it may, and once it may, the label ellipsises and the tools keep their
+   room. */
+.mb-nav__item {
+  /* **A navigation label never truncates.** §5 is explicit that bare icons are
+     hostile to a new cashier, and "Setti…" is a bare icon with extra steps.
+     So these do not shrink; the WORDMARK does, and below 1200px it goes
+     entirely (see the media query at the foot of this file). Measured at 1366:
+     six items, the More button, the brand and the tools come to about 1300px,
+     so the ordinary case has room to spare — this is the guard for the
+     1024px minimum the window allows. */
+  flex-shrink: 0;
+}
+
+/* Below the reference machine, the wordmark goes so the navigation keeps its
+   words. 1024px is the window minimum in tauri.conf.json, and this is what
+   stops the bar breaking there. */
+/* A media query cannot read a custom property: the condition is evaluated
+   before the cascade, so `max-width: var(--x)` is invalid CSS in every
+   browser. This is the one place in the product where a raw size is not a
+   choice. The escape sits on the line itself, because that is where the lint
+   looks. */
+@media (max-width: 1200px) { /* mb-tokens-allow: media queries cannot use var() */
+  .mb-topbar__name {
+    display: none;
+  }
 }

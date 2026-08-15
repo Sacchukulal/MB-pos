@@ -27,6 +27,8 @@ import {
   Button,
   ConfirmDialog,
   EmptyState,
+  Icon,
+  Page,
   SearchField,
   SectionHeader,
   Spinner,
@@ -444,8 +446,12 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   }
 
   return (
-    <div className="mb-billing">
-      <div className="mb-topbar">
+    /* `scroll={false}`: the billing screen manages its own two columns and
+       must NEVER scroll as a whole — the cart is permanent (§1) and a cart you
+       can scroll away from is not permanent. `Page` is here for one thing, the
+       page margin, which after P27.5 no screen sets for itself. */
+    <Page scroll={false} className="mb-billing">
+      <div className="mb-billbar">
         <div className="mb-segment" role="group" aria-label="Order type">
           {ORDER_TYPES.map((kind) => (
             <button
@@ -466,10 +472,11 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           aria-pressed={locked}
           title="Keep this order type for the next order"
         >
-          {locked ? '🔒 Type locked' : '🔓 Lock type'}
+          <Icon name="lock" size="sm" />
+          {locked ? 'Type locked' : 'Lock type'}
         </Button>
 
-        <div className="mb-topbar__search">
+        <div className="mb-billbar__search">
           {/* P10 owns search behaviour (budget B2). It lives here now so the
               layout is not re-cut next session. */}
           <SearchField
@@ -614,7 +621,7 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
                       onClick={() => void removeLine(line.index)}
                       aria-label={`Remove ${line.name}`}
                     >
-                      ✕
+                      <Icon name="x" size="sm" />
                     </Button>
                     <span className="mb-cartline__qty-value">{line.qty}</span>
                   </div>
@@ -766,6 +773,6 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           onFailed={report}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
