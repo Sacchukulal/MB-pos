@@ -103,6 +103,39 @@ pub enum Permission {
     /// adjusting stock by hand at scale. A separate `count.approve` would let a
     /// shop grant the big power while denying the small one.
     StockCount,
+    /// P28. Marking somebody present or absent, and setting the roster.
+    ///
+    /// A shift supervisor's job, and deliberately weak: a shop where only the
+    /// owner can say who turned up is a shop where nobody records who turned
+    /// up, and then the roster is decoration.
+    AttendanceMark,
+    /// P28. **Changing a clock-in or a clock-out after the event.**
+    ///
+    /// The one that needs watching, and the reason attendance is split into
+    /// two permissions at all. Clocking yourself IN needs nothing — it is the
+    /// PIN. Editing the time afterwards is how hours get inflated, so it is
+    /// its own permission, it always writes an audit row with before and
+    /// after, and it can never be the person's own row.
+    AttendanceCorrect,
+    /// P28. Approving or rejecting leave, and adjusting a leave balance.
+    ///
+    /// The adjustment is the sharp half: it is the one row in the leave ledger
+    /// a person writes freehand, so it is also the one somebody could use to
+    /// invent a fortnight's holiday. It carries a required reason for the same
+    /// reason `StockAdjust` does.
+    LeaveApprove,
+    /// P28. Seeing what people are paid, and the staff cost.
+    ///
+    /// **Not `ReportsView`.** What a shop took at the till and what it pays
+    /// its people are two different secrets, and an owner who wants a manager
+    /// to watch the day's sales does not thereby want them to know what
+    /// everybody earns.
+    SalaryView,
+    /// P28. Setting salaries, giving advances, and approving a payroll run.
+    ///
+    /// The strongest in this session: approving a run moves real money out of
+    /// the drawer, and it is the owner's decision every time.
+    SalaryManage,
 }
 
 impl Permission {
@@ -139,6 +172,11 @@ impl Permission {
         Permission::SuppliersManage,
         Permission::PurchasesManage,
         Permission::StockCount,
+        Permission::AttendanceMark,
+        Permission::AttendanceCorrect,
+        Permission::LeaveApprove,
+        Permission::SalaryView,
+        Permission::SalaryManage,
     ];
 
     /// The stored form. **This string is a database value**: changing one is a
@@ -177,6 +215,11 @@ impl Permission {
             Permission::SuppliersManage => "suppliers.manage",
             Permission::PurchasesManage => "purchases.manage",
             Permission::StockCount => "stock.count",
+            Permission::AttendanceMark => "attendance.mark",
+            Permission::AttendanceCorrect => "attendance.correct",
+            Permission::LeaveApprove => "leave.approve",
+            Permission::SalaryView => "salary.view",
+            Permission::SalaryManage => "salary.manage",
         }
     }
 
@@ -217,6 +260,11 @@ impl Permission {
             Permission::SuppliersManage => "manage suppliers and pay them",
             Permission::PurchasesManage => "enter deliveries and returns",
             Permission::StockCount => "count what is on the shelves",
+            Permission::AttendanceMark => "mark somebody present or absent",
+            Permission::AttendanceCorrect => "change a clock-in or clock-out",
+            Permission::LeaveApprove => "approve leave",
+            Permission::SalaryView => "see what people are paid",
+            Permission::SalaryManage => "set salaries and approve payroll",
         }
     }
 
@@ -317,9 +365,10 @@ mod tests {
         // to iterate an enum in Rust without a dependency, and this test is
         // cheaper than one: a variant added below ALL has no row, no screen and
         // no check, and nothing else would notice.
-        assert_eq!(Permission::ALL.len(), 31);
+        // 31 at P26; 36 at P28, which added the five employment ones.
+        assert_eq!(Permission::ALL.len(), 36);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 31, "two permissions share a code");
+        assert_eq!(codes.len(), 36, "two permissions share a code");
     }
 
     #[test]

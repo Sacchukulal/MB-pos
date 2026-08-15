@@ -956,8 +956,51 @@ CREATE TABLE staff (
     joined_on  INTEGER,
     status     TEXT    NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'suspended', 'left')),
+
+    -- P28, scope 9.15 — THE EMPLOYMENT RECORD, on top of P11's identity.
+    --
+    -- **Nobody is ever deleted.** `status = 'left'` with `left_on` is the only
+    -- ending there is: this person's name is on last year's bills and in the
+    -- audit trail, and a screen hiding them is not the same as a database
+    -- forgetting them. v1's staff screen was a dead list of name, role and
+    -- phone that did nothing at all, which is why these columns exist.
+    designation TEXT,
+    -- Kitchen, counter, service. Free text rather than an enum: every shop
+    -- draws this line differently and a coined list nobody uses is worse than
+    -- the shop's own words.
+    department  TEXT,
+    address     TEXT,
+    emergency_name  TEXT,
+    emergency_phone TEXT,
+    -- What was photocopied and put in the file — "Aadhaar ...4321". A
+    -- REFERENCE, not the number: a POS has no business holding somebody's
+    -- identity document, and holding one is a liability with no upside.
+    id_proof    TEXT,
+    -- `attachments.filename`, when somebody has taken a photo.
+    photo_file  TEXT,
+    employment_type TEXT NOT NULL DEFAULT 'full_time'
+        CHECK (employment_type IN ('full_time', 'part_time', 'casual')),
+    left_on     INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- **One direction, not both, and the asymmetry is the point.**
+    --
+    -- A leaving DATE on somebody who is still working is a contradiction, and
+    -- payroll reading it would stop paying a person who is standing in the
+    -- kitchen. That is refused.
+    --
+    -- The other way round is merely INCOMPLETE: `status = 'left'` with no date
+    -- is what P11's sign-in path writes, because suspending or ending an
+    -- account is an identity decision that happens without anybody knowing
+    -- which day the employment ended — and re-deriving that day from the
+    -- clock would be exactly the mistake D5 exists to prevent. P28's
+    -- employment editor asks for the date and sets both; a record without one
+    -- is shown as needing it rather than refused at the door.
+    --
+    -- The first version of this CHECK was `=` in both directions and it broke
+    -- thirteen of P11's tests on the first run — because the fixture seeds
+    -- somebody who has left, which is exactly the case it was meant to serve.
+    CHECK (left_on IS NULL OR status = 'left')
 ) STRICT;
 
 -- `is_builtin` means "cannot be DELETED". It does not mean "cannot be edited":
@@ -2197,6 +2240,364 @@ CREATE TABLE attachments (
     created_by  TEXT REFERENCES staff (id)
 ) STRICT;
 
+-- ===========================================================================
+-- P28 — STAFF, SHIFTS, SALARY AND LEAVE.
+--
+-- P11 built IDENTITY: who this is and what they may do. Everything below is
+-- EMPLOYMENT: what they are paid, when they worked, and when they were away.
+--
+-- **THE RULE THAT SHAPES ALL OF IT: a balance is the SUM OF A LEDGER, never a
+-- stored number.** There are three balances here — leave, advances, and what a
+-- payroll run owes — and each is the shape this product already got right for
+-- credit (D120: one rupee, one row) and stock (D127: a count posts a DELTA).
+-- A stored `leave_balance` somebody updates is a number that will one day
+-- disagree with its own history, and that argument is unwinnable because there
+-- is nothing to check it against.
+--
+-- **DAYS ARE COUNTED IN HALVES.** `half_days`, an INTEGER: a full day is 2 and
+-- a half day is 1, which are the only two units a restaurant actually grants.
+-- It is the same argument as paise (D2) — a fraction stored as a float is a
+-- fraction that will not add up, and "0.5 + 0.5 + 0.5 = 1.4999999" in a leave
+-- balance is an argument with an employee.
+--
+-- **MONEY IS PAISE** (D2), like everywhere else.
+-- ===========================================================================
+
+-- Scope 9.7/9.8. What a shift is SUPPOSED to be: the shapes a shop's day comes
+-- in. A roster then says who is expected on which one, and attendance is
+-- measured against it.
+--
+-- Minutes from midnight, so a night shift is `start_minute > end_minute` and
+-- the reader knows it wraps. Storing two clock strings would mean parsing them
+-- in three places and getting the wrap wrong in one of them.
+CREATE TABLE shift_patterns (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    name         TEXT    NOT NULL,
+    start_minute INTEGER NOT NULL CHECK (start_minute BETWEEN 0 AND 1439),
+    end_minute   INTEGER NOT NULL CHECK (end_minute BETWEEN 0 AND 1439),
+    -- Unpaid break inside the shift, subtracted from the hours worked.
+    break_minutes INTEGER NOT NULL DEFAULT 0 CHECK (break_minutes >= 0),
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    is_active    INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    CHECK (trim(name) <> '')
+) STRICT;
+
+-- Who is EXPECTED, and when. One row per person per business day.
+--
+-- The roster is what makes "late" and "absent" mean anything: without it,
+-- attendance is a list of times with nothing to compare them to, which is what
+-- v1's staff screen amounted to.
+--
+-- A weekly-off day is a roster row with `pattern_id IS NULL` — the person is
+-- expected to be away, so not turning up is not an absence. That is a
+-- different fact from having no roster row at all, which means nobody has said
+-- either way.
+CREATE TABLE roster (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    staff_id     TEXT    NOT NULL REFERENCES staff (id),
+    business_day INTEGER NOT NULL,
+    pattern_id   TEXT REFERENCES shift_patterns (id),
+    -- Why this day is off, when it is off. "Weekly off", "Festival".
+    note         TEXT,
+    created_at   INTEGER NOT NULL,
+    created_by   TEXT REFERENCES staff (id)
+) STRICT;
+
+CREATE UNIQUE INDEX idx_roster_person_day ON roster (outlet_id, staff_id, business_day);
+CREATE INDEX idx_roster_day ON roster (outlet_id, business_day);
+
+-- Scope 9.7. What actually happened: one row per person per shift worked.
+--
+-- **THE BUSINESS DAY IS STAMPED, NOT DERIVED** (D5). A shift that starts at
+-- 21:00 and ends at 02:30 belongs to the day it STARTED in — every hour of it,
+-- on both the payroll and the handover. Re-deriving that from `ended_at`
+-- would put half a night shift on tomorrow, and tomorrow's report would then
+-- disagree with the drawer that was counted at the end of it.
+--
+-- **`terminal_id` and `shift_no` join to `day_closes`** (P27, D140). That row
+-- already exists, already counts one drawer, and already rolls up to the till
+-- and then to the shop. This session says who was standing at it; it does not
+-- invent a second idea of a shift.
+CREATE TABLE attendance (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    staff_id     TEXT    NOT NULL REFERENCES staff (id),
+    business_day INTEGER NOT NULL,
+    terminal_id  TEXT REFERENCES terminals (id),
+    -- Matches `day_closes.shift_no`. 0 means "not tied to a drawer" — a cook
+    -- clocks in and never touches a till, and that is the ordinary case.
+    shift_no     INTEGER NOT NULL DEFAULT 0 CHECK (shift_no >= 0),
+    -- What they were expected to do, if anybody said. NULL is an unrostered
+    -- shift, which is normal in a shop that has not built a roster yet.
+    pattern_id   TEXT REFERENCES shift_patterns (id),
+    started_at   INTEGER NOT NULL,
+    -- NULL means still clocked in. A row that is still NULL the next morning is
+    -- a MISSED CLOCK-OUT, and correcting it is a manager's job with an audit
+    -- row (R11) — never the person's own, and never silent, because that is
+    -- exactly how hours get inflated.
+    ended_at     INTEGER,
+    -- Set when a manager corrects the row. Both are kept: the audit trail says
+    -- what changed, and these say the row IS a correction, so a report can show
+    -- it as one without joining the audit log (D47 — a correction is a STATE).
+    corrected_at INTEGER,
+    corrected_by TEXT REFERENCES staff (id),
+    correction_reason TEXT,
+    note         TEXT,
+    CHECK (ended_at IS NULL OR ended_at >= started_at),
+    -- A correction has a name and a reason or it is not a correction.
+    CHECK ((corrected_at IS NULL) = (corrected_by IS NULL)),
+    CHECK (corrected_at IS NULL OR trim(coalesce(correction_reason, '')) <> '')
+) STRICT;
+
+CREATE INDEX idx_attendance_person_day ON attendance (outlet_id, staff_id, business_day);
+CREATE INDEX idx_attendance_day ON attendance (outlet_id, business_day);
+-- "Who is still clocked in?" — asked at every day close, and by the handover.
+CREATE INDEX idx_attendance_open ON attendance (outlet_id, staff_id) WHERE ended_at IS NULL;
+
+-- Scope 9.11. The kinds of leave a shop grants. Data, not a hardcoded list —
+-- the same argument as expense categories and wastage reasons.
+CREATE TABLE leave_types (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    name          TEXT    NOT NULL,
+    -- Half-days granted per year. NULL is "no entitlement" — unpaid leave has
+    -- none, and a weekly off is not an entitlement either.
+    annual_half_days INTEGER CHECK (annual_half_days IS NULL OR annual_half_days >= 0),
+    -- Whether a day of it is PAID. This is the only column payroll reads: an
+    -- unpaid day is deducted from the month, a paid one is not.
+    is_paid       INTEGER NOT NULL DEFAULT 1 CHECK (is_paid IN (0, 1)),
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    CHECK (trim(name) <> '')
+) STRICT;
+
+-- Scope 9.11. A request, and what was decided about it.
+--
+-- The REQUEST is not the balance. Approving one writes a `taken` row into the
+-- ledger below; rejecting one writes nothing. So a rejected request cannot
+-- affect a balance even by accident, because the balance never reads this
+-- table.
+CREATE TABLE leave_requests (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    staff_id      TEXT    NOT NULL REFERENCES staff (id),
+    leave_type_id TEXT    NOT NULL REFERENCES leave_types (id),
+    from_day      INTEGER NOT NULL,
+    to_day        INTEGER NOT NULL,
+    -- What was asked for, in halves. Computed from the dates and the half-day
+    -- flags when the request is made, and stored — because the calendar it was
+    -- computed against (weekly offs) can change afterwards, and a request must
+    -- not silently become a different request.
+    half_days     INTEGER NOT NULL CHECK (half_days > 0),
+    reason        TEXT    NOT NULL,
+    state         TEXT    NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending', 'approved', 'rejected', 'cancelled')),
+    requested_at  INTEGER NOT NULL,
+    -- Who asked. Usually the person; a manager may enter one on their behalf,
+    -- and then the two differ and the audit row says so.
+    requested_by  TEXT REFERENCES staff (id),
+    decided_at    INTEGER,
+    decided_by    TEXT REFERENCES staff (id),
+    -- **A rejection without a reason is a rejection nobody can appeal.**
+    decision_note TEXT,
+    CHECK (to_day >= from_day),
+    CHECK (trim(reason) <> ''),
+    CHECK ((decided_at IS NULL) = (decided_by IS NULL)),
+    CHECK (state = 'pending' OR state = 'cancelled' OR decided_at IS NOT NULL),
+    CHECK (state <> 'rejected' OR trim(coalesce(decision_note, '')) <> '')
+) STRICT;
+
+CREATE INDEX idx_leave_requests_person ON leave_requests (outlet_id, staff_id, from_day);
+CREATE INDEX idx_leave_requests_pending ON leave_requests (outlet_id, from_day) WHERE state = 'pending';
+-- The calendar: who is away in this window.
+CREATE INDEX idx_leave_requests_window ON leave_requests (outlet_id, from_day, to_day) WHERE state = 'approved';
+
+-- **THE LEAVE BALANCE, AND IT IS A LEDGER.**
+--
+-- Four kinds of row and the balance is their sum. No stored total exists
+-- anywhere in this schema, so there is nothing that can drift:
+--
+--   accrued  + the entitlement, granted at the start of a year or monthly
+--   taken    − a day off that was approved
+--   adjusted ± a correction somebody made, with a reason and a name
+--   lapsed   − what was not used by the end of the year
+--
+-- `half_days` is SIGNED here and only here: the sign is what makes the sum
+-- work, and `kind` says which direction it must have (the CHECK below).
+CREATE TABLE leave_ledger (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    staff_id      TEXT    NOT NULL REFERENCES staff (id),
+    leave_type_id TEXT    NOT NULL REFERENCES leave_types (id),
+    kind          TEXT    NOT NULL CHECK (kind IN ('accrued', 'taken', 'adjusted', 'lapsed')),
+    half_days     INTEGER NOT NULL CHECK (half_days <> 0),
+    -- The request this row came from, when it came from one. NULL for an
+    -- accrual, an adjustment or a lapse.
+    request_id    TEXT REFERENCES leave_requests (id),
+    -- Required on an adjustment, which is the one row a person writes freehand
+    -- and therefore the one somebody could use to invent a fortnight's holiday.
+    reason        TEXT,
+    at            INTEGER NOT NULL,
+    business_day  INTEGER NOT NULL,
+    made_by       TEXT REFERENCES staff (id),
+    CHECK (kind <> 'accrued'  OR half_days > 0),
+    CHECK (kind <> 'taken'    OR half_days < 0),
+    CHECK (kind <> 'lapsed'   OR half_days < 0),
+    CHECK (kind <> 'adjusted' OR trim(coalesce(reason, '')) <> '')
+) STRICT;
+
+CREATE INDEX idx_leave_ledger_person ON leave_ledger (outlet_id, staff_id, leave_type_id);
+CREATE UNIQUE INDEX idx_leave_ledger_request ON leave_ledger (request_id) WHERE request_id IS NOT NULL;
+
+-- Scope 9.9. What a person is paid, and from when.
+--
+-- **EFFECTIVE-DATED, and that is the whole point.** A raise is a NEW ROW with
+-- a later `effective_from`, never an edit of the old one. Last month's payroll
+-- run then recomputes to the same figure it printed, for ever — which is what
+-- makes a payslip something a person can be shown a year later.
+CREATE TABLE salary_structures (
+    id             TEXT    NOT NULL PRIMARY KEY,
+    outlet_id      TEXT    NOT NULL REFERENCES outlets (id),
+    staff_id       TEXT    NOT NULL REFERENCES staff (id),
+    effective_from INTEGER NOT NULL,
+    basis          TEXT    NOT NULL CHECK (basis IN ('monthly', 'daily', 'hourly')),
+    -- Paise. Per month, per day worked, or per hour worked, by `basis`.
+    amount         INTEGER NOT NULL CHECK (amount >= 0),
+    created_at     INTEGER NOT NULL,
+    created_by     TEXT REFERENCES staff (id),
+    note           TEXT
+) STRICT;
+
+CREATE UNIQUE INDEX idx_salary_structures_person_from
+    ON salary_structures (outlet_id, staff_id, effective_from);
+
+-- The fixed parts on top of, or off, the basis: a food allowance, a room
+-- deduction. Separate rows rather than columns, because a shop that gives four
+-- allowances should not need a migration.
+CREATE TABLE salary_components (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    structure_id TEXT    NOT NULL REFERENCES salary_structures (id) ON DELETE CASCADE,
+    kind         TEXT    NOT NULL CHECK (kind IN ('allowance', 'deduction')),
+    name         TEXT    NOT NULL,
+    -- Always positive paise. `kind` carries the direction, never a sign — the
+    -- same rule `credit_adjustments.increases` follows and for the same reason.
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    CHECK (trim(name) <> '')
+) STRICT;
+
+CREATE INDEX idx_salary_components_structure ON salary_components (structure_id);
+
+-- Scope 9.10. Money handed over before payday, recovered from the next run.
+--
+-- **It moves the drawer on the day it is given**, through `cash_movements` —
+-- because it does. An advance that only appears at month end is a drawer that
+-- is short all month and nobody knows why.
+CREATE TABLE salary_advances (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
+    staff_id      TEXT    NOT NULL REFERENCES staff (id),
+    amount        INTEGER NOT NULL CHECK (amount > 0),
+    -- Over how many payroll runs it comes back. 1 is "all of it next month",
+    -- which is the common case.
+    instalments   INTEGER NOT NULL DEFAULT 1 CHECK (instalments >= 1),
+    reason        TEXT,
+    given_at      INTEGER NOT NULL,
+    business_day  INTEGER NOT NULL,
+    given_by      TEXT REFERENCES staff (id),
+    -- The drawer row this wrote, so the two can never be reconciled by hand.
+    cash_movement_id TEXT REFERENCES cash_movements (id)
+) STRICT;
+
+CREATE INDEX idx_salary_advances_person ON salary_advances (outlet_id, staff_id, business_day);
+
+-- Scope 9.9. One month's payroll.
+--
+-- **COMPUTED, REVIEWED, THEN POSTED**, and the three are different states. The
+-- first thing an owner does with a payroll figure is disagree with one line of
+-- it, so a run is editable while it is a `draft` and a fact once it is
+-- `approved`. Changing an approved run means REVERSING it, which is its own
+-- fact with its own audit row (D47 — a correction is a state, not a delete).
+CREATE TABLE payroll_runs (
+    id          TEXT    NOT NULL PRIMARY KEY,
+    outlet_id   TEXT    NOT NULL REFERENCES outlets (id),
+    -- Business days (D5), inclusive.
+    from_day    INTEGER NOT NULL,
+    to_day      INTEGER NOT NULL,
+    state       TEXT    NOT NULL DEFAULT 'draft'
+        CHECK (state IN ('draft', 'approved', 'reversed')),
+    computed_at INTEGER NOT NULL,
+    computed_by TEXT REFERENCES staff (id),
+    approved_at INTEGER,
+    approved_by TEXT REFERENCES staff (id),
+    -- How the money left: which drawer row and which expense row. Both written
+    -- in the SAME transaction as the approval (D82), so payroll and the cash
+    -- position cannot disagree — there is only one of them.
+    cash_movement_id TEXT REFERENCES cash_movements (id),
+    expense_id  TEXT REFERENCES expenses (id),
+    -- How it was paid out.
+    paid_by     TEXT NOT NULL DEFAULT 'cash' CHECK (paid_by IN ('cash', 'bank')),
+    reversed_at INTEGER,
+    reversed_by TEXT REFERENCES staff (id),
+    reversal_reason TEXT,
+    note        TEXT,
+    CHECK (to_day >= from_day),
+    CHECK ((approved_at IS NULL) = (approved_by IS NULL)),
+    CHECK (state <> 'approved' OR approved_at IS NOT NULL),
+    CHECK (state <> 'reversed' OR trim(coalesce(reversal_reason, '')) <> '')
+) STRICT;
+
+CREATE INDEX idx_payroll_runs_period ON payroll_runs (outlet_id, from_day, to_day);
+
+-- What each payroll run took back off which advance. The outstanding balance
+-- of an advance is its amount minus the sum of these — a ledger again, and for
+-- the third time in this file the reason is that a stored `outstanding` column
+-- is a column that will one day be wrong.
+CREATE TABLE advance_recoveries (
+    id          TEXT    NOT NULL PRIMARY KEY,
+    advance_id  TEXT    NOT NULL REFERENCES salary_advances (id),
+    run_id      TEXT    NOT NULL REFERENCES payroll_runs (id),
+    amount      INTEGER NOT NULL CHECK (amount > 0)
+) STRICT;
+
+CREATE INDEX idx_advance_recoveries_advance ON advance_recoveries (advance_id);
+CREATE UNIQUE INDEX idx_advance_recoveries_run ON advance_recoveries (run_id, advance_id);
+
+-- One person's line in one run. Every figure is stored rather than recomputed
+-- on read: the structure, the attendance and the leave calendar can all change
+-- after a run is approved, and **a payslip must say the same thing in a year's
+-- time as it said on the day it was handed over.** That is the same argument
+-- D52 makes about a bill line freezing its own price.
+CREATE TABLE payroll_lines (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    run_id        TEXT    NOT NULL REFERENCES payroll_runs (id) ON DELETE CASCADE,
+    staff_id      TEXT    NOT NULL REFERENCES staff (id),
+    -- What it was computed FROM, frozen.
+    basis         TEXT    NOT NULL CHECK (basis IN ('monthly', 'daily', 'hourly')),
+    basis_amount  INTEGER NOT NULL CHECK (basis_amount >= 0),
+    days_worked_half INTEGER NOT NULL DEFAULT 0 CHECK (days_worked_half >= 0),
+    minutes_worked   INTEGER NOT NULL DEFAULT 0 CHECK (minutes_worked >= 0),
+    unpaid_half_days INTEGER NOT NULL DEFAULT 0 CHECK (unpaid_half_days >= 0),
+    -- The arithmetic, in paise, each a column so a payslip can print it and an
+    -- owner can add it up by hand.
+    earned        INTEGER NOT NULL DEFAULT 0,
+    allowances    INTEGER NOT NULL DEFAULT 0 CHECK (allowances >= 0),
+    deductions    INTEGER NOT NULL DEFAULT 0 CHECK (deductions >= 0),
+    unpaid_leave_deduction INTEGER NOT NULL DEFAULT 0 CHECK (unpaid_leave_deduction >= 0),
+    advance_recovered INTEGER NOT NULL DEFAULT 0 CHECK (advance_recovered >= 0),
+    net           INTEGER NOT NULL,
+    -- True when a person changed a figure by hand before approving. The screen
+    -- shows it, so a reviewer knows which lines are the computer's and which
+    -- are somebody's.
+    edited        INTEGER NOT NULL DEFAULT 0 CHECK (edited IN (0, 1)),
+    note          TEXT
+) STRICT;
+
+CREATE UNIQUE INDEX idx_payroll_lines_run_person ON payroll_lines (run_id, staff_id);
+CREATE INDEX idx_payroll_lines_person ON payroll_lines (staff_id);
+
 -- The ledger, oldest first, for one supplier's account.
 CREATE INDEX idx_purchases_supplier ON purchases (supplier_id, business_day);
 -- Every period report, on the STORED business day (D5).
@@ -2304,7 +2705,26 @@ INSERT INTO permissions (code, description) VALUES
     -- and no fourth permission is invented for it.
     ('suppliers.manage',   'Add suppliers and record what is owed and paid'),
     ('purchases.manage',   'Enter deliveries, returns and purchase orders'),
-    ('stock.count',        'Walk the store and write down what is there');
+    ('stock.count',        'Walk the store and write down what is there'),
+    -- P28. Five, and the split is about WHO IS TRUSTED WITH WHAT, not about
+    -- which screen a thing is on.
+    --
+    -- `staff.manage` already exists (P11) and stays what it is: hiring, roles
+    -- and PINs. These five are the employment side, and they are separate
+    -- because a shift supervisor who marks people present is not the person
+    -- who decides what anybody is paid.
+    --
+    -- **`attendance.correct` is the one that matters.** Clocking yourself in
+    -- needs nothing — it is the PIN. Changing a clock-out after the fact is
+    -- how hours get inflated, so it is its own permission, its own audit row
+    -- with before and after, and it can never be the person's own.
+    ('attendance.mark',    'Mark somebody present or absent, and set the roster'),
+    ('attendance.correct', 'Change a clock-in or clock-out after the event'),
+    ('leave.approve',      'Approve or reject leave, and adjust a leave balance'),
+    -- Reading what a shop pays its people is a different thing from reading
+    -- what it took at the till, so it is not `reports.view`.
+    ('salary.view',        'See what people are paid, and the staff cost'),
+    ('salary.manage',      'Set salaries, give advances, and approve payroll');
 
 -- ===========================================================================
 -- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).
@@ -2393,3 +2813,35 @@ INSERT INTO tax_classes (id, outlet_id, name, rate_bp, treatment, sort_order) VA
     ('tax_packaged_18',  'outlet_default', 'Packaged goods 18%',   1800, 'exclusive', 2),
     ('tax_liquor',       'outlet_default', 'Liquor — outside GST', 0,    'non_gst',   3),
     ('tax_exempt',       'outlet_default', 'Exempt',               0,    'exempt',    4);
+
+-- ===========================================================================
+-- SEED: the leave types and shift patterns a shop starts with (P28).
+--
+-- A STARTING POINT, not a law — the same argument as the expense categories
+-- and the wastage reasons above. Every one can be renamed, reordered, given a
+-- different entitlement or switched off, and P28's own test asserts a shop's
+-- edits survive.
+--
+-- The entitlements are in HALF-DAYS: 24 is twelve days a year, which is the
+-- ordinary casual-leave figure in a small Indian restaurant. Unpaid leave and
+-- the weekly off have no entitlement at all, because neither is something a
+-- shop grants a quantity of.
+-- ===========================================================================
+
+INSERT INTO leave_types (id, outlet_id, name, annual_half_days, is_paid, sort_order) VALUES
+    ('lv_casual',   'outlet_default', 'Casual leave',  24,   1, 0),
+    ('lv_sick',     'outlet_default', 'Sick leave',    12,   1, 1),
+    ('lv_weekly',   'outlet_default', 'Weekly off',    NULL, 1, 2),
+    ('lv_festival', 'outlet_default', 'Festival',      NULL, 1, 3),
+    -- The one payroll actually reads: an unpaid day is deducted from the
+    -- month, and every other kind is not.
+    ('lv_unpaid',   'outlet_default', 'Unpaid leave',  NULL, 0, 4);
+
+-- Minutes from midnight. The night shift is the one that wraps, and it is
+-- there in the starting list on purpose: a shop that never sees a wrapping
+-- shift in the product will discover the bug on the night it first runs one.
+INSERT INTO shift_patterns (id, outlet_id, name, start_minute, end_minute, break_minutes, sort_order) VALUES
+    ('shp_morning', 'outlet_default', 'Morning', 420,  900,  30, 0),   -- 07:00 – 15:00
+    ('shp_evening', 'outlet_default', 'Evening', 900,  1380, 30, 1),   -- 15:00 – 23:00
+    ('shp_full',    'outlet_default', 'Full day', 600, 1380, 60, 2),   -- 10:00 – 23:00
+    ('shp_night',   'outlet_default', 'Night',   1320, 360,  30, 3);   -- 22:00 – 06:00

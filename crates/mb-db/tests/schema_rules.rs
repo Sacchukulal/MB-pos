@@ -343,6 +343,45 @@ fn t8_every_named_index_exists() {
         // the same reason the three recipe indexes above exist.
         "idx_day_closes_drawer",
         "idx_day_closes_shop",
+        // P28. Every one of these answers a question a screen asks by name.
+        //
+        // The roster and the attendance are read two ways and both are here:
+        // "what is this person's month" (person, day) for a payslip, and "who
+        // is in today" (day) for the floor — a single composite index serves
+        // only the first, and the second would scan the year.
+        "idx_roster_person_day",
+        "idx_roster_day",
+        "idx_attendance_person_day",
+        "idx_attendance_day",
+        // "Who is still clocked in?" — asked at every day close and by the
+        // handover report. Partial, so it costs nothing once people go home:
+        // the index holds only the rows that are still open.
+        "idx_attendance_open",
+        "idx_leave_requests_person",
+        // The approval queue, partial for the same reason.
+        "idx_leave_requests_pending",
+        // The leave calendar: who is away in this window.
+        "idx_leave_requests_window",
+        // The balance is SUM(half_days) over these three columns, and it is
+        // read every time a request is made.
+        "idx_leave_ledger_person",
+        // **A request may write exactly one `taken` row, ever.** Partial
+        // unique, which is what makes approving twice a constraint violation
+        // rather than a doubled deduction somebody finds in March.
+        "idx_leave_ledger_request",
+        // One structure per person per effective date — a raise on a date
+        // that already has one is an edit, not a second raise.
+        "idx_salary_structures_person_from",
+        "idx_salary_components_structure",
+        "idx_salary_advances_person",
+        "idx_advance_recoveries_advance",
+        // **One recovery per advance per run.** The same guard as the leave
+        // one above, in the place the same mistake would cost money.
+        "idx_advance_recoveries_run",
+        "idx_payroll_runs_period",
+        // One line per person per run, and a person's payslip history.
+        "idx_payroll_lines_run_person",
+        "idx_payroll_lines_person",
     ];
 
     let db = Scratch::new("t8").open();

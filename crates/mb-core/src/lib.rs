@@ -51,6 +51,7 @@ pub mod charge;
 pub mod combo;
 pub mod credit;
 pub mod discount;
+pub mod employment;
 pub mod expense;
 pub mod ids;
 pub mod item;
