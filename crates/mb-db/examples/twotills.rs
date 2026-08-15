@@ -84,12 +84,35 @@ fn main() {
             )?;
         }
 
-        // **This till, and its series** (D135). Both tills are written into
-        // both books, because the master has to know who is forwarding to it
-        // and a secondary has to be able to name the main one on its screen.
-        let mut row = mb_db::repo::terminals::Terminal::new(&id, &name, at);
-        row.series_prefix = prefix.clone();
-        repos.terminals().save("outlet_default", &row, at).expect("its own series");
+        // **The tills, and their series** (D135).
+        //
+        // BOTH go into both books, because that is what a joined shop looks
+        // like: the main till has to know who is forwarding to it (a forwarded
+        // bill points at a terminal, and the day close per drawer needs the
+        // row), and a secondary has to be able to name the main one on its
+        // screen. In the running product the main till learns about a
+        // secondary from its first forwarded batch, and a secondary learns
+        // about the main one when it joins — this just gets there in one step.
+        for (this, label, series) in [
+            ("terminal_default", "Counter 1", "A/"),
+            ("term_second", "Counter 2", "B/"),
+        ] {
+            let mut row = mb_db::repo::terminals::Terminal::new(this, label, at);
+            row.series_prefix = series.to_owned();
+            repos
+                .terminals()
+                .save("outlet_default", &row, at)
+                .expect("its own series");
+        }
+        // One main till, and it is a person's decision (D139) — here, this
+        // script's.
+        repos
+            .terminals()
+            .make_master("outlet_default", "terminal_default", at)?;
+        // Anything this run said about ITS till, applied on top.
+        let mut mine = mb_db::repo::terminals::Terminal::new(&id, &name, at);
+        mine.series_prefix = prefix.clone();
+        repos.terminals().save("outlet_default", &mine, at).expect("named");
         Ok(())
     })
     .expect("the shop is set up");

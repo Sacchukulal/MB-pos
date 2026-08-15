@@ -261,13 +261,33 @@ fn main() {
 
     let window_state = app_config.window.clone();
 
-    tauri::Builder::default()
-        // Two counters on one PC fight over the database, the licence and the
-        // numbering. The second one focuses the first rather than dying
-        // quietly, because "it won't open" is the bug report that follows.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    let mut builder = tauri::Builder::default();
+    // Two counters on one PC fight over the database, the licence and the
+    // numbering. The second one focuses the first rather than dying quietly,
+    // because "it won't open" is the bug report that follows.
+    //
+    // **Unless somebody has deliberately pointed this copy somewhere else**
+    // (P27). The lock's job is "one copy per SHOP", and a machine running
+    // against a config folder Windows did not choose is a second shop — two
+    // tills, two databases, nothing shared. A shopkeeper never has that:
+    // `APPDATA` is per-user and fixed, so setting it is a deliberate act.
+    //
+    // Without this, D55's two-process check is impossible: the second till is
+    // swallowed by the first's window and P27 can only ever be proved by tests
+    // that never leave one process.
+    if config::AppConfig::directory() == config::AppConfig::windows_default() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             window::focus_existing(app);
-        }))
+        }));
+    } else {
+        log_info!(
+            "this copy runs against {} rather than the usual folder, so it does \
+             not take the one-copy lock",
+            config::AppConfig::directory().display()
+        );
+    }
+
+    builder
         .manage(app_state)
         .invoke_handler(commands!())
         .setup(move |app| {

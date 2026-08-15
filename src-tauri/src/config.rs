@@ -75,6 +75,28 @@ impl AppConfig {
         mb_db::locate::default_config_dir()
     }
 
+    /// **Where Windows itself would put it**, ignoring `APPDATA`.
+    ///
+    /// [`AppConfig::directory`] reads `APPDATA`, which is how a second till can
+    /// be run on one machine for D55's two-process check. This is the folder a
+    /// shopkeeper's copy always uses, so the two differing means somebody set
+    /// the variable on purpose — see the one-copy lock in `main.rs`.
+    #[must_use]
+    pub fn windows_default() -> PathBuf {
+        std::env::var_os("USERPROFILE").map_or_else(
+            // No `USERPROFILE` is not Windows as this product knows it. Answer
+            // with `directory()` so the two compare EQUAL and the lock is taken
+            // — the safe direction to be wrong in is "one copy".
+            AppConfig::directory,
+            |home| {
+                PathBuf::from(home)
+                    .join("AppData")
+                    .join("Roaming")
+                    .join("MagicBill")
+            },
+        )
+    }
+
     #[must_use]
     pub fn path() -> PathBuf {
         AppConfig::directory().join(FILE)

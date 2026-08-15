@@ -892,12 +892,23 @@ fn the_billing_path_cannot_reach_the_main_till() {
 /// A settle on a secondary, timed with a master and with none. If a network
 /// call ever appears on this path the difference is not subtle: an unreachable
 /// master costs a two-second connect timeout against a bill that takes
-/// milliseconds, so the bound is deliberately generous. It is here to catch a
-/// thousand-fold regression, not to police the scheduler — `cargo test` runs
-/// this suite in parallel with four hundred others, and a tight ratio here
-/// failed on nothing but a busy machine.
+/// milliseconds — so a wall-clock bound here would catch it easily.
+///
+/// **And it is `#[ignore]`d anyway, which is the honest answer.** Two versions
+/// of this shipped as an ordinary test — a ratio, then a 500 ms ceiling — and
+/// both failed on a busy laptop while passing alone. `cargo test --workspace`
+/// runs it in parallel with four hundred others and sometimes against a release
+/// build on the other cores; what it measures then is the laptop.
+/// `PERFORMANCE.md` already says this about every other figure in the product:
+/// take three readings, on a quiet machine, deliberately.
+///
+/// So the CI claim is the one above — the source cannot NAME the client — and
+/// this is the measurement, run by a person:
+///
+///     cargo test -p magic-bill --bin magic-bill r9_ -- --ignored --nocapture
 #[test]
-fn a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not() {
+#[ignore = "a measurement, not an assertion — see the note above"]
+fn r9_a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not() {
     let scratch = Scratch::new("term_budget");
     let master = a_till(&scratch, "master", "t_a", "Counter 1", "A/");
     let second = a_till(&scratch, "second", "t_b", "Counter 2", "B/");
@@ -924,12 +935,17 @@ fn a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not() {
     // and the settle never asks it anything.
     let alone = time_ten();
 
-    // Ten bills. A single connect timeout on the settle path would add two
-    // seconds to one of these runs, so a whole run under half a second is proof
-    // that neither of them waited on a socket.
+    // Printed, because a number a person reads is the point of running this.
+    println!("R9: ten bills with the main till up  — {with_master:?}");
+    println!("R9: ten bills with the main till off — {alone:?}");
+
+    // The only assertion, and it is enormous on purpose: a single connect
+    // timeout on the settle path adds TWO SECONDS to a run, so five seconds for
+    // ten bills cannot be reached by a slow disk or a busy scheduler. Anything
+    // tighter is measuring the machine.
     for (what, took) in [("with the main till up", with_master), ("with it off", alone)] {
         assert!(
-            took < std::time::Duration::from_millis(500),
+            took < std::time::Duration::from_secs(5),
             "ten bills {what} took {took:?} — that is long enough to be waiting \
              on a network, and nothing on this path may"
         );
