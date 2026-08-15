@@ -175,6 +175,14 @@ pub struct DayClose {
     /// nothing, and "₹340 short — paid the vegetable man from the drawer" tells
     /// them everything. Audit B15.
     pub note: Option<String>,
+    /// **D140 — which drawer this is.** `None` is the shop's roll-up, written
+    /// when the last till closes, and it is the row that locks the day. A cash
+    /// drawer is a box under one till, and "we were ₹340 short" is
+    /// unanswerable until you know which box.
+    pub terminal: Option<String>,
+    /// Scope 9.8's boundary half: one till can count its drawer several times
+    /// in a day. 0 on the shop's row.
+    pub shift_no: i64,
 }
 
 /// How many of each note and coin were counted.
@@ -939,28 +947,69 @@ impl<'a> MoneyRepo<'a> {
     /// **A cash expense is not double-counted**, and cannot be: it is an
     /// expense row and nothing else. The movements table deliberately holds no
     /// row for it (see the schema comment).
+    /// **The whole shop's drawer.** Every till's box added together.
     pub fn cash_position(&self, outlet: &str, day: BusinessDay) -> Result<CashPosition, DbError> {
-        let day_sql = encode::business_day_to_sql(day);
+        self.cash_position_of(outlet, day, None)
+    }
 
+    /// **One till's drawer** — D140, and the reason it exists: a cash drawer is
+    /// a box under one till, and "we were ₹340 short" is unanswerable until you
+    /// know which box.
+    ///
+    /// **The per-till figures sum EXACTLY to the shop's**, and that is a
+    /// property of this one function rather than of two that could drift: rows
+    /// written before this shop had a second till carry no terminal, and every
+    /// term below attributes those to the master. `None` here means the shop,
+    /// and it is the same SQL with the filter removed.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one query per term of one sum; splitting them would put the \
+                  filter that makes the totals tie in six places"
+    )]
+    pub fn cash_position_of(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+        terminal: Option<&str>,
+    ) -> Result<CashPosition, DbError> {
+        let day_sql = encode::business_day_to_sql(day);
+        // **The master owns every row written before this shop had a second
+        // till**, which is what makes the per-drawer figures add up to the
+        // shop's exactly rather than nearly.
+        let master: Option<String> = self
+            .tx
+            .query_row(
+                "SELECT id FROM terminals WHERE outlet_id = ?1 AND is_master = 1",
+                [outlet],
+                |row| row.get(0),
+            )
+            .ok();
+        let master = master.as_deref();
+        // `?3` is the till being asked about (NULL = the whole shop) and `?4`
+        // is the master, which owns every row written before this shop had a
+        // second till.
         let taken: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(p.amount + p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
-                AND o.state = 'settled'",
-            rusqlite::params![outlet, day_sql],
+                AND o.state = 'settled'
+                AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
         let spent: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM expenses
-              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'",
-            rusqlite::params![outlet, day_sql],
+              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'
+                AND (?3 IS NULL OR COALESCE(terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
         let moved = |kind: &str| -> Result<i64, DbError> {
             Ok(self.tx.query_row(
                 "SELECT COALESCE(SUM(amount), 0) FROM cash_movements
-                  WHERE outlet_id = ?1 AND business_day = ?2 AND kind = ?3",
-                rusqlite::params![outlet, day_sql, kind],
+                  WHERE outlet_id = ?1 AND business_day = ?2 AND kind = ?5
+                    AND (?3 IS NULL OR COALESCE(terminal_id, ?4) = ?3)",
+                rusqlite::params![outlet, day_sql, terminal, master, kind],
                 |r| r.get(0),
             )?)
         };
@@ -968,16 +1017,11 @@ impl<'a> MoneyRepo<'a> {
         let top_ups = moved("top_up")?;
         let payouts = moved("payout")?;
         let drops = moved("bank_drop")?;
-
-        // **P26, D120 — the term this query was missing.** A shop that pays the
-        // vegetable man from the till was being told to expect money it had
-        // already handed over. A purchase deliberately writes no `expenses` row
-        // and no `cash_movements` row (one rupee, one row), so the drawer reads
-        // the payment itself.
         let paid_out: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM supplier_payments
-              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'",
-            rusqlite::params![outlet, day_sql],
+              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'
+                AND (?3 IS NULL OR COALESCE(terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
 
@@ -1024,19 +1068,36 @@ impl<'a> MoneyRepo<'a> {
         Ok(position.expected)
     }
 
+    /// **D140 — a close is one drawer, or it is the shop's roll-up.**
+    ///
+    /// `close.terminal` says which: `Some` is a till's own counted box for one
+    /// shift, `None` is the shop's total, written when the last till closes and
+    /// **the row that locks the day** (D77).
+    ///
+    /// Two conflict targets rather than one, because the shop row's terminal is
+    /// NULL and SQLite treats NULLs as distinct — the same reason P25's recipes
+    /// need three partial indexes.
     pub fn save_day_close(&self, outlet: &str, close: &DayClose) -> Result<(), DbError> {
+        let conflict = if close.terminal.is_some() {
+            "(outlet_id, business_day, terminal_id, shift_no) WHERE terminal_id IS NOT NULL"
+        } else {
+            "(outlet_id, business_day) WHERE terminal_id IS NULL"
+        };
         self.tx.execute(
-            "INSERT INTO day_closes (id, outlet_id, business_day, opening_float, expected_cash,
+            &format!(
+                "INSERT INTO day_closes (id, outlet_id, business_day, terminal_id, shift_no,
+                                     opening_float, expected_cash,
                                      counted_cash, variance, is_locked, closed_at, closed_by,
                                      note)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT (outlet_id, business_day)
+             VALUES (?1, ?2, ?3, ?12, ?13, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT {conflict}
              DO UPDATE SET counted_cash = excluded.counted_cash,
                            variance     = excluded.variance,
                            is_locked    = excluded.is_locked,
                            closed_at    = excluded.closed_at,
                            closed_by    = excluded.closed_by,
-                           note         = excluded.note",
+                           note         = excluded.note"
+            ),
             rusqlite::params![
                 close.id,
                 outlet,
@@ -1049,6 +1110,8 @@ impl<'a> MoneyRepo<'a> {
                 encode::timestamp_to_sql(close.closed_at),
                 close.closed_by.as_ref().map(StaffId::as_str),
                 close.note,
+                close.terminal,
+                close.shift_no,
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(
@@ -1060,6 +1123,79 @@ impl<'a> MoneyRepo<'a> {
         )
     }
 
+    /// Every drawer close for a day, in the order they were counted.
+    ///
+    /// **The shop's total is the SUM of these and never an independent query**
+    /// — two ways to compute one number is two numbers.
+    pub fn drawer_closes(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+    ) -> Result<Vec<DayClose>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT id, business_day, opening_float, expected_cash, counted_cash, variance,
+                    is_locked, closed_at, closed_by, note, terminal_id, shift_no
+               FROM day_closes
+              WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id IS NOT NULL
+              ORDER BY closed_at",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![outlet, encode::business_day_to_sql(day)],
+            read_day_close,
+        )?;
+        rows.collect::<Result<_, _>>().map_err(DbError::from)
+    }
+
+    /// Which tills have not counted their drawer for this day yet.
+    ///
+    /// **The shop's day cannot close while this is not empty** (D140), and the
+    /// Z-report names them rather than quietly totalling what it has.
+    pub fn tills_still_open(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+    ) -> Result<Vec<String>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT t.name FROM terminals t
+              WHERE t.outlet_id = ?1
+                AND NOT EXISTS (SELECT 1 FROM day_closes d
+                                 WHERE d.outlet_id = ?1 AND d.business_day = ?2
+                                   AND d.terminal_id = t.id)
+              ORDER BY t.created_at",
+        )?;
+        let mut cursor = stmt.query(rusqlite::params![
+            outlet,
+            encode::business_day_to_sql(day)
+        ])?;
+        let mut out = Vec::new();
+        while let Some(row) = cursor.next()? {
+            out.push(row.get::<_, String>(0)?);
+        }
+        Ok(out)
+    }
+
+    /// The next shift number for a till on a day — 1 on the first close.
+    ///
+    /// Scope 9.8's boundary half: one till can count its drawer several times
+    /// in a day, and the till's day total is the sum of its shifts.
+    pub fn next_shift(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+        terminal: &str,
+    ) -> Result<i64, DbError> {
+        let n: i64 = self.tx.query_row(
+            "SELECT COALESCE(MAX(shift_no), 0) + 1 FROM day_closes
+              WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id = ?3",
+            rusqlite::params![outlet, encode::business_day_to_sql(day), terminal],
+            |row| row.get(0),
+        )?;
+        Ok(n)
+    }
+
+    /// **The SHOP's close for a day** — the roll-up row, which is the one that
+    /// locks the day (D77, D140). A till's own drawer close is
+    /// [`MoneyRepo::drawer_closes`].
     pub fn find_day_close(
         &self,
         outlet: &str,
@@ -1067,28 +1203,42 @@ impl<'a> MoneyRepo<'a> {
     ) -> Result<Option<DayClose>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, business_day, opening_float, expected_cash, counted_cash, variance,
-                    is_locked, closed_at, closed_by, note
-               FROM day_closes WHERE outlet_id = ?1 AND business_day = ?2",
+                    is_locked, closed_at, closed_by, note, terminal_id, shift_no
+               FROM day_closes
+              WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id IS NULL",
         )?;
-        let mut rows = stmt.query(rusqlite::params![
-            outlet,
-            encode::business_day_to_sql(day)
-        ])?;
-        let Some(row) = rows.next()? else {
-            return Ok(None);
-        };
-        Ok(Some(DayClose {
-            id: row.get(0)?,
-            business_day: encode::business_day_from_sql(row.get(1)?, "day_closes.business_day")?,
-            opening_float: encode::money_from_sql(row.get(2)?),
-            expected_cash: encode::money_from_sql(row.get(3)?),
-            counted_cash: encode::money_from_sql(row.get(4)?),
-            variance: encode::money_from_sql(row.get(5)?),
-            is_locked: encode::bool_from_sql(row.get(6)?, "day_closes.is_locked")?,
-            closed_at: encode::timestamp_from_sql(row.get(7)?),
-            closed_by: row.get::<_, Option<String>>(8)?.map(StaffId::new),
-            note: row.get(9)?,
-        }))
+        let mut rows = stmt.query_map(
+            rusqlite::params![outlet, encode::business_day_to_sql(day)],
+            read_day_close,
+        )?;
+        rows.next().transpose().map_err(DbError::from)
+    }
+
+    /// One till's own close for a day and shift.
+    pub fn find_drawer_close(
+        &self,
+        outlet: &str,
+        day: BusinessDay,
+        terminal: &str,
+        shift_no: i64,
+    ) -> Result<Option<DayClose>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT id, business_day, opening_float, expected_cash, counted_cash, variance,
+                    is_locked, closed_at, closed_by, note, terminal_id, shift_no
+               FROM day_closes
+              WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id = ?3
+                AND shift_no = ?4",
+        )?;
+        let mut rows = stmt.query_map(
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(day),
+                terminal,
+                shift_no
+            ],
+            read_day_close,
+        )?;
+        rows.next().transpose().map_err(DbError::from)
     }
 
     /// **The counted notes and coins**, replacing whatever was there.
@@ -1152,10 +1302,38 @@ impl<'a> MoneyRepo<'a> {
     /// two of them.
     pub fn unlock_day(&self, outlet: &str, day: BusinessDay) -> Result<bool, DbError> {
         let changed = self.tx.execute(
+            // The SHOP's row is the only locked one (D140), so this touches it
+            // and leaves every drawer's count exactly as it was counted —
+            // reopening a day must not look like somebody recounted a box.
             "UPDATE day_closes SET is_locked = 0
-              WHERE outlet_id = ?1 AND business_day = ?2 AND is_locked = 1",
+              WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id IS NULL
+                AND is_locked = 1",
             rusqlite::params![outlet, encode::business_day_to_sql(day)],
         )?;
         Ok(changed > 0)
     }
+}
+
+/// One `day_closes` row, read back.
+///
+/// One reader for the shop's roll-up, a till's drawer and the list — three
+/// copies of this would be three chances for the terminal column to be dropped
+/// from one of them.
+fn read_day_close(row: &rusqlite::Row<'_>) -> rusqlite::Result<DayClose> {
+    Ok(DayClose {
+        id: row.get(0)?,
+        business_day: BusinessDay::from_days_since_epoch(
+            i32::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+        ),
+        opening_float: encode::money_from_sql(row.get(2)?),
+        expected_cash: encode::money_from_sql(row.get(3)?),
+        counted_cash: encode::money_from_sql(row.get(4)?),
+        variance: encode::money_from_sql(row.get(5)?),
+        is_locked: row.get::<_, i64>(6)? == 1,
+        closed_at: encode::timestamp_from_sql(row.get(7)?),
+        closed_by: row.get::<_, Option<String>>(8)?.map(StaffId::new),
+        note: row.get(9)?,
+        terminal: row.get(10)?,
+        shift_no: row.get(11)?,
+    })
 }

@@ -180,6 +180,30 @@ impl Counter for FakeCounter {
         mb_lan::BatchResult { outcomes, says }
     }
 
+    /// P27. **A fact, not a request** (D136) — so the fake stores what it is
+    /// given and reports it, which is all the real one does either.
+    fn receive(&self, _device: &Device, forwarded: &mb_lan::Forwarded) -> mb_lan::Receipt {
+        let stored: Vec<(String, bool)> = forwarded
+            .orders
+            .iter()
+            .map(|o| {
+                let id = o
+                    .get("core")
+                    .and_then(|c| c.get("id"))
+                    .and_then(|i| i.as_str())
+                    .unwrap_or("unknown")
+                    .to_owned();
+                (id, true)
+            })
+            .collect();
+        let says = format!("{} stored.", stored.len());
+        mb_lan::Receipt {
+            stored,
+            refused: Vec::new(),
+            says,
+        }
+    }
+
     fn catalogue(&self, held: Option<&str>) -> Option<mb_lan::Catalogue> {
         // The one behaviour worth faking, because it is a status code and not
         // a business rule: an unchanged version is answered 304.

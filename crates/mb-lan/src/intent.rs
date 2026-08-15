@@ -335,3 +335,64 @@ mod tests {
         assert!(!held.message().is_empty());
     }
 }
+
+// ---------------------------------------------------------------------------
+// P27 — a settled bill travelling from a secondary till to the master.
+// ---------------------------------------------------------------------------
+
+/// **A FACT, not a request** — D136.
+///
+/// A phone sends an *intent*: "please add two dosas", and the counter decides.
+/// A second till sends a **fact**: "I settled this bill, here it is." The
+/// difference is total, and it is what removes reconciliation from this feature
+/// entirely:
+///
+/// * the money was already computed, by the same `mb_core` the master runs;
+/// * the number was already claimed, from a series only this till issues
+///   (D135), so it cannot collide with anything the master has;
+/// * and a settled bill is **immutable** — D47 makes a correction a STATE, so
+///   there is no later version of this bill for the master's copy to conflict
+///   with.
+///
+/// The master therefore never merges, diffs or resolves. It writes what it is
+/// given, once, and `order.id` is the idempotency key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Forwarded {
+    /// The till that took the money. **Its own** `terminals` row on the master,
+    /// which is what makes the day close per drawer (D140) work across tills.
+    pub terminal_id: String,
+    /// The orders, as `mb_core::AnyOrder` — settled, voided or cancelled. The
+    /// whole bill travels inside it, because `SettledOrder` already carries its
+    /// `Bill` and its `Settlement`.
+    ///
+    /// **Serialised as JSON and not as rows**, so that the master needs no
+    /// knowledge of the sender's schema version beyond what serde already
+    /// guarantees.
+    pub orders: Vec<serde_json::Value>,
+}
+
+/// What the master did with a forwarded batch.
+///
+/// **Per order, never one status for the batch** — the same rule
+/// [`BatchResult`] follows, and for the same reason: a batch that reports one
+/// status is a batch whose failures are invisible.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receipt {
+    /// `(order id, stored)`. `stored` is true both for one that was just
+    /// written and for one that was already there — **a repeat is a success**,
+    /// which is what lets a till retry for ever without thinking (D82).
+    pub stored: Vec<(String, bool)>,
+    /// Anything the master could not store, with the sentence a person reads.
+    pub refused: Vec<(String, String)>,
+    /// The whole thing in one sentence, for the secondary's own screen.
+    pub says: String,
+}
+
+impl Receipt {
+    /// Whether every order in the batch is now on the master — which is the
+    /// only condition under which the sender may forget them.
+    #[must_use]
+    pub fn all_stored(&self) -> bool {
+        self.refused.is_empty() && self.stored.iter().all(|(_, ok)| *ok)
+    }
+}

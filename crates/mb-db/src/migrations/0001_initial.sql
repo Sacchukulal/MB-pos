@@ -89,15 +89,47 @@ CREATE TABLE terminals (
     name         TEXT    NOT NULL,
     is_master    INTEGER NOT NULL DEFAULT 1 CHECK (is_master IN (0, 1)),
     last_seen_at INTEGER,
-    -- 11.2: a secondary terminal bills from a reserved block so numbers stay
-    -- unique without asking the master for each one.
-    block_start  INTEGER,
-    block_end    INTEGER,
-    created_at   INTEGER NOT NULL
+    -- **D135 — EVERY TERMINAL HAS ITS OWN SERIES, AND THE SERIES IS THE
+    -- TERMINAL.** Till 1 issues A/0001, till 2 issues B/0001, and the two
+    -- series share no value — so no partition, clock skew or restart can
+    -- produce one number twice.
+    --
+    -- **`block_start` and `block_end` were here and are DELETED.** P04
+    -- reserved them for the design P27's draft prompt asked for: a master
+    -- handing out reserved ranges. That design has to answer "what happens
+    -- when a block runs out mid-service", and both answers — a round trip to a
+    -- master that may be off, or a till that stops taking money — are the
+    -- outcome this whole session exists to prevent. It also leaves a hole in
+    -- the shop's bill book for every partly-used block. A reserved column for
+    -- a design that turned out to be wrong is worse than no column, because
+    -- the next session reads it as an instruction.
+    --
+    -- Rule 46(b) wants a serial number that is consecutive and unique for the
+    -- financial year, and multiple SERIES are what the rule's own word allows.
+    -- Unique within the outlet, refused by name when two tills try to share
+    -- one: that is the single way this can still go wrong, so it is checked
+    -- rather than discovered.
+    series_prefix TEXT   NOT NULL DEFAULT '',
+    -- **D139 — moving the master is a decision a person makes, never an
+    -- election.** This stamp is how the old master knows to stand down when it
+    -- comes back: a later `master_since` elsewhere wins, and there is never a
+    -- moment when two tills both answer as master.
+    master_since INTEGER,
+    created_at   INTEGER NOT NULL,
+    UNIQUE (outlet_id, name)
 ) STRICT;
 
-INSERT INTO terminals (id, outlet_id, name, is_master, created_at)
-VALUES ('terminal_default', 'outlet_default', 'Counter', 1, 0);
+-- **The guarantee lives on `counters`, not here** — see the index below the
+-- counters table. This column is what a person types against a till and what
+-- seeds both of its counter rows; the thing that must be unique is the string
+-- that actually gets PRINTED, and that is the counter's.
+
+-- The first till, and it is the master because it is the only one. Its series
+-- prefix is EMPTY on purpose (D135): a shop with one till has never typed one
+-- and must not be given "A/" it did not ask for. A prefix appears when a second
+-- till joins, which is the moment it starts to mean something.
+INSERT INTO terminals (id, outlet_id, name, is_master, series_prefix, master_since, created_at)
+VALUES ('terminal_default', 'outlet_default', 'Counter', 1, '', 0, 0);
 
 -- THE E6 FIX.
 --
@@ -1113,6 +1145,10 @@ CREATE TABLE credit_adjustments (
 CREATE TABLE cash_movements (
     id           TEXT    NOT NULL PRIMARY KEY,
     outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    -- **P27, D140 — a drawer is a box under ONE till.** NULL is a row written
+    -- before this shop had a second till, and every query attributes it to the
+    -- master, so the per-drawer figures still sum EXACTLY to the shop total.
+    terminal_id  TEXT REFERENCES terminals (id),
     kind         TEXT    NOT NULL
         CHECK (kind IN ('float', 'top_up', 'payout', 'bank_drop')),
     -- Always positive paise. The direction belongs to the kind, never to a
@@ -1157,6 +1193,10 @@ CREATE TABLE expense_categories (
 CREATE TABLE expenses (
     id           TEXT    NOT NULL PRIMARY KEY,
     outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    -- **P27, D140.** Which drawer a CASH expense came out of; irrelevant for
+    -- the other three modes, which never touch a box. NULL is attributed to
+    -- the master so the per-drawer figures still sum exactly to the shop's.
+    terminal_id  TEXT REFERENCES terminals (id),
     category_id  TEXT REFERENCES expense_categories (id),
     description  TEXT    NOT NULL,
     amount       INTEGER NOT NULL,
@@ -1190,10 +1230,32 @@ CREATE TABLE expenses (
 -- Audit B15: v1 had "no opening cash, no closing cash, no expected vs actual,
 -- no Z-report. This is how every restaurant actually closes the day and it does
 -- not exist."
+-- **D140 — the day close is PER TERMINAL, because the drawer is physical.**
+--
+-- A cash drawer is a box under one till. Counting the shop's cash as one number
+-- is what makes "we were ₹340 short" unanswerable: short on which till, on
+-- whose shift?
+--
+-- So a row is one of two things, and `terminal_id` says which:
+--   * **a DRAWER close** — a terminal, a shift number, one counted box;
+--   * **the SHOP's close** — `terminal_id IS NULL`, `shift_no = 0`, written
+--     automatically when the LAST till closes, and the sum of the drawers
+--     rather than an independent query that could disagree with them.
+--
+-- **The shop row is the one that locks the day** (D77), so a void or a stock
+-- count is refused once the shop has closed and not merely once one till has.
+-- For a shop with a single till this is still one press: closing it closes the
+-- shop, because it was the last one.
 CREATE TABLE day_closes (
     id            TEXT    NOT NULL PRIMARY KEY,
     outlet_id     TEXT    NOT NULL REFERENCES outlets (id),
     business_day  INTEGER NOT NULL,
+    -- NULL = the shop's roll-up. Otherwise the till whose drawer this is.
+    terminal_id   TEXT REFERENCES terminals (id),
+    -- Scope 9.8's BOUNDARY half, and only that half: one till can have several
+    -- shifts in a day, and cash is counted per shift. 0 on the shop row.
+    -- Clock in/out, rosters, attendance, salary and leave are P28.
+    shift_no      INTEGER NOT NULL DEFAULT 1 CHECK (shift_no >= 0),
     opening_float INTEGER NOT NULL DEFAULT 0,
     expected_cash INTEGER NOT NULL,
     counted_cash  INTEGER NOT NULL,
@@ -1204,8 +1266,18 @@ CREATE TABLE day_closes (
     closed_at     INTEGER NOT NULL,
     closed_by     TEXT REFERENCES staff (id),
     note          TEXT,
-    UNIQUE (outlet_id, business_day)
+    CHECK ((terminal_id IS NULL) = (shift_no = 0))
 ) STRICT;
+
+-- One close per drawer per shift, and exactly one shop roll-up per day.
+-- Partial indexes rather than a UNIQUE constraint, because SQLite treats NULLs
+-- as distinct and the shop row's terminal is always NULL — the same reason
+-- P25's recipes need three of these.
+CREATE UNIQUE INDEX idx_day_closes_drawer
+    ON day_closes (outlet_id, business_day, terminal_id, shift_no)
+    WHERE terminal_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_day_closes_shop
+    ON day_closes (outlet_id, business_day) WHERE terminal_id IS NULL;
 
 -- A child table rather than a JSON column, because the note mix is a report an
 -- owner actually asks for ("we are always short of tens") and JSON would make
@@ -1250,6 +1322,19 @@ CREATE TABLE counters (
     last_reset_day INTEGER,
     PRIMARY KEY (outlet_id, terminal_id, kind)
 ) STRICT;
+
+-- **D135's guarantee, in the database.** Two tills issuing under the same
+-- prefix is the ONE way a per-terminal series can still produce a number
+-- twice, so it is a constraint and not a convention.
+--
+-- Partial on a non-empty prefix, and that gap is closed in code rather than
+-- here: a shop with more than one till must give every till a prefix, refused
+-- in words naming what to type, because two tills both printing bare numbers
+-- is exactly the collision this exists to stop. SQLite cannot express "unique
+-- unless there is only one row", and a sentence a person reads beats a
+-- constraint they cannot.
+CREATE UNIQUE INDEX idx_counters_prefix
+    ON counters (outlet_id, kind, prefix) WHERE prefix <> '';
 
 INSERT INTO counters (outlet_id, terminal_id, kind, last_issued, start, reset_daily, prefix, pad_width)
 VALUES ('outlet_default', 'terminal_default', 'token', NULL, 1, 1, '', 0),
@@ -1940,6 +2025,9 @@ CREATE TABLE purchase_lines (
 CREATE TABLE supplier_payments (
     id           TEXT    NOT NULL PRIMARY KEY,
     outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    -- **P27, D140.** Cash handed to the vegetable man came out of one box.
+    -- D120 made this the drawer's only record of it, so it has to know which.
+    terminal_id  TEXT REFERENCES terminals (id),
     supplier_id  TEXT    NOT NULL REFERENCES suppliers (id),
     amount       INTEGER NOT NULL CHECK (amount > 0),
     -- The real mode — audit B12: never the string "Full Settlement". **'cash'

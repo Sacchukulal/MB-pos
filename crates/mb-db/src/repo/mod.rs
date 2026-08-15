@@ -56,6 +56,9 @@ pub mod settings;
 /// function in this crate that is deliberately incapable of refusing a bill
 /// (D112).
 pub mod stock;
+/// P27. The tills â **every terminal has its own series** (D135), and moving
+/// the master is a decision a person makes (D139).
+pub mod terminals;
 pub mod taxclass;
 
 pub use audit::{AuditFilter, AuditRepo};
@@ -79,6 +82,7 @@ pub use stock::{
     ConsumptionRow, Material, Movement, MovementKind, MovementRow, OnHand, ProblemRow, StockRepo,
 };
 pub use taxclass::TaxClassRepo;
+pub use terminals::{Terminal, TerminalRepo};
 
 /// Every repository, over one transaction.
 #[derive(Debug)]
@@ -193,6 +197,14 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn counts(&self) -> CountRepo<'a> {
         CountRepo::new(self.tx)
+    }
+
+    /// P27 — the tills. **The billing path never asks this repository for a
+    /// number** (D135): a counter row is claimed inside the settle transaction,
+    /// exactly as it has been since P05.
+    #[must_use]
+    pub fn terminals(&self) -> TerminalRepo<'a> {
+        TerminalRepo::new(self.tx)
     }
 
     /// Every report (P18), grouped by the stored business day.

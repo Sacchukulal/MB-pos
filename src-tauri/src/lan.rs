@@ -305,6 +305,33 @@ impl mb_lan::Counter for Bridge {
             })
     }
 
+    /// **P27, D136 — take a settled bill from another till.**
+    ///
+    /// A fact, not a request. Nothing is merged and nothing is recomputed: the
+    /// money came from the same `mb_core` this machine runs, and the number came
+    /// from a series only the sender issues (D135), so there is no version of
+    /// this bill here for it to conflict with.
+    fn receive(
+        &self,
+        device: &mb_lan::Device,
+        forwarded: &mb_lan::Forwarded,
+    ) -> mb_lan::Receipt {
+        let Some(app) = self.app() else {
+            return mb_lan::Receipt {
+                stored: Vec::new(),
+                refused: Vec::new(),
+                says: "The main till is closing. Nothing was stored — send it again."
+                    .to_owned(),
+            };
+        };
+        let _ = device;
+        crate::forwarding::receive_on(&app, forwarded).unwrap_or_else(|e| mb_lan::Receipt {
+            stored: Vec::new(),
+            refused: Vec::new(),
+            says: e.message,
+        })
+    }
+
     fn catalogue(&self, held: Option<&str>) -> Option<mb_lan::Catalogue> {
         let app = self.app()?;
         let fresh = crate::orders::catalogue(&app).ok()?;

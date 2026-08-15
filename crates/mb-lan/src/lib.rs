@@ -40,6 +40,9 @@
 //! else needs a credential they do not have. The long version, including what
 //! they *can* still do, is in [`server`]'s module note.
 
+/// P27. **The other end of the wire** â the first client this crate has ever
+/// had, because a second till is a client too (D136, D137).
+pub mod client;
 pub mod counter;
 pub mod discovery;
 pub mod error;
@@ -56,6 +59,8 @@ pub use intent::{Batch, BatchResult, Catalogue, Intent, LineView, Outcome, What}
 pub use identity::Identity;
 pub use limit::{Limiter, Rate};
 pub use pairing::{Desk, Waiting};
+pub use client::{ClientError, Credential, Master};
+pub use intent::{Forwarded, Receipt};
 pub use server::{
     start_on,
     Missed, PROTOCOL_VERSION, Push, Running, Shared, TlsConfig, Where, require, router, start,

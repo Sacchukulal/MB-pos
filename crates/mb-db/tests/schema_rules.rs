@@ -333,6 +333,16 @@ fn t8_every_named_index_exists() {
         // backup has to carry. Partial, because most attachments will belong to
         // something and a row with no subject is a stray this must not index.
         "idx_attachments_subject",
+        // P27, **D135's guarantee in the database**. Two tills issuing under
+        // the same prefix is the one way a per-terminal series can still
+        // produce a number twice, so it is a constraint and not a convention.
+        "idx_counters_prefix",
+        // P27, D140. One close per drawer per shift, and exactly ONE shop
+        // roll-up per day. Partial rather than a UNIQUE constraint because the
+        // shop row's terminal is NULL and SQLite treats NULLs as distinct —
+        // the same reason the three recipe indexes above exist.
+        "idx_day_closes_drawer",
+        "idx_day_closes_shop",
     ];
 
     let db = Scratch::new("t8").open();

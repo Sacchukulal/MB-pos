@@ -185,6 +185,20 @@ pub trait Counter: Send + Sync + 'static {
         batch: &crate::intent::Batch,
     ) -> crate::intent::BatchResult;
 
+    /// **P27 — take a settled bill from another till** (D136).
+    ///
+    /// A fact, not a request: the money and the number were decided by the
+    /// sender, from a series only it issues, so there is nothing here to
+    /// resolve. Idempotent on each order's id — a repeat is a success, which is
+    /// what lets a secondary retry for ever without keeping track.
+    ///
+    /// Still no business rule in this crate: this hands the message over.
+    fn receive(
+        &self,
+        device: &Device,
+        forwarded: &crate::intent::Forwarded,
+    ) -> crate::intent::Receipt;
+
     /// The menu and the floor, with a version.
     ///
     /// `held` is the version the phone already has; `None` means it has none.

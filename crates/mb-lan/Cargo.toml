@@ -85,10 +85,18 @@ qrcode = { version = "0.14", default-features = false }
 # that it must be exactly right.
 base64 = "0.22"
 
+# **P27 â the client half.** It was a dev-dependency from P19: the test client,
+# on the same TLS stack as the server, so the handshake being tested was the
+# real one. A second till needs exactly that client in the shipped binary, and
+# **the same crate rather than a second one** â a hand-written HTTP client
+# whose only interesting property is being correct is the argument this
+# workspace has already made three times for taking a crate instead. hyper and
+# rustls are already in the binary behind axum and the server's own TLS.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-manual-roots", "http2"] }
+
 [dev-dependencies]
 # The test client. Same TLS stack as the server, so T10 is testing the real
 # handshake rather than a mock of one.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-manual-roots", "http2"] }
 serde_json = "1"
 base64 = "0.22"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }

@@ -234,6 +234,15 @@ struct Hello {
     protocol_version: u32,
     shop_name: String,
     fingerprint: String,
+    /// **P27.** A joining TILL needs the certificate itself to pin it, and a
+    /// phone reads this and ignores it.
+    ///
+    /// Publishing it costs nothing: a server presents its certificate on every
+    /// handshake, to anybody who connects. What makes it trustworthy is not
+    /// secrecy but the FINGERPRINT a person carried across the room on a QR
+    /// (D80) â this endpoint is how the till gets the bytes, and the QR is how
+    /// it knows they are the right ones.
+    certificate_pem: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -262,6 +271,7 @@ pub fn router(shared: Shared) -> Router {
         // P20 — what a phone came here to do. See `docs/LAN_PROTOCOL.md`.
         .route("/v1/intent", post(intent))
         .route("/v1/batch", post(batch))
+        .route("/v1/forward", post(forward))
         .route("/v1/catalogue", get(catalogue))
         .with_state(shared)
 }
@@ -280,6 +290,25 @@ async fn intent(
     };
     let outcome = shared.counter.apply(&device, &intent);
     answered(&outcome)
+}
+
+/// **P27 â a settled bill arriving from another till** (D136).
+///
+/// It goes through the same door, the same TLS and the same authentication as
+/// a phone's intent, because a second till is another paired device and not a
+/// second protocol. What differs is only the payload: a fact rather than a
+/// request.
+async fn forward(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    Json(forwarded): Json<crate::intent::Forwarded>,
+) -> Response {
+    let device = match authenticate(&shared, &headers, from) {
+        Ok(d) => d,
+        Err(response) => return response,
+    };
+    Json(shared.counter.receive(&device, &forwarded)).into_response()
 }
 
 /// A batch a phone queued while it could not reach us.
@@ -355,6 +384,7 @@ async fn hello(
         protocol_version: PROTOCOL_VERSION,
         shop_name: shared.counter.shop_name(),
         fingerprint: shared.identity.fingerprint.clone(),
+        certificate_pem: shared.identity.certificate_pem.clone(),
     })
     .into_response()
 }

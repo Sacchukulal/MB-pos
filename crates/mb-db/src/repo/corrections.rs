@@ -324,7 +324,13 @@ impl<'a> CorrectionsRepo<'a> {
         let locked: Option<i64> = self
             .tx
             .query_row(
-                "SELECT is_locked FROM day_closes WHERE outlet_id = ?1 AND business_day = ?2",
+                // **`terminal_id IS NULL` is the SHOP's row** (D140), and
+                // leaving it out is a real bug this caught: a till's own drawer
+                // close is not locked, so without the filter this answered from
+                // whichever row SQLite reached first and a closed day accepted
+                // a void.
+                "SELECT is_locked FROM day_closes
+                  WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id IS NULL",
                 rusqlite::params![outlet, encode::business_day_to_sql(day)],
                 |row| row.get(0),
             )

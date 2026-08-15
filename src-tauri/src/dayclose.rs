@@ -39,6 +39,7 @@ use mb_db::repo::money::{CashMovement, DayClose, Denomination};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::billing::TERMINAL;
 use crate::flows::{now, today};
 use crate::guard;
 use crate::ipc::MoneyView;
@@ -178,7 +179,11 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                     None => None,
                 };
                 Ok((
-                    repos.money().cash_position(OUTLET, day)?,
+                    // **This till's own drawer** (D140), never the shop's: the
+                    // person in front of this screen is counting the box under
+                    // THIS till, and showing them the shop total would be a
+                    // variance they cannot act on.
+                    repos.money().cash_position_of(OUTLET, day, Some(TERMINAL))?,
                     repos.corrections().day_totals(OUTLET, day)?,
                     existing,
                     stored,
@@ -370,8 +375,19 @@ pub fn close_on(
     let counted = Money::from_paise(preview.counted.paise);
     let expected = Money::from_paise(preview.expected.paise);
     let variance = Money::from_paise(preview.variance.paise);
+    // **D140 — this press counts ONE DRAWER**, this till's, for this shift.
+    // The shop's day is closed further down, and only when no till is left.
+    let shift_no = app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                mb_db::Repos::new(tx).money().next_shift(OUTLET, day, TERMINAL)
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
     let close = DayClose {
-        id: format!("close_{}", day.days_since_epoch()),
+        id: format!("close_{}_{TERMINAL}_{shift_no}", day.days_since_epoch()),
+        terminal: Some(TERMINAL.to_owned()),
+        shift_no,
         business_day: day,
         opening_float: Money::from_paise(
             preview
@@ -382,7 +398,11 @@ pub fn close_on(
         expected_cash: expected,
         counted_cash: counted,
         variance,
-        is_locked: true,
+        // **A drawer close does not lock the day.** The shop's row does, and
+        // it is written when the last till has counted, because a day that
+        // locked while another till could still send bills into it would have
+        // a total that changed after it was sealed.
+        is_locked: false,
         closed_at: at,
         closed_by: Some(who.staff_id.clone()),
         note: (!reason.is_empty()).then(|| reason.clone()),
@@ -425,15 +445,56 @@ pub fn close_on(
                     )?;
                 }
 
+                // **D140 — the last till to count closes the shop.**
+                //
+                // The roll-up is the SUM of the drawers and never an
+                // independent query, because two ways to compute one number is
+                // two numbers. And it is only written when no till is left
+                // uncounted: a day that sealed while another till could still
+                // send bills into it would have a total that changed
+                // afterwards, which is the one thing a locked day promises not
+                // to do.
+                //
+                // For a shop with one till this is the same single press it has
+                // always been — that till was the last one.
+                let waiting = repos.money().tills_still_open(OUTLET, day)?;
+                if waiting.is_empty() {
+                    let drawers = repos.money().drawer_closes(OUTLET, day)?;
+                    let sum = |pick: fn(&mb_db::repo::money::DayClose) -> Money| {
+                        Money::try_sum(drawers.iter().map(pick)).unwrap_or(Money::ZERO)
+                    };
+                    repos.money().save_day_close(
+                        OUTLET,
+                        &DayClose {
+                            id: format!("close_{}", day.days_since_epoch()),
+                            terminal: None,
+                            shift_no: 0,
+                            business_day: day,
+                            opening_float: sum(|c| c.opening_float),
+                            expected_cash: sum(|c| c.expected_cash),
+                            counted_cash: sum(|c| c.counted_cash),
+                            variance: sum(|c| c.variance),
+                            is_locked: true,
+                            closed_at: at,
+                            closed_by: Some(who.staff_id.clone()),
+                            note: (!reason.is_empty()).then(|| reason.clone()),
+                        },
+                    )?;
+                }
+
                 // R11 — the same transaction as the thing it records.
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::DAY_CLOSED, "day")
                         .about(day.to_string())
                         .with_after(serde_json::json!({
+                            "terminal": TERMINAL,
+                            "shift": shift_no,
                             "expected_paise": expected.paise(),
                             "counted_paise": counted.paise(),
                             "variance_paise": variance.paise(),
+                            "shop_closed": waiting.is_empty(),
+                            "waiting_on": waiting,
                             "reason": reason,
                         })),
                 )?;

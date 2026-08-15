@@ -586,6 +586,11 @@ fn seed_money(db: &Db) {
             OUTLET,
             &DayClose {
                 id: "close_0".to_owned(),
+                // The SHOP's roll-up (D140): a one-till shop's close is both
+                // its drawer and the shop's, and this fixture is the shop's
+                // because it is the row the day lock reads.
+                terminal: None,
+                shift_no: 0,
                 business_day: day(0),
                 opening_float: opening,
                 expected_cash: expected,

@@ -46,6 +46,9 @@ mod credit;
 mod dayclose;
 mod floor;
 mod expenses;
+/// P27. **Bills travelling between tills** â a settled bill is a FACT, and
+/// facts are copied rather than reconciled (D136).
+mod forwarding;
 mod flows;
 mod guard;
 /// P25. **The stock book** — materials, recipes, wastage, the buy list and
@@ -160,6 +163,9 @@ mod buying_tests;
 mod order_tests;
 mod startup;
 mod state;
+/// P27. **The tills** â who this machine is, who the master is, and the
+/// series it issues under (D135, D139).
+mod terminals;
 mod window;
 mod words;
 

@@ -138,6 +138,13 @@ pub mod action {
     /// wrong, and the next question is always "what changed just before it".
     pub const STOCK_REBUILT: AuditAction = "stock.rebuilt";
 
+    // --- P27, the tills ------------------------------------------------------
+    pub const TERMINAL_SAVED: AuditAction = "terminal.saved";
+    /// **D139 â moving the master is a decision a person makes**, so it leaves
+    /// a row saying who made it. There is no election to blame.
+    pub const MASTER_MOVED: AuditAction = "terminal.master_moved";
+    pub const TERMINAL_JOINED: AuditAction = "terminal.joined";
+
     // --- P26, buying ---------------------------------------------------------
     //
     // The same rule as P25's: only what a person DECIDED. A purchase moving five
@@ -220,6 +227,9 @@ pub mod action {
         COUNT_OPENED,
         COUNT_APPROVED,
         COUNT_ABANDONED,
+        TERMINAL_SAVED,
+        MASTER_MOVED,
+        TERMINAL_JOINED,
     ];
 
     /// What the owner reads, rather than the tag. UI_GUIDELINES §6.
@@ -284,6 +294,9 @@ pub mod action {
             COUNT_OPENED => "Started counting the store",
             COUNT_APPROVED => "Approved a stock count",
             COUNT_ABANDONED => "Gave up on a stock count",
+            TERMINAL_SAVED => "Changed a till",
+            MASTER_MOVED => "Made another till the main one",
+            TERMINAL_JOINED => "A new till joined the shop",
             _ => "Did something this version does not know about",
         }
     }
