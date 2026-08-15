@@ -1405,12 +1405,26 @@ CREATE INDEX idx_orders_created_by ON orders (created_by, business_day);
 -- the top of its range rather than wrapping, and its comment says in as many
 -- words that a repeat "is caught by P04's uniqueness constraint rather than
 -- silently reused". This is that constraint.
+--
+-- P27 added `terminal_id`, and it is not a widening — it is what makes D135
+-- true. Every till issues out of its OWN series, so till A and till B both have
+-- a bill number 1; they print as `A/0001` and `B/0001` and they are different
+-- bills. Without the terminal in the key the master would refuse the second
+-- till's first bill of the day for ever, which is exactly what T8 found: a
+-- thirty-minute partition healed into `UNIQUE constraint failed`.
+--
+-- **The value alone was never the identity.** `bill_number_formatted` is what
+-- the customer holds and what the shop's book shows, and it carries the
+-- prefix — so a shop with one till is unaffected and a shop with two is
+-- finally correct.
 CREATE UNIQUE INDEX idx_orders_bill_number
-    ON orders (outlet_id, bill_number_value)
+    ON orders (outlet_id, terminal_id, bill_number_value)
     WHERE bill_number_value IS NOT NULL;
--- A token resets daily, so it is unique within a business day, not forever.
+-- A token resets daily, so it is unique within a business day, not forever —
+-- and per till, for the same reason: two counters both calling "token 5" is the
+-- same bug wearing a smaller hat.
 CREATE UNIQUE INDEX idx_orders_token
-    ON orders (outlet_id, business_day, token_value)
+    ON orders (outlet_id, terminal_id, business_day, token_value)
     WHERE token_value IS NOT NULL;
 
 CREATE INDEX idx_order_lines_order ON order_lines (order_id);

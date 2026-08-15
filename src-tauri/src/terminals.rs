@@ -149,7 +149,15 @@ pub struct TerminalEdit {
 pub fn tills_on(app: &App) -> UiResult<TillsView> {
     let who = guard::require(app, Permission::ReportsView)?;
     let at = now();
-    let mine = me(&crate::config::AppConfig::directory());
+    // **The id comes from `App`, not from the file.** They are the same value —
+    // `App` read the file at start-up — but only one of them can be trusted to
+    // still be the id every bill on this machine was written under. Reading the
+    // file again here would let a join half an hour ago make this screen
+    // disagree with the book.
+    let mine = Me {
+        terminal_id: app.terminal_id().to_owned(),
+        ..me(&crate::config::AppConfig::directory())
+    };
     let waiting = crate::forwarding::waiting_on(app).map(|w| w.len()).unwrap_or(0);
     let allowed = app.entitlement().limits.terminals;
 

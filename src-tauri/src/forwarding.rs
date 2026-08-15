@@ -229,16 +229,16 @@ pub fn waiting_says(count: usize) -> String {
 
 /// This till, describing itself, with what it is carrying.
 pub fn from_here(app: &App, orders: Vec<serde_json::Value>) -> UiResult<Forwarded> {
-    let me = crate::terminals::me(&crate::config::AppConfig::directory());
+    // `App`'s id, not the file's: this must be the id the bills in this batch
+    // were actually written under, and that is the one the process started with.
+    let id = app.terminal_id().to_owned();
     let mine = app.with_shop(|shop| {
         shop.db
-            .read_transaction(|tx| {
-                mb_db::Repos::new(tx).terminals().find(OUTLET, &me.terminal_id)
-            })
+            .read_transaction(|tx| mb_db::Repos::new(tx).terminals().find(OUTLET, &id))
             .map_err(|e| words::from_db(&e))
     })?;
     Ok(Forwarded {
-        terminal_id: me.terminal_id,
+        terminal_id: id,
         terminal_name: mine
             .as_ref()
             .map_or_else(|| "This till".to_owned(), |t| t.name.clone()),

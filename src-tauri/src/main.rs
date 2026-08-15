@@ -166,6 +166,11 @@ mod state;
 /// P27. **The tills** â who this machine is, who the master is, and the
 /// series it issues under (D135, D139).
 mod terminals;
+/// P27's eleven. Two tills with two databases, hammered concurrently, split for
+/// half an hour and healed — because what is only provable here is what happens
+/// to a shop's MONEY when two machines write bills at once.
+#[cfg(test)]
+mod terminal_tests;
 mod window;
 mod words;
 

@@ -144,6 +144,9 @@ pub const CATALOGUE: &[Entry] = &[
     Entry { id: "sales_mode", title: "Sales by payment mode", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::PaymentMode) },
     Entry { id: "sales_cashier", title: "Sales by cashier", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Cashier) },
     Entry { id: "sales_section", title: "Sales by section", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Section) },
+    // P27, scope 11.1. One entry and one column, which is the whole of "a
+    // terminal dimension" â the catalogue is data (P18) and no .tsx changes.
+    Entry { id: "sales_terminal", title: "Sales by till", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Terminal) },
     Entry { id: "items", title: "Item sales", group: "Items", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Item) },
     Entry { id: "categories", title: "Category sales", group: "Items", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Category) },
     Entry { id: "stopped", title: "Items that stopped selling", group: "Items", needs: Permission::ReportsView, kind: Kind::StoppedSelling },
@@ -1077,6 +1080,7 @@ const fn label_for(by: SalesBy) -> &'static str {
         SalesBy::PaymentMode => "Paid by",
         SalesBy::Cashier => "Cashier",
         SalesBy::Section => "Section",
+        SalesBy::Terminal => "Till",
         SalesBy::Item => "Item",
         SalesBy::Category => "Category",
     }
@@ -1655,6 +1659,7 @@ mod tests {
             SalesBy::PaymentMode,
             SalesBy::Cashier,
             SalesBy::Section,
+            SalesBy::Terminal,
             SalesBy::Item,
             SalesBy::Category,
         ] {

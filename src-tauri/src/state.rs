@@ -191,6 +191,18 @@ impl App {
         &self.terminal_id
     }
 
+    /// Make this `App` a different till — **before it opens a shop**.
+    ///
+    /// A test only, and deliberately consuming: the running program decides
+    /// this once from `terminal.json`, and a setter that could be called later
+    /// would be a value the billing path cannot trust.
+    #[cfg(test)]
+    #[must_use]
+    pub fn becoming_till(mut self, id: &str) -> App {
+        self.terminal_id = id.to_owned();
+        self
+    }
+
     /// What the counter knows about updates (P22). A copy of a held value.
     #[must_use]
     pub fn updates(&self) -> crate::updates::UpdateState {

@@ -111,6 +111,11 @@ pub enum SalesBy {
     PaymentMode,
     Cashier,
     Section,
+    /// **P27 — which till took the money.** A shop with two counters asks this
+    /// on day one: *"is the second one paying for itself?"* Grouped on the
+    /// STORED `terminal_id`, so a bill forwarded from a secondary counts to the
+    /// till that wrote it and not to the one that received it (D136).
+    Terminal,
     Item,
     Category,
 }
@@ -267,6 +272,15 @@ impl<'a> ReportsRepo<'a> {
                         "o.settled_by",
                         "COALESCE(s.name, 'Unknown')",
                         "LEFT JOIN staff s ON s.id = o.settled_by",
+                    ),
+                    SalesBy::Terminal => (
+                        "o.terminal_id",
+                        // The till's NAME, resolved here — the same rule the
+                        // cashier report follows, and for the same reason: a
+                        // report that hands back ids is a screen writing SQL by
+                        // post.
+                        "COALESCE(tm.name, o.terminal_id)",
+                        "LEFT JOIN terminals tm ON tm.id = o.terminal_id",
                     ),
                     SalesBy::Section => (
                         "COALESCE(t.section_id, '')",
