@@ -167,6 +167,30 @@ pub mod action {
     pub const COUNT_APPROVED: AuditAction = "count.approved";
     pub const COUNT_ABANDONED: AuditAction = "count.abandoned";
 
+    // ---- P28: the employment side -------------------------------------
+    /// Somebody clocked on or off. Cheap, and it is what answers "who was in
+    /// the shop that evening" a month later.
+    pub const CLOCKED_IN: AuditAction = "attendance.in";
+    pub const CLOCKED_OUT: AuditAction = "attendance.out";
+    /// **The one that needs watching.** Changing a clock-out after the event
+    /// is how hours get inflated, so it is its own action with a before and
+    /// an after, and it is never the person's own row.
+    pub const ATTENDANCE_CORRECTED: AuditAction = "attendance.corrected";
+    pub const ROSTER_CHANGED: AuditAction = "roster.changed";
+    pub const LEAVE_REQUESTED: AuditAction = "leave.requested";
+    pub const LEAVE_DECIDED: AuditAction = "leave.decided";
+    /// The one row of the leave ledger a person writes freehand — and
+    /// therefore the one somebody could use to invent a fortnight's holiday.
+    pub const LEAVE_ADJUSTED: AuditAction = "leave.adjusted";
+    pub const SALARY_SET: AuditAction = "salary.set";
+    pub const ADVANCE_GIVEN: AuditAction = "advance.given";
+    pub const PAYROLL_COMPUTED: AuditAction = "payroll.computed";
+    /// **Money leaves the shop here.** Its own action, because "who approved
+    /// March's payroll" is a question an owner asks and has to be able to
+    /// search for.
+    pub const PAYROLL_APPROVED: AuditAction = "payroll.approved";
+    pub const PAYROLL_REVERSED: AuditAction = "payroll.reversed";
+
     /// Every one of the above, for the screen's filter.
     pub const ALL: &[AuditAction] = &[
         LOGIN_OK,
@@ -230,6 +254,18 @@ pub mod action {
         TERMINAL_SAVED,
         MASTER_MOVED,
         TERMINAL_JOINED,
+        CLOCKED_IN,
+        CLOCKED_OUT,
+        ATTENDANCE_CORRECTED,
+        ROSTER_CHANGED,
+        LEAVE_REQUESTED,
+        LEAVE_DECIDED,
+        LEAVE_ADJUSTED,
+        SALARY_SET,
+        ADVANCE_GIVEN,
+        PAYROLL_COMPUTED,
+        PAYROLL_APPROVED,
+        PAYROLL_REVERSED,
     ];
 
     /// What the owner reads, rather than the tag. UI_GUIDELINES §6.
@@ -297,6 +333,18 @@ pub mod action {
             TERMINAL_SAVED => "Changed a till",
             MASTER_MOVED => "Made another till the main one",
             TERMINAL_JOINED => "A new till joined the shop",
+            CLOCKED_IN => "Clocked in",
+            CLOCKED_OUT => "Clocked out",
+            ATTENDANCE_CORRECTED => "Changed somebody's hours",
+            ROSTER_CHANGED => "Changed the roster",
+            LEAVE_REQUESTED => "Asked for leave",
+            LEAVE_DECIDED => "Decided a leave request",
+            LEAVE_ADJUSTED => "Adjusted a leave balance by hand",
+            SALARY_SET => "Set somebody's salary",
+            ADVANCE_GIVEN => "Gave a salary advance",
+            PAYROLL_COMPUTED => "Worked out a payroll run",
+            PAYROLL_APPROVED => "Approved a payroll run",
+            PAYROLL_REVERSED => "Reversed a payroll run",
             _ => "Did something this version does not know about",
         }
     }

@@ -44,6 +44,23 @@ pub enum Access {
     /// Anybody, including nobody: these work on the lock screen. Keep this list
     /// short and keep the reason with it.
     Public,
+    /// **A session, but no particular permission** — P28.
+    ///
+    /// Not the same as `Public`, and the difference matters: these do NOT work
+    /// on the lock screen. Clocking yourself in is the case they exist for. It
+    /// IS the PIN — a person who has signed in has already proved who they
+    /// are — and making them ask for a second permission to say "I am here" is
+    /// how a shop ends up not recording attendance at all.
+    ///
+    /// Every one of them acts on the SIGNED-IN PERSON'S OWN data, or refuses.
+    /// That rule cannot be expressed in this table, because it depends on which
+    /// row is being asked for, so the command enforces it and T11 is the test
+    /// that it actually does.
+    ///
+    /// Classifying these as `Public` would have been a lie in the one table
+    /// whose whole job is to be true, and it would have pushed the public list
+    /// past the size at which it stops being a decision.
+    SignedIn,
     Needs(Permission),
     /// **Any one of these opens the door** (P17).
     ///
@@ -205,6 +222,52 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("save_recurring_expense", Access::Needs(Permission::ExpensesManage)),
     ("confirm_recurring_expense", Access::Needs(Permission::ExpensesManage)),
     ("export_expenses", Access::Needs(Permission::ExpensesManage)),
+    // --- P28: the employment side -----------------------------------------
+    //
+    // Five permissions, and the split is about WHO IS TRUSTED WITH WHAT rather
+    // than which screen a thing is on. The two that matter:
+    //
+    //   * **clocking yourself in and out is `Public`.** It IS the PIN — a
+    //     person who has signed in has already proved who they are, and making
+    //     them ask for a second permission to say "I am here" is how a shop
+    //     ends up not recording attendance at all. The command reads the
+    //     session and can only ever write the signed-in person's own row.
+    //
+    //   * **`correct_attendance` is its own permission**, because editing a
+    //     clock-out after the event is how hours get inflated. It also refuses
+    //     to touch the caller's own row, which is a rule no permission can
+    //     express — see the command.
+    ("employees", Access::Needs(Permission::StaffManage)),
+    ("save_employee", Access::Needs(Permission::StaffManage)),
+    // Reading attendance: your own needs nothing beyond being signed in, and
+    // anybody ELSE's needs the permission. That cannot be said in this table —
+    // it depends on which row is being asked for — so the command decides, and
+    // this entry is `Public` on purpose rather than by omission. T11 is the
+    // test that it actually refuses.
+    ("attendance", Access::SignedIn),
+    ("clock_in", Access::SignedIn),
+    ("clock_out", Access::SignedIn),
+    ("correct_attendance", Access::Needs(Permission::AttendanceCorrect)),
+    ("save_roster", Access::Needs(Permission::AttendanceMark)),
+    // The same "your own, or the permission" rule as `attendance`, for the same
+    // reason and with the same test.
+    ("leave", Access::SignedIn),
+    ("request_leave", Access::SignedIn),
+    ("decide_leave", Access::Needs(Permission::LeaveApprove)),
+    ("adjust_leave", Access::Needs(Permission::LeaveApprove)),
+    // What a shop pays its people is a different secret from what it took at
+    // the till, so none of these is `ReportsView`.
+    ("salary", Access::Needs(Permission::SalaryView)),
+    ("save_salary", Access::Needs(Permission::SalaryManage)),
+    ("give_advance", Access::Needs(Permission::SalaryManage)),
+    ("payroll_runs", Access::Needs(Permission::SalaryView)),
+    ("payroll", Access::Needs(Permission::SalaryView)),
+    ("compute_payroll", Access::Needs(Permission::SalaryManage)),
+    ("edit_payroll_line", Access::Needs(Permission::SalaryManage)),
+    // **Where money leaves the shop.** The owner's decision, every time.
+    ("approve_payroll", Access::Needs(Permission::SalaryManage)),
+    ("reverse_payroll", Access::Needs(Permission::SalaryManage)),
+    ("staff_cost", Access::Needs(Permission::SalaryView)),
 
     // --- settings (P17) -----------------------------------------------------
     // Reading is `NeedsAny`: the shop's details, tax, printers and backup are
@@ -681,7 +744,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 26] = [
+        const SOURCES: [&str; 27] = [
             include_str!("terminals.rs"),
             include_str!("orders.rs"),
             include_str!("buying.rs"),
@@ -704,6 +767,7 @@ mod tests {
             include_str!("floor.rs"),
             include_str!("credit.rs"),
             include_str!("expenses.rs"),
+            include_str!("employment.rs"),
             include_str!("settings/ipc.rs"),
             include_str!("settings/printers.rs"),
             include_str!("settings/backup.rs"),

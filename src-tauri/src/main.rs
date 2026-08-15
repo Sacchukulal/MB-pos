@@ -45,6 +45,7 @@ mod credit;
 /// expected cash, the counted cash, the difference in words, and the lock.
 mod dayclose;
 mod floor;
+mod employment;
 mod expenses;
 /// P27. **Bills travelling between tills** â a settled bill is a FACT, and
 /// facts are copied rather than reconciled (D136).
@@ -163,6 +164,10 @@ mod buying_tests;
 mod order_tests;
 /// P27.5. **A whole shop, so the look can be designed against a real screen.**
 /// Not a test of anything — a seeder, ignored by the suite (D55).
+/// P28 driven end to end: a payroll month with an advance, and the two things
+/// that must be refused (approving twice, correcting your own hours).
+#[cfg(test)]
+mod employment_tests;
 #[cfg(test)]
 mod look_demo;
 mod startup;

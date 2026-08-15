@@ -38,6 +38,7 @@ pub mod counts;
 pub mod corrections;
 pub mod devices;
 pub mod kitchen;
+pub mod employment;
 pub mod events;
 pub mod floor;
 pub mod menu;
@@ -127,6 +128,17 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn money(&self) -> MoneyRepo<'a> {
         MoneyRepo::new(self.tx)
+    }
+
+    /// **The employment side** (P28): shifts, attendance, leave, salary and
+    /// payroll.
+    ///
+    /// `people()` above is the IDENTITY side — who this is and what they may
+    /// do — and the two are deliberately separate, because a shift supervisor
+    /// reads one of them and the owner reads the other.
+    #[must_use]
+    pub fn employment(&self) -> employment::EmploymentRepo<'a> {
+        employment::EmploymentRepo::new(self.tx)
     }
 
     #[must_use]
