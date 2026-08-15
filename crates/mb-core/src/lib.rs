@@ -50,6 +50,10 @@ pub mod cart;
 pub mod charge;
 pub mod combo;
 pub mod credit;
+/// P29. **What the machines plugged into a counter are saying** — a scanner,
+/// a scale, and the barcodes a scale prints. Pure, because none of those
+/// devices exists on the machine this was written on.
+pub mod devices;
 pub mod discount;
 pub mod employment;
 pub mod expense;

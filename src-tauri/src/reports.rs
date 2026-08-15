@@ -116,6 +116,13 @@ pub enum Kind {
     /// **P26, D133, and audit B14's answer.** The number v1 printed was not
     /// wrong by a percentage; it was a different quantity.
     Profit,
+    /// **P29, scope 8.5 — who took the tips.**
+    ///
+    /// The arithmetic was always right: a tip changes what is DUE, never what
+    /// the bill IS, so it appears in no sales figure and no tax summary. This
+    /// is the half a shop actually asked for — who took them, so they can be
+    /// shared out.
+    Tips,
 }
 
 /// How the buying report is grouped.
@@ -162,6 +169,12 @@ pub const CATALOGUE: &[Entry] = &[
     // Found by looking at the list.
     Entry { id: "input_credit", title: "Input tax credit on purchases", group: "Tax", needs: Permission::ReportsView, kind: Kind::InputCredit },
     Entry { id: "control", title: "Voids, discounts, refunds and reprints", group: "Control", needs: Permission::AuditView, kind: Kind::Control },
+    // **P29, and it sits in Control on purpose.** A tip is not revenue, so it
+    // does not belong under Sales — putting it there is exactly the confusion
+    // this report exists to prevent. It is money that passed through the shop
+    // for somebody else, which is the same kind of thing as a void: something
+    // an owner watches rather than something the shop earned.
+    Entry { id: "tips", title: "Tips, and who took them", group: "Control", needs: Permission::ReportsView, kind: Kind::Tips },
     // **Scope 3.7, and it is the first real measure of kitchen speed this
     // owner has ever had.** Two rows and no new screen: adding a report is a
     // line here plus a function in mb-db, which is P18's whole shape.
@@ -563,6 +576,37 @@ fn build(
                     ]
                 })
                 .collect();
+            (columns, rows, None, None)
+        }
+
+        Kind::Tips => {
+            let rows_in = reports.tips_by_staff(OUTLET, period)?;
+            let columns = vec![
+                column("Who settled", false),
+                column("Bills", true),
+                column("Cash — in the drawer", true),
+                column("Card and UPI — owed", true),
+                column("Total", true),
+            ];
+            let rows = rows_in
+                .iter()
+                .map(|row| {
+                    vec![
+                        row.who.clone(),
+                        row.bills.to_string(),
+                        row.cash.to_plain_string(),
+                        row.other.to_plain_string(),
+                        row.total.to_plain_string(),
+                    ]
+                })
+                .collect();
+            // **The sentence matters more than the table here**, because the
+            // one thing a shop can get wrong about tips is thinking they are
+            // takings. Said once, in Rust, where the report is made (§6).
+            notes.push(
+                "A tip is not the shop's money. It is in no sales figure and no                  tax figure. Cash tips are already in the drawer, so they come                  out of it when they are handed over."
+                    .to_owned(),
+            );
             (columns, rows, None, None)
         }
 

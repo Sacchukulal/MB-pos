@@ -162,6 +162,20 @@ pub struct HsnBucket {
     pub igst: Money,
 }
 
+/// One person's tips over a period — P29, scope 8.5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TipRow {
+    pub who: String,
+    /// **Already in the drawer.** A cash tip is physically there, which is why
+    /// `cash_position` counts `amount + tip` — and why a shop paying tips out
+    /// at close needs this figure apart from the one below.
+    pub cash: Money,
+    /// Card, UPI, or on an account. Owed to the person, not in the till.
+    pub other: Money,
+    pub total: Money,
+    pub bills: i64,
+}
+
 /// One line of the control report: something a person did that an owner may
 /// want to ask about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -444,6 +458,57 @@ impl<'a> ReportsRepo<'a> {
     /// with who and why. Four `SELECT`s in a `UNION ALL` rather than four
     /// reports, because the question is "what happened here today?" and the
     /// answer is one column of time.
+/// **Tips, by whoever settled the bill** — P29, scope 8.5.
+    ///
+    /// The arithmetic was already right: a tip changes what is DUE and never
+    /// what the bill IS, so it is outside the taxable value and outside every
+    /// sales figure in this product. What a shop actually asked for is this —
+    /// **who took them**, so they can be shared out at the end of the week.
+    ///
+    /// Attributed to the person who SETTLED the bill, which is the honest
+    /// answer available: a restaurant that pools tips does not care, and one
+    /// that does not pool them settles at the till where the waiter is
+    /// standing. A per-line waiter attribution would be a second answer to a
+    /// question this product cannot really answer.
+    ///
+    /// Split by mode, because a CASH tip is already in the drawer and a CARD
+    /// tip is not — a shop paying out cash tips from the till at close needs
+    /// the two figures apart or the drawer will not balance.
+    pub fn tips_by_staff(&self, outlet: &str, period: Period) -> Result<Vec<TipRow>, DbError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT COALESCE(s.name, 'Not recorded'),
+                    COALESCE(SUM(CASE WHEN p.mode = 'cash' THEN p.tip ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN p.mode <> 'cash' THEN p.tip ELSE 0 END), 0),
+                    COALESCE(SUM(p.tip), 0),
+                    COUNT(DISTINCT p.order_id)
+               FROM payments p
+               JOIN orders o ON o.id = p.order_id
+          LEFT JOIN staff s ON s.id = o.settled_by
+              WHERE o.outlet_id = ?1
+                AND p.business_day BETWEEN ?2 AND ?3
+                AND o.state = 'settled'
+                AND p.tip <> 0
+           GROUP BY s.id
+           ORDER BY SUM(p.tip) DESC",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![
+            outlet,
+            encode::business_day_to_sql(period.from),
+            encode::business_day_to_sql(period.to)
+        ])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(TipRow {
+                who: row.get(0)?,
+                cash: encode::money_from_sql(row.get(1)?),
+                other: encode::money_from_sql(row.get(2)?),
+                total: encode::money_from_sql(row.get(3)?),
+                bills: row.get(4)?,
+            });
+        }
+        Ok(out)
+    }
+
     pub fn control_log(&self, outlet: &str, period: Period) -> Result<Vec<ControlRow>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT o.business_day, o.voided_at, 'void',
