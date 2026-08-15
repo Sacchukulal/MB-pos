@@ -242,6 +242,15 @@ export function Shell() {
   const [jobs, setJobs] = useState<readonly PrintJobView[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
   const [lock, setLock] = useState<LockState | null>(null);
+  /**
+   * **What this till is holding for the main one** (P27, D138) — the whole
+   * sentence, written in Rust, empty when there is nothing to say.
+   *
+   * It lives in the shell for the same reason the print queue does (audit D4):
+   * a shop must be able to SEE that its tills are apart, and a state that is
+   * only visible on the screen nobody has open is a state that is hidden.
+   */
+  const [tillsSay, setTillsSay] = useState('');
   const { theme, toggle } = useTheme();
   const toast = useToast();
 
@@ -280,6 +289,7 @@ export function Shell() {
     subscribe((message) => {
       if (message.kind === 'printQueue') setJobs(message.jobs);
       if (message.kind === 'session') reloadLock();
+      if (message.kind === 'tills') setTillsSay(message.says);
     })
       .then((unlisten) => {
         stop = unlisten;
@@ -370,6 +380,16 @@ export function Shell() {
         <div className="mb-nopin" role="status">
           <strong>Anybody can open this shop&rsquo;s reports and settings.</strong>
           <span>Add a PIN in Staff so the counter locks itself.</span>
+        </div>
+      ) : null}
+
+      {/* P27, D138. Also not dismissible, and for the same reason as the
+          banner above: the state is real until it stops being real. It says
+          "nothing is lost" out loud, because the fear it answers is the shop
+          thinking those bills have gone. */}
+      {tillsSay ? (
+        <div className="mb-tillqueue" role="status">
+          <strong>{tillsSay}</strong>
         </div>
       ) : null}
 

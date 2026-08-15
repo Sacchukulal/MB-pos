@@ -76,6 +76,8 @@ import type { PurchaseEdit } from './generated/PurchaseEdit';
 import type { PoEdit } from './generated/PoEdit';
 import type { PhotoView } from './generated/PhotoView';
 import type { StockCountView } from './generated/StockCountView';
+import type { TerminalEdit } from './generated/TerminalEdit';
+import type { TillsView } from './generated/TillsView';
 import type { CountEdit } from './generated/CountEdit';
 import type { ShareView } from './generated/ShareView';
 import type { Channel } from './generated/Channel';
@@ -459,6 +461,32 @@ export interface Commands {
     args: { id: string; period: PeriodArg; channel: Channel };
     returns: ShareView;
   };
+
+  // --- P27, the tills -------------------------------------------------------
+  // Every one of them answers with the whole roster, so the screen never has to
+  // work out what changed — the same shape the settings and the floor use.
+  tills: { args: void; returns: TillsView };
+  /** The prefix is the field that matters: D135's one remaining risk. */
+  save_till: { args: { edit: TerminalEdit }; returns: TillsView };
+  /** D139 — a person chooses. There is no election. */
+  make_master: { args: { id: string }; returns: TillsView };
+  /**
+   * **Waits for somebody at the other counter to press Allow**, so it can take
+   * a minute or two — the screen shows a spinner and Tauri runs it off the UI
+   * thread.
+   */
+  join_master: {
+    args: {
+      address: string;
+      fingerprint: string;
+      token: string;
+      name: string;
+      prefix: string;
+    };
+    returns: TillsView;
+  };
+  /** The same call the background sender makes, so pressing it is only early. */
+  send_waiting_bills: { args: void; returns: TillsView };
 
   // --- P17, the settings ----------------------------------------------------
   // Five commands for ninety settings, because the catalogue IS the screen:

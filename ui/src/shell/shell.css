@@ -26,6 +26,24 @@
   flex: 0 0 auto;
 }
 
+/* **P27, D138 — the bills this till is holding for the main one.**
+   The same shape as the no-PIN banner above and for the same reason (audit
+   D4): a state a shop cannot see is a state the software is hiding. The accent
+   colour and not the warning one, because nothing is wrong — the money is safe
+   and it is going across — and a red bar over an ordinary Tuesday teaches a
+   shop to ignore red bars. */
+.mb-shell > .mb-tillqueue {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-bottom: var(--border-width) solid var(--border);
+  font-size: var(--text-sm);
+}
+
 .mb-shell > .mb-body {
   flex: 1 1 auto;
   /* Without this a tall child stretches the body instead of scrolling inside

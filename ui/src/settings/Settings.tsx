@@ -48,6 +48,7 @@ import { Backup } from './Backup';
 import { Network } from './Network';
 import { Numbering } from './Numbering';
 import { Printers } from './Printers';
+import { Tills } from './Tills';
 
 import './settings.css';
 
@@ -69,6 +70,7 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   backup: () => <Backup />,
   appearance: () => <Appearance />,
   network: () => <Network />,
+  tills: () => <Tills />,
 };
 
 /**
@@ -80,7 +82,11 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
  * with nothing in it — which would have to be special-cased in the load, the
  * save, the export and the both-directions test.
  */
-const EXTRA_SECTIONS = [{ code: 'network', label: 'Phones', canEdit: true, settings: [] }];
+const EXTRA_SECTIONS = [
+  { code: 'network', label: 'Phones', canEdit: true, settings: [] },
+  // P27. A till is a ROW too, for the same reason a phone is.
+  { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
+];
 
 /**
  * Which sections show the paper beside them.

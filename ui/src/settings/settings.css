@@ -575,3 +575,56 @@
   padding: var(--space-2) 0;
   border-bottom: var(--border-width) solid var(--border);
 }
+
+/* ---------------------------------------------------------------------------
+   P27 — the tills.
+
+   Deliberately the same shapes as the phones panel above: a till and a phone
+   are both "a row with a name, a sentence and a button", and giving them two
+   layouts would be two things to keep in step for no reason a shopkeeper could
+   see.
+   --------------------------------------------------------------------------- */
+
+.mb-tills__till {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.mb-tills__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb-tills__note {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* **The main till is off.** Loud on purpose (D138): a shop must be able to see
+   that its tills are apart, and the alternative to this card is a cashier
+   discovering it when the table screen does nothing. */
+.mb-tills__away {
+  border-left: var(--space-1) solid var(--warn);
+}
+
+/* And what this till is still holding. Not an alarm — nothing is lost — so it
+   is the accent and not the danger colour. */
+.mb-tills__waiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border-left: var(--space-1) solid var(--accent);
+}

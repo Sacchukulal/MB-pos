@@ -382,3 +382,122 @@ repeatedly told no.
 **A held intent is not in it either**, for the same reason and with the same
 consequence: re-sending a held intent gets held again, until a person releases
 it with a new id.
+
+---
+
+## 14. A second till — P27
+
+Everything above was written for a phone. A second **till** speaks the same
+protocol over the same TLS with the same pinned certificate and the same
+credential, and it is a paired device with a role — **not a second register.**
+
+### 14.1 What a till is, and what it is not
+
+A till has its **own database**. It has the menu, the tax rules, its own
+printer, its own drawer and the whole of `mb-core`, so it bills, prints, takes
+cash and gives change without asking anybody. A phone has none of that and asks
+for everything.
+
+That difference is the whole design. A phone sends **requests**; a till sends
+**facts** (D136) — and it sends requests only for the one thing it does not own,
+which is the floor (D137).
+
+### 14.2 The roles
+
+One till in a shop is the **main till** (the master). It holds the floor, it is
+the shop's book of record, and it is the machine the others forward to. Every
+other till is a **secondary**.
+
+The role is a person's decision and never an election (D139). Moving it clears
+every master and sets one in a single transaction, so there is never an instant
+when two answer as master or none does. The old master is not consulted; it
+sees a later `master_since` than its own the next time it opens and stands down.
+
+### 14.3 Joining
+
+Exactly P19's pairing, §3 above, with two differences:
+
+* `platform` is `"till"`. The pairing panel shows it, so the person pressing
+  Allow can see that a computer and not a phone is joining.
+* the licence is asked `till_room` instead of `device_limit` (D141). They are
+  different lines on a plan, so a shop out of phones can still add the counter
+  it paid for.
+
+The joining till fetches `/v1/hello` over a connection that trusts nothing,
+checks the certificate's fingerprint against the one on the QR a person is
+holding, and only then pins it. A stranger answering on that address hands over
+a certificate whose fingerprint does not match, and the join is refused with
+*"That is not the till on the code."*
+
+The credential and the pinned certificate are written **beside the config**,
+never into the database: a backup is restored onto other machines (D27), and one
+that carried a terminal's identity would give a shop two tills claiming to be
+one.
+
+### 14.4 `POST /v1/forward` — the facts
+
+    {
+      "terminal_id":    "term_1755261900123",
+      "terminal_name":  "Counter 2",
+      "series_prefix":  "B/",
+      "orders":         [ <a whole settled, voided or cancelled order> ]
+    }
+
+Answered with a receipt:
+
+    {
+      "stored":  [["ord_abc", true], ["ord_def", true]],
+      "refused": [],
+      "says":    "2 bills stored."
+    }
+
+Four things are true of it and they are what make it safe:
+
+1. **It is idempotent on each order's id** — `applied_events`, in the same
+   transaction as the effect. A repeat is a **success**, which is what lets a
+   secondary retry for ever without keeping track of what it has already sent.
+2. **Order does not matter.** Bills are independent facts.
+3. **Only what is FINISHED travels.** A draft is not a fact: it lives on the
+   till that is typing it, and if that till never comes back nobody was charged.
+4. **Nothing leaves the sender's queue but a confirmed apply.** Not a timeout,
+   not a restart, not a person.
+
+The till describes itself in every batch because the main till may never have
+heard from it — a forwarded bill points at a terminal, and the day close per
+drawer needs that row to exist. It is also the only place D135 can be checked:
+the uniqueness that stops two tills sharing a bill number is shop-wide, and only
+the main till sees the whole shop. **A prefix clash refuses the whole batch**,
+with the sentence naming the other till, because storing half of it under a
+colliding series is the worse answer.
+
+### 14.5 `POST /v1/intent` — the floor
+
+Unchanged, and used by a secondary for exactly the same reasons a phone uses it.
+Tables and open orders belong to the main till (D137).
+
+### 14.6 The conflicts between two tills
+
+Section 10's cases, answered by the same code, with one difference: **the
+sentence names the till.** *"At the counter"* is not an answer when there are
+two counters and the person reading it is standing at one of them.
+
+| What happened | What the loser reads |
+|---|---|
+| Two tills open the same table | *"This table is already open on Counter 2. You are both on the same order."* — they JOIN it; see 10(a), and D137 for why refusing would be worse |
+| One till settles while another adds | *"That bill has already been paid on Counter 1. Start a new order for anything else."* |
+| A till goes offline mid-order | Nothing — its order was a draft on its own machine and was never the main till's, so there is nothing to reconcile |
+| The main till disappears | *"The main till is off. This till can take counter and parcel bills — table service needs the main till."* |
+
+A one-till shop reads the old sentences unchanged: with one till there is no
+name worth saying, so it still says *"at the counter"*, which is where it
+happened.
+
+### 14.7 Numbers never travel
+
+**No till ever asks another for a number.** Every till issues out of its own
+series — `A/0001`, `B/0001` — so there is no allocation message, no block, no
+top-up and no reservation in this protocol, and there is nothing here that a
+settle waits for (D135).
+
+That is why a secondary bills at full speed with the main till switched off, and
+why R9's two seconds are a bookkeeping budget rather than a billing one.
