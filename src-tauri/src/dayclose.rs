@@ -39,7 +39,6 @@ use mb_db::repo::money::{CashMovement, DayClose, Denomination};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::billing::TERMINAL;
 use crate::flows::{now, today};
 use crate::guard;
 use crate::ipc::MoneyView;
@@ -183,7 +182,7 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                     // person in front of this screen is counting the box under
                     // THIS till, and showing them the shop total would be a
                     // variance they cannot act on.
-                    repos.money().cash_position_of(OUTLET, day, Some(TERMINAL))?,
+                    repos.money().cash_position_of(OUTLET, day, Some(app.terminal_id()))?,
                     repos.corrections().day_totals(OUTLET, day)?,
                     existing,
                     stored,
@@ -380,13 +379,13 @@ pub fn close_on(
     let shift_no = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
-                mb_db::Repos::new(tx).money().next_shift(OUTLET, day, TERMINAL)
+                mb_db::Repos::new(tx).money().next_shift(OUTLET, day, app.terminal_id())
             })
             .map_err(|e| words::from_db(&e))
     })?;
     let close = DayClose {
-        id: format!("close_{}_{TERMINAL}_{shift_no}", day.days_since_epoch()),
-        terminal: Some(TERMINAL.to_owned()),
+        id: format!("close_{}_{}_{shift_no}", day.days_since_epoch(), app.terminal_id()),
+        terminal: Some(app.terminal_id().to_owned()),
         shift_no,
         business_day: day,
         opening_float: Money::from_paise(
@@ -488,7 +487,7 @@ pub fn close_on(
                     &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::DAY_CLOSED, "day")
                         .about(day.to_string())
                         .with_after(serde_json::json!({
-                            "terminal": TERMINAL,
+                            "terminal": app.terminal_id(),
                             "shift": shift_no,
                             "expected_paise": expected.paise(),
                             "counted_paise": counted.paise(),

@@ -524,7 +524,7 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let moved = with_table(order.clone(), Some(target.clone()));
-                repos.orders().save(OUTLET, crate::billing::TERMINAL, &moved)?;
+                repos.orders().save(OUTLET, app.terminal_id(), &moved)?;
                 repos.events().record(
                     &order_id,
                     at,
@@ -638,7 +638,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
                         ));
                     }
                 }
-                repos.orders().save(OUTLET, crate::billing::TERMINAL, &merged)?;
+                repos.orders().save(OUTLET, app.terminal_id(), &merged)?;
 
                 // And the absorbed one is closed with a link rather than a hole.
                 let closed = match absorbed.clone() {
@@ -657,7 +657,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
                 };
                 repos
                     .orders()
-                    .save(OUTLET, crate::billing::TERMINAL, &mb_core::AnyOrder::Cancelled(closed))?;
+                    .save(OUTLET, app.terminal_id(), &mb_core::AnyOrder::Cancelled(closed))?;
                 repos.floor().record_merge(&from_order, &into_order)?;
                 repos.events().record(
                     &from_order,
@@ -775,7 +775,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                         ));
                     }
                 }
-                repos.orders().save(OUTLET, crate::billing::TERMINAL, &kept)?;
+                repos.orders().save(OUTLET, app.terminal_id(), &kept)?;
 
                 // And what leaves: a new order with its own numbers, claimed
                 // against the ORIGINAL's business day (D5) so a split at 00:15
@@ -800,14 +800,14 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 let token = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    app.terminal_id(),
                     mb_db::numbering::CounterKind::Token,
                     day,
                 )?;
                 let bill_number = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    app.terminal_id(),
                     mb_db::numbering::CounterKind::Bill,
                     day,
                 )?;
@@ -815,7 +815,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 let new_id = opened.core.id.as_str().to_owned();
                 repos
                     .orders()
-                    .save(OUTLET, crate::billing::TERMINAL, &mb_core::AnyOrder::Open(opened))?;
+                    .save(OUTLET, app.terminal_id(), &mb_core::AnyOrder::Open(opened))?;
 
                 repos.events().record(
                     &request.order_id,

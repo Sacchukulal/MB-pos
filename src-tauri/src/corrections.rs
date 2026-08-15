@@ -289,7 +289,7 @@ pub fn void_bill_on(
                 let repos = mb_db::Repos::new(tx);
                 repos.orders().save(
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    app.terminal_id(),
                     &AnyOrder::Voided(voided.clone()),
                 )?;
                 // **P25, D113 — put back exactly what was taken.**
@@ -475,7 +475,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
                 let repos = mb_db::Repos::new(tx);
                 repos.orders().save(
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    app.terminal_id(),
                     &AnyOrder::Cancelled(cancelled.clone()),
                 )?;
                 repos.audit().append(

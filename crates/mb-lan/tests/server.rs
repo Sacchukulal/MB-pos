@@ -48,6 +48,9 @@ struct FakeCounter {
     /// P20 — which intents reached the counter, so a test can prove an
     /// unpaired phone got nowhere near the applier.
     applied: Mutex<Vec<String>>,
+    /// P27/D141 — the sentence the shop's plan gives back, or nothing when
+    /// there is room for another till.
+    till_full: Mutex<Option<String>>,
 }
 
 impl FakeCounter {
@@ -58,6 +61,7 @@ impl FakeCounter {
             reads: AtomicU32::new(0),
             seen: Mutex::new(Vec::new()),
             applied: Mutex::new(Vec::new()),
+            till_full: Mutex::new(None),
         })
     }
 
@@ -83,6 +87,13 @@ impl Counter for FakeCounter {
 
     fn device_limit(&self) -> u32 {
         self.limit.load(Ordering::SeqCst)
+    }
+
+    fn till_room(&self) -> Result<(), String> {
+        match self.till_full.lock().unwrap().clone() {
+            Some(says) => Err(says),
+            None => Ok(()),
+        }
     }
 
     fn devices(&self) -> Vec<DeviceRow> {
@@ -831,6 +842,54 @@ async fn the_device_limit_refuses_in_a_sentence_with_the_number() {
     assert!(said.contains('2'), "the number is not in the sentence: {said}");
     assert!(said.contains("phones"), "{said}");
     assert!(said.contains("Remove one"), "it does not say what to do: {said}");
+}
+
+/// **T7 / D141 — the licence counts tills at the door, and a till is not a
+/// phone.**
+///
+/// Two halves, and the second is the one that matters. A shop whose plan is full
+/// of tills must still be able to add the phone it paid for, and a shop that has
+/// used up its phones must still be able to add a till: they are separate lines
+/// on the plan, so they are separate gates here.
+///
+/// Nothing in this test can stop a till that has already joined — there is no
+/// call for it to make. That is D141's other half, and it is true by there being
+/// no code rather than by a test asserting it.
+#[tokio::test]
+async fn a_full_plan_refuses_a_new_till_and_leaves_the_phones_alone() {
+    let h = Harness::start();
+    *h.counter.till_full.lock().unwrap() = Some(
+        "This shop's plan allows 2 tills, and all of them are in use. A bigger \
+         plan lets another one join — the tills you have keep billing either way."
+            .to_owned(),
+    );
+
+    let (token, _) = h.shared.desk.open(h.clock.now());
+    let refused = h
+        .client
+        .post(h.url("/v1/pair"))
+        .json(&PairRequest {
+            name: "Second counter".to_owned(),
+            platform: "till".to_owned(),
+            token,
+        })
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(refused.status(), 403);
+    let body: serde_json::Value = refused.json().await.expect("json");
+    let said = body["message"].as_str().unwrap_or_default();
+    assert!(said.contains('2'), "the plan's number is not in it: {said}");
+    assert!(said.contains("tills"), "it talks about phones: {said}");
+    // The half a shopkeeper actually needs to read.
+    assert!(
+        said.contains("keep billing"),
+        "it does not promise the tills already working keep working: {said}"
+    );
+
+    // And the phone line is untouched by the till line being full.
+    let phone = pair_a_phone(&h, "Ravi's phone").await;
+    assert!(!phone.device_id.is_empty());
 }
 
 /// **P20 on the road**: an authenticated phone reaches the applier, an

@@ -283,6 +283,11 @@ fn main() {
             // P19. Last, because it is the only thing here that opens a socket
             // — and it never stops the window opening if it cannot.
             lan::start(app.handle());
+            // P27. **The bills a secondary is holding** (D136). One sleeping
+            // thread that does nothing at all on the main till, and that never
+            // touches the settle path — it only reads a queue the settle
+            // already wrote.
+            forwarding::start_sender(app.handle());
             push::watch_for_pairing(app.handle());
             push::emit_session(app.handle());
             if let Some(main) = app.get_webview_window("main") {

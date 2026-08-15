@@ -164,7 +164,15 @@ pub fn apply(
                     });
                 }
 
-                let applied = do_it(&repos, intent, staff, at, day, cashier_has.as_deref())?;
+                let applied = do_it(
+                    &repos,
+                    intent,
+                    staff,
+                    at,
+                    day,
+                    cashier_has.as_deref(),
+                    app.terminal_id(),
+                )?;
 
                 let recorded = serde_json::to_string(&applied.outcome).unwrap_or_default();
                 repos
@@ -231,6 +239,33 @@ fn refused(message: impl Into<String>) -> Applied {
     }
 }
 
+/// **Which till this order is on, when there is more than one** (P27, D137).
+///
+/// One shop, one till: this is `None` and every sentence below reads exactly as
+/// it did before P27 — *"at the counter"*, which is where it happened. A shop
+/// with two tills gets the name instead, because *"already open at the
+/// counter"* is not an answer when there are two counters and the person is
+/// standing at one of them.
+///
+/// Never a decision, only a word. A failure to read it costs a vaguer sentence
+/// and nothing else, which is why it swallows its errors.
+fn on_which_till(repos: &mb_db::Repos<'_>, order: &OrderId) -> Option<String> {
+    if repos.terminals().count(OUTLET).ok()? < 2 {
+        return None;
+    }
+    let id = repos.orders().terminal_of(order).ok()??;
+    let name = repos.terminals().find(OUTLET, &id).ok()??.name;
+    (!name.trim().is_empty()).then_some(name)
+}
+
+/// "at the counter", or "on Counter 2".
+fn where_words(till: Option<&str>) -> String {
+    match till {
+        Some(name) => format!("on {name}"),
+        None => "at the counter".to_owned(),
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "everything applying an intent needs, and threading it through a \
@@ -249,6 +284,10 @@ fn do_it(
     at: Timestamp,
     day: mb_core::BusinessDay,
     cashier_has: Option<&str>,
+    // **Which till this order belongs to** (P27, D135). The master applies a
+    // phone's intent, so an order opened from the floor belongs to the machine
+    // running this code, and its numbers come out of that machine's series.
+    till: &str,
 ) -> Result<Applied, mb_db::DbError> {
     // Opening an order is the one intent with no order to load.
     if let What::OpenOrder {
@@ -257,7 +296,7 @@ fn do_it(
         covers,
     } = &intent.what
     {
-        return open_order(repos, order_type, table_id.as_deref(), *covers, staff, at, day);
+        return open_order(repos, order_type, table_id.as_deref(), *covers, staff, at, day, till);
     }
 
     let Some(order_id) = intent.order_id.as_deref() else {
@@ -269,24 +308,35 @@ fn do_it(
 
     // **Conflict (e): the counter has already finished with it.** Said in the
     // words a waiter needs — whether to write it down or not.
+    //
+    // **D137's second conflict, and the till it names.** A settle always beats
+    // an addition, on a phone and between two tills alike: the reverse takes
+    // money for food nobody agreed to. Only the words change when a shop has
+    // two counters, and they change because "at the counter" stops being an
+    // answer when the person asking is standing at one.
     let mut open = match found {
         Some(AnyOrder::Open(open)) => open,
         Some(AnyOrder::Settled(_)) => {
-            return Ok(refused(
-                "That bill has already been paid at the counter. Start a new \
-                 order for anything else.",
-            ));
+            let till = on_which_till(repos, &OrderId::new(order_id));
+            return Ok(refused(format!(
+                "That bill has already been paid {}. Start a new order for \
+                 anything else.",
+                where_words(till.as_deref())
+            )));
         }
         Some(AnyOrder::Voided(_)) => {
-            return Ok(refused(
-                "That bill was paid and then cancelled at the counter. Start a \
-                 new order.",
-            ));
+            let till = on_which_till(repos, &OrderId::new(order_id));
+            return Ok(refused(format!(
+                "That bill was paid and then cancelled {}. Start a new order.",
+                where_words(till.as_deref())
+            )));
         }
         Some(AnyOrder::Cancelled(_)) => {
-            return Ok(refused(
-                "That order was cancelled at the counter. Start a new one.",
-            ));
+            let till = on_which_till(repos, &OrderId::new(order_id));
+            return Ok(refused(format!(
+                "That order was cancelled {}. Start a new one.",
+                where_words(till.as_deref())
+            )));
         }
         Some(AnyOrder::Draft(_)) | None => {
             return Ok(refused(
@@ -468,7 +518,7 @@ fn do_it(
                 .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
             repos.orders().save(
                 OUTLET,
-                crate::billing::TERMINAL,
+                till,
                 &AnyOrder::Cancelled(cancelled),
             )?;
             return Ok(Applied {
@@ -490,7 +540,7 @@ fn do_it(
 
     repos
         .orders()
-        .save(OUTLET, crate::billing::TERMINAL, &AnyOrder::Open(open.clone()))?;
+        .save(OUTLET, till, &AnyOrder::Open(open.clone()))?;
 
     Ok(Applied {
         outcome: view_of(&open, note),
@@ -498,6 +548,11 @@ fn do_it(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "everything opening an order needs, and a struct would only move \
+              the list somewhere less obvious"
+)]
 fn open_order(
     repos: &mb_db::Repos<'_>,
     order_type: &str,
@@ -506,6 +561,7 @@ fn open_order(
     staff: &StaffId,
     at: Timestamp,
     day: mb_core::BusinessDay,
+    till: &str,
 ) -> Result<Applied, mb_db::DbError> {
     let Ok(order_type) = mb_db::encode::order_type_from_sql(order_type) else {
         return Ok(refused("That is not an order type this counter knows."));
@@ -543,15 +599,33 @@ fn open_order(
                 .is_some_and(|t| t.as_str() == table)
         });
         if let Some(AnyOrder::Open(open)) = existing {
-            return Ok(Applied {
-                outcome: view_of(
-                    &open,
-                    Some(
-                        "Somebody had already opened this table. You are both on \
-                         the same order."
-                            .to_owned(),
-                    ),
+            // **D137's first conflict, and it is answered by joining rather
+            // than refusing — on purpose, and this is the correction.**
+            //
+            // P27's draft said the second till is REFUSED with "Table 5 is
+            // already open on Counter 2". Refusing is the wrong answer and the
+            // code that was already here had it right: a party that has
+            // half-ordered on one till and is now standing at another must be
+            // servable, and a refusal leaves the cashier with a customer and no
+            // way to take their money. Two orders on one table is the failure —
+            // one order reached from two tills is not.
+            //
+            // What P27 adds is the NAME. "Somebody had already opened this
+            // table" is a fine sentence in a one-till shop and a useless one in
+            // a two-till shop, where the cashier's next question is *which
+            // counter*.
+            let till = on_which_till(repos, &open.core.id);
+            let says = match till {
+                Some(name) => format!(
+                    "This table is already open on {name}. You are both on the \
+                     same order."
                 ),
+                None => "Somebody had already opened this table. You are both on \
+                         the same order."
+                    .to_owned(),
+            };
+            return Ok(Applied {
+                outcome: view_of(&open, Some(says)),
                 tell_the_cashier: None,
             });
         }
@@ -578,14 +652,14 @@ fn open_order(
     let token = mb_db::numbering::claim(
         repos.tx(),
         OUTLET,
-        crate::billing::TERMINAL,
+        till,
         mb_db::numbering::CounterKind::Token,
         day,
     )?;
     let bill_number = mb_db::numbering::claim(
         repos.tx(),
         OUTLET,
-        crate::billing::TERMINAL,
+        till,
         mb_db::numbering::CounterKind::Bill,
         day,
     )?;
@@ -596,7 +670,7 @@ fn open_order(
     };
     repos
         .orders()
-        .save(OUTLET, crate::billing::TERMINAL, &AnyOrder::Open(open.clone()))?;
+        .save(OUTLET, till, &AnyOrder::Open(open.clone()))?;
 
     Ok(Applied {
         outcome: view_of(&open, None),

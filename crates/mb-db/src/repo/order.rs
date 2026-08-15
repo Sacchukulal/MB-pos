@@ -33,7 +33,7 @@ use mb_core::{
     OpenOrder, OrderCore, OrderId, Payment, SettledOrder, Settlement, StaffId, TableId, TaxAmounts,
     TaxOutcome, TaxSummary, TaxTreatment, VoidedOrder,
 };
-use rusqlite::Transaction;
+use rusqlite::{OptionalExtension as _, Transaction};
 
 use crate::encode::{self, order_state};
 use crate::error::DbError;
@@ -244,6 +244,24 @@ impl<'a> OrderRepo<'a> {
             }
         };
         Ok(Some(order))
+    }
+
+    /// **Which till holds this order** (P27, D137).
+    ///
+    /// Deliberately not on `AnyOrder`: which machine typed a bill is a fact
+    /// about the shop's wiring and not about the sale, and putting it in
+    /// `mb-core` would put it on the money path. It is read only to write a
+    /// sentence — *"Table 5 is already open on Counter 2"* — and never to
+    /// decide anything.
+    pub fn terminal_of(&self, id: &OrderId) -> Result<Option<String>, DbError> {
+        Ok(self
+            .tx
+            .query_row(
+                "SELECT terminal_id FROM orders WHERE id = ?1",
+                [id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
     }
 
     /// Everything on the floor right now — what P09's table grid draws.

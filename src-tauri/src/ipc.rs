@@ -549,6 +549,11 @@ macro_rules! commands {
             $crate::counting::approve_stock_count,
             $crate::counting::abandon_stock_count,
             $crate::counting::count_sheet,
+            $crate::terminals::tills,
+            $crate::terminals::save_till,
+            $crate::terminals::make_master,
+            $crate::terminals::join_master,
+            $crate::terminals::send_waiting_bills,
             $crate::share::share_report,
             // P17 — the settings. Five commands for ninety settings, because
             // the catalogue is the screen.

@@ -19,7 +19,7 @@ use mb_print::printer::PrinterConfig;
 use mb_print::queue::{Job, JobKind};
 use tauri::State;
 
-use crate::billing::{CartState, TERMINAL};
+use crate::billing::CartState;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
@@ -339,14 +339,14 @@ pub fn complete_bill_on(app: &App) -> UiResult<String> {
         // emptiness check above has already refused.
         let opened_by = state.opened_by.clone().unwrap_or_else(|| settled_by.clone());
         Ok((
-            state.to_draft(at, opened_by)?,
+            state.to_draft(at, opened_by, app.terminal_id())?,
             bill,
             state.settlement.clone(),
         ))
     })?;
 
     let (number, settled) = app.with_shop(|shop| {
-        let till = mb_db::Till::new(OUTLET, TERMINAL);
+        let till = mb_db::Till::new(OUTLET, app.terminal_id());
         // **An order the kitchen already knows about is already on disk**, with
         // its numbers claimed (see `park_open_order`). Claiming again would
         // burn a bill number per kitchen ticket and leave the parked row
@@ -584,12 +584,12 @@ pub(crate) fn park_open_order(app: &App) -> UiResult<String> {
 
     let draft = app.with_cart(|state| {
         let opened_by = state.opened_by.clone().unwrap_or_else(|| staff.clone());
-        state.to_draft(at, opened_by)
+        state.to_draft(at, opened_by, app.terminal_id())
     })?;
     let id = draft.core.id.clone();
 
     let number = app.with_shop(|shop| {
-        let till = mb_db::Till::new(OUTLET, TERMINAL);
+        let till = mb_db::Till::new(OUTLET, app.terminal_id());
         let found = match &existing {
             Some(_) => shop
                 .db
@@ -607,7 +607,7 @@ pub(crate) fn park_open_order(app: &App) -> UiResult<String> {
                     .transaction(|tx| {
                         mb_db::Repos::new(tx).orders().save(
                             OUTLET,
-                            TERMINAL,
+                            app.terminal_id(),
                             &mb_core::AnyOrder::Open(open.clone()),
                         )
                     })

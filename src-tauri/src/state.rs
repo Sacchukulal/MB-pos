@@ -106,6 +106,19 @@ pub struct App {
     /// reason: the health panel and the shell both read it, and neither is
     /// allowed to make a network call to draw a row.
     updates: Mutex<crate::updates::UpdateState>,
+    /// **Which till this machine is** (P27, D135).
+    ///
+    /// Decided once, at start-up, from `terminal.json` beside the config — and
+    /// held, because it is read on the settle path. Every bill number this
+    /// machine issues comes out of a series keyed on it, so a stale or wrong
+    /// answer here is two tills sharing a number, which is the collision the
+    /// whole session exists to prevent.
+    ///
+    /// It is not behind a lock and it does not change while the app runs.
+    /// Joining a shop rewrites the file and says the till must be restarted —
+    /// a value that could change under a bill being written is a value the
+    /// billing path cannot trust.
+    terminal_id: String,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -166,7 +179,16 @@ impl App {
                 is_dev_build: !crate::updates::is_a_release_build(),
                 ..crate::updates::UpdateState::default()
             }),
+            terminal_id: crate::terminals::me(&AppConfig::directory()).terminal_id,
         })
+    }
+
+    /// **Which till this machine is** (P27, D135). `terminal_default` on the
+    /// shop that has only ever had one, which is the id migration 0001 seeded
+    /// and the one every bill it has already written points at.
+    #[must_use]
+    pub fn terminal_id(&self) -> &str {
+        &self.terminal_id
     }
 
     /// What the counter knows about updates (P22). A copy of a held value.
@@ -805,6 +827,16 @@ pub enum Pushed {
     /// screen had not asked for it.
     FloorChanged {
         waiting: u32,
+    },
+    /// **This till is holding bills the main till has not taken yet** (P27,
+    /// D138). Pushed for the same reason as the print queue: *a shop must be
+    /// able to see that the tills are apart*, and a banner that only refreshes
+    /// when somebody opens a screen is a banner that lies.
+    Tills {
+        /// How many bills are queued here.
+        waiting: u32,
+        /// The whole sentence, empty when there is nothing to say (R8).
+        says: String,
     },
 }
 

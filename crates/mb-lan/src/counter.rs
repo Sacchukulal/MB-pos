@@ -142,6 +142,18 @@ pub trait Counter: Send + Sync + 'static {
     /// Every device that is not revoked.
     fn devices(&self) -> Vec<DeviceRow>;
 
+    /// **P27/D141 — is there room in the plan for another TILL?**
+    ///
+    /// A till is counted separately from a phone: they are different lines on a
+    /// plan and a shop that has used up its phones must still be able to add the
+    /// counter it paid for. `Err` carries the sentence a person reads, with the
+    /// plan's number in it.
+    ///
+    /// **This is asked at the door and nowhere else.** A till that has already
+    /// joined keeps billing whatever this would say tomorrow — a lapsed
+    /// subscription must never be money a shop cannot take.
+    fn till_room(&self) -> Result<(), String>;
+
     /// Find a live device and check its credential.
     ///
     /// **This is read on EVERY request**, and that is deliberate: revocation

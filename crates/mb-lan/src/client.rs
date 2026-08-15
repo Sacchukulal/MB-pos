@@ -72,6 +72,11 @@ pub struct Master {
     base: String,
     http: reqwest::Client,
     credential: Option<Credential>,
+    /// **The certificate this client is pinned to**, kept so a till that has
+    /// just met a master can write down the exact one it checked (D80) rather
+    /// than fetching it a second time — a second fetch could return a different
+    /// certificate from the one the person's QR proved.
+    certificate_pem: String,
 }
 
 impl Master {
@@ -101,7 +106,14 @@ impl Master {
             base: base.trim_end_matches('/').to_owned(),
             http,
             credential: None,
+            certificate_pem: certificate_pem.to_owned(),
         })
+    }
+
+    /// The certificate this client checked and is now pinned to.
+    #[must_use]
+    pub fn certificate_pem(&self) -> &str {
+        &self.certificate_pem
     }
 
     /// **Meet a master for the first time, with a fingerprint a person
@@ -170,22 +182,66 @@ impl Master {
 
     /// **Join** — the same pairing a phone does (P19 §3), with a token a person
     /// is holding up on the master's screen.
+    ///
+    /// Pairing is two steps because **a person is in the middle of it**: the
+    /// post asks, and somebody at the master reads the name and presses Allow.
+    /// This waits for them, up to `patience`, exactly as the phone's screen
+    /// does — so the caller gets a credential or a sentence and never a
+    /// half-finished join it has to remember to come back to.
+    ///
+    /// # Errors
+    ///
+    /// [`ClientError::Refused`] when the master says no — a spent token, a full
+    /// plan (D141), or nobody pressing Allow before `patience` runs out.
     pub async fn join(
         &self,
         token: &str,
         name: &str,
-    ) -> Result<serde_json::Value, ClientError> {
-        self.post_json(
-            "/v1/pair",
-            &serde_json::json!({
-                "token": token,
-                "name": name,
-                // A till, not a phone. The master's pairing panel shows this,
-                // so the person pressing Allow can see what is joining.
-                "platform": "till",
-            }),
-        )
-        .await
+        patience: Duration,
+    ) -> Result<Credential, ClientError> {
+        let asked: serde_json::Value = self
+            .post_json(
+                "/v1/pair",
+                &serde_json::json!({
+                    "token": token,
+                    "name": name,
+                    // A till, not a phone. The master's pairing panel shows
+                    // this, so the person pressing Allow sees what is joining —
+                    // and D141 counts a till against a different line.
+                    "platform": "till",
+                }),
+            )
+            .await?;
+
+        // The master may approve instantly (a token it was already holding), in
+        // which case there is nothing to poll for.
+        if let Some(credential) = credential_in(&asked) {
+            return Ok(credential);
+        }
+        let request_id = asked
+            .get("request_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ClientError::Unreadable("the main till did not say what to wait for".to_owned())
+            })?
+            .to_owned();
+
+        let deadline = std::time::Instant::now() + patience;
+        loop {
+            let status: serde_json::Value = self.get(&format!("/v1/pair/{request_id}")).await?;
+            if let Some(credential) = credential_in(&status) {
+                return Ok(credential);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(ClientError::Refused {
+                    status: 0,
+                    message: "Nobody allowed this till at the main counter. Show the \
+                              code again and ask somebody there to press Allow."
+                        .to_owned(),
+                });
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
 
     /// **Send facts** (D136). Retryable for ever: the master is idempotent on
@@ -264,6 +320,109 @@ impl Master {
         }
         serde_json::from_str(&text).map_err(|e| ClientError::Unreadable(e.to_string()))
     }
+}
+
+// ---------------------------------------------------------------------------
+// The blocking face of it.
+// ---------------------------------------------------------------------------
+
+/// **One runtime for every client call this process makes**, built the first
+/// time one is made and never on a master that makes none.
+///
+/// The counter is not an async program: its commands are ordinary functions and
+/// its sender is an ordinary thread. Rather than each of them building a runtime
+/// — a thread pool created and destroyed around every two-second tick — they
+/// share this one, and `mb-lan` keeps the async in the crate that already owns
+/// it. `src-tauri` names tokio nowhere, which is the same boundary
+/// `server::start` drew for the server.
+///
+/// **Multi-threaded with one worker, deliberately.** A join waits up to two
+/// minutes for a person to press Allow, and on a current-thread runtime that
+/// wait would own the driver and stall the sender behind it.
+fn shared_runtime() -> Option<&'static tokio::runtime::Runtime> {
+    static RUNTIME: std::sync::OnceLock<Option<tokio::runtime::Runtime>> =
+        std::sync::OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("mb-lan-client")
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
+
+fn on_runtime<T>(
+    future: impl std::future::Future<Output = Result<T, ClientError>>,
+) -> Result<T, ClientError> {
+    let Some(runtime) = shared_runtime() else {
+        return Err(ClientError::Unreachable(
+            "this till could not start networking".to_owned(),
+        ));
+    };
+    runtime.block_on(future)
+}
+
+impl Master {
+    /// [`Master::meet`], for a caller with no runtime.
+    ///
+    /// # Errors
+    ///
+    /// As [`Master::meet`].
+    pub fn meet_blocking(base: &str, expected_fingerprint: &str) -> Result<Master, ClientError> {
+        on_runtime(Master::meet(base, expected_fingerprint))
+    }
+
+    /// [`Master::join`], for a caller with no runtime.
+    ///
+    /// # Errors
+    ///
+    /// As [`Master::join`].
+    pub fn join_blocking(
+        &self,
+        token: &str,
+        name: &str,
+        patience: Duration,
+    ) -> Result<Credential, ClientError> {
+        on_runtime(self.join(token, name, patience))
+    }
+
+    /// [`Master::forward`], for a caller with no runtime.
+    ///
+    /// # Errors
+    ///
+    /// As [`Master::forward`].
+    pub fn forward_blocking(&self, batch: &Forwarded) -> Result<Receipt, ClientError> {
+        on_runtime(self.forward(batch))
+    }
+
+    /// [`Master::apply`], for a caller with no runtime.
+    ///
+    /// # Errors
+    ///
+    /// As [`Master::apply`].
+    pub fn apply_blocking(&self, intent: &Intent) -> Result<Outcome, ClientError> {
+        on_runtime(self.apply(intent))
+    }
+}
+
+/// A credential out of a pairing answer, when there is one.
+///
+/// **Both halves or neither.** A body carrying an id and no secret is a body
+/// that has not finished being approved, and treating it as a join would leave
+/// a till holding an identity it cannot prove.
+fn credential_in(body: &serde_json::Value) -> Option<Credential> {
+    let device_id = body.get("device_id")?.as_str()?;
+    let secret = body.get("secret")?.as_str()?;
+    if device_id.is_empty() || secret.is_empty() {
+        return None;
+    }
+    Some(Credential {
+        device_id: device_id.to_owned(),
+        secret: secret.to_owned(),
+    })
 }
 
 /// Two fingerprints, however they happen to be written down.

@@ -410,14 +410,24 @@ async fn pair(
     }
     // The limit is checked BEFORE a person is asked, so nobody is shown an
     // approval they are not allowed to grant.
-    let live = u32::try_from(shared.counter.devices().len()).unwrap_or(u32::MAX);
-    let limit = shared.counter.device_limit();
-    if live >= limit {
-        return refused(&Refusal::TooManyDevices(format!(
-            "This shop's plan allows {limit} {}. Remove one on the counter \
-             before adding another.",
-            if limit == 1 { "phone" } else { "phones" }
-        )));
+    //
+    // **A till is counted against a different line than a phone** (D141): they
+    // are priced separately, and a shop that has used up its phones must still
+    // be able to add the counter it paid for.
+    if request.platform.trim().eq_ignore_ascii_case("till") {
+        if let Err(says) = shared.counter.till_room() {
+            return refused(&Refusal::TooManyDevices(says));
+        }
+    } else {
+        let live = u32::try_from(shared.counter.devices().len()).unwrap_or(u32::MAX);
+        let limit = shared.counter.device_limit();
+        if live >= limit {
+            return refused(&Refusal::TooManyDevices(format!(
+                "This shop's plan allows {limit} {}. Remove one on the counter \
+                 before adding another.",
+                if limit == 1 { "phone" } else { "phones" }
+            )));
+        }
     }
 
     match shared.desk.present(

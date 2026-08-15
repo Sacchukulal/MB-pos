@@ -714,7 +714,18 @@ pub type Cart_ = Mutex<CartState>;
 // Turning a cart into an order (P10).
 // ---------------------------------------------------------------------------
 
-/// The terminal this counter is. One until P27 builds the second.
+/// **The shop's FIRST till**, and only that.
+///
+/// Migration 0001 seeds this row, every bill a one-till shop has ever written
+/// points at it, and a shop that adds a second till in 2027 must not have its
+/// history orphaned from the machine that wrote it. So it stays, and it is the
+/// answer [`crate::state::App::terminal_id`] gives on a machine that has never
+/// joined anything.
+///
+/// **It is not "which till is this".** That question is answered by
+/// `App::terminal_id`, which reads this machine's own `terminal.json` — and
+/// after P27 it has to be, because the bill series is keyed on it (D135) and
+/// two tills answering `terminal_default` is two tills printing bill A/0001.
 pub const TERMINAL: &str = "terminal_default";
 
 impl CartState {
@@ -754,13 +765,18 @@ impl CartState {
     /// `opened_by` and falls back to the current person only for a cart that
     /// somehow has neither. See `flows::complete_bill`, which is the only
     /// caller, and P11 item 8 for why the two differ.
-    pub fn to_draft(&self, at: Timestamp, by: mb_core::StaffId) -> UiResult<mb_core::DraftOrder> {
+    pub fn to_draft(
+        &self,
+        at: Timestamp,
+        by: mb_core::StaffId,
+        till: &str,
+    ) -> UiResult<mb_core::DraftOrder> {
         let day = mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
         let id = mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| {
             // A new order gets an id from the clock plus the terminal. D13 says
             // ids are text because two terminals collide on integers, and this
             // is that rule honoured rather than restated.
-            format!("ord_{}_{}", at.millis(), TERMINAL)
+            format!("ord_{}_{till}", at.millis())
         }));
 
         let mut draft = mb_core::DraftOrder::new(id, day, at, self.order_type, by);

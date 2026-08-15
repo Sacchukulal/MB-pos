@@ -17,4 +17,12 @@ stand_in: boolean, } | { "kind": "licence", state: string, } | { "kind": "sync",
 /**
  * How many phones are waiting for somebody to press Allow.
  */
-waiting: number, } | { "kind": "floorChanged", waiting: number, };
+waiting: number, } | { "kind": "floorChanged", waiting: number, } | { "kind": "tills", 
+/**
+ * How many bills are queued here.
+ */
+waiting: number, 
+/**
+ * The whole sentence, empty when there is nothing to say (R8).
+ */
+says: string, };

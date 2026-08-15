@@ -395,6 +395,20 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("abandon_stock_count", Access::Needs(Permission::StockCount)),
     ("count_sheet", Access::Needs(Permission::StockCount)),
     ("approve_stock_count", Access::Needs(Permission::StockAdjust)),
+    // --- P27, the tills ------------------------------------------------------
+    // Reading the roster is reading the shop, and the banner on the billing
+    // screen needs it — so it is the reports permission and not the settings
+    // one, or a cashier could not see that their bills are queued.
+    ("tills", Access::Needs(Permission::ReportsView)),
+    // Changing a till's series prefix changes what its bills are NUMBERED, so
+    // it sits with the shop's own settings and nothing weaker (D135).
+    ("save_till", Access::Needs(Permission::SettingsStore)),
+    ("make_master", Access::Needs(Permission::SettingsStore)),
+    ("join_master", Access::Needs(Permission::SettingsStore)),
+    // Pressing "send now" only drains a queue that would have drained itself.
+    // Anybody who may write a bill may push their own bills across.
+    ("send_waiting_bills", Access::Needs(Permission::BillCreate)),
+
     // D134. Sharing a report is reading it, so it is the report's own
     // permission and nothing weaker â `report_on` checks it again anyway.
     ("share_report", Access::Needs(Permission::ReportsView)),
@@ -667,7 +681,8 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 25] = [
+        const SOURCES: [&str; 26] = [
+            include_str!("terminals.rs"),
             include_str!("orders.rs"),
             include_str!("buying.rs"),
             include_str!("counting.rs"),
@@ -708,7 +723,15 @@ mod tests {
                     if next.starts_with('#') {
                         continue;
                     }
-                    if let Some(rest) = next.strip_prefix("pub fn ") {
+                    // **`async` too**, and P27 is why: `join_master` waits for a
+                    // person at another counter to press Allow, so it has to be
+                    // async — and a scanner that only knew `pub fn` would have
+                    // let it in unclassified, which is the one thing this test
+                    // exists to prevent.
+                    if let Some(rest) = next
+                        .strip_prefix("pub fn ")
+                        .or_else(|| next.strip_prefix("pub async fn "))
+                    {
                         let name: String =
                             rest.chars().take_while(|c| *c != '(' && *c != '<').collect();
                         found.insert(name);
@@ -791,7 +814,11 @@ mod tests {
             // Every command in this file must have been found by the scan.
             let names: Vec<String> = text
                 .lines()
-                .filter_map(|line| line.trim().strip_prefix("pub fn "))
+                .filter_map(|line| {
+                    let line = line.trim();
+                    line.strip_prefix("pub fn ")
+                        .or_else(|| line.strip_prefix("pub async fn "))
+                })
                 .map(|rest| rest.chars().take_while(|c| *c != '(' && *c != '<').collect())
                 .collect();
             if !names.iter().any(|n: &String| scanned.contains(n)) {

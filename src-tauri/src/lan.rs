@@ -145,6 +145,41 @@ impl mb_lan::Counter for Bridge {
             .collect()
     }
 
+    /// **D141 — the licence counts tills at the door.**
+    ///
+    /// The same shape as `device_limit` and for the same WEBSITE-C5 reason: the
+    /// number is read from the live plan at the moment of joining, never
+    /// remembered from when the shop first paid.
+    ///
+    /// Only this call can answer it. A joining till has its own empty database
+    /// and cannot see the shop's roster or the shop's plan — the master can, and
+    /// the master is the one being asked.
+    fn till_room(&self) -> Result<(), String> {
+        let Some(handle) = self.app() else {
+            // Shutting down. Refusing here would be refusing a join for a reason
+            // that is not about the shop's licence, but so would allowing it —
+            // and this one is undoable by pressing the button again.
+            return Err("The main till is closing. Try again once it is open.".to_owned());
+        };
+        let allowed = handle.entitlement().limits.terminals;
+        let have = handle
+            .with_shop(|shop| {
+                shop.db
+                    .read_transaction(|tx| mb_db::Repos::new(tx).terminals().count(OUTLET))
+                    .map_err(|e| words::from_db(&e))
+            })
+            .unwrap_or(0);
+        if have < allowed {
+            return Ok(());
+        }
+        Err(format!(
+            "This shop's plan allows {allowed} {}, and all of them are in use. \
+             A bigger plan lets another one join — the tills you have keep \
+             billing either way.",
+            if allowed == 1 { "till" } else { "tills" }
+        ))
+    }
+
     fn authenticate(&self, device_id: &str, secret: &str) -> Option<mb_lan::Device> {
         let handle = self.app()?;
         // **A READER, on every request.** The revoke has to bite immediately

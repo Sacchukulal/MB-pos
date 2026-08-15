@@ -131,24 +131,43 @@ impl<'a> OutboxRepo<'a> {
 
     /// The backlog, oldest first, capped.
     pub fn pending(&self, limit: usize) -> Result<Vec<OutboxRow>, DbError> {
+        self.pending_in(None, limit)
+    }
+
+    /// The backlog for **one table**, oldest first, capped.
+    ///
+    /// P27 needs this and the unfiltered form would have been a bug: a
+    /// secondary till's outbox also holds menu edits and settings, nothing
+    /// clears those until P33's cloud sync exists, and "the oldest two hundred
+    /// rows" would eventually be two hundred rows that are not bills — so the
+    /// shop's money would stop travelling while the queue looked healthy.
+    pub fn pending_in(
+        &self,
+        table: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<OutboxRow>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT id, table_name, row_id, op, tombstone, created_at, attempts
                FROM sync_outbox
               WHERE synced_at IS NULL
+                AND (?1 IS NULL OR table_name = ?1)
               ORDER BY created_at
-              LIMIT ?1",
+              LIMIT ?2",
         )?;
-        let rows = stmt.query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)?,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params![table, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        )?;
 
         let mut out = Vec::new();
         for row in rows {

@@ -361,6 +361,14 @@ pub struct Forwarded {
     /// The till that took the money. **Its own** `terminals` row on the master,
     /// which is what makes the day close per drawer (D140) work across tills.
     pub terminal_id: String,
+    /// **The till describing itself**, so the master can create the row the
+    /// first time it hears from one â a forwarded bill points at a terminal,
+    /// and pairing makes a DEVICE row rather than a till.
+    pub terminal_name: String,
+    /// **And declaring its series** (D135). The master checks it against every
+    /// other till it knows, because the uniqueness that stops two bills sharing
+    /// a number is shop-wide and only the master can see the whole shop.
+    pub series_prefix: String,
     /// The orders, as `mb_core::AnyOrder` — settled, voided or cancelled. The
     /// whole bill travels inside it, because `SettledOrder` already carries its
     /// `Bill` and its `Settlement`.

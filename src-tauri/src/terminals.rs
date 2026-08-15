@@ -336,6 +336,126 @@ pub fn make_master_on(app: &App, id: String) -> UiResult<TillsView> {
     tills_on(app)
 }
 
+/// **Join a shop that already has a till** — P19's pairing, done by a till.
+///
+/// The person is holding the master's QR: it carries the address and the
+/// fingerprint, and the master is showing a single-use token that a person
+/// there presses Allow on. All three are needed, and the fingerprint is what
+/// makes the address trustworthy (D80).
+///
+/// # What it writes, and where
+///
+/// The credential and the pin go **beside the config**, never in the database
+/// (D79/D85): a backup is restored onto other machines, and one that carried a
+/// terminal's identity would give a shop two tills claiming to be one.
+pub fn join_on(
+    app: &App,
+    address: String,
+    fingerprint: String,
+    token: String,
+    name: String,
+    prefix: String,
+) -> UiResult<TillsView> {
+    let who = guard::require(app, Permission::SettingsStore)?;
+    let at = now();
+    if prefix.trim().is_empty() {
+        // **D135's one remaining risk, refused at the door.** A till joining a
+        // shop that already has one must print under its own letter, or the two
+        // series are the same series.
+        return Err(UiError::new(
+            "join.prefix",
+            "Give this till its own short prefix — A, B, C — to go in front of \
+             its numbers. Without it two tills would print the same bill number.",
+        ));
+    }
+
+    // The client is async and this command is not. mb-lan owns the runtime —
+    // the same boundary `server::start` drew — so nothing here mentions tokio.
+    let master = mb_lan::Master::meet_blocking(&address, &fingerprint)
+        .map_err(|e| UiError::new("join.failed", e.to_string()))?;
+    // Two minutes, because a person has to walk to the other counter, read the
+    // name on its screen and press Allow.
+    let credential = master
+        .join_blocking(&token, &name, std::time::Duration::from_secs(120))
+        .map_err(|e| UiError::new("join.failed", e.to_string()))?;
+
+    // **A new identity for this machine.** Not `terminal_default` — that id
+    // belongs to the shop's first till and is on every bill it has ever
+    // written.
+    let id = format!("term_{}", at.millis());
+    let config_dir = crate::config::AppConfig::directory();
+    let mine = Me {
+        terminal_id: id.clone(),
+        master: Some(Link {
+            base: address.trim_end_matches('/').to_owned(),
+            // **The certificate the fingerprint proved**, not the one typed and
+            // not one fetched again afterwards — a second fetch is a second
+            // chance for a stranger to answer.
+            certificate_pem: master.certificate_pem().to_owned(),
+            device_id: credential.device_id,
+            secret: credential.secret,
+        }),
+    };
+    write_me(&config_dir, &mine).map_err(|e| {
+        UiError::new(
+            "join.write",
+            "This till joined but could not remember it. Check the disk is not full.",
+        )
+        .with_detail(e.to_string())
+    })?;
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| -> Result<Result<(), UiError>, mb_db::DbError> {
+                let repos = mb_db::Repos::new(tx);
+                let mut row = Terminal::new(id.clone(), name.trim(), at);
+                row.series_prefix = prefix.trim().to_owned();
+                if let Err(refusal) = repos.terminals().save(OUTLET, &row, at) {
+                    return Ok(Err(UiError::new("join.prefix", refusal.to_string())));
+                }
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        today(at),
+                        Some(who.staff_id.clone()),
+                        action::TERMINAL_JOINED,
+                        "terminal",
+                    )
+                    .about(id.clone())
+                    .with_after(serde_json::json!({ "name": name, "prefix": prefix })),
+                )?;
+                Ok(Ok(()))
+            })
+            .map_err(|e| words::from_db(&e))
+    })??;
+
+    crate::log_info!("this till joined the shop as {id}");
+    tills_on(app)
+}
+
+/// **Send what is waiting, now.** The button beside the queue, and the same
+/// call the background sender makes.
+pub fn send_now_on(app: &App) -> UiResult<TillsView> {
+    guard::require(app, Permission::BillCreate)?;
+    let mine = me(&crate::config::AppConfig::directory());
+    let Some(link) = mine.master else {
+        return Err(UiError::new(
+            "forward.master",
+            "This is the main till. Its bills are already here.",
+        ));
+    };
+    let master = mb_lan::Master::pinned(&link.base, &link.certificate_pem)
+        .map_err(|e| UiError::new("forward.pin", e.to_string()))?
+        .as_device(mb_lan::Credential {
+            device_id: link.device_id,
+            secret: link.secret,
+        });
+    let sent = crate::forwarding::send_once(app, &master)?;
+    crate::log_info!("{sent} bills went across to the main till");
+    tills_on(app)
+}
+
 /// **Stand down if somebody else has been made master since.**
 ///
 /// Called at start-up. The old master is the machine that failed, so nothing in
@@ -354,6 +474,44 @@ pub fn stand_down_if_replaced(app: &App) -> UiResult<bool> {
             })
             .map_err(|e| words::from_db(&e))
     })
+}
+
+// ---------------------------------------------------------------------------
+// The commands (D46 — thin, and every body is above).
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn tills(app: tauri::State<'_, App>) -> UiResult<TillsView> {
+    tills_on(&app)
+}
+
+#[tauri::command]
+pub fn save_till(app: tauri::State<'_, App>, edit: TerminalEdit) -> UiResult<TillsView> {
+    save_till_on(&app, edit)
+}
+
+#[tauri::command]
+pub fn make_master(app: tauri::State<'_, App>, id: String) -> UiResult<TillsView> {
+    make_master_on(&app, id)
+}
+
+/// **Joining waits for a person to press Allow**, so it is `async` — Tauri runs
+/// it off the UI thread and the screen keeps painting its spinner.
+#[tauri::command]
+pub async fn join_master(
+    app: tauri::State<'_, App>,
+    address: String,
+    fingerprint: String,
+    token: String,
+    name: String,
+    prefix: String,
+) -> UiResult<TillsView> {
+    join_on(&app, address, fingerprint, token, name, prefix)
+}
+
+#[tauri::command]
+pub async fn send_waiting_bills(app: tauri::State<'_, App>) -> UiResult<TillsView> {
+    send_now_on(&app)
 }
 
 #[cfg(test)]

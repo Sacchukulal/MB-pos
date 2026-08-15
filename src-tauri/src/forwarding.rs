@@ -26,12 +26,12 @@
 //! * **The master is never on the critical path of a sale.** Nothing here is
 //!   called while a customer is standing there — B5 is untouched (D135).
 
-use mb_core::{AnyOrder, StaffId};
+use mb_core::AnyOrder;
 use mb_lan::{Forwarded, Receipt};
+use tauri::Manager as _;
 
-use crate::billing::TERMINAL;
 use crate::state::{App, OUTLET};
-use crate::words::{self, UiResult};
+use crate::words::{self, UiError, UiResult};
 
 /// **The master's side.** Store what another till sent, once each.
 pub fn receive_on(app: &App, forwarded: &Forwarded) -> UiResult<Receipt> {
@@ -44,6 +44,48 @@ pub fn receive_on(app: &App, forwarded: &Forwarded) -> UiResult<Receipt> {
                 let repos = mb_db::Repos::new(tx);
                 let mut stored = Vec::new();
                 let mut refused = Vec::new();
+
+                // **The master learns about a till the first time it hears from
+                // one.** Pairing made a DEVICE row; a forwarded bill points at a
+                // TERMINAL, and the day close per drawer (D140) needs that row
+                // to exist here.
+                //
+                // It is also the only place D135's guarantee can be checked:
+                // the uniqueness that stops two tills sharing a bill number is
+                // shop-wide, and only the master sees the whole shop. A clash
+                // is refused here, so the sender is told rather than the two
+                // series quietly overlapping.
+                let known = repos.terminals().find(OUTLET, &sender)?;
+                if known.is_none()
+                    || known.as_ref().is_some_and(|t| {
+                        t.series_prefix != forwarded.series_prefix
+                    })
+                {
+                    let mut row = known.unwrap_or_else(|| {
+                        mb_db::repo::terminals::Terminal::new(
+                            sender.clone(),
+                            forwarded.terminal_name.clone(),
+                            at,
+                        )
+                    });
+                    row.name.clone_from(&forwarded.terminal_name);
+                    row.series_prefix.clone_from(&forwarded.series_prefix);
+                    if let Err(clash) = repos.terminals().save(OUTLET, &row, at) {
+                        // Everything in the batch is refused, and with the
+                        // sentence naming the other till — because storing half
+                        // of it under a colliding series is the worse answer.
+                        let says = clash.to_string();
+                        return Ok(Receipt {
+                            stored: Vec::new(),
+                            refused: forwarded
+                                .orders
+                                .iter()
+                                .map(|o| (id_of(o), says.clone()))
+                                .collect(),
+                            says,
+                        });
+                    }
+                }
 
                 for raw in &forwarded.orders {
                     let Ok(order) = serde_json::from_value::<AnyOrder>(raw.clone()) else {
@@ -117,10 +159,11 @@ pub fn waiting_on(app: &App) -> UiResult<Vec<serde_json::Value>> {
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let mut out = Vec::new();
-                for row in repos.outbox().pending(200)? {
-                    if row.table_name != "orders" {
-                        continue;
-                    }
+                // **Bills only, and asked for as bills.** Reading "the oldest
+                // two hundred rows" and filtering here would eventually read two
+                // hundred menu edits — nothing clears those until P33 — and the
+                // shop's money would silently stop travelling.
+                for row in repos.outbox().pending_in(Some("orders"), 200)? {
                     // Only what is FINISHED travels. A draft is not a fact
                     // (D137): it lives on the till that is typing it, and if
                     // that till never comes back nobody was charged for it.
@@ -184,13 +227,142 @@ pub fn waiting_says(count: usize) -> String {
     }
 }
 
-/// This till's own name in a forwarded batch.
-#[must_use]
-pub fn from_here(orders: Vec<serde_json::Value>) -> Forwarded {
-    Forwarded {
-        terminal_id: TERMINAL.to_owned(),
+/// This till, describing itself, with what it is carrying.
+pub fn from_here(app: &App, orders: Vec<serde_json::Value>) -> UiResult<Forwarded> {
+    let me = crate::terminals::me(&crate::config::AppConfig::directory());
+    let mine = app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                mb_db::Repos::new(tx).terminals().find(OUTLET, &me.terminal_id)
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    Ok(Forwarded {
+        terminal_id: me.terminal_id,
+        terminal_name: mine
+            .as_ref()
+            .map_or_else(|| "This till".to_owned(), |t| t.name.clone()),
+        series_prefix: mine.map(|t| t.series_prefix).unwrap_or_default(),
         orders,
+    })
+}
+
+/// **Send everything this till is holding, and forget only what was taken.**
+///
+/// Retryable for ever and safe to call at any moment: the master is idempotent
+/// on each order's id, so a batch that half-arrived and a batch sent twice end
+/// in exactly the same place.
+pub fn send_once(app: &App, master: &mb_lan::Master) -> UiResult<usize> {
+    let orders = waiting_on(app)?;
+    if orders.is_empty() {
+        return Ok(0);
     }
+    let batch = from_here(app, orders)?;
+    let receipt = master.forward_blocking(&batch).map_err(|e| match e {
+        // **"The master is off" is the ordinary state this feature is built
+        // for** (D138), so it is not dressed up as a failure. The bills stay in
+        // the queue, which is exactly where they should be.
+        mb_lan::ClientError::Unreachable(_) => UiError::new(
+            "forward.away",
+            "The main till is not answering. Nothing was lost — these go across \
+             as soon as it is back.",
+        ),
+        other => UiError::new("forward.refused", other.to_string()),
+    })?;
+    confirmed_on(app, &receipt)?;
+    Ok(receipt.stored.iter().filter(|(_, ok)| *ok).count())
+}
+
+// ---------------------------------------------------------------------------
+// The sender.
+// ---------------------------------------------------------------------------
+
+/// How often a till with something to send tries again.
+///
+/// **R7 is 2 s target, 10 s ceiling**, so this is two. It is a budget it is
+/// allowed to have because forwarding is not on the billing path — D135 is what
+/// bought that, and T11 is the proof.
+const EAGER: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// And how often a till with nothing to send looks anyway.
+///
+/// Budget **M4** — idle CPU under 1 %. An idle secondary must not spend its
+/// afternoon opening connections to a master that has nothing to take, so a
+/// quiet tick is a read of the queue and no network at all — and on a master it
+/// is one small file read, because it stops before even that.
+const QUIET: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// **Start the thread that drains the queue.**
+///
+/// One thread, started once, that ends when the app does. It does nothing at
+/// all on a master — `Me::master` is `None` there — so the shop that has one
+/// till pays a `COUNT(*)` every twenty seconds and nothing else.
+///
+/// **Nothing here touches the settle path.** The queue is written by the settle
+/// itself (the outbox row is inside its transaction), and this thread only
+/// reads. A cashier can unplug the network mid-bill and the bill is unaffected.
+pub fn start_sender(handle: &tauri::AppHandle) {
+    let handle = handle.clone();
+    let started = std::thread::Builder::new()
+        .name("mb-forward".to_owned())
+        .spawn(move || {
+            loop {
+                let Some(app) = handle.try_state::<crate::state::App>() else {
+                    return; // Shutting down.
+                };
+                let waiting = sweep(&app, &handle);
+                std::thread::sleep(if waiting { EAGER } else { QUIET });
+            }
+        });
+    if let Err(e) = started {
+        // Loud, because the failure is invisible otherwise: the till keeps
+        // billing perfectly and its money never reaches the shop's book.
+        crate::log_warn!("the thread that sends bills to the main till did not start: {e}");
+    }
+}
+
+/// One turn of the sender. Returns whether anything is still waiting.
+fn sweep(app: &crate::state::App, handle: &tauri::AppHandle) -> bool {
+    let mine = crate::terminals::me(&crate::config::AppConfig::directory());
+    let Some(link) = mine.master else {
+        return false; // This is the master. Its bills are already here.
+    };
+    let waiting = waiting_on(app).unwrap_or_default();
+    if waiting.is_empty() {
+        announce(handle, 0);
+        return false;
+    }
+
+    let sent = mb_lan::Master::pinned(&link.base, &link.certificate_pem)
+        .map(|m| {
+            m.as_device(mb_lan::Credential {
+                device_id: link.device_id,
+                secret: link.secret,
+            })
+        })
+        .map_or(0, |master| send_once(app, &master).unwrap_or(0));
+
+    // Count again rather than subtracting: a bill settled while that call was
+    // in flight, and the banner must say what is true now.
+    let left = waiting_on(app).map_or(waiting.len(), |w| w.len());
+    announce(handle, left);
+    if sent > 0 {
+        crate::log_info!("{sent} bills went across to the main till, {left} still here");
+    }
+    left > 0
+}
+
+/// Tell the window what this till is holding (D138 — *a shop must be able to
+/// see that the tills are apart*).
+fn announce(handle: &tauri::AppHandle, waiting: usize) {
+    use tauri::Emitter as _;
+    let _ = handle.emit(
+        crate::push::CHANNEL,
+        crate::state::Pushed::Tills {
+            waiting: crate::ipc::count(waiting as i64),
+            says: waiting_says(waiting),
+        },
+    );
 }
 
 fn order_id(order: &AnyOrder) -> String {
@@ -212,5 +384,3 @@ fn id_of(raw: &serde_json::Value) -> String {
         .to_owned()
 }
 
-/// Keeps the staff import honest about why it is here.
-const _: Option<StaffId> = None;
