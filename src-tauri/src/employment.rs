@@ -82,19 +82,15 @@ const SALARY_CATEGORY: &str = "exc_salary";
 // The view models
 // ===========================================================================
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(export, export_to = "../../ui/src/ipc/generated/")]
-#[serde(rename_all = "camelCase")]
-pub struct MoneyView {
-    pub paise: i64,
-    pub text: String,
-}
+// **MoneyView is ipc.rs's, not a second one.** P28 declared its own for
+// half an hour and it would have quietly overwritten the canonical file — the
+// two shapes happened to match, so nothing would have complained, and the
+// doc-comment explaining why money crosses the wire as a pair would have gone.
+// One shape for money on the wire, one file, one explanation.
+use crate::ipc::MoneyView;
 
 fn money(m: Money) -> MoneyView {
-    MoneyView {
-        paise: m.paise(),
-        text: m.to_plain_string(),
-    }
+    MoneyView::from(m)
 }
 
 /// One person, on the employment side.
@@ -384,12 +380,18 @@ fn minutes_words(minutes: i64) -> String {
     }
 }
 
+/// "₹18,000.00 a month".
+///
+/// **No rupee sign of its own** — `Money::to_indian_string` already carries
+/// one, and the first version added a second. Found by opening the Salary
+/// screen and reading "₹₹650.00 a day": the kind of thing no test would ever
+/// notice and every shopkeeper would (D55).
 fn basis_words(basis: Basis, amount: Money) -> String {
     let sum = amount.to_indian_string();
     match basis {
-        Basis::Monthly => format!("₹{sum} a month"),
-        Basis::Daily => format!("₹{sum} a day"),
-        Basis::Hourly => format!("₹{sum} an hour"),
+        Basis::Monthly => format!("{sum} a month"),
+        Basis::Daily => format!("{sum} a day"),
+        Basis::Hourly => format!("{sum} an hour"),
     }
 }
 
@@ -1933,12 +1935,12 @@ pub fn payroll_on(app: &App, run_id: String) -> UiResult<PayrollView> {
                 let says = match run.state {
                     RunState::Draft => format!(
                         "A draft. Check every line — nothing has left the drawer yet. \
-                         {} people, ₹{} in total.",
+                         {} people, {} in total.",
                         lines.len(),
                         total.to_indian_string()
                     ),
                     RunState::Approved => format!(
-                        "Approved. ₹{} went out as one salary expense, and the cash \
+                        "Approved. {} went out as one salary expense, and the cash \
                          position already knows.",
                         total.to_indian_string()
                     ),

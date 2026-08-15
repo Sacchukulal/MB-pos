@@ -501,3 +501,83 @@ settle waits for (D135).
 
 That is why a secondary bills at full speed with the main till switched off, and
 why R9's two seconds are a bookkeeping budget rather than a billing one.
+
+---
+
+## 15. The owner's remote interface — P28, scope 9.13
+
+The owner is usually **not at the counter**. Everything about employment —
+hiring, permissions, salary, advances, approving leave, correcting attendance —
+has to be reachable from their phone, and later from the cloud.
+
+**This section is the contract the Android session builds against.** The
+service and the protocol are P28's; the phone SCREENS are Phase 11. Writing the
+protocol later would have meant changing the service.
+
+### 15.1 The rule that decides everything here
+
+> **A phone is a screen. It is never an authority.** (D9)
+
+Every command below is **permission-checked on the counter**, in
+`guard::COMMAND_ACCESS`, in exactly the same table the counter's own screens go
+through. There is no second path, no "trusted device" flag, and no permission
+that only the phone's UI enforces. `employment_tests::
+every_employment_command_refuses_somebody_without_the_permission` calls every
+one of them directly, without the permission, and asserts the refusal — that is
+the test this whole section rests on.
+
+A device is bound to a **person** at pairing (§3), so the actor on every command
+is the person whose phone it is. It is not a parameter and cannot be one.
+
+### 15.2 The command set
+
+Same names, same arguments and same shapes as the counter's own IPC — see
+`src-tauri/src/employment.rs`. Carried over the transport in §5's envelope, and
+**idempotent on the intent id** (§6, D82) exactly like an order intent: a phone
+on a bad connection retries, and a retried advance must not hand over the money
+twice.
+
+| command | needs | what it does |
+|---|---|---|
+| `employees` | `staff.manage` | the people, with the employment record |
+| `save_employee` | `staff.manage` | designation, department, ID reference, and the leaving date |
+| `attendance` | *signed in* | your own hours; **anybody else's needs `attendance.mark`** |
+| `clock_in` / `clock_out` | *signed in* | your own row, and only ever your own |
+| `correct_attendance` | `attendance.correct` | change a clock-in or clock-out. **Never your own row** — a rule no permission can express, enforced in the command |
+| `save_roster` | `attendance.mark` | who is expected, and when |
+| `leave` | *signed in* | your own balance and requests; anybody else's needs `leave.approve` |
+| `request_leave` | *signed in* | ask. A manager may ask on somebody's behalf, and the audit row says who did which |
+| `decide_leave` | `leave.approve` | approve or reject. **A rejection carries a reason** |
+| `adjust_leave` | `leave.approve` | grant an entitlement, or correct a balance with a reason |
+| `salary` | `salary.view` | one person's salary history and advances |
+| `save_salary` | `salary.manage` | a NEW effective-dated row, never an edit |
+| `give_advance` | `salary.manage` | money out of the drawer today |
+| `payroll_runs` / `payroll` | `salary.view` | the runs, and one run's lines |
+| `compute_payroll` | `salary.manage` | computes a DRAFT. Moves no money |
+| `edit_payroll_line` | `salary.manage` | change one figure before approving. The line is marked `edited` |
+| `approve_payroll` | `salary.manage` | **where money leaves the shop** |
+| `reverse_payroll` | `salary.manage` | a correction is a state, not a delete (D47) |
+| `staff_cost` | `salary.view` | wages as a percentage of what the shop took |
+
+### 15.3 Self-service, and why it cannot be a permission
+
+Three of those say *signed in* rather than naming a permission, and the reason
+is that **the rule depends on WHOSE row is being asked for**: your own
+attendance is yours, and the same command against somebody else's is a refusal.
+
+`Access::SignedIn` is what that is called in `guard.rs`. It is deliberately not
+`Access::Public` — public means *works on the lock screen*, and none of these
+do. The command itself compares the asked-for id against the session and
+refuses; `employment_tests::self_service_cannot_read_somebody_elses_anything`
+is the test.
+
+**A screen that merely declines to draw a row has still been sent it.** That is
+why this is here and not in React or in Kotlin.
+
+### 15.4 What is NOT here
+
+* **No phone screens.** Phase 11.
+* **No cloud.** The transport is the shop's own WiFi (D9). The cloud arrives in
+  P31–P35 and reuses this command set rather than replacing it.
+* **No statutory payroll** (PF, ESI, TDS). Scope 9.17 is pending the owner's
+  decision; see §15 of `FEATURE_SCOPE.md`.

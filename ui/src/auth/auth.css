@@ -231,3 +231,28 @@
 .mb-audit__after {
   color: var(--text);
 }
+
+/* --- P28: the employment tabs ------------------------------------------- */
+
+/* A leave balance that has gone below zero. A shop DOES grant more than
+   somebody had and recover it later, so the state is real — and hiding it
+   behind a floor of zero would be the software lying about what it knows. */
+.mb-leave--over {
+  color: var(--danger);
+}
+
+/* One request waiting on a decision: what was asked for on the left, the two
+   buttons on the right. Not a table, because the reason is a sentence and a
+   sentence in a table cell is a sentence nobody reads. */
+.mb-leave__pending {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-group);
+  padding: var(--gap-field) 0;
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.mb-leave__pending:last-child {
+  border-bottom: none;
+}

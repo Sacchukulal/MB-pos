@@ -41,6 +41,7 @@ use mb_core::{
     AnyOrder, Cart, DraftOrder, ItemSnapshot, ItemId, Money, OrderId, OrderType, Qty, StaffId,
     TableId, TaxRate, TaxTreatment, Timestamp,
 };
+use mb_core::businessday::BusinessDay;
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::repo::menu::{Category, MenuItem};
 use mb_db::{Db, DbConfig, Repos};
@@ -238,6 +239,7 @@ fn demo_look() {
     seed_credit(&app);
     seed_expenses(&app);
     seed_shelf(&app);
+    seed_people(&app);
 
     std::fs::write(mb_db::locate::config_path(&home), db_path.display().to_string())
         .expect("the location file");
@@ -248,6 +250,7 @@ fn demo_look() {
     println!("  {settled} bills settled today");
     println!("  6 credit customers, 8 expenses");
     println!("  {} materials on the shelf", MATERIALS.len());
+    println!("  {} people, plus one who left", PEOPLE.len());
     println!();
     println!("now: $env:APPDATA=\"{}\"; cargo run -p magic-bill", root.display());
 }
@@ -885,4 +888,285 @@ fn demo_printer() {
     println!();
     println!("Now open the app against this folder and press Settings → Printers →");
     println!("Test print. The checklist is in docs/OWNER_TESTS.md.");
+}
+
+/// The people, and their employment — P28.
+///
+/// Nine, which is a real small restaurant: a manager, two cooks, a tandoor
+/// man, two waiters, a helper, a cashier and somebody who left in the middle of
+/// the month. **The one who left is the point** — scope 9.15 says a record is
+/// never deleted, and a screen that has never had one on it has never shown
+/// what that looks like.
+const PEOPLE: &[(&str, &str, &str, &str, &str, i64)] = &[
+    // id, name, designation, department, basis, amount in rupees
+    ("staff_meena", "Meena", "Manager", "Counter", "monthly", 28_000),
+    ("staff_ravi", "Ravi", "Head cook", "Kitchen", "monthly", 24_000),
+    ("staff_shashi", "Shashi", "Cook", "Kitchen", "monthly", 18_000),
+    ("staff_iqbal", "Iqbal", "Tandoor", "Kitchen", "monthly", 20_000),
+    ("staff_deepa", "Deepa", "Cashier", "Counter", "monthly", 16_000),
+    ("staff_kumar", "Kumar", "Waiter", "Service", "daily", 650),
+    ("staff_arun", "Arun", "Waiter", "Service", "daily", 650),
+    ("staff_sita", "Sita", "Helper", "Kitchen", "daily", 500),
+    ("staff_gopal", "Gopal", "Helper", "Kitchen", "hourly", 90),
+];
+
+/// Nine people, their salaries, a fortnight of attendance, a roster, leave
+/// entitlements and two advances.
+///
+/// **A shift a fortnight ago, not one starting now**, because the screens being
+/// designed here show a MONTH: a demo whose attendance is all in the last five
+/// minutes shows a table with one row in it and proves nothing about a table.
+fn seed_people(app: &App) {
+    let at = crate::flows::now();
+    let today = crate::flows::today(at);
+
+    for (id, name, designation, department, basis, amount) in PEOPLE {
+        crate::ipc::save_staff_member_on(
+            app,
+            crate::ipc::StaffEdit {
+                id: (*id).to_owned(),
+                name: (*name).to_owned(),
+                code: Some(name.chars().take(2).collect()),
+                role_id: Some(match *department {
+                    "Counter" => "role_manager",
+                    _ => "role_waiter",
+                }
+                .to_owned()),
+                status: "active".to_owned(),
+            },
+        )
+        .expect("hired");
+
+        crate::employment::save_employee_on(
+            app,
+            crate::employment::EmployeeEdit {
+                id: (*id).to_owned(),
+                designation: (*designation).to_owned(),
+                department: (*department).to_owned(),
+                address: String::new(),
+                emergency_name: String::new(),
+                emergency_phone: String::new(),
+                id_proof: String::new(),
+                employment_type: if *basis == "monthly" {
+                    "full_time"
+                } else {
+                    "part_time"
+                }
+                .to_owned(),
+                left_on: String::new(),
+            },
+        )
+        .expect("employment record");
+
+        crate::employment::save_salary_on(
+            app,
+            crate::employment::SalaryEdit {
+                staff_id: (*id).to_owned(),
+                // Effective from a month ago, so a run over the last fortnight
+                // finds a structure rather than skipping everybody.
+                effective_from: ymd(BusinessDay::from_days_since_epoch(
+                    today.days_since_epoch() - 40,
+                )),
+                basis: (*basis).to_owned(),
+                amount: amount.to_string(),
+                components: Vec::new(),
+            },
+        )
+        .expect("salary");
+
+        // The yearly entitlement, granted.
+        crate::employment::adjust_leave_on(
+            app,
+            (*id).to_owned(),
+            "lv_casual".to_owned(),
+            24,
+            "Yearly entitlement".to_owned(),
+            true,
+        )
+        .expect("leave granted");
+    }
+
+    // Somebody who left. **The record stays** (scope 9.15) — their name is on
+    // last month's bills and in the audit trail.
+    crate::ipc::save_staff_member_on(
+        app,
+        crate::ipc::StaffEdit {
+            id: "staff_prakash".to_owned(),
+            name: "Prakash".to_owned(),
+            code: Some("Pr".to_owned()),
+            role_id: Some("role_waiter".to_owned()),
+            status: "active".to_owned(),
+        },
+    )
+    .expect("hired");
+    crate::employment::save_employee_on(
+        app,
+        crate::employment::EmployeeEdit {
+            id: "staff_prakash".to_owned(),
+            designation: "Waiter".to_owned(),
+            department: "Service".to_owned(),
+            address: String::new(),
+            emergency_name: String::new(),
+            emergency_phone: String::new(),
+            id_proof: String::new(),
+            employment_type: "part_time".to_owned(),
+            left_on: ymd(BusinessDay::from_days_since_epoch(
+                today.days_since_epoch() - 6,
+            )),
+        },
+    )
+    .expect("left");
+
+    // A fortnight of attendance: everybody in, everybody out, with two people
+    // late on two of the days so the verdict column has something in it.
+    for back in 1..=14_i32 {
+        let day = BusinessDay::from_days_since_epoch(today.days_since_epoch() - back);
+        for (n, (id, ..)) in PEOPLE.iter().enumerate() {
+            // A rest day each, staggered, so the roster has days off in it.
+            if (i32::try_from(n).unwrap_or(0) + back) % 7 == 0 {
+                // A rostered day OFF — which is a different fact from having no
+                // roster row at all, and the screen must not call it an absence.
+                put_roster(app, id, day, None);
+                continue;
+            }
+            // **The times match the pattern they are rostered against** —
+            // shp_morning is 07:00 to 15:00. The first version rostered the
+            // morning shift and clocked everybody in at 09:00, so the screen
+            // said "Late by 2h" against every name in the shop, which is
+            // correct and useless. A demo whose every row is the same warning
+            // is a demo that teaches you nothing about the warning.
+            let late = back % 5 == 0 && n % 3 == 0;
+            let start = if late { 7 * 60 + 40 } else { 7 * 60 };
+            let end = 15 * 60;
+            // **The roster first, then what happened.** Without a roster,
+            // attendance is a list of times with nothing to compare against —
+            // every verdict reads "worked, not rostered", which is honest and
+            // tells a manager nothing. It is also the whole reason the roster
+            // table exists.
+            put_roster(app, id, day, Some("shp_morning"));
+            put_shift(app, id, day, start, end);
+        }
+    }
+
+    // Two advances, one of them in instalments — so the payroll screen has a
+    // recovery on it and the drawer has a payout in it.
+    crate::employment::give_advance_on(
+        app,
+        "staff_kumar".to_owned(),
+        "3000".to_owned(),
+        1,
+        "Festival".to_owned(),
+    )
+    .expect("advance");
+    crate::employment::give_advance_on(
+        app,
+        "staff_shashi".to_owned(),
+        "6000".to_owned(),
+        3,
+        "School fees".to_owned(),
+    )
+    .expect("advance");
+
+    // One approved leave and one still waiting, so both states are on screen.
+    let asked = crate::employment::request_leave_on(
+        app,
+        "staff_deepa".to_owned(),
+        "lv_casual".to_owned(),
+        ymd(BusinessDay::from_days_since_epoch(today.days_since_epoch() - 3)),
+        ymd(BusinessDay::from_days_since_epoch(today.days_since_epoch() - 3)),
+        2,
+        "Family function".to_owned(),
+    )
+    .expect("asked");
+    if let Some(request) = asked.requests.first() {
+        crate::employment::decide_leave_on(app, request.id.clone(), true, String::new())
+            .expect("approved");
+    }
+    crate::employment::request_leave_on(
+        app,
+        "staff_iqbal".to_owned(),
+        "lv_casual".to_owned(),
+        ymd(day_ahead(today, 3)),
+        ymd(day_ahead(today, 4)),
+        4,
+        "Going home".to_owned(),
+    )
+    .expect("asked");
+}
+
+fn day_ahead(day: BusinessDay, n: i32) -> BusinessDay {
+    BusinessDay::from_days_since_epoch(day.days_since_epoch() + n)
+}
+
+fn ymd(day: BusinessDay) -> String {
+    let (y, m, d) = day.to_ymd();
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// One finished shift, written straight to the repo.
+///
+/// Not through `clock_in` / `clock_out`: those stamp the CURRENT time, which is
+/// exactly right for a counter and useless for seeding a fortnight.
+fn put_shift(app: &App, staff_id: &str, day: BusinessDay, start_minute: i64, end_minute: i64) {
+    let stamp = |minute: i64| {
+        mb_core::Timestamp::from_local_parts(
+            day.days_since_epoch(),
+            u32::try_from(minute * 60).unwrap_or(0),
+            mb_core::UtcOffset::INDIA,
+        )
+        .expect("a time on that day")
+    };
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                Repos::new(tx).employment().save_attendance(
+                    OUTLET,
+                    &mb_db::repo::employment::Attendance {
+                        id: format!("att_{staff_id}_{}", day.days_since_epoch()),
+                        staff_id: staff_id.to_owned(),
+                        day,
+                        terminal_id: None,
+                        shift_no: 0,
+                        pattern_id: None,
+                        started_at: stamp(start_minute),
+                        ended_at: Some(stamp(end_minute)),
+                        corrected_at: None,
+                        corrected_by: None,
+                        correction_reason: None,
+                        note: None,
+                    },
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("a shift");
+}
+
+/// One roster day. `None` is a rostered day OFF.
+fn put_roster(app: &App, staff_id: &str, day: BusinessDay, pattern: Option<&str>) {
+    let at = crate::flows::now();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                Repos::new(tx).employment().save_roster_day(
+                    OUTLET,
+                    &mb_db::repo::employment::RosterDay {
+                        id: format!("ros_{staff_id}_{}", day.days_since_epoch()),
+                        staff_id: staff_id.to_owned(),
+                        day,
+                        pattern_id: pattern.map(str::to_owned),
+                        note: if pattern.is_none() {
+                            Some("Weekly off".to_owned())
+                        } else {
+                            None
+                        },
+                    },
+                    at,
+                    None,
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("a roster day");
 }

@@ -78,6 +78,15 @@ import type { PhotoView } from './generated/PhotoView';
 import type { StockCountView } from './generated/StockCountView';
 import type { TerminalEdit } from './generated/TerminalEdit';
 import type { TillsView } from './generated/TillsView';
+import type { EmployeeView } from './generated/EmployeeView';
+import type { EmployeeEdit } from './generated/EmployeeEdit';
+import type { AttendanceView } from './generated/AttendanceView';
+import type { LeaveView } from './generated/LeaveView';
+import type { SalaryView } from './generated/SalaryView';
+import type { SalaryEdit } from './generated/SalaryEdit';
+import type { PayrollListView } from './generated/PayrollListView';
+import type { PayrollView } from './generated/PayrollView';
+import type { StaffCostView } from './generated/StaffCostView';
 import type { CountEdit } from './generated/CountEdit';
 import type { ShareView } from './generated/ShareView';
 import type { Channel } from './generated/Channel';
@@ -390,6 +399,76 @@ export interface Commands {
   /** The only way a reminder becomes money. */
   confirm_recurring_expense: { args: { id: string }; returns: ExpensesView };
   export_expenses: { args: void; returns: string };
+
+  // ---- P28: the employment side ------------------------------------------
+  //
+  // **Every one of these is permission-checked in Rust**, and several of them
+  // decide by WHOSE row is being asked for rather than by a permission alone:
+  // your own hours and your own leave are yours, anybody else's needs the
+  // right. That rule cannot live here — a screen that merely does not draw a
+  // row has still been sent it.
+  employees: { args: void; returns: EmployeeView[] };
+  save_employee: { args: { edit: EmployeeEdit }; returns: EmployeeView[] };
+  attendance: {
+    args: { staffId: string | null; from: string; to: string };
+    returns: AttendanceView;
+  };
+  /** Needs nothing but being signed in. It IS the PIN. */
+  clock_in: { args: { terminalId: string | null }; returns: AttendanceView };
+  clock_out: { args: void; returns: AttendanceView };
+  /** The watched one: never your own row, always an audit row with both sides. */
+  correct_attendance: {
+    args: { id: string; started: string; ended: string; reason: string };
+    returns: AttendanceView;
+  };
+  save_roster: {
+    args: { staffId: string; day: string; patternId: string; note: string };
+    returns: AttendanceView;
+  };
+  leave: { args: { staffId: string | null }; returns: LeaveView };
+  request_leave: {
+    args: {
+      staffId: string;
+      leaveTypeId: string;
+      from: string;
+      to: string;
+      halfDays: number;
+      reason: string;
+    };
+    returns: LeaveView;
+  };
+  decide_leave: {
+    args: { id: string; approve: boolean; note: string };
+    returns: LeaveView;
+  };
+  adjust_leave: {
+    args: {
+      staffId: string;
+      leaveTypeId: string;
+      halfDays: number;
+      reason: string;
+      accrual: boolean;
+    };
+    returns: LeaveView;
+  };
+  salary: { args: { staffId: string }; returns: SalaryView };
+  save_salary: { args: { edit: SalaryEdit }; returns: SalaryView };
+  give_advance: {
+    args: { staffId: string; amount: string; instalments: number; reason: string };
+    returns: SalaryView;
+  };
+  payroll_runs: { args: void; returns: PayrollListView };
+  payroll: { args: { runId: string }; returns: PayrollView };
+  /** Computes and stores a DRAFT. Moves no money. */
+  compute_payroll: { args: { from: string; to: string }; returns: PayrollView };
+  edit_payroll_line: {
+    args: { runId: string; staffId: string; net: string; note: string };
+    returns: PayrollView;
+  };
+  /** **Where money leaves the shop.** One expense, and the drawer reconciles. */
+  approve_payroll: { args: { runId: string; paidBy: string }; returns: PayrollView };
+  reverse_payroll: { args: { runId: string; reason: string }; returns: PayrollView };
+  staff_cost: { args: { from: string; to: string }; returns: StaffCostView };
 
   // --- P25, the stock book --------------------------------------------------
   // MARKET_GAP_ANALYSIS calls inventory "the biggest single hole". Every

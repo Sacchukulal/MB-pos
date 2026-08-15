@@ -37,25 +37,51 @@ import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import type { RoleView } from '../ipc/generated/RoleView';
 
+import { Attendance, Leave, Payroll, Salary } from './Employment';
+import type { EmployeeView } from '../ipc/generated/EmployeeView';
+
 import './auth.css';
 
 export function Staff() {
   const [tab, setTab] = useState('people');
+  const [people, setPeople] = useState<readonly EmployeeView[]>([]);
+
+  // The employment tabs need the list of people to choose between, and the
+  // salary tab needs it before anybody has opened People. Loaded once, here.
+  useEffect(() => {
+    call('employees')
+      .then(setPeople)
+      .catch(() => {
+        // A person with no staff permission still reaches this screen for
+        // their OWN attendance and leave (scope 9.14), and an empty list is
+        // the honest state for them rather than a toast about permission.
+      });
+  }, []);
+
   return (
     <Page className="mb-screen">
       <PageHeader
         title="Staff"
-        subtitle="Who works here, what each of them may do, and their PIN."
+        subtitle="Who works here, what they are paid, when they worked and when they were away."
       />
       <Tabs
         tabs={[
           { id: 'people', label: 'People' },
+          { id: 'attendance', label: 'Attendance' },
+          { id: 'leave', label: 'Leave' },
+          { id: 'salary', label: 'Salary' },
+          { id: 'payroll', label: 'Payroll' },
           { id: 'roles', label: 'Roles' },
         ]}
         active={tab}
         onChange={setTab}
       />
-      {tab === 'people' ? <People /> : <Roles />}
+      {tab === 'people' ? <People /> : null}
+      {tab === 'attendance' ? <Attendance /> : null}
+      {tab === 'leave' ? <Leave /> : null}
+      {tab === 'salary' ? <Salary people={people} /> : null}
+      {tab === 'payroll' ? <Payroll /> : null}
+      {tab === 'roles' ? <Roles /> : null}
     </Page>
   );
 }
