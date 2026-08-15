@@ -266,18 +266,10 @@
      should give way first. A cashier can scroll a list of items they are
      reading; they cannot scroll a tax breakdown they have not been shown. */
   --cart-lines-min: 6rem;
-  /* And the same floor for the TOTALS block, found the same way at P27.5.
-     The cart column is a grid of auto rows around one flexible one; the items
-     row had a floor and the totals row did not, so on a 768px screen with the
-     set-up strip open the breakdown was squeezed to about fifteen pixels —
-     a tax block that exists to show CGST and SGST per rate, showing neither.
-
-     **9rem, not 6.5rem** — the second number came from counting rows and the
-     first from looking at a real bill. An ordinary one is subtotal, taxable,
-     CGST, SGST, round off and TOTAL, and TOTAL alone is --text-2xl; at 6.5rem
-     the breakdown got about fifty pixels and scrolled away the very thing
-     UI_GUIDELINES §4 calls "a feature, not a footer". */
-  --totals-min: 9rem;
+  /* (--totals-min was here and is GONE. It was a floor on the totals block,
+     and a floor is an absolute promise: two of them plus a payment block is
+     exactly how Complete bill went off the bottom of the cart. What the cart
+     needs is a shrink ORDER, not a second number — see billing.css.) */
 
   /* The settings screen (P17). The section list is fixed at a width that holds
      "The kitchen ticket" plus its read-only mark; the fields flow into as many

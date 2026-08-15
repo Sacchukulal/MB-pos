@@ -683,7 +683,22 @@ fn seed_expenses(app: &App) {
 ///
 /// Id, name, dimension, the pack it arrives in, who it comes from, the reorder
 /// level in that pack, and what one pack costs.
-const MATERIALS: &[(&str, &str, &str, Option<(&str, &str, &str)>, &str, &str, &str)] = &[
+/// One row of [`MATERIALS`], named because seven tuple positions with a nested
+/// tuple in the middle is not readable and clippy is right to say so.
+///
+/// `id, name, dimension, the pack it arrives in (name, size, unit), who it
+/// comes from, the reorder level in that pack, what one pack costs`.
+type Material = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<(&'static str, &'static str, &'static str)>,
+    &'static str,
+    &'static str,
+    &'static str,
+);
+
+const MATERIALS: &[Material] = &[
     ("mat_rice", "Sona Masoori Rice", "weight", Some(("bag", "25", "kg")), "Metro", "2", "1450"),
     ("mat_atta", "Wheat Atta", "weight", Some(("bag", "10", "kg")), "Metro", "2", "420"),
     ("mat_paneer", "Paneer", "weight", None, "The milk van", "3", "340"),
@@ -801,4 +816,73 @@ fn base_unit(dimension: &str) -> &'static str {
         "count" => "piece",
         _ => "kg",
     }
+}
+
+/// **Point this shop's printer at the TVSE and say so** — P27.5, for the
+/// hardware checklist P07 left and nobody has ever run.
+///
+/// Separate from `demo_look` on purpose: seeding a shop is harmless, and
+/// pointing it at a real printer is a thing that makes paper come out of a
+/// machine in somebody's house. Run it deliberately.
+///
+/// It only CONFIGURES. Printing is done by pressing the button in the running
+/// app, because that is the path a shop uses and because the print queue is
+/// the app's, not a test's — a test that enqueues and exits proves nothing
+/// about whether the paper came out.
+///
+/// ```text
+/// $env:MB_DEMO="C:\some\scratch\demo"
+/// $env:MB_PRINTER="TVSE RP3200 Lite"
+/// cargo test -p magic-bill --bin magic-bill demo_printer -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "points a demo shop at a real printer; run by hand"]
+fn demo_printer() {
+    let Some(root) = std::env::var_os("MB_DEMO").map(std::path::PathBuf::from) else {
+        panic!("set MB_DEMO to the demo's APPDATA folder");
+    };
+    let Some(windows_name) = std::env::var_os("MB_PRINTER").map(|s| s.to_string_lossy().into_owned())
+    else {
+        panic!("set MB_PRINTER to the Windows printer name, e.g. \"TVSE RP3200 Lite\"");
+    };
+
+    let home = root.join("MagicBill");
+    let db_path = home.join("magicbill.db");
+    assert!(db_path.exists(), "seed the shop first: {}", db_path.display());
+
+    let db = Db::open(&DbConfig::new(db_path.clone())).expect("open");
+    let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
+    app.open_shop(db, db_path);
+
+    let before = crate::settings::printers::printers_on(&app).expect("the printers");
+    let existing = before.printers.first().map(|p| p.id.clone()).unwrap_or_default();
+
+    let view = crate::settings::printers::save_printer_on(
+        &app,
+        crate::settings::printers::PrinterEdit {
+            id: existing,
+            name: "Counter".to_owned(),
+            kind: "spooler".to_owned(),
+            address: windows_name.clone(),
+            paper_mm: 80,
+            is_default: true,
+            role: "bill".to_owned(),
+            // `raster`, not "picture" — the schema names the two engines
+            // `raster` and `text`, and the SCREEN calls them Picture and
+            // Printer font (P07 checklist point 3). Two vocabularies for the
+            // same pair, which the CHECK constraint caught the first time.
+            engine: "raster".to_owned(),
+            is_bold_dark: false,
+            // P07 checklist point 6. Harmless with no drawer plugged in.
+            can_kick_drawer: true,
+        },
+    )
+    .expect("the printer");
+
+    for printer in &view.printers {
+        println!("  {} — {} — {}", printer.name, printer.connection, printer.role);
+    }
+    println!();
+    println!("Now open the app against this folder and press Settings → Printers →");
+    println!("Test print. The checklist is in docs/OWNER_TESTS.md.");
 }

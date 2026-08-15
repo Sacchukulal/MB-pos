@@ -21,7 +21,7 @@
 
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -369,5 +369,71 @@ describe('the top navigation', () => {
       // Not a glyph: a name from the set.
       expect(screen.icon).toMatch(/^[a-z-]+$/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The cart column
+// ---------------------------------------------------------------------------
+
+/**
+ * **Complete bill must never go below the fold.**
+ *
+ * P09 wrote three paragraphs about fixing this and P27.5 broke it again within
+ * an hour, by adding a second floor to the cart's row template. Grid honours
+ * floors by OVERFLOWING when their sum does not fit, and that column is
+ * `overflow: hidden`, so what overflowed was the bottom — the button on the
+ * one path PERFORMANCE §2.2 calls sacred. Found by billing a real table for
+ * cash and looking at the screen (D55).
+ *
+ * **jsdom has no layout engine**, so this cannot be asserted by measuring
+ * anything; `getBoundingClientRect` returns zeros. What it CAN assert is that
+ * the mechanism which makes the promise is still the one in the file: a flex
+ * column with an explicit shrink ORDER, and no absolute floor to overflow
+ * against. That is a weaker test than measuring, and it is written down as
+ * weaker rather than dressed up — but it fails the moment somebody reaches for
+ * `grid-template-rows` and a `minmax()` again, which is exactly how this bug
+ * arrives both times.
+ */
+describe('the cart column', () => {
+  // Comments stripped first: the block below EXPLAINS why it is not a grid,
+  // by naming the thing it is not — so a raw text search finds the words in
+  // the very comment that documents their absence. The lints strip comments
+  // for the same reason and it is the same trap.
+  // Comments stripped FIRST. The block below explains why it is not a grid by
+  // naming the thing it is not, so a raw text search finds those words inside
+  // the very comment that documents their absence. Both lints strip comments
+  // for the same reason; it is the same trap.
+  const raw = readFileSync(join('src', 'billing', 'billing.css'), 'utf8');
+  const css = raw.replace(new RegExp('/\\*[\\s\\S]*?\\*/', 'g'), '');
+  const cart = css.slice(
+    css.indexOf('.mb-billing__cart {'),
+    css.indexOf('.mb-floor__section {'),
+  );
+
+  it('is a flex column, not a row template with floors', () => {
+    expect(cart).toContain('display: flex');
+    expect(cart).not.toContain('grid-template-rows');
+    expect(cart).not.toContain('minmax(');
+  });
+
+  it('never shrinks the payment block or the actions', () => {
+    for (const rule of ['.mb-payment {', '.mb-actions {']) {
+      const at = css.indexOf(rule);
+      expect(at, `${rule} is missing`).toBeGreaterThan(-1);
+      const block = css.slice(at, css.indexOf('}', at));
+      expect(block, `${rule} may be shrunk`).toContain('flex: 0 0 auto');
+    }
+  });
+
+  /** The item list gives way before the totals do — a number's only job here
+   *  is to be bigger than the other one. */
+  it('gives the item list a much higher shrink than the totals', () => {
+    const lines = css.slice(css.indexOf('.mb-cart__lines {'));
+    const linesShrink = /flex:\s*1\s+(\d+)/.exec(lines)?.[1];
+    const totals = css.slice(css.indexOf('.mb-totals {'));
+    expect(linesShrink).toBeDefined();
+    expect(Number(linesShrink)).toBeGreaterThan(10);
+    expect(totals).toContain('flex: 0 1 auto');
   });
 });

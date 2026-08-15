@@ -46,13 +46,27 @@
 }
 
 .mb-billing__cart {
-  display: grid;
-  /* Header, THE ITEMS, totals, payment, actions. The items row keeps a floor:
-     `1fr` alone loses to the auto rows when the panel is tall (a bill with
-     several payments), and the list a cashier is reading disappears at exactly
-     the moment they are taking money. It scrolls inside that floor instead. */
-  grid-template-rows: auto minmax(var(--cart-lines-min), 1fr) minmax(var(--totals-min), auto) auto auto;
-  gap: var(--space-3);
+  /* **A FLEX COLUMN, NOT A GRID, AND P27.5 IS WHY.**
+   *
+   * It was `grid-template-rows` with a floor on the items row and (after
+   * P27.5 raised it) a floor on the totals row too. Grid honours those floors
+   * by OVERFLOWING when their sum does not fit — and this column is
+   * `overflow: hidden`, so what overflows is the bottom. Billing a real table
+   * for cash showed exactly that: the payment block grew two rows, the sum of
+   * the minimums passed the column height, and **Complete bill went below the
+   * fold on the sacred path** — the precise bug P09 wrote three paragraphs
+   * about believing it had fixed.
+   *
+   * Row arithmetic cannot promise "these two always survive". Flex can say it
+   * directly: the actions and the payment block do not shrink, the item list
+   * gives way first (shrink 50), and the totals give way only after that
+   * (shrink 1). A cashier can always reach the button; what they lose on a
+   * six-rate bill with three payments is seeing every item at once, which is
+   * the right thing to lose.
+   */
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
   min-height: 0;
   /* **THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT.**
 
@@ -214,10 +228,13 @@
 
 /* --- The cart region ---------------------------------------------------- */
 
+/* The list gives way FIRST — shrink 50 against the totals block's 1. Its
+   basis is the floor it keeps while there is room to keep it. */
 .mb-cart__lines {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  flex: 1 50 var(--cart-lines-min);
   min-height: 0;
   overflow-y: auto;
 }
@@ -275,8 +292,14 @@
 .mb-totals {
   display: flex;
   flex-direction: column;
-  /* The breakdown scrolls; TOTAL and the buttons do not. See below. */
+  /* **Content-sized, and gives way only after the item list has** (shrink 1
+     against its 50). There is deliberately no floor here: a floor is an
+     absolute promise, and two absolute promises plus a payment block is how
+     Complete bill went off the bottom in the first place. The shrink ORDER is
+     the promise, and it does not need a number to be right. */
+  flex: 0 1 auto;
   min-height: 0;
+  /* The breakdown scrolls; TOTAL and the buttons do not. See below. */
   overflow: hidden;
   gap: var(--space-1);
   padding-top: var(--space-2);
@@ -362,9 +385,12 @@
 
 /* --- Payment and actions ------------------------------------------------ */
 
+/* **Never shrinks.** The payment block and the actions under it are what a
+   cashier is reaching for; everything above them gives way instead. */
 .mb-payment {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   gap: var(--space-2);
   padding-top: var(--space-2);
   border-top: var(--border-width) solid var(--border);
@@ -386,6 +412,7 @@
 .mb-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  flex: 0 0 auto;
   gap: var(--space-2);
   padding-top: var(--space-2);
   border-top: var(--border-width) solid var(--border);
