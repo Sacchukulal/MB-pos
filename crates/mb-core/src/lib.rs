@@ -66,6 +66,9 @@ pub mod order;
 pub mod payment;
 /// P26. What a delivery actually cost — pure, and the free bag is a
 /// denominator (D123).
+/// P29, scope 8.3/8.4. **Did the money actually arrive?** — the seam a real
+/// payment provider drops into, and the honest manual one that ships today.
+pub mod provider;
 pub mod purchase;
 pub mod qty;
 /// P25. Recipes, and what a sale takes off the shelf — pure, and deliberately

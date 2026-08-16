@@ -191,6 +191,20 @@ pub enum Block {
         width_pct: u8,
         align: Align,
     },
+    /// **P29, scope 7.6 — the bill's own number, in a form a scanner can
+    /// read.** Recalling a printed bill by scanning it is the one thing a
+    /// scanner does that nothing else in this product can do at all.
+    ///
+    /// CODE 128, which every scanner sold reads and which takes letters as
+    /// well as digits — a bill number is `B-0042`, not a number.
+    Barcode {
+        payload: String,
+        /// Whether to print the characters underneath. Yes on a bill: a
+        /// barcode a scanner will not read is a bill somebody still has to
+        /// find by hand.
+        human_readable: bool,
+        align: Align,
+    },
     Spacer {
         lines: u8,
     },

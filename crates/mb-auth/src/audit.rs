@@ -191,6 +191,21 @@ pub mod action {
     pub const PAYROLL_APPROVED: AuditAction = "payroll.approved";
     pub const PAYROLL_REVERSED: AuditAction = "payroll.reversed";
 
+    /// **P29, scope 8.3. Somebody said the money arrived.**
+    ///
+    /// The person at the counter may do this — otherwise nothing would ever
+    /// be confirmed — so the audit row is what makes it safe: a payment that
+    /// was marked confirmed and never landed has a name and a time on it.
+    pub const PAYMENT_CONFIRMED: AuditAction = "payment.confirmed";
+
+    /// P29, scope 14.5. Where a delivery got to, and who took it.
+    pub const DELIVERY_SET: AuditAction = "delivery.set";
+    /// **P29. Cash off a rider.** Its own action and never a plain cash
+    /// movement, because the row it writes is the only record that a rider
+    /// who was carrying nine hundred rupees at eight o clock is carrying
+    /// nothing at eleven — and the before and after are in the entry.
+    pub const RIDER_HANDBACK: AuditAction = "delivery.handback";
+
     /// Every one of the above, for the screen's filter.
     pub const ALL: &[AuditAction] = &[
         LOGIN_OK,
@@ -266,6 +281,9 @@ pub mod action {
         PAYROLL_COMPUTED,
         PAYROLL_APPROVED,
         PAYROLL_REVERSED,
+        PAYMENT_CONFIRMED,
+        DELIVERY_SET,
+        RIDER_HANDBACK,
     ];
 
     /// What the owner reads, rather than the tag. UI_GUIDELINES §6.
@@ -345,6 +363,9 @@ pub mod action {
             PAYROLL_COMPUTED => "Worked out a payroll run",
             PAYROLL_APPROVED => "Approved a payroll run",
             PAYROLL_REVERSED => "Reversed a payroll run",
+            PAYMENT_CONFIRMED => "Confirmed a payment arrived",
+            DELIVERY_SET => "Moved a delivery along",
+            RIDER_HANDBACK => "Took cash back off a rider",
             _ => "Did something this version does not know about",
         }
     }

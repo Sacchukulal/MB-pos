@@ -5,4 +5,4 @@ export type PreviewLine = { "kind": "text", text: string, indent: number,
  * 1, 2 or 3 — the ESC/POS multiplier, so the screen shows the same
  * relative size the paper will.
  */
-scale: number, bold: boolean, } | { "kind": "rule", glyph: string, width: number, indent: number, } | { "kind": "qr", payload: string, indent: number, } | { "kind": "logo", indent: number, } | { "kind": "blank" };
+scale: number, bold: boolean, } | { "kind": "rule", glyph: string, width: number, indent: number, } | { "kind": "qr", payload: string, indent: number, } | { "kind": "barcode", payload: string, indent: number, } | { "kind": "logo", indent: number, } | { "kind": "blank" };

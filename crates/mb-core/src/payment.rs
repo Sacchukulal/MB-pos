@@ -91,6 +91,22 @@ pub struct Payment {
     /// or card — that happens to clear a balance. So `mode` says what it
     /// **was** and this flag says what it **did**.
     pub settles_credit: bool,
+    /// **P29, scope 8.3 — did the money actually arrive?**
+    ///
+    /// False on every electronic payment this product takes today, because the
+    /// provider that ships ([`crate::provider::Manual`]) cannot check a bank
+    /// and will not pretend to. Cash and credit are true the moment they are
+    /// taken: the notes are in the drawer, and a promise IS the record.
+    ///
+    /// The point of the field is the LIST it makes possible — "show me
+    /// tonight's unconfirmed payments" — because a shop cannot chase what it
+    /// cannot list.
+    #[serde(default)]
+    pub confirmed: bool,
+    /// Which provider answered. `None` on the modes nobody has to be asked
+    /// about.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 impl Payment {
@@ -99,12 +115,32 @@ impl Payment {
             // A zero-rupee payment row is noise in every report downstream.
             return Err(PaymentError::NonPositiveAmount);
         }
-        Ok(Payment { mode, amount, reference: None, settles_credit: false })
+        // **Cash and credit start confirmed, everything else does not.** The
+        // default is the safe direction: a mode this product has not thought
+        // about yet lands on the list a person reads, rather than quietly
+        // counting as money in hand.
+        let confirmed = matches!(mode, PaymentMode::Cash | PaymentMode::Credit(_));
+        Ok(Payment {
+            mode,
+            amount,
+            reference: None,
+            settles_credit: false,
+            confirmed,
+            provider: None,
+        })
     }
 
     #[must_use]
     pub fn with_reference(mut self, reference: impl Into<String>) -> Self {
         self.reference = Some(reference.into());
+        self
+    }
+
+    /// What a provider said about it (P29).
+    #[must_use]
+    pub fn answered_by(mut self, provider: impl Into<String>, confirmed: bool) -> Self {
+        self.provider = Some(provider.into());
+        self.confirmed = confirmed;
         self
     }
 

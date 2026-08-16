@@ -50,6 +50,10 @@ pub enum Group {
     Stock,
     Backup,
     Appearance,
+    /// P29. The scanner, the scale, the customer display and the label
+    /// printer. **Every one of them optional**, and an empty port here is a
+    /// finished configuration rather than a half-done one.
+    Devices,
 }
 
 impl Group {
@@ -68,6 +72,7 @@ impl Group {
         Group::Stock,
         Group::Backup,
         Group::Appearance,
+        Group::Devices,
     ];
 
     #[must_use]
@@ -84,6 +89,7 @@ impl Group {
             Group::Stock => "Stock",
             Group::Backup => "Backup",
             Group::Appearance => "How it looks",
+            Group::Devices => "Devices",
         }
     }
 
@@ -102,6 +108,7 @@ impl Group {
             Group::Stock => "stock",
             Group::Backup => "backup",
             Group::Appearance => "appearance",
+            Group::Devices => "devices",
         }
     }
 
@@ -135,6 +142,20 @@ pub struct Entry {
 /// An empty stored value, which for a choice means "not chosen yet". Named,
 /// because an unexplained `""` in a list of state codes reads like a mistake.
 const NOT_CHOSEN: &str = "";
+
+/// P29. What the number inside a scale's label means.
+const LABEL_VALUES: &[Choice] = &[
+    Choice { value: "quantity", label: "Weight or quantity" },
+    Choice { value: "price", label: "Price" },
+];
+
+/// P29. **"Show me what it is sending" is a tool, not a fallback** — it is how
+/// a dealer sets up a scale nobody here has ever seen.
+const SCALE_PROTOCOLS: &[Choice] = &[
+    Choice { value: "status_then_weight", label: "Status, then the weight (commonest)" },
+    Choice { value: "weight_only", label: "Just the weight" },
+    Choice { value: "raw", label: "Show me what it is sending" },
+];
 
 const PATTERNS: &[Choice] = &[
     Choice { value: "dashed", label: "Dashed  - - -" },
@@ -889,6 +910,113 @@ pub const CATALOG: &[Entry] = &[
          second typeface and a text shaper, which is P23.",
         ["language", "hindi", "kannada", "english", "bhasha"], LANGUAGES,
         appearance.language),
+
+    flag!("receipt.bill_barcode", Receipt, Row, "Print the bill number as a barcode",
+        "Adds a barcode to the foot of every bill, so a scanner can bring that          bill back onto the screen. Leave it off if you have no scanner — it          is two more lines of paper on every bill.",
+        ["barcode", "scan", "scanner", "recall", "bill"],
+        receipt.bill_barcode),
+
+    // -----------------------------------------------------------------------
+    // P29 — the things a counter is plugged into (scope 7.6–7.9).
+    //
+    // **Every one of them is optional and every one of them can be absent.**
+    // An empty port here is a finished configuration, not a half-done one, and
+    // nothing in this section may ever be able to stop a bill.
+    //
+    // The scanner has no port at all: it IS a keyboard. Its only settings are
+    // how to tell it apart from a person typing, and getting that wrong in the
+    // wrong direction throws away what a cashier typed — so the defaults are
+    // deliberately cautious.
+    // -----------------------------------------------------------------------
+    number!("devices.scan_average_gap_ms", Devices, Row, "A scan types faster than (average)",
+        "How quickly characters have to arrive, on average, to be a barcode \
+         scanner rather than a person. Lower is safer: a fast typist read as a \
+         scan loses what they typed.",
+        ["scanner", "barcode", "scan", "speed", "gap"],
+        1..=200 "ms between keys", u32, devices.scan_average_gap_ms),
+    number!("devices.scan_single_gap_ms", Devices, Row, "A scan never pauses longer than",
+        "One pause longer than this ends the burst, whatever the average — so \
+         somebody typing, thinking, and typing again is never read as one scan.",
+        ["scanner", "barcode", "pause", "gap"],
+        1..=1000 "ms", u32, devices.scan_single_gap_ms),
+    number!("devices.scan_min_length", Devices, Row, "A barcode is at least this long",
+        "Anything shorter is somebody searching the menu. The shortest real \
+         barcode in a shop is 8 characters.",
+        ["scanner", "barcode", "length", "short"],
+        1..=40 "characters", u32, devices.scan_min_length),
+
+    words!("devices.label_prefix", Devices, Row, "Scale labels start with",
+        "The leading digits on the labels your weighing scale prints — often \
+         21 or 22. Leave it empty unless your scale prints labels with the \
+         weight inside the barcode.",
+        ["scale", "label", "weight", "barcode", "prefix", "embedded"],
+        4, Free, devices.label_prefix),
+    number!("devices.label_item_from", Devices, Row, "The item code starts at digit",
+        "Counting from zero. Your scale's manual, or the dealer, will say.",
+        ["scale", "label", "item", "position"],
+        0..=12 "", u32, devices.label_item_from),
+    number!("devices.label_item_len", Devices, Row, "The item code is this many digits",
+        "How long the item code inside the label is.",
+        ["scale", "label", "item", "length"],
+        1..=12 "digits", u32, devices.label_item_len),
+    number!("devices.label_value_from", Devices, Row, "The weight or price starts at digit",
+        "Counting from zero.",
+        ["scale", "label", "weight", "price", "position"],
+        0..=12 "", u32, devices.label_value_from),
+    number!("devices.label_value_len", Devices, Row, "The weight or price is this many digits",
+        "How long the number inside the label is.",
+        ["scale", "label", "weight", "price", "length"],
+        1..=12 "digits", u32, devices.label_value_len),
+    pick_text!("devices.label_value_is", Devices, Row, "That number is a",
+        "Some scales print the weight inside the barcode and some print the \
+         price. **The shop's own price still bills**: a printed price is \
+         compared against it, not trusted over it.",
+        ["scale", "label", "weight", "price"],
+        LABEL_VALUES, devices.label_value_is),
+    number!("devices.label_value_decimals", Devices, Row, "With this many decimal places",
+        "450 grams printed as 00450 with 3 decimal places is 0.450 kg. ₹12.50 \
+         printed as 01250 with 2 is twelve rupees fifty.",
+        ["scale", "label", "decimal", "weight", "price"],
+        0..=4 "places", u32, devices.label_value_decimals),
+
+    words!("devices.scale_port", Devices, Row, "The scale is on",
+        "The COM port your weighing scale is plugged into — COM3, COM4. Leave \
+         it empty if you have no scale, which is most shops.",
+        ["scale", "weight", "com", "serial", "port"],
+        16, Free, devices.scale_port),
+    number!("devices.scale_baud", Devices, Row, "The scale runs at this speed",
+        "The scale's baud rate. 9600 is right for nearly every counter scale \
+         sold in India.",
+        ["scale", "baud", "speed", "serial"],
+        300..=115200 "baud", u32, devices.scale_baud),
+    pick_text!("devices.scale_protocol", Devices, Row, "The scale talks like this",
+        "Every brand differs. If neither shape works, choose \"Show me what it \
+         is sending\" — the device screen then prints the raw bytes, which is \
+         how an unknown scale gets set up without waiting for us.",
+        ["scale", "protocol", "raw", "format"],
+        SCALE_PROTOCOLS, devices.scale_protocol),
+
+    flag!("devices.display_on", Devices, Row, "Show the customer their bill",
+        "A second screen the customer can see, with the bill as it is typed \
+         and the total at the end. It never takes the keyboard away from the \
+         billing screen.",
+        ["customer", "display", "second screen", "pole", "monitor"],
+        devices.display_on),
+    words!("devices.display_port", Devices, Row, "The pole display is on",
+        "A serial pole display's COM port. Leave it empty to use a second \
+         monitor instead, which is what most shops have.",
+        ["customer", "display", "pole", "com", "serial", "port"],
+        16, Free, devices.display_port),
+    words!("devices.display_idle", Devices, Row, "The display says this when idle",
+        "What the customer sees between bills. Empty shows the shop's name.",
+        ["customer", "display", "idle", "welcome"],
+        40, Free, devices.display_idle),
+
+    words!("devices.label_printer", Devices, Row, "Parcel labels print on",
+        "The printer id parcel labels go to. Leave it empty if you do not \
+         print labels — the button is then not offered at all.",
+        ["label", "parcel", "sticker", "printer"],
+        40, Free, devices.label_printer),
 ];
 
 /// The entry for a key, or `None` if this build has never heard of it.

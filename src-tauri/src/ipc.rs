@@ -354,6 +354,7 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             K::Test => "Test print",
             K::Drawer => "Cash drawer",
             K::DayClose => "Closing slip",
+            K::Delivery => "Delivery slip",
         }
         .to_owned(),
         state: match status.state {
@@ -540,6 +541,23 @@ macro_rules! commands {
             $crate::employment::approve_payroll,
             $crate::employment::reverse_payroll,
             $crate::employment::staff_cost,
+            // P29 — delivery, the riders, and the cash they are carrying.
+            $crate::delivery::delivery_board,
+            $crate::delivery::save_delivery,
+            $crate::delivery::record_handback,
+            $crate::delivery::set_rider,
+            $crate::delivery::print_delivery_slip,
+            // P29 — what the payment machines said, and what nobody has
+            // confirmed yet.
+            $crate::payments::payments,
+            $crate::payments::confirm_payment,
+            // P29 — the device screen, the scale, the customer display and
+            // parcel labels.
+            $crate::devices::device_manager,
+            $crate::devices::scanned,
+            $crate::devices::read_scale_once,
+            $crate::devices::show_customer_display,
+            $crate::devices::print_label,
             // P25 — the stock book.
             $crate::inventory::inventory,
             $crate::inventory::recipe,
@@ -759,6 +777,7 @@ pub fn cart_add_on(
 #[tauri::command]
 pub fn cart_set_qty(
     app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
     index: usize,
     qty: String,
 ) -> UiResult<CartView> {
@@ -770,25 +789,31 @@ pub fn cart_set_qty(
         )
         .with_detail(e.to_string())
     })?;
-    app.with_cart_mut(|state| {
+    let view = app.with_cart_mut(|state| {
         state.cart.set_qty(index, parsed).map_err(|e| {
             UiError::new("cart.qty", "That quantity could not be set.")
                 .with_detail(e.to_string())
         })?;
         cart_view(state, &app.shop_config())
-    })
+    });
+    shown(&handle, view)
 }
 
 #[tauri::command]
-pub fn cart_remove(app: tauri::State<'_, App>, index: usize) -> UiResult<CartView> {
+pub fn cart_remove(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    index: usize,
+) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
-    app.with_cart_mut(|state| {
+    let view = app.with_cart_mut(|state| {
         state.cart.remove(index).map_err(|e| {
             UiError::new("cart.remove", "That line could not be removed.")
                 .with_detail(e.to_string())
         })?;
         cart_view(state, &app.shop_config())
-    })
+    });
+    shown(&handle, view)
 }
 
 /// New order. Keeps the order type, because **the type lock** (crown jewel 1)
@@ -808,13 +833,14 @@ pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
 #[tauri::command]
 pub fn cart_set_order_type(
     app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
     order_type: String,
 ) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
     let kind = order_type_from_label(&order_type).ok_or_else(|| {
         UiError::new("cart.order_type", format!("\"{order_type}\" is not an order type."))
     })?;
-    app.with_cart_mut(|state| {
+    let view = app.with_cart_mut(|state| {
         state.order_type = kind;
         // A parcel has no table, and leaving a stale one would settle the bill
         // against a table nobody is sitting at.
@@ -823,28 +849,88 @@ pub fn cart_set_order_type(
             state.table_label = None;
         }
         cart_view(state, &app.shop_config())
-    })
+    });
+    shown(&handle, view)
 }
 
 /// Take a payment. Split payment is simply calling this more than once (1.15).
 #[tauri::command]
 pub fn cart_add_payment(
     app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
     mode: String,
     amount_paise: i64,
+    reference: Option<String>,
 ) -> UiResult<CartView> {
-    guard::require(&app, Permission::BillCreate)?;
+    shown(&handle, cart_add_payment_on(&app, mode, amount_paise, reference))
+}
+
+/// **P29, scope 8.3: the payment goes past a provider on its way onto the
+/// bill.**
+///
+/// Cash is untouched — the notes are in the drawer and nobody has to be asked.
+/// Everything electronic is asked about, and there are three answers:
+///
+/// * approved — taken, and marked confirmed;
+/// * waiting — taken, and marked **unconfirmed**, which is what the manual
+///   provider that ships says about everything (a person looked at a phone);
+/// * declined — **not taken at all**, so the bill stays unsettled and the
+///   cashier can ask for another way to pay. That is T8, and it is the one
+///   case where a machine is allowed to stop a payment: not because it broke,
+///   but because the bank said no.
+pub fn cart_add_payment_on(
+    app: &App,
+    mode: String,
+    amount_paise: i64,
+    reference: Option<String>,
+) -> UiResult<CartView> {
+    guard::require(app, Permission::BillCreate)?;
     let mode = match mode.as_str() {
         "Cash" => mb_core::PaymentMode::Cash,
         "Card" => mb_core::PaymentMode::Card,
         "UPI" => mb_core::PaymentMode::Upi,
         other => mb_core::PaymentMode::Other(other.to_owned()),
     };
-    let payment = mb_core::Payment::new(mode, mb_core::Money::from_paise(amount_paise))
-        .map_err(|e| {
-            UiError::new("payment.invalid", "That payment could not be taken.")
-                .with_detail(e.to_string())
-        })?;
+    let amount = mb_core::Money::from_paise(amount_paise);
+    let reference = reference.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
+    let order_id = app.with_cart(|state| Ok(state.order_id.clone()))?;
+
+    let answer = crate::payments::ask_about(
+        app,
+        order_id.as_deref(),
+        &mode,
+        amount,
+        reference.as_deref(),
+    )?;
+
+    if let mb_core::provider::Answer::Declined { because } = &answer {
+        return Err(UiError::new(
+            "payment.declined",
+            format!("That payment was refused — {because}. Ask for another way to pay."),
+        ));
+    }
+
+    let mut payment = mb_core::Payment::new(mode, amount).map_err(|e| {
+        UiError::new("payment.invalid", "That payment could not be taken.")
+            .with_detail(e.to_string())
+    })?;
+    // The provider's reference wins over the typed one when there is one: an
+    // approval code from a machine is worth more than a number somebody read
+    // off a screen.
+    let confirmed = answer.is_approved();
+    if let mb_core::provider::Answer::Approved { reference: given } = &answer
+        && !given.is_empty()
+    {
+        payment = payment.with_reference(given.clone());
+    }
+    if payment.reference.is_none()
+        && let Some(reference) = reference
+    {
+        payment = payment.with_reference(reference);
+    }
+    let provider = app.provider();
+    payment = payment.answered_by(provider.name(), confirmed);
+
     app.with_cart_mut(|state| {
         state.settlement.add(payment).map_err(|e| {
             UiError::new("payment.invalid", "That payment could not be taken.")
@@ -855,12 +941,16 @@ pub fn cart_add_payment(
 }
 
 #[tauri::command]
-pub fn cart_clear_payments(app: tauri::State<'_, App>) -> UiResult<CartView> {
+pub fn cart_clear_payments(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
-    app.with_cart_mut(|state| {
+    let view = app.with_cart_mut(|state| {
         state.settlement = mb_core::Settlement::new();
         cart_view(state, &app.shop_config())
-    })
+    });
+    shown(&handle, view)
 }
 
 /// The floor — **the only view of open orders** (scope 1.4).
@@ -2215,23 +2305,45 @@ pub fn search_items(
 // correction sequences driven without a window.
 
 #[tauri::command]
-pub fn open_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<CartView> {
-    open_table_on(&app, table_id)
+pub fn open_table(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    table_id: String,
+) -> UiResult<CartView> {
+    shown(&handle, open_table_on(&app, table_id))
+}
+
+/// **P29, scope 7.8 — the customer sees the bill as it is typed.**
+///
+/// Every command that changes the cart goes through here. It does nothing at
+/// all when the display is off, which is every shop that has not asked for
+/// one, and it can never fail into the billing path: a second screen that is
+/// unplugged is a log line.
+fn shown(handle: &tauri::AppHandle, view: UiResult<CartView>) -> UiResult<CartView> {
+    if let Ok(cart) = &view {
+        crate::devices::show_bill(handle, cart);
+    }
+    view
 }
 
 #[tauri::command]
 pub fn cart_add(
     app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
     item_id: String,
     qty: Option<String>,
     note: Option<String>,
 ) -> UiResult<CartView> {
-    cart_add_on(&app, item_id, qty, note)
+    shown(&handle, cart_add_on(&app, item_id, qty, note))
 }
 
 #[tauri::command]
-pub fn cart_clear(app: tauri::State<'_, App>, keep_type: bool) -> UiResult<CartView> {
-    cart_clear_on(&app, keep_type)
+pub fn cart_clear(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    keep_type: bool,
+) -> UiResult<CartView> {
+    shown(&handle, cart_clear_on(&app, keep_type))
 }
 
 #[cfg(test)]

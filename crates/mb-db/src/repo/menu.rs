@@ -276,6 +276,33 @@ impl<'a> MenuRepo<'a> {
     /// has ever been billed cannot be deleted — `order_lines.item_id` is what
     /// item-wise sales (10.2) reads a year later, so a sold item is history in
     /// the same way a staff member who has left is (9.15).
+    /// **P29, scope 7.6 — the item a scanner just typed.**
+    ///
+    /// A barcode IS a short code: it is characters typed at the counter
+    /// instead of a name, only typed by a machine. So it lives in the same
+    /// column, and a shop that already types "D1" for a dosa can point a
+    /// scanner at a packet and get the same lookup.
+    ///
+    /// Case-insensitive, because a scanner's letters and a person's are the
+    /// same code.
+    pub fn find_by_code(
+        &self,
+        outlet: &str,
+        code: &str,
+    ) -> Result<Option<(String, String)>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT id, name FROM items
+              WHERE outlet_id = ?1 AND short_code IS NOT NULL
+                AND upper(short_code) = upper(?2)
+              LIMIT 1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![outlet, code])?;
+        match rows.next()? {
+            Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+            None => Ok(None),
+        }
+    }
+
     pub fn set_available(
         &self,
         outlet: &str,

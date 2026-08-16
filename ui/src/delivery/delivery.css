@@ -1,0 +1,60 @@
+/*
+ * The delivery board — P29, scope 14.5. Every value is a token.
+ */
+
+.mb-delivery {
+  /* The page margin is the SHELL's (P27.5, .mb-main). */
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-group);
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.mb-delivery__day {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* The address is what the rider actually reads, so it is body text and it
+   WRAPS (D30) — a truncated address is a delivery that comes back. */
+.mb-delivery__address {
+  white-space: normal;
+  max-width: 32ch;
+}
+
+.mb-delivery__who {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-delivery__why {
+  font-size: var(--text-sm);
+  color: var(--danger);
+  white-space: normal;
+  max-width: 28ch;
+}
+
+/* **The two money words.** "Collect ₹640" has to be findable from a metre
+   away on a busy evening; "Paid" must not shout, because a rider who sees
+   colour everywhere stops reading any of it. */
+.mb-delivery__collect {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--warn);
+}
+
+.mb-delivery__paid {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* Cash in somebody's pocket. Not an error — it is a completely normal
+   evening — but it is the figure the owner is looking for. */
+.mb-delivery__carrying {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+  color: var(--warn);
+}

@@ -124,3 +124,165 @@ this.
       passes against two processes on one machine; two real machines is the
       honest version).
 - [ ] A full day in a real shop.
+
+---
+
+# P29's devices — NONE OF THESE HAS BEEN PLUGGED IN
+
+Added 2026-08-16.
+
+P29 built the software for a barcode scanner, a weighing scale, a customer
+display, a label printer and a payment machine. **This computer has a printer
+and nothing else.** So what is claimed is exactly this:
+
+| | |
+|---|---|
+| the parsing, the timing rule, the stability rule | proved, with tests |
+| the failure path — absent, unplugged, silent | proved, with tests |
+| that any of it works with real hardware | **not claimed** |
+
+Every one of these devices is optional and none of them can stop a bill: a
+counter with nothing plugged in bills exactly as it did before P29, and that is
+a test (T1). What is below is what only you can check.
+
+**Where to look in the app:** More → **Devices**. It lists what is set up, has a
+Test button per device, and shows **the raw data a device is sending** — which
+is what a dealer needs to configure a brand nobody here has ever seen. The
+settings themselves are in Settings → **Devices**.
+
+---
+
+## 5. The barcode scanner
+
+**What to buy:** any USB "keyboard wedge" scanner (₹1,200 upwards). It plugs in
+as a keyboard; there is no driver and nothing to configure in Windows.
+
+**Set up first:** put a code into an item — Menu → the item → the code field.
+The scanner types that code, so anything you can type there, it can scan.
+
+- [ ] Open Billing, point the scanner at a packet, pull the trigger. **The item
+      is added to the bill**, at quantity 1, without touching the keyboard.
+- [ ] **Type a nine-letter word into the search box as fast as you can and press
+      Enter.** It must search the menu, **not** be treated as a barcode. This is
+      the one that matters: missing a scan costs one re-scan, but reading your
+      typing as a scan throws away what you typed.
+- [ ] Scan something with no code in the menu. It should say *"Nothing on this
+      counter has the code …"* and tell you where to add it — not fail silently.
+- [ ] Turn on Settings → The bill → **Print the bill number as a barcode**,
+      print a bill, then scan the barcode on that paper. It should find the
+      bill and say so.
+- [ ] If your scanner is too fast or too slow to be told from typing, the two
+      timing settings are in Settings → Devices. Tell me what happened and I
+      will change the defaults.
+
+---
+
+## 6. The weighing scale
+
+**What to buy:** any counter scale with a serial (RS-232) or USB-serial output —
+the kind a sweet shop or a meat counter uses. Ask the dealer for the **baud
+rate** and whether it sends continuously.
+
+**Set up first:** Settings → Devices → the port (COM3, COM4…), the speed, and
+the shape it talks in.
+
+- [ ] Open the device screen and press **Test it** on the scale. If the shape is
+      wrong you will see **the raw bytes it is sending** — send me that line and
+      the right shape becomes a one-line change.
+- [ ] Choose **"Show me what it is sending"** and press Test with something on
+      the pan. That is the mode that exists so a scale nobody here has ever seen
+      can be set up without waiting for us.
+- [ ] Put an item on the bill, open the quantity box and press **Weigh**. The
+      weight should arrive as the quantity.
+- [ ] **Put a bag down and press Weigh while it is still bouncing.** It must say
+      *"still settling"* and take nothing. A weight grabbed on the way up is a
+      customer undercharged for ever.
+- [ ] Unplug the scale and press Weigh. It must say so in a sentence and **the
+      bill must still complete**.
+
+**Weight-encoded labels** (the sticker a scale prints, with the weight inside
+the barcode): the parsing is built and tested, and where each digit sits is a
+setting because every brand differs. If you use them, send me one label and I
+will tell you the four numbers to type in.
+
+---
+
+## 7. The customer display
+
+**What to buy:** either a spare monitor on the second HDMI port (cheapest and
+best), or a serial VFD pole display.
+
+**Set up first:** Settings → Devices → **Show the customer their bill**. For a
+pole display, add its COM port too.
+
+- [ ] Turn it on. A second window opens showing your shop's name.
+- [ ] Add items to a bill and watch the second screen: the lines and the total
+      should follow along.
+- [ ] **THE ONE THAT MATTERS.** Type a whole bill, start to finish, without
+      touching the mouse. **Your typing must never jump out of the search box.**
+      If you have to click back into it even once, tell me and the feature comes
+      out — a display that steals the keyboard will be unplugged by Friday, and
+      it is better not shipped than shipped.
+- [ ] Drag the second window onto the second monitor and restart the app. It
+      should come back where you left it.
+- [ ] Unplug the second monitor while billing. Nothing should happen to the
+      billing screen.
+
+---
+
+## 8. The label printer
+
+**What to buy:** any small thermal label printer that Windows sees as a printer.
+
+**Set up first:** add it in Settings → Printers, then put its id into
+Settings → Devices → **Parcel labels print on**.
+
+- [ ] A **Label** button appears on the billing screen. It appears only when a
+      label printer is set up — that is deliberate.
+- [ ] Press it with a parcel on the bill. Check the sticker: the item, the
+      quantity, the table or token, and your shop's name.
+- [ ] Switch the label printer off and press it again. The job should sit in the
+      print queue and print when the printer comes back — the same as a bill.
+
+---
+
+## 9. The payment machine
+
+**Nothing here is signed up for, and that is on purpose** — it is your
+commercial decision (FEATURE_SCOPE §15, X17).
+
+What ships today is the honest version: when you press **UPI** or **Card**, you
+can type the reference, and the payment is recorded as **not confirmed** until
+somebody says the money arrived.
+
+- [ ] Take a UPI payment and settle the bill.
+- [ ] Open Reports → **Close the day**. There is a **Not confirmed yet** list
+      with that payment on it, its reference, and an **It arrived** button.
+- [ ] Check your bank app, press **It arrived**, and watch it leave the list.
+- [ ] At the end of a real evening, look at that list before you close. **That
+      is the whole feature**: a shop cannot chase what it cannot list.
+
+**What is still yours to decide:**
+
+- **A UPI aggregator** (Razorpay, Cashfree, PhonePe and others) would let the
+  till confirm a payment by itself. Each one charges per transaction and needs a
+  business account and KYC. Tell me which and it becomes a short prompt — the
+  billing code does not change.
+- **A card terminal** that takes a pushed amount needs the acquiring bank's own
+  SDK, which differs per bank. Tell me which bank's machine you have.
+
+---
+
+## 10. Delivery — no hardware, but only you can judge it
+
+- [ ] Take a delivery order, give it to a rider, send it out and mark it
+      arrived. Then take the cash off the rider on the Delivery screen.
+- [ ] **Watch the drawer figure while a rider is out.** The day close should
+      say *"Still with the riders"* and take that money out of what it expects.
+      Put it back with the handback and check the drawer figure returns.
+- [ ] Send one out and mark it **Did not arrive** with a reason. Check the
+      reason is on the screen the next day.
+- [ ] Print a **delivery slip** and look at the paper: the address big enough to
+      read at a gate in the dark, and either **COLLECT ₹640** or **PAID** — a
+      rider who cannot tell those apart asks for money that has already been
+      paid.

@@ -63,6 +63,9 @@ pub enum PreviewLine {
     /// The printer draws a real square (D36); on screen the payload is what a
     /// person can actually check — the same decision the text sink made.
     Qr { payload: String, indent: usize },
+    /// P29. The printer draws the bars; the preview shows the characters,
+    /// which is what a person checking a bill layout can actually verify.
+    Barcode { payload: String, indent: usize },
     /// A logo the raster sink will draw. The screen shows a placeholder: the
     /// bytes are a 1-bit bitmap (D37) and decoding one in the webview to show
     /// it smaller than a thumbnail is work for nothing.
@@ -89,6 +92,10 @@ pub fn to_preview(laid: &Laid) -> PreviewDoc {
                 indent: line.indent,
             },
             LaidContent::QrCode { payload, .. } => PreviewLine::Qr {
+                payload: payload.clone(),
+                indent: line.indent,
+            },
+            LaidContent::Barcode { payload, .. } => PreviewLine::Barcode {
                 payload: payload.clone(),
                 indent: line.indent,
             },

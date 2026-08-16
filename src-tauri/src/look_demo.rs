@@ -155,6 +155,26 @@ const BUSY: &[BusyTable] = &[
 
 /// The bills already settled today, so reports and the day close have a day
 /// behind them. Item, quantity, payment mode.
+/// P29. Somebody to deliver to. The address lives on the customer, so a
+/// regular is typed once and found by phone afterwards.
+const DELIVERY_CUSTOMERS: &[(&str, &str, &str, &str)] = &[
+    ("cus_meera", "Meera", "98400 11223", "14/3 Kamaraj Street, second gate, blue door"),
+    ("cus_arun", "Arun", "98450 66112", "Flat 3B, Srinivasa Apartments, behind the temple"),
+    ("cus_farida", "Farida", "94440 88221", "22 Mount Road, above the medical shop"),
+];
+
+/// P29. Five deliveries at five different points of an evening — and the two
+/// that matter are the last two: one still on the road with the money to
+/// collect, and one that never arrived.
+const DELIVERIES: &[(&str, i64, &str, &str, &str)] = &[
+    // item, quantity, customer, state, why it failed
+    ("itm_meals", 2, "cus_meera", "delivered", ""),
+    ("itm_curry_pbm", 1, "cus_arun", "delivered", ""),
+    ("itm_noodles", 2, "cus_farida", "assigned", ""),
+    ("itm_dosa_masala", 3, "cus_meera", "out", ""),
+    ("itm_meals", 1, "cus_arun", "failed", "Nobody was home, phone switched off"),
+];
+
 const SETTLED: &[(&str, i64, &str)] = &[
     ("itm_meals", 2, "cash"),
     ("itm_dosa_masala", 3, "upi"),
@@ -240,6 +260,8 @@ fn demo_look() {
     seed_expenses(&app);
     seed_shelf(&app);
     seed_people(&app);
+    seed_delivery(&app);
+    seed_unconfirmed(&app);
 
     std::fs::write(mb_db::locate::config_path(&home), db_path.display().to_string())
         .expect("the location file");
@@ -251,6 +273,8 @@ fn demo_look() {
     println!("  6 credit customers, 8 expenses");
     println!("  {} materials on the shelf", MATERIALS.len());
     println!("  {} people, plus one who left", PEOPLE.len());
+    println!("  {} deliveries, 2 riders, 1 short handback", DELIVERIES.len());
+    println!("  1 UPI payment nobody has confirmed");
     println!();
     println!("now: $env:APPDATA=\"{}\"; cargo run -p magic-bill", root.display());
 }
@@ -436,8 +460,21 @@ fn seed_settled_bills(app: &App) -> usize {
         let total = app
             .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
             .expect("bill");
+        // **Every fourth cash bill carries a tip** (P29, scope 8.5), so the
+        // day close's tips line and the tips report are not judged empty. A
+        // tip changes what is DUE and never what the bill IS.
+        let tip = if done % 4 == 3 && *mode == "cash" {
+            Money::from_paise(2_000)
+        } else {
+            Money::ZERO
+        };
         app.with_cart_mut(|state| {
-            let payment = mb_core::Payment::new(mode_of(mode), total).expect("a payment");
+            state.settlement.set_tip(tip).map_err(|e| {
+                crate::words::UiError::new("bill.tip", "That tip could not be taken.")
+                    .with_detail(e.to_string())
+            })?;
+            let payment = mb_core::Payment::new(mode_of(mode), total.add(tip).unwrap_or(total))
+                .expect("a payment");
             state.settlement.add(payment).map_err(|e| {
                 crate::words::UiError::new("bill.pay", "That payment could not be taken.")
                     .with_detail(e.to_string())
@@ -1092,6 +1129,174 @@ fn seed_people(app: &App) {
         "Going home".to_owned(),
     )
     .expect("asked");
+}
+
+/// **P29's evening.** Five deliveries at five different points, two riders,
+/// one handback that leaves somebody short, and one delivery that did not
+/// arrive.
+///
+/// Every screen this session added is judged empty otherwise — and the two
+/// that matter most (a rider carrying money, a payment nobody has confirmed)
+/// are exactly the ones that show nothing at all on a fresh shop.
+fn seed_delivery(app: &App) {
+    use mb_db::repo::delivery::DeliveryState;
+
+    // The riders. Both are already on the staff list — a rider is a member of
+    // staff with a flag, not a second people table.
+    for id in ["staff_kumar", "staff_ravi"] {
+        crate::delivery::set_rider_on(app, id.to_owned(), true).expect("a rider");
+    }
+
+    // Somebody to deliver to. The address lives on the CUSTOMER, so a regular
+    // is typed once and scanned by phone number afterwards.
+    let now = crate::flows::now();
+    let day = crate::flows::today(now);
+    for (id, name, phone, address) in DELIVERY_CUSTOMERS {
+        app.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| {
+                    mb_db::Repos::new(tx).money().save_customer(
+                        OUTLET,
+                        &mb_db::repo::money::Customer {
+                            id: mb_core::CustomerId::new(*id),
+                            name: (*name).to_owned(),
+                            phone: Some((*phone).to_owned()),
+                            gstin: None,
+                            address: Some((*address).to_owned()),
+                            credit_limit: None,
+                            is_active: true,
+                        },
+                        now,
+                    )
+                })
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("a delivery customer");
+    }
+
+    // Five orders, billed and settled in cash — which is what a shop that
+    // takes the money at the counter and sends the food out does, and the case
+    // the drawer gets wrong.
+    for (n, (item, qty, customer, state, failure)) in DELIVERIES.iter().enumerate() {
+        // **A parked order stays in the cart.** Without this the next delivery
+        // is added to the last one and the board ends up one short — which is
+        // exactly what happened the first time this ran.
+        crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
+        app.with_cart_mut(|state| {
+            state.order_type = OrderType::Delivery;
+            state.table = None;
+            state.table_label = None;
+            Ok(())
+        })
+        .expect("delivery");
+        crate::ipc::cart_add_on(app, (*item).to_owned(), Some(qty.to_string()), None)
+            .expect("added");
+        let total = app
+            .with_cart(|s| Ok(s.bill(&app.shop_config())?.grand_total))
+            .expect("bill");
+        // The last two are not settled: one is still on the road with the
+        // money to collect, and one never arrived at all.
+        let settle = !matches!(*state, "out" | "failed");
+        if settle {
+            app.with_cart_mut(|s| {
+                let payment = mb_core::Payment::new(mb_core::PaymentMode::Cash, total)
+                    .expect("a payment");
+                s.settlement.add(payment).map_err(|e| {
+                    crate::words::UiError::new("bill.pay", "That payment could not be taken.")
+                        .with_detail(e.to_string())
+                })
+            })
+            .expect("paid");
+            crate::flows::complete_bill_on(app).expect("settled");
+        } else {
+            crate::flows::park_open_order(app).expect("held");
+        }
+
+        // **The one that has not been moved yet.** Several of these are
+        // written inside the same second, so "the newest" is not a reliable
+        // way to find the one just made — but exactly one of them is still
+        // waiting for a rider.
+        let order_id = crate::delivery::board_on(app, None)
+            .expect("the board")
+            .deliveries
+            .iter()
+            .find(|d| d.state == "pending")
+            .expect("the new delivery is on the board")
+            .order_id
+            .clone();
+
+        let rider = if n % 2 == 0 { "staff_kumar" } else { "staff_ravi" };
+        // Walk the state machine, because it refuses a jump — which is the
+        // point of it, and a seeder that could skip a step would be seeding a
+        // state the product cannot reach.
+        let steps: &[&str] = match *state {
+            "assigned" => &["assigned"],
+            "out" => &["assigned", "out"],
+            "delivered" => &["assigned", "out", "delivered"],
+            "failed" => &["assigned", "out", "failed"],
+            _ => &[],
+        };
+        for step in steps {
+            crate::delivery::save_delivery_on(
+                app,
+                crate::delivery::DeliveryEdit {
+                    order_id: order_id.clone(),
+                    address: String::new(),
+                    customer_id: (*customer).to_owned(),
+                    rider_id: rider.to_owned(),
+                    state: (*step).to_owned(),
+                    failure: if *step == "failed" {
+                        (*failure).to_owned()
+                    } else {
+                        String::new()
+                    },
+                },
+            )
+            .expect("the delivery moved along");
+        }
+        let _ = DeliveryState::Delivered;
+        let _ = day;
+    }
+
+    // **One handback, and it is SHORT.** Kumar hands over two hundred of the
+    // three-sixty he collected, so the screen shows a real difference rather
+    // than a tidy zero — the tidy case proves nothing, and the difference is
+    // the whole reason the feature exists.
+    crate::delivery::record_handback_on(
+        app,
+        "staff_kumar".to_owned(),
+        "200".to_owned(),
+        "first round".to_owned(),
+    )
+    .expect("a handback");
+}
+
+/// **One UPI payment nobody has confirmed**, so the day close's list is not
+/// empty on a screen that exists to show it.
+fn seed_unconfirmed(app: &App) {
+    // The last delivery was PARKED, so it is still in the cart — and adding to
+    // it here would have turned a failed delivery into a settled parcel. It
+    // did, once, and the delivery board quietly showed four rows instead of
+    // five.
+    crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
+    app.with_cart_mut(|state| {
+        state.order_type = OrderType::Parcel;
+        Ok(())
+    })
+    .expect("parcel");
+    crate::ipc::cart_add_on(app, "itm_curry_pbm".to_owned(), Some("2".to_owned()), None)
+        .expect("added");
+    let total = app
+        .with_cart(|s| Ok(s.bill(&app.shop_config())?.grand_total))
+        .expect("bill");
+    crate::ipc::cart_add_payment_on(
+        app,
+        "UPI".to_owned(),
+        total.paise(),
+        Some("UPI/4477112233".to_owned()),
+    )
+    .expect("taken");
+    crate::flows::complete_bill_on(app).expect("settled");
 }
 
 fn day_ahead(day: BusinessDay, n: i32) -> BusinessDay {

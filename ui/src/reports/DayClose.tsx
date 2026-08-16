@@ -36,6 +36,7 @@ import {
 import { call, isUiError } from '../ipc/call';
 import type { CountArg } from '../ipc/generated/CountArg';
 import type { DayCloseView } from '../ipc/generated/DayCloseView';
+import type { UnconfirmedView } from '../ipc/generated/UnconfirmedView';
 
 export function DayClose() {
   const [view, setView] = useState<DayCloseView | null>(null);
@@ -44,6 +45,9 @@ export function DayClose() {
   const [confirming, setConfirming] = useState(false);
   const [reopening, setReopening] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
+  // P29. Every electronic payment nobody has said arrived yet.
+  const [unconfirmed, setUnconfirmed] = useState<UnconfirmedView[]>([]);
+  const [waiting, setWaiting] = useState('');
   const toast = useToast();
 
   const complain = useCallback(
@@ -65,6 +69,17 @@ export function DayClose() {
 
   useEffect(() => {
     call('day_close').then(arrived).catch(complain);
+    // P29. Silent on failure: a shop whose person may not read reports still
+    // closes its day, and an error toast about a list they cannot see would
+    // be noise they can do nothing about.
+    call('payments')
+      .then((view) => {
+        setUnconfirmed([...view.unconfirmed]);
+        setWaiting(view.says);
+      })
+      .catch(() => {
+        setUnconfirmed([]);
+      });
   }, [arrived, complain]);
 
   /** Every keystroke goes to Rust, and Rust owns the arithmetic. */
@@ -190,6 +205,46 @@ export function DayClose() {
         {/* The sentence, written in Rust. */}
         <strong>{view.varianceSays}</strong>
       </Card>
+
+      {/* **P29, scope 8.3 — what has not been confirmed.**
+
+          Here rather than on a screen of its own, because "at close" is when a
+          shop can still do something about it: the customer is gone, but the
+          bank app is open and the reference is on the screen. A list nobody is
+          standing in front of is a list nobody clears. */}
+      {unconfirmed.length > 0 ? (
+        <Card className="mb-dayclose__unconfirmed">
+          <h3 className="mb-dayclose__title">Not confirmed yet</h3>
+          <p className="mb-dayclose__closed">{waiting}</p>
+          {unconfirmed.map((row) => (
+            <div className="mb-dayclose__line" key={`${row.orderId}-${row.seq}`}>
+              <span>
+                {row.bill} · {row.mode}
+                {row.reference ? ` · ${row.reference}` : ''}
+              </span>
+              <span className="mb-numeric">{row.amount.text}</span>
+              <Button
+                small
+                onClick={() => {
+                  call('confirm_payment', {
+                    orderId: row.orderId,
+                    seq: row.seq,
+                    reference: '',
+                  })
+                    .then((fresh) => {
+                      setUnconfirmed([...fresh.unconfirmed]);
+                      setWaiting(fresh.says);
+                      toast.show('ok', 'Marked as arrived.');
+                    })
+                    .catch(complain);
+                }}
+              >
+                It arrived
+              </Button>
+            </div>
+          ))}
+        </Card>
+      ) : null}
 
       {view.needsReason && !view.isClosed ? (
         <Card>

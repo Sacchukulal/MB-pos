@@ -64,6 +64,12 @@ pub enum LaidContent {
         width_pct: u8,
         align: Align,
     },
+    /// P29 — a scannable code, and the digits under it.
+    Barcode {
+        payload: String,
+        human_readable: bool,
+        align: Align,
+    },
     Blank,
 }
 
@@ -236,6 +242,20 @@ fn lay_block(
             content: LaidContent::QrCode {
                 payload: payload.clone(),
                 width_pct: *width_pct,
+                align: *align,
+            },
+            style: Style::NORMAL,
+            indent,
+        }),
+
+        Block::Barcode {
+            payload,
+            human_readable,
+            align,
+        } => lines.push(LaidLine {
+            content: LaidContent::Barcode {
+                payload: payload.clone(),
+                human_readable: *human_readable,
                 align: *align,
             },
             style: Style::NORMAL,

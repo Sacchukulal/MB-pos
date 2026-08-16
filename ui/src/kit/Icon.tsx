@@ -93,7 +93,13 @@ export type IconName =
   | 'parcel'
   | 'cash'
   | 'card'
-  | 'qr';
+  | 'qr'
+  // P29 — the things a counter is plugged into, and the bike outside.
+  | 'bike'
+  | 'scan'
+  | 'scale'
+  | 'monitor'
+  | 'plug';
 
 /**
  * The geometry. 24×24, stroked, never filled.
@@ -360,6 +366,44 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="13.5" y="3.5" width="7" height="7" rx="1" />
       <rect x="3.5" y="13.5" width="7" height="7" rx="1" />
       <path d="M13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h.01" />
+    </>
+  ),
+  // ---- P29 ----------------------------------------------------------------
+  bike: (
+    <>
+      <circle cx="5.5" cy="16.5" r="3" />
+      <circle cx="18.5" cy="16.5" r="3" />
+      <path d="M5.5 16.5h7l3-7h-3" />
+      <path d="M15.5 9.5h2.5l1.5 7" />
+      <path d="M9.5 6.5h3" />
+    </>
+  ),
+  scan: (
+    <>
+      <path d="M3.5 8V5.5a2 2 0 0 1 2-2H8M16 3.5h2.5a2 2 0 0 1 2 2V8" />
+      <path d="M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16" />
+      <path d="M3.5 12h17" />
+    </>
+  ),
+  scale: (
+    <>
+      <path d="M4 20.5h16" />
+      <path d="M5.5 20.5V13h13v7.5" />
+      <path d="M8.5 13V9.5a3.5 3.5 0 0 1 7 0V13" />
+      <path d="M9 16.5h6" />
+    </>
+  ),
+  monitor: (
+    <>
+      <rect x="2.5" y="4" width="19" height="12.5" rx="2" />
+      <path d="M9 20.5h6M12 16.5v4" />
+    </>
+  ),
+  plug: (
+    <>
+      <path d="M9 3.5v5M15 3.5v5" />
+      <path d="M6.5 8.5h11v3a5.5 5.5 0 0 1-11 0z" />
+      <path d="M12 17v3.5" />
     </>
   ),
 };

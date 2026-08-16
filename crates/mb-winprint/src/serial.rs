@@ -6,7 +6,7 @@
 //! that changes the baud rate in Magic Bill's settings does not also have to
 //! change it in Windows.
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::ptr;
 
 use crate::WinPrintError;
@@ -71,6 +71,38 @@ impl Write for SerialPort {
             )));
         }
         Ok(())
+    }
+}
+
+impl Read for SerialPort {
+    /// **P29 — the scale, which is the one serial device that talks back.**
+    ///
+    /// Returns `Ok(0)` when the port had nothing to say inside its timeout,
+    /// and that is not an error: a scale with nothing on it sends nothing, and
+    /// an idle counter must not be a stream of failures in the log.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let len = Dword::try_from(buf.len()).unwrap_or(Dword::MAX);
+        let mut read: Dword = 0;
+        // SAFETY: `buf` is valid for `len` bytes, `read` is writable, and a
+        // null `overlapped` means a synchronous read on a handle opened for it.
+        let ok = unsafe {
+            sys::ReadFile(
+                self.handle,
+                buf.as_mut_ptr(),
+                len,
+                &raw mut read,
+                ptr::null_mut(),
+            )
+        };
+        if ok == FALSE {
+            // SAFETY: no arguments.
+            let code = unsafe { sys::GetLastError() };
+            return Err(io::Error::other(format!(
+                "reading from {} failed (Windows error {code})",
+                self.name
+            )));
+        }
+        Ok(read as usize)
     }
 }
 
@@ -152,10 +184,16 @@ pub fn open(port: &str, baud: u32) -> Result<SerialPort, WinPrintError> {
     // thread for ever. Five seconds plus a millisecond per byte is generous for
     // any printer and finite for a dead one — this is one of the timeouts P07
     // item 7.3 says can actually be honoured.
+    // The read timeouts are P29's, and they are deliberately short: a scale is
+    // polled from a screen a person is looking at, so 'nothing yet' has to come
+    // back fast enough to poll again. 200 ms total, and no waiting between
+    // bytes once something has started arriving.
     let timeouts = sys::CommTimeouts {
+        read_interval_timeout: 50,
+        read_total_timeout_constant: 200,
+        read_total_timeout_multiplier: 0,
         write_total_timeout_constant: 5_000,
         write_total_timeout_multiplier: 1,
-        ..sys::CommTimeouts::default()
     };
     // SAFETY: a valid COMMTIMEOUTS and an open handle.
     if unsafe { sys::SetCommTimeouts(opened.handle, &raw const timeouts) } == FALSE {

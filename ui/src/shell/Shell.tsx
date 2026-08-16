@@ -36,6 +36,8 @@ import { Expenses } from '../expenses/Expenses';
 import { Stock } from '../stock/Stock';
 import { Buying } from '../buying/Buying';
 import { Floor } from '../floor/Floor';
+import { Delivery } from '../delivery/Delivery';
+import { Devices } from '../devices/Devices';
 import { Menu } from '../menu/Menu';
 import { Reports } from '../reports/Reports';
 import { Settings } from '../settings/Settings';
@@ -163,6 +165,21 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'purchases.manage',
   },
   {
+    // **P29.** Beside the floor, because it is the same question asked about
+    // the food that has left the building: which orders are still out, and who
+    // is carrying the cash for them.
+    //
+    // **Not `daily`, and that is a decision rather than an oversight.** The bar
+    // is a fixed six because seven words do not fit across 1366px, and none of
+    // the six is droppable for a shop that does no deliveries at all. So this
+    // sits under More, where Stock and Buying already are — every screen a
+    // particular shop lives in and a different shop never opens.
+    id: 'delivery',
+    label: 'Delivery',
+    icon: 'bike',
+    render: () => <Delivery />,
+  },
+  {
     id: 'bills',
     daily: true,
     label: 'Bills',
@@ -230,6 +247,17 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     icon: 'flame',
     render: () => <Kitchen />,
     needs: 'bill.create',
+  },
+  {
+    // **P29.** Beside Health, because they are the same question about the two
+    // halves of one counter: is the software all right, and is the hardware. A
+    // dealer setting a shop up lives on this screen for an hour and never
+    // opens it again.
+    id: 'devices',
+    label: 'Devices',
+    icon: 'plug',
+    render: () => <Devices />,
+    needs: 'settings.printer',
   },
   {
     // Beside Account, because the two answer "is my counter all right?" from

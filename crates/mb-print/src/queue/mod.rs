@@ -88,6 +88,11 @@ pub enum JobKind {
     /// because the print queue shows a person what each job IS, and "test
     /// print" against the paper that records a day's cash is audit F8.
     DayClose,
+    /// P29, scope 14.5. The slip that goes out with the rider: the address,
+    /// the phone and what to collect. Its own kind for the same reason the
+    /// Z-report is — the queue tells a person what each job IS, and a rider's
+    /// slip is not a parcel label.
+    Delivery,
 }
 
 impl JobKind {
@@ -100,6 +105,7 @@ impl JobKind {
             JobKind::Test => "test",
             JobKind::Drawer => "drawer",
             JobKind::DayClose => "day_close",
+            JobKind::Delivery => "delivery",
         }
     }
 
@@ -112,6 +118,7 @@ impl JobKind {
             "test" => Some(JobKind::Test),
             "drawer" => Some(JobKind::Drawer),
             "day_close" => Some(JobKind::DayClose),
+            "delivery" => Some(JobKind::Delivery),
             _ => None,
         }
     }
@@ -130,6 +137,9 @@ impl JobKind {
             // Behind a bill: a customer waiting to pay beats the slip that
             // closes a day which is already over.
             JobKind::DayClose => 30,
+            // With the food, so it goes at kitchen speed and not at label
+            // speed: the rider is standing there.
+            JobKind::Delivery => 25,
             JobKind::Test | JobKind::Label => 50,
         }
     }
@@ -406,7 +416,14 @@ impl Queue {
             // A closing slip goes wherever a bill would, and a shop with only a
             // kitchen printer must still be able to print one — the alternative
             // is a day that cannot be closed on paper.
-            JobKind::DayClose | JobKind::Label | JobKind::Test | JobKind::Drawer => true,
+            // A delivery slip is the same argument: the rider is at the counter
+            // and a shop with one kitchen printer must still be able to send
+            // an address out with them.
+            JobKind::DayClose
+            | JobKind::Label
+            | JobKind::Test
+            | JobKind::Drawer
+            | JobKind::Delivery => true,
         };
         if !allowed {
             return Err(PrintError::invalid(format!(

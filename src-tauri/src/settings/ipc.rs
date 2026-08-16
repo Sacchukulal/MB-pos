@@ -170,6 +170,10 @@ pub const fn permission_for(group: Group) -> Permission {
         // The look and the language are "how this shop presents itself".
         Group::Appearance => Permission::SettingsStore,
         Group::Backup => Permission::BackupRun,
+        // P29. A scanner, a scale, a customer display and a label printer are
+        // things somebody plugs in — the same job, and usually the same
+        // person, as setting up a printer.
+        Group::Devices => Permission::SettingsPrinter,
     }
 }
 

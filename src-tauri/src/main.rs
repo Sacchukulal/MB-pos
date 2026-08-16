@@ -46,6 +46,14 @@ mod credit;
 mod dayclose;
 mod floor;
 mod employment;
+/// P29. **Orders that leave on a bike**, and the cash a rider is carrying.
+mod delivery;
+/// P29. **Did the money actually arrive?** — the payment provider seam, the
+/// attempts ledger and the unconfirmed list.
+mod payments;
+/// P29. **The things a counter is plugged into** — and not one of them may
+/// ever stop a bill.
+mod devices;
 mod expenses;
 /// P27. **Bills travelling between tills** â a settled bill is a FACT, and
 /// facts are copied rather than reconciled (D136).
@@ -168,6 +176,17 @@ mod order_tests;
 /// that must be refused (approving twice, correcting your own hours).
 #[cfg(test)]
 mod employment_tests;
+/// P29 driven end to end: a rider's evening, and the cash that comes back.
+#[cfg(test)]
+mod delivery_tests;
+/// P29 driven end to end: the unconfirmed list, a declined card, and the three
+/// places a tip must never appear.
+#[cfg(test)]
+mod payment_tests;
+/// P29: T1 and T2 — every device absent, and every device present but not
+/// answering. The sale completes either way.
+#[cfg(test)]
+mod device_tests;
 #[cfg(test)]
 mod look_demo;
 mod startup;
@@ -330,6 +349,14 @@ fn main() {
             }
             push::watch_for_pairing(app.handle());
             push::emit_session(app.handle());
+            // P29, scope 7.8. Open the customer window if this shop asked for
+            // one. It cannot fail into anything: a second monitor that has been
+            // unplugged since last night is a log line and a counter that still
+            // bills.
+            if let Some(state) = app.handle().try_state::<App>() {
+                let on = state.shop_config().devices.display_on;
+                devices::sync_display(app.handle(), on);
+            }
             if let Some(main) = app.get_webview_window("main") {
                 // Step 8. Restored and THEN shown, so the 800x600 flash audit
                 // F7 describes cannot happen.

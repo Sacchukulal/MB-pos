@@ -508,6 +508,25 @@ pub(crate) fn default_printer(app: &App) -> UiResult<PrinterConfig> {
         })
 }
 
+/// **One named printer** — P29, for the label printer, which is chosen by id
+/// rather than by being the default.
+pub(crate) fn printer_by_id(app: &App, id: &str) -> UiResult<PrinterConfig> {
+    let rows = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })?;
+    rows.iter()
+        .find(|p| p.id == id)
+        .map(crate::state::printer_config_for)
+        .ok_or_else(|| {
+            UiError::new(
+                "print.no_printer",
+                "That printer is not set up any more. Choose another one in                  Settings, under Devices.",
+            )
+        })
+}
+
 /// **One template, another argument** — P12's reprint, and audit D7.
 ///
 /// `bill_document` already takes a [`Copy`](mb_print::template::Copy), so a

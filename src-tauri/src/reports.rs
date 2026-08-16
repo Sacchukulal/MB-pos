@@ -604,7 +604,9 @@ fn build(
             // one thing a shop can get wrong about tips is thinking they are
             // takings. Said once, in Rust, where the report is made (§6).
             notes.push(
-                "A tip is not the shop's money. It is in no sales figure and no                  tax figure. Cash tips are already in the drawer, so they come                  out of it when they are handed over."
+                "A tip is not the shop's money. It is in no sales figure and \
+                 no tax figure. Cash tips are already in the drawer, so they \
+                 come out of it when they are handed over."
                     .to_owned(),
             );
             (columns, rows, None, None)

@@ -433,6 +433,134 @@ pub struct ShopConfig {
     pub stock: Stock,
     pub backup: BackupPolicy,
     pub appearance: Appearance,
+    /// P29. The scanner, the scale, the customer display and the label
+    /// printer — every one of them optional.
+    pub devices: Devices,
+}
+
+/// **P29 — the things a counter is plugged into** (scope 7.6–7.9).
+///
+/// Every one of them is optional, and every one of them can be absent,
+/// unplugged, broken or slow. **Not one of them may ever block a sale**, which
+/// is why an empty port here is a normal, complete configuration and not a
+/// half-finished one.
+///
+/// The scanner needs no port at all: it is a keyboard, and the only setting it
+/// has is how to tell it apart from a person typing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Devices {
+    /// The longest AVERAGE gap between keystrokes that still counts as a
+    /// machine. See [`mb_core::devices::ScanRule`] for why this is the shape
+    /// of the question.
+    pub scan_average_gap_ms: u32,
+    /// One gap longer than this ends the burst, whatever the average.
+    pub scan_single_gap_ms: u32,
+    /// Shorter than this and it is not a barcode at all.
+    pub scan_min_length: u32,
+
+    /// The leading digits that mark a weight-encoded label. Empty means this
+    /// shop does not use them, which is most shops.
+    pub label_prefix: String,
+    pub label_item_from: u32,
+    pub label_item_len: u32,
+    pub label_value_from: u32,
+    pub label_value_len: u32,
+    /// `quantity` or `price` — what the number inside the label means.
+    pub label_value_is: String,
+    /// How many of the value's digits are after the decimal point.
+    pub label_value_decimals: u32,
+
+    /// `COM3`, or empty for a shop with no scale — which is nearly all of
+    /// them.
+    pub scale_port: String,
+    pub scale_baud: u32,
+    /// `status_then_weight`, `weight_only` or `raw`.
+    ///
+    /// **`raw` is a tool and not a fallback**: it shows exactly what the scale
+    /// is sending, which is how a dealer configures a brand nobody here has
+    /// ever seen. It is the difference between "we support your scale" and
+    /// "we support scales".
+    pub scale_protocol: String,
+
+    /// Whether a second screen shows the customer their bill as it is typed.
+    pub display_on: bool,
+    /// A serial pole display's port. Empty means the second WINDOW, which is
+    /// what a shop with a spare monitor uses.
+    pub display_port: String,
+    /// What the display says when there is no bill on the screen.
+    pub display_idle: String,
+
+    /// Which printer parcel labels go to. Empty means the shop prints none,
+    /// and the label button is not offered.
+    pub label_printer: String,
+}
+
+impl Default for Devices {
+    fn default() -> Self {
+        let scan = mb_core::devices::ScanRule::default();
+        Devices {
+            scan_average_gap_ms: scan.max_average_gap_ms,
+            scan_single_gap_ms: scan.max_single_gap_ms,
+            scan_min_length: u32::try_from(scan.min_length).unwrap_or(8),
+            // The commonest Indian convention, and still off until a shop
+            // types a prefix: guessing here would turn ordinary EAN-13
+            // barcodes into weights.
+            label_prefix: String::new(),
+            label_item_from: 1,
+            label_item_len: 6,
+            label_value_from: 7,
+            label_value_len: 5,
+            label_value_is: "quantity".to_owned(),
+            label_value_decimals: 3,
+            scale_port: String::new(),
+            scale_baud: 9_600,
+            scale_protocol: "status_then_weight".to_owned(),
+            display_on: false,
+            display_port: String::new(),
+            display_idle: String::new(),
+            label_printer: String::new(),
+        }
+    }
+}
+
+impl Devices {
+    /// The scan rule, as mb-core wants it.
+    #[must_use]
+    pub fn scan_rule(&self) -> mb_core::devices::ScanRule {
+        mb_core::devices::ScanRule {
+            max_average_gap_ms: self.scan_average_gap_ms,
+            max_single_gap_ms: self.scan_single_gap_ms,
+            min_length: usize::try_from(self.scan_min_length).unwrap_or(8),
+        }
+    }
+
+    /// The label rule, or `None` when this shop does not use weight-encoded
+    /// labels — which is the ordinary case and not a misconfiguration.
+    #[must_use]
+    pub fn label_rule(&self) -> Option<mb_core::devices::EmbeddedRule> {
+        if self.label_prefix.trim().is_empty() {
+            return None;
+        }
+        Some(mb_core::devices::EmbeddedRule {
+            prefix: self.label_prefix.trim().to_owned(),
+            item_from: usize::try_from(self.label_item_from).unwrap_or(0),
+            item_len: usize::try_from(self.label_item_len).unwrap_or(0),
+            value_from: usize::try_from(self.label_value_from).unwrap_or(0),
+            value_len: usize::try_from(self.label_value_len).unwrap_or(0),
+            value_is_price: self.label_value_is == "price",
+            value_decimals: self.label_value_decimals,
+        })
+    }
+
+    #[must_use]
+    pub fn protocol(&self) -> mb_core::devices::ScaleProtocol {
+        match self.scale_protocol.as_str() {
+            "weight_only" => mb_core::devices::ScaleProtocol::WeightOnly,
+            "raw" => mb_core::devices::ScaleProtocol::Raw,
+            _ => mb_core::devices::ScaleProtocol::StatusThenWeight,
+        }
+    }
 }
 
 /// The stock book's only preference.

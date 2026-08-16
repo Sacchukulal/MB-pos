@@ -89,6 +89,16 @@ pub struct Capabilities {
     pub raster: bool,
     /// `GS ( k` — the printer's own QR encoder (D36).
     pub native_qr: bool,
+    /// P29. `GS k` — the printer's own barcode encoder, which is what makes a
+    /// bill scannable back into the till. Same argument as the QR: the
+    /// printer draws it far better than a raster of ours would.
+    #[serde(default = "yes")]
+    pub native_barcode: bool,
+}
+
+/// Serde default for a capability added after shops had saved printers.
+const fn yes() -> bool {
+    true
 }
 
 impl Default for Capabilities {
@@ -100,6 +110,7 @@ impl Default for Capabilities {
             drawer: true,
             raster: true,
             native_qr: true,
+            native_barcode: true,
         }
     }
 }
@@ -116,6 +127,7 @@ impl Capabilities {
                 drawer: false,
                 raster: true,
                 native_qr: false,
+                native_barcode: false,
             },
             Target::Spooler { .. } | Target::Network { .. } | Target::Serial { .. } => {
                 Capabilities::default()

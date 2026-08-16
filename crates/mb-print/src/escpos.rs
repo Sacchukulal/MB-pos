@@ -241,6 +241,30 @@ impl EscPos {
             .extend_from_slice(&[GS, b'(', b'k', 3, 0, 49, 81, 48]);
         self
     }
+
+    /// **CODE 128, P29.** Every scanner sold reads it, and unlike EAN it takes
+    /// letters — which a bill number has in it.
+    ///
+    /// `GS k 73 n d1..dn`, the length-prefixed form. The older
+    /// NUL-terminated form (`GS k 6`) cannot carry a NUL and is refused by
+    /// several current printers, so this uses the one that is universal on
+    /// anything made this decade.
+    pub fn barcode(&mut self, payload: &str, human_readable: bool, height: u8) -> &mut Self {
+        // How tall, in dots. 60 is about 8 mm — readable, and not half the
+        // receipt.
+        self.out.extend_from_slice(&[GS, b'h', height.clamp(1, 255)]);
+        // Narrow bar width, 2 dots. Wider is easier to scan and eats paper.
+        self.out.extend_from_slice(&[GS, b'w', 2]);
+        // Where the characters go: 0 none, 2 below.
+        self.out
+            .extend_from_slice(&[GS, b'H', if human_readable { 2 } else { 0 }]);
+        // Code set B, which covers the printable ASCII a bill number uses.
+        let data = payload.as_bytes();
+        let length = u8::try_from(data.len().saturating_add(2)).unwrap_or(u8::MAX);
+        self.out.extend_from_slice(&[GS, b'k', 73, length, b'{', b'B']);
+        self.out.extend_from_slice(data);
+        self
+    }
 }
 
 /// What a finished job needs beyond its document.
@@ -318,6 +342,22 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                 } else {
                     // The same choice the text sink makes: a URI a customer can
                     // read and type beats a blank space.
+                    out.line(payload);
+                }
+            }
+            LaidContent::Barcode {
+                payload,
+                human_readable,
+                align,
+            } => {
+                if caps.native_barcode {
+                    out.align(*align)
+                        .barcode(payload, *human_readable, 60)
+                        .line("")
+                        .align(Align::Left);
+                } else {
+                    // The same choice the QR arm makes above: characters a
+                    // person can read beat a blank space.
                     out.line(payload);
                 }
             }

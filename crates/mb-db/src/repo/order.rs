@@ -100,6 +100,12 @@ impl<'a> OrderRepo<'a> {
                      ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
              ON CONFLICT (id) DO UPDATE SET
                  state                 = excluded.state,
+                 -- **P29 found this missing.** A cashier who starts a bill and
+                 -- then presses Delivery changes the cart's type, and without
+                 -- this line the ROW keeps whatever it was first saved as — so
+                 -- the order never appears on the delivery board and settles as
+                 -- a dine-in. Every other field the cart owns is already here.
+                 order_type            = excluded.order_type,
                  table_id              = excluded.table_id,
                  sub_table             = excluded.sub_table,
                  covers                = excluded.covers,
@@ -559,8 +565,8 @@ impl<'a> OrderRepo<'a> {
             self.tx.execute(
                 "INSERT INTO payments (id, order_id, seq, mode, customer_id, mode_label, amount,
                                        tip, reference, settles_credit, received_at, received_by,
-                                       business_day)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                       business_day, provider, confirmed_at, confirmed_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 rusqlite::params![
                     format!("{order_id}_pay_{seq}"),
                     order_id,
@@ -575,6 +581,22 @@ impl<'a> OrderRepo<'a> {
                     encode::timestamp_to_sql(core.created_at),
                     core.created_by.as_str(),
                     encode::business_day_to_sql(core.business_day),
+                    payment.provider,
+                    // **P29.** Confirmed at the moment it was taken, or not at
+                    // all. A payment nobody has checked carries no time, which
+                    // is what puts it on the list a shop reads at close — and
+                    // the person is whoever was at the till, because a
+                    // confirmation with no name on it settles no argument.
+                    if payment.confirmed {
+                        Some(encode::timestamp_to_sql(core.created_at))
+                    } else {
+                        None
+                    },
+                    if payment.confirmed {
+                        Some(core.created_by.as_str())
+                    } else {
+                        None
+                    },
                 ],
             )?;
         }
@@ -784,7 +806,8 @@ impl<'a> OrderRepo<'a> {
     /// Replays [`Settlement`]: `new`, `add` per payment, then the tip.
     fn read_settlement(&self, order_id: &str) -> Result<Settlement, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT mode, customer_id, mode_label, amount, tip, reference, settles_credit
+            "SELECT mode, customer_id, mode_label, amount, tip, reference, settles_credit,
+                    provider, confirmed_at
                FROM payments WHERE order_id = ?1 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
@@ -796,13 +819,16 @@ impl<'a> OrderRepo<'a> {
                 row.get::<_, i64>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
             ))
         })?;
 
         let mut settlement = Settlement::new();
         let mut tip = Money::ZERO;
         for row in rows {
-            let (mode, customer, label, amount, row_tip, reference, credit) = row?;
+            let (mode, customer, label, amount, row_tip, reference, credit, provider, confirmed) =
+                row?;
             let mode = encode::payment_mode_from_sql(&mode, customer.as_deref(), label.as_deref())?;
             let mut payment = Payment::new(mode, encode::money_from_sql(amount))
                 .map_err(|e| DbError::invariant(format!("order {order_id} payment: {e}")))?;
@@ -812,6 +838,10 @@ impl<'a> OrderRepo<'a> {
             if encode::bool_from_sql(credit, "payments.settles_credit")? {
                 payment = payment.settling_credit();
             }
+            // P29. A time in `confirmed_at` IS the confirmation; there is no
+            // second boolean that could disagree with it.
+            payment.confirmed = confirmed.is_some();
+            payment.provider = provider;
             settlement
                 .add(payment)
                 .map_err(|e| DbError::invariant(format!("order {order_id} settlement: {e}")))?;

@@ -382,6 +382,20 @@ fn t8_every_named_index_exists() {
         // One line per person per run, and a person's payslip history.
         "idx_payroll_lines_run_person",
         "idx_payroll_lines_person",
+        // P29, scope 14.5. "What is this rider carrying" is asked at every
+        // handback and at every day close, and it is a sum over these rows —
+        // never a stored figure (D120), so the index is what makes the
+        // question cheap enough to ask that often.
+        "idx_rider_handbacks_rider",
+        // And the drawer's own question: what came back today, at all.
+        "idx_rider_handbacks_day",
+        // P29, scope 8.3. The day's asks — read by the day close, which is
+        // where a shop finds out that three payments were never confirmed.
+        "idx_payment_attempts_day",
+        // "What happened on that bill?", asked at the counter mid-argument.
+        // Partial, because an attempt made before the draft existed has no
+        // order to hang on and this index must not hold it.
+        "idx_payment_attempts_order",
     ];
 
     let db = Scratch::new("t8").open();

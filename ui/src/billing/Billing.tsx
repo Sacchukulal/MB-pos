@@ -86,6 +86,14 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   // behaviour.
   //
   const searchBox = useRef<HTMLInputElement>(null);
+  /**
+   * **P29 — whether this shop has a scale and a label printer.**
+   *
+   * Asked once, when the screen opens. A button for hardware a shop does not
+   * own is worse than no button: it is a promise that fails when pressed.
+   */
+  const [hasScale, setHasScale] = useState(false);
+  const [hasLabels, setHasLabels] = useState(false);
 
   // **The reducer is PURE, and the commands ride in the state.**
   //
@@ -105,6 +113,43 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     },
     { ...initialKeys(), outbox: [] as KeyCommand[], seq: 0 },
   );
+
+  /**
+   * **P29, scope 7.6 — the scanner, which is a keyboard.**
+   *
+   * A scanner types the code into the search box and presses Enter, so the box
+   * gets exactly what a fast cashier typing "dosa" gets. The only thing that
+   * tells them apart is the TIMING, so the timing is collected here — the
+   * characters and the gap before each one — and the decision is made in Rust
+   * by a pure function with its own tests (R8, and `mb_core::devices`).
+   *
+   * **The dangerous mistake is the other one.** Missing a scan costs a
+   * re-scan; reading a fast typist as a scan throws away what they typed. So
+   * when Rust says "typing", this does nothing at all and Enter behaves
+   * exactly as it did before P29.
+   */
+  const strokes = useRef<{ text: string; gaps: number[]; at: number }>({
+    text: '',
+    gaps: [],
+    at: 0,
+  });
+
+  const noteKeystroke = useCallback((text: string) => {
+    const now = Date.now();
+    const before = strokes.current;
+    const grewByOne = text.length === before.text.length + 1 && text.startsWith(before.text);
+    if (grewByOne && before.text !== '') {
+      strokes.current = {
+        text,
+        gaps: [...before.gaps, now - before.at],
+        at: now,
+      };
+      return;
+    }
+    // Anything else — a paste, a backspace, a fresh box — starts again. A
+    // half-remembered burst is worse than no burst.
+    strokes.current = { text, gaps: [], at: now };
+  }, []);
 
   const report = useCallback(
     (cause: unknown) => {
@@ -135,6 +180,17 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     if (!inApp()) return;
     call('current_cart').then(setCart).catch(report);
     call('menu_items').then(setMenu).catch(report);
+    // Silent on failure: a cashier who may not open the device screen still
+    // bills, and the two buttons below simply do not appear.
+    call('device_manager')
+      .then((devices) => {
+        setHasScale(devices.devices.some((d) => d.kind === 'scale' && d.setUp));
+        setHasLabels(devices.devices.some((d) => d.kind === 'label' && d.setUp));
+      })
+      .catch(() => {
+        setHasScale(false);
+        setHasLabels(false);
+      });
   }, [report]);
 
   // **The floor changed the order this cart has open** (P20, D83).
@@ -215,6 +271,49 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       report(cause);
     }
   }, [locked, refreshFloor, report]);
+
+  /**
+   * Enter, with a burst of characters in the box: ask Rust whether that was a
+   * machine. Returns true when it handled it, so the ordinary Enter does not
+   * also run.
+   */
+  const handledAsScan = useCallback(async (): Promise<boolean> => {
+    const burst = strokes.current;
+    if (burst.text.trim() === '') return false;
+    try {
+      const outcome = await call('scanned', { text: burst.text, gapsMs: burst.gaps });
+      if (outcome.what === 'typing') return false;
+
+      strokes.current = { text: '', gaps: [], at: 0 };
+      dispatch({ kind: 'typed', text: '' });
+
+      if (outcome.what === 'item' || outcome.what === 'weighed') {
+        await addItem(outcome.itemId, outcome.qty);
+        if (outcome.says) toast.show('ok', outcome.says);
+        return true;
+      }
+      if (outcome.what === 'bill') {
+        // A printed bill, scanned back onto the screen. The Bills screen is
+        // where a settled bill is worked on, so this says what it found
+        // rather than pretending the billing screen can reopen it.
+        toast.show('info', `${outcome.says} — open it under Bills.`);
+        return true;
+      }
+      // Unknown: the code is real, nothing on this counter has it. Offering
+      // to attach it to an item is the Menu screen's job (D102), so this
+      // sends them there rather than growing a second editor here.
+      toast.show(
+        'warn',
+        outcome.says,
+        'Add it as the item’s code on the Menu screen, then scan again.',
+      );
+      return true;
+    } catch (cause) {
+      // **A scanner that cannot be asked about must not eat a keystroke.**
+      report(cause);
+      return false;
+    }
+  }, [addItem, report, toast]);
 
   const setOrderType = useCallback(
     async (orderType: string) => {
@@ -427,6 +526,18 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         if (box.value !== '') return;
       }
       event.preventDefault();
+      // **P29: was that a scanner?** Only ever on Enter, only ever when there
+      // is a burst in the box, and only when Rust says so — otherwise the
+      // ordinary Enter runs, exactly as it did before.
+      if (event.key === 'Enter') {
+        void handledAsScan().then((handled) => {
+          if (handled) return;
+          const done = mark('keystroke');
+          dispatch({ kind: 'key', key: 'Enter' });
+          done();
+        });
+        return;
+      }
       // B1: mark the input, and let the hook report when the pixels changed.
       const done = mark('keystroke');
       dispatch({ kind: 'key', key: event.key });
@@ -434,7 +545,7 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [handledAsScan, mark]);
 
   if (!inApp()) {
     return (
@@ -491,7 +602,12 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             // Audit F5 asked for a way through twenty open tables; typing the
             // table number and pressing Enter is that way, and it is one
             // keystroke shorter than filtering.
-            onChange={(event) => dispatch({ kind: 'typed', text: event.target.value })}
+            onChange={(event) => {
+              // P29 — the timing, for the scan-or-person question. Recording
+              // it costs nothing and asking is only ever done on Enter.
+              noteKeystroke(event.target.value);
+              dispatch({ kind: 'typed', text: event.target.value });
+            }}
           />
           <Suggestions
             items={keys.suggestions}
@@ -706,6 +822,27 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             <Button variant="quiet" onClick={() => void newOrder()}>
               New order
             </Button>
+            {/* **P29, scope 7.9 — a parcel label.** Only when this shop has a
+                label printer set up: a button for hardware nobody owns is a
+                promise that fails when pressed. */}
+            {hasLabels ? (
+              <Button
+                variant="quiet"
+                disabled={!cart || cart.isEmpty}
+                onClick={() => {
+                  const first = cart?.lines[0];
+                  if (!first) return;
+                  call('print_label', {
+                    line: `${first.qty} x ${first.name}`,
+                    token: cart?.table ?? 'Parcel',
+                  })
+                    .then(() => toast.show('ok', 'The label is printing.'))
+                    .catch(report);
+                }}
+              >
+                Label
+              </Button>
+            ) : null}
             <Button
               variant="quiet"
               disabled={!cart || cart.isEmpty}
@@ -723,6 +860,29 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           onType={(text) => dispatch({ kind: 'typed', text })}
           onConfirm={() => dispatch({ kind: 'key', key: 'Enter' })}
           onCancel={() => dispatch({ kind: 'key', key: 'Escape' })}
+          // **P29, scope 7.7.** Only offered when this shop has a scale — and
+          // a scale that does not answer says so in a toast and leaves the
+          // typed quantity exactly where it was. Weighing can fail; billing
+          // cannot.
+          onWeigh={
+            hasScale
+              ? () => {
+                  call('read_scale_once')
+                    .then((answer) => {
+                      if (!answer.answered) {
+                        toast.show('warn', answer.says);
+                        return;
+                      }
+                      // "1.234 kg" — the number is the quantity, the unit is
+                      // the scale's own word for it.
+                      const [amount] = answer.says.split(' ');
+                      if (amount) dispatch({ kind: 'typed', text: amount });
+                      toast.show('ok', answer.says);
+                    })
+                    .catch(report);
+                }
+              : undefined
+          }
         />
       ) : null}
 

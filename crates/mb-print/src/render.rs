@@ -59,6 +59,13 @@ pub trait Sink {
         let _ = (payload, width_pct, align, index);
     }
 
+    /// P29. A sink that cannot draw bars prints the characters instead — the
+    /// same choice the QR arm makes, and for the same reason: a number a
+    /// person can read beats a blank space.
+    fn barcode(&mut self, payload: &str, human_readable: bool, align: Align, index: usize) {
+        let _ = (payload, human_readable, align, index);
+    }
+
     fn blank(&mut self, index: usize) {
         let _ = index;
     }
@@ -84,6 +91,11 @@ pub fn render(laid: &Laid, sink: &mut dyn Sink) {
                 width_pct,
                 align,
             } => sink.qr(payload, *width_pct, *align, index),
+            LaidContent::Barcode {
+                payload,
+                human_readable,
+                align,
+            } => sink.barcode(payload, *human_readable, *align, index),
             LaidContent::Blank => sink.blank(index),
         }
     }

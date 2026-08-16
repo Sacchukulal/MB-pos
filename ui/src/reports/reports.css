@@ -344,6 +344,29 @@
   line-height: var(--line-normal);
 }
 
+/* **P29, scope 8.3 — the payments nobody has confirmed.**
+
+   Beside the drawer count, because the two are the same job: this is the
+   money the shop believes it has and has not checked. The rows carry a
+   button, so each line is a row inside a column card — the same trap the
+   banner below documents. */
+/* Capped, and it scrolls. A shop that took twenty card payments today would
+   otherwise push the drawer count — the whole point of the screen — off the
+   bottom. */
+.mb-dayclose__unconfirmed {
+  /* `flex: 0 0 auto` as well as the height cap: the page is a flex column, so
+     a card that only says how TALL it may be gets squeezed down to its heading
+     by the siblings around it. Found by looking at it. */
+  flex: 0 0 auto;
+  max-height: var(--raw-output-height);
+  overflow-y: auto;
+}
+
+.mb-dayclose__unconfirmed .mb-dayclose__line {
+  align-items: center;
+  gap: var(--space-3);
+}
+
 /* The "this day is closed" banner: the sentence on the left, the way out on
    the right. */
 .mb-dayclose__banner {

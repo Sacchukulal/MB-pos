@@ -36,6 +36,7 @@ pub mod composition;
 /// (D127).
 pub mod counts;
 pub mod corrections;
+pub mod delivery;
 pub mod devices;
 pub mod kitchen;
 pub mod employment;
@@ -46,6 +47,7 @@ pub mod menucsv;
 pub mod money;
 pub mod order;
 pub mod outbox;
+pub mod payments;
 pub mod people;
 pub mod print_jobs;
 /// P18. Every report, and every one of them groups by the STORED business day
@@ -141,6 +143,13 @@ impl<'a> Repos<'a> {
         employment::EmploymentRepo::new(self.tx)
     }
 
+    /// **Orders that leave on a bike** (P29), and the cash a rider is
+    /// carrying — which is the half of delivery where money actually goes.
+    #[must_use]
+    pub fn delivery(&self) -> delivery::DeliveryRepo<'a> {
+        delivery::DeliveryRepo::new(self.tx)
+    }
+
     #[must_use]
     pub fn settings(&self) -> SettingsRepo<'a> {
         SettingsRepo::new(self.tx)
@@ -176,6 +185,14 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn corrections(&self) -> CorrectionsRepo<'a> {
         CorrectionsRepo::new(self.tx)
+    }
+
+    /// P29 — what a payment provider said, and every payment nobody has
+    /// confirmed. **Not the payments themselves**: those are written inside
+    /// the settle, by `orders()`, and that does not change.
+    #[must_use]
+    pub fn payments(&self) -> payments::PaymentsRepo<'a> {
+        payments::PaymentsRepo::new(self.tx)
     }
 
     /// P19 devices — the phones this counter serves.

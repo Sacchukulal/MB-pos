@@ -136,6 +136,19 @@ pub enum Permission {
     /// The strongest in this session: approving a run moves real money out of
     /// the drawer, and it is the owner's decision every time.
     SalaryManage,
+    /// P29, scope 14.5. **Sending an order out on a bike, and taking the cash
+    /// back off the rider.**
+    ///
+    /// One permission and not two, because it is one job: the person who
+    /// hands the parcel over is the person the rider hands the money to an
+    /// hour later. Splitting it would mean a counter that can dispatch and
+    /// cannot receipt, which is a counter where the money sits unrecorded.
+    ///
+    /// It is nonetheless a MONEY permission, not a floor one — a handback
+    /// says cash came in, so a false one hides cash that did not. Every
+    /// handback writes an audit row saying what the rider was carrying before
+    /// and after, which is the control that makes one permission safe.
+    DeliveryDispatch,
 }
 
 impl Permission {
@@ -177,6 +190,7 @@ impl Permission {
         Permission::LeaveApprove,
         Permission::SalaryView,
         Permission::SalaryManage,
+        Permission::DeliveryDispatch,
     ];
 
     /// The stored form. **This string is a database value**: changing one is a
@@ -220,6 +234,7 @@ impl Permission {
             Permission::LeaveApprove => "leave.approve",
             Permission::SalaryView => "salary.view",
             Permission::SalaryManage => "salary.manage",
+            Permission::DeliveryDispatch => "delivery.dispatch",
         }
     }
 
@@ -265,6 +280,7 @@ impl Permission {
             Permission::LeaveApprove => "approve leave",
             Permission::SalaryView => "see what people are paid",
             Permission::SalaryManage => "set salaries and approve payroll",
+            Permission::DeliveryDispatch => "send deliveries out and take the money back",
         }
     }
 
@@ -365,10 +381,11 @@ mod tests {
         // to iterate an enum in Rust without a dependency, and this test is
         // cheaper than one: a variant added below ALL has no row, no screen and
         // no check, and nothing else would notice.
-        // 31 at P26; 36 at P28, which added the five employment ones.
-        assert_eq!(Permission::ALL.len(), 36);
+        // 31 at P26; 36 at P28, which added the five employment ones; 37 at
+        // P29, which added the rider dispatch.
+        assert_eq!(Permission::ALL.len(), 37);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 36, "two permissions share a code");
+        assert_eq!(codes.len(), 37, "two permissions share a code");
     }
 
     #[test]

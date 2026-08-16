@@ -269,6 +269,47 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("reverse_payroll", Access::Needs(Permission::SalaryManage)),
     ("staff_cost", Access::Needs(Permission::SalaryView)),
 
+    // --- delivery (P29, scope 14.5) -----------------------------------------
+    // **Reading the board is SignedIn on purpose.** Where the food is is the
+    // floor's business, and a counter that has to fetch the owner to see which
+    // orders are still out is a counter that keeps the list on paper instead.
+    // The board says who is carrying how much, which is the one figure that
+    // matters, and hiding it would not make it safer — it would make it
+    // unwatched.
+    ("delivery_board", Access::SignedIn),
+    // Everything that MOVES a delivery, or takes money off a rider, is the one
+    // permission. See the enum for why it is one and not two, and for the
+    // before-and-after audit row that makes that safe.
+    ("save_delivery", Access::Needs(Permission::DeliveryDispatch)),
+    ("record_handback", Access::Needs(Permission::DeliveryDispatch)),
+    ("print_delivery_slip", Access::Needs(Permission::DeliveryDispatch)),
+    // Saying somebody is a rider edits their staff record, so it is the same
+    // decision as any other edit to it.
+    ("set_rider", Access::Needs(Permission::StaffManage)),
+
+    // --- payments (P29, scope 8.3) ------------------------------------------
+    // Reading which payments nobody has confirmed is reading the day's money,
+    // so it is  — the same key that opens the cash position.
+    ("payments", Access::Needs(Permission::ReportsView)),
+    // **Confirming is the cashier's**, not the owner's. The person with the
+    // bank app open is the person at the counter, and an owner-only
+    // confirmation is a list nobody ever clears. Every confirmation writes an
+    // audit row with a name and a time on it, which is what makes that safe.
+    ("confirm_payment", Access::Needs(Permission::BillCreate)),
+
+    // --- the devices (P29, scope 7.6-7.9) -----------------------------------
+    // Setting up a scanner, a scale, a display or a label printer is the same
+    // job — usually the same person — as setting up a printer.
+    ("device_manager", Access::Needs(Permission::SettingsPrinter)),
+    ("show_customer_display", Access::Needs(Permission::SettingsPrinter)),
+    // **Reading the scale is BillCreate**, not a settings permission: it is
+    // done mid-bill, by whoever is billing, forty times an evening.
+    ("read_scale_once", Access::Needs(Permission::BillCreate)),
+    // A scan is a keystroke on the billing screen, so it is the billing
+    // permission and nothing else.
+    ("scanned", Access::Needs(Permission::BillCreate)),
+    ("print_label", Access::Needs(Permission::BillCreate)),
+
     // --- settings (P17) -----------------------------------------------------
     // Reading is `NeedsAny`: the shop's details, tax, printers and backup are
     // four permissions and a shop may well split them between two people.
@@ -744,7 +785,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 27] = [
+        const SOURCES: [&str; 30] = [
             include_str!("terminals.rs"),
             include_str!("orders.rs"),
             include_str!("buying.rs"),
@@ -768,6 +809,9 @@ mod tests {
             include_str!("credit.rs"),
             include_str!("expenses.rs"),
             include_str!("employment.rs"),
+            include_str!("delivery.rs"),
+            include_str!("payments.rs"),
+            include_str!("devices.rs"),
             include_str!("settings/ipc.rs"),
             include_str!("settings/printers.rs"),
             include_str!("settings/backup.rs"),

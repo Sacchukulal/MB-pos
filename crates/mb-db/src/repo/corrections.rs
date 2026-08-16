@@ -320,6 +320,29 @@ impl<'a> CorrectionsRepo<'a> {
     /// SQL — audit E3 is what happens when it does: *"business rules live
     /// inside screen files… to answer 'what exactly happens when a bill is
     /// settled?' you must read four files at once."*
+    /// **P29 — the order behind a printed bill number.**
+    ///
+    /// What a scanner reading the barcode at the foot of a bill turns into.
+    /// The formatted number is what is printed and what is stored (P03 keeps
+    /// both on purpose), so this matches on exactly the characters the paper
+    /// carries.
+    pub fn order_by_bill_number(
+        &self,
+        outlet: &str,
+        number: &str,
+    ) -> Result<Option<String>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT id FROM orders
+              WHERE outlet_id = ?1 AND bill_number_formatted = ?2
+              ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![outlet, number])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn day_is_locked(&self, outlet: &str, day: BusinessDay) -> Result<bool, DbError> {
         let locked: Option<i64> = self
             .tx

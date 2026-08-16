@@ -171,6 +171,17 @@ unsafe extern "system" {
         overlapped: *mut c_void,
     ) -> Bool;
 
+    /// P29. **The scale talks back**, which is the one device in this product
+    /// that sends bytes rather than receiving them. Same handle, same
+    /// `unsafe` boundary (D34), no new dependency.
+    pub fn ReadFile(
+        file: Handle,
+        buffer: *mut u8,
+        bytes: Dword,
+        read: *mut Dword,
+        overlapped: *mut c_void,
+    ) -> Bool;
+
     pub fn FlushFileBuffers(file: Handle) -> Bool;
 
     pub fn CloseHandle(object: Handle) -> Bool;

@@ -647,7 +647,13 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
 ///
 /// Recomputed from the cart rather than stored: an open order has no bill yet,
 /// and inventing one on the tile would be a second money path (R2).
-fn running_total(
+/// The bill an order WOULD produce right now.
+///
+/// P29 reads it too: a delivery that has not been settled yet has no `bills`
+/// row, so the board would show a rider nothing to collect on an order the
+/// customer has not paid for. One function, so the floor tile and the delivery
+/// board cannot disagree about what an open order is worth.
+pub(crate) fn running_total(
     order: &AnyOrder,
     config: &crate::settings::ShopConfig,
 ) -> Option<MoneyView> {

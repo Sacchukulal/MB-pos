@@ -175,6 +175,14 @@ pub struct ReceiptSettings {
     pub logo_width_pct: u8,
     pub qr: QrMode,
     pub qr_width_pct: u8,
+    /// **P29, scope 7.6 — print the bill number as a barcode.**
+    ///
+    /// Off by default: a shop with no scanner gets nothing out of two extra
+    /// lines of paper on every bill. On, it is what makes "scan the bill to
+    /// bring it back" possible at all — which is the one thing a scanner does
+    /// that nothing else in this product can do.
+    #[serde(default)]
+    pub bill_barcode: bool,
     pub footer: String,
     /// Printed above the totals when the shop is a composition dealer
     /// (scope 2.10) — they may not collect GST and must say so.
@@ -193,6 +201,7 @@ impl Default for ReceiptSettings {
             logo_width_pct: 40,
             qr: QrMode::None,
             qr_width_pct: 40,
+            bill_barcode: false,
             footer: "Thank you, visit again".to_owned(),
             composition_note:
                 "Composition taxable person, not eligible to collect tax on supplies".to_owned(),

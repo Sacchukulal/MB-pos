@@ -73,6 +73,15 @@ pub struct App {
     /// Replaced **wholesale** on save, so nothing on the printing path can ever
     /// see half of a change.
     shop_config: Mutex<crate::settings::ShopConfig>,
+    /// **Who answers "did the money arrive?"** (P29, scope 8.3).
+    ///
+    /// [] on every shop today, because nothing in
+    /// this product can check a bank and it will not pretend to. It is a field
+    /// rather than a constant so that a real aggregator — chosen by the shop's
+    /// owner, which is a commercial decision (FEATURE_SCOPE §15) — drops in
+    /// here and **nothing on the billing path changes**. That claim is proved
+    /// by the tests, which put a stand-in in this exact field.
+    provider: std::sync::RwLock<Arc<dyn mb_core::provider::Provider>>,
     /// **The counter as a server** (P19, D9). `None` until the network is
     /// started, which is a state and not a failure: a single-till shop with no
     /// phones never starts it and loses nothing.
@@ -171,6 +180,7 @@ impl App {
             font: Arc::new(font),
             sessions,
             shop_config: Mutex::new(crate::settings::ShopConfig::default()),
+            provider: std::sync::RwLock::new(Arc::new(mb_core::provider::Manual)),
             network: Mutex::new(None),
             licensing: Mutex::new(licensing),
             entitlement: std::sync::RwLock::new(entitlement),
@@ -189,6 +199,27 @@ impl App {
     #[must_use]
     pub fn terminal_id(&self) -> &str {
         &self.terminal_id
+    }
+
+    /// Who to ask about a payment. Cloned out, so nothing holds the lock
+    /// while a provider is talking to a network.
+    #[must_use]
+    pub fn provider(&self) -> Arc<dyn mb_core::provider::Provider> {
+        match self.provider.read() {
+            Ok(guard) => Arc::clone(&guard),
+            // A poisoned lock must not stop a sale (requirement 3). The manual
+            // provider is the honest fallback: it confirms nothing.
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        }
+    }
+
+    /// Put a different provider in place — a real one at start-up, a stand-in
+    /// in a test.
+    pub fn use_provider(&self, provider: Arc<dyn mb_core::provider::Provider>) {
+        match self.provider.write() {
+            Ok(mut guard) => *guard = provider,
+            Err(poisoned) => *poisoned.into_inner() = provider,
+        }
     }
 
     /// Make this `App` a different till — **before it opens a shop**.
@@ -850,6 +881,38 @@ pub enum Pushed {
         /// The whole sentence, empty when there is nothing to say (R8).
         says: String,
     },
+    /// **What the customer is being shown** (P29, scope 7.8).
+    ///
+    /// Sent only while the display is switched on, and only when the cart
+    /// actually changes — a handful of messages per bill, not one per
+    /// keystroke. The second window listens on the same channel as everything
+    /// else, so the display is a SCREEN of this app rather than a second
+    /// program with its own idea of what the bill says.
+    CustomerBill {
+        /// Every line, already priced and formatted (R8).
+        lines: Vec<DisplayLine>,
+        total: String,
+        /// The heading: the shop's name, or what the shop typed for an idle
+        /// display.
+        title: String,
+        /// The UPI QR's payload, when there is one to show at payment.
+        qr: String,
+        /// True when there is nothing on the bill, so the display shows the
+        /// shop's name instead of an empty table.
+        idle: bool,
+    },
+}
+
+/// One line, as the customer sees it. **Formatted in Rust** — the display is
+/// a screen like any other and R8 is not suspended because it faces the other
+/// way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayLine {
+    pub name: String,
+    pub qty: String,
+    pub amount: String,
 }
 
 /// A print job, as a screen shows it.

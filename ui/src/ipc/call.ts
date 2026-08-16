@@ -87,6 +87,12 @@ import type { SalaryEdit } from './generated/SalaryEdit';
 import type { PayrollListView } from './generated/PayrollListView';
 import type { PayrollView } from './generated/PayrollView';
 import type { StaffCostView } from './generated/StaffCostView';
+import type { DeliveryBoardView } from './generated/DeliveryBoardView';
+import type { DeliveryEdit } from './generated/DeliveryEdit';
+import type { PaymentsView } from './generated/PaymentsView';
+import type { DevicesView } from './generated/DevicesView';
+import type { DeviceTest } from './generated/DeviceTest';
+import type { ScanOutcome } from './generated/ScanOutcome';
 import type { CountEdit } from './generated/CountEdit';
 import type { ShareView } from './generated/ShareView';
 import type { Channel } from './generated/Channel';
@@ -469,6 +475,40 @@ export interface Commands {
   approve_payroll: { args: { runId: string; paidBy: string }; returns: PayrollView };
   reverse_payroll: { args: { runId: string; reason: string }; returns: PayrollView };
   staff_cost: { args: { from: string; to: string }; returns: StaffCostView };
+
+  // --- P29, delivery (scope 14.5) -------------------------------------------
+  // Every one of these comes back as the WHOLE board, because the figure that
+  // matters — what a rider is carrying — is a sum over rows and changes when
+  // any of them does. A screen that patched one row would be a screen showing
+  // a stale total beside a fresh one.
+  delivery_board: { args: { day: string | null }; returns: DeliveryBoardView };
+  save_delivery: { args: { edit: DeliveryEdit }; returns: DeliveryBoardView };
+  record_handback: {
+    args: { riderId: string; amount: string; note: string };
+    returns: DeliveryBoardView;
+  };
+  set_rider: { args: { staffId: string; isRider: boolean }; returns: DeliveryBoardView };
+  print_delivery_slip: { args: { orderId: string }; returns: string };
+
+  // --- P29, the money that arrives through a machine (scope 8.3, 8.4) -------
+  payments: { args: void; returns: PaymentsView };
+  confirm_payment: {
+    args: { orderId: string; seq: number; reference: string };
+    returns: PaymentsView;
+  };
+
+  // --- P29, the things a counter is plugged into (scope 7.6-7.9) -----------
+  // **Not one of these can fail into a sale.**  returns a
+  // status rather than an error for every device problem there is, which is
+  // why its return type is a view and not a quantity.
+  device_manager: { args: void; returns: DevicesView };
+  read_scale_once: { args: void; returns: DeviceTest };
+  // **The timing crosses the wire, the decision does not.** React collects the
+  // characters and the gaps; whether that was a machine or a person is a pure
+  // function in mb-core with its own tests (R8).
+  scanned: { args: { text: string; gapsMs: number[] }; returns: ScanOutcome };
+  show_customer_display: { args: { on: boolean }; returns: DevicesView };
+  print_label: { args: { line: string; token: string }; returns: string };
 
   // --- P25, the stock book --------------------------------------------------
   // MARKET_GAP_ANALYSIS calls inventory "the biggest single hole". Every

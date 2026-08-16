@@ -563,12 +563,18 @@ CREATE TABLE orders (
     channel           TEXT,
     commission_bp     INTEGER,
 
-    -- Scope 14.5, built at P28.
+    -- Scope 14.5, built at P29.
     delivery_address TEXT,
     delivery_rider   TEXT,
     delivery_state   TEXT
         CHECK (delivery_state IS NULL
                OR delivery_state IN ('pending', 'assigned', 'out', 'delivered', 'failed')),
+    -- **A delivery that did not arrive is a STATE with a reason** (D47), the
+    -- same shape as a cancel and a void two lines below. Nobody was home, the
+    -- customer refused it, the address was wrong — and which one it was decides
+    -- whether the food comes back to the kitchen or is written off, so it is a
+    -- column and not a shrug.
+    delivery_failure TEXT,
 
     -- A draft has no numbers; everything past draft has both.
     CHECK ((state = 'draft') = (bill_number_value IS NULL)),
@@ -579,6 +585,11 @@ CREATE TABLE orders (
     CHECK ((state = 'voided') = (void_reason IS NOT NULL)),
     CHECK (cancel_reason IS NULL OR trim(cancel_reason) <> ''),
     CHECK (void_reason IS NULL OR trim(void_reason) <> ''),
+    -- COALESCE rather than a bare comparison, because `NULL = 'failed'` is
+    -- NULL and SQLite lets a NULL CHECK pass — which would leave a failure
+    -- reason sitting on an order that never went out.
+    CHECK ((COALESCE(delivery_state, '') = 'failed') = (delivery_failure IS NOT NULL)),
+    CHECK (delivery_failure IS NULL OR trim(delivery_failure) <> ''),
     -- Audit 2.3: a dine-in order must have a table by the time it is open. A
     -- draft may sit there without one while the cashier is still typing.
     CHECK (state = 'draft' OR order_type <> 'dine_in' OR table_id IS NOT NULL)
@@ -821,6 +832,18 @@ CREATE TABLE payments (
     -- Scope 8.3 / 8.4 — the id the payment device gave back, so an
     -- auto-confirmed UPI or a card terminal can be reconciled later.
     device_ref TEXT,
+    -- P29, scope 8.3. Which provider answered for this payment: 'manual' for
+    -- the one that ships, a named aggregator later. NULL on the payments that
+    -- nobody has to ask about — cash and credit.
+    provider    TEXT,
+    -- **P29: the unconfirmed state, and it is the point of the feature.**
+    --
+    -- NULL means nobody has said the money arrived. Today that is every UPI
+    -- and card payment, because the manual provider cannot check a bank — and
+    -- that is exactly the list a shop needs at close, because a shop cannot
+    -- chase what it cannot list.
+    confirmed_at INTEGER,
+    confirmed_by TEXT REFERENCES staff (id),
     -- Audit B12: mode says what it WAS, this says what it DID. v1 recorded a
     -- credit settlement with payment mode "Full Settlement", which is not a
     -- payment mode, and it polluted every payment-mode report.
@@ -832,6 +855,9 @@ CREATE TABLE payments (
     business_day  INTEGER NOT NULL,
 
     CHECK ((mode = 'credit') = (customer_id IS NOT NULL)),
+    -- Somebody confirmed it, or nobody did. A confirming person with no time
+    -- is a row that cannot be put in order at close.
+    CHECK (confirmed_by IS NULL OR confirmed_at IS NOT NULL),
     CHECK ((mode = 'other') = (mode_label IS NOT NULL)),
     CHECK (amount > 0),
     CHECK (tip >= 0),
@@ -980,6 +1006,12 @@ CREATE TABLE staff (
     photo_file  TEXT,
     employment_type TEXT NOT NULL DEFAULT 'full_time'
         CHECK (employment_type IN ('full_time', 'part_time', 'casual')),
+    -- P29, scope 14.5. **A rider is a member of staff with a flag**, not a
+    -- second kind of person: in a small restaurant the rider is usually a
+    -- waiter who takes the bike out when an order comes in, and a separate
+    -- rider table would be a second list of the same people with a second
+    -- spelling of every name.
+    is_rider    INTEGER NOT NULL DEFAULT 0 CHECK (is_rider IN (0, 1)),
     left_on     INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -2241,6 +2273,90 @@ CREATE TABLE attachments (
 ) STRICT;
 
 -- ===========================================================================
+-- P29 — DELIVERY, AND THE CASH A RIDER IS CARRYING.
+--
+-- Scope 14.5. The delivery columns on `orders` were reserved at P04
+-- (`delivery_address`, `delivery_rider`, `delivery_state`) and this is what
+-- makes them mean something.
+--
+-- **THE PROBLEM THIS TABLE EXISTS FOR.** A delivery paid in cash is settled
+-- when the rider hands the food over — so the bill is paid, the sale is real,
+-- and the money is in somebody's pocket on a bike three kilometres away. Every
+-- other cash payment in this product is in the drawer the moment it is taken.
+-- These are not, and a drawer that counts them is a drawer that is short all
+-- evening for a reason nobody can name.
+--
+-- So `cash_position` subtracts what riders are carrying, and this table is how
+-- it comes back. A handback is a LEDGER row — the amount a rider handed over,
+-- when, and who took it — and "what is Kumar carrying" is:
+--
+--     cash on his delivered orders today  −  what he has handed back today
+--
+-- never a stored figure. Third time in this schema, same reason (D120).
+-- ===========================================================================
+
+CREATE TABLE rider_handbacks (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    -- **A rider is a member of staff.** Most riders in a small restaurant are
+    -- also waiters, and a second people table nobody keeps up to date is how a
+    -- shop ends up with two spellings of one name.
+    rider_id     TEXT    NOT NULL REFERENCES staff (id),
+    business_day INTEGER NOT NULL,
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    at           INTEGER NOT NULL,
+    -- Who was at the till when the money was handed over. Not the rider — the
+    -- whole point of a handback is that two people saw it.
+    taken_by     TEXT REFERENCES staff (id),
+    note         TEXT
+) STRICT;
+
+CREATE INDEX idx_rider_handbacks_rider ON rider_handbacks (outlet_id, rider_id, business_day);
+CREATE INDEX idx_rider_handbacks_day ON rider_handbacks (outlet_id, business_day);
+
+-- ===========================================================================
+-- P29 — WHAT THE PAYMENT MACHINE SAID, INCLUDING WHEN IT SAID NO.
+--
+-- Scope 8.3 / 8.4. Every time a provider is asked whether money arrived, the
+-- answer lands here — approved, declined or waiting.
+--
+-- **A decline is the row that matters.** An approved attempt has a payment row
+-- beside it and is nearly redundant; a DECLINED one has no payment at all,
+-- because a declined card leaves the bill unsettled. Without this table that
+-- entire event is invisible: the cashier tried, the machine refused, the
+-- customer paid cash instead, and three weeks later nobody can explain the
+-- argument at the counter.
+--
+-- No foreign key on `order_id`, deliberately. A card is often swiped before
+-- the draft has been written — the cashier is standing at the terminal — and a
+-- constraint forcing the other order would put a modal in the middle of the
+-- fastest screen in the product. Same argument as `attachments.subject_id`.
+-- ===========================================================================
+
+CREATE TABLE payment_attempts (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
+    order_id     TEXT,
+    provider     TEXT    NOT NULL,
+    mode         TEXT    NOT NULL CHECK (mode IN ('cash', 'card', 'upi', 'credit', 'other')),
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    -- What was typed or what the machine gave back.
+    reference    TEXT,
+    answer       TEXT    NOT NULL CHECK (answer IN ('approved', 'declined', 'waiting')),
+    -- The provider's own words, which a cashier reads out to a customer.
+    because      TEXT,
+    at           INTEGER NOT NULL,
+    business_day INTEGER NOT NULL,
+    asked_by     TEXT REFERENCES staff (id)
+) STRICT;
+
+CREATE INDEX idx_payment_attempts_day ON payment_attempts (outlet_id, business_day);
+-- "What happened on that bill?" — asked at the counter, mid-argument.
+CREATE INDEX idx_payment_attempts_order ON payment_attempts (order_id)
+    WHERE order_id IS NOT NULL;
+
+
+-- ===========================================================================
 -- P28 — STAFF, SHIFTS, SALARY AND LEAVE.
 --
 -- P11 built IDENTITY: who this is and what they may do. Everything below is
@@ -2724,7 +2840,12 @@ INSERT INTO permissions (code, description) VALUES
     -- Reading what a shop pays its people is a different thing from reading
     -- what it took at the till, so it is not `reports.view`.
     ('salary.view',        'See what people are paid, and the staff cost'),
-    ('salary.manage',      'Set salaries, give advances, and approve payroll');
+    ('salary.manage',      'Set salaries, give advances, and approve payroll'),
+    -- P29, scope 14.5. Assigning a rider, moving a delivery along, and taking
+    -- the cash back off a rider at the end of the evening. One permission,
+    -- because it is one job — see the enum for why, and for the audit row
+    -- that makes it safe to be one.
+    ('delivery.dispatch',  'Send deliveries out and take the money back off riders');
 
 -- ===========================================================================
 -- SEED: the reasons a shop starts with (P12, scope 1.17-1.20).

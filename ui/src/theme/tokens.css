@@ -257,6 +257,10 @@
   --plan-cells: 16;
   --plan-cell-size: 3.5rem;
   --help-keys-width: 9rem;
+  /* P29. How much of a device's raw output the device screen shows before it
+     scrolls. Twelve lines is enough to see a scale repeating itself, which is
+     the thing a dealer is looking for. */
+  --raw-output-height: 12rem;
   /* How little of the cart may ever be on screen. The cart column is a grid of
      auto rows around one flexible one, and CSS gives the auto rows their
      content first — so when payments appeared the item list was squeezed to

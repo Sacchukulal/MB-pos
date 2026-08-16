@@ -558,6 +558,18 @@ fn footer(doc: &mut Document, ctx: &BillContext<'_>) {
         }
     }
 
+    // **P29, scope 7.6.** The bill's own number, in a form a scanner reads —
+    // which is what makes "scan the bill to bring it back" possible. Below
+    // the QR and above the thank-you, because it is for the shop rather than
+    // for the customer.
+    if s.bill_barcode && let Some(number) = ctx.order.bill_number() {
+        doc.push(Block::Barcode {
+            payload: number.formatted.clone(),
+            human_readable: true,
+            align: Align::Centre,
+        });
+    }
+
     if !s.footer.is_empty() {
         doc.text(&s.footer, s.sections.footer, Align::Centre);
     }

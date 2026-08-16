@@ -40,7 +40,7 @@ use std::fmt;
 use std::io::Write;
 
 #[cfg(windows)]
-mod serial;
+pub mod serial;
 #[cfg(windows)]
 mod spooler;
 #[cfg(windows)]
@@ -143,6 +143,17 @@ pub fn open_serial(port: &str, baud: u32) -> Result<Box<dyn Write + Send>, WinPr
         let _ = (port, baud);
         Err(WinPrintError::Unsupported("serial ports"))
     }
+}
+
+/// **P29 — a serial port a caller can also READ from.**
+///
+/// `open_serial` above hands back a `Write`, which is all a printer needs and
+/// all P07 wanted. A scale sends bytes, so this hands back the port itself.
+/// Two functions rather than changing the printer one: a printer that could be
+/// read from is a printer somebody will eventually block the queue on.
+#[cfg(windows)]
+pub fn open_serial_duplex(port: &str, baud: u32) -> Result<serial::SerialPort, WinPrintError> {
+    serial::open(port, baud)
 }
 
 /// True when this build can actually reach the two OS transports.

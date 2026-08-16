@@ -239,13 +239,33 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                 line("Refunded", totals.refunded),
                 line("Net takings", totals.net),
             ],
+            // **Every line that makes the expected figure, and nothing that
+            // does not.** P29 added the last three: before them the list did
+            // not add up to the number underneath it, and a person counting a
+            // drawer against a total they cannot reproduce stops trusting the
+            // total.
             drawer: vec![
                 line("Opening float", position.opening_float),
-                line("Cash from bills", position.cash_sales),
+                // Tips are split out of the takings line rather than added to
+                // it — a cash tip really is in the drawer, but a 'cash from
+                // bills' figure that quietly includes it will never agree with
+                // the sales report, and the gap is exactly the staff's money.
+                line(
+                    "Cash from bills",
+                    position
+                        .cash_sales
+                        .sub(position.cash_tips)
+                        .unwrap_or(position.cash_sales),
+                ),
+                line("Tips in the drawer", position.cash_tips),
                 line("Put in", position.top_ups),
                 line("Spent from the drawer", position.cash_expenses),
                 line("Paid out", position.payouts),
                 line("Sent to the bank", position.bank_drops),
+                // P26, D120 — cash handed to the vegetable man at the door.
+                line("Paid to suppliers", position.suppliers_paid),
+                // P29, scope 14.5 — out on a bike, not in the box.
+                line("Still with the riders", position.with_riders),
             ],
             expected: MoneyView::from(expected),
             denominations,

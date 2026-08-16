@@ -10,7 +10,7 @@
 
 import { useEffect, useRef } from 'react';
 
-import { Button, Modal } from '../kit';
+import { Button, Icon, Modal } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import { SHORTCUTS, SUB_TABLE_LETTERS, type Mode } from './keyboard';
 import type { TableView } from '../ipc/generated/TableView';
@@ -63,11 +63,20 @@ export function QuantityPopup({
   onType,
   onConfirm,
   onCancel,
+  onWeigh,
 }: {
   mode: Extract<Mode, { kind: 'quantity' }>;
   onType: (text: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * **P29, scope 7.7 — take the quantity off the scale.**
+   *
+   * `undefined` when this shop has no scale, which is nearly all of them —
+   * and then there is no button at all, rather than a button that explains
+   * itself when pressed.
+   */
+  onWeigh?: () => void;
 }) {
   const box = useRef<HTMLInputElement>(null);
 
@@ -115,6 +124,12 @@ export function QuantityPopup({
         <Button onClick={() => onType(step(shown, 1))} aria-label="One more">
           +
         </Button>
+        {onWeigh ? (
+          <Button onClick={onWeigh} aria-label="Take the weight from the scale">
+            <Icon name="scale" size="sm" />
+            Weigh
+          </Button>
+        ) : null}
       </div>
       <span className="mb-field__hint">
         Type a quantity — 2, or 0.5 for half a kilo. Blank means one.

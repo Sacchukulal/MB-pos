@@ -1,0 +1,78 @@
+/*
+ * The customer's screen — P29, scope 7.8.
+ *
+ * Read from two metres away, by somebody who is not wearing their glasses, at
+ * an angle, in a shop with a tube light. So: big, high contrast, and nothing
+ * on it that is not the bill.
+ */
+
+.mb-display {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-group);
+  height: 100vh;
+  padding: var(--space-6);
+  background: var(--surface);
+  color: var(--text);
+  /* Nothing here is clickable, so nothing here shows a text cursor either —
+     a customer dragging a selection across their own bill looks broken. */
+  user-select: none;
+}
+
+.mb-display__shop {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  text-align: center;
+}
+
+.mb-display__welcome {
+  margin: auto;
+  font-size: var(--text-2xl);
+  color: var(--text-muted);
+}
+
+.mb-display__lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+}
+
+.mb-display__line {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--gap-group);
+  align-items: baseline;
+  font-size: var(--text-lg);
+}
+
+.mb-display__what {
+  /* A name wraps, never ellipsises (D30) — including on the screen the
+     customer is checking their own order against. */
+  white-space: normal;
+}
+
+.mb-display__qty,
+.mb-display__amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-display__total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--border);
+  font-size: var(--text-xl);
+}
+
+.mb-display__grand {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+}

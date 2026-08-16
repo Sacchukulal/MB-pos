@@ -127,7 +127,27 @@ pub struct CashPosition {
     /// existed the day close told a shop to expect money it had already paid the
     /// vegetable man.
     pub suppliers_paid: Money,
-    /// float + sales + top-ups − expenses − payouts − drops − suppliers paid.
+    /// **P29, scope 8.5 — how much of `cash_sales` is somebody's tip.**
+    ///
+    /// Not subtracted from anything: a cash tip really is in the drawer. It is
+    /// split out so the day close can show it on its own line, because a
+    /// takings figure that silently includes tips is a figure that will never
+    /// agree with the sales report — and the gap between them is exactly the
+    /// money that belongs to the staff.
+    pub cash_tips: Money,
+    /// **P29, scope 14.5 — cash a rider is carrying, and it is not here yet.**
+    ///
+    /// A delivery paid in cash is settled when the rider hands the food over,
+    /// so the sale is real and the money is in somebody's pocket three
+    /// kilometres away. Every other cash payment in this product is in the
+    /// drawer the moment it is taken; these are not.
+    ///
+    /// Counting them is a drawer that is short all evening for a reason nobody
+    /// can name — and the shortfall walks back in at nine o'clock, which makes
+    /// it look like a theft that resolved itself.
+    pub with_riders: Money,
+    /// float + sales + top-ups − expenses − payouts − drops − suppliers paid
+    /// − what riders are still carrying.
     pub expected: Money,
 }
 
@@ -997,6 +1017,22 @@ impl<'a> MoneyRepo<'a> {
             rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
+        // **P29, scope 8.5. How much of that was a tip.**
+        //
+        // Cash tips ARE in the drawer, so they are not subtracted from
+        // anything — the same query, split out, so the day close can show them
+        // on their own line. A drawer whose 'cash from bills' figure quietly
+        // includes tips is a drawer that never quite matches the sales report,
+        // and the difference is exactly the money that belongs to the staff.
+        let tips: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(p.tip), 0)
+               FROM payments p JOIN orders o ON o.id = p.order_id
+              WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
+                AND o.state = 'settled'
+                AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
+            |r| r.get(0),
+        )?;
         let spent: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM expenses
               WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'
@@ -1025,6 +1061,44 @@ impl<'a> MoneyRepo<'a> {
             |r| r.get(0),
         )?;
 
+        // **P29 — what the riders are still carrying.**
+        //
+        // Cash taken on delivery orders that are with a rider, minus what has
+        // been handed back. Both halves are sums over rows; nothing is stored,
+        // so this cannot drift away from the handbacks that made it (D120).
+        //
+        // **On the road counts, not just arrived.** Plenty of shops settle a
+        // COD bill the moment they type it — the cash is with the rider from
+        // the second the bike leaves, not from the second the food changes
+        // hands — so an order that is `out` counts exactly like a `delivered`
+        // one. A `failed` one never counts: nobody paid.
+        //
+        // A rider is required, so a shop that does not use this feature
+        // assigns nobody, subtracts nothing, and its drawer is what it always
+        // was.
+        let collected: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(p.amount + p.tip), 0)
+               FROM payments p JOIN orders o ON o.id = p.order_id
+              WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
+                AND o.state = 'settled'
+                AND o.order_type = 'delivery'
+                AND o.delivery_state IN ('out', 'delivered')
+                AND o.delivery_rider IS NOT NULL
+                AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
+            |r| r.get(0),
+        )?;
+        let handed_back: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM rider_handbacks
+              WHERE outlet_id = ?1 AND business_day = ?2",
+            rusqlite::params![outlet, day_sql],
+            |r| r.get(0),
+        )?;
+        // Never negative: a rider who hands back more than they collected has
+        // made an arithmetic mistake somebody must look at, and it must not
+        // quietly ADD to the expected drawer.
+        let with_riders = (collected - handed_back).max(0);
+
         Ok(CashPosition {
             opening_float: encode::money_from_sql(float),
             cash_sales: encode::money_from_sql(taken),
@@ -1033,8 +1107,10 @@ impl<'a> MoneyRepo<'a> {
             payouts: encode::money_from_sql(payouts),
             bank_drops: encode::money_from_sql(drops),
             suppliers_paid: encode::money_from_sql(paid_out),
+            cash_tips: encode::money_from_sql(tips),
+            with_riders: encode::money_from_sql(with_riders),
             expected: encode::money_from_sql(
-                float + taken + top_ups - spent - payouts - drops - paid_out,
+                float + taken + top_ups - spent - payouts - drops - paid_out - with_riders,
             ),
         })
     }
