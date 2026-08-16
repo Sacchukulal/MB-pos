@@ -1,11 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the counter's own window is allowed to ask Tauri for. Deliberately short: this product's front end talks to Rust through our own commands and one event channel, and nothing else.",
+  "description": "What the counter's own window is allowed to ask Tauri for. Deliberately short: this product's front end talks to Rust through our own commands and one event channel, and nothing else — plus the four window verbs a title bar we draw ourselves cannot work without.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
   ]
 }

@@ -589,14 +589,17 @@ pub const CATALOG: &[Entry] = &[
     words!("store.phone", Store, Store, "Phone number",
         "Ten digits. Printed on the bill so a customer can call about an order.",
         ["mobile", "contact", "telephone"], 10, Phone, store.phone),
+    // **Neither of these is checked any more** — the owner, 2026-08-16. The
+    // length is generous rather than exact for the same reason: it is a string
+    // off a certificate, and the certificate is right.
     words!("store.gstin", Store, Store, "GST number",
-        "Fifteen characters. It is checked against its own checksum and against \
-         your state, because a GST number that does not match its state is the \
-         commonest cause of a rejected return.",
-        ["gst", "gstin", "tax number"], 15, Gstin, store.gstin),
+        "Printed on the bill if you turn that on. Type it exactly as it is on \
+         your certificate — nothing here checks it or changes it.",
+        ["gst", "gstin", "tax number"], 32, Gstin, store.gstin),
     words!("store.fssai", Store, Store, "FSSAI licence number",
-        "Fourteen digits. Every food business must print it.",
-        ["food licence", "fssai"], 14, Fssai, store.fssai),
+        "Printed on the bill if you turn that on. Type it exactly as it is on \
+         your certificate.",
+        ["food licence", "fssai"], 32, Fssai, store.fssai),
     pick_text!("store.state_code", Store, Store, "State",
         "Which state you are in. This decides whether a bill charges CGST and \
          SGST or IGST.",

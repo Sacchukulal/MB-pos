@@ -435,8 +435,13 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
         (entry.write)(&mut wanted, &value).map_err(|e| UiError::from(e.about(entry.key)))?;
     }
 
-    // 3.
-    catalog::check_gstin_against_state(&wanted).map_err(UiError::from)?;
+    // 3. **The GST number is no longer cross-checked against the state**, on
+    //    the owner's instruction of 2026-08-16. It used to refuse a save when
+    //    the first two digits did not match the shop's state — which is a real
+    //    and common mistake, and also a rule that stopped somebody saving their
+    //    phone number because a number on a certificate looked wrong to us.
+    //    `check_gstin_against_state` is kept, tested and called by nothing:
+    //    reinstating it is one line, and it is the owner's call.
 
     // 4.
     let at = crate::flows::now();

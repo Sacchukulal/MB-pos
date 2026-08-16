@@ -213,13 +213,17 @@ fn check_shape(shape: Shape, text: &str) -> Result<(), Invalid> {
                 ))
             }
         }
-        Shape::Fssai => {
-            if text.len() == 14 && text.chars().all(|c| c.is_ascii_digit()) {
-                Ok(())
-            } else {
-                Err(Invalid::new("An FSSAI licence number is fourteen digits."))
-            }
-        }
+        // **Whatever the shop types is what the shop meant** — the owner,
+        // 2026-08-16: *"U FORCING unnessorily put correct GST number, whatever
+        // they enter that is ok, dont make any rules for fssi and GST".*
+        //
+        // Both of these used to REFUSE, which stopped the settings screen
+        // saving anything else on the page with it. A licence number is a
+        // string a shop copies off a certificate; a counter that argues with
+        // the certificate is a counter that is wrong more often than the shop
+        // is. `check_gstin` is still here and still correct — nothing calls it
+        // to refuse a person any more.
+        Shape::Fssai | Shape::Gstin => Ok(()),
         Shape::UpiId => {
             match text.split_once('@') {
                 Some((name, handle)) if !name.is_empty() && !handle.is_empty() => Ok(()),
@@ -228,7 +232,6 @@ fn check_shape(shape: Shape, text: &str) -> Result<(), Invalid> {
                 )),
             }
         }
-        Shape::Gstin => check_gstin(text),
     }
 }
 

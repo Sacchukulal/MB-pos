@@ -311,15 +311,14 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // **The queue is built from the printer list at start-up** (D32/state.rs),
-    // so a printer added now has no thread until the queue is rebuilt. Saying
-    // so is the honest half; rebuilding it is P22's restart-free story.
-    log_info!(
-        "{} saved the printer \"{}\" — it will be used for new jobs after the \
-         next restart",
-        who.name,
-        row.name
-    );
+    // **The queue runs a thread per printer it was STARTED with**, so a
+    // printer saved now has nowhere to send anything until the queue is built
+    // again. This used to say so in the log and leave it there — and the owner
+    // added their TVSE, pressed **Print a sample bill**, and was told "there is
+    // no printer prn_…". Setting a printer up is the one moment somebody is
+    // certain to test it, so it has to work then. P30.6.
+    app.rebuild_queue();
+    log_info!("{} saved the printer \"{}\"", who.name, row.name);
 
     printers_on(app)
 }
@@ -357,6 +356,8 @@ pub fn delete_printer_on(app: &App, id: String) -> UiResult<PrintersView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
+    // Same as saving one: the queue is the printer list made real. P30.6.
+    app.rebuild_queue();
     log_info!("{} removed a printer", who.name);
     printers_on(app)
 }

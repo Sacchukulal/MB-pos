@@ -78,6 +78,7 @@ export type IconName =
   | 'pencil'
   | 'trash'
   | 'warning'
+  | 'bell'
   | 'info'
   | 'refresh'
   | 'arrow-right'
@@ -288,6 +289,14 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M12 3.8 21.5 20H2.5z" />
       <path d="M12 9.5v5M12 17.5h.01" />
+    </>
+  ),
+  /** The alerts button (P30.6). Everything that used to be a banner lives
+      behind this, so the counter is the counter. */
+  bell: (
+    <>
+      <path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5" />
+      <path d="M13.7 19a2 2 0 0 1-3.4 0" />
     </>
   ),
   info: (

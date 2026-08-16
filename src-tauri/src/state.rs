@@ -422,6 +422,44 @@ impl App {
         log_info!("the shop at {} is open", path.display());
     }
 
+    /// **Rebuild the queue after the printer list changes** — P30.6.
+    ///
+    /// The queue runs a thread per printer it was STARTED with, so a printer
+    /// added while the app is running had no thread and every job addressed to
+    /// it was refused with *"there is no printer prn_…"*. That is exactly what
+    /// the owner hit: they added their TVSE, pressed **Print a sample bill**,
+    /// and were told nothing had been sent.
+    ///
+    /// It was a known gap — `save_printer_on` logged "it will be used after the
+    /// next restart" — and a log line is not an answer. Setting a printer up is
+    /// the one moment somebody is certain to test it.
+    ///
+    /// Jobs already on the spool are not lost: the store is the database, the
+    /// new queue reads the same rows, and the old queue is shut down only after
+    /// the new one is in place.
+    pub fn rebuild_queue(&self) {
+        let db = {
+            let shop = lock(&self.shop);
+            match shop.as_ref() {
+                Some(shop) => Arc::clone(&shop.db),
+                // No shop, no queue to rebuild. The transient queue a first run
+                // uses is built per call and never outlives it.
+                None => return,
+            }
+        };
+        let fresh = self.build_queue(&db);
+        let old = {
+            let mut shop = lock(&self.shop);
+            match shop.as_mut() {
+                Some(shop) => Some(std::mem::replace(&mut shop.queue, fresh)),
+                None => None,
+            }
+        };
+        if let Some(old) = old {
+            old.shutdown();
+        }
+    }
+
     /// Build the print queue from the printers the shop has configured.
     ///
     /// **This is the other half of audit D4.** P07 built a queue that remembers

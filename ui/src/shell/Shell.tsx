@@ -16,14 +16,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, Icon, Modal, Notice, useToast, type IconName } from '../kit';
+import { Button, Icon, Modal, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
+import type { SetupView } from '../ipc/generated/SetupView';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import { useTheme } from '../theme/ThemeProvider';
 import { Account } from '../account/Account';
 import { FirstRun } from '../setup/FirstRun';
+import { AlertsPanel, loudest, type Alert } from './Alerts';
 import { Billing } from '../billing/Billing';
 import { Health } from '../health/Health';
 import { Kitchen } from '../kitchen/Kitchen';
@@ -45,6 +47,8 @@ import { Settings } from '../settings/Settings';
 
 import './shell.css';
 import '../auth/auth.css';
+
+const WORST: Record<Alert['tone'], number> = { danger: 3, warn: 2, accent: 1, info: 0 };
 
 export interface Screen {
   id: string;
@@ -109,9 +113,9 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     daily: true,
     label: "Billing",
     icon: 'receipt',
-    // The set-up list lives on this screen and needs to be able to send
-    // somebody to Settings or Menu — see `Setup` and D102.
-    render: (go) => <Billing onGoTo={go} />,
+    // No `go`: the set-up list moved to the alerts bell at P30.6, and this
+    // screen is the till and nothing else again.
+    render: () => <Billing />,
   },
   {
     // The floor answers a different question from the billing grid: not
@@ -315,6 +319,17 @@ export function Shell() {
    * only visible on the screen nobody has open is a state that is hidden.
    */
   const [tillsSay, setTillsSay] = useState('');
+  /**
+   * **What the set-up list still wants** — P30.6.
+   *
+   * It used to be a strip on the billing screen (D102). The owner installed the
+   * counter and found it, plus three standing banners, taking a third of the
+   * page: *"instead of showing like this big line notification/error, just make
+   * a small bell button near sun moon button."* So the steps are alerts now,
+   * and the billing screen is the billing screen.
+   */
+  const [setup, setSetup] = useState<SetupView | null>(null);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const { theme, toggle } = useTheme();
   const toast = useToast();
 
@@ -327,6 +342,25 @@ export function Shell() {
         /* The shell opens regardless; the status is a nicety. */
       });
   }, []);
+
+  /**
+   * **The set-up steps, re-read whenever the counter is signed into or the
+   * screen changes** (P30.6).
+   *
+   * `setup_list` is derived from what is actually in the shop (D102), so it is
+   * always right and never remembers a position. Asking again on a screen
+   * change is how a step ticks itself off a moment after somebody does it —
+   * they add their tables on the Floor screen and come back to a bell with one
+   * fewer on it. It needs a signed-in person, so it waits for one.
+   */
+  useEffect(() => {
+    if (!inApp() || lock === null || lock.signedInAs === null) return;
+    call('setup_list')
+      .then(setSetup)
+      .catch(() => {
+        /* A counter that cannot say what is left still bills. */
+      });
+  }, [lock, screen]);
 
   /**
    * **Is this counter set up?** (P30.5.)
@@ -434,6 +468,68 @@ export function Shell() {
   // holds, asked for rather than mirrored.
   const locked = inApp() && lock !== null && lock.signedInAs === null;
 
+  /**
+   * **Everything the shop should know, in one list** — P30.6.
+   *
+   * Four sources, and every sentence in it was written in Rust (§6): the
+   * licence line, the no-PIN warning, what this till is holding for the main
+   * one, and whatever the set-up list still wants. A message pushed from the
+   * backend will be a fifth case here and nothing else — that is the shape the
+   * owner asked for when they said this is where super-admin notices should
+   * land.
+   *
+   * Ordered worst-first, because the panel is read top down.
+   */
+  const alerts: Alert[] = [];
+  if (status?.licence) {
+    alerts.push({
+      id: 'licence',
+      tone:
+        status.licenceTone === 'danger'
+          ? 'danger'
+          : status.licenceTone === 'warn'
+            ? 'warn'
+            : 'info',
+      icon: 'badge',
+      title: 'Your licence',
+      says: status.licence,
+      goTo: 'account',
+      goLabel: 'Open Account',
+    });
+  }
+  if (lock?.nobodyHasAPin) {
+    alerts.push({
+      id: 'no-pin',
+      tone: 'warn',
+      icon: 'lock',
+      title: 'Anybody can open your reports and settings',
+      says: 'Add a PIN in Staff so the counter locks itself.',
+      goTo: 'staff',
+      goLabel: 'Open Staff',
+    });
+  }
+  if (tillsSay) {
+    alerts.push({
+      id: 'tills',
+      tone: 'accent',
+      icon: 'refresh',
+      title: 'Your other till',
+      says: tillsSay,
+    });
+  }
+  for (const step of setup?.steps ?? []) {
+    if (step.done) continue;
+    alerts.push({
+      id: `setup-${step.id}`,
+      tone: 'info',
+      icon: 'info',
+      title: step.title,
+      says: step.why,
+      goTo: step.goTo,
+    });
+  }
+  alerts.sort((a, b) => WORST[b.tone] - WORST[a.tone]);
+
   if (inApp() && lock === null) {
     // Before the first answer. Deliberately nothing rather than the billing
     // screen: a flash of somebody else's till is worse than a blank moment.
@@ -489,70 +585,13 @@ export function Shell() {
         onLock={() => {
           call('lock_now').then(setLock).catch(() => undefined);
         }}
+        alertCount={alerts.length}
+        alertTone={loudest(alerts)}
+        onOpenAlerts={() => setAlertsOpen(true)}
       />
-
-      {/* The two standing banners. Both are `Notice` from the kit at P27.5
-          rather than two hand-written strips that happened to look similar —
-          §6: ONE place turns a machine state into words. Neither is
-          dismissible, and for the same reason: a dismissed banner is a fixed
-          bug that was never fixed. */}
-      {lock?.nobodyHasAPin ? (
-        <div className="mb-shell__banner">
-          {/* Audit C1, on a shop that has not fixed it yet. */}
-          <Notice standing tone="warn" icon="lock">
-            <strong>Anybody can open this shop&rsquo;s reports and settings.</strong>{' '}
-            Add a PIN in Staff so the counter locks itself.
-          </Notice>
-        </div>
-      ) : null}
-
-      {/* P27, D138. The accent tone and not the warning one, because nothing
-          is wrong — the money is safe and it is going across — and a red bar
-          over an ordinary Tuesday teaches a shop to ignore red bars. */}
-      {tillsSay ? (
-        <div className="mb-shell__banner">
-          <Notice standing tone="accent" icon="refresh">
-            {tillsSay}
-          </Notice>
-        </div>
-      ) : null}
 
       <div className="mb-body">
         <main className="mb-main">
-          {/*
-            **The licence banner** (P21). A quiet line above the screen, never a
-            modal — a dialog a cashier has to dismiss before every bill is how a
-            licence system stops a restaurant trading without meaning to.
-
-            It rides on `app_status`, which is `Access::Public`, because the
-            person who needs to know the plan ran out is whoever is standing at
-            the counter. Every sentence in it ends by saying what still works.
-
-            **Not on the Account screen**, found by looking: that screen shows
-            the same sentence in its own first card, so the banner made it
-            appear twice, four centimetres apart.
-          */}
-          {status?.licence && screen !== 'account' ? (
-            <div className="mb-shell__banner mb-shell__banner--inmain">
-              <Notice
-                standing
-                tone={
-                  status.licenceTone === 'danger'
-                    ? 'danger'
-                    : status.licenceTone === 'warn'
-                      ? 'warn'
-                      : 'info'
-                }
-                action={
-                  <Button small variant="quiet" onClick={() => setScreen('account')}>
-                    Open Account
-                  </Button>
-                }
-              >
-                {status.licence}
-              </Notice>
-            </div>
-          ) : null}
           {/*
             **Nothing is rendered behind the lock** — P30.5, and this is the
             worst bug the fresh install turned up.
@@ -579,6 +618,14 @@ export function Shell() {
           {locked ? null : active?.render(setScreen)}
         </main>
       </div>
+
+      {alertsOpen ? (
+        <AlertsPanel
+          alerts={alerts}
+          onGo={setScreen}
+          onClose={() => setAlertsOpen(false)}
+        />
+      ) : null}
 
       <PrintQueuePanel
         open={queueOpen}
@@ -735,6 +782,9 @@ function TopBar({
   who,
   role,
   onLock,
+  alertCount,
+  alertTone,
+  onOpenAlerts,
 }: {
   shopPath: string | null;
   screens: readonly Screen[];
@@ -749,6 +799,11 @@ function TopBar({
   who: string | null;
   role: string | null;
   onLock: () => void;
+  /** How many alerts are waiting — P30.6. Zero draws no badge at all. */
+  alertCount: number;
+  /** The worst of them, so the badge is not one colour for everything. */
+  alertTone: Alert['tone'] | null;
+  onOpenAlerts: () => void;
 }) {
   const window = inApp() ? getCurrentWindow() : null;
   const [moreOpen, setMoreOpen] = useState(false);
@@ -894,6 +949,25 @@ function TopBar({
                 ? `${jobs.length} printing`
                 : 'Printing'}
           </span>
+        </button>
+
+        {/* **The alerts bell** (P30.6), beside the sun/moon exactly where the
+            owner asked for it. Everything that used to be a strip above a
+            screen is behind this, and a message pushed from the backend will
+            arrive here too when there is a backend to push one. */}
+        <button
+          type="button"
+          className={['mb-bell', alertTone ? `mb-bell--${alertTone}` : ''].filter(Boolean).join(' ')}
+          onClick={onOpenAlerts}
+          aria-label={
+            alertCount === 0
+              ? 'Alerts — nothing needs you'
+              : `Alerts — ${alertCount} waiting`
+          }
+          title={alertCount === 0 ? 'Alerts' : `${alertCount} waiting`}
+        >
+          <Icon name="bell" size="sm" />
+          {alertCount > 0 ? <span className="mb-bell__count">{alertCount}</span> : null}
         </button>
 
         {/* The sun/moon toggle the owner asked for by name. */}

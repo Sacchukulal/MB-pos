@@ -283,6 +283,11 @@
      should give way first. A cashier can scroll a list of items they are
      reading; they cannot scroll a tax breakdown they have not been shown. */
   --cart-lines-min: 6rem;
+
+  /* The alerts panel (P30.6). Wide enough for a licence sentence on two lines
+     with a button beside it, and never taller than a short window's screen. */
+  --alerts-width: 26rem;
+  --alerts-tall: 70vh;
   /* (--totals-min was here and is GONE. It was a floor on the totals block,
      and a floor is an absolute promise: two of them plus a payment block is
      exactly how Complete bill went off the bottom of the cart. What the cart
