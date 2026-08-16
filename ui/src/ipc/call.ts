@@ -32,6 +32,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 import type { AppStatus } from './generated/AppStatus';
+import type { FirstRunView } from './generated/FirstRunView';
 import type { PrintJobView } from './generated/PrintJobView';
 import type { PreviewDoc } from './generated/PreviewDoc';
 import type { CartView } from './generated/CartView';
@@ -138,6 +139,14 @@ import type { CounterEdit } from './generated/CounterEdit';
  */
 export interface Commands {
   app_status: { args: void; returns: AppStatus };
+
+  // --- P30.5, the first run ---------------------------------------------------
+  // **The only three commands that work with no shop at all.** A fresh install
+  // has no database, so nothing here can ask for a permission — these are what
+  // create the thing a permission lives in.
+  first_run: { args: void; returns: FirstRunView };
+  create_shop: { args: { folder: string }; returns: FirstRunView };
+  use_existing_shop: { args: { path: string }; returns: FirstRunView };
   set_appearance: { args: { theme: string; textSize: string }; returns: void };
   reveal_logs: { args: void; returns: string };
   list_printers: { args: void; returns: PrinterView[] };
@@ -759,6 +768,22 @@ export function isUiError(value: unknown): value is UiError {
     'code' in value &&
     'message' in value
   );
+}
+
+/**
+ * **Is this the licence saying no, rather than something going wrong?** (P30.5)
+ *
+ * The distinction decides how it is shown. A licence refusal is an ANSWER — the
+ * screen renders it in place with the way to fix it (`Locked`), and there is
+ * nothing to retry. Anything else is a fault, and a fault is a toast.
+ *
+ * Every code from `mb_license` is `licence.…` — `licence.not_in_plan`,
+ * `licence.not_operating`, and the handling errors beside them. `licensing.rs`
+ * holds the list of gated commands and a Rust test walks it, so the set this
+ * can fire on is a table and not a habit (D40).
+ */
+export function isLicenceRefusal(cause: unknown): cause is UiError {
+  return isUiError(cause) && cause.code.startsWith('licence.');
 }
 
 /**

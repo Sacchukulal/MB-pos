@@ -22,6 +22,12 @@ vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   inApp: () => true,
   isUiError: () => false,
+  // The real one, because the test below is about the difference it makes.
+  isLicenceRefusal: (cause: unknown) =>
+    typeof cause === 'object' &&
+    cause !== null &&
+    'code' in cause &&
+    String((cause as { code: unknown }).code).startsWith('licence.'),
 }));
 
 const { Reports } = await import('../src/reports/Reports');
@@ -182,4 +188,42 @@ it('exports the report on screen, through Rust, and says where it went', async (
 
   fireEvent.click(screen.getByRole('button', { name: 'Save as PDF' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('report_pdf', expect.anything()));
+});
+
+/**
+ * **A licence refusal is an ANSWER, and it stays on the screen** — P30.5, D75.
+ *
+ * Reports are behind the licence (D86: the licence gates features, never
+ * billing). Until P30.5 a shop without one opened this screen and got a spinner
+ * that never stopped, plus a red toast that slid away after four seconds — so
+ * the screen was permanently blank and the only explanation had already gone.
+ * Found on a fresh install, which is the only place it could be found: a seeded
+ * demo shop has a healthy licence.
+ *
+ * The sentence is Rust's, and it is the same one the banner uses.
+ */
+it('says why, on the screen, when the licence does not cover reports', async () => {
+  const refusal = {
+    code: 'licence.not_operating',
+    message:
+      'This computer has no licence yet. You can bill and print — enter your ' +
+      'licence key, or start a free trial.',
+    detail: 'reports · never-activated',
+  };
+  call.mockImplementation((command: string) =>
+    command === 'report_list' ? Promise.reject(refusal) : answer(command),
+  );
+
+  const go = vi.fn();
+  render(
+    <ToastProvider>
+      <Reports onGoTo={go} />
+    </ToastProvider>,
+  );
+
+  expect(await screen.findByText('This part needs a licence')).toBeTruthy();
+  expect(screen.getByText(/no licence yet/)).toBeTruthy();
+  // And the way out is on the same screen, not somewhere they have to find.
+  fireEvent.click(screen.getByRole('button', { name: 'Open Account' }));
+  expect(go).toHaveBeenCalledWith('account');
 });

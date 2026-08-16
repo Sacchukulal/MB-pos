@@ -140,19 +140,26 @@ export function Floor() {
           </>
         }
       >
-        <div className="mb-segment" role="group" aria-label="Which room">
-          {sections.map((name) => (
-            <button
-              key={name}
-              type="button"
-              className="mb-segment__option"
-              aria-pressed={(name === 'All' && section === null) || section === name}
-              onClick={() => setSection(name === 'All' ? null : name)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        {/* **No rooms, no room picker** (P30.5). A shop with no sections got a
+            segmented control holding the single word "All" — a tall empty box
+            in the corner of the screen offering a choice between one thing.
+            One section is the same: "All" and "Main hall" are the same set of
+            tables under two names. */}
+        {floor.sections.length > 1 ? (
+          <div className="mb-segment" role="group" aria-label="Which room">
+            {sections.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="mb-segment__option"
+                aria-pressed={(name === 'All' && section === null) || section === name}
+                onClick={() => setSection(name === 'All' ? null : name)}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </Toolbar>
 
       {/* Scope 14.3, and it is the line an owner glances at. */}
@@ -166,7 +173,12 @@ export function Floor() {
       {floor.hasLayout ? (
         <Plan floor={floor} tiles={shown} onFailed={report} onChanged={setFloor} onMove={setMoving} />
       ) : (
-        <Grid tiles={shown} onMove={setMoving} />
+        <Grid
+          tiles={shown}
+          onMove={setMoving}
+          none={floor.tables.length === 0}
+          onSetUp={() => setMaster(true)}
+        />
       )}
 
       {master ? (
@@ -213,12 +225,32 @@ export function Floor() {
 function Grid({
   tiles,
   onMove,
+  none,
+  onSetUp,
 }: {
   tiles: readonly TableView[];
   onMove: (tile: TableView) => void;
+  /** True when the shop has no tables at all, rather than none in this view. */
+  none?: boolean;
+  onSetUp?: () => void;
 }) {
   if (tiles.length === 0) {
-    return (
+    // **Two different emptinesses** (P30.5). "Try another section" is useless
+    // advice to a shop that has never added a table, and it was the only thing
+    // this screen said on a fresh install.
+    return none ? (
+      <EmptyState
+        title="No tables yet"
+        body="Add your rooms and tables and they appear here. A shop that does only parcel and counter sales never needs this."
+        action={
+          onSetUp ? (
+            <Button variant="primary" onClick={onSetUp}>
+              Set up the room
+            </Button>
+          ) : undefined
+        }
+      />
+    ) : (
       <EmptyState
         title="Nothing here"
         body="Try another section, or show everything."

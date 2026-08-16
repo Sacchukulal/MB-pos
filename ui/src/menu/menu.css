@@ -9,10 +9,14 @@
 .mb-menu {
   /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
      set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
-  display: grid;
-  grid-template-columns: var(--menu-categories-width) minmax(0, 1fr);
-  gap: var(--space-4);
+     so the left edge of the app moved as you walked through it.
+
+     **This was a two-column grid until P30.5, and P27.5 left it that way when it
+     put a PageHeader above the body.** The header then landed in column one —
+     14 rem wide — so the word "Menu" and its whole description wrapped one
+     word per line down the left edge, with the toolbar overlapping beside it.
+     The two columns belong to `.mb-menu__body`, which has them; this is a
+     page, and a page is a column. */
   min-height: 0;
   height: 100%;
   overflow: hidden;
@@ -184,6 +188,13 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* With no groups there is no rail, and without this the first column is still
+   reserved — the items would start a quarter of the way across the screen with
+   nothing to their left. P30.5. */
+.mb-menu__body--nogroups {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .mb-menu__find {

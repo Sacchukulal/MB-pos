@@ -20,6 +20,9 @@ const call = vi.fn();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   isUiError: () => false,
+  // P30.5 — the screen asks this before it toasts. Nothing here refuses, so
+  // the honest answer is always no.
+  isLicenceRefusal: () => false,
 }));
 
 const { Stock } = await import('../src/stock/Stock');

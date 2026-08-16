@@ -232,3 +232,29 @@ describe('the totals block (audit B10 and B11)', () => {
     expect(screen.queryByText('CGST 9%')).toBeNull();
   });
 });
+
+/**
+ * **An empty floor draws nothing at all** — P30.5.
+ *
+ * It used to answer with a card in the middle of the counter: "No tables set
+ * up yet · Tables are added in Settings." A tea stall, a bakery and a parcel
+ * counter have no tables and never will, so that was permanent furniture
+ * explaining a feature they do not want, on the one screen a cashier looks at
+ * all day. The owner's word for it was *"big buttons without proper styling
+ * eating so much spaces unnessorily"*, and they had installed it on a real
+ * machine to find out.
+ *
+ * A filter that matches nothing is the OPPOSITE case and keeps its answer:
+ * there is something, and the reason it is not on screen is the filter.
+ */
+describe('an empty floor (P30.5)', () => {
+  it('takes no space when there is nothing to show and no filter', () => {
+    const { container } = render(<TableGrid tables={[]} filter="" onOpen={vi.fn()} />);
+    expect(container.textContent).toBe('');
+  });
+
+  it('still says why when a filter is what emptied it', () => {
+    render(<TableGrid tables={[]} filter="9" onOpen={vi.fn()} />);
+    expect(screen.getByText('No table matches that')).toBeTruthy();
+  });
+});

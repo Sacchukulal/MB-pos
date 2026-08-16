@@ -80,14 +80,30 @@ export function TableGrid({
   }, [shown]);
 
   if (shown.length === 0) {
+    /*
+      **Nothing to show and nothing to say — so nothing** (P30.5).
+
+      This used to answer an empty floor with a card in the middle of the
+      counter: "No tables set up yet · Tables are added in Settings." Two
+      things are wrong with that. A tea stall, a bakery and a parcel counter
+      have no tables and never will, so it is permanent furniture explaining a
+      feature they do not want; and the one screen a cashier lives on is the
+      worst place in the product to spend half a pane on it.
+
+      Nothing is hidden: an open parcel or self-service order arrives here as a
+      "No table" entry (§4, "so no order is ever invisible"), so the moment
+      there is something to see the grid comes back on its own. The Floor
+      screen is where a shop that DOES want tables is told how to add them,
+      because that is a screen somebody opened on purpose.
+
+      A filter that matches nothing is the opposite case and keeps its answer:
+      there IS something, and the reason it is not on screen is the filter.
+    */
+    if (!filter) return null;
     return (
       <EmptyState
-        title={filter ? 'No table matches that' : 'No tables set up yet'}
-        body={
-          filter
-            ? 'Clear the filter to see the whole floor.'
-            : 'Tables are added in Settings. Parcel and self-service orders appear here too.'
-        }
+        title="No table matches that"
+        body="Clear the filter to see the whole floor."
       />
     );
   }

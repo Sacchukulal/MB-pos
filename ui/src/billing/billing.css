@@ -235,8 +235,32 @@
   flex-direction: column;
   gap: var(--space-1);
   flex: 1 50 var(--cart-lines-min);
-  min-height: 0;
+  /* **It gives way FIRST, but it does not disappear** — P30.5.
+   *
+   * `shrink: 50` was doing its job too well. On a 720-pixel work area a plain
+   * two-line bill showed **none of its lines**: the list collapsed to a
+   * scrollbar while the tax breakdown below it sat there taking four rows.
+   * That is backwards — the lines are what a cashier reads back to the
+   * customer, and the breakdown is the thing the comment above
+   * `.mb-totals__breakdown` already says is the right thing to lose.
+   *
+   * **The floor is under a height query, and that is the whole care of it.**
+   * `--totals-min` was deleted at P18 for a reason worth reading in
+   * `tokens.css`: two absolute floors plus a payment block is exactly how
+   * Complete bill went off the bottom. A floor here is a third one, and at the
+   * window's own minimum of 640 it takes so much that TOTAL disappears — I did
+   * that, looked at it, and put the query in. Above 700 pixels of viewport the
+   * room is provably there; below it the old shrink order takes over, and what
+   * a very short window loses is seeing the lines, not the number the cashier
+   * reads out.
+   */
   overflow-y: auto;
+}
+
+@media (min-height: 700px) { /* mb-tokens-allow: media queries cannot use var() */
+  .mb-cart__lines {
+    min-height: var(--cart-lines-min);
+  }
 }
 
 .mb-cartline {
@@ -347,6 +371,11 @@
    competing with fifteen other figures and it is the only one that is said out
    loud. */
 .mb-totals__row--grand {
+  /* And it never gives way. The comment above `.mb-totals__breakdown` says the
+     breakdown is the only thing in this block that shrinks; without this, a
+     short window shrinks the block itself and clips TOTAL, which is failure
+     (2) in that list. P30.5. */
+  flex: 0 0 auto;
   padding-top: var(--gap-field);
   margin-top: var(--space-1);
   border-top: var(--border-width) solid var(--border-strong);

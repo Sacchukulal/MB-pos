@@ -560,6 +560,10 @@ macro_rules! commands {
             $crate::devices::read_scale_once,
             $crate::devices::show_customer_display,
             $crate::devices::print_label,
+            // P30.5 — the first run, and making a shop at all.
+            $crate::firstrun::first_run,
+            $crate::firstrun::create_shop,
+            $crate::firstrun::use_existing_shop,
             // P25 — the stock book.
             $crate::inventory::inventory,
             $crate::inventory::recipe,
@@ -1691,6 +1695,23 @@ pub fn list_staff_on(app: &App) -> UiResult<Vec<PersonView>> {
                 let repos = mb_db::Repos::new(tx);
                 let mut out = Vec::new();
                 for member in repos.people().list_staff(OUTLET)? {
+                    // **The stand-in is not a person, and the staff list is
+                    // "who works here"** (P30.5).
+                    //
+                    // `staff_default` exists because `orders.created_by` is a
+                    // NOT NULL foreign key and a shop has to be able to bill
+                    // before anybody has signed in — see `state::DEFAULT_STAFF`.
+                    // It is the counter itself. Listing it put a row called
+                    // "Counter · No role yet · PIN None" at the top of the
+                    // staff screen of every new shop, next to the owner's own
+                    // name, and the owner's first question was who that was.
+                    //
+                    // Hidden here rather than deleted: it is the author of
+                    // every bill taken before the first sign-in, and those
+                    // bills must keep saying who took them.
+                    if member.id.as_str() == crate::state::DEFAULT_STAFF {
+                        continue;
+                    }
                     let locked_out = lockout_message(&repos, &member)?;
                     out.push(person_view(&member, locked_out));
                 }

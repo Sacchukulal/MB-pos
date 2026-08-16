@@ -61,8 +61,15 @@ export function Setup({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
   const done = view.steps.length - left.length;
   const urgent = left.some((step) => step.mattersMost);
-  // `null` means nobody has pressed it yet, so the shop's own state decides.
-  const isOpen = open ?? urgent;
+  // **Closed unless somebody opens it** (P30.5).
+  //
+  // It used to open itself whenever anything urgent was left, which on a fresh
+  // shop was everything — so the billing screen opened with a six-item
+  // checklist across it and the cart pushed off the bottom. The compulsory half
+  // is the first-run screen's job now; what is left here is the shop's own
+  // business, and a strip that opens itself every morning is a strip people
+  // learn to close without reading.
+  const isOpen = open ?? false;
 
   return (
     <section className={['mb-setup', urgent ? 'mb-setup--urgent' : ''].filter(Boolean).join(' ')}>

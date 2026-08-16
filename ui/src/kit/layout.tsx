@@ -247,16 +247,38 @@ export function Notice({
   icon,
   children,
   action,
+  standing = false,
 }: {
   tone?: 'info' | 'ok' | 'warn' | 'danger' | 'accent';
   icon?: IconName;
   children: ReactNode;
   action?: ReactNode;
+  /**
+   * **True for a banner that is always there** — the licence line, the no-PIN
+   * warning, the held-bills line. It is a status strip rather than a card: one
+   * line, tight above and below, centred on its icon.
+   *
+   * P30.5, and the owner's fresh install is why. A shop with no licence key sees
+   * the licence line on every screen for as long as it takes them to buy one,
+   * and a shop with no PIN sees that one too — so on a new install two cards
+   * with card-sized padding sat between the top bar and the till, on a 768-pixel
+   * screen, for ever. The words are the same; the box stops shouting.
+   */
+  standing?: boolean;
 }) {
   const fallback: IconName =
     tone === 'danger' || tone === 'warn' ? 'warning' : tone === 'ok' ? 'check' : 'info';
   return (
-    <div className={`mb-notice mb-notice--${tone}`} role="status">
+    <div
+      className={[
+        'mb-notice',
+        `mb-notice--${tone}`,
+        standing ? 'mb-notice--standing' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      role="status"
+    >
       <Icon name={icon ?? fallback} size="sm" className="mb-notice__icon" />
       <div className="mb-notice__says">{children}</div>
       {action ? <div className="mb-notice__action">{action}</div> : null}

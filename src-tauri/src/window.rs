@@ -41,6 +41,24 @@ const MIN_SENSIBLE_HEIGHT: u32 = 480;
 
 /// Put the window back where it was, then show it.
 pub fn restore_and_show(window: &tauri::WebviewWindow, state: &WindowState) {
+    // **A first run fills the WORK AREA** — P30.5, D156.
+    //
+    // The configuration asks for 1366 x 768 centred, which is exactly the
+    // screen a counter PC has. So on the reference machine Windows put the
+    // bottom forty-eight pixels of the app *under the taskbar*, and what lives
+    // at the bottom of the billing screen is **Complete bill**. Found by
+    // measuring the window against the monitor rather than by looking at a
+    // screenshot, which is why it survived thirty sessions.
+    //
+    // `maximize()` is NOT the fix and was tried first: a window with
+    // `decorations: false` maximises to the whole MONITOR plus the invisible
+    // resize border, so it covered the taskbar and hung eight pixels off every
+    // edge — worse than the bug. The work area is the number Windows keeps for
+    // exactly this question, and it is right whatever that machine's taskbar
+    // is doing.
+    if state.width.is_none() && state.height.is_none() {
+        fill_the_work_area(window);
+    }
     if let (Some(width), Some(height)) = (state.width, state.height)
         // **A saved size that could not hold a counter is not a saved size.**
         //
@@ -69,6 +87,31 @@ pub fn restore_and_show(window: &tauri::WebviewWindow, state: &WindowState) {
     }
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Make the window exactly the usable part of the screen.
+///
+/// Only on a first run — after that the shop's own size wins, including a size
+/// they chose that happens to be smaller. Best effort throughout: a window that
+/// opens at its configured size is a smaller problem than one that does not
+/// open, so every step here is allowed to fail quietly.
+fn fill_the_work_area(window: &tauri::WebviewWindow) {
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let area = monitor.work_area();
+    if area.size.width == 0 || area.size.height == 0 {
+        return;
+    }
+    log_info!(
+        "first run — filling the work area: {}x{} at {},{}",
+        area.size.width,
+        area.size.height,
+        area.position.x,
+        area.position.y
+    );
+    let _ = window.set_position(PhysicalPosition::new(area.position.x, area.position.y));
+    let _ = window.set_size(PhysicalSize::new(area.size.width, area.size.height));
 }
 
 /// Remember where it is. Called when the window moves, resizes or closes.

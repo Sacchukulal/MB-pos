@@ -54,6 +54,9 @@ mod payments;
 /// P29. **The things a counter is plugged into** — and not one of them may
 /// ever stop a bill.
 mod devices;
+/// P30.5. **The first five minutes** — and the command that was missing:
+/// nothing in this product could create a shop.
+mod firstrun;
 mod expenses;
 /// P27. **Bills travelling between tills** â a settled bill is a FACT, and
 /// facts are copied rather than reconciled (D136).

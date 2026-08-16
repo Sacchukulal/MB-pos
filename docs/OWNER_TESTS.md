@@ -79,11 +79,33 @@ upload it, and nothing has been uploaded.
 
 ---
 
-## 2. The look — NOT DONE, and it is the big one
+## 2. The look — YOU SAW IT ON 2026-08-16 AND REJECTED IT
 
-P27.5 redesigned the whole app on 2026-08-15. **You have not seen it.**
+P27.5 redesigned the whole app on 2026-08-15. You installed it on a second
+computer the next day and said:
 
-Open it and tell me what is wrong. What I already know I have not proved:
+> *"there has so much of annoying bugs and so many things u never looked at
+> rwality… the entire page is covered by that annoying notifications of no
+> account, no shop, not set pin, and that 6 startup steps with eating entire
+> page… big buttons without proper styling eating so much spaces
+> unnessorily, even first installation also totaly confused after installing
+> where to go, what i have to do."*
+
+**P30.5 is the answer** — see `PROMPTS/P30.5-first-run-and-the-look.txt` and
+DECISIONS.md D155/D156. Most of what you hit was not the design: there was no
+way to create a shop at all, so every screen failed at once; the licence
+banner was stretching to 230 pixels on every page; and the window was asking
+for the whole screen, so the bottom of it sat under your taskbar.
+
+**Please install the new one and go through it again.** Then tell me about
+the part I did NOT change:
+
+- [ ] **The button sizes.** You said they eat too much space. I fixed every
+      place a screenshot showed space being wasted, but I did not shrink the
+      buttons themselves — that is your taste, not a bug. Say "a bit smaller"
+      or "much smaller" and it is one file, and nothing can break.
+
+What I still have not proved:
 
 - [ ] **1920×1080.** This machine's display is 1366×768, so the wide layout has
       been reasoned about and never seen. If you have a bigger monitor, open it
@@ -101,9 +123,16 @@ Screenshots of before and after are in `docs/ui/`.
 
 ---
 
-## 3. The installer — **BUILT at P30, and it fits**
+## 3. The installer — **BUILT at P30, REBUILT at P30.5, and it fits**
 
-It had never been run. It has now.
+It had never been run. It has now, twice: 6.78 MB at P30, **6.80 MB at
+P30.5**. Budget S4 (under 20 MB) is met with room to spare either way.
+
+**You ran the P30 one and it is what P30.5 came out of** — you found there was
+no way to create a shop, so install the P30.5 build instead. If the P30 build
+is still on that computer, uninstall it **and delete
+`C:\Users\<you>\AppData\Roaming\MagicBill\`** first, or you will not see the
+new first-run screen: it only appears when there is no shop.
 
 ```
 cargo tauri build

@@ -174,8 +174,15 @@ function Who({
       ) : null}
       <div className="mb-lock__people">
         {shown.length === 0 ? (
+          /* **Two different emptinesses, and they were saying the same thing**
+             — P30.5. Typing a name that matches nobody used to answer "Nobody
+             here has a PIN yet", which is a claim about the SHOP rather than
+             about what was typed, and it is alarming as well as untrue. Found
+             by typing a PIN into the search box by mistake. */
           <p className="mb-muted">
-            Nobody here has a PIN yet. Somebody who manages staff can set one.
+            {people.length === 0
+              ? 'Nobody here has a PIN yet. Somebody who manages staff can set one.'
+              : 'Nobody here goes by that. Clear the box to see everybody.'}
           </p>
         ) : (
           shown.map((person) => (

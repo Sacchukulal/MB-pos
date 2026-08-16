@@ -493,7 +493,19 @@ fn t8_a_parked_job_is_visible_and_a_person_decides_what_happens_to_it() {
     assert!(until(|| fake.sent.lock().unwrap().len() == 1));
 
     // Dismiss removes a job, and it is the only other thing that does.
+    //
+    // **The job is parked first, deliberately.** The first version enqueued
+    // one onto a printer that was now working and dismissed it in the very
+    // next statement — a race with the worker thread that had already picked
+    // it up, which passed on its own and failed once in a full `--workspace`
+    // run under load. Parking it also matches the only dismissal a cashier can
+    // actually perform: the button lives on the parked row.
+    fake.fail_first.store(u32::MAX, Ordering::SeqCst);
     let second = queue.enqueue(ticket("kitchen")).expect("queued");
+    assert!(until(|| queue
+        .snapshot()
+        .iter()
+        .any(|s| s.id == second && s.state == JobState::Parked)));
     queue.dismiss(&second).expect("dismisses");
     assert!(!queue.snapshot().iter().any(|s| s.id == second));
     queue.shutdown();

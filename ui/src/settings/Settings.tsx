@@ -347,9 +347,24 @@ export function Settings() {
           >
             Write these settings out
           </Button>
-          <label className="mb-settings__load">
-            <span>Load settings from a file</span>
+          {/*
+            **A label wearing the kit's button, over a hidden file input**
+            (P30.5).
+
+            It used to be a caption above a bare `<input type="file">`, so the
+            bottom of the settings screen showed Windows' own grey "Choose File
+            / No file chosen" next to our buttons — a different font, a
+            different height and a different century. The kit still owns the
+            shape: this borrows `mb-button`, it does not redraw one.
+
+            A `<label>` and not a `<button>` because opening the file picker
+            from script is what browsers block; a label pointing at the input is
+            the one way that always works.
+          */}
+          <label className="mb-button mb-button--secondary mb-settings__load">
+            Load settings from a file
             <input
+              className="mb-visually-hidden"
               type="file"
               accept="application/json,.json"
               onChange={(event) => {

@@ -405,19 +405,12 @@
   border-top: var(--border-width) solid var(--border);
 }
 
+/* The label carries `mb-button` for its looks; this only adds what a label
+   does not get for free. Everything else — the height, the border, the hover —
+   is the kit's, so the two buttons here match each other and every other
+   button in the product. */
 .mb-settings__load {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
   cursor: pointer;
-}
-
-.mb-settings__load input {
-  font: inherit;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
 }
 
 .mb-settings__changes {

@@ -1,0 +1,200 @@
+/*
+ * The first five minutes — P30.5. Every value is a token.
+ *
+ * This is the only screen in the product that is deliberately NARROW. A form
+ * stretched across 1366 pixels reads as a wall; a column somebody's eye can
+ * follow reads as a conversation, and this is the one screen where the person
+ * in front of it has never seen the product before.
+ */
+
+.mb-firstrun {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Not `height: 100%` — this sits under the title bar in `.mb-shell`'s
+     column, so a hundred per cent of the shell is one bar too tall and the
+     bottom of the panel goes under the edge of the window. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+  background: var(--surface-sunk);
+}
+
+.mb-firstrun__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-group);
+  width: 100%;
+  max-width: var(--firstrun-width);
+  padding: var(--space-6);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+
+/* --- Where you are ------------------------------------------------------- */
+
+.mb-firstrun__steps {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mb-firstrun__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-firstrun__dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--firstrun-dot);
+  height: var(--firstrun-dot);
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: var(--border-width) solid var(--border);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The step you are on is the only one with the accent on it. A row of four
+   accent circles tells somebody nothing about where they are. */
+.mb-firstrun__step--now {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.mb-firstrun__step--now .mb-firstrun__dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.mb-firstrun__step--done .mb-firstrun__dot {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.mb-firstrun__steplabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- The step itself ----------------------------------------------------- */
+
+.mb-firstrun__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-group);
+}
+
+.mb-firstrun__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-title);
+}
+
+.mb-firstrun__lede {
+  margin: 0;
+  max-width: var(--firstrun-lede);
+  color: var(--text-muted);
+  line-height: var(--line-normal);
+}
+
+.mb-firstrun__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+}
+
+/* The item row on the last step: three fields and a button, on one line,
+   because adding five things should be five keystrokes and an Enter. */
+.mb-firstrun__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--gap-field);
+  flex-wrap: wrap;
+}
+
+.mb-firstrun__row > *:first-child {
+  flex: 2 1 var(--firstrun-item);
+}
+
+.mb-firstrun__added {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ok);
+  font-size: var(--text-sm);
+}
+
+.mb-firstrun__added li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The recovery code itself, on a page with nothing else to look at. Big,
+   spaced and monospaced, because somebody is copying it onto paper by hand and
+   a 0 must not read as an O. */
+.mb-firstrun__code {
+  margin: 0;
+  padding: var(--space-4);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-code);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  user-select: all;
+}
+
+/* --- Where the data goes ------------------------------------------------- */
+
+.mb-firstrun__where,
+.mb-firstrun__found {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mb-firstrun__label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-firstrun__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+}
+
+/* --- The way forward ----------------------------------------------------- */
+
+.mb-firstrun__actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--gap-field);
+  padding-top: var(--space-2);
+}

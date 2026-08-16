@@ -15,6 +15,7 @@
 import type { ReactNode } from 'react';
 
 import type { MoneyView } from '../ipc/generated/MoneyView';
+import { Button } from './controls';
 
 export function Card({
   children,
@@ -239,17 +240,65 @@ export function EmptyState({
   title,
   body,
   action,
+  small = false,
 }: {
   title: string;
   body?: string;
   action?: ReactNode;
+  /**
+   * **True inside a panel rather than a page** — the cart, a drawer, a column.
+   *
+   * The full size is built for the middle of an empty screen and is 150 pixels
+   * tall. The cart's line area is allowed to shrink to `--cart-lines-min`, so
+   * on an empty bill the full-size version overflowed and the totals block cut
+   * "Press an item to add it" through the middle of the words. Found by looking
+   * at a fresh install; it has been sliced like that since P09.
+   */
+  small?: boolean;
 }) {
   return (
-    <div className="mb-empty">
+    <div className={['mb-empty', small ? 'mb-empty--small' : ''].filter(Boolean).join(' ')}>
       <span className="mb-empty__title">{title}</span>
       {body ? <span>{body}</span> : null}
       {action}
     </div>
+  );
+}
+
+/**
+ * **A screen the licence does not open, said on the screen itself** — P30.5.
+ *
+ * Reports and the stock book are behind the licence (D86: the licence gates
+ * features, never billing). Until P30.5 a shop without one opened Reports and
+ * got a spinner that never stopped, plus a red toast that slid away after four
+ * seconds — so the screen was permanently blank and the only explanation had
+ * already gone. Found on a fresh install, and it is the same failure D75
+ * names: *a refusal must arrive as an answer, not as "the data could not be
+ * read".*
+ *
+ * The sentence is Rust's (§6, one place turns a machine state into words) and
+ * it is the same one the banner uses, because saying it the same way twice is
+ * what makes a person believe it.
+ */
+export function Locked({
+  says,
+  onOpenAccount,
+}: {
+  says: string;
+  onOpenAccount?: () => void;
+}) {
+  return (
+    <EmptyState
+      title="This part needs a licence"
+      body={says}
+      action={
+        onOpenAccount ? (
+          <Button variant="primary" onClick={onOpenAccount}>
+            Open Account
+          </Button>
+        ) : undefined
+      }
+    />
   );
 }
 

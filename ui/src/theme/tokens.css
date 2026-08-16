@@ -182,6 +182,9 @@
   /* A page title at --text-xl and weight 650 looks loose on the OS UI font
      without this. Optical, not mathematical (§5). */
   --tracking-title: -0.01em;
+  /* The other direction, for a string somebody is copying character by
+     character onto paper — the recovery code at first run. */
+  --tracking-code: 0.12em;
 
   /* **How far an icon drops to sit on the text baseline.** An icon box is
      centred on the line box, not on the baseline, so a 20px icon next to 16px
@@ -257,6 +260,16 @@
   --plan-cells: 16;
   --plan-cell-size: 3.5rem;
   --help-keys-width: 9rem;
+  /* P30.5, the first run — the one screen in the product that is deliberately
+     NARROW. A form stretched across 1366 px reads as a wall; a column the eye
+     can follow reads as a conversation, and the person in front of this one
+     has never seen the product before. */
+  --firstrun-width: 34rem;
+  --firstrun-lede: 44ch;
+  --firstrun-dot: 1.75rem;
+  /* How wide the item name wants to be on the last set-up step, before the
+     row wraps. Wide enough for "Chicken Biryani" and no wider. */
+  --firstrun-item: 12rem;
   /* P29. How much of a device's raw output the device screen shows before it
      scrolls. Twelve lines is enough to see a scale repeating itself, which is
      the thing a dealer is looking for. */

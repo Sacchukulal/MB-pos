@@ -294,6 +294,17 @@
   margin-top: var(--icon-nudge);
 }
 
+/* The always-there banners. A strip, not a card — see `Notice`'s `standing`. */
+.mb-notice--standing {
+  align-items: center;
+  padding-block: var(--space-2);
+}
+
+.mb-notice--standing .mb-notice__icon {
+  /* Centred with the row now, so the baseline nudge would push it low. */
+  margin-top: 0;
+}
+
 .mb-notice__says {
   flex: 1;
   min-width: 0;

@@ -61,6 +61,20 @@ pub enum Access {
     /// whose whole job is to be true, and it would have pushed the public list
     /// past the size at which it stops being a decision.
     SignedIn,
+    /// **Before there is a shop to have a permission in** — P30.5.
+    ///
+    /// A fresh install has no database, no staff row and no session. The three
+    /// commands that get it out of that state therefore cannot need a
+    /// permission, cannot need a session, and cannot need a shop: they are what
+    /// MAKES the shop.
+    ///
+    /// They are not `Public`, and the difference is the same one P28 drew: a
+    /// public command works on the lock screen for ever, and these must stop
+    /// being freely callable the moment the shop is set up. **Once it is, they
+    /// require `backup.run`** — pointing a working till at a different
+    /// database is a backup-level decision, not a set-up one — and
+    /// `switching_shops_after_set_up_needs_the_backup_permission` is the test.
+    FirstRun,
     Needs(Permission),
     /// **Any one of these opens the door** (P17).
     ///
@@ -434,6 +448,14 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // first-run bug P11 shipped. It reads counts and shows no shop data.
     ("setup_list", Access::Public),
 
+    // --- the first run (P30.5) ------------------------------------------------
+    // **The only commands in the product that work with no shop at all.**
+    // A fresh install has no database, so nothing here can ask for a
+    // permission — these are what create the thing a permission lives in.
+    ("first_run", Access::FirstRun),
+    ("create_shop", Access::FirstRun),
+    ("use_existing_shop", Access::FirstRun),
+
     // --- the kitchen screen (P24) -------------------------------------------
     // All `bill.create`. A cook clearing a ticket is doing the shop's work, and
     // a kitchen that needed a manager's permission to say "done" is a kitchen
@@ -789,7 +811,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 30] = [
+        const SOURCES: [&str; 31] = [
             include_str!("terminals.rs"),
             include_str!("orders.rs"),
             include_str!("buying.rs"),
@@ -816,6 +838,7 @@ mod tests {
             include_str!("delivery.rs"),
             include_str!("payments.rs"),
             include_str!("devices.rs"),
+            include_str!("firstrun.rs"),
             include_str!("settings/ipc.rs"),
             include_str!("settings/printers.rs"),
             include_str!("settings/backup.rs"),

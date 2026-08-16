@@ -23,6 +23,7 @@ import type { LockState } from '../ipc/generated/LockState';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import { useTheme } from '../theme/ThemeProvider';
 import { Account } from '../account/Account';
+import { FirstRun } from '../setup/FirstRun';
 import { Billing } from '../billing/Billing';
 import { Health } from '../health/Health';
 import { Kitchen } from '../kitchen/Kitchen';
@@ -150,7 +151,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     id: 'stock',
     label: 'Stock',
     icon: 'boxes',
-    render: () => <Stock />,
+    render: (go) => <Stock onGoTo={go} />,
     needs: 'inventory.view',
   },
   {
@@ -194,7 +195,9 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     daily: true,
     label: 'Reports',
     icon: 'chart',
-    render: () => <Reports />,
+    // `go` so a licence refusal can hand somebody straight to the Account
+    // screen instead of leaving them to find it (P30.5).
+    render: (go) => <Reports onGoTo={go} />,
     needs: 'reports.view',
   },
   {
@@ -293,6 +296,13 @@ const SCREENS: readonly Screen[] = import.meta.env.DEV
 export function Shell() {
   const [screen, setScreen] = useState<string>('billing');
   const [status, setStatus] = useState<AppStatus | null>(null);
+  /**
+   * **Is this counter set up?** `null` while we do not know yet, so nothing
+   * flashes. P30.5: the answer decides whether the shell shows the counter or
+   * the set-up flow, and it is Rust's answer rather than a guess from whether
+   * a call failed.
+   */
+  const [setUp, setSetUp] = useState<boolean | null>(null);
   const [jobs, setJobs] = useState<readonly PrintJobView[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
   const [lock, setLock] = useState<LockState | null>(null);
@@ -316,6 +326,25 @@ export function Shell() {
       .catch(() => {
         /* The shell opens regardless; the status is a nicety. */
       });
+  }, []);
+
+  /**
+   * **Is this counter set up?** (P30.5.)
+   *
+   * Asked once, before anything else renders. `first_run` is one of the three
+   * commands in the product that work with no shop at all — it has to be,
+   * because on a fresh install there is no database for a permission to live
+   * in.
+   *
+   * A failure here counts as SET UP, deliberately: an existing shop whose
+   * counter is having a bad morning must not be shown a set-up wizard over the
+   * top of its own data.
+   */
+  useEffect(() => {
+    if (!inApp()) return;
+    call('first_run')
+      .then((first) => setSetUp(!first.needed))
+      .catch(() => setSetUp(true));
   }, []);
 
   const reloadLock = useCallback(() => {
@@ -411,6 +440,37 @@ export function Shell() {
     return <div className="mb-shell" />;
   }
 
+  // **Nothing renders until we know whether there is a shop** (P30.5). The same
+  // argument as the line above: a flash of a counter that does not exist is
+  // worse than a blank moment.
+  if (inApp() && setUp === null) {
+    return <div className="mb-shell" />;
+  }
+
+  // **A shop that is not set up does not show the counter at all.**
+  //
+  // Until P30.5 a fresh install landed on the billing screen with no shop behind
+  // it: every screen's first call failed, the failures stacked up as toasts, a
+  // six-item checklist ate the page, and nothing anywhere in the product could
+  // create a shop. The set-up IS the screen now, and it goes away for good
+  // when the three compulsory steps are done.
+  if (inApp() && setUp === false) {
+    return (
+      <div className="mb-shell">
+        <BareBar />
+        <FirstRun
+          onDone={() => {
+            setSetUp(true);
+            // Everything the shell holds was read against a shop that did not
+            // exist a minute ago. Ask again rather than trusting any of it.
+            call('app_status').then(setStatus).catch(() => undefined);
+            reloadLock();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="mb-shell">
       <TopBar
@@ -439,7 +499,7 @@ export function Shell() {
       {lock?.nobodyHasAPin ? (
         <div className="mb-shell__banner">
           {/* Audit C1, on a shop that has not fixed it yet. */}
-          <Notice tone="warn" icon="lock">
+          <Notice standing tone="warn" icon="lock">
             <strong>Anybody can open this shop&rsquo;s reports and settings.</strong>{' '}
             Add a PIN in Staff so the counter locks itself.
           </Notice>
@@ -451,7 +511,7 @@ export function Shell() {
           over an ordinary Tuesday teaches a shop to ignore red bars. */}
       {tillsSay ? (
         <div className="mb-shell__banner">
-          <Notice tone="accent" icon="refresh">
+          <Notice standing tone="accent" icon="refresh">
             {tillsSay}
           </Notice>
         </div>
@@ -475,6 +535,7 @@ export function Shell() {
           {status?.licence && screen !== 'account' ? (
             <div className="mb-shell__banner mb-shell__banner--inmain">
               <Notice
+                standing
                 tone={
                   status.licenceTone === 'danger'
                     ? 'danger'
@@ -492,7 +553,30 @@ export function Shell() {
               </Notice>
             </div>
           ) : null}
-          {active?.render(setScreen)}
+          {/*
+            **Nothing is rendered behind the lock** — P30.5, and this is the
+            worst bug the fresh install turned up.
+
+            The screen used to mount underneath the lock overlay. Every one of
+            its first commands was then refused with `auth.locked`, which is
+            correct — and the refusals were invisible, because the overlay
+            covers the toasts on purpose. Then the person signed in, `locked`
+            went false, and **the screen did not remount**: its `useEffect`
+            had already run and would never run again. So a shop that starts
+            the app, types its PIN and lands on the counter got an empty menu
+            and no cart, every single morning, until it navigated away and
+            back.
+
+            It was invisible for thirty sessions because the demo shop nobody
+            gave a PIN to never locks. The first run makes a PIN compulsory,
+            so from P30.5 onwards EVERY shop would have hit it on day one.
+
+            Not rendering is also the right answer on its own terms: a locked
+            counter has no business firing a dozen commands it knows will be
+            refused, and mounting `active` the moment the lock clears is how a
+            screen gets its data with a session behind it.
+          */}
+          {locked ? null : active?.render(setScreen)}
         </main>
       </div>
 
@@ -580,6 +664,61 @@ export function splitScreens(
   const inBar = screens.filter((s) => s.daily);
   const inMore = screens.filter((s) => !s.daily);
   return { inBar, inMore, elsewhere: inMore.find((s) => s.id === current) ?? null };
+}
+
+/**
+ * **The window buttons, and nothing else** — P30.5.
+ *
+ * The set-up flow renders instead of the shell, and the shell is where the
+ * title bar lives. Without this the window has no minimise, no maximise and
+ * **no close**: `decorations: false` means we draw those ourselves, so a
+ * first-run screen with no bar is a window somebody has to kill from Task
+ * Manager. Found by looking at it.
+ *
+ * Deliberately not the real `TopBar`: there is nowhere to navigate to yet, and
+ * a row of screens somebody cannot open is worse than no row at all.
+ */
+function BareBar() {
+  const window = inApp() ? getCurrentWindow() : null;
+  return (
+    <header className="mb-topbar" data-tauri-drag-region>
+      <div className="mb-topbar__brand" data-tauri-drag-region>
+        <span className="mb-topbar__mark" aria-hidden="true">
+          <Icon name="receipt" size="sm" />
+        </span>
+        <span className="mb-topbar__name">Magic Bill</span>
+      </div>
+      <div className="mb-topbar__spacer" data-tauri-drag-region />
+      <div className="mb-topbar__tools">
+        <span className="mb-topbar__windows">
+          <button
+            type="button"
+            className="mb-topbar__button"
+            onClick={() => window?.minimize()}
+            aria-label="Minimise"
+          >
+            <Icon name="minimise" size="sm" />
+          </button>
+          <button
+            type="button"
+            className="mb-topbar__button"
+            onClick={() => window?.toggleMaximize()}
+            aria-label="Maximise"
+          >
+            <Icon name="maximise" size="sm" />
+          </button>
+          <button
+            type="button"
+            className="mb-topbar__button mb-topbar__button--close"
+            onClick={() => window?.close()}
+            aria-label="Close"
+          >
+            <Icon name="close" size="sm" />
+          </button>
+        </span>
+      </div>
+    </header>
+  );
 }
 
 function TopBar({
@@ -743,7 +882,12 @@ function TopBar({
           }
         >
           <Icon name={needsAttention ? 'warning' : 'printer'} size="sm" />
-          <span>
+          {/* The word goes below 1120px so the navigation keeps its own — the
+              `aria-label` above carries the whole sentence either way, and a
+              printer icon beside a count is not a thing anybody has to learn.
+              P30.5: at 1024, which is the window minimum, "Reports" was sitting
+              on top of the cashier's name. */}
+          <span className="mb-queue__word">
             {needsAttention
               ? 'NOT PRINTED'
               : jobs.length > 0

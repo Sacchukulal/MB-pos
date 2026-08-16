@@ -223,6 +223,13 @@
   color: var(--text-muted);
 }
 
+/* P30.5. On the set-up screen there is no navigation to fill the middle, so
+   something has to — and it has to stay draggable, or the window can only be
+   moved by a 200-pixel strip on the left. */
+.mb-topbar__spacer {
+  flex: 1;
+}
+
 /* --- The tools at the right end ----------------------------------------- */
 
 .mb-topbar__tools {
@@ -339,6 +346,20 @@
   min-height: 0;
 }
 
+/* **The licence line is not a screen.**
+
+   It lives inside `main` so it scrolls with the page instead of permanently
+   eating a strip of a 768px window — but the rule above is a universal child
+   selector at the same specificity as `.mb-shell__banner`, and it comes later,
+   so the banner won `flex: 1` and STRETCHED. On a fresh install, where the
+   licence line always shows, that left a 230-pixel hole between the banner and
+   the screen. Every screen. Reported by the owner on 2026-08-16 with four
+   screenshots, and invisible to every session before it because a seeded demo
+   shop has a healthy licence and never renders this banner at all. */
+.mb-main > .mb-shell__banner {
+  flex: 0 0 auto;
+}
+
 /* --- The print-queue indicator -----------------------------------------
    Audit D4: "a failed print is only a red message on screen. Nothing
    remembers it. In a rush the cashier misses the toast."
@@ -405,22 +426,17 @@
   color: var(--text-muted);
 }
 
-/* --- First run ---------------------------------------------------------- */
+/* --- First run ----------------------------------------------------------
 
-.mb-firstrun {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-5);
-  height: 100%;
-  text-align: center;
-}
+   **Deleted at P30.5, and the deletion is the note.** Two rules for
+    lived here with nothing rendering them — a leftover from a
+   screen that was never built — and when P30.5 finally built the real first-run
+   flow in , these won: same specificity, later in the
+   cascade, so every heading and every line of the wizard came out centred.
 
-.mb-firstrun__title {
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-bold);
-}
+   The same collision P27.5 found with , and the same lesson: CSS
+   for a component belongs beside the component, and a rule nothing renders is
+   a trap rather than dead weight. */
 
 /* --- The licence banner (P21) -------------------------------------------- */
 
@@ -511,6 +527,33 @@
    looks. */
 @media (max-width: 1200px) { /* mb-tokens-allow: media queries cannot use var() */
   .mb-topbar__name {
+    display: none;
+  }
+
+  /* The role beside the name goes too. "Meena" is who to ask; "Owner" is
+     something they already know about themselves. P30.5. */
+  .mb-who__role {
+    display: none;
+  }
+}
+
+/* **And at the window's own minimum, the print queue keeps only its icon.**
+   Hiding the wordmark and the role was not enough at 1024: the navigation ran
+   under the cashier's name, which is the one thing on this bar that must never
+   happen — every word of it is a place somebody is trying to go. The queue's
+   `aria-label` is a whole sentence, so nothing is lost but four characters.
+   P30.5, found by resizing to `minWidth` and looking. */
+@media (max-width: 1120px) { /* mb-tokens-allow: media queries cannot use var() */
+  .mb-queue__word {
+    display: none;
+  }
+
+  /* And the cashier's own name. It is the last thing to go and it still hurts
+     least: the button keeps its person icon, its lock icon and an `aria-label`
+     that reads "Signed in as Meena. Lock the counter" — and the one person who
+     does not need to be told who is signed in is the person signed in. Every
+     word left on this bar is now a place somebody is trying to go. */
+  .mb-who__name {
     display: none;
   }
 }

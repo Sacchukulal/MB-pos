@@ -28,13 +28,14 @@ import {
   DateRangePicker,
   EmptyState,
   Icon,
+  Locked,
   SectionHeader,
   Spinner,
   Table,
   useToast,
   type Column,
 } from '../kit';
-import { call, isUiError } from '../ipc/call';
+import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import { Dashboard } from './Dashboard';
 import { DayClose } from './DayClose';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
@@ -50,8 +51,17 @@ interface Line {
   cells: readonly string[];
 }
 
-export function Reports() {
+export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const [list, setList] = useState<ReportListView | null>(null);
+  /**
+   * **The licence saying no, held rather than flashed** (P30.5).
+   *
+   * Reports are behind the licence (D86). On a shop without one this screen
+   * used to open on a spinner that never stopped and a red toast that slid
+   * away after four seconds — permanently blank, with the only explanation
+   * already gone. Now the refusal IS the screen, and it says how to fix it.
+   */
+  const [locked, setLocked] = useState<string>('');
   // **The dashboard is what this screen opens on.** Audit G1: the owner's
   // first question is "what needs me", and a screen that opens on a list of
   // reports makes them ask it themselves.
@@ -64,6 +74,12 @@ export function Reports() {
 
   const complain = useCallback(
     (cause: unknown) => {
+      // A refusal is an answer, not a fault: it belongs on the screen, and a
+      // toast on top of it would say the same thing twice and then vanish.
+      if (isLicenceRefusal(cause)) {
+        setLocked(cause.message);
+        return;
+      }
       if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
     },
     [toast],
@@ -106,6 +122,9 @@ export function Reports() {
       .catch(complain);
   };
 
+  if (locked) {
+    return <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />;
+  }
   if (!list) return <Spinner label="Opening the reports" />;
 
   const columns: readonly Column<Line>[] =

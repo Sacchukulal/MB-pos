@@ -12,7 +12,21 @@
 
 .mb-lock {
   position: fixed;
-  inset: 0;
+  /* **It stops at the title bar** — P30.5.
+   *
+   * `inset: 0` covered the whole window, which broke two things Shell.tsx's
+   * own comment beside this overlay already claims. The print-queue indicator
+   * was supposed to stay visible while the screen is locked (audit D4: paper
+   * coming out wrong is still the shop's problem), and it was not. Worse:
+   * `decorations: false` means we draw the close, minimise and maximise
+   * buttons ourselves, so a locked counter was a window nobody could close
+   * without Task Manager. Found by locking it and looking.
+   *
+   * Nothing readable is exposed. Everything below this line is still covered,
+   * and the bar itself carries a name, some screen labels and three window
+   * buttons.
+   */
+  inset: var(--topbar-height) 0 0 0;
   z-index: var(--z-lock);
   display: grid;
   place-items: center;

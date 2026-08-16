@@ -188,3 +188,49 @@ describe('the floor (scope 14.1–14.3)', () => {
     expect(screen.getByText(/This table is free/)).toBeTruthy();
   });
 });
+
+/**
+ * **A shop with one room has no room picker, and a shop with none has no
+ * tables screen worth the name** — P30.5.
+ *
+ * The default fixture has ONE section, and until P30.5 that drew a segmented
+ * control containing the single word "All": a tall box in the corner of the
+ * screen offering a choice between one thing. "All" and "Hall" are the same
+ * set of tables under two names.
+ *
+ * And on a shop with no tables at all — a tea stall, a bakery, a parcel
+ * counter — the screen said "Nothing here · Try another section, or show
+ * everything", which is advice nobody can take.
+ */
+describe('empty is not a lecture (P30.5)', () => {
+  it('hides the room picker until there is more than one room', async () => {
+    call.mockResolvedValue(floor());
+    show();
+    await screen.findByText('3 of 4 tables busy');
+    expect(screen.queryByRole('group', { name: 'Which room' })).toBeNull();
+
+    cleanup();
+    call.mockResolvedValue(
+      floor({
+        sections: [
+          { id: 'sec_hall', name: 'Hall', sortOrder: 0, isActive: true, tableCount: 2 },
+          { id: 'sec_ac', name: 'AC room', sortOrder: 1, isActive: true, tableCount: 2 },
+        ],
+      }),
+    );
+    show();
+    await screen.findByText('3 of 4 tables busy');
+    expect(screen.getByRole('group', { name: 'Which room' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'AC room' })).toBeTruthy();
+  });
+
+  it('tells a shop with no tables what to do, not to try another section', async () => {
+    call.mockResolvedValue(floor({ tiles: [], tables: [], sections: [] }));
+    show();
+    expect(await screen.findByText('No tables yet')).toBeTruthy();
+    expect(screen.queryByText(/Try another section/)).toBeNull();
+    // The way to fix it is on the screen, and there are two of it: the toolbar
+    // button a busy shop uses, and this one.
+    expect(screen.getAllByRole('button', { name: 'Set up the room' }).length).toBe(2);
+  });
+});

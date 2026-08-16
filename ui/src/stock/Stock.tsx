@@ -35,6 +35,7 @@ import {
   EmptyState,
   Icon,
   Input,
+  Locked,
   Modal,
   Page,
   PageHeader,
@@ -47,7 +48,7 @@ import {
   type Column,
 } from '../kit';
 import { Count } from '../buying/Count';
-import { call, isUiError } from '../ipc/call';
+import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import type { BuyGroupView } from '../ipc/generated/BuyGroupView';
 import type { DishCostView } from '../ipc/generated/DishCostView';
 import type { InventoryView } from '../ipc/generated/InventoryView';
@@ -79,8 +80,15 @@ const KINDS = [
 
 type Editing = { material: MaterialView | null; isNew: boolean };
 
-export function Stock() {
+export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const [view, setView] = useState<InventoryView | null>(null);
+  /**
+   * **The licence saying no, held rather than flashed** (P30.5). The stock book
+   * is gated (D86, and `licensing.rs` says why the DEDUCTION still runs); this
+   * screen used to answer a shop without a licence with a blank page and a
+   * toast that slid away. See `Locked`.
+   */
+  const [locked, setLocked] = useState<string>('');
   const [tab, setTab] = useState('shelf');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -91,6 +99,11 @@ export function Stock() {
 
   const report = useCallback(
     (cause: unknown) => {
+      // A refusal is an answer, not a fault — it goes on the screen.
+      if (isLicenceRefusal(cause)) {
+        setLocked(cause.message);
+        return;
+      }
       if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
     },
     [toast],
@@ -114,6 +127,9 @@ export function Stock() {
     );
   }, [view, search]);
 
+  if (locked) {
+    return <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />;
+  }
   if (!view) return <div className="mb-stock" />;
 
   const columns: Column<MaterialView>[] = [

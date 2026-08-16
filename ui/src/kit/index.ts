@@ -38,6 +38,7 @@ export {
   Card,
   DateRangePicker,
   EmptyState,
+  Locked,
   Money,
   Numeric,
   SaveBar,

@@ -644,6 +644,7 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
               }
             />
           ) : (
+            /* An empty floor draws NOTHING here — see `TableGrid`, P30.5. */
             <TableGrid tables={tables} filter={filter} onOpen={openTable} />
           )}
 
@@ -754,6 +755,7 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
               ))
             ) : (
               <EmptyState
+                small
                 title="Nothing on this bill yet"
                 body="Press an item to add it."
               />

@@ -66,10 +66,15 @@ it('lists what is left, with the reason rather than the label', async () => {
   call.mockResolvedValue(halfway);
   render(<Setup onGoTo={vi.fn()} />);
 
-  expect(await screen.findByText('Put your menu in')).toBeTruthy();
-  expect(screen.getByText('Type the items, or import a spreadsheet.')).toBeTruthy();
+  // Collapsed, the line still says WHAT is left — P30.5 closed the strip by
+  // default, so the names on the summary line are now the only thing a shop
+  // sees until it asks for more.
+  expect(await screen.findByText(/Put your menu in/)).toBeTruthy();
   // The headline says the thing that matters most: you can trade meanwhile.
   expect(screen.getByText(/take money in the meantime/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { expanded: false }));
+  expect(screen.getByText('Type the items, or import a spreadsheet.')).toBeTruthy();
 });
 
 /**
@@ -84,7 +89,9 @@ it('shows what is left and counts what is done in a line', async () => {
   call.mockResolvedValue(halfway);
   render(<Setup onGoTo={vi.fn()} />);
 
-  expect(await screen.findByText('Put your menu in')).toBeTruthy();
+  const line = await screen.findByRole('button', { expanded: false });
+  fireEvent.click(line);
+  expect(screen.getByText('Put your menu in')).toBeTruthy();
   // The finished step is a number, not a row.
   expect(screen.queryByText('Tell us about your shop')).toBeNull();
   // P27.5 made this a collapsible strip, so the count moved from a paragraph
@@ -96,34 +103,30 @@ it('shows what is left and counts what is done in a line', async () => {
 });
 
 /**
- * **The strip collapses, and it starts closed once the urgent steps are done.**
+ * **The strip is one line until somebody opens it — always.**
  *
- * P22 already cut this from "every step" to "only what is left", because six
- * rows filled the billing pane. P27.5 found that two rows still take a quarter
- * of the screen a cashier looks at all day, for the life of the shop — and the
- * steps that survive longest are the optional ones a shop may never do, so the
- * panel is biggest exactly when it matters least.
+ * P22 cut this from "every step" to "only what is left", because six rows
+ * filled the billing pane. P27.5 made it collapsible, but still opened it
+ * whenever something urgent was outstanding. **P30.5 closed it for good**, and
+ * the owner's fresh install is why: on a brand-new shop *everything* is urgent,
+ * so the one screen a cashier lives on opened with a six-item checklist across
+ * it and the cart pushed off the bottom. The compulsory half is the first-run
+ * screen's job now (`FirstRun`); what is left here is the shop's own business,
+ * and a strip that opens itself every morning is one people learn to close
+ * without reading.
  */
-it('opens itself only while something that matters most is outstanding', async () => {
+it('is one line until somebody opens it, however urgent what is left', async () => {
+  // `menu` is outstanding AND mattersMost — the case that used to force it open.
   call.mockResolvedValue(halfway);
-  const { unmount } = render(<Setup onGoTo={vi.fn()} />);
-
-  // `menu` is outstanding and mattersMost, so the reasons are showing.
-  expect(await screen.findByText('Type the items, or import a spreadsheet.')).toBeTruthy();
-  unmount();
-
-  // With only the optional tail left, it is a single line until pressed.
-  call.mockResolvedValue({
-    ...halfway,
-    steps: halfway.steps.map((s) => (s.mattersMost ? { ...s, done: true } : s)),
-  });
   render(<Setup onGoTo={vi.fn()} />);
 
   const line = await screen.findByRole('button', { expanded: false });
-  // The names are still on the line, so a collapsed strip still says what.
+  // The names are on the line, so a collapsed strip still says what is left.
+  expect(screen.getByText(/Put your menu in/)).toBeTruthy();
   expect(screen.getByText(/Add your tables/)).toBeTruthy();
   // But not the reasons, and not a "Do it" for each.
   expect(screen.queryByText('Only if you have table service.')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Do it' })).toBeNull();
 
   fireEvent.click(line);
   expect(screen.getByText('Only if you have table service.')).toBeTruthy();
@@ -134,6 +137,7 @@ it('sends somebody to the screen that already does the job', async () => {
   call.mockResolvedValue(halfway);
   render(<Setup onGoTo={go} />);
 
+  fireEvent.click(await screen.findByRole('button', { expanded: false }));
   const buttons = await screen.findAllByRole('button', { name: 'Do it' });
   const first = buttons[0];
   expect(first).toBeDefined();

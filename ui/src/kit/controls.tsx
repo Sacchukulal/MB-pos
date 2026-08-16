@@ -104,6 +104,17 @@ export function Input({ label, hint, error, className, ...rest }: InputProps) {
       {(id, invalid) => (
         <input
           id={id}
+          /* **Off by default across the whole product**, and a caller may still
+             say otherwise because this sits before the spread.
+
+             This is a till on a shared counter, not a website. Windows' WebView
+             offers a "Saved info" dropdown over any text field it recognises —
+             found at first run, where it covered the tax selector while
+             somebody was typing their menu in. Worse than covering the screen:
+             it would offer one shop's customer names and phone numbers to
+             whoever is standing at the counter next. Nothing here is a form
+             anybody fills in twice, so there is nothing to save. */
+          autoComplete="off"
           className={[
             'mb-input',
             invalid ? 'mb-input--invalid' : '',

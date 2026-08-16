@@ -129,7 +129,7 @@ export function Menu() {
         r.isAvailable ? (
           <Badge tone="ok">Yes</Badge>
         ) : (
-          <Badge tone="warn">86&rsquo;d</Badge>
+          <Badge tone="warn">Sold out</Badge>
         ),
     },
     {
@@ -152,7 +152,11 @@ export function Menu() {
                 .catch(report);
             }}
           >
-            {r.isAvailable ? '86 it' : 'Put back'}
+            {/* **"Sold out", not "86 it"** (P30.5). "86" is American kitchen
+                slang; the shops this is for say sold out, finished, over. §6
+                is written from the cashier's side of the screen, and a word
+                somebody has to be taught is a word on the wrong side. */}
+            {r.isAvailable ? 'Sold out' : 'Put back'}
           </Button>
         </div>
       ),
@@ -215,26 +219,39 @@ export function Menu() {
         }
       />
 
-      <div className="mb-menu__body">
-      <aside className="mb-menu__categories">
-        <Button
-          variant={chosen === null ? 'primary' : 'quiet'}
-          wide
-          onClick={() => setChosen(null)}
-        >
-          Everything ({rows.length})
-        </Button>
-        {categories.map((category) => (
+      <div
+        className={[
+          'mb-menu__body',
+          categories.length === 0 ? 'mb-menu__body--nogroups' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+      {/* **No groups, no group rail** (P30.5). A shop that has not put its items
+          into groups yet — which is every shop on its first day — got a
+          quarter of the screen taken by one solid accent button reading
+          "Everything (2)", offering a choice between one thing. */}
+      {categories.length > 0 ? (
+        <aside className="mb-menu__categories">
           <Button
-            key={category.id}
-            variant={chosen === category.id ? 'primary' : 'quiet'}
+            variant={chosen === null ? 'primary' : 'quiet'}
             wide
-            onClick={() => setChosen(category.id)}
+            onClick={() => setChosen(null)}
           >
-            {category.name} ({category.itemCount})
+            Everything ({rows.length})
           </Button>
-        ))}
-      </aside>
+          {categories.map((category) => (
+            <Button
+              key={category.id}
+              variant={chosen === category.id ? 'primary' : 'quiet'}
+              wide
+              onClick={() => setChosen(category.id)}
+            >
+              {category.name} ({category.itemCount})
+            </Button>
+          ))}
+        </aside>
+      ) : null}
 
       <section className="mb-menu__items">
         <div className="mb-menu__find">
