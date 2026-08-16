@@ -11,9 +11,12 @@ pub mod dayclose;
 /// P29, scope 14.5 — the slip that goes out on the bike.
 pub mod delivery;
 pub mod kitchen;
+/// P30. The payslip — scope 9.14's third part, which P28 named as not done.
+pub mod payslip;
 
 pub use bill::{BillContext, BillCustomer, Copy, EInvoice, Store, bill_document};
 pub use delivery::{DeliveryContext, SlipLine as DeliverySlipLine, delivery_document};
+pub use payslip::{PaySlipLine, PayslipContext, payslip_document};
 pub use dayclose::{CountedNote, DayCloseContext, SlipLine, day_close_document};
 pub use kitchen::{
     KitchenContext, LabelContext, TicketKind, TicketLine, kitchen_document, label_document,

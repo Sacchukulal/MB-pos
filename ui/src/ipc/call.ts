@@ -475,6 +475,8 @@ export interface Commands {
   approve_payroll: { args: { runId: string; paidBy: string }; returns: PayrollView };
   reverse_payroll: { args: { runId: string; reason: string }; returns: PayrollView };
   staff_cost: { args: { from: string; to: string }; returns: StaffCostView };
+  // P30 — scope 9.14's third part, which P28 named as not done.
+  print_payslip: { args: { runId: string; staffId: string }; returns: string };
 
   // --- P29, delivery (scope 14.5) -------------------------------------------
   // Every one of these comes back as the WHOLE board, because the figure that

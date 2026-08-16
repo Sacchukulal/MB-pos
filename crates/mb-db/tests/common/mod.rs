@@ -5,7 +5,7 @@
 //! has to justify (R6, scope 16.15).
 
 // Shared by four test binaries, each of which uses a different subset.
-#![allow(dead_code)]
+#![allow(dead_code, reason = "shared by four test binaries, each using a different subset")]
 // The clippy.toml exemption only reaches `#[test]` functions, and everything
 // here is a plain helper. In a fixture `expect` IS the assertion: a scratch
 // directory that cannot be created is the test failing, not a shop losing data.

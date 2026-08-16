@@ -1027,6 +1027,30 @@ function RunSheet({
                 </strong>
               ),
             },
+            {
+              // **P30 — the paper the person being paid holds** (scope 9.14).
+              // Only for somebody who may manage payroll: handing the slip
+              // over is the same authority as approving the run.
+              key: 'slip',
+              header: '',
+              render: (l) =>
+                run.mayManage ? (
+                  <Button
+                    small
+                    variant="quiet"
+                    onClick={() => {
+                      // This sheet has no toast of its own; a failure goes the
+                      // same way every other failure on it does.
+                      call('print_payslip', { runId: run.id, staffId: l.staffId }).catch(
+                        onFailed,
+                      );
+                    }}
+                  >
+                    <Icon name="printer" size="sm" />
+                    Payslip
+                  </Button>
+                ) : null,
+            },
           ]}
           rowKey={(l) => l.id}
         />

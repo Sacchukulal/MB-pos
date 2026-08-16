@@ -123,6 +123,10 @@ pub enum Kind {
     /// is the half a shop actually asked for — who took them, so they can be
     /// shared out.
     Tips,
+    /// **P30 — scope 9.8's report half**, which P27 built the boundary for and
+    /// P28 left. Whose shift was this, what did the drawer say, and did it
+    /// match.
+    Handover,
 }
 
 /// How the buying report is grouped.
@@ -175,6 +179,10 @@ pub const CATALOGUE: &[Entry] = &[
     // for somebody else, which is the same kind of thing as a void: something
     // an owner watches rather than something the shop earned.
     Entry { id: "tips", title: "Tips, and who took them", group: "Control", needs: Permission::ReportsView, kind: Kind::Tips },
+    // **P30 — scope 9.8, the half P28 left.** It sits in Control beside the
+    // voids, because a drawer that keeps coming up short on one person's
+    // shift is exactly the kind of thing this group exists to surface.
+    Entry { id: "handover", title: "Shift handovers — every drawer counted", group: "Control", needs: Permission::DayClose, kind: Kind::Handover },
     // **Scope 3.7, and it is the first real measure of kitchen speed this
     // owner has ever had.** Two rows and no new screen: adding a report is a
     // line here plus a function in mb-db, which is P18's whole shape.
@@ -576,6 +584,51 @@ fn build(
                     ]
                 })
                 .collect();
+            (columns, rows, None, None)
+        }
+
+        Kind::Handover => {
+            let rows_in = reports.handovers(OUTLET, period)?;
+            let columns = vec![
+                column("Day", false),
+                column("Till", false),
+                column("Shift", true),
+                column("Closed by", false),
+                column("At", false),
+                column("Expected", true),
+                column("Counted", true),
+                column("Difference", true),
+                column("Who was on", false),
+                column("Reason given", false),
+            ];
+            let short = rows_in.iter().filter(|r| r.variance.is_negative()).count();
+            let rows = rows_in
+                .iter()
+                .map(|row| {
+                    vec![
+                        row.day.to_string(),
+                        row.till.clone(),
+                        row.shift_no.to_string(),
+                        row.closed_by.clone(),
+                        crate::words::when(row.closed_at),
+                        row.expected.to_plain_string(),
+                        row.counted.to_plain_string(),
+                        // **The difference in words, never a bare minus sign.**
+                        // This column is read at eleven at night by somebody
+                        // tired, and "-340.00" is read wrong eventually.
+                        crate::dayclose::variance_words(row.variance),
+                        row.who_was_on.join(", "),
+                        row.note.clone().unwrap_or_default(),
+                    ]
+                })
+                .collect();
+            if short > 0 {
+                notes.push(format!(
+                    "{short} of these came up short. The reason beside each one \
+                     is what somebody typed at the time — that is what it is \
+                     for."
+                ));
+            }
             (columns, rows, None, None)
         }
 

@@ -1983,6 +1983,128 @@ pub fn payroll_on(app: &App, run_id: String) -> UiResult<PayrollView> {
     })
 }
 
+
+/// **Put one person's payslip on paper** — scope 9.14's third part, P30.
+///
+/// P28 built the payroll and named this as not done. It is the piece the
+/// person being paid actually holds, and a shop that cannot hand one over
+/// settles every argument about pay by memory.
+///
+/// Printed like every other document, through P07's queue — so a printer that
+/// is off means a slip that prints when it comes back, exactly as a bill does.
+/// **`SalaryManage`, not `SalaryView`**: reading what somebody earns and
+/// handing them the paper are the same authority as approving the run that
+/// produced it, and this is the one that ends up in somebody's pocket.
+pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult<String> {
+    guard::require(app, Permission::SalaryManage)?;
+    let at = now();
+    let printer = crate::flows::default_printer(app)?;
+    let config = app.shop_config();
+
+    let run = payroll_on(app, run_id.clone())?;
+    let line = run
+        .lines
+        .iter()
+        .find(|l| l.staff_id == staff_id)
+        .ok_or_else(|| {
+            UiError::new(
+                "payroll.no_line",
+                "That person is not on this payroll run.",
+            )
+        })?;
+
+    let people = people_on(app)?;
+    let person = people.iter().find(|p| p.id == staff_id);
+    let designation = person
+        .and_then(|p| p.designation.clone())
+        .filter(|d| !d.trim().is_empty());
+
+    // Every figure, in the order it was worked out. A slip that showed only
+    // the net would be a number somebody has to trust.
+    let mut lines = vec![mb_print::template::PaySlipLine {
+        label: "Earned".to_owned(),
+        amount: line.earned.text.clone(),
+        takes_away: false,
+    }];
+    if line.allowances.paise > 0 {
+        lines.push(mb_print::template::PaySlipLine {
+            label: "Allowances".to_owned(),
+            amount: line.allowances.text.clone(),
+            takes_away: false,
+        });
+    }
+    if line.deductions.paise > 0 {
+        lines.push(mb_print::template::PaySlipLine {
+            label: "Deductions".to_owned(),
+            amount: line.deductions.text.clone(),
+            takes_away: true,
+        });
+    }
+    if line.unpaid_leave_deduction.paise > 0 {
+        lines.push(mb_print::template::PaySlipLine {
+            label: "Unpaid leave".to_owned(),
+            amount: line.unpaid_leave_deduction.text.clone(),
+            takes_away: true,
+        });
+    }
+    if line.advance_recovered.paise > 0 {
+        lines.push(mb_print::template::PaySlipLine {
+            label: "Advance recovered".to_owned(),
+            amount: line.advance_recovered.text.clone(),
+            takes_away: true,
+        });
+    }
+
+    let period = format!("{} to {}", run.from, run.to);
+    let worked = if line.unpaid_says.trim().is_empty() {
+        format!("{} worked", line.days_says)
+    } else {
+        format!("{} worked, {} unpaid", line.days_says, line.unpaid_says)
+    };
+    let paid_by = if run.paid_by.trim().is_empty() {
+        "Cash".to_owned()
+    } else {
+        run.paid_by.clone()
+    };
+
+    let document = mb_print::template::payslip_document(
+        printer.paper,
+        &mb_print::template::PayslipContext {
+            shop: &config.store.name,
+            person: &line.staff_name,
+            designation: designation.as_deref(),
+            period: &period,
+            basis_says: &basis_words(
+                // The tag on the view, back into the enum it came from. A
+                // basis this build has never heard of would be a payroll row
+                // written by a newer version, and "monthly" is the honest
+                // fallback for a slip somebody is holding.
+                basis_from_tag(&line.basis).unwrap_or(Basis::Monthly),
+                Money::from_paise(line.basis_amount.paise),
+            ),
+            worked_says: &worked,
+            lines: &lines,
+            net: &line.net.text,
+            paid_by: &paid_by,
+            edited: line.edited,
+        },
+    );
+
+    app.with_shop(|shop| {
+        shop.queue
+            .enqueue(
+                mb_print::queue::Job::new(
+                    mb_print::queue::JobKind::DayClose,
+                    &printer.id,
+                    document,
+                    today(at),
+                )
+                .because(format!("payslip for {}", line.staff_name)),
+            )
+            .map_err(|e| words::from_print(&e))
+    })
+}
+
 pub fn payroll_list_on(app: &App) -> UiResult<PayrollListView> {
     guard::require(app, Permission::SalaryView)?;
     let may_manage = guard::require(app, Permission::SalaryManage).is_ok();
@@ -2519,6 +2641,16 @@ pub fn reverse_payroll(
     reason: String,
 ) -> UiResult<PayrollView> {
     reverse_payroll_on(&app, run_id, reason)
+}
+
+/// P30 — scope 9.14's third part.
+#[tauri::command]
+pub fn print_payslip(
+    app: tauri::State<'_, App>,
+    run_id: String,
+    staff_id: String,
+) -> UiResult<String> {
+    print_payslip_on(&app, run_id, staff_id)
 }
 
 #[tauri::command]

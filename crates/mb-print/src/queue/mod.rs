@@ -96,6 +96,22 @@ pub enum JobKind {
 }
 
 impl JobKind {
+    /// **Every kind, so a test can walk them.**
+    ///
+    /// Hand-written, because Rust cannot iterate an enum without a
+    /// dependency — the same trade `Permission::ALL` makes, and the same
+    /// test shape guards it: a variant missing from here is a variant no
+    /// test ever tries to write to the database.
+    pub const ALL: &'static [JobKind] = &[
+        JobKind::Bill,
+        JobKind::Kitchen,
+        JobKind::Label,
+        JobKind::Test,
+        JobKind::Drawer,
+        JobKind::DayClose,
+        JobKind::Delivery,
+    ];
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

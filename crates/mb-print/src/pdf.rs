@@ -113,7 +113,10 @@ impl PdfSink {
             self.cursor = 0.0;
         }
         if !text.trim().is_empty() {
-            #[allow(clippy::cast_precision_loss)]
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "a column index on a page: no page is 2^53 characters wide"
+            )]
             let x = MARGIN + (indent as f64) * CHAR_WIDTH;
             self.placed.push(Placed {
                 page: self.page,
@@ -146,7 +149,10 @@ impl PdfSink {
         // receipt with "Page 1 of 1" on it looks like a form.
         if of > 1 {
             let label = format!("Page {} of {of}", page + 1);
-            #[allow(clippy::cast_precision_loss)]
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "the length of \"Page 1 of 2\": a dozen characters"
+            )]
             let x = (PAGE_WIDTH - (label.len() as f64) * CHAR_WIDTH) / 2.0;
             content.push_str(&format!(
                 "/F1 {FONT_SIZE:.1} Tf\n1 0 0 1 {x:.2} {MARGIN:.2} Tm\n({}) Tj\n",

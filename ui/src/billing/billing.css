@@ -546,3 +546,14 @@
   font-size: var(--text-sm);
   line-height: var(--line-normal);
 }
+
+/* **Audit I6 — a very long bill** (P30). Quiet, because it is a nudge and
+   not a problem: the shop is allowed to sell sixty dishes to one table. */
+.mb-cart__long {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}

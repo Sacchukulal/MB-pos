@@ -757,3 +757,52 @@ fn a_kitchen_printer_refuses_a_bill() {
     assert!(refused.is_err(), "a customer's bill went to the tandoor");
     queue.shutdown();
 }
+
+/// **Every kind of job this queue can make is a kind the database accepts** —
+/// P30, and it is here because P30 found two that were not.
+///
+/// `print_jobs.kind` carries a CHECK listing the kinds, exactly as
+/// `permissions` carries the vocabulary of "no": a typo becomes a constraint
+/// violation instead of a silent unknown row. The cost of that is two lists,
+/// and the two lists drifted — `day_close` arrived at P18 and `delivery` at
+/// P29, and neither was ever added to the schema. **Printing a Z-report was
+/// refused by the database**, on the one path where a shop most needs paper,
+/// and nothing noticed for twelve sessions.
+///
+/// So it is a test now (D40). It walks `JobKind::ALL` rather than a list
+/// written here, so adding a kind and forgetting the schema fails at once.
+#[test]
+fn every_job_kind_the_queue_can_make_is_allowed_by_the_schema() {
+    let scratch = common::Scratch::new("queue-kinds");
+    let db = Db::open(&DbConfig::new(scratch.path("shop.db"))).expect("opens");
+    common::seed_printer(&db, "kitchen");
+
+    for kind in mb_print::queue::JobKind::ALL {
+        let tag = kind.as_str();
+        let wrote = db.transaction(|tx| {
+            Repos::new(tx).print_jobs().save(
+                common::OUTLET,
+                &mb_db::repo::PrintJobRow {
+                    id: format!("job_{tag}"),
+                    printer_id: "kitchen".to_owned(),
+                    kind: tag.to_owned(),
+                    state: "pending".to_owned(),
+                    copies: 1,
+                    priority: kind.priority(),
+                    attempts: 0,
+                    payload: "{}".to_owned(),
+                    reason: None,
+                    last_error: None,
+                    engine_used: None,
+                    business_day: BusinessDay::from_days_since_epoch(20_000),
+                    created_at: mb_core::Timestamp::from_millis(0),
+                },
+                mb_core::Timestamp::from_millis(0),
+            )
+        });
+        assert!(
+            wrote.is_ok(),
+            "the queue can produce a {tag:?} job and the database refuses it: {wrote:?}"
+        );
+    }
+}

@@ -278,7 +278,7 @@ fn b5_a_whole_settle_is_one_durable_write() {
 
 fn mb(bytes: u64) -> f64 {
     // Reporting only.
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss, reason = "a file size, printed to one decimal place")]
     let bytes = bytes as f64;
     bytes / (1024.0 * 1024.0)
 }
@@ -357,9 +357,13 @@ fn seed_a_shop(db: &Db) {
 /// also what makes the fsync measurement above mean anything.
 fn write_one_bill(db: &Db, n: u64) {
     // Spread the bills over a year so the day indexes have real cardinality.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        reason = "a loop counter over a year of seeded bills"
+    )]
     let day = BusinessDay::from_days_since_epoch(20_000 + ((n / 205) as i32));
-    #[allow(clippy::cast_possible_wrap)]
+    #[allow(clippy::cast_possible_wrap, reason = "the same loop counter")]
     let at = Timestamp::from_millis(1_770_000_000_000 + (n as i64) * 60_000);
     let order_id = format!("ord_{n:07}");
 

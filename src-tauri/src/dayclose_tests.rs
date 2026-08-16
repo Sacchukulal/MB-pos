@@ -305,3 +305,91 @@ fn the_float_left_in_the_drawer_is_tomorrows_opening() {
     );
     assert_eq!(tomorrow.expected.paise(), 200_000);
 }
+
+// ---------------------------------------------------------------------------
+// P30 — the slip actually reaches the queue
+// ---------------------------------------------------------------------------
+
+/// **The closing slip is a JOB, not a log line.**
+///
+/// P30 found that `print_jobs.kind` had never learnt the word `day_close`,
+/// so every Z-report since P18 was refused by the database — and `close_on`
+/// deliberately swallows a print failure into a warning, because a failed
+/// print must never un-close a day that has been counted. The two together
+/// meant a shop closed its day, saw nothing, and got no paper.
+///
+/// The swallow is right and stays. This is the test that says the thing being
+/// swallowed is not happening.
+#[test]
+fn closing_the_day_with_the_slip_actually_queues_it() {
+    let scratch = Scratch::new("dayclose_slip");
+    let app = a_shop(&scratch, "slip");
+    let expected = a_cash_sale(&app).paise();
+
+    let before = app.print_queue_snapshot().len();
+    close_on(&app, count_of(expected), String::new(), true).expect("closed");
+
+    let after = app.print_queue_snapshot();
+    assert!(
+        after.len() > before,
+        "the day closed and no slip reached the queue — which is exactly how          a broken CHECK constraint hid for twelve sessions"
+    );
+    assert!(
+        after.iter().any(|job| job.what == "Closing slip"),
+        "the queue shows what each job IS, and this one is the Z-report: {:?}",
+        after.iter().map(|j| j.what.clone()).collect::<Vec<_>>()
+    );
+}
+
+/// **The shift handover report** — scope 9.8's other half, built at P30.
+///
+/// P27 built the boundary (a till closes its drawer per shift, D140) and P28
+/// built attendance. Neither built the thing a manager actually reads at ten
+/// o'clock: whose shift was this, what did the drawer say, and did it match.
+/// It was marked PART in FEATURE_SCOPE and nobody had come back to it.
+#[test]
+fn the_handover_report_names_the_shift_the_person_and_the_difference() {
+    let scratch = Scratch::new("dayclose_handover");
+    let app = a_shop(&scratch, "handover");
+    // Reports are behind the licence gate (D86); the refusal itself is
+    // `licence_tests`' business, not this one's.
+    app.use_licensing(crate::licence_tests::licence_in(
+        &scratch,
+        "handover-licence",
+        mb_license::Status::Active,
+        90,
+    ));
+    let expected = a_cash_sale(&app).paise();
+
+    // Counted one hundred rupees short, with a reason.
+    close_on(
+        &app,
+        count_of(expected - 10_000),
+        "Paid the milkman from the drawer".to_owned(),
+        false,
+    )
+    .expect("closed");
+
+    let day = crate::flows::today(crate::flows::now()).to_string();
+    let report = crate::reports::report_on(
+        &app,
+        "handover".to_owned(),
+        crate::reports::PeriodArg { from: day.clone(), to: day },
+    )
+    .expect("the handover report");
+
+    let row = report.rows.first().expect("one drawer was counted");
+    assert!(
+        row.iter().any(|c| c.contains("Short by")),
+        "the difference is a SENTENCE, the same one the day close showed: {row:?}"
+    );
+    assert!(
+        row.iter().any(|c| c.contains("milkman")),
+        "the reason somebody typed is the whole point of the row: {row:?}"
+    );
+    assert!(
+        report.notes.iter().any(|n| n.contains("came up short")),
+        "and the report says how many, in words: {:?}",
+        report.notes
+    );
+}

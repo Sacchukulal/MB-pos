@@ -253,6 +253,49 @@ impl Cart {
         &self.lines
     }
 
+    /// **How many lines make a ticket somebody should look at** — audit I6.
+    ///
+    /// > *"No limit on how many items a single order can hold, and no warning
+    /// > when one order's KOT will run to several feet of paper."*
+    ///
+    /// Forty lines on 80 mm paper is roughly half a metre of ticket, which is
+    /// the point at which a kitchen printer becomes the slowest thing in the
+    /// shop and a cook loses their place. It is also, almost always, a bill
+    /// that should have been split.
+    ///
+    /// **It is a warning and never a limit.** A wedding party really does order
+    /// sixty dishes on one table, and a counter that refused would be a counter
+    /// that stops a sale — requirement 3, and there is no version of that trade
+    /// worth making.
+    pub const LONG_ORDER: usize = 40;
+
+    /// True when this order is long enough to be worth mentioning.
+    #[must_use]
+    pub fn is_long(&self) -> bool {
+        self.lines.len() >= Cart::LONG_ORDER
+    }
+
+    /// The sentence, or nothing. Written here so the counter and the kitchen
+    /// screen cannot word it differently (UI_GUIDELINES §6).
+    #[must_use]
+    #[allow(
+        clippy::integer_division,
+        reason = "centimetres of paper, rounded down on purpose: it is a nudge                   and not a measurement"
+    )]
+    pub fn length_says(&self) -> Option<String> {
+        self.is_long().then(|| {
+            format!(
+                "{} lines on this bill. The kitchen ticket will be about {} cm \
+                 of paper — worth splitting the table if it is two parties.",
+                self.lines.len(),
+                // Roughly 8 lines to 10 cm on 80 mm paper at the standard row
+                // height. Deliberately rough: it is a nudge, not a measurement.
+                self.lines.len().saturating_mul(10) / 8
+            )
+        })
+    }
+
+
     /// A bad index is an error the caller must handle, never a silent no-op and
     /// never a panic.
     fn check(&self, index: usize) -> Result<()> {
@@ -288,6 +331,48 @@ mod tests {
         )
         .expect("adds");
         cart
+    }
+
+    /// **Audit I6 — a very long order is mentioned, never refused.**
+    ///
+    /// > *"No limit on how many items a single order can hold, and no warning
+    /// > when one order's KOT will run to several feet of paper."*
+    ///
+    /// A wedding party really does order sixty dishes on one table, so the
+    /// counter says something and carries on. A refusal here would be a
+    /// counter that stops a sale, which requirement 3 forbids.
+    #[test]
+    fn a_very_long_order_is_mentioned_and_never_refused() {
+        let mut cart = Cart::new();
+        for n in 0..Cart::LONG_ORDER {
+            cart.add(
+                item(&format!("itm_{n}"), &format!("Dish {n}"), 10_000),
+                Qty::from_whole(1).expect("in range"),
+                None,
+                vec![],
+            )
+            .expect("a long order is still an order");
+        }
+        assert!(cart.is_long());
+        let says = cart.length_says().expect("it says something");
+        assert!(says.contains("40 lines"), "{says}");
+        assert!(says.contains("cm of paper"), "{says}");
+
+        // One under the line says nothing at all — a warning on every ordinary
+        // bill is a warning nobody reads.
+        let mut ordinary = Cart::new();
+        for n in 0..(Cart::LONG_ORDER - 1) {
+            ordinary
+                .add(
+                    item(&format!("itm_{n}"), &format!("Dish {n}"), 10_000),
+                    Qty::from_whole(1).expect("in range"),
+                    None,
+                    vec![],
+                )
+                .expect("adds");
+        }
+        assert!(!ordinary.is_long());
+        assert!(ordinary.length_says().is_none());
     }
 
     #[test]

@@ -268,6 +268,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("approve_payroll", Access::Needs(Permission::SalaryManage)),
     ("reverse_payroll", Access::Needs(Permission::SalaryManage)),
     ("staff_cost", Access::Needs(Permission::SalaryView)),
+    // **The payslip is SalaryManage, not SalaryView** (P30): reading what
+    // somebody earns and handing them the paper that says so are the same
+    // authority as approving the run that produced it.
+    ("print_payslip", Access::Needs(Permission::SalaryManage)),
 
     // --- delivery (P29, scope 14.5) -----------------------------------------
     // **Reading the board is SignedIn on purpose.** Where the food is is the

@@ -38,4 +38,16 @@ kitchenUpToDate: boolean,
  * shows these and offers to take them in, and the cashier's payments and
  * discounts are untouched either way.
  */
-fromTheFloor: Array<FloorChange>, };
+fromTheFloor: Array<FloorChange>, 
+/**
+ * **Audit I6 — a very long order, mentioned rather than refused.**
+ *
+ * Empty on every ordinary bill. Past forty lines it carries a sentence
+ * about how much paper the kitchen ticket will be, because that is the
+ * point at which a printer becomes the slowest thing in the shop and the
+ * bill is usually two parties on one table.
+ *
+ * A warning and never a limit: a wedding party really does order sixty
+ * dishes, and requirement 3 says billing never stops.
+ */
+lengthSays: string, };

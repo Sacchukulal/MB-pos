@@ -101,18 +101,39 @@ Screenshots of before and after are in `docs/ui/`.
 
 ---
 
-## 3. The installer — NOT BUILT
+## 3. The installer — **BUILT at P30, and it fits**
 
-`bundle.targets = ["nsis"]` is configured and **has never been run**. Only
-`cargo build --release` has ever built this. So:
+It had never been run. It has now.
 
-- [ ] the installer does not exist;
-- [ ] **S4** (the download is under 20 MB) is unmeasured;
-- [ ] **S5** (install to first printable bill in 3 minutes) is unmeasured;
-- [ ] the WebView2 install mode for an offline Windows 10 machine is unconfirmed.
+```
+cargo tauri build
+  → target\release\bundle\nsis\Magic Bill_0.1.0_x64-setup.exe
+```
 
-This is a session of its own and it should happen before anybody else installs
-this.
+| | |
+|---|---|
+| **the installer** | **6.78 MB** |
+| **budget S4** — the download is under 20 MB | **MET**, with room to spare |
+| the binary inside it | 23.65 MB (NSIS compresses it) |
+| the front end | 455 KB of JavaScript, 73 KB of CSS, 124 KB gzipped |
+
+**What is still yours to check**, because it needs a second computer:
+
+- [ ] **Run the installer on a machine that is not this one.** Ideally the
+      oldest Windows 10 PC you can find, with no developer tools on it.
+- [ ] **S5 — install to a printed bill inside three minutes.** Time it from
+      double-clicking the setup to holding a printed bill. If it takes longer,
+      tell me where the time went; that is a budget and it is missable.
+- [ ] **WebView2 on an offline machine.** The installer is set to download it
+      if Windows does not have it, which needs internet. A shop being set up in
+      a back room with no WiFi is the case to try. If it fails, the fix is a
+      different bundle mode and it is a one-line change.
+- [ ] **Windows SmartScreen.** The build is unsigned, so Windows will warn the
+      first person who runs it. Signing needs a certificate you buy; tell me
+      when you have one.
+- [ ] Uninstall it afterwards and check the shop's data is **still there**. It
+      should be: the database lives beside the config, not in the program
+      folder.
 
 ---
 

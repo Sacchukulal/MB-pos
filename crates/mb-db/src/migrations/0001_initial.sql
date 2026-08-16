@@ -411,8 +411,21 @@ CREATE TABLE print_jobs (
     id           TEXT    NOT NULL PRIMARY KEY,
     outlet_id    TEXT    NOT NULL REFERENCES outlets (id),
     printer_id   TEXT    NOT NULL REFERENCES printers (id),
+    -- **Every kind the queue can produce, and P30 found two missing.**
+    --
+    -- `day_close` has existed since P18 and `delivery` since P29; neither was
+    -- ever added here, so printing a Z-report or a rider's slip was refused by
+    -- the database with "CHECK constraint failed" — on the one path where a
+    -- shop most needs paper. Nothing caught it: both go through a queue that
+    -- most tests stand in for, and no test had ever pressed Print on a day
+    -- close.
+    --
+    -- The list is here as well as in `JobKind` on purpose, the same argument
+    -- the `permissions` table makes: a typo becomes a constraint violation
+    -- rather than a silent "unknown kind". `every_job_kind_the_queue_can_make_is_allowed_by_the_schema`
+    -- is what stops the two lists parting company again.
     kind         TEXT    NOT NULL
-        CHECK (kind IN ('bill', 'kitchen', 'label', 'test', 'drawer')),
+        CHECK (kind IN ('bill', 'kitchen', 'label', 'test', 'drawer', 'day_close', 'delivery')),
     -- 'done' is not a state a row can be in: a done job has no row.
     state        TEXT    NOT NULL DEFAULT 'pending'
         CHECK (state IN ('pending', 'printing', 'failed', 'parked')),

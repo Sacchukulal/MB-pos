@@ -541,6 +541,8 @@ macro_rules! commands {
             $crate::employment::approve_payroll,
             $crate::employment::reverse_payroll,
             $crate::employment::staff_cost,
+            // P30 — the payslip P28 named as not done (scope 9.14).
+            $crate::employment::print_payslip,
             // P29 — delivery, the riders, and the cash they are carrying.
             $crate::delivery::delivery_board,
             $crate::delivery::save_delivery,
@@ -1214,17 +1216,25 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
             })
     })?;
 
+    // **An order with no table is identified by its own id** — P30 found this
+    // by restarting mid-service and tapping the parked parcel order.
+    //
+    // The floor's "No table" group holds parcel and self-service orders, and
+    //  gives such a tile the ORDER's id because there is no table to
+    // name it after. This function only ever looked for a table, so tapping one
+    // of those tiles found nothing, fell into the "free table" branch below,
+    // and started a NEW empty order whose table was set to an order id — which
+    // then failed the foreign key on settle and told the shop its data could
+    // not be read. The parked food was still on disk and unreachable.
     let found = app.with_shop(|shop| {
         let open = shop
             .db
             .transaction(|tx| mb_db::Repos::new(tx).orders().list_open(OUTLET))
             .map_err(|e| words::from_db(&e))?;
         Ok(open.into_iter().find(|order| {
-            order
-                .core()
-                .table
-                .as_ref()
-                .is_some_and(|t| t.as_str() == table_id)
+            let core = order.core();
+            core.table.as_ref().is_some_and(|t| t.as_str() == table_id)
+                || (core.table.is_none() && core.id.as_str() == table_id)
         }))
     })?;
 
@@ -1238,8 +1248,10 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
                 state.cart = core.cart.clone();
                 state.order_type = core.order_type;
                 state.order_id = Some(core.id.as_str().to_owned());
-                state.table = Some(table_id.clone());
-                state.table_label = label.clone();
+                // A parcel keeps its own (absent) table. Writing the order id
+                // in here is what produced the foreign-key failure above.
+                state.table = core.table.as_ref().map(|t| t.as_str().to_owned());
+                state.table_label = core.table.as_ref().and(label.clone());
                 state.settlement = mb_core::Settlement::new();
             }
             None => {

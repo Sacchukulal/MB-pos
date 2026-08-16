@@ -683,6 +683,14 @@ export function Billing({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             }
           />
 
+          {/* **Audit I6 — a very long bill says so** (P30). Not a refusal:
+              a wedding party really does order sixty dishes, and a counter
+              that stopped selling would be a worse product than a long
+              ticket. The whole sentence is Rust's. */}
+          {cart && cart.lengthSays ? (
+            <p className="mb-cart__long">{cart.lengthSays}</p>
+          ) : null}
+
           {/* **What the floor did while this was being typed** (P20, D83).
               The counter already took the change — it is the authority — and
               this offers to bring the lines into the bill on screen. Nothing

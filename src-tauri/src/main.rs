@@ -187,6 +187,15 @@ mod payment_tests;
 /// answering. The sale completes either way.
 #[cfg(test)]
 mod device_tests;
+/// P30. The hygiene rules as tests — every allow says why, nothing unwraps on
+/// a user path, no deferred note is left in the tree, no secret is committed,
+/// and no source file is unreachable.
+#[cfg(test)]
+mod hygiene_tests;
+/// P30. **A whole trading day, and everything has to reconcile** — where two
+/// figures are computed by different code, they are asserted equal.
+#[cfg(test)]
+mod acceptance_tests;
 #[cfg(test)]
 mod look_demo;
 mod startup;

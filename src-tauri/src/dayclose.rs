@@ -364,7 +364,12 @@ fn grid(counts: &[CountArg]) -> Vec<DenominationView> {
 }
 
 /// **The difference, in words.**
-fn variance_words(variance: Money) -> String {
+/// **The difference in words, never a bare minus sign.**
+///
+/// P30 gave the handover report the same sentence rather than a second one:
+/// a shop that reads "Short by 340.00" on the day close and "-340.00" on the
+/// report is a shop reading two products.
+pub(crate) fn variance_words(variance: Money) -> String {
     if variance.is_zero() {
         return "The drawer matches exactly.".to_owned();
     }

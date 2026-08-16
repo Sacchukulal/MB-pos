@@ -748,6 +748,19 @@ fn a_payroll_month_with_an_advance_adds_up_and_reconciles_with_the_drawer() {
         "the drawer disagrees with what was actually handed over"
     );
 
+    // **P30 — the payslip, which P28 named as not done** (scope 9.14).
+    //
+    // The paper is what the person being paid holds, and a shop that cannot
+    // hand one over settles every argument about pay by memory.
+    let job = crate::employment::print_payslip_on(&app, run.id.clone(), "staff_ravi".to_owned())
+        .expect("a payslip goes to the printer");
+    assert!(!job.is_empty(), "the slip was queued like any other document");
+    assert!(
+        crate::employment::print_payslip_on(&app, run.id.clone(), "staff_nobody".to_owned())
+            .is_err(),
+        "a payslip for somebody who is not on the run is a refusal, not a blank slip"
+    );
+
     // **T7 — approving twice is refused.**
     assert!(
         approve_payroll_on(&app, run.id.clone(), "cash".to_owned()).is_err(),

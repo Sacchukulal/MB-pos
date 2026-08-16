@@ -14,7 +14,7 @@
     reason = "tests: expect is the assertion, and the fixture splits a fake total three ways"
 )]
 // Shared by five test binaries, each of which uses a different subset.
-#![allow(dead_code)]
+#![allow(dead_code, reason = "shared by five test binaries, each using a different subset")]
 
 use mb_core::{
     AnyOrder, Bill, BillInput, BusinessDay, Cart, Charge, ChargeKind, Claimed, CustomerId,

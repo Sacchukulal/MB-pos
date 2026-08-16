@@ -40,7 +40,7 @@
 //!   second source of truth, and this schema has already refused one of those
 //!   (`customers` has no balance column, D65).
 
-use mb_core::{BusinessDay, Money, Qty};
+use mb_core::{BusinessDay, Money, Qty, Timestamp};
 use rusqlite::Transaction;
 
 use crate::encode;
@@ -887,5 +887,114 @@ fn label_for(by: SalesBy, raw: &rusqlite::types::Value) -> String {
             other => other.to_owned(),
         },
         _ => text,
+    }
+}
+
+/// One drawer, counted at the end of one shift — **scope 9.8's report half**,
+/// built at P30.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandoverRow {
+    pub day: BusinessDay,
+    /// The till's own name, or "The shop" for the roll-up row.
+    pub till: String,
+    pub shift_no: i64,
+    /// Who counted it. The whole point of a handover: two people and a name.
+    pub closed_by: String,
+    /// "11:14 pm", formatted by the caller — this crate owns no clock.
+    pub closed_at: Timestamp,
+    pub expected: Money,
+    pub counted: Money,
+    /// counted − expected, as it was STORED at the close (never recomputed, so
+    /// a void three weeks later cannot rewrite what was handed over).
+    pub variance: Money,
+    pub note: Option<String>,
+    /// Who was clocked in on that till's day. A handover with no names on it
+    /// answers "how much" and not "who", and the second question is the one
+    /// asked when the money is short.
+    pub who_was_on: Vec<String>,
+}
+
+impl<'a> ReportsRepo<'a> {
+    /// **Every drawer handed over in a period** — scope 9.8, the half P28
+    /// left.
+    ///
+    /// P27 built the boundary (a till closes its drawer per shift, D140) and
+    /// P28 built attendance; neither built the report that puts them beside
+    /// each other, which is the thing a manager actually reads at ten o'clock:
+    /// *whose shift was this, what did the drawer say, and did it match?*
+    ///
+    /// The shop's roll-up row is included and named, because a two-till shop
+    /// hands over twice and reconciles once, and a report showing only the
+    /// tills would not add up to the day.
+    pub fn handovers(
+        &self,
+        outlet: &str,
+        period: Period,
+    ) -> Result<Vec<HandoverRow>, DbError> {
+        let from = encode::business_day_to_sql(period.from);
+        let to = encode::business_day_to_sql(period.to);
+        let mut stmt = self.tx.prepare(
+            "SELECT c.business_day,
+                    COALESCE(t.name, 'The shop'),
+                    c.shift_no,
+                    COALESCE(s.name, 'Not recorded'),
+                    c.closed_at,
+                    c.expected_cash,
+                    c.counted_cash,
+                    c.variance,
+                    c.note,
+                    c.terminal_id
+               FROM day_closes c
+          LEFT JOIN terminals t ON t.id = c.terminal_id
+          LEFT JOIN staff s ON s.id = c.closed_by
+              WHERE c.outlet_id = ?1 AND c.business_day BETWEEN ?2 AND ?3
+           ORDER BY c.business_day DESC, c.terminal_id IS NULL, t.name, c.shift_no",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![outlet, from, to])?;
+
+        let mut out: Vec<HandoverRow> = Vec::new();
+        while let Some(row) = rows.next()? {
+            let day = encode::business_day_from_sql(row.get(0)?, "day_closes.business_day")?;
+            out.push(HandoverRow {
+                day,
+                till: row.get(1)?,
+                shift_no: row.get(2)?,
+                closed_by: row.get(3)?,
+                closed_at: encode::timestamp_from_sql(row.get(4)?),
+                expected: encode::money_from_sql(row.get(5)?),
+                counted: encode::money_from_sql(row.get(6)?),
+                variance: encode::money_from_sql(row.get(7)?),
+                note: row.get(8)?,
+                who_was_on: Vec::new(),
+            });
+        }
+
+        // Who was on, per day. One query for the whole period rather than one
+        // per row: a month of two-till closes is sixty rows and would be sixty
+        // round trips (PERFORMANCE §5 rule 4).
+        let mut people = self.tx.prepare(
+            "SELECT a.business_day, s.name
+               FROM attendance a JOIN staff s ON s.id = a.staff_id
+              WHERE a.outlet_id = ?1 AND a.business_day BETWEEN ?2 AND ?3
+           GROUP BY a.business_day, s.name
+           ORDER BY s.name",
+        )?;
+        let mut by_day: std::collections::BTreeMap<i32, Vec<String>> =
+            std::collections::BTreeMap::new();
+        let mut who = people.query(rusqlite::params![outlet, from, to])?;
+        while let Some(row) = who.next()? {
+            let day = encode::business_day_from_sql(row.get(0)?, "attendance.business_day")?;
+            by_day
+                .entry(day.days_since_epoch())
+                .or_default()
+                .push(row.get(1)?);
+        }
+        for row in &mut out {
+            if let Some(names) = by_day.get(&row.day.days_since_epoch()) {
+                row.who_was_on = names.clone();
+            }
+        }
+
+        Ok(out)
     }
 }
