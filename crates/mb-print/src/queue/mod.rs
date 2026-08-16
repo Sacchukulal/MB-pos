@@ -65,7 +65,7 @@ use crate::doc::Document;
 use crate::drawer::DrawerConfig;
 use crate::error::PrintError;
 use crate::escpos::{self, JobOptions};
-use crate::font::Font;
+use crate::font::Typefaces;
 use crate::layout::layout;
 use crate::printer::{Engine, PrinterConfig};
 use crate::raster::{RasterOptions, to_raster};
@@ -176,6 +176,13 @@ pub struct Job {
     /// Whether this job should also open the drawer. [`crate::drawer`] decides;
     /// the queue only carries the answer.
     pub kick_drawer: bool,
+    /// **P31. Which typeface to draw this with**, as a key from
+    /// [`crate::font::FAMILIES`]. `None` is the built-in one.
+    ///
+    /// On the JOB rather than on the printer, because the shop chooses one face
+    /// for the bill and another for the kitchen ticket — and one printer
+    /// commonly prints both.
+    pub font: Option<String>,
 }
 
 impl Job {
@@ -194,12 +201,20 @@ impl Job {
             reason: None,
             business_day,
             kick_drawer: false,
+            font: None,
         }
     }
 
     #[must_use]
     pub fn because(mut self, reason: impl Into<String>) -> Job {
         self.reason = Some(reason.into());
+        self
+    }
+
+    /// P31. The face this shop chose for this kind of document.
+    #[must_use]
+    pub fn in_face(mut self, font: Option<String>) -> Job {
+        self.font = font;
         self
     }
 
@@ -215,6 +230,14 @@ impl Job {
 struct Payload {
     document: Document,
     kick_drawer: bool,
+    /// P31. Which typeface this job is drawn with — the shop chooses one for
+    /// the bill and one for the kitchen ticket.
+    ///
+    /// `#[serde(default)]` because a job parked before this field existed is
+    /// still a job that has to print after the update. It comes out `None`,
+    /// which is the built-in face and exactly what it was queued with.
+    #[serde(default)]
+    font: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,7 +352,7 @@ struct Shared {
     subscribers: Mutex<Vec<Sender<QueueEvent>>>,
     statuses: Mutex<BTreeMap<String, JobStatus>>,
     printers: Arc<BTreeMap<String, PrinterConfig>>,
-    font: Arc<Font>,
+    faces: Arc<dyn Typefaces>,
     config: QueueConfig,
     transports: Arc<dyn TransportFactory>,
 }
@@ -357,10 +380,10 @@ impl Queue {
     pub fn start(
         printers: Vec<PrinterConfig>,
         store: Arc<dyn JobStore>,
-        font: Arc<Font>,
+        faces: Arc<dyn Typefaces>,
         config: QueueConfig,
     ) -> Queue {
-        Queue::start_with_transports(printers, store, font, config, Arc::new(RealTransports))
+        Queue::start_with_transports(printers, store, faces, config, Arc::new(RealTransports))
     }
 
     /// The same, with the transports supplied.
@@ -370,7 +393,7 @@ impl Queue {
     pub fn start_with_transports(
         printers: Vec<PrinterConfig>,
         store: Arc<dyn JobStore>,
-        font: Arc<Font>,
+        faces: Arc<dyn Typefaces>,
         config: QueueConfig,
         transports: Arc<dyn TransportFactory>,
     ) -> Queue {
@@ -385,7 +408,7 @@ impl Queue {
             subscribers: Mutex::new(Vec::new()),
             statuses: Mutex::new(BTreeMap::new()),
             printers: Arc::clone(&printers),
-            font,
+            faces,
             transports,
             config,
         });
@@ -453,6 +476,7 @@ impl Queue {
         let payload = serde_json::to_string(&Payload {
             document: job.document,
             kick_drawer: job.kick_drawer,
+            font: job.font.clone(),
         })
         .map_err(|e| PrintError::invalid(format!("that document cannot be queued: {e}")))?;
 
@@ -825,7 +849,7 @@ fn print_once(
         Engine::Raster => {
             let raster = to_raster(
                 &laid,
-                &shared.font,
+                &shared.faces.face(payload.font.as_deref()),
                 RasterOptions {
                     native_qr: printer.caps.native_qr,
                     ..RasterOptions::default()

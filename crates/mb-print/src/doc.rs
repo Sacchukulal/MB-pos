@@ -100,22 +100,34 @@ impl Pattern {
     }
 }
 
-// **`FontFamily` used to be here, and P17 deleted it — decision D71.**
+// **`FontFamily` used to be here, P17 deleted it (D71), and P31 put the choice
+// back — NOT here.**
 //
-// Audit Part 3 lists a font choice, v1 had one, and P06 modelled it. It was
-// written onto every `Document` and **read by nothing**: `layout` does not
-// carry it into `Laid`, and the raster sink draws with the ONE face the queue
-// loaded at start-up (D33 — "one face for every printer, loaded once", because
-// a cold glyph cache costs more than the whole raster). In `Engine::Text` mode
-// the face is the printer's own, so ours could never apply there at all.
+// Audit Part 3 lists a font choice, v1 had one, and P06 modelled it on the
+// document. It was written onto every `Document` and **read by nothing**:
+// `layout` does not carry it into `Laid`, and the raster sink drew with the ONE
+// face the queue loaded at start-up (D33 — "one face for every printer, loaded
+// once", because a cold glyph cache costs more than the whole raster). P17's T1
+// found it — render, change the setting, render again, identical — and deleting
+// a control wired to nothing was right.
 //
-// P17's T1 is what found it: render the bill, change the setting, render again,
-// and the two documents are identical. A setting that changes nothing is a lie
-// on a screen, so the honest choice was to delete it rather than ship it.
+// **Where it lives now is the JOB, and that is the whole difference.** A
+// `Document` is a shape; which typeface draws it is a fact about the printing,
+// like the paper width and the cut. So `queue::Job` carries a family key,
+// `Shared` holds a `font::Typefaces`, and the raster sink is handed the face for
+// that job. A bill and a kitchen ticket going to the same printer can be
+// different faces — which is what the owner asked for at P31, and what a field
+// on the document could never have given.
 //
-// **It comes back at P23**, which has to ship a second face anyway for Kannada
-// (D31 names that as a known gap needing a shaper). A font choice is a real
-// choice on the day there is more than one font.
+// The faces are not in the installer either: `typefaces.rs` reads them out of
+// the system font folder, so five more choices cost nothing (S4).
+//
+// In `Engine::Text` mode the face is still the printer's own and ours cannot
+// apply, exactly as it never could. That is why the setting is described as the
+// face the RASTER path draws with.
+//
+// Kannada is still not this (D31, crown jewel 17): a second face is not a
+// shaper, and `layout` still counts characters. `font.rs` says so at length.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

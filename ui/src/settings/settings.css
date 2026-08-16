@@ -623,3 +623,74 @@
   gap: var(--space-3);
   border-left: var(--space-1) solid var(--accent);
 }
+
+/* --- The logo (P31) ------------------------------------------------------ */
+
+.mb-logo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The picture and its controls side by side, so the words about it are beside
+   the thing they describe rather than under it. */
+.mb-logo__has {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+/* **White, always, in both themes.** This is a picture of paper: showing black
+   ink on a dark surface would be showing something that cannot happen, and the
+   whole reason the canvas exists is that it is exactly what will print. */
+.mb-logo__paper {
+  padding: var(--space-3);
+  background: var(--qr-paper);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* One canvas pixel per printed dot, drawn at whatever size fits. `pixelated`
+   because a logo scaled up smoothly would look better than the paper does,
+   which is the one thing this must not do. */
+.mb-logo__dots {
+  display: block;
+  max-width: var(--logo-preview-width);
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.mb-logo__trying {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--border);
+}
+
+/* --- This version (P31) -------------------------------------------------- */
+
+.mb-updates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Label above value, in two columns, so "Running / 2.4.5" reads as one fact
+   rather than as a sentence. */
+.mb-updates__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.mb-updates__facts dt {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+}
+
+.mb-updates__facts dd {
+  margin: 0;
+}

@@ -415,6 +415,33 @@ export function Shell() {
     return () => stop?.();
   }, [reloadLock]);
 
+  /**
+   * **The queue as it is right now, once, when the shell mounts.**
+   *
+   * Everything else about the queue arrives pushed (M4), and that is right —
+   * but a push only tells you what CHANGED. Rust emits the queue at start-up,
+   * and if the webview reloads after that (a dev reload, a crashed renderer,
+   * a second window) the shell comes back with an empty list and a parked
+   * kitchen ticket that nothing on screen mentions. D4 is precisely that the
+   * cashier must be able to SEE a print that did not happen.
+   *
+   * `list_print_jobs` is what answers "what is in the queue right now", and it
+   * had never been called. One call, on mount, and no polling.
+   */
+  useEffect(() => {
+    if (!inApp()) return;
+    call('list_print_jobs')
+      // **Checked, not trusted.** The queue is the one thing on this screen
+      // that is allowed not to answer — a shop mid-restore has no queue at
+      // all — and an empty list is the honest reading of that. Assigning
+      // whatever came back put a `null` where an array goes and took the whole
+      // shell down with it.
+      .then((fresh) => setJobs(Array.isArray(fresh) ? fresh : []))
+      // Silent: a queue that will not read must not put an error over a
+      // counter somebody is billing on. The push will correct it.
+      .catch(() => undefined);
+  }, []);
+
   // **Ctrl+L locks the counter.** Registered in the billing screen's SHORTCUTS
   // table as well, because the help sheet is generated from that table (audit
   // F4) and a key documented nowhere is a key nobody learns.

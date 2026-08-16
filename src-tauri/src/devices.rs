@@ -698,17 +698,13 @@ pub fn print_label_on(app: &App, line: String, token: String) -> UiResult<String
             of: None,
         },
     );
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                mb_print::queue::Job::new(
-                    mb_print::queue::JobKind::Label,
-                    &printer.id,
-                    document,
-                    crate::flows::today(crate::flows::now()),
-                )
-                .because(format!("label for {token}")),
-            )
-            .map_err(|e| crate::words::from_print(&e))
-    })
+    app.print(
+        mb_print::queue::Job::new(
+            mb_print::queue::JobKind::Label,
+            &printer.id,
+            document,
+            crate::flows::today(crate::flows::now()),
+        )
+        .because(format!("label for {token}")),
+    )
 }

@@ -174,33 +174,17 @@ pub struct PrinterView {
     pub offset_y_mm: i64,
 }
 
-#[tauri::command]
-pub fn list_printers(app: tauri::State<'_, App>) -> UiResult<Vec<PrinterView>> {
-    guard::require(&app, Permission::SettingsPrinter)?;
-    app.with_shop(|shop| {
-        let rows = shop
-            .db
-            .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
-            .map_err(|e| words::from_db(&e))?;
-        Ok(rows
-            .into_iter()
-            .map(|p| PrinterView {
-                connection: match p.kind.as_str() {
-                    "spooler" => format!("Windows: {}", p.address.clone().unwrap_or_default()),
-                    "network" => format!("Network: {}", p.address.clone().unwrap_or_default()),
-                    "serial" => format!("Serial: {}", p.address.clone().unwrap_or_default()),
-                    _ => "Not connected".to_owned(),
-                },
-                id: p.id,
-                name: p.name,
-                paper_mm: p.paper_mm,
-                is_default: p.is_default,
-                offset_x_mm: p.offset_x_mm,
-                offset_y_mm: p.offset_y_mm,
-            })
-            .collect())
-    })
-}
+// **`list_printers` was here, and P31 deleted it.**
+//
+// P08 wrote it so the test print had something to aim at. P17 then built
+// `settings::printers::printer_setup`, which answers the same question and
+// three more — the Windows printers this machine can see, the category
+// routes, and whether the shop is running on a stand-in. Nothing ever called
+// this one again.
+//
+// Two commands answering one question is audit E6, and the way that ends is
+// somebody fixing a bug in the copy nobody uses. `PrinterView` stays: it is
+// what `nudge_offset_on` gives back to P17's screen.
 
 /// The test print — P07 built the slip, the ruler and the nudge; this is what
 /// makes them reachable.
@@ -224,17 +208,18 @@ pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResu
     // With a shop, the job is durable and survives a power cut. Without one,
     // the queue is in memory — D32's port, and the reason a test print works
     // when nothing else does.
-    let queued = app.with_shop(|shop| {
-        shop.queue
-            .enqueue(job.clone())
-            .map_err(|e| words::from_print(&e))
-    });
+    let queued = app.print(job.clone());
 
     match queued {
         Ok(id) => Ok(id),
         Err(e) if e.code == "shop.none" => {
             log_info!("test print with no shop open — using an in-memory queue");
             let queue = app.transient_queue(vec![printer]);
+            // **The one enqueue outside `App::print`**, and it has to be: there
+            // is no shop, so there is no chosen typeface to stamp on. It prints
+            // in the built-in face, which is the only one a counter with no
+            // settings could have meant. `hygiene_tests` allows this line by
+            // name.
             let id = queue.enqueue(job).map_err(|e| words::from_print(&e))?;
             // The transient queue is dropped with the print in flight; the
             // worker thread owns the job and finishes it.
@@ -245,16 +230,15 @@ pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResu
     }
 }
 
-/// Scope 7.11 — print, look at the paper, nudge, print again.
-#[tauri::command]
-pub fn nudge_print_offset(
-    app: tauri::State<'_, App>,
-    printer_id: String,
-    dx_mm: i32,
-    dy_mm: i32,
-) -> UiResult<PrinterView> {
-    nudge_offset_on(&app, printer_id, dx_mm, dy_mm)
-}
+// **`nudge_print_offset` was here, and P31 deleted it.**
+//
+// It was a one-line wrapper around `nudge_offset_on` below, and P17's
+// `settings::printers::nudge_printer` is another one — around the same body,
+// with the same permission, returning the same view. Two doors into one room,
+// and the shop only ever used one of them.
+//
+// The BODY stays, and it is the point: D46 put the arithmetic and the clamp in
+// one place precisely so a second nudge could not grow a second answer.
 
 /// The body (D46), so P17's printer screen nudges through the SAME arithmetic
 /// and the same clamp rather than growing a second one.
@@ -426,9 +410,7 @@ macro_rules! commands {
             $crate::ipc::app_status,
             $crate::ipc::set_appearance,
             $crate::ipc::reveal_logs,
-            $crate::ipc::list_printers,
             $crate::ipc::print_test_page,
-            $crate::ipc::nudge_print_offset,
             $crate::ipc::list_print_jobs,
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
@@ -436,6 +418,7 @@ macro_rules! commands {
             $crate::ipc::current_cart,
             $crate::ipc::cart_add,
             $crate::ipc::cart_set_qty,
+            $crate::ipc::cart_step_qty,
             $crate::ipc::cart_remove,
             $crate::ipc::cart_clear,
             $crate::ipc::cart_set_order_type,
@@ -564,6 +547,12 @@ macro_rules! commands {
             $crate::firstrun::first_run,
             $crate::firstrun::create_shop,
             $crate::firstrun::use_existing_shop,
+            // P31 — the logo, and the two Browse buttons that did not exist.
+            $crate::logo::logo,
+            $crate::logo::pick_a_logo,
+            $crate::logo::save_logo,
+            $crate::logo::remove_logo,
+            $crate::logo::pick_a_folder,
             // P25 — the stock book.
             $crate::inventory::inventory,
             $crate::inventory::recipe,
@@ -800,6 +789,65 @@ pub fn cart_set_qty(
             UiError::new("cart.qty", "That quantity could not be set.")
                 .with_detail(e.to_string())
         })?;
+        cart_view(state, &app.shop_config())
+    });
+    shown(&handle, view)
+}
+
+/// **One more, or one less** — the − and + on a cart line.
+///
+/// # Why this is a command and not `qty + 1` on the screen
+///
+/// A quantity is a whole number of THOUSANDTHS (`mb_core::Qty`), and it crosses
+/// the wire as the string a shopkeeper reads: "2", "0.5", "1.333". Stepping it
+/// in TypeScript means `parseFloat` and a double — and `0.1 + 0.2` is
+/// `0.30000000000000004`, which comes back here as a quantity with seventeen
+/// decimal places and is refused. R8 and D2 both say the arithmetic belongs on
+/// this side; this is one of the places that is true for a reason rather than
+/// on principle.
+///
+/// **Down to nothing removes the line**, because that is what a cashier
+/// pressing − on a single item means. `Cart::set_qty` would refuse a zero — and
+/// a button that does nothing at the end of its range is a button somebody
+/// presses four more times.
+#[tauri::command]
+pub fn cart_step_qty(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    index: usize,
+    by: i32,
+) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
+
+    let step = mb_core::Qty::from_whole(i64::from(by)).map_err(|e| {
+        UiError::new("cart.qty", "That step is too big.").with_detail(e.to_string())
+    })?;
+
+    let view = app.with_cart_mut(|state| {
+        let now = state
+            .cart
+            .lines()
+            .get(index)
+            .ok_or_else(|| {
+                UiError::new("cart.qty.gone", "That line is not on this bill any more.")
+            })?
+            .qty;
+        let next = now.add(step).map_err(|e| {
+            UiError::new("cart.qty", "That quantity could not be worked out.")
+                .with_detail(e.to_string())
+        })?;
+
+        if next.is_positive() {
+            state.cart.set_qty(index, next).map_err(|e| {
+                UiError::new("cart.qty", "That quantity could not be set.")
+                    .with_detail(e.to_string())
+            })?;
+        } else {
+            state.cart.remove(index).map_err(|e| {
+                UiError::new("cart.remove", "That line could not be removed.")
+                    .with_detail(e.to_string())
+            })?;
+        }
         cart_view(state, &app.shop_config())
     });
     shown(&handle, view)

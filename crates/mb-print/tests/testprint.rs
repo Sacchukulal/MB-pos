@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use mb_core::{BusinessDay, Money, Timestamp};
 use mb_db::{Db, DbConfig, Repos};
-use mb_print::font::Font;
 use mb_print::layout::layout;
 use mb_print::paper::{Offset, PaperKind};
 use mb_print::printer::{PrinterConfig, Target, nudge};
@@ -38,7 +37,7 @@ fn t11_a_test_print_reaches_paper_with_no_database_and_no_printer() {
     let queue = Queue::start(
         vec![printer.clone()],
         Arc::new(MemoryStore::new()),
-        Arc::new(Font::builtin().expect("the shipped face loads")),
+        Arc::new(mb_print::font::OneFace::builtin().expect("the shipped face loads")),
         QueueConfig::default(),
     );
 

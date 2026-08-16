@@ -383,7 +383,7 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
         // Everything else previews the BILL, and on purpose: a shop changing
         // its name or its GST number wants to see where that lands on paper
         // just as much as one changing a separator.
-        _ => super::sample::bill_preview(&wanted, paper),
+        _ => super::sample::bill_preview(&wanted, paper, crate::logo::stored(app)),
     }
     .map_err(|e| words::from_print(&e))?;
 

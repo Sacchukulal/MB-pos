@@ -163,8 +163,32 @@ impl Transport for FakeTransport {
 // Fixtures.
 // ---------------------------------------------------------------------------
 
-fn font() -> Arc<Font> {
-    Arc::new(Font::builtin().expect("the shipped face loads"))
+fn font() -> Arc<dyn mb_print::font::Typefaces> {
+    Arc::new(mb_print::font::OneFace(Arc::new(
+        Font::builtin().expect("the shipped face loads"),
+    )))
+}
+
+/// **A `Typefaces` that writes down what it was asked for** — P31.
+///
+/// The face a job prints in cannot be seen in the bytes without a second face
+/// installed on the machine running the test, and "is Consolas on this
+/// computer?" is not a thing a test may depend on. What CAN be asserted, and is
+/// the whole of the wiring, is that the key the job carried is the key the
+/// queue asked for.
+#[derive(Debug, Default)]
+struct Watching {
+    asked: Mutex<Vec<Option<String>>>,
+}
+
+impl mb_print::font::Typefaces for Watching {
+    fn face(&self, key: Option<&str>) -> Arc<Font> {
+        self.asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(key.map(str::to_owned));
+        Arc::new(Font::builtin().expect("the shipped face loads"))
+    }
 }
 
 fn quick() -> QueueConfig {
@@ -817,4 +841,113 @@ fn every_job_kind_the_queue_can_make_is_allowed_by_the_schema() {
             "the queue can produce a {tag:?} job and the database refuses it: {wrote:?}"
         );
     }
+}
+
+/// **P31. The face on the job is the face the queue draws with.**
+///
+/// The shop chooses one typeface for its bills and another for its kitchen
+/// tickets, and that choice has to survive being written to a database, parked
+/// through a power cut and picked up again by a worker thread. Between the
+/// settings screen and the printer there is a lot of room to lose a string.
+///
+/// Asserted on the KEY rather than on the dots, deliberately: seeing the
+/// difference in the bytes needs a second face installed on whatever machine is
+/// running this, and "does this computer have Consolas?" is not something a
+/// test may be true or false because of.
+#[test]
+fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
+    let printer_fake = Arc::new(Recorder::default());
+    let transports = Arc::new(FakeTransports::new(vec![(
+        "kitchen",
+        Arc::clone(&printer_fake),
+    )]));
+    let watching = Arc::new(Watching::default());
+    let store = Arc::new(MemoryStore::new());
+
+    let queue = Queue::start_with_transports(
+        vec![printer("kitchen")],
+        Arc::clone(&store) as Arc<dyn mb_print::queue::JobStore>,
+        Arc::clone(&watching) as Arc<dyn mb_print::font::Typefaces>,
+        quick(),
+        transports,
+    );
+
+    queue
+        .enqueue(ticket("kitchen").in_face(Some("consolas".to_owned())))
+        .expect("queued");
+    assert!(
+        until(|| printer_fake.sent.lock().unwrap().len() == 1),
+        "the ticket never printed"
+    );
+
+    let asked = watching.asked.lock().unwrap().clone();
+    assert_eq!(
+        asked,
+        vec![Some("consolas".to_owned())],
+        "the queue drew the ticket with a face the job did not ask for"
+    );
+
+    // And a job that chose nothing asks for nothing, which is the built-in one.
+    queue.enqueue(ticket("kitchen")).expect("queued");
+    assert!(
+        until(|| printer_fake.sent.lock().unwrap().len() == 2),
+        "the second ticket never printed"
+    );
+    assert_eq!(watching.asked.lock().unwrap().last(), Some(&None));
+
+    queue.shutdown();
+}
+
+/// The other half: it survives the database.
+///
+/// A ticket parked at 11 p.m. by a printer that was switched off has to come
+/// back at 8 a.m. in the face the shop chose, not in the default — and the only
+/// thing that carries it across is the `payload` column.
+#[test]
+fn the_typeface_survives_being_parked_and_picked_up_again() {
+    let scratch = common::Scratch::new("queue-typeface-restart");
+    let db = Arc::new(Db::open(&DbConfig::new(scratch.path("shop.db"))).expect("opens"));
+    common::seed_printer(&db, "kitchen");
+    let store = Arc::new(SqliteStore::new(Arc::clone(&db), common::OUTLET));
+
+    // Round one: the printer is switched off for the whole of it, so the job is
+    // still in the database when the counter goes down.
+    let off = Arc::new(Recorder::default());
+    off.fail_first.store(u32::MAX, Ordering::SeqCst);
+    let first = Queue::start_with_transports(
+        vec![printer("kitchen")],
+        Arc::clone(&store) as Arc<dyn mb_print::queue::JobStore>,
+        font(),
+        quick(),
+        Arc::new(FakeTransports::new(vec![("kitchen", Arc::clone(&off))])),
+    );
+    first
+        .enqueue(ticket("kitchen").in_face(Some("cascadia".to_owned())))
+        .expect("queued");
+    first.shutdown();
+
+    // Round two: the printer is back, and the face has to come back with it.
+    let on = Arc::new(Recorder::default());
+    let watching = Arc::new(Watching::default());
+    let second = Queue::start_with_transports(
+        vec![printer("kitchen")],
+        Arc::clone(&store) as Arc<dyn mb_print::queue::JobStore>,
+        Arc::clone(&watching) as Arc<dyn mb_print::font::Typefaces>,
+        quick(),
+        Arc::new(FakeTransports::new(vec![("kitchen", Arc::clone(&on))])),
+    );
+    assert!(
+        until(|| on.sent.lock().unwrap().len() == 1),
+        "the parked ticket never printed after the restart"
+    );
+    assert!(
+        watching
+            .asked
+            .lock()
+            .unwrap()
+            .contains(&Some("cascadia".to_owned())),
+        "the typeface did not survive the restart: {:?}",
+        watching.asked.lock().unwrap()
+    );
+    second.shutdown();
 }

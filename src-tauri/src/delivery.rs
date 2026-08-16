@@ -565,19 +565,13 @@ pub fn print_delivery_slip_on(app: &App, order_id: String) -> UiResult<String> {
     };
     let document = mb_print::template::delivery_document(printer.paper, &ctx);
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                mb_print::queue::Job::new(
+    app.print(mb_print::queue::Job::new(
                     mb_print::queue::JobKind::Delivery,
                     &printer.id,
                     document,
                     today(at),
                 )
-                .because(format!("delivery {}", view.reference)),
-            )
-            .map_err(|e| words::from_print(&e))
-    })
+                .because(format!("delivery {}", view.reference)),)
 }
 
 fn blank(text: &str) -> Option<&str> {

@@ -296,7 +296,28 @@ fn lay_block(
             rows,
             style,
         } => {
-            let style = cap_scale(*style, columns.len(), usable, notes);
+            // **What a table needs is its columns' WIDTHS, not how many of them
+            // there are**, and asking the wrong one of those was a bug that
+            // printed one letter per line.
+            //
+            // The old code passed `columns.len()`. On 48-column paper an item
+            // table is four columns, so `4 * 2 = 8` fitted comfortably inside
+            // 48 and nothing was ever capped — while the real arithmetic was
+            // `48 / 2 = 24` usable, 23 of them already spoken for by qty, rate
+            // and amount, and **one** column left for the item's name. A shop
+            // that set "Item list size: Large" got
+            //
+            //     P   2   240.00    478.80
+            //     a
+            //     n
+            //     e
+            //     e
+            //     r
+            //
+            // and a roll of paper per bill. The owner found it on a real
+            // install; no test caught it because every test used the default
+            // size.
+            let style = cap_scale(*style, columns_need(columns), usable, notes);
             let width = (usable / usize::from(style.scale())).max(1);
             let widths = fit_columns(columns, width);
             for row in rows {
@@ -311,6 +332,31 @@ fn lay_block(
         }
     }
     Ok(())
+}
+
+/// **The narrowest a fill column may be squeezed to before the scale gives
+/// way instead.**
+///
+/// Ten characters, because that is about where a dish stops being recognisable
+/// — "Paneer But" can be guessed at, "P" cannot. It is deliberately not
+/// generous: a kitchen ticket's food is 2× by default and a shop is entitled to
+/// keep it that way, so the number has to be small enough that a ticket
+/// (5 fixed columns) stays big and a bill (23 fixed columns) comes down.
+const MIN_FILL: usize = 10;
+
+/// How many scale-1 columns a table honestly needs.
+///
+/// Fixed columns need exactly what they asked for. A fill column needs enough
+/// to be read — see [`MIN_FILL`] — because "fill" means *take what is left*,
+/// and what is left can be one character.
+fn columns_need(columns: &[Column]) -> usize {
+    columns
+        .iter()
+        .map(|c| match c.width {
+            Width::Fixed(n) => n,
+            Width::Fill => MIN_FILL,
+        })
+        .sum()
 }
 
 /// Rule two, crown jewel 18: reduce the scale until the content fits.
@@ -656,5 +702,71 @@ mod tests {
         for word in "ANNAPOORNESHWARI REFRESHMENTS".split(' ') {
             assert!(rendered.contains(word), "{word} was lost while capping");
         }
+    }
+
+    /// **The one-letter item column.** The owner found this on a real install:
+    /// set "Item list size: Large" and every dish printed vertically, one
+    /// character per line.
+    ///
+    /// The table is the shape `template::bill` builds — a fill for the name,
+    /// then qty, rate and amount. At 2× on 48-column paper the three fixed
+    /// columns take 23 of the 24 available and the name is left with one.
+    #[test]
+    fn a_table_whose_name_column_would_vanish_drops_the_scale_instead() {
+        let columns = vec![
+            Column::fill(Align::Left),
+            Column::fixed(4, Align::Right),
+            Column::fixed(9, Align::Right),
+            Column::fixed(10, Align::Right),
+        ];
+        let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+        doc.push(Block::Columns {
+            columns,
+            rows: vec![vec![
+                "Paneer Butter Masala".to_owned(),
+                "2".to_owned(),
+                "240.00".to_owned(),
+                "478.80".to_owned(),
+            ]],
+            style: Style::new(2, false),
+        });
+
+        let laid = layout(&doc).expect("lays out");
+        assert!(laid.was_capped(), "2x cannot fit this table and must be capped");
+
+        // The whole name on one line, which is the point.
+        let lines = laid.text_lines();
+        assert_eq!(lines.len(), 1, "one row must not become twenty: {lines:?}");
+        assert!(
+            lines[0].starts_with("Paneer Butter Masala"),
+            "the name column collapsed again: {:?}",
+            lines[0]
+        );
+        assert!(lines[0].ends_with("478.80"), "the amount moved: {:?}", lines[0]);
+    }
+
+    /// The other direction, and it is the one that keeps the fix honest: a
+    /// kitchen ticket has almost no fixed columns, so its food stays big.
+    #[test]
+    fn a_kitchen_ticket_keeps_its_big_food() {
+        let columns = vec![
+            Column::fixed(4, Align::Right),
+            Column::fixed(1, Align::Left),
+            Column::fill(Align::Left),
+        ];
+        let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+        doc.push(Block::Columns {
+            columns,
+            rows: vec![vec![
+                "2".to_owned(),
+                "x".to_owned(),
+                "Paneer Butter Masala".to_owned(),
+            ]],
+            style: Style::new(2, true),
+        });
+
+        let laid = layout(&doc).expect("lays out");
+        assert!(!laid.was_capped(), "a ticket at 2x fits and must not be shrunk");
+        assert_eq!(laid.lines[0].style.scale(), 2);
     }
 }

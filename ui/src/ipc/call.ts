@@ -37,7 +37,6 @@ import type { PrintJobView } from './generated/PrintJobView';
 import type { PreviewDoc } from './generated/PreviewDoc';
 import type { CartView } from './generated/CartView';
 import type { MenuItemView } from './generated/MenuItemView';
-import type { PrinterView } from './generated/PrinterView';
 import type { TableView } from './generated/TableView';
 import type { Pushed } from './generated/Pushed';
 import type { UiError } from './generated/UiError';
@@ -108,6 +107,8 @@ import type { SettingEdit } from './generated/SettingEdit';
 import type { SavedView } from './generated/SavedView';
 import type { PreviewView } from './generated/PreviewView';
 import type { PrintersView } from './generated/PrintersView';
+import type { LogoView } from './generated/LogoView';
+import type { PickedFile } from './generated/PickedFile';
 import type { PrinterEdit } from './generated/PrinterEdit';
 import type { BackupView } from './generated/BackupView';
 import type { VerifyView } from './generated/VerifyView';
@@ -149,12 +150,7 @@ export interface Commands {
   use_existing_shop: { args: { path: string }; returns: FirstRunView };
   set_appearance: { args: { theme: string; textSize: string }; returns: void };
   reveal_logs: { args: void; returns: string };
-  list_printers: { args: void; returns: PrinterView[] };
   print_test_page: { args: { printerId: string }; returns: string };
-  nudge_print_offset: {
-    args: { printerId: string; dxMm: number; dyMm: number };
-    returns: PrinterView;
-  };
   list_print_jobs: { args: void; returns: PrintJobView[] };
   preview_test_page: {
     args: { printerId: string | null };
@@ -175,6 +171,12 @@ export interface Commands {
     returns: CartView;
   };
   cart_set_qty: { args: { index: number; qty: string }; returns: CartView };
+  /**
+   * − and + on a cart line. **The arithmetic is Rust's** — a quantity is a
+   * whole number of thousandths, and `parseFloat` here would send back
+   * `0.30000000000000004`. Down to nothing removes the line.
+   */
+  cart_step_qty: { args: { index: number; by: number }; returns: CartView };
   cart_remove: { args: { index: number }; returns: CartView };
   cart_clear: { args: { keepType: boolean }; returns: CartView };
   cart_set_order_type: { args: { orderType: string }; returns: CartView };
@@ -640,6 +642,24 @@ export interface Commands {
     args: { group: string; edits: SettingEdit[] };
     returns: PreviewView;
   };
+
+  // P31 — the logo, and the two Browse buttons.
+  //
+  // `mb-print` has drawn a logo since P07 and nothing in the product could
+  // ever supply one, so `receipt.logo` and `receipt.logo_width_pct` were two
+  // settings pointing at a picture that did not exist. D37 put the PNG
+  // decoding in the browser; these are the other three quarters of it.
+  logo: { args: void; returns: LogoView };
+  /** Opens the operating system's picker. `null` is Cancel, not a failure. */
+  pick_a_logo: { args: void; returns: PickedFile | null };
+  /** `MB1` dots, base64. Rust decodes them before writing, so a picture that
+   *  would silently fail to print is refused while the person is still
+   *  looking at it. */
+  save_logo: { args: { encoded: string }; returns: LogoView };
+  remove_logo: { args: void; returns: LogoView };
+  /** The first run's Browse. Public — there is nobody to hold a permission on
+   *  a machine with no shop yet, and all it can do is return a string. */
+  pick_a_folder: { args: { start: string | null }; returns: string | null };
 
   // The printers (P17 part 4). A printer is a RECORD, not a scalar, so it has
   // its own commands rather than a place in the catalogue.

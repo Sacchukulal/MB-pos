@@ -105,6 +105,23 @@ function Line({ line }: { line: PreviewLine }) {
         </span>
       );
 
+    case 'barcode':
+      // **This arm was missing, and it is exactly the failure D29 describes.**
+      // The switch simply fell off the end, returned `undefined`, and React
+      // drew nothing — so a shop that turned on `receipt.bill_barcode` saw a
+      // preview that did not have the barcode the paper would. A sink forgot a
+      // block, silently, for as long as the setting existed.
+      //
+      // The printer draws real bars (`GS k`); the screen shows the characters,
+      // which is the same call the QR arm makes and for the same reason.
+      return (
+        <span className="mb-receipt__barcode">
+          <Indent columns={line.indent} />
+          {line.payload}
+          {'\n'}
+        </span>
+      );
+
     case 'logo':
       return (
         <span className="mb-receipt__logo">
@@ -114,7 +131,22 @@ function Line({ line }: { line: PreviewLine }) {
 
     case 'blank':
       return <span>{'\n'}</span>;
+
+    default:
+      // **The compiler now fails the build if a variant is added and not
+      // drawn.** `line` narrows to `never` only when every arm above exists;
+      // the moment one does not, this assignment is a type error at the line
+      // that caused it. That is the guard the missing barcode arm needed, and
+      // it costs three lines.
+      return assertDrawn(line);
   }
+}
+
+function assertDrawn(line: never): never {
+  throw new Error(
+    `The bill preview has no way to draw ${JSON.stringify(line)}. ` +
+      'Every laid-out line must reach the screen (D29).',
+  );
 }
 
 /**

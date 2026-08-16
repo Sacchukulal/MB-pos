@@ -169,6 +169,33 @@ pub struct CartView {
     /// ticket, or complete the bill. It comes from the order's own ledger, so
     /// it is right after a merge and after a restart.
     pub kitchen_up_to_date: bool,
+    /// **Whether the kitchen has been told ANYTHING on this order yet** — which
+    /// is a different question from [`CartView::kitchen_up_to_date`], and the
+    /// screen needs both.
+    ///
+    /// Before the first ticket, ✕ on a line is somebody undoing a mis-tap two
+    /// seconds after making it, and asking them to type a reason for that is
+    /// how a till gets slower for no gain. After it, food is being cooked: the
+    /// same ✕ has to become a **void** — a reason, an audit row and a
+    /// cancellation slip to the kitchen — which is `void_line`, and is audit
+    /// B5/B6.
+    pub kitchen_told: bool,
+    /// **How many people are on this table** (P14, scope 14.3).
+    ///
+    /// On the view because the split dialog has to show what is already set —
+    /// and because `set_covers` had no caller at all until P31, so every
+    /// per-cover figure in Reports had nothing to divide by.
+    pub covers: Option<u32>,
+    /// **The order's id, once it has one.**
+    ///
+    /// `None` while the cart is only somebody typing. It becomes `Some` at the
+    /// moment `park_open_order` claims a bill number — the first kitchen ticket
+    /// or an opened table — and from then on the order is IN THE SHOP'S BOOKS.
+    ///
+    /// That is exactly the line at which "Cancel order" stops meaning "clear
+    /// the screen" and starts meaning `cancel_order`: a reason, an audit row, a
+    /// cancelled order the reports can see, and the kitchen told to stop.
+    pub order_id: Option<String>,
     /// **What the floor did to this order while the cashier had it open**
     /// (P20, D83).
     ///
@@ -421,6 +448,9 @@ pub fn cart_view(
             .kitchen
             .pending(&state.cart)
             .is_ok_and(|pending| pending.is_empty()),
+        kitchen_told: !state.kitchen.told().is_empty(),
+        covers: state.covers,
+        order_id: state.order_id.clone(),
         from_the_floor: state.from_the_floor.clone(),
         length_says: state.cart.length_says().unwrap_or_default(),
     })

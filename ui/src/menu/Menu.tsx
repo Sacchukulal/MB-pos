@@ -47,6 +47,7 @@ import type { MenuRowView } from '../ipc/generated/MenuRowView';
 import type { TaxClassView } from '../ipc/generated/TaxClassView';
 import type { ImportPlanView } from '../ipc/generated/ImportPlanView';
 import { Combos, Composition, ModifierGroups } from './Composition';
+import { Groups } from './Groups';
 
 import './menu.css';
 
@@ -60,6 +61,7 @@ export function Menu() {
   const [madeOf, setMadeOf] = useState<MenuRowView | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const toast = useToast();
 
   const report = useCallback(
@@ -190,6 +192,12 @@ export function Menu() {
         count={rows.length}
         actions={
           <>
+            {/* First, because it is what a shop does before it has items:
+                decide what the groups are. It was not possible at all until
+                now — `save_menu_category` had no caller. */}
+            <Button variant="secondary" onClick={() => setGroupsOpen(true)}>
+              Groups
+            </Button>
             <Button variant="secondary" onClick={() => setBulkOpen(true)}>
               Change prices
             </Button>
@@ -250,6 +258,12 @@ export function Menu() {
               {category.name} ({category.itemCount})
             </Button>
           ))}
+          {/* At the bottom of the rail as well as in the header, because this
+              is where somebody is looking when they notice a group is wrong. */}
+          <Button variant="quiet" wide onClick={() => setGroupsOpen(true)}>
+            <Icon name="settings" size="sm" />
+            Edit groups
+          </Button>
         </aside>
       ) : null}
 
@@ -280,6 +294,21 @@ export function Menu() {
         <Combos rows={rows} onFailed={report} />
       </section>
       </div>
+
+      {groupsOpen ? (
+        <Groups
+          categories={categories}
+          onChanged={(fresh) => {
+            setCategories(fresh);
+            // The item counts on the rail come from the same list, but the
+            // ROWS are what a renamed group changes on screen — so re-read
+            // rather than patch a second copy (D4).
+            void load();
+          }}
+          onClose={() => setGroupsOpen(false)}
+          onFailed={report}
+        />
+      ) : null}
 
       {madeOf ? (
         <Composition

@@ -265,7 +265,7 @@ fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
             mb_print::printer::Target::None,
         )],
         store,
-        std::sync::Arc::new(Font::builtin().expect("the shipped face loads")),
+        std::sync::Arc::new(mb_print::font::OneFace::builtin().expect("the shipped face loads")),
         QueueConfig::default(),
     );
 

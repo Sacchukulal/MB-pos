@@ -275,6 +275,30 @@ fn every_setting_on_the_paper_changes_the_paper() {
         if !matches!(entry.group, Group::Receipt | Group::Kitchen) {
             continue;
         }
+        // **The two typeface settings, and they are exempt for a real reason
+        // rather than a convenient one** (P31).
+        //
+        // This test compares the LAID-OUT document, and a typeface cannot
+        // change that: `mb-print` lays a receipt out on a character grid —
+        // `paper.dots()` divided by `paper.columns()` — so every face produces
+        // the same 48 columns and the same line breaks. The difference is in
+        // the DOTS, one layer further down, and it is real.
+        //
+        // D71 is what happened last time somebody added a font list without
+        // that layer existing: three choices, three identical documents, and
+        // the list was deleted. It is back because the wiring is:
+        //
+        // * `queue::the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for`
+        //   — the key on the job is the key the raster sink is drawn with;
+        // * `queue::the_typeface_survives_being_parked_and_picked_up_again`
+        //   — and it survives a power cut;
+        // * `the_chosen_typeface_is_the_one_the_bill_is_printed_in` below
+        //   — and the shop's setting is what puts it on the job.
+        //
+        // If those three go, this exemption goes with them and D71 stands.
+        if entry.key == "receipt.font" || entry.key == "kitchen.font" {
+            continue;
+        }
         let mut config = base_config.clone();
         let other = something_else(entry, &config);
         assert_ne!(
@@ -633,4 +657,75 @@ fn only_the_store_group_lives_in_the_store_profile() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// P31 — the typeface, from the settings screen to the job.
+// ---------------------------------------------------------------------------
+
+/// **The shop's chosen face is the one on the job.**
+///
+/// `mb-print`'s queue tests prove the key on a job is the key the raster sink
+/// draws with, and that it survives a power cut. This is the other end of the
+/// same wire: that the value a shopkeeper picked on the settings screen is what
+/// gets put there — and that a bill and a kitchen ticket are answered
+/// **separately**, which is the whole of the owner's request.
+///
+/// Without this the two halves could both be right and the middle missing,
+/// which is exactly the shape of D71.
+#[test]
+fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
+    let scratch = Scratch::new("settings-typeface");
+    let app = a_shop(&scratch, "typeface");
+
+    crate::settings::ipc::save_on(
+        &app,
+        vec![
+            crate::settings::ipc::SettingEdit {
+                key: "receipt.font".to_owned(),
+                value: "consolas".to_owned(),
+            },
+            crate::settings::ipc::SettingEdit {
+                key: "kitchen.font".to_owned(),
+                value: "courier".to_owned(),
+            },
+        ],
+    )
+    .expect("both faces save");
+
+    let config = app.shop_config();
+    assert_eq!(config.receipt.font, "consolas");
+    assert_eq!(config.kitchen.font, "courier");
+
+    // What `App::print` would stamp on each kind of paper. A bill and a ticket
+    // must not get the same answer, or the second setting is decoration.
+    let day = crate::flows::today(crate::flows::now());
+    let doc = || mb_print::doc::Document::new(mb_print::paper::Paper::new(
+        mb_print::paper::PaperKind::Mm80,
+    ));
+    let bill = mb_print::queue::Job::new(mb_print::queue::JobKind::Bill, "p", doc(), day);
+    let ticket = mb_print::queue::Job::new(mb_print::queue::JobKind::Kitchen, "p", doc(), day);
+
+    assert_eq!(
+        app.face_for_test(bill.kind),
+        Some("consolas".to_owned()),
+        "the bill did not take the shop's bill face"
+    );
+    assert_eq!(
+        app.face_for_test(ticket.kind),
+        Some("courier".to_owned()),
+        "the kitchen ticket did not take the shop's kitchen face"
+    );
+
+    // And a shop that has chosen nothing asks for nothing, which is the
+    // built-in face — not an empty string the loader would have to special-case.
+    crate::settings::ipc::save_on(
+        &app,
+        vec![crate::settings::ipc::SettingEdit {
+            key: "receipt.font".to_owned(),
+            value: "builtin".to_owned(),
+        }],
+    )
+    .expect("saves");
+    assert_eq!(app.face_for_test(bill.kind), Some("builtin".to_owned()));
 }

@@ -163,3 +163,10 @@
 .mb-stock__find {
   width: var(--find-width);
 }
+
+/* **Used more than the recipes say** (P31). Danger, and in bold as well as in
+   colour — §2 rule 2: grey-scale the screen and it must still read. */
+.mb-stock__over {
+  color: var(--danger);
+  font-weight: var(--weight-bold);
+}

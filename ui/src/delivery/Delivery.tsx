@@ -24,6 +24,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Badge,
   Button,
+  Checkbox,
   EmptyState,
   Icon,
   Input,
@@ -45,6 +46,7 @@ import {
 import { call, isUiError } from '../ipc/call';
 import type { DeliveryBoardView } from '../ipc/generated/DeliveryBoardView';
 import type { DeliveryView } from '../ipc/generated/DeliveryView';
+import type { PersonView } from '../ipc/generated/PersonView';
 import type { RiderDayView } from '../ipc/generated/RiderDayView';
 
 import './delivery.css';
@@ -69,6 +71,8 @@ export function Delivery() {
   const [failing, setFailing] = useState<DeliveryView | null>(null);
   const [why, setWhy] = useState('');
   const [handback, setHandback] = useState<RiderDayView | null>(null);
+  /** P31 — who is allowed to take an order out, which nothing could set. */
+  const [choosingRiders, setChoosingRiders] = useState(false);
   const [amount, setAmount] = useState('');
   const toast = useToast();
 
@@ -295,17 +299,36 @@ export function Delivery() {
           title="The riders"
           note="What each of them collected, and what is still in their pocket."
           flush
+          actions={
+            <Button variant="secondary" onClick={() => setChoosingRiders(true)}>
+              Who can ride
+            </Button>
+          }
         >
           {view.riders.length === 0 ? (
             <EmptyState
               title="Nobody is out"
-              body="Mark somebody as a rider on the Staff screen, then give them an order."
+              /* **The old words sent people to a screen that could not do it.**
+                 They said "mark somebody as a rider on the Staff screen", and
+                 `set_rider` had no button on the Staff screen or anywhere
+                 else — it had no caller at all. The button is now beside this
+                 sentence, which is where somebody reading it is looking. */
+              body="Say who rides — the button above — and then give them an order."
             />
           ) : (
             <Table rows={[...view.riders]} columns={riderColumns} rowKey={(r) => r.id} />
           )}
         </Panel>
       </Sections>
+
+      {choosingRiders ? (
+        <WhoRides
+          view={view}
+          onClose={() => setChoosingRiders(false)}
+          onChanged={setView}
+          onFailed={report}
+        />
+      ) : null}
 
       {/* **A failure has to say why.** Not a default, not a shrug — the reason
           is what tells a shop whether the food comes back or is written off. */}
@@ -378,5 +401,76 @@ export function Delivery() {
         </Stack>
       </Modal>
     </Page>
+  );
+}
+
+/**
+ * **Who is allowed to take an order out** — `set_rider`, P29's command with no
+ * caller until P31.
+ *
+ * The empty state on the riders panel used to say *"mark somebody as a rider on
+ * the Staff screen"*, and there was no such control on the Staff screen or
+ * anywhere else: the only riders a shop could ever have were the ones a
+ * migration happened to flag. So the delivery board could be opened, and the
+ * first thing it asked for could not be done.
+ *
+ * # A rider is a FLAG on a person, not a second kind of person
+ *
+ * They are already staff — they clock in, they have a PIN, they show up in the
+ * audit trail. This says one more thing about them, which is why it is a
+ * tick-box beside a name and not a form.
+ */
+function WhoRides({
+  view,
+  onClose,
+  onChanged,
+  onFailed,
+}: {
+  view: DeliveryBoardView;
+  onClose: () => void;
+  onChanged: (fresh: DeliveryBoardView) => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [people, setPeople] = useState<readonly PersonView[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    call('list_staff').then(setPeople).catch(onFailed);
+  }, [onFailed]);
+
+  const isRider = (id: string) => view.riders.some((r) => r.id === id);
+
+  return (
+    <Modal open title="Who can ride" onClose={onClose}>
+      <Stack>
+        <p className="mb-muted">
+          Anybody ticked here can be given a delivery, and the cash they collect
+          is tracked against their name until they hand it over.
+        </p>
+        {people
+          // Somebody who has left cannot be sent out with two thousand rupees.
+          .filter((p) => p.status === 'active')
+          .map((p) => (
+            <Checkbox
+              key={p.id}
+              label={p.name}
+              checked={isRider(p.id)}
+              disabled={busy}
+              onChange={(e) => {
+                setBusy(true);
+                call('set_rider', { staffId: p.id, isRider: e.target.checked })
+                  .then(onChanged)
+                  .catch(onFailed)
+                  .finally(() => setBusy(false));
+              }}
+            />
+          ))}
+      </Stack>
+      <div className="mb-row mb-row--end">
+        <Button variant="primary" onClick={onClose}>
+          Done
+        </Button>
+      </div>
+    </Modal>
   );
 }

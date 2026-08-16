@@ -165,11 +165,21 @@ const PATTERNS: &[Choice] = &[
     Choice { value: "double", label: "Double line" },
 ];
 
-// **There is no FONTS list, and there was one until T1 ran** — decision D71.
-// The product embeds one face (D33), `layout` does not carry a family into
-// `Laid`, and the raster sink draws with the face the queue loaded at start-up.
-// Rendering the bill with each of the three choices produced three identical
-// documents. See the note where `FontFamily` used to live, in mb-print's doc.rs.
+// **The FONTS list came back at P31, and D71 is why it took this long.**
+//
+// P17 added a font list, T1 rendered the bill with each of its three choices,
+// got three identical documents, and deleted it — correctly. The product
+// embedded one face (D33) and the raster sink drew with whatever the queue
+// loaded at start-up, so the setting was a control wired to nothing.
+//
+// What changed is not the list; it is the layer underneath it. `mb_print::queue`
+// now asks a `Typefaces` for the face on each JOB, the job carries the key, and
+// `typefaces.rs` loads the file. So the choice reaches the dots.
+//
+// It still does not reach `Laid` — a receipt is a character grid and every face
+// produces the same 48 columns — which is why T1 exempts these two keys BY NAME
+// and points at the three tests that cover them instead. If those go, D71
+// stands again and so should the deletion. See FONTS below.
 
 const ROW_HEIGHTS: &[Choice] = &[
     Choice { value: "compact", label: "Compact — least paper" },
@@ -177,10 +187,44 @@ const ROW_HEIGHTS: &[Choice] = &[
     Choice { value: "relaxed", label: "Relaxed — easiest to read" },
 ];
 
-const SIZES: &[Choice] = &[
-    Choice { value: "1", label: "Normal" },
-    Choice { value: "2", label: "Large" },
-    Choice { value: "3", label: "Extra large" },
+/// **The text sizes, in px** — P31, and the owner asked for it by name:
+/// *"sizes in px not Large/Normal/Small."*
+///
+/// # These are the only three, and that is the printer's doing rather than ours
+///
+/// A thermal printer's character cell comes from the paper: `paper.dots()`
+/// divided by `paper.columns()`, which is **12 × 24 dots on both 58 mm and
+/// 80 mm rolls**. Everything the hardware can draw is that cell times one, two
+/// or three — the ESC/POS multiplier — so 24, 48 and 72 px are not three
+/// options out of many, they are the complete list.
+///
+/// A free-text px box would be a box that lies. The character WIDTH has to stay
+/// on the column grid or the text sink, the PDF sink, the raster sink and the
+/// on-screen preview stop agreeing about where a line breaks, which is the
+/// drift `mb-print` exists to prevent (D1, D29).
+///
+/// The old word stays in brackets, because a shop that learned "Large" on v1
+/// should still be able to find it.
+pub(super) const SIZES: &[Choice] = &[
+    Choice { value: "1", label: "24 px (normal)" },
+    Choice { value: "2", label: "48 px (large)" },
+    Choice { value: "3", label: "72 px (extra large)" },
+];
+
+/// **The typefaces** — the owner's *"5-6 choices"*.
+///
+/// Mirrors [`mb_print::font::FAMILIES`], which is the list the printer actually
+/// resolves against. Written out rather than generated because `Choice` holds
+/// `&'static str` and this is a `const` table read at start-up — and there is a
+/// test below that fails the build if the two ever disagree, which is the part
+/// that matters.
+pub(super) const FONTS: &[Choice] = &[
+    Choice { value: "builtin", label: "Magic Bill's own (IBM Plex Mono)" },
+    Choice { value: "consolas", label: "Consolas" },
+    Choice { value: "consolas_bold", label: "Consolas Bold — darker on faint paper" },
+    Choice { value: "courier", label: "Courier New" },
+    Choice { value: "lucida", label: "Lucida Console" },
+    Choice { value: "cascadia", label: "Cascadia Mono" },
 ];
 
 const LOGO_POSITIONS: &[Choice] = &[
@@ -637,9 +681,10 @@ pub const CATALOG: &[Entry] = &[
         ["inclusive", "exclusive", "included", "on top"], tax.prices_include_tax),
 
     // --- the bill (audit Part 3, "Bill Settings" — every row) --------------
-    // Part 3's "Font" row is NOT here. See D71 and the note in mb-print's
-    // doc.rs: there is one embedded face, so the choice changed nothing. It
-    // returns at P23, which ships a second face for Kannada anyway.
+    // Part 3's "Font" row IS here now — `receipt.font`, a few lines below.
+    // It was deleted at P17 (D71) because there was one embedded face and the
+    // choice changed nothing; P31 gave the queue a face per job and the
+    // choice something to change. See the note above FONTS.
     pick!("receipt.pattern", Receipt, Row, "Separator line",
         "What the dividing lines on the bill look like.",
         ["line", "divider", "dashes", "dotted"], PATTERNS, pattern_to, pattern_from,
@@ -687,6 +732,14 @@ pub const CATALOG: &[Entry] = &[
         "", ["separator", "line", "subtotal"], receipt.separators.below_subtotals),
     flag!("receipt.separators.below_grand_total", Receipt, Row, "Line under the total",
         "", ["separator", "line", "total"], receipt.separators.below_grand_total),
+
+    // P31, the owner's fourth item. First among the look settings, because it
+    // is a decision about the whole piece of paper rather than about one line.
+    pick_text!("receipt.font", Receipt, Row, "Bill typeface",
+        "The face your bills print in. All of these come with Windows — if one \
+         is missing from this computer, Magic Bill quietly uses its own.",
+        ["font", "typeface", "face", "typography", "letters", "print"],
+        FONTS, receipt.font),
 
     size!("receipt.sections.store_name.scale", Receipt, "Shop name size",
         "", ["size", "big", "header", "name"], receipt.sections.store_name),
@@ -777,6 +830,15 @@ pub const CATALOG: &[Entry] = &[
         "", ["kot", "separator", "columns"], kitchen.separators.below_column_names),
     flag!("kitchen.separators.below_items", Kitchen, Row, "Line under the food",
         "", ["kot", "separator", "items"], kitchen.separators.below_items),
+    // Its own face, separate from the bill's, because the owner asked for both
+    // — and because they are read differently: a ticket across a hot room at
+    // speed, a bill at arm's length.
+    pick_text!("kitchen.font", Kitchen, Row, "Kitchen ticket typeface",
+        "The face your kitchen tickets print in. It does not have to be the \
+         same as the bill's.",
+        ["font", "typeface", "face", "kot", "kitchen", "letters", "print"],
+        FONTS, kitchen.font),
+
     size!("kitchen.title.scale", Kitchen, "Title size",
         "", ["kot", "size", "title"], kitchen.title),
     flag!("kitchen.title.bold", Kitchen, Row, "Title in bold",
@@ -1048,7 +1110,8 @@ const TOPICS: &[(&str, &str)] = &[
     ("receipt.row_height", "Paper and spacing"),
     ("receipt.show.", "What goes on the bill"),
     ("receipt.separators.", "Dividing lines"),
-    ("receipt.sections.", "Sizes and bold"),
+    ("receipt.font", "Typeface and sizes"),
+    ("receipt.sections.", "Typeface and sizes"),
     ("receipt.logo", "Your logo"),
     ("receipt.qr", "The UPI QR code"),
     ("receipt.footer", "The last words"),
@@ -1058,9 +1121,10 @@ const TOPICS: &[(&str, &str)] = &[
     ("kitchen.pattern", "Paper and spacing"),
     ("kitchen.row_height", "Paper and spacing"),
     ("kitchen.separators.", "Dividing lines"),
-    ("kitchen.title", "Sizes and bold"),
-    ("kitchen.details", "Sizes and bold"),
-    ("kitchen.items", "Sizes and bold"),
+    ("kitchen.font", "Typeface and sizes"),
+    ("kitchen.title", "Typeface and sizes"),
+    ("kitchen.details", "Typeface and sizes"),
+    ("kitchen.items", "Typeface and sizes"),
     ("billing.search_mode", "At the counter"),
     ("billing.rounding", "At the counter"),
     ("billing.lock_order_type", "At the counter"),

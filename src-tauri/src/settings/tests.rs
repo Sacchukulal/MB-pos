@@ -381,3 +381,54 @@ fn describing_a_value_never_shows_a_tag() {
         "12.50"
     );
 }
+
+/// **P31 — the two font lists cannot drift apart.**
+///
+/// `catalog::FONTS` is what the settings screen offers; `mb_print::font::FAMILIES`
+/// is what the print queue resolves against. They are two tables because one is
+/// a `&'static [Choice]` read at start-up and the other is a fact about
+/// typefaces that belongs in the printing crate — and two tables of the same
+/// thing is exactly how a shop ends up choosing a face that silently does not
+/// exist. So the build fails instead.
+#[test]
+fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
+    use super::catalog::FONTS;
+
+    let offered: Vec<&str> = FONTS.iter().map(|c| c.value).collect();
+    let known: Vec<&str> = mb_print::font::FAMILIES.iter().map(|f| f.key).collect();
+    assert_eq!(
+        offered, known,
+        "the settings screen and mb-print disagree about which faces exist"
+    );
+
+    for choice in FONTS {
+        let family = mb_print::font::family(choice.value)
+            .unwrap_or_else(|| panic!("{} is offered and unknown to mb-print", choice.value));
+        assert_eq!(
+            choice.label, family.label,
+            "{} is called two different things in two places",
+            choice.value
+        );
+    }
+}
+
+/// The owner asked for sizes in px. This is that, made mechanical: a label that
+/// goes back to "Large" fails the build.
+#[test]
+fn the_text_sizes_are_given_in_px() {
+    use super::catalog::SIZES;
+
+    for choice in SIZES {
+        assert!(
+            choice.label.contains(" px"),
+            "the owner asked for sizes in px, and this one says {:?}",
+            choice.label
+        );
+    }
+    // 24, 48 and 72 — the paper's own cell (12x24 dots) times the ESC/POS
+    // multiplier. If a paper size ever changes those, this is where it is said.
+    let labels: Vec<&str> = SIZES.iter().map(|c| c.label).collect();
+    assert!(labels[0].starts_with("24 px"), "{labels:?}");
+    assert!(labels[1].starts_with("48 px"), "{labels:?}");
+    assert!(labels[2].starts_with("72 px"), "{labels:?}");
+}

@@ -300,6 +300,102 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+// ---------------------------------------------------------------------------
+// The faces a shop may choose between — P31.
+// ---------------------------------------------------------------------------
+
+/// **The faces on offer, and where each one comes from.**
+///
+/// The owner asked for *"5-6 choices"* for the bill and the kitchen ticket.
+/// The obvious way to do that is five more `.ttf` files in `assets/`, and it is
+/// the wrong way: each is ~130 KB against S4's 20 MB installer, and every one
+/// is a licence to check and re-check.
+///
+/// **So they come off the machine.** `Font::load` already takes bytes from
+/// anywhere — that seam exists for crown jewel 17's Kannada face — and every
+/// name below ships with Windows 10 and 11. It costs nothing in the installer,
+/// and a face that is somehow missing falls back to the built-in with a line in
+/// the log rather than a counter that will not print.
+///
+/// **Monospace only, and that is not taste.** [`crate::layout`] lays a receipt
+/// out on a character grid: `paper.dots()` divided by `paper.columns()`. A
+/// proportional face rendered into that grid has each glyph squeezed into a
+/// cell of the same width, so an 'i' is drawn with an 'M's worth of space
+/// around it. It is legible and it looks wrong, and there is no honest way to
+/// offer it.
+pub const FAMILIES: &[Family] = &[
+    Family {
+        key: "builtin",
+        label: "Magic Bill's own (IBM Plex Mono)",
+        file: None,
+    },
+    Family { key: "consolas", label: "Consolas", file: Some("consola.ttf") },
+    Family {
+        key: "consolas_bold",
+        label: "Consolas Bold — darker on faint paper",
+        file: Some("consolab.ttf"),
+    },
+    Family { key: "courier", label: "Courier New", file: Some("cour.ttf") },
+    Family { key: "lucida", label: "Lucida Console", file: Some("lucon.ttf") },
+    Family { key: "cascadia", label: "Cascadia Mono", file: Some("CascadiaMono.ttf") },
+];
+
+/// One choice on the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Family {
+    /// What is stored in the settings row. Never shown.
+    pub key: &'static str,
+    /// What the shop reads.
+    pub label: &'static str,
+    /// The file in the system font folder, or `None` for the built-in.
+    pub file: Option<&'static str>,
+}
+
+/// Is this a name this build knows? Used by the settings catalogue, so an
+/// unknown value in a config file is refused rather than silently ignored.
+#[must_use]
+pub fn family(key: &str) -> Option<Family> {
+    FAMILIES.iter().copied().find(|f| f.key == key)
+}
+
+/// **Which face to draw a job with**, asked of the caller.
+///
+/// # Why this is a trait and not a `Faces` struct in this crate
+///
+/// Resolving a family name means reading a file out of the system font folder
+/// and saying something in the log when it is not there — and this crate does
+/// neither. It has no `log` dependency and no opinion about where an operating
+/// system keeps its typefaces; `mb-winprint` is where D31 put the OS, and the
+/// application is where the log lives.
+///
+/// So the crate keeps the part that is genuinely about typefaces ([`FAMILIES`])
+/// and asks for the rest, exactly as it already asks for its transports
+/// (`TransportFactory`) and its storage (`JobStore`).
+///
+/// **It cannot fail.** A shop whose chosen face has been uninstalled gets the
+/// built-in one, because requirement 3 of the ten says billing does not stop
+/// and the only thing worse than the wrong typeface is no bill.
+pub trait Typefaces: Send + Sync + fmt::Debug {
+    /// `None`, an empty string, or `"builtin"` all mean the shipped face.
+    fn face(&self, key: Option<&str>) -> Arc<Font>;
+}
+
+/// The one every test and every caller with nothing to choose between uses.
+#[derive(Debug)]
+pub struct OneFace(pub Arc<Font>);
+
+impl OneFace {
+    pub fn builtin() -> Result<OneFace, PrintError> {
+        Ok(OneFace(Arc::new(Font::builtin()?)))
+    }
+}
+
+impl Typefaces for OneFace {
+    fn face(&self, _key: Option<&str>) -> Arc<Font> {
+        Arc::clone(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -122,6 +122,28 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       .catch(complain);
   };
 
+  /**
+   * **Send the figures to somebody** — scope 10.13, `share_report`, which was
+   * written at P26 and never called.
+   *
+   * Rust composes the summary and, crucially, **says what each way of sending
+   * it cannot do** (D134): WhatsApp will not carry a table, e-mail opens a
+   * draft it cannot attach to. The screen shows that sentence rather than
+   * inventing a cheerful one, because a summary that arrives mangled is worse
+   * than one that was never sent.
+   *
+   * "Copy" is first and is the default, because it is the only one that cannot
+   * fail: a shopkeeper pastes it wherever they were going to send it anyway.
+   */
+  const share = (channel: 'copy' | 'whats_app' | 'email' | 'folder') => {
+    call('share_report', { id: chosen, period: { from, to }, channel })
+      .then((shared) => {
+        if (channel === 'copy') void navigator.clipboard.writeText(shared.text);
+        toast.show('ok', shared.says, shared.caveat === '' ? undefined : shared.caveat);
+      })
+      .catch(complain);
+  };
+
   if (locked) {
     return <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />;
   }
@@ -228,6 +250,18 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
               note={report.subtitle}
               action={
                 <div className="mb-reports__exports">
+                  {/* Sending it first, saving it second: an owner looking at
+                      this at 11 p.m. wants it on their phone far more often
+                      than they want a file on the till. */}
+                  <Button small variant="quiet" onClick={() => share('copy')}>
+                    Copy
+                  </Button>
+                  <Button small variant="quiet" onClick={() => share('whats_app')}>
+                    WhatsApp
+                  </Button>
+                  <Button small variant="quiet" onClick={() => share('email')}>
+                    Email
+                  </Button>
                   <Button small variant="quiet" onClick={() => save('report_csv')}>
                     Save as CSV
                   </Button>

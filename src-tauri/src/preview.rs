@@ -117,8 +117,12 @@ pub fn to_preview(laid: &Laid) -> PreviewDoc {
 fn describe(note: &mb_print::layout::Note) -> String {
     use mb_print::layout::Note;
     match note {
+        // Not "a heading": the same note comes from the item table, where the
+        // reason is that qty, rate and amount had already eaten the paper and
+        // the item's name was down to one character. Saying "heading" there
+        // sent somebody to the wrong setting.
         Note::ScaleCapped { asked, used } => format!(
-            "A heading was too big for this paper, so it printed at {used}× \
+            "Some text was too big for this paper, so it printed at {used}× \
              instead of {asked}×."
         ),
         Note::OffsetClamped {

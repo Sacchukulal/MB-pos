@@ -682,10 +682,7 @@ fn print_slip(app: &App, close: &DayClose, counts: &[CountArg]) -> UiResult<()> 
         },
     );
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                mb_print::queue::Job::new(
+    app.print(mb_print::queue::Job::new(
                     mb_print::queue::JobKind::DayClose,
                     &printer.id,
                     document,
@@ -694,8 +691,6 @@ fn print_slip(app: &App, close: &DayClose, counts: &[CountArg]) -> UiResult<()> 
                 .because("closing slip".to_owned()),
             )
             .map(|_| ())
-            .map_err(|e| words::from_print(&e))
-    })
 }
 
 // ---------------------------------------------------------------------------

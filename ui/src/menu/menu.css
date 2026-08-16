@@ -200,3 +200,72 @@
 .mb-menu__find {
   width: var(--find-width);
 }
+
+/* --- Groups: what the menu is arranged into, and where each one is cooked --
+
+   **This block was rewritten after looking at it.** The first version was a
+   rigid three-column grid — name, printer, buttons — with the printer column
+   fixed. Inside a modal it did not fit, so the name column was squeezed to
+   nothing, the wrap rule did what it was told, and "Drinks" came out as five
+   lines of one letter with the dialog scrolling sideways.
+   UI_GUIDELINES §1 forbids that outright.
+
+   Flex with wrapping instead: every part states the width it WANTS and gives
+   way in order, and a narrow window stacks the row rather than shredding it.  */
+
+.mb-groups__add {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2);
+  align-items: end;
+  margin-bottom: var(--gap-group);
+}
+
+.mb-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--gap-group);
+  padding: 0;
+  list-style: none;
+}
+
+.mb-groups__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+/* The name takes what is left and never less than it can read. The zero
+   min-width is the half that matters: without it a flex item refuses to shrink
+   at all, which is what pushed the row past the dialog in the first place. */
+.mb-groups__what {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-start;
+  flex: 1 1 var(--group-name-min);
+  min-width: 0;
+}
+
+.mb-groups__what strong {
+  overflow-wrap: anywhere;
+}
+
+/* Wants its own width, gives way before the name does, and drops to its own
+   line before either of them is unreadable. */
+.mb-groups__route {
+  flex: 0 1 var(--group-route-width);
+  min-width: 0;
+}
+
+/* The two buttons are the one part that must never wrap onto its own line:
+   they are what the row is FOR, and a row three lines tall for two words is
+   how a list of six groups stops fitting on the screen. */
+.mb-groups__row .mb-row {
+  flex: 0 0 auto;
+}

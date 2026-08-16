@@ -53,6 +53,7 @@ import type { PayrollView } from '../ipc/generated/PayrollView';
 import type { PayrollListView } from '../ipc/generated/PayrollListView';
 import type { SalaryView } from '../ipc/generated/SalaryView';
 import type { ShiftView } from '../ipc/generated/ShiftView';
+import type { StaffCostView } from '../ipc/generated/StaffCostView';
 
 /** A day, as the product writes one everywhere: 2026-08-16. */
 function dayText(date: Date): string {
@@ -107,6 +108,8 @@ export function Attendance({ staffId }: { staffId?: string }) {
   const [from, setFrom] = useState(fortnightAgoText());
   const [to, setTo] = useState(todayText());
   const [fixing, setFixing] = useState<ShiftView | null>(null);
+  /** P31 — who is EXPECTED in, which nothing could say. */
+  const [rostering, setRostering] = useState(false);
   const report = useReport();
 
   const load = useCallback(() => {
@@ -179,6 +182,16 @@ export function Attendance({ staffId }: { staffId?: string }) {
       <Toolbar
         end={
           <Row gap="inline">
+            {/* **Who is meant to be in.** `save_roster` decides whether a shift
+                counts as late, and it had no button — so every "Late by 35
+                minutes" in the table above was judged against a roster nobody
+                could set. */}
+            {view?.mayCorrect ? (
+              <Button variant="secondary" onClick={() => setRostering(true)}>
+                <Icon name="calendar" size="sm" />
+                Roster
+              </Button>
+            ) : null}
             <Button variant="secondary" onClick={() => void call('clock_in', { terminalId: null }).then(load).catch(report)}>
               <Icon name="clock" size="sm" />
               Clock in
@@ -218,6 +231,18 @@ export function Attendance({ staffId }: { staffId?: string }) {
           <Table rows={[...(view?.shifts ?? [])]} columns={columns} rowKey={(s) => s.id} />
         </Panel>
       )}
+
+      {rostering && view ? (
+        <SetRoster
+          view={view}
+          onClose={() => setRostering(false)}
+          onDone={() => {
+            setRostering(false);
+            load();
+          }}
+          onFailed={report}
+        />
+      ) : null}
 
       {fixing ? (
         <FixHours
@@ -306,6 +331,8 @@ function FixHours({
 export function Leave({ staffId }: { staffId?: string }) {
   const [view, setView] = useState<LeaveView | null>(null);
   const [asking, setAsking] = useState(false);
+  /** P31 — granting or taking back a balance, which had no button. */
+  const [adjusting, setAdjusting] = useState(false);
   const report = useReport();
 
   const load = useCallback(() => {
@@ -320,10 +347,21 @@ export function Leave({ staffId }: { staffId?: string }) {
     <Stack gap="section">
       <Toolbar
         end={
-          <Button variant="primary" onClick={() => setAsking(true)}>
-            <Icon name="plus" size="sm" />
-            Ask for leave
-          </Button>
+          <>
+            {/* **A balance has to be able to move**, and `adjust_leave` was
+                the command that did it with nothing calling it. A year's
+                allowance at the start of April, three days carried forward,
+                a correction after an argument — none of it was possible. */}
+            {view?.mayApprove ? (
+              <Button variant="secondary" onClick={() => setAdjusting(true)}>
+                Grant or deduct
+              </Button>
+            ) : null}
+            <Button variant="primary" onClick={() => setAsking(true)}>
+              <Icon name="plus" size="sm" />
+              Ask for leave
+            </Button>
+          </>
         }
       >
         <span className="mb-muted">
@@ -413,6 +451,19 @@ export function Leave({ staffId }: { staffId?: string }) {
           rowKey={(r) => r.id}
         />
       </Panel>
+
+      {adjusting && view ? (
+        <AdjustLeave
+          view={view}
+          staffId={staffId ?? view.staffId}
+          onClose={() => setAdjusting(false)}
+          onDone={() => {
+            setAdjusting(false);
+            load();
+          }}
+          onFailed={report}
+        />
+      ) : null}
 
       {asking && view ? (
         <AskForLeave
@@ -852,6 +903,15 @@ export function Payroll() {
   const [run, setRun] = useState<PayrollView | null>(null);
   const [from, setFrom] = useState(fortnightAgoText());
   const [to, setTo] = useState(todayText());
+  /**
+   * **Wages against takings** — `staff_cost`, scope 9.16, wired at P31.
+   *
+   * *"The second of the two numbers that decide whether a restaurant makes
+   * money"*, says its own doc comment. P25 gave the first (food cost) a screen
+   * and this one never got past Rust. It sits here rather than in Reports
+   * because it is the same period an owner has already chosen above.
+   */
+  const [cost, setCost] = useState<StaffCostView | null>(null);
   const report = useReport();
 
   const load = useCallback(() => {
@@ -859,6 +919,14 @@ export function Payroll() {
   }, [report]);
 
   useEffect(load, [load]);
+
+  // Re-asked whenever the period moves, which is the only thing it depends on.
+  // Silent on failure: it is a figure beside the runs, not the runs.
+  useEffect(() => {
+    call('staff_cost', { from, to })
+      .then(setCost)
+      .catch(() => setCost(null));
+  }, [from, to]);
 
   return (
     <Stack gap="section">
@@ -887,6 +955,28 @@ export function Payroll() {
           <Input label="To" value={to} onChange={(e) => setTo(e.target.value)} />
         </Row>
       </Toolbar>
+
+      {cost ? (
+        <Panel title="What your people cost">
+          <Row gap="group">
+            <Stack gap="inline">
+              <span className="mb-muted">Wages</span>
+              <strong className="mb-mono">{cost.wages.text}</strong>
+            </Stack>
+            <Stack gap="inline">
+              <span className="mb-muted">Takings</span>
+              <strong className="mb-mono">{cost.revenue.text}</strong>
+            </Stack>
+            <Stack gap="inline">
+              <span className="mb-muted">Wages as a share</span>
+              {/* Rust's sentence. It is a percentage when there is one and a
+                  reason when there is not — a screen dividing by a zero it
+                  cannot see would print Infinity. */}
+              <strong>{cost.says}</strong>
+            </Stack>
+          </Row>
+        </Panel>
+      ) : null}
 
       <Panel title="Runs" flush>
         {list && list.runs.length === 0 ? (
@@ -974,6 +1064,15 @@ function RunSheet({
 }) {
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState('');
+  /**
+   * P31 — the line being corrected, and what has been typed into it.
+   *
+   * The table already prints a * beside an edited figure, which means the
+   * VIEW has known about corrections all along and nothing could make one.
+   * The first thing an owner does with a payroll figure is disagree with one
+   * line of it; until now the only answer was to reverse the whole run.
+   */
+  const [fixing, setFixing] = useState<{ staffId: string; name: string; net: string; note: string } | null>(null);
 
   return (
     <Modal open title={`Payroll ${run.from} to ${run.to}`} onClose={onClose} wide>
@@ -1035,20 +1134,44 @@ function RunSheet({
               header: '',
               render: (l) =>
                 run.mayManage ? (
-                  <Button
-                    small
-                    variant="quiet"
-                    onClick={() => {
-                      // This sheet has no toast of its own; a failure goes the
-                      // same way every other failure on it does.
-                      call('print_payslip', { runId: run.id, staffId: l.staffId }).catch(
-                        onFailed,
-                      );
-                    }}
-                  >
-                    <Icon name="printer" size="sm" />
-                    Payslip
-                  </Button>
+                  <div className="mb-row">
+                    {/* **Correct one line, while the run is still a draft.**
+                        `edit_payroll_line` — and the `*` this table already
+                        prints beside an edited figure was, until P31, a mark
+                        nothing could ever produce. After approval the only
+                        honest answer is `reverse_payroll`, so the button is
+                        not there. */}
+                    {run.state === 'draft' ? (
+                      <Button
+                        small
+                        variant="quiet"
+                        onClick={() =>
+                          setFixing({
+                            staffId: l.staffId,
+                            name: l.staffName,
+                            net: l.net.text,
+                            note: '',
+                          })
+                        }
+                      >
+                        Correct
+                      </Button>
+                    ) : null}
+                    <Button
+                      small
+                      variant="quiet"
+                      onClick={() => {
+                        // This sheet has no toast of its own; a failure goes the
+                        // same way every other failure on it does.
+                        call('print_payslip', { runId: run.id, staffId: l.staffId }).catch(
+                          onFailed,
+                        );
+                      }}
+                    >
+                      <Icon name="printer" size="sm" />
+                      Payslip
+                    </Button>
+                  </div>
                 ) : null,
             },
           ]}
@@ -1101,6 +1224,451 @@ function RunSheet({
             </Row>
           )
         ) : null}
+
+        {/* **Correcting one line, and it never hides the original.** Rust
+            keeps what it computed and marks the line as edited, which is why
+            the table can print a `*` beside it — a payroll figure somebody
+            changed by hand must be visibly one. */}
+        {fixing ? (
+          <Panel title={`Correct ${fixing.name}`}>
+            <Stack gap="field">
+              <p className="mb-muted">
+                What was worked out stays on the record. This says what you are
+                actually handing over, and why.
+              </p>
+              <Input
+                label="To hand over"
+                value={fixing.net}
+                inputMode="decimal"
+                onChange={(e) => setFixing({ ...fixing, net: e.target.value })}
+              />
+              <Input
+                label="Why"
+                hint="It is kept beside the figure, so this can be explained later."
+                value={fixing.note}
+                placeholder="Agreed a day's extra pay for the festival"
+                onChange={(e) => setFixing({ ...fixing, note: e.target.value })}
+              />
+              <Row end gap="field">
+                <Button variant="quiet" onClick={() => setFixing(null)}>
+                  Leave it
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={fixing.note.trim() === ''}
+                  onClick={() =>
+                    void call('edit_payroll_line', {
+                      runId: run.id,
+                      staffId: fixing.staffId,
+                      net: fixing.net.trim(),
+                      note: fixing.note.trim(),
+                    })
+                      .then((fresh) => {
+                        setFixing(null);
+                        onChanged(fresh);
+                      })
+                      .catch(onFailed)
+                  }
+                >
+                  Save the correction
+                </Button>
+              </Row>
+            </Stack>
+          </Panel>
+        ) : null}
+      </Stack>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// P31 — the employment record itself, which nothing could edit.
+// ---------------------------------------------------------------------------
+
+/**
+ * **Who somebody is at work, and the day they stopped being it.**
+ *
+ * `save_employee` has been in Rust since P28 and had no caller, so the whole
+ * employment side of a person was unreachable: no designation, no department,
+ * no emergency contact, no ID proof — and, worst of the six, **no way to record
+ * that somebody has left.** A cook who walked out in April was still on the
+ * payroll list in August, because the only thing that could take them off it
+ * was a command with no button.
+ *
+ * # Leaving is a DATE, not a delete
+ *
+ * Scope 9.15: the record stays for ever. Their name is on bills, on attendance
+ * rows and on payslips, and a shop that deletes them loses all three. So the
+ * leaving date is the whole of it, and Rust sets the status from it — the two
+ * travel together precisely so a screen cannot set one without the other.
+ */
+export function EmploymentDetails({
+  person,
+  onClose,
+  onDone,
+  onFailed,
+}: {
+  person: { id: string; name: string };
+  onClose: () => void;
+  onDone: () => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [existing, setExisting] = useState<EmployeeView | null>(null);
+  const [designation, setDesignation] = useState('');
+  const [department, setDepartment] = useState('');
+  const [address, setAddress] = useState('');
+  const [emergencyName, setEmergencyName] = useState('');
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [idProof, setIdProof] = useState('');
+  const [employmentType, setEmploymentType] = useState('full_time');
+  const [leftOn, setLeftOn] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Read what is already there rather than starting everybody blank: this
+  // dialog is opened far more often to correct one field than to fill in
+  // seven.
+  useEffect(() => {
+    call('employees')
+      .then((list) => {
+        const found = list.find((e) => e.id === person.id);
+        if (!found) return;
+        setExisting(found);
+        setDesignation(found.designation ?? '');
+        setDepartment(found.department ?? '');
+        setEmploymentType(found.employmentType);
+      })
+      .catch(() => undefined);
+  }, [person.id]);
+
+  return (
+    <Modal
+      open
+      title={`${person.name} at work`}
+      onClose={onClose}
+      actions={
+        <>
+          <Button variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void call('save_employee', {
+                edit: {
+                  id: person.id,
+                  designation,
+                  department,
+                  address,
+                  emergencyName,
+                  emergencyPhone,
+                  idProof,
+                  employmentType,
+                  // Empty is "still working" — Rust's rule, and it is what
+                  // sets the status. Typed as text and parsed there (D39).
+                  leftOn,
+                },
+              })
+                .then(onDone)
+                .catch(onFailed)
+                .finally(() => setBusy(false));
+            }}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <Stack gap="field">
+        {existing?.left ? (
+          <p className="mb-muted">{existing.left}</p>
+        ) : null}
+        <Input
+          label="What they do"
+          hint="Cook, cashier, cleaner. It goes on the payslip."
+          value={designation}
+          onChange={(e) => setDesignation(e.target.value)}
+        />
+        <Input
+          label="Which part of the shop"
+          hint="Kitchen, counter, delivery. Leave it blank if you have only one."
+          value={department}
+          onChange={(e) => setDepartment(e.target.value)}
+        />
+        <Select
+          label="Working"
+          value={employmentType}
+          onChange={(e) => setEmploymentType(e.target.value)}
+          options={[
+            { value: 'full_time', label: 'Full time' },
+            { value: 'part_time', label: 'Part time' },
+            { value: 'casual', label: 'Casual — as needed' },
+          ]}
+        />
+        <Input
+          label="Where they live"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+        />
+        <Input
+          label="Who to call in an emergency"
+          value={emergencyName}
+          onChange={(e) => setEmergencyName(e.target.value)}
+        />
+        <Input
+          label="On this number"
+          value={emergencyPhone}
+          inputMode="tel"
+          onChange={(e) => setEmergencyPhone(e.target.value)}
+        />
+        <Input
+          label="ID they gave you"
+          hint="Aadhaar number, licence number — whatever you keep on file."
+          value={idProof}
+          onChange={(e) => setIdProof(e.target.value)}
+        />
+        <Input
+          label="The day they left"
+          hint="Leave this empty while they still work here. Filling it in takes them off the payroll and off the roster — nothing about their past is deleted."
+          value={leftOn}
+          placeholder="2026-08-31"
+          onChange={(e) => setLeftOn(e.target.value)}
+        />
+      </Stack>
+    </Modal>
+  );
+}
+
+/**
+ * **Granting a balance, and taking one back** — `adjust_leave`, P28's command
+ * with no button until P31.
+ *
+ * Every leave balance in the product could go down (somebody takes a day) and
+ * could never go up. So a shop could not grant the year's allowance in April,
+ * could not carry three days forward, and could not correct a mistake — the
+ * ledger was write-once in one direction.
+ *
+ * # Half-days, because that is the unit the ledger keeps
+ *
+ * `LeaveBalanceView` counts halves and says them in words ("4½ days"). This
+ * asks in halves too rather than inventing a days box and multiplying by two:
+ * the multiplication would be a second answer, and it would be wrong for the
+ * shop that grants an odd number.
+ */
+function AdjustLeave({
+  view,
+  staffId,
+  onClose,
+  onDone,
+  onFailed,
+}: {
+  view: LeaveView;
+  staffId: string;
+  onClose: () => void;
+  onDone: () => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [who, setWho] = useState(staffId);
+  const [leaveTypeId, setLeaveTypeId] = useState(view.balances[0]?.leaveTypeId ?? '');
+  const [halves, setHalves] = useState('2');
+  const [accrual, setAccrual] = useState(true);
+  const [reason, setReason] = useState('');
+  const [people, setPeople] = useState<readonly EmployeeView[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    call('employees').then(setPeople).catch(() => undefined);
+  }, []);
+
+  return (
+    <Modal
+      open
+      title="Grant or deduct leave"
+      onClose={onClose}
+      actions={
+        <>
+          <Button variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || reason.trim() === '' || leaveTypeId === ''}
+            onClick={() => {
+              setBusy(true);
+              void call('adjust_leave', {
+                staffId: who,
+                leaveTypeId,
+                halfDays: Number(halves),
+                reason: reason.trim(),
+                accrual,
+              })
+                .then(onDone)
+                .catch(onFailed)
+                .finally(() => setBusy(false));
+            }}
+          >
+            {accrual ? 'Grant it' : 'Take it back'}
+          </Button>
+        </>
+      }
+    >
+      <Stack gap="field">
+        <p className="mb-muted">
+          This writes a line in the leave ledger with your reason on it. It is
+          not a leave request and nobody has to approve it.
+        </p>
+        <Select
+          label="Who"
+          value={who}
+          onChange={(e) => setWho(e.target.value)}
+          options={people.map((p) => ({ value: p.id, label: p.name }))}
+        />
+        <Select
+          label="Which leave"
+          value={leaveTypeId}
+          onChange={(e) => setLeaveTypeId(e.target.value)}
+          options={view.balances.map((b) => ({
+            value: b.leaveTypeId,
+            label: `${b.leaveType} — ${b.leftSays} left`,
+          }))}
+        />
+        <Select
+          label="Which way"
+          value={accrual ? 'grant' : 'deduct'}
+          onChange={(e) => setAccrual(e.target.value === 'grant')}
+          options={[
+            { value: 'grant', label: 'Give them more' },
+            { value: 'deduct', label: 'Take some back' },
+          ]}
+        />
+        <Input
+          label="How many half-days"
+          hint="Two halves is one day. The ledger counts in halves, so half a day off is one."
+          value={halves}
+          inputMode="numeric"
+          onChange={(e) => setHalves(e.target.value.replace(/[^0-9]/g, ''))}
+        />
+        <Input
+          label="Why"
+          hint="It goes in the ledger beside the number, so this can be explained later."
+          value={reason}
+          placeholder="Yearly allowance for 2026"
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </Stack>
+    </Modal>
+  );
+}
+
+/**
+ * **Who is expected in, on a day** — `save_roster`, P28's command with no
+ * caller until P31.
+ *
+ * # It is not a nicety; it is what "late" means
+ *
+ * The attendance table has always printed a verdict — *"Late by 35 minutes"*,
+ * *"On time"* — and `shift_view` works that out by looking up the roster day
+ * for that person and reading the shift pattern on it. **With no roster there
+ * is no expected start**, so every shift in the product was judged against
+ * nothing. The verdict column was honest about what it knew and there was no
+ * way to tell it anything.
+ *
+ * # A day OFF is a row, and that is deliberate
+ *
+ * `RosterDay` with no pattern means "rostered off", which mb-db's own comment
+ * calls *"a different fact from having no row at all"*. So the pattern list has
+ * an explicit "Off" — not a blank somebody has to guess the meaning of.
+ */
+function SetRoster({
+  view,
+  onClose,
+  onDone,
+  onFailed,
+}: {
+  view: AttendanceView;
+  onClose: () => void;
+  onDone: () => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [people, setPeople] = useState<readonly EmployeeView[]>([]);
+  const [staffId, setStaffId] = useState('');
+  const [day, setDay] = useState(todayText());
+  const [patternId, setPatternId] = useState(view.patterns[0]?.id ?? '');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    call('employees')
+      .then((list) => {
+        setPeople(list);
+        setStaffId((was) => (was === '' ? (list[0]?.id ?? '') : was));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  return (
+    <Modal
+      open
+      title="Who is in, and when"
+      onClose={onClose}
+      actions={
+        <>
+          <Button variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || staffId === ''}
+            onClick={() => {
+              setBusy(true);
+              void call('save_roster', { staffId, day, patternId, note })
+                .then(onDone)
+                .catch(onFailed)
+                .finally(() => setBusy(false));
+            }}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <Stack gap="field">
+        <p className="mb-muted">
+          This is what you expect, not what happened. It is how &ldquo;on
+          time&rdquo; and &ldquo;late&rdquo; get their meaning on the list
+          behind this box.
+        </p>
+        <Select
+          label="Who"
+          value={staffId}
+          onChange={(e) => setStaffId(e.target.value)}
+          options={people.map((p) => ({ value: p.id, label: p.name }))}
+        />
+        <Input label="Which day" value={day} onChange={(e) => setDay(e.target.value)} />
+        {view.patterns.length === 0 ? (
+          <p className="mb-muted">
+            This shop has no shifts set up yet, so the only thing that can be
+            said here is that somebody is off.
+          </p>
+        ) : null}
+        <Select
+          label="Which shift"
+          value={patternId}
+          onChange={(e) => setPatternId(e.target.value)}
+          options={[
+            // Empty is a rostered day OFF — a real fact, and different from
+            // having no row at all. Said in words rather than left blank.
+            { value: '', label: 'Off that day' },
+            ...view.patterns.map((p) => ({ value: p.id, label: p.says })),
+          ]}
+        />
+        <Input
+          label="Anything to note"
+          value={note}
+          placeholder="Covering for Ravi"
+          onChange={(e) => setNote(e.target.value)}
+        />
       </Stack>
     </Modal>
   );

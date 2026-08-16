@@ -81,6 +81,20 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # not die quietly, because "it won't open" is the bug report that follows.
 tauri-plugin-single-instance = "2"
 
+# **"Browse…"** — P31, and the two places the owner found it missing: choosing a
+# logo, and choosing where a new shop's data file goes.
+#
+# Neither can be done from the webview. `<input type="file">` hands JavaScript a
+# sandboxed `File` and never a path, which is right for a browser and useless
+# for "put my shop on D:". A folder cannot be chosen from one at all.
+#
+# **Taken for its Rust half only.** No permission is added to
+# `capabilities/default.json`: the screens still reach this through our own two
+# commands like everything else, which keeps one answer to "what can the front
+# end ask for?" (D1). It is Tauri's own wrapper around `rfd`, so the dialog is
+# the operating system's, parented to our window, and on the right thread.
+tauri-plugin-dialog = "2"
+
 # R6 — the type generator. `cargo test` regenerates the TypeScript and diffs
 # it, so the two sides of the IPC boundary cannot drift apart. Build-time only:
 # it contributes nothing to the shipped binary.

@@ -128,14 +128,8 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
     let document = mb_print::template::kitchen_document(printer.paper, &ctx)
         .map_err(|e| words::from_print(&e))?;
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                Job::new(JobKind::Kitchen, &printer.id, document, today(at))
-                    .because("no kitchen screen drew this in time".to_owned()),
-            )
-            .map_err(|e| words::from_print(&e))
-    })
+    app.print(Job::new(JobKind::Kitchen, &printer.id, document, today(at))
+                    .because("no kitchen screen drew this in time".to_owned()),)
 }
 
 /// Print what the kitchen has not seen — **the delta, never the order.**
@@ -197,13 +191,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     let reason = table
         .clone()
         .map_or_else(|| "kitchen ticket".to_owned(), |t| format!("table {t}"));
-    let id = app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                Job::new(JobKind::Kitchen, &printer.id, document, today(at)).because(reason),
-            )
-            .map_err(|e| words::from_print(&e))
-    })?;
+    let id = app.print(Job::new(JobKind::Kitchen, &printer.id, document, today(at)).because(reason),)?;
 
     // 2b. **The order goes on disk BEFORE the paper.** Same rule as
     //     `complete_bill`, and the same reason (D4): if the order is not saved
@@ -456,19 +444,18 @@ pub(crate) fn queue_bill_print(
             cashier: Some(cashier),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
-            logo: None,
+            // **P31.** This was `None` here and at every other call site, so
+            // `receipt.logo` and `receipt.logo_width_pct` were two settings
+            // pointing at a picture nothing could supply. `logo::stored`
+            // returns `None` for a shop that has not chosen one and for a file
+            // that will not read, so a bad logo is still a bill (D37).
+            logo: crate::logo::stored(app),
         },
     )
     .map_err(|e| words::from_print(&e))?;
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                Job::new(JobKind::Bill, &printer.id, document, today(now()))
-                    .because(format!("bill {number}")),
-            )
-            .map_err(|e| words::from_print(&e))
-    })?;
+    app.print(Job::new(JobKind::Bill, &printer.id, document, today(now()))
+                    .because(format!("bill {number}")),)?;
     Ok(())
 }
 
@@ -562,16 +549,14 @@ pub(crate) fn queue_bill_copy(
             cashier: Some(cashier),
             copy,
             einvoice: mb_print::template::EInvoice::default(),
-            logo: None,
+            // P31 — a duplicate is the same paper as the original (D30), so it
+            // carries the same letterhead.
+            logo: crate::logo::stored(app),
         },
     )
     .map_err(|e| words::from_print(&e))?;
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(Job::new(JobKind::Bill, &printer.id, document, today(now())).because(because))
-            .map_err(|e| words::from_print(&e))
-    })?;
+    app.print(Job::new(JobKind::Bill, &printer.id, document, today(now())).because(because))?;
     Ok(())
 }
 
@@ -595,6 +580,29 @@ pub(crate) fn queue_bill_copy(
 /// and `complete_bill` reuses the parked order rather than claiming again.
 pub(crate) fn park_open_order(app: &App) -> UiResult<String> {
     let at = now();
+
+    // **The same guard `complete_bill` has, at the OTHER door into `open_draft`.**
+    //
+    // mb-db refuses a dine-in order with no table, correctly, deep inside
+    // `open_draft` — and `words::from_db` turns that into *"The shop's data
+    // could not be read"*, because the variant it arrives in also carries
+    // "SQLITE_BUSY" and audit F8 forbids showing a cashier either one.
+    //
+    // `complete_bill` already said this properly and the kitchen ticket did
+    // not, so the most common mistake on the whole screen — pressing Kitchen
+    // ticket before typing the table number — read as a data-file failure.
+    // Found by pressing it on a real install.
+    app.with_cart(|state| {
+        if state.order_type == mb_core::OrderType::DineIn && state.table.is_none() {
+            return Err(UiError::new(
+                "bill.no_table",
+                "This is a dine-in order with no table. Type the table number and \
+                 press Enter, or change the order type.",
+            ));
+        }
+        Ok(())
+    })?;
+
     let existing = app.with_cart(|state| Ok(state.order_id.clone()))?;
     let staff = app
         .sessions()

@@ -37,7 +37,7 @@ import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import type { RoleView } from '../ipc/generated/RoleView';
 
-import { Attendance, Leave, Payroll, Salary } from './Employment';
+import { Attendance, EmploymentDetails, Leave, Payroll, Salary } from './Employment';
 import type { EmployeeView } from '../ipc/generated/EmployeeView';
 
 import './auth.css';
@@ -91,6 +91,8 @@ function People() {
   const [roles, setRoles] = useState<readonly RoleView[]>([]);
   const [editing, setEditing] = useState<PersonView | null>(null);
   const [pinFor, setPinFor] = useState<PersonView | null>(null);
+  /** P31 — the employment record behind a person: what they do, and when they left. */
+  const [atWork, setAtWork] = useState<PersonView | null>(null);
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -142,6 +144,11 @@ function People() {
           <Button small variant="quiet" onClick={() => setPinFor(p)}>
             PIN
           </Button>
+          {/* P31. What they do, who to call, and the day they left —
+              `save_employee`, which had no button at all. */}
+          <Button small variant="quiet" onClick={() => setAtWork(p)}>
+            At work
+          </Button>
         </div>
       ),
     },
@@ -192,6 +199,21 @@ function People() {
 
       {pinFor ? (
         <SetPin person={pinFor} onClose={() => setPinFor(null)} onDone={load} />
+      ) : null}
+
+      {atWork ? (
+        <EmploymentDetails
+          person={atWork}
+          onClose={() => setAtWork(null)}
+          onDone={() => {
+            setAtWork(null);
+            toast.show('ok', 'Saved.');
+            void load();
+          }}
+          onFailed={(cause) => {
+            if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+          }}
+        />
       ) : null}
     </>
   );

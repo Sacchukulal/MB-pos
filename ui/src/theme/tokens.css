@@ -247,6 +247,9 @@
      minimum packs seven columns; the dense step past 24 tables packs ten and
      the tile drops its secondary line. */
   --cart-width: 24rem;
+  /* P31. How wide the minus and plus on a cart line are. Square and tight: the
+     cart is 24rem and the item name has to survive three buttons beside it. */
+  --cart-step-size: 1.75rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
   --tile-height: 4.5rem;
@@ -260,6 +263,13 @@
   --plan-cells: 16;
   --plan-cell-size: 3.5rem;
   --help-keys-width: 9rem;
+  /* P31, the Groups dialog. The printer column wants this much and gives way
+     before the name does; the name never goes below its own minimum, and below
+     that the row wraps rather than squeezing either. Written down together
+     because they are one decision: the first version fixed the printer column
+     and let the name collapse to one character per line. */
+  --group-route-width: 12rem;
+  --group-name-min: 9rem;
   /* P30.5, the first run — the one screen in the product that is deliberately
      NARROW. A form stretched across 1366 px reads as a wall; a column the eye
      can follow reads as a conversation, and the person in front of this one
@@ -328,6 +338,11 @@
      move. */
   --qr-ink: #000000;
   --qr-paper: #ffffff;
+  /* P31. The logo preview is the third: it is a picture of the roll, drawn one
+     canvas pixel per printed dot, and it reuses the QR pair for the same
+     reason — a thermal roll is white when the app is dark. This is how wide
+     that picture may get on screen before it stops growing. */
+  --logo-preview-width: 18rem;
 
   /* The lock screen and the people screens (P11). The card is narrow on
      purpose: a PIN pad the width of a monitor is a PIN pad you have to look

@@ -138,6 +138,14 @@ export function Printers() {
                   ),
                 )
               }
+              onSlip={() =>
+                void run(call('print_test_page', { printerId: printer.id }), () =>
+                  toast.show(
+                    'info',
+                    'The slip is printing. The ruler on it is what the arrows below move.',
+                  ),
+                )
+              }
               onNudge={(dx, dy) =>
                 void run(
                   call('nudge_printer', { printerId: printer.id, dxMm: dx, dyMm: dy }),
@@ -212,12 +220,15 @@ function PrinterCard({
   printer,
   onEdit,
   onTest,
+  onSlip,
   onNudge,
   onDelete,
 }: {
   printer: PrinterRowView;
   onEdit: () => void;
   onTest: () => void;
+  /** P07's alignment slip — see the button's own note. */
+  onSlip: () => void;
   onNudge: (dx: number, dy: number) => void;
   onDelete: () => void;
 }) {
@@ -242,6 +253,17 @@ function PrinterCard({
         <div className="mb-row mb-row--end">
           <Button small onClick={onTest}>
             Print a sample bill
+          </Button>
+          {/* **The slip is not the sample bill, and P31 stopped pretending it
+              was.** P07 built it with the ALIGNMENT RULER on it, which is what
+              the four nudge buttons below are read against — a sample bill has
+              no ruler, so nudging by looking at one is guesswork.
+
+              It is also the only thing on this screen that prints with no shop
+              open, which is exactly when somebody needs to know whether the
+              printer works: a first run, and the minutes after a restore. */}
+          <Button small variant="quiet" onClick={onSlip}>
+            Print the alignment slip
           </Button>
           <Button small onClick={onEdit}>
             Change

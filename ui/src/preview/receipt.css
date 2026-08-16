@@ -68,6 +68,13 @@
   color: var(--text-muted);
 }
 
+/* The printer draws real bars; the screen shows what they encode, so a person
+   can check the bill number is the one they expect. Same treatment as the QR
+   because it is the same kind of stand-in. */
+.mb-receipt__barcode {
+  color: var(--text-muted);
+}
+
 .mb-receipt__logo {
   color: var(--text-faint);
 }

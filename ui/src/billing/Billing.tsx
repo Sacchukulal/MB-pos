@@ -52,6 +52,8 @@ import {
 /** The reducer's state, plus the commands it last asked for. */
 type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
 import { PutOnAccount } from '../credit/Credit';
+import { ReasonDialog } from '../corrections/Reason';
+import { Split } from './Split';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
 
@@ -71,6 +73,28 @@ export function Billing() {
   const filter = '';
   const [locked, setLocked] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  /**
+   * **The line somebody is voiding, once the kitchen has been told.**
+   *
+   * Before the first ticket a ✕ is a mis-tap being undone and stays silent.
+   * After it, food is on a pass and taking it off the bill is a correction the
+   * shop has to be able to account for — so it goes through the same reason
+   * dialog as every other one (P12), and Rust prints the kitchen its
+   * cancellation slip.
+   */
+  const [voidingLine, setVoidingLine] = useState<{ index: number; name: string } | null>(null);
+  /**
+   * The line whose quantity is being typed, and what has been typed so far.
+   *
+   * − and + cover "one more"; this covers "make it seven" and "make it 0.75",
+   * which is the same gesture as tapping the number on a phone keypad. It is
+   * the only caller of `cart_set_qty`.
+   */
+  const [typingQty, setTypingQty] = useState<{ index: number; text: string } | null>(null);
+  /** The reason for cancelling a parked order (P12). */
+  const [cancelReason, setCancelReason] = useState(false);
+  /** P14, scope 1.21-1.24 — split it evenly, split off some food, how many guests. */
+  const [splitting, setSplitting] = useState(false);
   /// P15 — the customer picker for a bill going on an account.
   const [onAccount, setOnAccount] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -258,6 +282,82 @@ export function Billing() {
       }
     },
     [report],
+  );
+
+  /**
+   * **Change a line's quantity** — the thing the cart could not do.
+   *
+   * Until now the only control on a cart line was ✕: two dosas becoming three
+   * meant deleting the line and typing the item again, on the till, mid
+   * service. `cart_set_qty` had been in Rust since P09 with nothing calling it.
+   *
+   * Typing an exact quantity is `cart_set_qty`; − and + are `cart_step_qty`,
+   * because a quantity is thousandths and JavaScript has doubles (D2).
+   */
+  const setQty = useCallback(
+    async (index: number, qty: string) => {
+      try {
+        setCart(await call('cart_set_qty', { index, qty }));
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [report],
+  );
+
+  /**
+   * Commit what was typed into the quantity box.
+   *
+   * An unchanged value is not sent: blurring the box after looking at it must
+   * not write an audit-visible change. **Rust parses the text** — "0.5", "1/2"
+   * and "abc" are all its judgement to make, and it already has the sentence
+   * for the last one.
+   */
+  const commitQty = useCallback(async () => {
+    const typed = typingQty;
+    setTypingQty(null);
+    if (!typed) return;
+    const was = cart?.lines.find((l) => l.index === typed.index)?.qty;
+    if (typed.text.trim() === '' || typed.text.trim() === was) return;
+    await setQty(typed.index, typed.text.trim());
+  }, [cart?.lines, setQty, typingQty]);
+
+  const step = useCallback(
+    async (line: { index: number; qty: string; name: string }, by: number) => {
+      // **One less than one is a removal, and a removal after the kitchen has
+      // been told is a void.** Sending this to Rust as a step would take the
+      // line off silently and the kitchen would keep cooking it.
+      if (by < 0 && cart?.kitchenTold && line.qty === '1') {
+        setVoidingLine({ index: line.index, name: line.name });
+        return;
+      }
+      try {
+        setCart(await call('cart_step_qty', { index: line.index, by }));
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [cart?.kitchenTold, report],
+  );
+
+  /**
+   * ✕ — and **what ✕ means changes the moment the kitchen has been told.**
+   *
+   * Before the first ticket it is somebody undoing a mis-tap, and asking them
+   * to type a reason for that makes the till slower for nothing. After it,
+   * food is being cooked: taking the line off is a correction the shop must be
+   * able to account for, so it becomes `void_line` — a reason, an audit row,
+   * and a cancellation slip Rust prints for the kitchen (audit B5/B6).
+   */
+  const takeOffTheBill = useCallback(
+    async (line: { index: number; name: string }) => {
+      if (cart?.kitchenTold) {
+        setVoidingLine({ index: line.index, name: line.name });
+        return;
+      }
+      await removeLine(line.index);
+    },
+    [cart?.kitchenTold, removeLine],
   );
 
   const newOrder = useCallback(async () => {
@@ -733,16 +833,60 @@ export function Billing() {
                     ) : null}
                     <div className="mb-cartline__rate">{line.rateLabel}</div>
                   </div>
+                  {/* **− qty + and then ✕**, in that order, because the
+                      quantity is what a cashier changes forty times a shift
+                      and the removal is what they do once. */}
                   <div className="mb-cartline__qty">
                     <Button
                       small
                       variant="quiet"
-                      onClick={() => void removeLine(line.index)}
+                      onClick={() => void step(line, -1)}
+                      aria-label={`One less ${line.name}`}
+                    >
+                      <Icon name="minus" size="sm" />
+                    </Button>
+                    {typingQty?.index === line.index ? (
+                      <input
+                        className="mb-cartline__qty-input"
+                        autoFocus
+                        inputMode="decimal"
+                        aria-label={`Quantity of ${line.name}`}
+                        value={typingQty.text}
+                        onChange={(e) =>
+                          setTypingQty({ index: line.index, text: e.target.value })
+                        }
+                        onBlur={() => void commitQty()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void commitQty();
+                          if (e.key === 'Escape') setTypingQty(null);
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="mb-cartline__qty-value"
+                        aria-label={`Change the quantity of ${line.name}`}
+                        onClick={() => setTypingQty({ index: line.index, text: line.qty })}
+                      >
+                        {line.qty}
+                      </button>
+                    )}
+                    <Button
+                      small
+                      variant="quiet"
+                      onClick={() => void step(line, +1)}
+                      aria-label={`One more ${line.name}`}
+                    >
+                      <Icon name="plus" size="sm" />
+                    </Button>
+                    <Button
+                      small
+                      variant="quiet"
+                      onClick={() => void takeOffTheBill(line)}
                       aria-label={`Remove ${line.name}`}
                     >
                       <Icon name="x" size="sm" />
                     </Button>
-                    <span className="mb-cartline__qty-value">{line.qty}</span>
                   </div>
                   <span className="mb-cartline__amount">{line.amount.text}</span>
                 </div>
@@ -847,10 +991,31 @@ export function Billing() {
                 Label
               </Button>
             ) : null}
+            {/* **Two different actions behind one word, and the difference is
+                whether the shop's books know about this order yet.**
+
+                Nothing parked: the cart is somebody typing, and clearing it is
+                clearing it.
+
+                Parked (a kitchen ticket went, or a table was opened): the
+                order has a bill number, the kitchen may be cooking, and the
+                reports will look for it. Clearing the screen would leave an
+                open order in the database forever. That is `cancel_order` —
+                which was written at P12 and had nothing calling it. */}
+            {/* P14's scope 1.21-1.24, reachable at last: what each person
+                owes, some of the food onto its own bill, and how many are
+                sitting there. Three commands that had no button. */}
             <Button
               variant="quiet"
               disabled={!cart || cart.isEmpty}
-              onClick={() => setConfirmCancel(true)}
+              onClick={() => setSplitting(true)}
+            >
+              Split
+            </Button>
+            <Button
+              variant="quiet"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => (cart?.orderId ? setCancelReason(true) : setConfirmCancel(true))}
             >
               Cancel order
             </Button>
@@ -923,6 +1088,74 @@ export function Billing() {
         }}
         onCancel={() => setConfirmCancel(false)}
       />
+
+      {/* **The order is in the books, so cancelling it is a correction.**
+          One dialog for all four of P12's corrections, so the reason list, the
+          free-text box and the wording cannot drift apart between them. */}
+      {cancelReason && cart?.orderId ? (
+        <ReasonDialog
+          kind="cancel"
+          what={`Cancel order ${cart.table ?? cart.orderType} — ${cart.bill.grandTotal.text}`}
+          confirmLabel="Cancel the order"
+          onCancel={() => setCancelReason(false)}
+          onConfirm={(reason) => {
+            setCancelReason(false);
+            const id = cart.orderId;
+            if (!id) return;
+            call('cancel_order', { orderId: id, reason })
+              .then(async () => {
+                toast.show('ok', 'The order is cancelled, and the kitchen has been told.');
+                // The cart is cleared LOCALLY afterwards, and only after Rust
+                // agreed: clearing first and then failing would take the
+                // order off the screen while it stayed open in the books.
+                await newOrder();
+              })
+              .catch(report);
+          }}
+        />
+      ) : null}
+
+      {splitting && cart ? (
+        <Split
+          cart={cart}
+          onClose={() => {
+            setSplitting(false);
+            // The guest count is saved as it is typed, so the cart on screen
+            // is a copy that is now behind. Ask again (D4).
+            call('current_cart').then(setCart).catch(report);
+          }}
+          onSplit={(said) => {
+            setSplitting(false);
+            toast.show('ok', said);
+            call('current_cart').then(setCart).catch(report);
+            void refreshFloor();
+          }}
+          onFailed={report}
+        />
+      ) : null}
+
+      {/* Taking a line off a bill the kitchen is already cooking. */}
+      {voidingLine ? (
+        <ReasonDialog
+          kind="item_void"
+          what={`Take ${voidingLine.name} off this bill`}
+          confirmLabel="Take it off"
+          onCancel={() => setVoidingLine(null)}
+          onConfirm={(reason) => {
+            const line = voidingLine;
+            setVoidingLine(null);
+            call('void_line', { index: line.index, reason })
+              .then((fresh) => {
+                setCart(fresh);
+                toast.show('ok', `${line.name} is off the bill.`);
+              })
+              // A void whose kitchen slip failed comes back as an error that
+              // still says the line is off — Rust wrote that sentence, and
+              // this must show it rather than swallowing it.
+              .catch(report);
+          }}
+        />
+      ) : null}
 
       {onAccount ? (
         <PutOnAccount

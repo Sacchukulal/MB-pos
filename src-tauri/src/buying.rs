@@ -1636,7 +1636,7 @@ fn sanity(
 // base64, because the photograph arrives as a data URL.
 // ---------------------------------------------------------------------------
 
-fn base64_decode(text: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64_decode(text: &str) -> Option<Vec<u8>> {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD
         .decode(text.trim())

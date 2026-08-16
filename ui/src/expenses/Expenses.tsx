@@ -54,6 +54,8 @@ export function Expenses() {
   const [mode, setMode] = useState('cash');
   const [editing, setEditing] = useState<ExpenseRowView | null>(null);
   const [drawer, setDrawer] = useState(false);
+  /** P31 — the categories themselves, which nothing could add to. */
+  const [editingCategories, setEditingCategories] = useState(false);
   const toast = useToast();
 
   const report = useCallback(
@@ -189,6 +191,17 @@ export function Expenses() {
         <Button variant="primary" onClick={quickAdd}>
           Record it
         </Button>
+        {/* **Beside the box that uses them**, and this is a bug fixed by
+            looking: it was first put in the totals row, which only draws once
+            a shop has spent something TODAY — so on a quiet morning, and on
+            every shop's first day, the button was not there at all.
+
+            `save_expense_category` had no caller until P31, so the headings a
+            shop sorts its spending under were whatever migration 0001 seeded,
+            for ever. */}
+        <Button variant="quiet" onClick={() => setEditingCategories(true)}>
+          Categories
+        </Button>
       </div>
 
       {/* Scope 10.6's cash position — the number a drawer is counted against,
@@ -285,6 +298,15 @@ export function Expenses() {
             setView(fresh);
             setDrawer(false);
           }}
+          onFailed={report}
+        />
+      ) : null}
+
+      {editingCategories && view ? (
+        <SpendCategories
+          view={view}
+          onClose={() => setEditingCategories(false)}
+          onChanged={setView}
           onFailed={report}
         />
       ) : null}
@@ -455,6 +477,137 @@ function EditExpense({
           }}
         >
           Save
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * **What a shop sorts its spending into** — `save_expense_category`, P16's
+ * command with no caller until P31.
+ *
+ * The list was whatever migration 0001 seeded and could never change, so a
+ * bakery filing everything under "Miscellaneous" had no way out of it — and
+ * the category totals at the bottom of this screen, which are the whole reason
+ * for having categories, told them nothing.
+ *
+ * # Retiring, not deleting
+ *
+ * There is no delete in Rust and this does not ask for one. Last April's
+ * expenses point at their category, and removing it would leave them pointing
+ * at nothing. "Remove" sets `isActive` false: it stops being offered on new
+ * spending, and every figure already filed under it still adds up.
+ */
+function SpendCategories({
+  view,
+  onClose,
+  onChanged,
+  onFailed,
+}: {
+  view: ExpensesView;
+  onClose: () => void;
+  onChanged: (fresh: ExpensesView) => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [adding, setAdding] = useState('');
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const save = async (id: string, name: string, isActive: boolean) => {
+    setBusy(true);
+    try {
+      onChanged(await call('save_expense_category', { id, name, isActive }));
+    } catch (cause) {
+      onFailed(cause);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open title="What you spend on" onClose={onClose}>
+      <p className="mb-muted">
+        These are the headings your spending is sorted under, and what the
+        totals at the bottom of the screen are grouped by.
+      </p>
+
+      <div className="mb-row">
+        <Input
+          label="Add a heading"
+          value={adding}
+          autoFocus
+          placeholder="Gas"
+          onChange={(e) => setAdding(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || adding.trim() === '') return;
+            void save(`exc_${Date.now().toString(36)}`, adding.trim(), true);
+            setAdding('');
+          }}
+        />
+        <Button
+          variant="primary"
+          disabled={busy || adding.trim() === ''}
+          onClick={() => {
+            void save(`exc_${Date.now().toString(36)}`, adding.trim(), true);
+            setAdding('');
+          }}
+        >
+          Add
+        </Button>
+      </div>
+
+      <div className="mb-stack">
+        {view.allCategories
+          // The `null` id is "no category" — a real bucket on the totals and
+          // not a row anybody can rename.
+          .filter((c) => c.id !== null)
+          .map((c) => (
+            <div key={c.id} className="mb-row">
+              {renaming?.id === c.id ? (
+                <Input
+                  label="Name"
+                  value={renaming.name}
+                  autoFocus
+                  onChange={(e) => setRenaming({ id: c.id ?? '', name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setRenaming(null);
+                    if (e.key !== 'Enter') return;
+                    const name = renaming.name.trim();
+                    setRenaming(null);
+                    if (name !== '' && name !== c.name) void save(c.id ?? '', name, true);
+                  }}
+                />
+              ) : (
+                <>
+                  <strong>{c.name}</strong>
+                  <span className="mb-muted">
+                    {c.count === 0 ? 'nothing filed here yet' : `${c.count} entries`}
+                  </span>
+                </>
+              )}
+              <Button
+                small
+                disabled={busy}
+                onClick={() => setRenaming({ id: c.id ?? '', name: c.name })}
+              >
+                Rename
+              </Button>
+              <Button
+                small
+                variant="quiet"
+                disabled={busy}
+                onClick={() => void save(c.id ?? '', c.name, false)}
+              >
+                Stop using it
+              </Button>
+            </div>
+          ))}
+      </div>
+
+      <div className="mb-row mb-row--end">
+        <Button variant="primary" onClick={onClose}>
+          Done
         </Button>
       </div>
     </Modal>

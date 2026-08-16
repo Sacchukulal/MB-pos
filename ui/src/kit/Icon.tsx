@@ -85,6 +85,7 @@ export type IconName =
   | 'calendar'
   | 'filter'
   | 'more'
+  | 'folder'
   | 'download'
   | 'upload'
   | 'user'
@@ -325,6 +326,10 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="12" cy="12" r="1.4" />
       <circle cx="18.5" cy="12" r="1.4" />
     </>
+  ),
+  // P31. Browse — for choosing a logo, and for choosing where a shop lives.
+  folder: (
+    <path d="M3.5 6.5a1 1 0 0 1 1-1h4l2 2.5h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1z" />
   ),
   download: <path d="M12 3.5v12M7 10.5l5 5 5-5M4.5 20.5h15" />,
   upload: <path d="M12 20.5v-12M7 13.5l5-5 5 5M4.5 3.5h15" />,

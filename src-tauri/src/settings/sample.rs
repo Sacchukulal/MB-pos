@@ -171,7 +171,11 @@ pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
 const SAMPLE_LOGO: &[u8] = &[8, 8, 0xFF, 0x81, 0x81, 0xFF, 0xFF, 0x81, 0x81, 0xFF];
 
 /// The bill, laid out with this shop's settings, ready for the screen.
-pub fn bill_preview(config: &ShopConfig, paper: Paper) -> Result<PreviewDoc, PrintError> {
+pub fn bill_preview(
+    config: &ShopConfig,
+    paper: Paper,
+    logo: Option<Vec<u8>>,
+) -> Result<PreviewDoc, PrintError> {
     let (bill, order) = sample_order()?;
     let store = config.store.to_print_store();
     let document = mb_print::template::bill_document(
@@ -185,7 +189,11 @@ pub fn bill_preview(config: &ShopConfig, paper: Paper) -> Result<PreviewDoc, Pri
             cashier: Some("Ravi"),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
-            logo: Some(SAMPLE_LOGO.to_vec()),
+            // **This shop's own logo when it has chosen one** (P31), and the
+            // three squares when it has not. The preview is what proves the
+            // logo settings do anything at all, so showing a stand-in to
+            // somebody who has a real one would be showing them the wrong bill.
+            logo: Some(logo.unwrap_or_else(|| SAMPLE_LOGO.to_vec())),
         },
     )?;
     Ok(to_preview(&layout(&document)?))
@@ -280,7 +288,7 @@ mod tests {
             let paper = Paper::new(kind);
             // A shop that has filled in nothing at all — its first day.
             let empty = ShopConfig::default();
-            assert!(bill_preview(&empty, paper).is_ok(), "{kind:?} empty");
+            assert!(bill_preview(&empty, paper, None).is_ok(), "{kind:?} empty");
             assert!(kitchen_preview(&empty, paper).is_ok(), "{kind:?} empty");
 
             // And one with everything turned on.
@@ -294,7 +302,7 @@ mod tests {
             full.receipt.sections.store_name = mb_print::Style::new(3, true);
             full.kitchen.two_column = true;
             full.kitchen.show_column_names = true;
-            assert!(bill_preview(&full, paper).is_ok(), "{kind:?} full");
+            assert!(bill_preview(&full, paper, None).is_ok(), "{kind:?} full");
             assert!(kitchen_preview(&full, paper).is_ok(), "{kind:?} full");
         }
     }
@@ -336,7 +344,7 @@ mod tests {
         // What the printer's text sink emits.
         let from_printer = laid.text_lines();
         // What the screen is handed.
-        let from_screen: Vec<String> = bill_preview(&config, paper)
+        let from_screen: Vec<String> = bill_preview(&config, paper, None)
             .expect("previews")
             .lines
             .iter()

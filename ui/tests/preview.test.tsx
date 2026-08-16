@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { Receipt } from '../src/preview/Receipt';
 import type { PreviewDoc } from '../src/ipc/generated/PreviewDoc';
+import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
 
 afterEach(cleanup);
 
@@ -64,6 +65,7 @@ const BILL: PreviewDoc = {
     },
     { kind: 'blank' },
     { kind: 'qr', payload: 'upi://pay?pa=anna@upi&am=646.00', indent: 0 },
+    { kind: 'barcode', payload: 'BIR1207', indent: 0 },
     { kind: 'logo', indent: 0 },
   ],
   notes: [
@@ -124,5 +126,48 @@ describe('the receipt preview is a sink, not a renderer', () => {
     // nothing at all.
     const { container } = render(<Receipt doc={BILL} />);
     expect(container.textContent).toContain('[ logo ]');
+  });
+
+  it('shows the barcode payload, for the same reason as the QR', () => {
+    // **This is the test that was missing.** The component had no `barcode`
+    // arm at all: the switch fell off the end, returned `undefined`, and a
+    // shop with `receipt.bill_barcode` on saw a preview that did not have what
+    // the paper would. The fixture above claimed to hold "every kind of line"
+    // and did not hold this one.
+    render(<Receipt doc={BILL} />);
+    expect(screen.getByText('BIR1207')).toBeInTheDocument();
+  });
+
+  it('draws one thing per line, for every kind there is', () => {
+    // **The claim the fixture makes, checked instead of asserted.**
+    //
+    // `SAMPLES` is keyed by `PreviewLine['kind']`, so it is the TYPE CHECKER
+    // that enforces the "every kind" part: add a variant in Rust, regenerate,
+    // and this object stops compiling until somebody has decided what it looks
+    // like on screen. A fixture nobody updated is what let the barcode through.
+    const SAMPLES: Record<PreviewLine['kind'], PreviewLine> = {
+      text: { kind: 'text', text: 'Masala Dosa', indent: 0, scale: 1, bold: false },
+      rule: { kind: 'rule', glyph: '-', width: 8, indent: 0 },
+      qr: { kind: 'qr', payload: 'upi://pay', indent: 0 },
+      barcode: { kind: 'barcode', payload: 'BIR1207', indent: 0 },
+      logo: { kind: 'logo', indent: 0 },
+      blank: { kind: 'blank' },
+    };
+
+    for (const [kind, line] of Object.entries(SAMPLES)) {
+      cleanup();
+      const doc: PreviewDoc = { columns: 48, lines: [line], notes: [] };
+      const { container } = render(<Receipt doc={doc} />);
+      const paper = container.querySelector('.mb-receipt__paper');
+      expect(paper, `${kind} did not render`).not.toBeNull();
+      // A blank line is a newline and nothing else; every other kind must put
+      // something a person can see on the paper.
+      if (kind !== 'blank') {
+        expect(
+          (paper?.textContent ?? '').trim().length,
+          `a "${kind}" line drew nothing at all`,
+        ).toBeGreaterThan(0);
+      }
+    }
   });
 });

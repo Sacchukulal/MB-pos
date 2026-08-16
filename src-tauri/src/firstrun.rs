@@ -175,7 +175,7 @@ pub fn create_shop_on(app: &App, folder: String) -> UiResult<FirstRunView> {
 /// they cannot ask for a permission — there is nobody to hold one. The moment
 /// the shop IS set up that stops being true, and pointing a working till at a
 /// different database becomes what it really is: a backup-level decision.
-fn only_before_set_up(app: &App) -> UiResult<()> {
+pub(crate) fn only_before_set_up(app: &App) -> UiResult<()> {
     if look_on(app)?.needed {
         return Ok(());
     }

@@ -73,6 +73,10 @@ mod inventory;
 #[cfg(test)]
 mod inventory_tests;
 mod ipc;
+/// P31. **The shop's logo** — the half D37 left for a later session and no
+/// session took: picking a file, keeping the dots, and handing them to the
+/// bill. Also the folder picker, because they are the same missing thing.
+mod logo;
 /// P19. **The counter as a server** — D9: the phone talks to the till over the
 /// shop's own WiFi, and the cloud is never the road an order travels.
 mod lan;
@@ -203,6 +207,9 @@ mod acceptance_tests;
 mod look_demo;
 mod startup;
 mod state;
+/// P31. **Which typeface a bill and a kitchen ticket print in** — the file
+/// system and the log half of `mb_print::font::Typefaces`.
+mod typefaces;
 /// P27. **The tills** â who this machine is, who the master is, and the
 /// series it issues under (D135, D139).
 mod terminals;
@@ -302,6 +309,10 @@ fn main() {
     let window_state = app_config.window.clone();
 
     let mut builder = tauri::Builder::default();
+    // P31. **"Browse…"**, and its Rust half only — no JS permission is granted
+    // for it in `capabilities/default.json`, so the screens reach it through
+    // `logo::pick_a_logo` and `logo::pick_a_folder` like everything else.
+    builder = builder.plugin(tauri_plugin_dialog::init());
     // Two counters on one PC fight over the database, the licence and the
     // numbering. The second one focuses the first rather than dying quietly,
     // because "it won't open" is the bug report that follows.

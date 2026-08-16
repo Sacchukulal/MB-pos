@@ -427,25 +427,20 @@ pub fn print_sample_on(app: &App, printer_id: String) -> UiResult<String> {
             cashier: Some(who.name.as_str()),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
-            logo: None,
+            // P31 — the same letterhead a real bill will carry.
+            logo: crate::logo::stored(app),
         },
     )
     .map_err(|e| words::from_print(&e))?;
 
     let at = crate::flows::now();
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                mb_print::queue::Job::new(
+    app.print(mb_print::queue::Job::new(
                     mb_print::queue::JobKind::Test,
                     &printer.id,
                     document,
                     crate::flows::today(at),
                 )
-                .because("sample bill".to_owned()),
-            )
-            .map_err(|e| words::from_print(&e))
-    })
+                .because("sample bill".to_owned()),)
 }
 
 /// Scope 7.11 — print, look at the paper, nudge, print again.

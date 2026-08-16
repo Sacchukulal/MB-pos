@@ -105,6 +105,13 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [itemClass, setItemClass] = useState('tax_food_5');
   const [added, setAdded] = useState<string[]>([]);
 
+  /**
+   * Where the shop's data will go. Empty means "the usual place", which is
+   * what `create_shop` already understood and what nearly everybody uses — so
+   * the common case is still one button and no decision.
+   */
+  const [folder, setFolder] = useState('');
+
 
   const complain = useCallback((cause: unknown) => {
     const said = isUiError(cause) ? cause.message : String(cause);
@@ -140,6 +147,48 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .then((fresh) => {
         setView(fresh);
         setStep('details');
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  /**
+   * **Adopt a database that is already on this computer** — a reinstall, or a
+   * drive letter that changed.
+   *
+   * `use_existing_shop` rather than `create_shop`: the two do the same thing
+   * in Rust today, and they do not mean the same thing. One says "make me a
+   * shop", the other says "that one is mine". A log line that says which is
+   * worth a command name, and this one had never been called.
+   */
+  const openExisting = (path: string) => {
+    setBusy(true);
+    setProblem('');
+    call('use_existing_shop', { path })
+      .then((fresh) => {
+        setView(fresh);
+        setStep(fresh.hasDetails ? 'pin' : 'details');
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  /**
+   * **Browse for a folder** — the owner's fifth item.
+   *
+   * The screen offered one path and no way to change it, so a shop that keeps
+   * its data on D: had nowhere to say so. A webview cannot open a folder
+   * picker at all, which is why this is a command: Rust opens the operating
+   * system's own dialog, parented to this window, and hands back the path.
+   *
+   * Pressing Cancel returns nothing, and nothing is not an error.
+   */
+  const browseForFolder = () => {
+    setBusy(true);
+    setProblem('');
+    call('pick_a_folder', { start: view?.defaultFolder ?? null })
+      .then((folder) => {
+        if (folder) setFolder(folder);
       })
       .catch(complain)
       .finally(() => setBusy(false));
@@ -291,16 +340,36 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               internet — your shop&rsquo;s data stays on this computer.
             </p>
 
+            {/* **The folder, and a way to change it.**
+
+                It used to be a path and nothing else, which read as an
+                instruction rather than a choice — so a shop that keeps its
+                data on a second drive had no way to say so and no sign that it
+                was allowed to. The Browse button is Rust's, because a webview
+                cannot open a folder picker at all. */}
             <div className="mb-firstrun__where">
               <span className="mb-firstrun__label">Your data will be kept in</span>
-              <code className="mb-firstrun__path">{view.defaultFolder}</code>
+              <code className="mb-firstrun__path">
+                {folder === '' ? view.defaultFolder : folder}
+              </code>
+              <div className="mb-row">
+                <Button variant="secondary" disabled={busy} onClick={browseForFolder}>
+                  <Icon name="folder" size="sm" />
+                  Choose a different folder
+                </Button>
+                {folder === '' ? null : (
+                  <Button variant="quiet" disabled={busy} onClick={() => setFolder('')}>
+                    Use the usual place
+                  </Button>
+                )}
+              </div>
             </div>
 
             <div className="mb-firstrun__actions">
               <Button
                 variant="primary"
                 disabled={busy}
-                onClick={() => makeShop('')}
+                onClick={() => makeShop(folder)}
               >
                 Start a new shop
               </Button>
@@ -316,13 +385,36 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                     key={found}
                     variant="secondary"
                     disabled={busy}
-                    onClick={() => makeShop(found.split(' — ')[0] ?? found)}
+                    onClick={() => openExisting(found.split(' — ')[0] ?? found)}
                   >
                     {found}
                   </Button>
                 ))}
               </div>
             ) : null}
+
+            {/* **A database somewhere this counter did not look.** `find_shops`
+                searches the usual places; an owner whose backup lives on a USB
+                stick or a mapped drive is not in the usual places, and until
+                now had no way in at all. */}
+            <div className="mb-firstrun__found">
+              <Button
+                variant="quiet"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  setProblem('');
+                  call('pick_a_folder', { start: null })
+                    .then((chosen) => {
+                      if (chosen) openExisting(chosen);
+                    })
+                    .catch(complain)
+                    .finally(() => setBusy(false));
+                }}
+              >
+                My shop&rsquo;s data is somewhere else — find it
+              </Button>
+            </div>
           </section>
         ) : null}
 

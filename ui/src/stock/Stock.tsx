@@ -52,6 +52,7 @@ import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import type { BuyGroupView } from '../ipc/generated/BuyGroupView';
 import type { DishCostView } from '../ipc/generated/DishCostView';
 import type { InventoryView } from '../ipc/generated/InventoryView';
+import type { VarianceView } from '../ipc/generated/VarianceView';
 import type { MaterialView } from '../ipc/generated/MaterialView';
 import type { StockMovementView } from '../ipc/generated/StockMovementView';
 import type { ProblemView } from '../ipc/generated/ProblemView';
@@ -254,6 +255,9 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           { id: 'buy', label: 'What to buy' },
           { id: 'moves', label: 'Movements' },
           { id: 'problems', label: `Needs a look${view.problems.length > 0 ? ` (${view.problems.length})` : ''}` },
+          // **P31. The number that finds theft**, and it had no screen at all:
+          // `stock_variance` was written at P25 and never called.
+          { id: 'variance', label: 'What went missing' },
           // **P26, scope 4.8.** The count belongs here and not on Buying: it is
           // a question about the shelf, and this is where the person already is
           // when they ask it.
@@ -289,6 +293,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       {tab === 'problems' ? (
         <Problems view={view} onChange={setView} onReport={report} />
       ) : null}
+      {tab === 'variance' ? <Variance onReport={report} /> : null}
 
       {editing ? (
         <MaterialForm
@@ -1050,4 +1055,90 @@ function standardOf(dimension: string): string[] {
   if (dimension === 'volume') return ['l'];
   if (dimension === 'count') return ['dozen'];
   return ['kg'];
+}
+
+/**
+ * **What should be on the shelf, against what is** — `stock_variance`, scope
+ * 4.7, written at P25 and never given a screen until P31.
+ *
+ * # This is the number that finds theft
+ *
+ * The recipes say how much rice ninety biryanis used. The count says how much
+ * rice is actually there. The difference is waste, over-portioning, a supplier
+ * short-weighing, or somebody carrying it out of the back door — and a shop
+ * with no way to see it never learns which.
+ *
+ * # The honest row is the one with no count on it
+ *
+ * D115: a material nobody has counted is marked `isUnchecked`, and the screen
+ * says so in words. A variance computed against a shelf nobody looked at is a
+ * figure that reads like a measurement and is not one — that is the mistake
+ * this column exists to refuse.
+ */
+function Variance({ onReport }: { onReport: (cause: unknown) => void }) {
+  const [rows, setRows] = useState<readonly VarianceView[] | null>(null);
+  const [from, setFrom] = useState(() => {
+    const then = new Date();
+    then.setDate(then.getDate() - 30);
+    return then.toISOString().slice(0, 10);
+  });
+  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+
+  useEffect(() => {
+    call('stock_variance', { from, to })
+      .then(setRows)
+      .catch((cause) => {
+        setRows([]);
+        onReport(cause);
+      });
+  }, [from, to, onReport]);
+
+  return (
+    <div className="mb-stack">
+      <div className="mb-row">
+        <Input label="From" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <Input label="To" value={to} onChange={(e) => setTo(e.target.value)} />
+      </div>
+
+      {rows !== null && rows.length === 0 ? (
+        <EmptyState
+          title="Nothing to compare yet"
+          body="This needs two things: recipes, so the counter knows what a dish should have used, and a stock count, so it knows what is really there. Do a count and come back."
+        />
+      ) : (
+        <Table
+          rows={[...(rows ?? [])]}
+          columns={[
+            { key: 'material', header: 'Material', render: (v) => v.material },
+            { key: 'theoretical', header: 'Should have used', render: (v) => v.theoretical },
+            {
+              key: 'actual',
+              header: 'Really used',
+              render: (v) => (v.isUnchecked ? <span className="mb-muted">{v.counted}</span> : v.actual),
+            },
+            {
+              key: 'variance',
+              header: 'Difference',
+              render: (v) =>
+                v.isUnchecked ? (
+                  '—'
+                ) : (
+                  <strong className={v.isOver ? 'mb-stock__over' : undefined}>{v.variance}</strong>
+                ),
+            },
+            { key: 'percent', header: 'As a share', render: (v) => (v.isUnchecked ? '—' : v.percent) },
+            {
+              key: 'value',
+              header: 'What it cost',
+              numeric: true,
+              render: (v) => (
+                <span className="mb-mono">{v.isUnchecked ? '—' : v.value.text}</span>
+              ),
+            },
+          ]}
+          rowKey={(v) => v.material}
+        />
+      )}
+    </div>
+  );
 }

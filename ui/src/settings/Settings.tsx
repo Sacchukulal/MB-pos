@@ -47,8 +47,10 @@ import { Appearance } from './Appearance';
 import { Backup } from './Backup';
 import { Network } from './Network';
 import { Numbering } from './Numbering';
+import { Logo } from './Logo';
 import { Printers } from './Printers';
 import { Tills } from './Tills';
+import { Updates } from './Updates';
 
 import './settings.css';
 
@@ -66,11 +68,17 @@ import './settings.css';
  */
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
+  // P31. The logo is a FILE, not a scalar, so it cannot be in the catalogue —
+  // but `receipt.logo` and `receipt.logo_width_pct` are, and they were two
+  // settings pointing at a picture nothing could supply. It goes directly
+  // under them, with the live paper beside it.
+  receipt: () => <Logo />,
   numbering: () => <Numbering />,
   backup: () => <Backup />,
   appearance: () => <Appearance />,
   network: () => <Network />,
   tills: () => <Tills />,
+  version: () => <Updates />,
 };
 
 /**
@@ -86,6 +94,10 @@ const EXTRA_SECTIONS = [
   { code: 'network', label: 'Phones', canEdit: true, settings: [] },
   // P27. A till is a ROW too, for the same reason a phone is.
   { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
+  // P31. **A shop must be able to go back** — audit E9, I1 and ANDROID-G2/G4.
+  // `main.rs` already tells a counter that will not start to look in
+  // "Settings > Go back", and until now there was no such place.
+  { code: 'version', label: 'This version', canEdit: true, settings: [] },
 ];
 
 /**
@@ -331,6 +343,34 @@ export function Settings() {
             and the import is a DRY RUN first, the same shape P13's CSV import
             uses and for the same reason. */}
         <div className="mb-settings__moving">
+          {/* **Read them again from the shop's data file** — `reload_settings`,
+              which existed and had no caller.
+
+              A second till on the same shop is a real thing (P27): the owner
+              changes the footer at the counter, and the till by the door is
+              still showing what it read when it started. This is how that
+              person catches up without restarting the program.
+
+              It discards nothing: unsaved edits are what the guard below
+              protects, so this is refused while there are any. */}
+          <Button
+            small
+            variant="quiet"
+            wide
+            disabled={dirty}
+            onClick={() =>
+              void call('reload_settings')
+                .then((fresh) => {
+                  setView(fresh);
+                  toast.show('ok', 'Read again from this shop’s data file.');
+                })
+                .catch((cause) => {
+                  if (isUiError(cause)) toast.show('danger', cause.message);
+                })
+            }
+          >
+            Read these settings again
+          </Button>
           <Button
             small
             variant="quiet"

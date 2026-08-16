@@ -573,14 +573,8 @@ fn print_cancellation(
     let document = mb_print::template::kitchen_document(printer.paper, &ctx)
         .map_err(|e| words::from_print(&e))?;
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                Job::new(JobKind::Kitchen, &printer.id, document, today(now()))
-                    .because("cancellation".to_owned()),
-            )
-            .map_err(|e| words::from_print(&e))
-    })?;
+    app.print(Job::new(JobKind::Kitchen, &printer.id, document, today(now()))
+                    .because("cancellation".to_owned()),)?;
     Ok(())
 }
 

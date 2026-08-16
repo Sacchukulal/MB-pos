@@ -295,14 +295,66 @@
 .mb-cartline__qty {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  /* **No gap, and the buttons are square.**
+
+     Measured, not guessed: the kit's small button is 42 px wide because its
+     padding is sized for a word, and four of them plus the gaps took 170 px of
+     a 324 px cart row — leaving 66 px for the item name, so a two-word dish
+     came out on two lines and three items no longer fitted in the list. Found
+     by putting three things on a bill and looking at it.
+
+     Touching each other is also right: minus, quantity, plus is ONE control,
+     and gaps between its parts read as three separate ones. The 44 px hit
+     target §4 asks for is the button's HEIGHT, which does not change. */
+  gap: 0;
 }
 
+.mb-cartline__qty .mb-button {
+  min-width: var(--cart-step-size);
+  padding-inline: 0;
+}
+
+/* **The number is a button**, because tapping it is how you say "make it
+   seven" without pressing + five times. It is deliberately not styled as one:
+   a third bordered control between − and + would read as clutter on a line a
+   cashier looks at forty times an hour, so it looks like the number it is and
+   only says so on hover. */
 .mb-cartline__qty-value {
   min-width: var(--space-6);
+  padding: 0;
   font-family: var(--font-mono);
+  font-size: inherit;
   font-variant-numeric: tabular-nums;
   text-align: center;
+  color: inherit;
+  background: none;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.mb-cartline__qty-value:hover {
+  border-color: var(--border);
+}
+
+.mb-cartline__qty-value:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* Exactly where the number was, and exactly as wide, so the line does not jump
+   when it turns into a box. */
+.mb-cartline__qty-input {
+  width: var(--space-9);
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--text);
+  background: var(--surface);
+  border: var(--border-width) solid var(--focus);
+  border-radius: var(--radius-xs);
 }
 
 .mb-cartline__amount {
@@ -585,4 +637,67 @@
   color: var(--text-muted);
   background: var(--surface-2);
   border-radius: var(--radius-sm);
+}
+
+/* --- Splitting a bill (P14's 1.21-1.24, wired at P31) -------------------- */
+
+.mb-split__covers {
+  margin-bottom: var(--gap-group);
+}
+
+.mb-split__heading {
+  margin: var(--gap-group) 0 var(--space-1);
+  font-size: var(--type-section);
+  font-weight: var(--type-section-weight);
+}
+
+.mb-split__note {
+  margin: 0 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--type-caption);
+}
+
+/* − 4 ways + on one line. The count is the widest thing in it, so it is what
+   the row is sized around. */
+.mb-split__ways {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+}
+
+.mb-split__count {
+  min-width: var(--space-8);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The shares wrap: fifty people is a real party, and a row that scrolled
+   sideways would break UI_GUIDELINES §1. */
+.mb-split__shares {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
+
+.mb-split__lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+/* Name, what is on the bill, how much moves — left to right in the order the
+   question is asked. */
+.mb-split__line {
+  display: grid;
+  grid-template-columns: 1fr auto var(--space-8);
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.mb-split__name {
+  overflow-wrap: anywhere;
 }

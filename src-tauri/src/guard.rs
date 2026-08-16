@@ -118,6 +118,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("current_cart", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
     ("cart_set_qty", Access::Needs(Permission::BillCreate)),
+    // P31. The - and + on a cart line. Same permission as setting the quantity
+    // outright, because it IS setting the quantity — the arithmetic is in Rust
+    // so that a thousandth cannot be lost to a JavaScript double (D2).
+    ("cart_step_qty", Access::Needs(Permission::BillCreate)),
     ("cart_remove", Access::Needs(Permission::BillCreate)),
     ("cart_clear", Access::Needs(Permission::BillCreate)),
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),
@@ -131,9 +135,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("complete_bill", Access::Needs(Permission::BillCreate)),
 
     // --- paper --------------------------------------------------------------
-    ("list_printers", Access::Needs(Permission::SettingsPrinter)),
     ("print_test_page", Access::Needs(Permission::SettingsPrinter)),
-    ("nudge_print_offset", Access::Needs(Permission::SettingsPrinter)),
     // Retrying or abandoning a print is reprinting a bill, which is a thing a
     // shop counts (scope 1.20) and therefore a thing it permits.
     ("retry_print_job", Access::Needs(Permission::BillReprint)),
@@ -455,6 +457,22 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("first_run", Access::FirstRun),
     ("create_shop", Access::FirstRun),
     ("use_existing_shop", Access::FirstRun),
+    // **Browse for a folder** — the other thing a fresh install needs and
+    // could not do. Classified with the three above rather than as Public for
+    // the reason `Access::FirstRun` gives: on a machine with no shop there is
+    // nobody to hold a permission, and the moment there IS a shop, pointing
+    // this till at a different folder stops being set-up and becomes a
+    // backup-level decision.
+    ("pick_a_folder", Access::FirstRun),
+
+    // --- the logo (P31) --------------------------------------------------------
+    // `settings.printer`, and not `settings.store`: a logo is part of what the
+    // paper looks like, which is the permission that already owns the paper
+    // size, the offsets and the engine.
+    ("logo", Access::Needs(Permission::SettingsPrinter)),
+    ("pick_a_logo", Access::Needs(Permission::SettingsPrinter)),
+    ("save_logo", Access::Needs(Permission::SettingsPrinter)),
+    ("remove_logo", Access::Needs(Permission::SettingsPrinter)),
 
     // --- the kitchen screen (P24) -------------------------------------------
     // All `bill.create`. A cook clearing a ticket is doing the shop's work, and
@@ -811,7 +829,7 @@ mod tests {
         // proved why it is a risk worth naming: a new module's commands would
         // otherwise be invisible to the very test that exists to see them, and
         // the coverage check would pass while covering nothing.
-        const SOURCES: [&str; 31] = [
+        const SOURCES: [&str; 32] = [
             include_str!("terminals.rs"),
             include_str!("orders.rs"),
             include_str!("buying.rs"),
@@ -839,6 +857,7 @@ mod tests {
             include_str!("payments.rs"),
             include_str!("devices.rs"),
             include_str!("firstrun.rs"),
+            include_str!("logo.rs"),
             include_str!("settings/ipc.rs"),
             include_str!("settings/printers.rs"),
             include_str!("settings/backup.rs"),

@@ -429,13 +429,23 @@
   border-bottom: var(--border-width) solid var(--border);
 }
 
+/* **The note gives way, never the heading** (P31).
+   Both were plain flex items, so a long note squeezed the title and "Your
+   logo" came out as two lines in a card two hundred pixels wider than it
+   needed to be. A heading that wraps while the sentence beside it does not is
+   backwards: the heading is what the eye scans down the page for.
+   `overflow-wrap` is the safety net for a title genuinely wider than its
+   panel — it breaks rather than escaping the card. */
 .mb-section__title {
   margin: 0;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
 }
 
 .mb-section__note {
+  min-width: 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
 }

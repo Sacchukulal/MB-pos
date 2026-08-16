@@ -138,7 +138,20 @@ export function Account() {
         )}
 
         <div className="mb-account__actions mb-row mb-row--end">
-          <Button variant="quiet" onClick={load}>
+          {/* **"Check again" now actually checks again.**
+
+              It called `account`, which reads the entitlement this counter is
+              already holding — so a shop that had just paid pressed it, got
+              the same cached answer, and pressed it four more times.
+              `refresh_licence` is the one that asks, and it had never been
+              called from anywhere. */}
+          <Button
+            variant="quiet"
+            disabled={busy}
+            onClick={() =>
+              run(() => call('refresh_licence'), 'Checked. This is the latest we have.')
+            }
+          >
             Check again
           </Button>
           {view.isActivated ? (

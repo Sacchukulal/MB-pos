@@ -167,6 +167,25 @@ pub struct AttendanceView {
     pub missed: Vec<ShiftView>,
     pub says: String,
     pub may_correct: bool,
+    /// **The shifts this shop runs** — P31.
+    ///
+    /// Already read here to work out whether somebody was late; sent on so the
+    /// roster can be SET as well as judged against. Without it `save_roster`
+    /// would need a screen where a person typed a pattern id, which is not a
+    /// thing anybody outside this repository knows.
+    pub patterns: Vec<PatternView>,
+}
+
+/// One of the shop's shifts, for the roster.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PatternView {
+    pub id: String,
+    /// "Morning — 7:00 to 15:00". Written here, because turning 420 minutes
+    /// past midnight into a time somebody reads is a conversion and every
+    /// conversion in this product happens once, in Rust (D39).
+    pub says: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -575,6 +594,19 @@ pub fn attendance_on(
                     missed,
                     says,
                     may_correct,
+                    patterns: patterns
+                        .iter()
+                        .filter(|p| p.is_active)
+                        .map(|p| PatternView {
+                            id: p.id.clone(),
+                            says: format!(
+                                "{} — {} to {}",
+                                p.name,
+                                clock(p.start_minute),
+                                clock(p.end_minute)
+                            ),
+                        })
+                        .collect(),
                 })
             })
             .map_err(|e| words::from_db(&e))
@@ -648,6 +680,18 @@ fn minute_of(at: mb_core::Timestamp) -> i64 {
 fn clock_words(at: mb_core::Timestamp) -> String {
     let minute = minute_of(at);
     format!("{:02}:{:02}", minute / 60, minute % 60)
+}
+
+/// Minutes past midnight, as a clock face. P31 — a shift pattern's start and
+/// end, so the roster can say "Morning — 07:00 to 15:00" rather than "420".
+#[allow(
+    clippy::integer_division,
+    reason = "a minute count into a clock face: both halves are used"
+)]
+fn clock(minute_of_day: i64) -> String {
+    // Past midnight wraps, which is what a night shift is.
+    let m = minute_of_day.rem_euclid(24 * 60);
+    format!("{:02}:{:02}", m / 60, m % 60)
 }
 
 fn staff_names(
@@ -2090,19 +2134,13 @@ pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult
         },
     );
 
-    app.with_shop(|shop| {
-        shop.queue
-            .enqueue(
-                mb_print::queue::Job::new(
+    app.print(mb_print::queue::Job::new(
                     mb_print::queue::JobKind::DayClose,
                     &printer.id,
                     document,
                     today(at),
                 )
-                .because(format!("payslip for {}", line.staff_name)),
-            )
-            .map_err(|e| words::from_print(&e))
-    })
+                .because(format!("payslip for {}", line.staff_name)),)
 }
 
 pub fn payroll_list_on(app: &App) -> UiResult<PayrollListView> {

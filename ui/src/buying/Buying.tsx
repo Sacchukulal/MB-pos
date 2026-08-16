@@ -62,6 +62,8 @@ export function Buying() {
   const [view, setView] = useState<BuyingView | null>(null);
   const [tab, setTab] = useState('deliveries');
   const [entering, setEntering] = useState(false);
+  /** P31 — raising a purchase order, which nothing could do. */
+  const [ordering, setOrdering] = useState(false);
   const [account, setAccount] = useState<SupplierAccountView | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<SupplierView | null>(null);
   const [looking, setLooking] = useState<PurchaseView | null>(null);
@@ -211,7 +213,14 @@ export function Buying() {
             </div>
           </Card>
         </div>
-        <Button onClick={() => setEntering(true)}>Enter a delivery</Button>
+        <div className="mb-row">
+          {/* P31. A purchase order could be advanced and closed and never
+              CREATED — `save_purchase_order` had no caller. */}
+          <Button variant="secondary" onClick={() => setOrdering(true)}>
+            Raise an order
+          </Button>
+          <Button onClick={() => setEntering(true)}>Enter a delivery</Button>
+        </div>
       </div>
 
       {/* D100 — an unhealthy row carries its own fix, and these are sentences
@@ -337,6 +346,20 @@ export function Buying() {
             rowKey={(o) => o.id}
           />
         )
+      ) : null}
+
+      {ordering ? (
+        <RaiseOrder
+          view={view}
+          onClose={() => setOrdering(false)}
+          onSaved={(fresh) => {
+            setView(fresh);
+            setOrdering(false);
+            setTab('orders');
+            toast.show('ok', 'The order is raised. Mark it sent when you have.');
+          }}
+          onError={report}
+        />
       ) : null}
 
       {entering ? (
@@ -705,6 +728,19 @@ function SupplierAccount({
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState('cash');
   const [reference, setReference] = useState('');
+  /**
+   * P31 — correcting the ledger, which had no button.
+   *
+   * `save_supplier_adjustment` existed from P26 and nothing called it, so a
+   * supplier's balance could only ever move by an invoice or a payment. A
+   * credit note for returned stock, an invoice entered twice, ten rupees of
+   * rounding somebody argued about — none of them had a way in, and the
+   * shop's answer was to enter a fake payment.
+   */
+  const [fixing, setFixing] = useState(false);
+  const [adjust, setAdjust] = useState('');
+  const [increases, setIncreases] = useState(false);
+  const [why, setWhy] = useState('');
 
   return (
     <Modal open title={account.supplier.name} onClose={onClose} wide>
@@ -739,7 +775,61 @@ function SupplierAccount({
         >
           Record
         </Button>
+        <Button variant="quiet" onClick={() => setFixing(!fixing)}>
+          {fixing ? 'Never mind' : 'Correct the balance'}
+        </Button>
       </div>
+
+      {/* **A correction is a LINE, not an edit.** It joins the movements below
+          with its reason on it, so what the balance is and how it got there
+          are still the same story. That is why there is no "change the
+          balance to" box: a figure with no line behind it is a figure nobody
+          can explain to the supplier on the phone. */}
+      {fixing ? (
+        <div className="mb-row">
+          <Input
+            label="By how much"
+            value={adjust}
+            inputMode="decimal"
+            onChange={(e) => setAdjust(e.target.value)}
+          />
+          <Select
+            label="Which way"
+            value={increases ? 'up' : 'down'}
+            onChange={(e) => setIncreases(e.target.value === 'up')}
+            options={[
+              { value: 'down', label: 'We owe them less' },
+              { value: 'up', label: 'We owe them more' },
+            ]}
+          />
+          <Input
+            label="Why"
+            value={why}
+            placeholder="Credit note for the returned oil"
+            onChange={(e) => setWhy(e.target.value)}
+          />
+          <Button
+            disabled={adjust.trim() === '' || why.trim() === ''}
+            onClick={() =>
+              call('save_supplier_adjustment', {
+                supplierId: account.supplier.id,
+                amount: adjust.trim(),
+                increases,
+                reason: why.trim(),
+              })
+                .then((fresh) => {
+                  onChanged(fresh);
+                  setFixing(false);
+                  setAdjust('');
+                  setWhy('');
+                })
+                .catch(onError)
+            }
+          >
+            Correct it
+          </Button>
+        </div>
+      ) : null}
 
       <Table
         rows={account.movements}
@@ -886,6 +976,153 @@ function PurchasePaper({
           <Button onClick={onClose}>Close</Button>
         </div>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * **Raising a purchase order** — `save_purchase_order`, P26's command that
+ * nothing called until P31.
+ *
+ * The Orders tab could mark an order sent and close it, and could not make
+ * one, so the whole tab was a list that could only ever be empty.
+ *
+ * # It stays optional, and the words say so
+ *
+ * The empty state on that tab is right: *"A purchase order is optional. You
+ * never have to raise one — enter what arrives and nothing here will ever ask
+ * about it."* Most shops in this market ring the supplier. This is for the ones
+ * whose supplier wants paper, and it must not become a step in front of
+ * entering a delivery.
+ *
+ * # No total, and that is deliberate
+ *
+ * An order is what you asked for; a delivery is what turned up and what it
+ * cost. Rust works the value out from the lines — a total typed here would be
+ * a second answer, and it would be the one that is wrong when the rate changes
+ * between ordering and delivery.
+ */
+function RaiseOrder({
+  view,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  view: BuyingView;
+  onClose: () => void;
+  onSaved: (fresh: BuyingView) => void;
+  onError: (cause: unknown) => void;
+}) {
+  const [supplierId, setSupplierId] = useState(view.suppliers[0]?.id ?? '');
+  const [number, setNumber] = useState('');
+  const [expected, setExpected] = useState('');
+  const [note, setNote] = useState('');
+  const [lines, setLines] = useState<PurchaseLineEdit[]>([{ ...BLANK_LINE }]);
+  const [busy, setBusy] = useState(false);
+
+  const setLine = (index: number, patch: Partial<PurchaseLineEdit>) => {
+    setLines((all) => all.map((line, n) => (n === index ? { ...line, ...patch } : line)));
+  };
+
+  const ready = lines.filter((l) => l.materialId !== '' && l.qty.trim() !== '');
+
+  return (
+    <Modal open title="Raise a purchase order" onClose={onClose} wide>
+      <p className="mb-buying__says">
+        What you are asking a supplier for. Nothing moves on the shelf and
+        nothing is owed until the delivery arrives and you enter it.
+      </p>
+
+      <div className="mb-row">
+        <Select
+          label="Supplier"
+          value={supplierId}
+          onChange={(e) => setSupplierId(e.target.value)}
+          options={view.suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        <Input
+          label="Your number for it"
+          hint="Leave it blank and we will give it one."
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+        />
+        <Input
+          label="Expected"
+          placeholder="2026-08-20"
+          value={expected}
+          onChange={(e) => setExpected(e.target.value)}
+        />
+      </div>
+
+      {lines.map((line, index) => (
+        <div className="mb-row" key={index}>
+          <Select
+            label="What"
+            value={line.materialId}
+            onChange={(e) => setLine(index, { materialId: e.target.value })}
+            options={[
+              { value: '', label: 'Pick a material' },
+              ...view.materials.map((m: BuyMaterialView) => ({ value: m.id, label: m.name })),
+            ]}
+          />
+          <Input
+            label="How much"
+            value={line.qty}
+            onChange={(e) => setLine(index, { qty: e.target.value })}
+          />
+          <Input
+            label="In"
+            hint="kg, litre, packet"
+            value={line.unit}
+            onChange={(e) => setLine(index, { unit: e.target.value })}
+          />
+          <Input
+            label="Rate you expect"
+            value={line.rate}
+            onChange={(e) => setLine(index, { rate: e.target.value })}
+          />
+        </div>
+      ))}
+
+      <div className="mb-row">
+        <Button
+          small
+          variant="quiet"
+          onClick={() => setLines([...lines, { ...BLANK_LINE }])}
+        >
+          Another line
+        </Button>
+      </div>
+
+      <Input label="Anything to tell them" value={note} onChange={(e) => setNote(e.target.value)} />
+
+      <div className="mb-row mb-row--end">
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          disabled={busy || supplierId === '' || ready.length === 0}
+          onClick={() => {
+            setBusy(true);
+            call('save_purchase_order', {
+              edit: {
+                id: `po_${Date.now().toString(36)}`,
+                supplierId,
+                number,
+                expected,
+                note,
+                lines: ready,
+              },
+            })
+              .then(onSaved)
+              .catch(onError)
+              .finally(() => setBusy(false));
+          }}
+        >
+          Raise it
+        </Button>
+      </div>
     </Modal>
   );
 }

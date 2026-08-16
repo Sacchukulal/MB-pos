@@ -53,10 +53,14 @@ pub struct App {
     /// **The cart lives in Rust** (P09). One counter, one cart, recomputed from
     /// scratch on every change — see billing.rs for why it is not in React.
     cart: Mutex<CartState>,
-    /// One face for every printer, loaded once (P07/D33). Rasterising a
-    /// receipt is 2 ms with a warm glyph cache and rather more with a cold one,
-    /// so there is exactly one.
-    font: Arc<Font>,
+    /// **The faces this counter can print in**, loaded once each (P07/D33,
+    /// P31). Rasterising a receipt is 2 ms with a warm glyph cache and rather
+    /// more with a cold one, so a face is parsed once and shared by every
+    /// printer worker.
+    ///
+    /// Was a single `Arc<Font>` until P31, when the owner asked for a choice
+    /// of typeface for the bill and the kitchen ticket.
+    faces: Arc<crate::typefaces::SystemFaces>,
     /// **Who is at the counter** (P11). Deliberately beside the cart rather
     /// than inside it: locking the screen must not be able to touch an order,
     /// and two separate locks is the cheapest way to make that structural
@@ -140,7 +144,7 @@ pub struct Shop {
 
 impl App {
     pub fn new(config: AppConfig) -> Result<App, UiError> {
-        let font = Font::builtin().map_err(|e| words::from_print(&e))?;
+        let faces = crate::typefaces::SystemFaces::new().map_err(|e| words::from_print(&e))?;
         let sessions = Sessions::new();
         // **A shop that does not exist yet has nothing to lock.**
         //
@@ -177,7 +181,7 @@ impl App {
             shop: Mutex::new(None),
             config: Mutex::new(config),
             cart: Mutex::new(CartState::default()),
-            font: Arc::new(font),
+            faces: Arc::new(faces),
             sessions,
             shop_config: Mutex::new(crate::settings::ShopConfig::default()),
             provider: std::sync::RwLock::new(Arc::new(mb_core::provider::Manual)),
@@ -360,6 +364,54 @@ impl App {
         lock(&self.shop_config).clone()
     }
 
+    /// **Every job this counter prints goes through here** — P31.
+    ///
+    /// # Why there is a choke point at all
+    ///
+    /// The shop chooses a typeface for its bills and another for its kitchen
+    /// tickets, so every job has to be stamped with one. Ten call sites each
+    /// remembering to do that is ten chances for the eleventh to forget, and
+    /// the way you find out is a shop saying *"the kitchen ticket ignores my
+    /// font"* on a Saturday.
+    ///
+    /// So the stamp happens once, here, decided from the job's own kind — and
+    /// `hygiene_tests` fails the build if anything outside this file calls
+    /// `enqueue` directly. That is D40: the rules that erode are enforced by a
+    /// test, not by agreement.
+    ///
+    /// The queue is still what owns durability, retries and parking; this adds
+    /// one field and hands the job straight over.
+    pub fn print(&self, job: mb_print::queue::Job) -> UiResult<String> {
+        let face = self.face_for(job.kind);
+        let job = job.in_face(face);
+        self.with_shop(|shop| shop.queue.enqueue(job).map_err(|e| words::from_print(&e)))
+    }
+
+    /// The same answer as [`App::face_for`], for the test that proves the
+    /// settings screen reaches the printer. Not reachable outside tests: the
+    /// only honest caller is [`App::print`].
+    #[cfg(test)]
+    #[must_use]
+    pub fn face_for_test(&self, kind: mb_print::queue::JobKind) -> Option<String> {
+        self.face_for(kind)
+    }
+
+    /// Which typeface a kind of document is printed in.
+    ///
+    /// A kitchen ticket is read across a hot room at speed and a bill is read
+    /// at arm's length, so the shop gets to answer twice. Everything else —
+    /// a test print, a label, a Z-report, a rider's slip — is paper the shop
+    /// itself reads, and follows the bill.
+    #[must_use]
+    fn face_for(&self, kind: mb_print::queue::JobKind) -> Option<String> {
+        let config = self.shop_config();
+        let chosen = match kind {
+            mb_print::queue::JobKind::Kitchen => config.kitchen.font,
+            _ => config.receipt.font,
+        };
+        Some(chosen).filter(|f| !f.is_empty())
+    }
+
     /// Read the configuration from the open shop and publish it.
     ///
     /// **A shop whose settings will not read keeps the defaults and says so.**
@@ -503,7 +555,7 @@ impl App {
         Queue::start(
             printers,
             store,
-            Arc::clone(&self.font),
+            Arc::clone(&self.faces) as Arc<dyn mb_print::font::Typefaces>,
             QueueConfig::default(),
         )
     }
@@ -519,7 +571,7 @@ impl App {
         Queue::start(
             printers,
             Arc::new(MemoryStore::new()),
-            Arc::clone(&self.font),
+            Arc::clone(&self.faces) as Arc<dyn mb_print::font::Typefaces>,
             QueueConfig::default(),
         )
     }
@@ -537,9 +589,12 @@ impl App {
         lock(&self.shop).is_some()
     }
 
+    /// The built-in face. Callers that lay a document out themselves — the
+    /// preview, the diagnostics slip — do not choose a typeface: the queue is
+    /// what draws a job, and the queue asks [`crate::typefaces::SystemFaces`].
     #[must_use]
     pub fn font(&self) -> Arc<Font> {
-        Arc::clone(&self.font)
+        self.faces.builtin()
     }
 
     pub fn config(&self) -> AppConfig {

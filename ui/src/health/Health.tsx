@@ -171,6 +171,22 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           </>
         ) : (
           <div className="mb-health__actions mb-row mb-row--end">
+            {/* **Audit E7's other half.** The bundle is what somebody sends
+                when they can be talked through it; this is what somebody
+                sends when they cannot. `reveal_logs` opens the folder in
+                Explorer and had never been called from anywhere — the log
+                file existed and there was no way to reach it from inside the
+                program that wrote it. */}
+            <Button
+              variant="quiet"
+              onClick={() => {
+                call('reveal_logs')
+                  .then((where) => toast.show('ok', 'The log folder is open.', where))
+                  .catch(report);
+              }}
+            >
+              Open the log folder
+            </Button>
             <Button
               variant="quiet"
               onClick={() => {

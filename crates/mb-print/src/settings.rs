@@ -183,6 +183,20 @@ pub struct ReceiptSettings {
     /// that nothing else in this product can do.
     #[serde(default)]
     pub bill_barcode: bool,
+    /// **P31. The typeface this is printed in**, as a key from
+    /// [`crate::font::FAMILIES`].
+    ///
+    /// A string rather than an enum, and deliberately: the list of faces is a
+    /// fact about the MACHINE, not about this format, and a shop whose Windows
+    /// has one we have never heard of should be reachable by adding a row to
+    /// that table rather than a variant here. An unknown value prints in the
+    /// built-in face and says so in the log — never a bill that does not come
+    /// out (requirement 3).
+    ///
+    /// `#[serde(default)]` because shops saved their settings before this
+    /// existed, and an empty string means the built-in one for exactly them.
+    #[serde(default)]
+    pub font: String,
     pub footer: String,
     /// Printed above the totals when the shop is a composition dealer
     /// (scope 2.10) — they may not collect GST and must say so.
@@ -202,6 +216,10 @@ impl Default for ReceiptSettings {
             qr: QrMode::None,
             qr_width_pct: 40,
             bill_barcode: false,
+            // Named rather than empty: "" is not one of the choices, and the
+            // settings catalogue is right to refuse a value that is not on its
+            // own list.
+            font: "builtin".to_owned(),
             footer: "Thank you, visit again".to_owned(),
             composition_note:
                 "Composition taxable person, not eligible to collect tax on supplies".to_owned(),
@@ -235,7 +253,10 @@ impl Default for KitchenSeparators {
 }
 
 /// The kitchen ticket's own toggles (audit Part 3, "KOT visibility").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// **Not `Copy` since P31.** It carries a typeface name now, and a `String`
+// cannot be. Every caller took it by value out of habit rather than need; the
+// ones that did are `&` now, which is what they meant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KitchenSettings {
     pub show_title: bool,
     pub show_token: bool,
@@ -258,6 +279,20 @@ pub struct KitchenSettings {
     pub title: Style,
     pub details: Style,
     pub items: Style,
+    /// **P31. The typeface this is printed in**, as a key from
+    /// [`crate::font::FAMILIES`].
+    ///
+    /// A string rather than an enum, and deliberately: the list of faces is a
+    /// fact about the MACHINE, not about this format, and a shop whose Windows
+    /// has one we have never heard of should be reachable by adding a row to
+    /// that table rather than a variant here. An unknown value prints in the
+    /// built-in face and says so in the log — never a bill that does not come
+    /// out (requirement 3).
+    ///
+    /// `#[serde(default)]` because shops saved their settings before this
+    /// existed, and "empty means the built-in one" is exactly right for them.
+    #[serde(default)]
+    pub font: String,
 }
 
 impl Default for KitchenSettings {
@@ -281,6 +316,10 @@ impl Default for KitchenSettings {
             title: Style::new(2, true),
             details: Style::new(1, true),
             items: Style::new(2, true),
+            // Named rather than empty: "" is not one of the choices, and the
+            // settings catalogue is right to refuse a value that is not on its
+            // own list.
+            font: "builtin".to_owned(),
         }
     }
 }

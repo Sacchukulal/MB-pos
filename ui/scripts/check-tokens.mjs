@@ -77,7 +77,20 @@ const ESCAPE = 'mb-tokens-allow:';
  */
 function stripComments(text) {
   const block = new RegExp("/\\*[\\s\\S]*?\\*/", "g");
-  const lineComment = new RegExp("^\\s*//.*$", "gm");
+  // **`[ \t]`, not `\s`, and that was a real bug.**
+  //
+  // `\s` matches a NEWLINE, so `^\s*//` starting at a blank line ate the blank
+  // line, its newline and the indentation of the comment below it — and the
+  // stripped text came out shorter than the file. Every line number after the
+  // first blank-line-then-comment was wrong by one, which meant:
+  //
+  // * reported problems pointed at the wrong line, and
+  // * `mb-tokens-allow` was read off the wrong RAW line, so **the escape hatch
+  //   silently did not work** in any file with a comment after a blank line.
+  //
+  // Found at P31 by writing a legitimate escape and watching the lint ignore
+  // it. `Logo.tsx` was two lines out.
+  const lineComment = new RegExp("^[ \\t]*//.*$", "gm");
   // Blanked rather than deleted, so a reported line number still points at
   // the right line of the real file.
   return text
