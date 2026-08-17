@@ -267,10 +267,48 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
                 let repos = mb_db::Repos::new(tx);
                 let existing = repos.settings().list_printers(OUTLET)?;
                 let before = existing.iter().find(|p| p.id == id);
-                // Keep the offset somebody has already nudged.
+
+                /*
+                  **THE STAND-IN GIVES WAY, AND THIS IS THE BUG THE OWNER
+                  REPORTED ON 2026-08-17.**
+
+                  > *"even if we added a printer again its not printig real
+                  > bill."*
+
+                  Every shop starts with `state::fallback_row` — a real row,
+                  `kind = 'none'`, `is_default = true`, whose whole job is to
+                  accept jobs and print nothing so a shop can bill on its first
+                  day (requirement 3). It has to be default, because on day one
+                  it is the only printer there is.
+
+                  Nothing ever took that back. The owner installed their TVSE,
+                  filled the dialog in, saved, and the stand-in was **still**
+                  the default — so `flows::default_printer` kept answering
+                  "prn_none" and every bill was rendered, queued, marked
+                  printed, and thrown away. No error anywhere, because
+                  printing nothing is exactly what that row promises to do.
+                  The only way to escape it was a checkbox at the bottom of
+                  the dialog reading "Bills go here unless something says
+                  otherwise", which does not contain the word default.
+
+                  So: **a real printer arriving where the only default is the
+                  stand-in becomes the default.** Not "always become the
+                  default" — a shop adding its second and third printers has
+                  already made that choice and this must not overrule it. Only
+                  the placeholder is ever displaced, which is what a
+                  placeholder is for.
+                */
+                let real = row.kind != "none";
+                let default_is_a_placeholder = existing
+                    .iter()
+                    .find(|p| p.is_default)
+                    .is_none_or(|p| p.id == crate::state::NO_PRINTER);
+
                 let row = Printer {
+                    // Keep the offset somebody has already nudged.
                     offset_x_mm: before.map_or(0, |p| p.offset_x_mm),
                     offset_y_mm: before.map_or(0, |p| p.offset_y_mm),
+                    is_default: row.is_default || (real && default_is_a_placeholder),
                     ..row.clone()
                 };
                 repos.settings().save_printer(OUTLET, &row, at)?;
@@ -320,6 +358,121 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
     app.rebuild_queue();
     log_info!("{} saved the printer \"{}\"", who.name, row.name);
 
+    printers_on(app)
+}
+
+/// **Choose where bills print** — one dropdown, and it is the owner's ask of
+/// 2026-08-17: *"no default printer selection option… just show option to
+/// select a default printer using drop down."*
+///
+/// It existed only as a checkbox at the bottom of the add-a-printer dialog,
+/// worded *"Bills go here unless something says otherwise"* — which is what
+/// being the default means but not what it is called, so nobody found it, and
+/// the shop kept printing to the stand-in. A setting that decides whether the
+/// shop prints at all belongs at the top of the screen in the words the owner
+/// used.
+///
+/// **One statement, not two.** This does not toggle a flag on one row and hope
+/// the others were cleared; it writes the whole list, so "exactly one default"
+/// is true after it by construction rather than by care.
+pub fn set_default_printer_on(app: &App, printer_id: String) -> UiResult<PrintersView> {
+    let who = guard::require(app, Permission::SettingsPrinter)?;
+    let at = crate::flows::now();
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let existing = repos.settings().list_printers(OUTLET)?;
+                if !existing.iter().any(|p| p.id == printer_id) {
+                    return Err(mb_db::DbError::invariant(
+                        "that printer is not set up any more",
+                    ));
+                }
+                for printer in &existing {
+                    let wanted = printer.id == printer_id;
+                    if printer.is_default != wanted {
+                        repos.settings().save_printer(
+                            OUTLET,
+                            &Printer {
+                                is_default: wanted,
+                                ..printer.clone()
+                            },
+                            at,
+                        )?;
+                    }
+                }
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    // The queue is the printer list made real — same reason as saving one.
+    app.rebuild_queue();
+    log_info!("{} chose where bills print", who.name);
+    printers_on(app)
+}
+
+/// **Which paper this shop's bills print on** — 58 mm (2 inch), 80 mm (3 inch)
+/// or 100 mm (4 inch).
+///
+/// # Why it is reachable from the bill designer as well as from Printers
+///
+/// The owner, 2026-08-17: *"the paper size selection in top, it should 2 inch
+/// 3 inch 4 inch."* They were on the screen where the bill is designed, and
+/// they are right that it belongs there: **paper width is the single setting
+/// that changes what every other setting on that screen does.** A heading that
+/// fits on 80 mm is capped on 58; the item table goes two-line below a width
+/// that has no room for four columns. Tuning a receipt without being able to
+/// see it on the right paper is tuning the wrong receipt.
+///
+/// **It is still one value, on the printer.** Paper belongs to a printer and
+/// not to a shop — a counter with an 80 mm bill printer and a 58 mm kitchen
+/// printer is an ordinary shop, and `save_printer` is where that is set per
+/// device. This changes the paper on the printer bills go to, which is the one
+/// the preview draws, so the two screens can never disagree about it.
+pub fn set_paper_on(app: &App, mm: u32) -> UiResult<PrintersView> {
+    let who = guard::require(app, Permission::SettingsPrinter)?;
+    if !PAPERS.contains(&mm) {
+        return Err(UiError::new(
+            "printer.paper",
+            "Paper is 58 mm (2 inch), 80 mm (3 inch) or 100 mm (4 inch).",
+        ));
+    }
+    let at = crate::flows::now();
+
+    // The printer bills actually go to — the same answer `flows::default_printer`
+    // gives, so changing "the paper" here changes the paper of the roll a
+    // customer's bill comes out on rather than of whichever row is first.
+    let target = crate::flows::default_printer(app)?.id;
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let Some(printer) = repos
+                    .settings()
+                    .list_printers(OUTLET)?
+                    .into_iter()
+                    .find(|p| p.id == target)
+                else {
+                    return Err(mb_db::DbError::invariant("that printer is gone"));
+                };
+                repos.settings().save_printer(
+                    OUTLET,
+                    &Printer {
+                        paper_mm: i64::from(mm),
+                        ..printer
+                    },
+                    at,
+                )
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    // The queue holds each printer's paper in its worker, so it has to be told.
+    app.rebuild_queue();
+    log_info!("{} set the bill paper to {mm} mm", who.name);
     printers_on(app)
 }
 
@@ -472,6 +625,19 @@ pub fn save_printer(app: tauri::State<'_, App>, edit: PrinterEdit) -> UiResult<P
 #[tauri::command]
 pub fn delete_printer(app: tauri::State<'_, App>, id: String) -> UiResult<PrintersView> {
     delete_printer_on(&app, id)
+}
+
+#[tauri::command]
+pub fn set_default_printer(
+    app: tauri::State<'_, App>,
+    printer_id: String,
+) -> UiResult<PrintersView> {
+    set_default_printer_on(&app, printer_id)
+}
+
+#[tauri::command]
+pub fn set_paper_size(app: tauri::State<'_, App>, mm: u32) -> UiResult<PrintersView> {
+    set_paper_on(&app, mm)
 }
 
 #[tauri::command]

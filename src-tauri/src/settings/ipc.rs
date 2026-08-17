@@ -323,6 +323,18 @@ pub struct PreviewView {
     pub doc: crate::preview::PreviewDoc,
     /// Which paper this is, in the owner's words: "80 mm (3 inch)".
     pub paper: String,
+    /// **The face the printer will use, named so a browser can use it too** —
+    /// 2026-08-17, when a shop could first choose Times New Roman.
+    ///
+    /// The label out of `mb_print::font::FAMILIES`, which for every face but
+    /// the built-in one IS the Windows family name — so the preview draws in
+    /// the same typeface the paper will. The screen falls back to its monospace
+    /// stack when the face is not installed, which is what the printer does too
+    /// (`SystemFaces::load`).
+    pub font: String,
+    /// Whether that face has one width for every character. The preview lays a
+    /// proportional one out by its boxes rather than by counting spaces.
+    pub font_is_monospace: bool,
     /// **Settings that could not be used yet, by name.**
     ///
     /// The preview redraws on every keystroke, and half-typed is a normal
@@ -387,11 +399,36 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
     }
     .map_err(|e| words::from_print(&e))?;
 
+    // **The face this preview is of.** The kitchen ticket and the bill each
+    // have their own, so the preview asks the same settings the printer will.
+    let key = match Group::from_code(&group) {
+        Some(Group::Kitchen) => wanted.kitchen.font.as_str(),
+        _ => wanted.receipt.font.as_str(),
+    };
+    let family = mb_print::font::family(key);
+
     Ok(PreviewView {
         doc,
         paper: paper_label,
+        // The built-in face is the only one with no Windows name, and the
+        // screen has its own monospace stack for it — so it is named as
+        // nothing rather than as a family a browser would fail to find.
+        font: family
+            .filter(|f| f.file.is_some())
+            .map_or_else(String::new, |f| windows_family(f.label).to_owned()),
+        font_is_monospace: family.is_none_or(|f| f.monospace),
         not_usable_yet,
     })
+}
+
+/// **The Windows family name inside a label.**
+///
+/// The labels a shop reads carry an explanation — "Times New Roman — a
+/// printed-book look", "Verdana — widest, easiest to read small" — because a
+/// dropdown of bare family names tells a shopkeeper nothing about which to
+/// pick. A browser needs the name alone.
+fn windows_family(label: &str) -> &str {
+    label.split(" — ").next().unwrap_or(label).trim()
 }
 
 // ---------------------------------------------------------------------------

@@ -210,8 +210,15 @@ fn t6_a_heading_too_big_is_capped_and_stays_complete() {
             _ => None,
         })
         .expect("the cap was not recorded");
-    assert_eq!(used.0, 3, "it should have been asked for at 3x");
-    assert!(used.1 < 3, "it should have come down");
+    // **In dots since 2026-08-17**, not in the ESC/POS multiplier. `Style::new(3, …)`
+    // is 3 cells, which is 72 dots, and the note says what was asked for and
+    // what was used in the same unit a shop's size setting is in.
+    assert_eq!(used.0, 72, "it should have been asked for at three cells");
+    assert!(used.1 < 72, "it should have come down");
+    assert!(
+        used.1 >= 24,
+        "capping must not take a heading below the ordinary body size: {used:?}"
+    );
 
     let rendered = text::to_text(&laid);
     for word in "ANNAPOORNESHWARI REFRESHMENTS".split(' ') {

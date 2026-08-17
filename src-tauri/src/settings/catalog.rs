@@ -187,28 +187,52 @@ const ROW_HEIGHTS: &[Choice] = &[
     Choice { value: "relaxed", label: "Relaxed — easiest to read" },
 ];
 
-/// **The text sizes, in px** — P31, and the owner asked for it by name:
-/// *"sizes in px not Large/Normal/Small."*
+/// **Ten sizes, numbered 1 to 10.**
 ///
-/// # These are the only three, and that is the printer's doing rather than ours
+/// # Three lists in one day, and the owner was right twice
 ///
-/// A thermal printer's character cell comes from the paper: `paper.dots()`
-/// divided by `paper.columns()`, which is **12 × 24 dots on both 58 mm and
-/// 80 mm rolls**. Everything the hardware can draw is that cell times one, two
-/// or three — the ESC/POS multiplier — so 24, 48 and 72 px are not three
-/// options out of many, they are the complete list.
+/// It was `24 px / 48 px / 72 px` — three, because a size WAS the ESC/POS
+/// multiplier and nothing between the multiples could be expressed. Told that,
+/// the owner asked for fine steps, and got twenty-two `px` values. That was
+/// wrong too, and they said so:
 ///
-/// A free-text px box would be a box that lies. The character WIDTH has to stay
-/// on the column grid or the text sink, the PDF sink, the raster sink and the
-/// on-screen preview stop agreeing about where a line breaks, which is the
-/// drift `mb-print` exists to prevent (D1, D29).
+/// > *"u given 22 selectors thats too not working, just 5 to 10 is enough…
+/// > dont use px, just like numbers u use 1,2,3..... etc, dont write smal
+/// > mediam, just think as a user how they feel."*
 ///
-/// The old word stays in brackets, because a shop that learned "Large" on v1
-/// should still be able to find it.
+/// **They are right, and this is the version that thinks about the person
+/// choosing.** A shopkeeper picking how big the total should print does not
+/// know what a dot is, does not want to count in twos, and gains nothing from
+/// twenty-two options where ten differ visibly. "Small / Medium / Large" is
+/// worse again: it is three words pretending to be a scale, and it does not
+/// say whether Large is bigger than the shop name.
+///
+/// So: **1 is smallest, 10 is biggest, and every step is visibly different on
+/// paper.** No unit, no adjective, no arithmetic.
+///
+/// # The value is still the height in dots
+///
+/// The LABEL is what a shop reads; the VALUE is what the printer draws — 16
+/// dots up to 72, which is three full cells of the printer's own font and the
+/// largest a thermal head will form. Keeping dots in the row means a shop that
+/// tuned its receipt before today still reads back to the same size (24 is
+/// still 3, 48 is still 8, 72 is still 10), and it is what stops the numbers
+/// on this list colliding with the `1`/`2`/`3` multipliers older builds wrote.
+///
+/// A shop on the **Text** print engine gets the nearest multiplier its printer
+/// can form (`Style::scale` rounds to it) — that hardware has one font at
+/// three sizes and no setting here can change it.
 pub(super) const SIZES: &[Choice] = &[
-    Choice { value: "1", label: "24 px (normal)" },
-    Choice { value: "2", label: "48 px (large)" },
-    Choice { value: "3", label: "72 px (extra large)" },
+    Choice { value: "16", label: "1" },
+    Choice { value: "20", label: "2" },
+    Choice { value: "24", label: "3" },
+    Choice { value: "28", label: "4" },
+    Choice { value: "32", label: "5" },
+    Choice { value: "36", label: "6" },
+    Choice { value: "40", label: "7" },
+    Choice { value: "48", label: "8" },
+    Choice { value: "60", label: "9" },
+    Choice { value: "72", label: "10" },
 ];
 
 /// **The typefaces** — the owner's *"5-6 choices"*.
@@ -225,6 +249,15 @@ pub(super) const FONTS: &[Choice] = &[
     Choice { value: "courier", label: "Courier New" },
     Choice { value: "lucida", label: "Lucida Console" },
     Choice { value: "cascadia", label: "Cascadia Mono" },
+    // The proportional faces, 2026-08-17. The owner asked for the v1 list back
+    // — *"i want some fonts like it was in previous mb pos app… Times New
+    // Roman etc"* — and `mb_print::font::FAMILIES` explains what had to change
+    // in the layout to make them honest rather than merely offered.
+    Choice { value: "times", label: "Times New Roman — a printed-book look" },
+    Choice { value: "georgia", label: "Georgia — heavier serif, clear on faint paper" },
+    Choice { value: "arial", label: "Arial" },
+    Choice { value: "calibri", label: "Calibri — rounder, a little smaller" },
+    Choice { value: "verdana", label: "Verdana — widest, easiest to read small" },
 ];
 
 const LOGO_POSITIONS: &[Choice] = &[
@@ -440,8 +473,17 @@ macro_rules! pick {
     };
 }
 
-/// Per-section text size: 1, 2 or 3 — the ESC/POS multiplier, which is what
-/// "Normal / Large / Extra large" means on a thermal printer.
+/// **Per-section text size, in dots** — 2026-08-17.
+///
+/// It stored the ESC/POS multiplier (1, 2 or 3) and nothing else, which is why
+/// there were only ever three sizes. It stores a HEIGHT now, and
+/// `Style::px` works the multiplier out from it so the text engine still has
+/// the number its hardware understands.
+///
+/// **A shop that saved `1`, `2` or `3` before today still reads back right.**
+/// Those rows are on disk in every shop that has ever changed a size, and
+/// refusing them would be an upgrade that resets a tuned receipt — so they are
+/// read as the multiplier they were and turned into the dots they meant.
 macro_rules! size {
     ($key:literal, $group:ident, $label:literal, $help:literal,
      [$($syn:literal),* $(,)?], $($field:ident).+) => {
@@ -453,14 +495,19 @@ macro_rules! size {
             help: $help,
             synonyms: &[$($syn),*],
             kind: Kind::Choice(SIZES),
-            read: |c| Value::Text(c.$($field).+.scale().to_string()),
+            read: |c| Value::Text(c.$($field).+.size.to_string()),
             write: |c, v| {
-                c.$($field).+.scale = match v.as_text()? {
-                    "1" => 1,
-                    "2" => 2,
-                    "3" => 3,
-                    _ => return Err(Invalid::new("A size here is Normal, Large or Extra large.")),
+                let px: u16 = match v.as_text()?.parse::<u16>() {
+                    // **The old values, still understood.** 1/2/3 were the
+                    // multiplier; anything larger is already a height. The same
+                    // rule `Style::size_from_wire` applies to a config file.
+                    Ok(n @ 1..=3) => n * crate::settings::BASE_CELL_PX,
+                    Ok(n) if crate::settings::is_a_size(n) => n,
+                    _ => return Err(Invalid::new(
+                        "Pick a size from the list — 12 px to 72 px.",
+                    )),
                 };
+                c.$($field).+.size = px;
                 Ok(())
             },
         }

@@ -164,7 +164,11 @@ describe('the kitchen display', () => {
    * cheap keyboard instead of a touchscreen, because a screen behind a tandoor
    * gets grease on it.
    */
-  it('clears a card from the number key as well as the button', async () => {
+  // Given longer than the default five seconds for the reason the shell's
+  // sign-in test is: it runs in about half a second on an idle machine, and
+  // vitest runs twenty-five files at once. A test that fails on a busy machine
+  // teaches whoever sees it to re-run the suite instead of reading it.
+  it('clears a card from the number key as well as the button', { timeout: 20_000 }, async () => {
     serve(view({ tickets: [ticket({ id: 'first' }), ticket({ id: 'second' })] }));
     show();
     await screen.findAllByText('Table 5');

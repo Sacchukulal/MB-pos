@@ -66,6 +66,49 @@ const GLYPH_ICONS = [
   '✔', '▲', '▼', '◀', '▶', '★', '☆', '🔒', '🔓', '🖨', '🖶', '☀', '☾', '☼',
 ];
 
+/**
+ * **A COMPONENT'S CLASSES MAY ONLY BE WRITTEN BY THE FILE THAT OWNS IT.**
+ *
+ * The owner, 2026-08-17, on finding the Floor screen's tables drawn
+ * differently from the billing screen's:
+ *
+ * > *"As already i told you from starting to till, dont hardcode any styling
+ * > themes, that must be global theme follow. if anything hardcoded, remove
+ * > hardcode immediately, that is the very very strict instruction forever."*
+ *
+ * The cause was not a raw value — `check-tokens.mjs` had been clean for
+ * twenty sessions — and it was not a page margin. `Floor.tsx` had **a second
+ * table tile**: its own JSX, reaching for the same `mb-tile` classes with
+ * different markup. The two screens had therefore never quite matched, and
+ * when the tile was restructured the copy kept the old shape and collapsed
+ * into overlapping text. Nothing failed. Nobody could have known.
+ *
+ * A values lint cannot see this and a layout lint could not either, because
+ * both copies were "legal". What is illegal is **a second author for one
+ * component's markup**, and that is checkable: if a class belongs to a
+ * component, only that component's file may write it.
+ *
+ * Adding a row here is how a new shared component gets the same protection.
+ * `forever` is the word the owner used, and a rule is the only thing that
+ * lasts that long.
+ *
+ * # What this list is NOT
+ *
+ * It is deliberately short. The rule is for **a whole component that has one
+ * owner and is drawn on more than one screen** — the thing that can be
+ * duplicated. Reusing one small class for its styling (a recovery code shown
+ * in two dialogs; a name that should wrap the way a cart line's does) is not
+ * a second implementation of anything, and banning it would turn a real rule
+ * into noise that the next session learns to escape.
+ */
+const OWNED_CLASSES = [
+  {
+    prefix: 'mb-tile',
+    owner: join('src', 'billing', 'TableGrid.tsx'),
+    what: 'the table tile',
+  },
+];
+
 const CHECKS = [
   {
     what: 'a page margin in a feature file',
@@ -177,6 +220,34 @@ for (const file of walk(ROOT)) {
           what: check.what,
           text: found[0].trim().slice(0, 60),
           fix: check.fix,
+        });
+      }
+    }
+
+    // **A second author for one component's markup** — see OWNED_CLASSES.
+    // TSX only: the CSS for a component lives in its feature's stylesheet and
+    // that is one author, which is the thing being protected.
+    if (kind !== 'tsx') return;
+    for (const owned of OWNED_CLASSES) {
+      if (path === owned.owner) continue;
+      // Written inside a className, not merely mentioned. `querySelector`
+      // in a test and a word in a sentence are not a second implementation.
+      //
+      // **`\b` alone does not work here**, and getting that wrong is how this
+      // rule shipped passing on the very file it was written for:
+      // `mb-tile__label` has no word boundary after "tile", because `_` is a
+      // word character. The suffix has to be matched explicitly.
+      const re = new RegExp(
+        `class(?:Name)?=["'\`{][^>]{0,200}?${owned.prefix}(?:__|--|[\\s"'\`])`,
+      );
+      const hit = re.exec(line);
+      if (hit) {
+        problems.push({
+          file: path,
+          line: index + 1,
+          what: `${owned.what}, drawn outside the file that owns it`,
+          text: hit[0].trim().slice(0, 60),
+          fix: `Import it from ${owned.owner.replace(/\\/g, '/')} instead of drawing a second copy.`,
         });
       }
     }

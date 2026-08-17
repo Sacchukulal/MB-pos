@@ -150,16 +150,31 @@ pub struct Sections {
     pub token: Style,
 }
 
+/// **A shop's saved sizes carry their height in dots, explicitly.**
+///
+/// `Style::new(2, true)` leaves `px` unset, meaning "two of the printer's own
+/// cells". That is right for a document built in code, and wrong for a SETTING:
+/// writing the configuration out and reading it back would turn `None` into
+/// `Some(48)` — the same size, a different value — so a shop's config file
+/// would not round-trip, and the export/import test said so the moment the px
+/// setting existed.
+///
+/// So the defaults say the number. 24 is one cell and 48 is two, which is
+/// exactly what these were before, and no shop's receipt moves.
+const fn dots(px: u16, bold: bool) -> Style {
+    Style::px(px, bold, 24)
+}
+
 impl Default for Sections {
     fn default() -> Self {
         Sections {
-            store_name: Style::new(2, true),
-            meta: Style::NORMAL,
-            items: Style::NORMAL,
-            subtotals: Style::NORMAL,
-            grand_total: Style::new(2, true),
-            footer: Style::NORMAL,
-            token: Style::new(2, true),
+            store_name: dots(48, true),
+            meta: dots(24, false),
+            items: dots(24, false),
+            subtotals: dots(24, false),
+            grand_total: dots(48, true),
+            footer: dots(24, false),
+            token: dots(48, true),
         }
     }
 }
@@ -312,10 +327,11 @@ impl Default for KitchenSettings {
             // hands, and a line of air between dishes is worth the paper.
             row_height: RowHeight::Relaxed,
             // The kitchen reads this across a hot room at speed, so the
-            // defaults are deliberately larger than the bill's.
-            title: Style::new(2, true),
-            details: Style::new(1, true),
-            items: Style::new(2, true),
+            // defaults are deliberately larger than the bill's. In dots, for
+            // the reason `dots` above gives.
+            title: dots(48, true),
+            details: dots(24, true),
+            items: dots(48, true),
             // Named rather than empty: "" is not one of the choices, and the
             // settings catalogue is right to refuse a value that is not on its
             // own list.

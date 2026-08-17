@@ -256,7 +256,11 @@ describe('the settings screen', () => {
     draw();
     await screen.findByLabelText('Shop name');
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
-    expect(screen.getByText(/80 mm/)).toBeTruthy();
+    // **Which paper it DREW on**, said above the paper itself. Matched by the
+    // whole sentence rather than by "80 mm": the paper-width picker added on
+    // 2026-08-17 offers "3 inch (80 mm)" as an option, so a loose match now
+    // finds two things and cannot tell the label from the picture.
+    expect(screen.getByText('Sample · 80 mm (3 inch)')).toBeTruthy();
 
     call.mockClear();
     fireEvent.change(screen.getByLabelText('Shop name'), {

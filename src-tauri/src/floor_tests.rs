@@ -473,3 +473,85 @@ fn a_shop_with_no_floor_plan_still_has_a_floor() {
     assert!(floor.tiles.iter().any(|t| t.order_id.is_some()), "with its order on it");
     assert!(floor.occupancy.busy.contains("1 of 4"), "{}", floor.occupancy.busy);
 }
+
+// ---------------------------------------------------------------------------
+// Carrying the bill to the table — the print mark on a tile, 2026-08-17.
+// ---------------------------------------------------------------------------
+
+/// **The bill goes to the table and the table stays open.**
+///
+/// This is the whole claim of `print_open_bill`, and it is the half that makes
+/// it safe to put on a tile a cashier's thumb passes over forty times a shift:
+/// pressing it produces paper and *no other consequence*. The order is still
+/// open, still on its table, still carrying its own bill number, and the money
+/// has not been taken.
+#[test]
+fn the_bill_can_go_to_the_table_without_settling_it() {
+    let scratch = Scratch::new("bill_to_table");
+    let app = a_shop_with_a_room(&scratch);
+    let order = seat(&app, "ord_bill", "tbl_3", &[("itm_dosa", 12_000, 2)], Some(2));
+
+    let before = read(&app, &order);
+    let said = crate::flows::print_open_bill_on(&app, order.as_str().to_owned())
+        .expect("the bill printed");
+
+    // **What the SHOP calls the table** — audit F8, and this assertion exists
+    // because the first version failed it. `TableId` is `tbl_3` here and is a
+    // whole sentence longer on a real shop, so the toast read "The bill for
+    // table tbl_outlet_default_sec_ac_2_ is printing." Asserting `contains("3")`
+    // alone would have passed on the broken version, which is why the second
+    // half of this is the one that matters.
+    assert_eq!(said, "The bill for table 3 is printing.", "{said}");
+    assert!(!said.contains("tbl_"), "the toast shows a database id: {said}");
+
+    // 1. **Paper.** And marked, so it can never be mistaken for a paid bill.
+    let jobs = app.print_queue_snapshot();
+    assert!(
+        jobs.iter().any(|j| j.reason.as_deref() == Some("bill to the table")),
+        "nothing reached the printer: {jobs:?}"
+    );
+
+    // 2. **And nothing else.** Same state, same table, same bill number — a
+    //    settled order here would mean the button closed a table that had not
+    //    paid, which is the failure worth having a test for.
+    let after = read(&app, &order);
+    assert!(
+        matches!(after, AnyOrder::Open(_)),
+        "printing the bill settled the order"
+    );
+    let (AnyOrder::Open(before), AnyOrder::Open(after)) = (&before, &after) else {
+        panic!("the order stopped being open");
+    };
+    assert_eq!(
+        before.bill_number.formatted, after.bill_number.formatted,
+        "printing the bill burned a bill number"
+    );
+    assert_eq!(before.core.table, after.core.table, "the party was moved off its table");
+    assert_eq!(before.core.cart.lines().len(), after.core.cart.lines().len());
+
+    // 3. **Twice is two pieces of paper and nothing else** — a waiter who lost
+    //    the first one presses it again, and that has to be free.
+    crate::flows::print_open_bill_on(&app, order.as_str().to_owned()).expect("and again");
+    assert!(matches!(read(&app, &order), AnyOrder::Open(_)));
+}
+
+/// A table with nothing on it, and a bill that has already been paid, are the
+/// two ways this can be pressed on something it cannot print — and both say so
+/// in words a shopkeeper can act on rather than failing silently.
+#[test]
+fn there_is_no_bill_to_carry_for_an_order_that_is_not_open() {
+    let scratch = Scratch::new("bill_to_nobody");
+    let app = a_shop_with_a_room(&scratch);
+
+    let missing = crate::flows::print_open_bill_on(&app, "ord_nothing".to_owned())
+        .expect_err("printed a bill for an order that does not exist");
+    assert_eq!(missing.code, "bill.not_open", "{missing:?}");
+
+    // An order that exists and has nothing on it. The tile would not show the
+    // button — a tile with no order has none — but the command is the control,
+    // not the button.
+    seat(&app, "ord_empty", "tbl_4", &[], None);
+    let empty = crate::flows::print_open_bill_on(&app, "ord_empty".to_owned())
+        .expect_err("printed an empty bill");
+    assert_eq!(empty.code, "bill.empty", "{empty:?}");
+}

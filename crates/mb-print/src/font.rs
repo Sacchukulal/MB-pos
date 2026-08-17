@@ -161,7 +161,13 @@ pub struct Font {
     name: String,
     inner: fontdue::Font,
     cache: Mutex<BTreeMap<(char, u32, u32), Arc<Glyph>>>,
+    /// The same glyphs placed at the pen rather than centred in a cell — see
+    /// [`Font::glyph_at`]. A second cache rather than a flag on the key,
+    /// because a receipt uses one or the other and never both.
+    natural: Mutex<BTreeMap<(char, u32, u32), Arc<Glyph>>>,
     cells: Mutex<BTreeMap<(u32, u32), Cell>>,
+    /// Worked out once, on demand — see [`Font::is_monospace`].
+    monospace: Mutex<Option<bool>>,
 }
 
 impl fmt::Debug for Font {
@@ -190,7 +196,9 @@ impl Font {
             name: name.into(),
             inner,
             cache: Mutex::new(BTreeMap::new()),
+            natural: Mutex::new(BTreeMap::new()),
             cells: Mutex::new(BTreeMap::new()),
+            monospace: Mutex::new(None),
         })
     }
 
@@ -249,6 +257,150 @@ impl Font {
 
         lock(&self.cells).insert((width, height), best);
         best
+    }
+
+    /// **How wide one character is, in dots, at this cell's size.**
+    ///
+    /// The number the layout needs in order to stop counting characters and
+    /// start measuring them — the seam this file has named since P07 as the
+    /// thing standing between a character grid and a real typeface.
+    ///
+    /// Rounded to whole dots, and that is deliberate rather than lazy: a
+    /// printer fires whole dots, so a layout that positioned text at 11.4 dots
+    /// would be describing something the hardware cannot do, and the raster
+    /// sink would round it anyway — in its own way, at its own moment, which
+    /// is how the sinks come to disagree. Rounding once, here, means every
+    /// caller gets the same answer.
+    ///
+    /// **Never zero.** A face that reports no advance for a character (a
+    /// control code, a glyph it does not have) would otherwise let a string of
+    /// them measure as nothing and wrap forever.
+    #[must_use]
+    pub fn advance(&self, ch: char, cell: Cell) -> u32 {
+        let width = self.inner.metrics(ch, cell.px).advance_width;
+        if width.is_finite() && width >= 1.0 {
+            width.round() as u32
+        } else {
+            1
+        }
+    }
+
+    /// **How wide a whole string is, in dots.**
+    ///
+    /// The sum of its advances. No kerning: fontdue exposes pair kerning and a
+    /// receipt does not want it — the amounts in a column have to line up with
+    /// each other more than the letters have to sit prettily, and kerning is
+    /// the thing that would make two rows of the same digits measure
+    /// differently.
+    #[must_use]
+    pub fn measure(&self, text: &str, cell: Cell) -> u32 {
+        text.chars().map(|ch| self.advance(ch, cell)).sum()
+    }
+
+    /// **A cell for an explicit height in dots**, rather than one derived from
+    /// the paper's column width.
+    ///
+    /// This is what a size in px means now. `Cell::for_column` still exists and
+    /// still describes the printer's own 12 × 24 grid; this describes what the
+    /// GRAPHICS engine draws when a shop has asked for 18 px text.
+    ///
+    /// The width it reports is the face's own 'M' advance at that size — for a
+    /// typewriter face that is every character's width, and for a proportional
+    /// one it is the widest, which is what a caller wanting a worst case
+    /// (a column that must not overflow) should reach for.
+    #[must_use]
+    pub fn cell_for_height(&self, height: u32) -> Cell {
+        // The same search `cell` does, against height alone: find the largest
+        // px whose ink fits the requested dot height.
+        let mut best = Cell {
+            width: height.div_ceil(2).max(1),
+            height,
+            px: 4.0,
+            baseline: height as f32,
+        };
+        let mut px = 4.0_f32;
+        while px <= (height as f32) * 1.5 {
+            let line = self
+                .inner
+                .horizontal_line_metrics(px)
+                .unwrap_or(fontdue::LineMetrics {
+                    ascent: px,
+                    descent: 0.0,
+                    line_gap: 0.0,
+                    new_line_size: px,
+                });
+            let ink_height = line.ascent - line.descent;
+            if ink_height > height as f32 {
+                break;
+            }
+            let spare = (height as f32) - ink_height;
+            let advance = self.inner.metrics('M', px).advance_width;
+            best = Cell {
+                width: if advance.is_finite() && advance >= 1.0 {
+                    advance.round() as u32
+                } else {
+                    height.div_ceil(2).max(1)
+                },
+                height,
+                px,
+                baseline: line.ascent + spare / 2.0,
+            };
+            px += 0.5;
+        }
+        best
+    }
+
+    /// **Is every character the same width?**
+    ///
+    /// Measured, not declared. [`FAMILIES`] says so for the faces this build
+    /// offers, but a `Font` is loaded from BYTES — that is the seam crown jewel
+    /// 17's Kannada face arrives through — so a font whose family nobody wrote
+    /// down still gets the right treatment.
+    ///
+    /// 'i' against 'M' is the whole test: they are the narrowest and widest
+    /// letters in a proportional Latin face by a wide margin, and identical in
+    /// a typewriter one.
+    #[must_use]
+    pub fn is_monospace(&self) -> bool {
+        if let Some(known) = *lock(&self.monospace) {
+            return known;
+        }
+        let cell = self.cell_for_height(24);
+        let same = self.advance('i', cell) == self.advance('M', cell);
+        *lock(&self.monospace) = Some(same);
+        same
+    }
+
+    /// **A glyph placed at the pen rather than centred in a cell.**
+    ///
+    /// [`Font::glyph`] centres a narrow glyph inside its column, which is right
+    /// for a character grid and wrong for proportional text — there, the pen
+    /// advances by the character's own width and the glyph sits where the face
+    /// says, or an 'i' would be drawn a third of a cell to the right of where
+    /// it belongs and the word would come apart.
+    ///
+    /// `pen` is only used to keep the cache honest about sub-dot positioning;
+    /// the returned glyph's `left` is relative to it.
+    #[must_use]
+    pub fn glyph_at(&self, ch: char, cell: Cell, pen: u32) -> Arc<Glyph> {
+        let _ = pen;
+        let key = (ch, cell.width, cell.height);
+        if let Some(found) = lock(&self.natural).get(&key) {
+            return Arc::clone(found);
+        }
+        let (metrics, coverage) = self.inner.rasterize(ch, cell.px);
+        let on: Vec<bool> = coverage.iter().map(|v| *v >= INK_THRESHOLD).collect();
+        let glyph = Arc::new(Glyph {
+            width: metrics.width as u32,
+            height: metrics.height as u32,
+            // No centring: the pen is the origin and `xmin` is the face's own
+            // offset from it.
+            left: metrics.xmin,
+            top: (cell.baseline - (metrics.ymin as f32 + metrics.height as f32)).round() as i32,
+            on,
+        });
+        lock(&self.natural).insert(key, Arc::clone(&glyph));
+        glyph
     }
 
     /// One glyph, rasterised and thresholded for a cell of this size.
@@ -323,21 +475,105 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// cell of the same width, so an 'i' is drawn with an 'M's worth of space
 /// around it. It is legible and it looks wrong, and there is no honest way to
 /// offer it.
+/// **THE MONOSPACE-ONLY RULE IS GONE, AND HERE IS WHAT REPLACED IT.**
+///
+/// This list used to be typewriter faces only, and the reason given was sound
+/// for the engine as it then was: [`crate::layout`] laid a receipt out on a
+/// character grid, so a proportional face had every glyph squeezed into a cell
+/// of the same width and an 'i' was drawn with an 'M's worth of air around it.
+///
+/// The owner asked for the v1 list back on 2026-08-17 — *"i want some fonts
+/// like it was in previous mb pos app… Times New Roman etc"* — and the audit
+/// confirms v1 offered *"Monospace, Sans-Serif, Serif, Arial, Courier New,
+/// Times New Roman"*. They chose the rebuild over the constraint.
+///
+/// So the layout **measures** text now instead of counting characters
+/// ([`Font::measure`]), and a proportional face is laid out the way an invoice
+/// always has been: column EDGES are fixed, and the text inside each column is
+/// aligned against them. What is no longer true is that every character sits on
+/// a grid — which was never something a customer wanted, only something the
+/// engine needed.
+///
+/// # `monospace` is still load-bearing
+///
+/// The ESC/POS **text** engine prints with the printer's own built-in font: it
+/// has one face, at 1×, 2× or 3×. It cannot render Times New Roman at 14 px and
+/// never will. So a shop on the Text engine gets the nearest thing the hardware
+/// can do, and [`Family::monospace`] is what lets the settings screen say so
+/// rather than let somebody choose a face that quietly does nothing.
 pub const FAMILIES: &[Family] = &[
     Family {
         key: "builtin",
         label: "Magic Bill's own (IBM Plex Mono)",
         file: None,
+        monospace: true,
     },
-    Family { key: "consolas", label: "Consolas", file: Some("consola.ttf") },
+    Family {
+        key: "consolas",
+        label: "Consolas",
+        file: Some("consola.ttf"),
+        monospace: true,
+    },
     Family {
         key: "consolas_bold",
         label: "Consolas Bold — darker on faint paper",
         file: Some("consolab.ttf"),
+        monospace: true,
     },
-    Family { key: "courier", label: "Courier New", file: Some("cour.ttf") },
-    Family { key: "lucida", label: "Lucida Console", file: Some("lucon.ttf") },
-    Family { key: "cascadia", label: "Cascadia Mono", file: Some("CascadiaMono.ttf") },
+    Family {
+        key: "courier",
+        label: "Courier New",
+        file: Some("cour.ttf"),
+        monospace: true,
+    },
+    Family {
+        key: "lucida",
+        label: "Lucida Console",
+        file: Some("lucon.ttf"),
+        monospace: true,
+    },
+    Family {
+        key: "cascadia",
+        label: "Cascadia Mono",
+        file: Some("CascadiaMono.ttf"),
+        monospace: true,
+    },
+    // --- the proportional faces, 2026-08-17 -------------------------------
+    //
+    // Every one ships with Windows 10 and 11, for the same reason the
+    // monospace ones do: `%SystemRoot%\Fonts` costs nothing in the installer
+    // and adds no licence to check. A face that is somehow missing falls back
+    // to the built-in with a line in the log (see `SystemFaces::load`).
+    Family {
+        key: "times",
+        label: "Times New Roman — a printed-book look",
+        file: Some("times.ttf"),
+        monospace: false,
+    },
+    Family {
+        key: "georgia",
+        label: "Georgia — heavier serif, clear on faint paper",
+        file: Some("georgia.ttf"),
+        monospace: false,
+    },
+    Family {
+        key: "arial",
+        label: "Arial",
+        file: Some("arial.ttf"),
+        monospace: false,
+    },
+    Family {
+        key: "calibri",
+        label: "Calibri — rounder, a little smaller",
+        file: Some("calibri.ttf"),
+        monospace: false,
+    },
+    Family {
+        key: "verdana",
+        label: "Verdana — widest, easiest to read small",
+        file: Some("verdana.ttf"),
+        monospace: false,
+    },
 ];
 
 /// One choice on the list.
@@ -349,6 +585,12 @@ pub struct Family {
     pub label: &'static str,
     /// The file in the system font folder, or `None` for the built-in.
     pub file: Option<&'static str>,
+    /// **Does every character have the same width?**
+    ///
+    /// True for a typewriter face. False for Times New Roman and its family,
+    /// where the ESC/POS text engine cannot reproduce what the graphics engine
+    /// draws — see [`FAMILIES`].
+    pub monospace: bool,
 }
 
 /// Is this a name this build knows? Used by the settings catalogue, so an
@@ -393,6 +635,103 @@ impl OneFace {
 impl Typefaces for OneFace {
     fn face(&self, _key: Option<&str>) -> Arc<Font> {
         Arc::clone(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod measuring {
+    //! **Measuring text, which is what replaced counting it** — 2026-08-17.
+
+    use super::*;
+
+    fn builtin() -> Font {
+        Font::builtin().expect("the built-in face loads")
+    }
+
+    /// In a typewriter face every character is the same width, so measuring a
+    /// string is counting it times the cell — which is exactly what the layout
+    /// did before it could measure. **The old behaviour has to fall out of the
+    /// new code**, or every existing receipt changes the day this ships.
+    #[test]
+    fn a_typewriter_face_measures_the_same_as_counting() {
+        let font = builtin();
+        let cell = font.cell(12, 24);
+        let advance = font.advance('M', cell);
+
+        for text in ["Masala Dosa", "1,240.00", "MMMMMMMM", "iiiiiiii"] {
+            assert_eq!(
+                font.measure(text, cell),
+                advance * u32::try_from(text.chars().count()).expect("short"),
+                "{text:?} did not measure as its character count"
+            );
+        }
+    }
+
+    /// And in a proportional face they are not, which is the whole point.
+    ///
+    /// Skipped where the face is not installed: this asserts a property of
+    /// Times New Roman, and a machine without it would otherwise fail a test
+    /// about the code.
+    #[test]
+    fn a_proportional_face_measures_an_i_narrower_than_an_m() {
+        let Ok(bytes) = std::fs::read(
+            std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or("C:\\Windows".into()))
+                .join("Fonts")
+                .join("times.ttf"),
+        ) else {
+            return;
+        };
+        let font = Font::load(&bytes, "Times New Roman").expect("loads");
+        let cell = font.cell_for_height(24);
+
+        assert!(
+            font.advance('i', cell) < font.advance('M', cell),
+            "a proportional face is measuring like a typewriter one"
+        );
+        // Which means a string of thin letters is genuinely narrower than a
+        // string of fat ones — the thing a character grid could not express.
+        assert!(font.measure("iiiiii", cell) < font.measure("MMMMMM", cell));
+    }
+
+    /// **Digits stay in step.** An amount column is digits, and a face whose
+    /// '1' were narrower than its '8' would make two rows of rupees fail to
+    /// line up — which is the one thing a shopkeeper checks a bill for.
+    /// Every face on the list is tabular for digits; this is what says so.
+    #[test]
+    fn digits_are_the_same_width_in_every_face_on_offer() {
+        let font = builtin();
+        let cell = font.cell_for_height(24);
+        let zero = font.advance('0', cell);
+        for digit in "123456789".chars() {
+            assert_eq!(font.advance(digit, cell), zero, "{digit} is out of step");
+        }
+    }
+
+    /// A size in dots is what a px setting means, and asking for a bigger one
+    /// has to give bigger text. Guards against the search in `cell_for_height`
+    /// silently pinning to its floor.
+    #[test]
+    fn a_taller_cell_draws_wider_characters() {
+        let font = builtin();
+        let small = font.cell_for_height(16);
+        let large = font.cell_for_height(32);
+        assert!(small.height < large.height);
+        assert!(
+            font.advance('M', small) < font.advance('M', large),
+            "16 px and 32 px drew the same width"
+        );
+    }
+
+    /// Nothing measures as nothing. A string that measured zero would wrap for
+    /// ever, and the character that does it is always something unprintable
+    /// that arrived from a shop's own data.
+    #[test]
+    fn no_character_measures_as_zero() {
+        let font = builtin();
+        let cell = font.cell(12, 24);
+        for ch in ['\u{0}', '\u{7}', ' ', '\u{200b}', 'ಅ'] {
+            assert!(font.advance(ch, cell) >= 1, "{ch:?} measured as nothing");
+        }
     }
 }
 

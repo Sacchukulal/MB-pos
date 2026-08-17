@@ -11,6 +11,22 @@ export type PreviewView = { doc: PreviewDoc,
  */
 paper: string, 
 /**
+ * **The face the printer will use, named so a browser can use it too** —
+ * 2026-08-17, when a shop could first choose Times New Roman.
+ *
+ * The label out of `mb_print::font::FAMILIES`, which for every face but
+ * the built-in one IS the Windows family name — so the preview draws in
+ * the same typeface the paper will. The screen falls back to its monospace
+ * stack when the face is not installed, which is what the printer does too
+ * (`SystemFaces::load`).
+ */
+font: string, 
+/**
+ * Whether that face has one width for every character. The preview lays a
+ * proportional one out by its boxes rather than by counting spaces.
+ */
+fontIsMonospace: boolean, 
+/**
  * **Settings that could not be used yet, by name.**
  *
  * The preview redraws on every keystroke, and half-typed is a normal

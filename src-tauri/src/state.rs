@@ -428,9 +428,17 @@ impl App {
         match read {
             Ok(config) => self.publish_shop_config(config),
             Err(e) if e.code == "shop.none" => {}
+            // **With the detail**, which is the half a support call needs.
+            // Without it this said only "the shop's data could not be read",
+            // and finding out WHICH setting meant adding a print statement and
+            // rebuilding — which is exactly what it cost on 2026-08-17.
             Err(e) => log_warn!(
-                "this shop's settings could not be read ({e}); the counter is \
-                 using the standard ones until that is fixed"
+                "this shop's settings could not be read ({e}{}); the counter is \
+                 using the standard ones until that is fixed",
+                e.detail
+                    .as_deref()
+                    .map(|d| format!(" — {d}"))
+                    .unwrap_or_default()
             ),
         }
     }
@@ -519,6 +527,10 @@ impl App {
     /// and show what it knows, the shop is still in the position the finding
     /// describes — *"nothing remembers it"*.
     fn build_queue(&self, db: &Arc<Db>) -> Queue {
+        // **Before anything else, take the default off the placeholder** if a
+        // real printer is sitting behind it. See `retire_the_stand_in`.
+        retire_the_stand_in(db);
+
         let mut printers = db
             .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
             .unwrap_or_else(|e| {
@@ -841,6 +853,82 @@ pub const NO_PRINTER: &str = "prn_none";
 /// Both are the same mistake: a printer that some of the system believes in.
 /// Saving the row means there is one answer to "what printers are there?", and
 /// the queue, the spool and the settings screen all read it.
+/// **A shop that is already printing nothing repairs itself on the way up.**
+///
+/// `save_printer_on` stops this happening from now on — a real printer saved
+/// where the only default is the placeholder takes the default with it. That
+/// does nothing for a shop already in the broken state, and the owner's is:
+/// they added their TVSE, it saved, the stand-in kept `is_default`, and every
+/// bill since has been rendered, queued, marked printed and thrown away. On
+/// their counter the symptom is *"even if we added a printer again its not
+/// printig real bill"*, with no error to go on.
+///
+/// Waiting for them to find the new dropdown is not a fix, it is a workaround
+/// with instructions. So the counter checks on every start: **if the default
+/// is the placeholder and a real printer exists, the real one takes it.**
+///
+/// It is safe to run every time, which is why it sits in `build_queue` rather
+/// than in a migration — it fires only when the default is the stand-in, so a
+/// shop that has chosen anything at all is never touched, and a shop with only
+/// the stand-in is left exactly as it was.
+fn retire_the_stand_in(db: &Arc<Db>) {
+    let outcome = db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let printers = repos.settings().list_printers(OUTLET)?;
+
+        let placeholder_holds_it = printers
+            .iter()
+            .find(|p| p.is_default)
+            .is_some_and(|p| p.id == NO_PRINTER);
+        if !placeholder_holds_it {
+            return Ok(None);
+        }
+        // Prefer one that can print a bill — moving the default onto a
+        // kitchen-only printer would trade one silent failure for another.
+        let Some(real) = printers
+            .iter()
+            .filter(|p| p.id != NO_PRINTER && p.kind != "none")
+            .find(|p| p.role == "bill" || p.role == "both")
+            .or_else(|| {
+                printers
+                    .iter()
+                    .find(|p| p.id != NO_PRINTER && p.kind != "none")
+            })
+        else {
+            // No real printer yet. The stand-in is correct, and this shop is
+            // on its first day.
+            return Ok(None);
+        };
+
+        let at = crate::flows::now();
+        for printer in &printers {
+            let wanted = printer.id == real.id;
+            if printer.is_default != wanted {
+                repos.settings().save_printer(
+                    OUTLET,
+                    &mb_db::repo::settings::Printer {
+                        is_default: wanted,
+                        ..printer.clone()
+                    },
+                    at,
+                )?;
+            }
+        }
+        Ok(Some(real.name.clone()))
+    });
+
+    match outcome {
+        Ok(Some(name)) => log_warn!(
+            "bills were going to the stand-in printer while \"{name}\" was set up; \
+             they go to \"{name}\" now"
+        ),
+        Ok(None) => {}
+        // Not fatal. The shop opens, and the settings screen now says in words
+        // that nothing is printing.
+        Err(e) => log_warn!("the default printer could not be checked ({e})"),
+    }
+}
+
 fn fallback_row() -> mb_db::repo::settings::Printer {
     mb_db::repo::settings::Printer {
         id: NO_PRINTER.to_owned(),

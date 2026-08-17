@@ -31,6 +31,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Button, Checkbox, Icon, Input, Notice, Select } from '../kit';
 import { call, isUiError } from '../ipc/call';
+import { MIN_PIN } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
 
 import './firstrun.css';
@@ -220,11 +221,13 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       return;
     }
     // **The same rule Rust holds** — `mb_auth::pin::MIN_DIGITS`/`MAX_DIGITS`.
-    // The first draft said four here, which meant the screen invited a PIN the
-    // program then refused. A form that asks for something impossible is worse
-    // than one that asks for nothing.
-    if (pin.length < 6 || pin.length > 8) {
-      setProblem('A PIN is 6 to 8 digits.');
+    // The first draft said four here while Rust wanted six, which meant the
+    // screen invited a PIN the program then refused. A form that asks for
+    // something impossible is worse than one that asks for nothing. Rust says
+    // four now (owner, 2026-08-17) and so does this — the two move together or
+    // not at all.
+    if (pin.length !== MIN_PIN) {
+      setProblem(`A PIN is ${MIN_PIN} digits.`);
       return;
     }
     if (pin !== pinAgain) {
@@ -482,8 +485,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 onChange={(e) => setPerson(e.target.value)}
               />
               <Input
-                label="A PIN, 6 to 8 digits"
-                maxLength={8}
+                label={`A PIN, ${MIN_PIN} digits`}
+                maxLength={MIN_PIN}
                 value={pin}
                 type="password"
                 inputMode="numeric"
@@ -491,7 +494,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
               <Input
                 label="The same PIN again"
-                maxLength={8}
+                maxLength={MIN_PIN}
                 value={pinAgain}
                 type="password"
                 inputMode="numeric"

@@ -104,22 +104,13 @@
   border-color: var(--text);
 }
 
-/* Six is the minimum, so the sixth dot carries a mark: the pad does NOT submit
-   itself (a PIN may be eight long), and without this nothing on screen says
-   when Enter will be accepted. Form, not colour — §2. */
-.mb-lock__dot--six {
-  position: relative;
-}
+/* **The "you may press Enter now" mark is GONE, and its going is the fix.**
 
-.mb-lock__dot--six::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: calc(-1 * var(--space-2));
-  width: var(--border-width);
-  height: var(--space-1);
-  background: var(--border-strong);
-}
+   The pad drew eight dots with a tick under the sixth, because a PIN was six
+   to eight digits and nothing else on screen said when Enter would be
+   accepted. A PIN is four digits now (owner, 2026-08-17), the row is four dots
+   long, and "the row is full" says it without a mark — which is what the mark
+   was standing in for all along. */
 
 .mb-lock__problem {
   margin: 0;

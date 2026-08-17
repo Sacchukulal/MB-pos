@@ -24,7 +24,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { Button, Input, Keypad } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
-import { MAX_PIN, MIN_PIN, initial, reduce, take, type State } from './keyboard';
+import { MIN_PIN, initial, reduce, take, type State } from './keyboard';
 
 import './auth.css';
 
@@ -225,15 +225,22 @@ function PinPad({
       <h1 className="mb-lock__title">{person.name}</h1>
       <p className="mb-muted">{person.role ?? ''}</p>
 
-      {/* Dots, not digits. Somebody is always standing behind the counter. */}
+      {/* Dots, not digits. Somebody is always standing behind the counter.
+
+          **Four of them, not eight** (owner, 2026-08-17). It drew `MAX_PIN`,
+          so a shop typing a four-digit PIN was looking at a row of eight
+          empty circles and four filled ones — which reads as a half-finished
+          PIN every single time. It draws what a PIN IS, and grows only for
+          somebody whose older, longer PIN is still on file. The marker at the
+          minimum goes with it: with the row already the right length there is
+          nothing left for it to mark. */}
       <div className="mb-lock__dots" aria-label={`${digits.length} digits typed`}>
-        {Array.from({ length: MAX_PIN }, (_, index) => (
+        {Array.from({ length: Math.max(MIN_PIN, digits.length) }, (_, index) => (
           <span
             key={index}
             className={[
               'mb-lock__dot',
               index < digits.length ? 'mb-lock__dot--filled' : '',
-              index === MIN_PIN - 1 ? 'mb-lock__dot--six' : '',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -291,7 +298,7 @@ function Recover({
         ))}
       </div>
       <p className="mb-muted">
-        New PIN: {'•'.repeat(newPin.length)} — type {MIN_PIN} to {MAX_PIN} digits.
+        New PIN: {'•'.repeat(newPin.length)} — type {MIN_PIN} digits.
       </p>
       <div className="mb-lock__actions">
         <Button variant="quiet" onClick={() => dispatch({ kind: 'back' })}>

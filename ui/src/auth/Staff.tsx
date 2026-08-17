@@ -37,6 +37,7 @@ import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import type { RoleView } from '../ipc/generated/RoleView';
 
+import { MIN_PIN } from './keyboard';
 import { Attendance, EmploymentDetails, Leave, Payroll, Salary } from './Employment';
 import type { EmployeeView } from '../ipc/generated/EmployeeView';
 
@@ -344,7 +345,8 @@ function SetPin({
     <Modal open title={`${person.name}'s PIN`} onClose={onClose}>
       <Input
         label="New PIN"
-        hint="Six to eight digits. It is stored scrambled and cannot be read back."
+        hint={`${MIN_PIN} digits. It is stored scrambled and cannot be read back.`}
+        maxLength={MIN_PIN}
         value={pin}
         autoFocus
         inputMode="numeric"

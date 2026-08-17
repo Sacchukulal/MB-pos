@@ -214,6 +214,39 @@ fn t10_a_reprint_is_marked_and_an_original_is_not() {
     assert!(voided.contains("wrong table"), "the reason is not printed");
 }
 
+/// **The bill a waiter carries to the table says it has not been paid.**
+///
+/// It is the same argument as T10 and the stakes are higher. An open order has
+/// no payment lines *because there are none*, so without a mark this paper is
+/// an ordinary bill with one section missing — something a customer could hold
+/// up as proof of payment and a shop could file as a settled sale. The mark is
+/// the whole reason [`Copy::NotPaid`] exists rather than reusing `Original`.
+#[test]
+fn a_bill_carried_to_the_table_says_it_is_not_paid() {
+    let fixture = Fixture::new();
+    let paper = Paper::new(PaperKind::Mm80);
+
+    let carried = text::to_text(
+        &layout(&bill_document(paper, &fixture.context(Copy::NotPaid)).expect("builds"))
+            .expect("lays out"),
+    );
+    let original = text::to_text(
+        &layout(&bill_document(paper, &fixture.context(Copy::Original)).expect("builds"))
+            .expect("lays out"),
+    );
+
+    assert!(carried.contains("NOT PAID"), "the bill is not marked:\n{carried}");
+    assert!(
+        carried.contains("pay at the counter"),
+        "it does not say what to do next:\n{carried}"
+    );
+    // And it is not confused with the other two markings.
+    assert!(!carried.contains("DUPLICATE"));
+    assert!(!carried.contains("VOIDED"));
+    // A settled bill never grows the mark.
+    assert!(!original.contains("NOT PAID"));
+}
+
 /// T11. Every receipt setting changes the output.
 ///
 /// A setting that changes nothing is either dead or broken, and v1 shipped one

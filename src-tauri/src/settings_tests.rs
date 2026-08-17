@@ -729,3 +729,383 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
     .expect("saves");
     assert_eq!(app.face_for_test(bill.kind), Some("builtin".to_owned()));
 }
+
+// ---------------------------------------------------------------------------
+// The printers — 2026-08-17, and every one of these is a bug the owner hit.
+//
+// > *"There is a major bug in the printing, the printer setting there is
+// > completely wrong flow is there, no default printer selection option, and
+// > even if we added a printer again its not printig real bill… and more
+// > importently just not show off, make it functional also, cross check
+// > weather its functions working or not."*
+//
+// Nothing here asserts that a screen draws a dropdown. Each one asserts that
+// pressing the thing changes where paper comes out, because "it looks set up
+// and prints nothing" is precisely the failure being fixed.
+// ---------------------------------------------------------------------------
+
+use crate::settings::printers::{
+    PrinterEdit, printers_on, save_printer_on, set_default_printer_on,
+};
+
+fn a_printer(name: &str, windows_name: &str, role: &str) -> PrinterEdit {
+    PrinterEdit {
+        id: String::new(),
+        name: name.to_owned(),
+        kind: "spooler".to_owned(),
+        address: windows_name.to_owned(),
+        paper_mm: 80,
+        // **Deliberately false**, which is the whole point: this is what the
+        // Add-a-printer dialog sends when somebody does not tick the box, and
+        // it is what the owner actually did.
+        is_default: false,
+        role: role.to_owned(),
+        engine: "raster".to_owned(),
+        is_bold_dark: false,
+        can_kick_drawer: false,
+    }
+}
+
+/// **Adding your printer makes it the one bills print on.**
+///
+/// The reported bug, exactly: a shop starts with `state::fallback_row` holding
+/// the default — a `kind = 'none'` row whose job is to accept jobs and print
+/// nothing — and adding a real printer never took that back. So the owner set
+/// their TVSE up, saw it in the list, and every bill was rendered, queued,
+/// marked printed and discarded, with no error anywhere.
+#[test]
+fn adding_a_real_printer_takes_the_default_off_the_stand_in() {
+    let scratch = Scratch::new("printer_default");
+    let app = a_shop(&scratch, "printers");
+
+    // The state every shop is in on its first day.
+    let before = printers_on(&app).expect("the printers");
+    assert_eq!(before.printers.len(), 1, "the stand-in should be the only row");
+    assert!(before.printers[0].is_stand_in);
+    assert!(before.printers[0].is_default, "and it holds the default");
+
+    let after = save_printer_on(&app, a_printer("TVS", "TVSE RP3200 Lite", "both"))
+        .expect("the printer saves");
+
+    let real = after
+        .printers
+        .iter()
+        .find(|p| p.name == "TVS")
+        .expect("the printer is not in the list");
+    assert!(
+        real.is_default,
+        "adding a real printer left the default on the stand-in — bills print nowhere"
+    );
+    assert_eq!(
+        after.printers.iter().filter(|p| p.is_default).count(),
+        1,
+        "two printers claim the default"
+    );
+
+    // And the thing that actually decides where a bill goes agrees.
+    let chosen = crate::flows::default_printer(&app).expect("a printer for bills");
+    assert_eq!(chosen.name, "TVS", "bills still go to the stand-in");
+}
+
+/// **A shop already stuck on the stand-in repairs itself when it opens.**
+///
+/// The fix above only helps a printer saved from now on. The owner's counter
+/// is already in the broken state — printer added, stand-in still holding the
+/// default, every bill discarded — and telling them to go and press a new
+/// dropdown is a workaround, not a fix. `retire_the_stand_in` runs on every
+/// start; this is the shop it was written for, built by hand.
+#[test]
+fn a_shop_already_printing_nothing_fixes_itself_on_the_way_up() {
+    let scratch = Scratch::new("printer_repair");
+    let path = scratch.dir().join("stuck.db");
+    let db = Db::open(&DbConfig::new(path.clone())).expect("open");
+
+    // Exactly what was on the owner's disk: the stand-in holding the default,
+    // and a real printer beside it that nothing prints on.
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let at = crate::flows::now();
+        repos.settings().save_printer(
+            OUTLET,
+            &mb_db::repo::settings::Printer {
+                id: crate::state::NO_PRINTER.to_owned(),
+                name: "No printer set up yet".to_owned(),
+                kind: "none".to_owned(),
+                address: None,
+                paper_mm: 80,
+                is_default: true,
+                can_kick_drawer: false,
+                offset_x_mm: 0,
+                offset_y_mm: 0,
+                role: "both".to_owned(),
+                engine: "raster".to_owned(),
+                is_bold_dark: false,
+            },
+            at,
+        )?;
+        repos.settings().save_printer(
+            OUTLET,
+            &mb_db::repo::settings::Printer {
+                id: "prn_tvs".to_owned(),
+                name: "TVS".to_owned(),
+                kind: "spooler".to_owned(),
+                address: Some("TVSE RP3200 Lite".to_owned()),
+                paper_mm: 80,
+                is_default: false,
+                can_kick_drawer: false,
+                offset_x_mm: 0,
+                offset_y_mm: 0,
+                role: "both".to_owned(),
+                engine: "raster".to_owned(),
+                is_bold_dark: false,
+            },
+            at,
+        )
+    })
+    .expect("the broken shop");
+
+    // Opening it is the whole test.
+    let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
+    app.open_shop(db, path);
+
+    assert_eq!(
+        crate::flows::default_printer(&app).expect("a printer").name,
+        "TVS",
+        "the shop opened still printing to the stand-in"
+    );
+    let view = printers_on(&app).expect("the printers");
+    assert!(view.printers.iter().find(|p| p.name == "TVS").expect("tvs").is_default);
+    assert!(
+        !view.printers.iter().find(|p| p.is_stand_in).expect("stand-in").is_default,
+        "two printers claim the default"
+    );
+}
+
+/// **And a shop on its FIRST day is left alone.**
+///
+/// The repair must not fire when the stand-in is the only printer there is —
+/// that is the state it exists for, and "fixing" it would mean a shop with no
+/// printer had no default at all.
+#[test]
+fn a_brand_new_shop_keeps_its_stand_in() {
+    let scratch = Scratch::new("printer_firstday");
+    let app = a_shop(&scratch, "firstday");
+
+    let view = printers_on(&app).expect("the printers");
+    assert_eq!(view.printers.len(), 1);
+    assert!(view.printers[0].is_stand_in);
+    assert!(view.printers[0].is_default, "a new shop has no default at all");
+}
+
+/// **A size an older build wrote still opens** — 2026-08-17.
+///
+/// A text size was the ESC/POS multiplier (`1`, `2`, `3`) and is a height in
+/// dots now. Every shop that has ever changed a size has one of the old numbers
+/// on its disk, and `Kind::check` runs before `write` — so the counter opened,
+/// refused its own settings row, logged a warning nobody would see, and printed
+/// the STANDARD receipt instead of the tuned one. Found by opening a real shop
+/// that had "Item list size" set.
+///
+/// This is what an upgrade looks like from the shop's side: the size they chose
+/// is still the size they get.
+#[test]
+fn a_size_saved_by_an_older_build_still_opens() {
+    let scratch = Scratch::new("settings_legacy_size");
+    let app = a_shop(&scratch, "legacy");
+
+    // Exactly what is on disk in a shop that chose "Large" before today.
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let settings = Repos::new(tx).settings();
+                settings.set(OUTLET, "receipt.sections.items.scale", &"2".to_owned(),
+                    crate::flows::now(), None)?;
+                settings.set(OUTLET, "receipt.sections.store_name.scale", &"3".to_owned(),
+                    crate::flows::now(), None)
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("the old rows");
+
+    let config = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| crate::settings::load(&Repos::new(tx), OUTLET))
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the settings load, rather than falling back to standard");
+
+    // 2x was 48 dots and 3x was 72. The shop's receipt is unchanged.
+    assert_eq!(config.receipt.sections.items.size, 48, "\"Large\" stopped being large");
+    assert_eq!(config.receipt.sections.store_name.size, 72);
+    // And the text engine still gets the multiplier its hardware understands.
+    assert_eq!(config.receipt.sections.items.scale(), 2);
+    assert_eq!(config.receipt.sections.store_name.scale(), 3);
+}
+
+/// **A size that is no longer on the list still opens, at the nearest one that
+/// is.**
+///
+/// The size list changed three times on 2026-08-17 — three multipliers, then
+/// twenty-two `px` values, then ten plain numbers. Each time, a shop had rows
+/// on disk holding a value the new list did not contain, and `Kind::check`
+/// refused them: the counter opened, refused its own settings row, and printed
+/// the standard receipt while the screen still showed what the shop had
+/// chosen. **The owner hit it twice in one evening.**
+///
+/// A list that can change is a list that will change again, so this is a rule
+/// rather than a patch: an unknown height snaps to the nearest offered one.
+#[test]
+fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
+    let scratch = Scratch::new("settings_offlist_size");
+    let app = a_shop(&scratch, "offlist");
+
+    // 46 and 28 were on the twenty-two-value list and are not on the ten.
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let settings = Repos::new(tx).settings();
+                settings.set(OUTLET, "receipt.sections.items.scale", &"46".to_owned(),
+                    crate::flows::now(), None)?;
+                settings.set(OUTLET, "receipt.sections.meta.scale", &"28".to_owned(),
+                    crate::flows::now(), None)
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("the rows");
+
+    let config = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| crate::settings::load(&Repos::new(tx), OUTLET))
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the settings load rather than falling back to standard");
+
+    // 46 is nearest 48, and 28 is on the list exactly.
+    assert_eq!(config.receipt.sections.items.size, 48);
+    assert_eq!(config.receipt.sections.meta.size, 28);
+    // Whatever it snapped to must be something the screen can show back, or the
+    // dropdown would open on nothing.
+    for size in [config.receipt.sections.items.size, config.receipt.sections.meta.size] {
+        assert!(crate::settings::is_a_size(size), "{size} is not on the list");
+    }
+}
+
+/// **Choosing 2 inch changes the paper the bill is laid out on** — the owner's
+/// *"the paper size selection in top, it should 2 inch 3 inch 4 inch"*
+/// (2026-08-17).
+///
+/// Not a test that a dropdown exists: a test that the number reaches the
+/// LAYOUT. Paper width is the one setting that changes what every other
+/// receipt setting does — 48 columns on 80 mm against 32 on 58 — so a picker
+/// that saved without the preview and the paper following it would be worse
+/// than no picker.
+#[test]
+fn choosing_the_paper_width_relays_out_the_bill() {
+    let scratch = Scratch::new("printer_paper");
+    let app = a_shop(&scratch, "printers");
+    save_printer_on(&app, a_printer("TVS", "TVSE RP3200 Lite", "both")).expect("saves");
+
+    // Three inch is where a shop starts.
+    let wide = crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
+        .expect("the preview");
+    assert!(wide.paper.contains("3 inch"), "{}", wide.paper);
+    assert_eq!(wide.doc.columns, 48, "80 mm paper is 48 columns");
+
+    crate::settings::printers::set_paper_on(&app, 58).expect("two inch");
+
+    let narrow = crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
+        .expect("the preview");
+    assert!(narrow.paper.contains("2 inch"), "{}", narrow.paper);
+    assert_eq!(narrow.doc.columns, 32, "58 mm paper is 32 columns");
+
+    // And it is on the printer bills actually go to, so the paper a customer's
+    // bill comes out on moved with it — not just the picture on the screen.
+    assert_eq!(
+        crate::flows::default_printer(&app).expect("a printer").paper.kind,
+        mb_print::paper::PaperKind::Mm58
+    );
+
+    // Four inch, and a width nobody sells is refused rather than stored.
+    crate::settings::printers::set_paper_on(&app, 100).expect("four inch");
+    assert_eq!(
+        crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
+            .expect("the preview")
+            .doc
+            .columns,
+        64
+    );
+    assert!(crate::settings::printers::set_paper_on(&app, 70).is_err());
+}
+
+/// **A shop that has already chosen is not overruled.**
+///
+/// The rule above is "the placeholder gives way", not "the newest printer
+/// wins". A kitchen printer added second must not quietly take the bills off
+/// the counter printer.
+#[test]
+fn a_second_printer_does_not_steal_the_default() {
+    let scratch = Scratch::new("printer_second");
+    let app = a_shop(&scratch, "printers");
+
+    save_printer_on(&app, a_printer("Counter", "EPSON TM-T82", "both")).expect("saves");
+    let after = save_printer_on(&app, a_printer("Kitchen", "TVSE RP3200 Lite", "kitchen"))
+        .expect("saves");
+
+    let counter = after.printers.iter().find(|p| p.name == "Counter").expect("counter");
+    let kitchen = after.printers.iter().find(|p| p.name == "Kitchen").expect("kitchen");
+    assert!(counter.is_default, "the second printer stole the bills");
+    assert!(!kitchen.is_default);
+}
+
+/// **The dropdown works** — `set_default_printer`, which did not exist, and
+/// whose absence was the owner's *"no default printer selection option"*.
+#[test]
+fn choosing_where_bills_print_moves_them_there() {
+    let scratch = Scratch::new("printer_choose");
+    let app = a_shop(&scratch, "printers");
+
+    save_printer_on(&app, a_printer("Counter", "EPSON TM-T82", "both")).expect("saves");
+    let view = save_printer_on(&app, a_printer("Back office", "HP LaserJet", "both"))
+        .expect("saves");
+    let back = view.printers.iter().find(|p| p.name == "Back office").expect("it").id.clone();
+
+    let after = set_default_printer_on(&app, back.clone()).expect("chooses");
+    assert_eq!(
+        after.printers.iter().filter(|p| p.is_default).count(),
+        1,
+        "choosing one did not clear the other"
+    );
+    assert!(after.printers.iter().find(|p| p.id == back).expect("it").is_default);
+    assert_eq!(
+        crate::flows::default_printer(&app).expect("a printer").name,
+        "Back office"
+    );
+
+    // And an id that is not a printer is refused rather than leaving the shop
+    // with no default at all.
+    assert!(set_default_printer_on(&app, "prn_nothing".to_owned()).is_err());
+}
+
+/// **"Bills only" and "Kitchen tickets only" mean something now.**
+///
+/// The three roles were collected, stored and shown back, and no print path
+/// ever read them — so a shop whose default was its kitchen printer had every
+/// customer's bill printed on the pass.
+#[test]
+fn a_kitchen_only_printer_does_not_get_the_bills() {
+    let scratch = Scratch::new("printer_roles");
+    let app = a_shop(&scratch, "printers");
+
+    // The kitchen printer arrives first, so it is the one that displaces the
+    // stand-in and holds `is_default`.
+    save_printer_on(&app, a_printer("Kitchen", "TVSE RP3200 Lite", "kitchen")).expect("saves");
+    save_printer_on(&app, a_printer("Counter", "EPSON TM-T82", "bill")).expect("saves");
+
+    assert_eq!(
+        crate::flows::default_printer(&app).expect("a printer").name,
+        "Counter",
+        "a bill was sent to a kitchen-tickets-only printer"
+    );
+}

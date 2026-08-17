@@ -31,6 +31,8 @@ const BILL: PreviewDoc = {
       text: '                  ANNA KUTEERA',
       indent: 0,
       scale: 2,
+      px: 48,
+      segments: [],
       bold: true,
     },
     { kind: 'rule', glyph: '=', width: 48, indent: 0 },
@@ -39,6 +41,8 @@ const BILL: PreviewDoc = {
       text: 'Bill No                             BIR/1207',
       indent: 0,
       scale: 1,
+      px: 24,
+      segments: [],
       bold: false,
     },
     {
@@ -46,6 +50,8 @@ const BILL: PreviewDoc = {
       text: 'Masala Dosa                           240.00',
       indent: 0,
       scale: 1,
+      px: 24,
+      segments: [],
       bold: false,
     },
     {
@@ -53,6 +59,8 @@ const BILL: PreviewDoc = {
       text: 'Beer 650ml                            440.00',
       indent: 0,
       scale: 1,
+      px: 24,
+      segments: [],
       bold: false,
     },
     { kind: 'rule', glyph: '-', width: 48, indent: 0 },
@@ -61,6 +69,8 @@ const BILL: PreviewDoc = {
       text: 'TOTAL                                 646.00',
       indent: 0,
       scale: 2,
+      px: 48,
+      segments: [],
       bold: true,
     },
     { kind: 'blank' },
@@ -146,7 +156,7 @@ describe('the receipt preview is a sink, not a renderer', () => {
     // and this object stops compiling until somebody has decided what it looks
     // like on screen. A fixture nobody updated is what let the barcode through.
     const SAMPLES: Record<PreviewLine['kind'], PreviewLine> = {
-      text: { kind: 'text', text: 'Masala Dosa', indent: 0, scale: 1, bold: false },
+      text: { kind: 'text', text: 'Masala Dosa', indent: 0, scale: 1, px: 24, segments: [], bold: false },
       rule: { kind: 'rule', glyph: '-', width: 8, indent: 0 },
       qr: { kind: 'qr', payload: 'upi://pay', indent: 0 },
       barcode: { kind: 'barcode', payload: 'BIR1207', indent: 0 },

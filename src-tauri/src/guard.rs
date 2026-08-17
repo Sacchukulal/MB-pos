@@ -127,12 +127,22 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),
     ("cart_add_payment", Access::Needs(Permission::BillCreate)),
     ("cart_clear_payments", Access::Needs(Permission::BillCreate)),
+    // Money off a bill is its OWN permission, not BillCreate: taking an order
+    // and giving away the shop's margin are different levels of trust, and the
+    // roles screen has had the checkbox since P11 with nothing behind it.
+    ("cart_set_discount", Access::Needs(Permission::BillDiscountBill)),
+    ("cart_clear_discount", Access::Needs(Permission::BillDiscountBill)),
     ("open_orders", Access::Needs(Permission::BillCreate)),
     ("menu_items", Access::Needs(Permission::BillCreate)),
     ("search_items", Access::Needs(Permission::BillCreate)),
     ("open_table", Access::Needs(Permission::BillCreate)),
     ("print_kitchen_ticket", Access::Needs(Permission::BillCreate)),
     ("complete_bill", Access::Needs(Permission::BillCreate)),
+    // Carrying the bill to the table. **Not `BillReprint`**, which counts
+    // copies of a bill that has been paid — this is the FIRST piece of paper,
+    // for a bill nobody has paid yet, and refusing it to a waiter who may take
+    // the order would refuse them the ordinary second half of taking it.
+    ("print_open_bill", Access::Needs(Permission::BillCreate)),
 
     // --- paper --------------------------------------------------------------
     ("print_test_page", Access::Needs(Permission::SettingsPrinter)),
@@ -357,6 +367,8 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("save_printer", Access::Needs(Permission::SettingsPrinter)),
     ("delete_printer", Access::Needs(Permission::SettingsPrinter)),
     ("route_category", Access::Needs(Permission::SettingsPrinter)),
+    ("set_default_printer", Access::Needs(Permission::SettingsPrinter)),
+    ("set_paper_size", Access::Needs(Permission::SettingsPrinter)),
     ("print_sample_bill", Access::Needs(Permission::SettingsPrinter)),
     ("nudge_printer", Access::Needs(Permission::SettingsPrinter)),
     // Backup is its own permission, and audit A1 is why: the person who may

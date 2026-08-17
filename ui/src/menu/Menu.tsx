@@ -193,10 +193,19 @@ export function Menu() {
         actions={
           <>
             {/* First, because it is what a shop does before it has items:
-                decide what the groups are. It was not possible at all until
-                now — `save_menu_category` had no caller. */}
+                decide what the categories are. It was not possible at all
+                until P31 — `save_menu_category` had no caller.
+
+                **It said "Groups" and that was the whole of half a bug.** The
+                owner reported on 2026-08-17 that there was *"no add catogory"*.
+                There was: this button. The database calls them categories, the
+                item dialog's field calls them Category, the report calls them
+                categories — and the one button that makes one called them
+                groups. A person looking for the word they were shown
+                everywhere else had no reason to press it. */}
             <Button variant="secondary" onClick={() => setGroupsOpen(true)}>
-              Groups
+              <Icon name="plus" size="sm" />
+              Categories
             </Button>
             <Button variant="secondary" onClick={() => setBulkOpen(true)}>
               Change prices
@@ -262,7 +271,7 @@ export function Menu() {
               is where somebody is looking when they notice a group is wrong. */}
           <Button variant="quiet" wide onClick={() => setGroupsOpen(true)}>
             <Icon name="settings" size="sm" />
-            Edit groups
+            Edit categories
           </Button>
         </aside>
       ) : null}
@@ -332,6 +341,7 @@ export function Menu() {
             setEditing(null);
             void load();
           }}
+          onCategoriesChanged={setCategories}
           onFailed={report}
         />
       ) : null}
@@ -482,6 +492,7 @@ function EditItem({
   classes,
   onClose,
   onSaved,
+  onCategoriesChanged,
   onFailed,
 }: {
   row: MenuRowView;
@@ -489,6 +500,8 @@ function EditItem({
   classes: readonly TaxClassView[];
   onClose: () => void;
   onSaved: (rows: readonly MenuRowView[]) => void;
+  /** The whole new list, straight from Rust — see `AddCategory`. */
+  onCategoriesChanged: (fresh: readonly CategoryView[]) => void;
   onFailed: (cause: unknown) => void;
 }) {
   const [name, setName] = useState(row.name);
@@ -536,14 +549,27 @@ function EditItem({
         value={price}
         onChange={(e) => setPrice(e.target.value)}
       />
-      <Select
-        label="Category"
-        value={categoryId}
-        onChange={(e) => setCategoryId(e.target.value)}
-        options={[
-          { value: '', label: 'No category' },
-          ...categories.map((c) => ({ value: c.id, label: c.name })),
-        ]}
+      {/* **The category, and a way to MAKE one** — the owner, 2026-08-17:
+          *"there is no catogory selection option while menu adding, and there
+          is no add catogory."*
+
+          Half of that was a naming problem and is fixed on the page behind
+          this dialog: categories were called "Groups", so somebody looking for
+          categories did not find the button that manages them.
+
+          The other half was real and is fixed here. The selector existed, but
+          on a new shop its only option is "No category" — and the one moment a
+          person knows what their categories are is the moment they are typing
+          their first item into this box. Sending them out of a half-filled
+          dialog to find another screen is how the list ends up empty forever.
+          `save_menu_category` is the same command the Categories dialog calls;
+          this is a second door onto it, not a second implementation. */}
+      <AddCategory
+        categories={categories}
+        chosen={categoryId}
+        onChoose={setCategoryId}
+        onChanged={onCategoriesChanged}
+        onFailed={onFailed}
       />
       <Select
         label="Tax class"
@@ -610,6 +636,101 @@ function EditItem({
         </Button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * **The category selector, with a way to make one** — 2026-08-17.
+ *
+ * Two states in one field. Normally it is the `Select` that was always here,
+ * with a "New" button beside it; press that and the select becomes a name box
+ * and an Add button. Adding calls `save_menu_category`, hands the whole new
+ * list back to the screen (D4 — one list, no second copy), and **selects what
+ * was just made**, because a person who has stopped to name a category was
+ * always going to put this item in it.
+ *
+ * It is a field rather than a dialog on purpose: a second modal over the item
+ * modal, to type one word, is how a shopkeeper loses their place.
+ */
+function AddCategory({
+  categories,
+  chosen,
+  onChoose,
+  onChanged,
+  onFailed,
+}: {
+  categories: readonly CategoryView[];
+  chosen: string;
+  onChoose: (id: string) => void;
+  onChanged: (fresh: readonly CategoryView[]) => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const add = async () => {
+    const wanted = name.trim();
+    if (wanted === '') return;
+    setBusy(true);
+    try {
+      // The id is ours to make and never shown — the same shape `Groups` uses,
+      // because `save_menu_category` upserts on it and a fresh one is what
+      // makes this an add rather than a rename of whatever was there.
+      const id = `cat_${Date.now().toString(36)}`;
+      onChanged(await call('save_menu_category', { id, name: wanted, isActive: true }));
+      onChoose(id);
+      setName('');
+      setNaming(false);
+    } catch (cause) {
+      onFailed(cause);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (naming) {
+    return (
+      <div className="mb-catadd">
+        <Input
+          label="New category"
+          hint="Tiffin, Drinks, Tandoor — how this shop arranges its menu."
+          value={name}
+          autoFocus
+          placeholder="Tiffin"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void add();
+            if (event.key === 'Escape') setNaming(false);
+          }}
+        />
+        <Button variant="primary" disabled={busy || name.trim() === ''} onClick={() => void add()}>
+          <Icon name="plus" size="sm" />
+          Add
+        </Button>
+        <Button variant="quiet" disabled={busy} onClick={() => setNaming(false)}>
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-catadd">
+      <Select
+        label="Category"
+        value={chosen}
+        onChange={(e) => onChoose(e.target.value)}
+        options={[
+          { value: '', label: 'No category' },
+          ...categories.map((c) => ({ value: c.id, label: c.name })),
+        ]}
+      />
+      <Button onClick={() => setNaming(true)}>
+        <Icon name="plus" size="sm" />
+        New
+      </Button>
+    </div>
   );
 }
 

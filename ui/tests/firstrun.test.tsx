@@ -80,21 +80,25 @@ it('opens on a welcome that names the file it is about to create', async () => {
 /**
  * **The screen asks for the PIN the program will accept.**
  *
- * The first draft said "four digits or more" and checked for four, while
- * `mb_auth::pin` has always required six to eight — so the form invited a PIN
- * and then refused it. Found by typing 1234 into it.
+ * The first draft said "four digits or more" and checked for four while
+ * `mb_auth::pin` required six to eight — so the form invited a PIN and then
+ * refused it. Found by typing 1234 into it.
+ *
+ * **A PIN is four digits now** (owner, 2026-08-17), so 1234 is the RIGHT
+ * answer and this test needed a new wrong one. That is the point of it: the
+ * two rules move together or the form lies again.
  */
 it('asks for the PIN rule Rust actually holds', async () => {
   wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
 
-  const pin = await screen.findByLabelText('A PIN, 6 to 8 digits');
+  const pin = await screen.findByLabelText('A PIN, 4 digits');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
-  fireEvent.change(pin, { target: { value: '1234' } });
-  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '1234' } });
+  fireEvent.change(pin, { target: { value: '123' } });
+  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '123' } });
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
-  expect(await screen.findByText('A PIN is 6 to 8 digits.')).toBeTruthy();
+  expect(await screen.findByText('A PIN is 4 digits.')).toBeTruthy();
   // And it refused BEFORE creating anybody — a retry must not leave the shop
   // with two owners in the staff list.
   expect(call).not.toHaveBeenCalledWith('save_staff_member', expect.anything());
@@ -110,11 +114,11 @@ it('keeps the same person when the PIN is typed again', async () => {
 
   await screen.findByLabelText('Your name');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
-  fireEvent.change(screen.getByLabelText('A PIN, 6 to 8 digits'), {
-    target: { value: '482913' },
+  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), {
+    target: { value: '4829' },
   });
   fireEvent.change(screen.getByLabelText('The same PIN again'), {
-    target: { value: '482913' },
+    target: { value: '4829' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
@@ -135,16 +139,16 @@ it('signs the owner in with the PIN they just chose', async () => {
 
   await screen.findByLabelText('Your name');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
-  fireEvent.change(screen.getByLabelText('A PIN, 6 to 8 digits'), {
-    target: { value: '482913' },
+  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), {
+    target: { value: '4829' },
   });
   fireEvent.change(screen.getByLabelText('The same PIN again'), {
-    target: { value: '482913' },
+    target: { value: '4829' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
   await waitFor(() =>
-    expect(call).toHaveBeenCalledWith('login', expect.objectContaining({ pin: '482913' })),
+    expect(call).toHaveBeenCalledWith('login', expect.objectContaining({ pin: '4829' })),
   );
 });
 
@@ -162,11 +166,11 @@ it('will not move on until the recovery code is written down', async () => {
 
   await screen.findByLabelText('Your name');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
-  fireEvent.change(screen.getByLabelText('A PIN, 6 to 8 digits'), {
-    target: { value: '482913' },
+  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), {
+    target: { value: '4829' },
   });
   fireEvent.change(screen.getByLabelText('The same PIN again'), {
-    target: { value: '482913' },
+    target: { value: '4829' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 

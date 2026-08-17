@@ -267,3 +267,227 @@ fn laying_out_twice_gives_the_same_answer() {
     let second: Laid = layout(&doc).expect("lays out");
     assert_eq!(first, second);
 }
+
+// ---------------------------------------------------------------------------
+// Sizes between the printer's own three — 2026-08-17.
+//
+// > *"size of fonts now showing 24px, 48px, 72px only 3 and its completly
+// > wrong, i want like small changes also like 2px increasing."*
+//
+// The multiplier was the only thing that could divide the paper, so those were
+// the only three sizes that existed. These prove the in-between ones are real
+// on the engine that prints them.
+// ---------------------------------------------------------------------------
+
+/// Lay one line out at a size and report how tall the picture came out and how
+/// many characters the layout let onto the line.
+fn at_size(px: u16, text: &str) -> (u32, usize) {
+    let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+    doc.text(text, Style::px(px, false, 24), Align::Left);
+    let laid = layout(&doc).expect("lays out");
+    let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let longest = laid
+        .lines
+        .iter()
+        .filter_map(|l| match &l.content {
+            LaidContent::Text { text } => Some(text.trim_end().chars().count()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    (raster.height(), longest)
+}
+
+/// **A size between the multiples draws between the multiples.**
+///
+/// 18 px has to be taller than 12 and shorter than 24 — on the paper, not just
+/// in the settings row. A size that saved and printed the same as the one
+/// below it is exactly the "completly wrong" the owner reported.
+#[test]
+fn every_size_draws_a_different_height() {
+    let mut last = 0;
+    for px in [12_u16, 14, 16, 18, 20, 22, 24, 32, 48] {
+        let (rows, _) = at_size(px, "Masala Dosa");
+        assert!(
+            rows > last,
+            "{px} px drew {rows} rows, no taller than the size below it ({last})"
+        );
+        last = rows;
+    }
+}
+
+/// **Words that wrap, so nothing is capped.**
+///
+/// `cap_scale` drops the size of a single word too long to fit at all — a
+/// two-hundred-letter word cannot be printed at 2× on 48 columns, so it is
+/// printed at 1×. That is correct and long-standing behaviour, and it is not
+/// what these tests are about, so they measure a line of ordinary short words.
+fn wrappable() -> String {
+    "AAA ".repeat(60)
+}
+
+/// **And a smaller size fits more on a line.**
+///
+/// This is the half that lives in the layout rather than in the renderer: a
+/// 12 px line is half the height of a 24 px one, so twice as many characters
+/// fit across the same roll. If this ever stops being true, the sink and the
+/// layout have stopped agreeing about where a line breaks — the drift this
+/// crate exists to prevent.
+#[test]
+fn a_smaller_size_fits_more_characters_across() {
+    let (_, wide) = at_size(24, &wrappable());
+    let (_, narrow) = at_size(12, &wrappable());
+
+    assert!(
+        narrow > wide,
+        "12 px fitted {narrow} characters and 24 px fitted {wide} — the smaller \
+         size did not fit more"
+    );
+    // Half the height is half the width, so about twice as many. "About",
+    // because a line breaks on a word boundary and the last word rarely lands
+    // exactly on the edge.
+    assert!(
+        narrow >= wide * 2 - 4,
+        "12 px fitted {narrow}, which is not about twice {wide}"
+    );
+}
+
+/// **The three old sizes draw exactly what they always drew.**
+///
+/// The whole risk of this change is a shop that had tuned its receipt finding
+/// it different on a Tuesday. 24, 48 and 72 px are 1x, 2x and 3x, and the
+/// golden ESC/POS files assert the bytes; this asserts the geometry.
+#[test]
+fn the_old_three_sizes_are_unchanged() {
+    for (px, scale) in [(24_u16, 1_u8), (48, 2), (72, 3)] {
+        assert_eq!(
+            Style::px(px, false, 24).scale(),
+            scale,
+            "{px} px stopped being {scale}x for the text engine"
+        );
+    }
+    // And the layout still gives them the widths they always had: 48 columns
+    // on 80 mm paper, halved at 2x and thirded at 3x. Measured as "the longest
+    // line that came out", so a line that broke early on a word boundary is
+    // within a word of the limit rather than exactly on it.
+    for (px, limit) in [(24_u16, 48_usize), (48, 24), (72, 16)] {
+        let longest = at_size(px, &wrappable()).1;
+        assert!(
+            longest <= limit && longest + 4 >= limit,
+            "{px} px filled {longest} of {limit} columns"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Proportional faces — 2026-08-17, the owner's *"i want some fonts like it was
+// in previous mb pos app (time new roman etc)"*.
+//
+// The engine laid a receipt out on a character grid, so a face whose letters
+// are different widths could only be squeezed into equal cells. The layout says
+// where each column's BOX is now, and the raster puts measured text against
+// those edges — which is how an invoice has always aligned.
+// ---------------------------------------------------------------------------
+
+/// Times New Roman, or `None` on a machine that does not have it. Skipping is
+/// right: this asserts what the code does with a proportional face, and a
+/// stripped Windows image would otherwise fail a test about the code.
+fn proportional() -> Option<Font> {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()),
+    )
+    .join("Fonts")
+    .join("times.ttf");
+    let bytes = std::fs::read(path).ok()?;
+    Font::load(&bytes, "Times New Roman").ok()
+}
+
+/// **The amount still ends where the paper ends.**
+///
+/// This is the whole risk of a proportional face on a bill. Padded with spaces
+/// and drawn by advance, an amount would land a long way left of the right
+/// edge — because a space in Times New Roman is about a third of a digit — and
+/// a column of rupees that does not line up is the one thing a shopkeeper
+/// checks a bill for.
+#[test]
+fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
+    let Some(font) = proportional() else { return };
+    let paper = Paper::new(PaperKind::Mm80);
+
+    let mut doc = Document::new(paper);
+    doc.row("Subtotal", "920.00", Style::NORMAL)
+        .row("Grand Total", "1,240.00", Style::NORMAL);
+    let laid = layout(&doc).expect("lays out");
+    let raster = to_raster(&laid, &font, RasterOptions::default()).expect("rasters");
+
+    // The rightmost dot of each line, which is the last digit of the amount.
+    let edges: Vec<u32> = raster
+        .bands
+        .iter()
+        .filter_map(|b| match b {
+            Band::Ink { image } => Some(image),
+            Band::Qr { .. } => None,
+        })
+        .flat_map(|image| {
+            (0..image.height).filter_map(move |y| {
+                (0..image.width).rev().find(|x| image.ink(*x, y))
+            })
+        })
+        .collect();
+
+    let furthest = edges.iter().copied().max().expect("something was drawn");
+    let dots = paper.kind.dots().expect("a thermal roll has dots");
+    assert!(
+        furthest + 12 >= dots && furthest < dots,
+        "the amounts end at {furthest} of {dots} dots — not against the right edge"
+    );
+}
+
+/// **And it really is proportional**, rather than the grid wearing a new face.
+///
+/// Six 'i's must take less room than six 'M's. If they take the same, the
+/// segments are being ignored and every glyph is back in an equal cell — which
+/// prints, and looks like the thing the old comment in `font.rs` warned about.
+#[test]
+fn a_proportional_face_is_drawn_proportionally() {
+    let Some(font) = proportional() else { return };
+
+    let ink_width = |text: &str| {
+        let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+        doc.text(text, Style::NORMAL, Align::Left);
+        let laid = layout(&doc).expect("lays out");
+        let raster = to_raster(&laid, &font, RasterOptions::default()).expect("rasters");
+        raster
+            .bands
+            .iter()
+            .filter_map(|b| match b {
+                Band::Ink { image } => Some(image),
+                Band::Qr { .. } => None,
+            })
+            .flat_map(|image| {
+                (0..image.height).filter_map(move |y| {
+                    (0..image.width).rev().find(|x| image.ink(*x, y))
+                })
+            })
+            .max()
+            .unwrap_or(0)
+    };
+
+    assert!(
+        ink_width("iiiiii") < ink_width("MMMMMM"),
+        "six thin letters took as much room as six fat ones — the face is being \
+         drawn on a grid"
+    );
+}
+
+/// **A typewriter face is untouched.** The two paths are told apart by the
+/// FACE, not by a setting, and every shop that has not changed its font must
+/// get byte-for-byte what it got yesterday — which the golden ESC/POS files
+/// assert, and this says out loud.
+#[test]
+fn the_shipped_face_still_takes_the_grid_path() {
+    assert!(font().is_monospace(), "the built-in face stopped being a typewriter one");
+    if let Some(times) = proportional() {
+        assert!(!times.is_monospace(), "Times New Roman was taken for a typewriter face");
+    }
+}

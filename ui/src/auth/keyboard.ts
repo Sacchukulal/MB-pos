@@ -21,10 +21,18 @@
 
 import type { PersonView } from '../ipc/generated/PersonView';
 
-/** How many digits the pad will hold. `mb_auth::pin` is the authority; this
- *  stops somebody typing forever, and the refusal itself comes from Rust. */
+/**
+ * How many digits the pad will hold. `mb_auth::pin` is the authority; this
+ * stops somebody typing forever, and the refusal itself comes from Rust.
+ *
+ * **A PIN is four digits** (owner, 2026-08-17). `MAX_PIN` stays at eight so a
+ * shop whose staff already have longer PINs can still sign in — see
+ * `mb_auth::pin::MIN_DIGITS` for the whole argument. The pad draws `MIN_PIN`
+ * dots and grows only if somebody types past them, so what a person sees is a
+ * four-digit pad.
+ */
 export const MAX_PIN = 8;
-export const MIN_PIN = 6;
+export const MIN_PIN = 4;
 
 export type Mode =
   /** Choosing who you are — by tapping a name, or by typing a staff code. */

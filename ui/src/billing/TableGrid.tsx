@@ -34,8 +34,14 @@
 
 import { useMemo } from 'react';
 
-import { EmptyState } from '../kit';
+import { EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
+
+/* **The tile brings its own styling.** `Tile` is imported by the Floor screen
+   as well as by this grid, and a component whose appearance depends on which
+   OTHER screen happened to be loaded first is the same class of bug as the
+   duplicate this replaced. The bundler dedupes it. */
+import './billing.css';
 
 /** Past this many tables the grid steps down a density. */
 export const DENSE_ABOVE = 24;
@@ -44,10 +50,18 @@ export function TableGrid({
   tables,
   filter,
   onOpen,
+  onPrintBill,
 }: {
   tables: readonly TableView[];
   filter: string;
   onOpen: (table: TableView) => void;
+  /**
+   * **Carry the bill to this table** — the owner's ask of 2026-08-17.
+   *
+   * Only ever called for a tile that has an order on it, because the button
+   * only exists on those. It settles nothing; see `flows::print_open_bill_on`.
+   */
+  onPrintBill: (table: TableView) => void;
 }) {
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -120,6 +134,7 @@ export function TableGrid({
                 table={table}
                 dense={dense}
                 onOpen={() => onOpen(table)}
+                onPrintBill={() => onPrintBill(table)}
               />
             ))}
           </div>
@@ -129,14 +144,62 @@ export function TableGrid({
   );
 }
 
-function Tile({
+/**
+ * **THE table tile. There is one, and this is it.**
+ *
+ * # Why it is exported
+ *
+ * The owner, 2026-08-17: *"in floor page the table icons differently showing.
+ * As already i told you from starting to till, dont hardcode any styling
+ * themes, that must be global theme follow… that is the very very strict
+ * instruction forever."*
+ *
+ * They were looking at the result of **a second copy of this component** living
+ * in `Floor.tsx`. It drew the same `mb-tile` classes with different markup and
+ * a different meta line, so the two screens had never quite matched — and when
+ * this one was restructured into a box-plus-face on 2026-08-17, the copy kept
+ * the old shape, lost its padding, and the Floor screen's tiles collapsed into
+ * overlapping text. That is what a duplicate costs: not that it looks
+ * different, but that fixing one silently breaks the other.
+ *
+ * So `Floor.tsx` imports this. **A tile is drawn in exactly one place in this
+ * product**, and a change to it reaches both screens or neither.
+ *
+ * # A tile is a box with two things you can press, so it is not a button
+ *
+ * It was one — a `<button>` with the label inside it. The owner asked for a
+ * print mark *"inside"* the tile, and a button inside a button is not markup a
+ * browser will render: the inner one is dropped, and what you get is a print
+ * icon that opens the table. So the tile is a positioned box holding a face
+ * (which fills it, and is the press that opens the table) and, when there is an
+ * order, a small print button in its corner.
+ *
+ * The face is still the whole tile to a mouse and to a finger. Nothing about
+ * pressing a table changed; there is simply somewhere else to press as well.
+ */
+export function Tile({
   table,
-  dense,
+  dense = false,
   onOpen,
+  onPrintBill,
 }: {
   table: TableView;
-  dense: boolean;
+  /** The floor's dense step past `DENSE_ABOVE` tables. Off unless asked for. */
+  dense?: boolean;
   onOpen: () => void;
+  /**
+   * Carry the bill to this table.
+   *
+   * **Both screens pass it**, and that was the owner's point on 2026-08-17:
+   * *"the users keeps open that floor page for billing also, so print button
+   * inside table cards also wil appeare here."* A waiter working off the Floor
+   * screen wants the same press a cashier has.
+   *
+   * Optional only so that a caller with genuinely nowhere to print from gets a
+   * tile without a dead button — a mark that does nothing is worse than no
+   * mark. There is no such caller today.
+   */
+  onPrintBill?: () => void;
 }) {
   const late = table.state === 'late';
   // Amber and red are two states, not one — see TableState::Waiting. The
@@ -144,49 +207,77 @@ function Tile({
   // a table somebody must look at are both read off the timer.
   const overdue = late || table.state === 'waiting';
   return (
-    <button
-      type="button"
-      className={`mb-tile mb-tile--${table.state}`}
-      onClick={onOpen}
-      aria-label={describe(table)}
-    >
-      <span className="mb-tile__label">{table.label}</span>
+    <div className={`mb-tile mb-tile--${table.state}`}>
+      <button
+        type="button"
+        className="mb-tile__face"
+        onClick={onOpen}
+        aria-label={describe(table)}
+      >
+        <span className="mb-tile__label">{table.label}</span>
 
-      {table.total ? (
-        <span className="mb-tile__amount">{table.total.text}</span>
-      ) : null}
+        {table.total ? (
+          <span className="mb-tile__amount">{table.total.text}</span>
+        ) : null}
 
-      {/* The second line is what the dense step drops. The label, the amount
-          and the timer are what the floor is actually read for. */}
-      {dense ? null : (
-        <span className="mb-tile__meta">
-          {table.minutes === null ? (
-            <span>{table.seats > 0 ? `${table.seats} seats` : ''}</span>
-          ) : (
-            <span className={overdue ? 'mb-tile__timer--late' : undefined}>
-              {formatMinutes(table.minutes)}
-            </span>
-          )}
-          {table.orderId && !table.kitchenTold ? (
-            <span
-              className="mb-tile__kitchen"
-              title="The kitchen has not been told"
-              aria-label="The kitchen has not been told"
-            />
-          ) : null}
-        </span>
-      )}
+        {/* The second line is what the dense step drops. The label, the amount
+            and the timer are what the floor is actually read for. */}
+        {dense ? null : (
+          <span className="mb-tile__meta">
+            {table.minutes === null ? (
+              <span>{table.seats > 0 ? `${table.seats} seats` : ''}</span>
+            ) : (
+              <span className={overdue ? 'mb-tile__timer--late' : undefined}>
+                {formatMinutes(table.minutes)}
+              </span>
+            )}
+            {/* **Scope 14.2's second timer** — food went to the kitchen and
+                nothing has since, which is the number that catches a
+                forgotten table. It came from the Floor screen's own copy of
+                this tile; it belongs to every tile, so it lives here now. */}
+            {table.kitchenMinutes === null ? null : (
+              <span className="mb-tile__food">
+                food {formatMinutes(table.kitchenMinutes)}
+              </span>
+            )}
+            {table.orderId && !table.kitchenTold ? (
+              <span
+                className="mb-tile__kitchen"
+                title="The kitchen has not been told"
+                aria-label="The kitchen has not been told"
+              />
+            ) : null}
+          </span>
+        )}
 
-      {/* Dense tiles keep the timer, because a late table is the one thing
-          worth interrupting somebody for. */}
-      {dense && table.minutes !== null ? (
-        <span
-          className={`mb-tile__meta ${overdue ? 'mb-tile__timer--late' : ''}`.trim()}
+        {/* Dense tiles keep the timer, because a late table is the one thing
+            worth interrupting somebody for. */}
+        {dense && table.minutes !== null ? (
+          <span
+            className={`mb-tile__meta ${overdue ? 'mb-tile__timer--late' : ''}`.trim()}
+          >
+            {formatMinutes(table.minutes)}
+          </span>
+        ) : null}
+      </button>
+
+      {/* **Only where there is something to print**, and only where the caller
+          offers it. A free table shows no mark at all — a print button on an
+          empty table is a button whose only possible outcome is an error
+          message, and forty of them on the floor is forty invitations to get
+          one. */}
+      {table.orderId && onPrintBill ? (
+        <button
+          type="button"
+          className="mb-tile__print"
+          onClick={onPrintBill}
+          title={`Print the bill for table ${table.label}`}
+          aria-label={`Print the bill for table ${table.label}`}
         >
-          {formatMinutes(table.minutes)}
-        </span>
+          <Icon name="printer" size="sm" />
+        </button>
       ) : null}
-    </button>
+    </div>
   );
 }
 

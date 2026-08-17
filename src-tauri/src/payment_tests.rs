@@ -354,3 +354,115 @@ fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
         tips.notes
     );
 }
+
+// ---------------------------------------------------------------------------
+// Money off a bill — scope 1.12, audit B7, and the owner's *"where is discount
+// option?? i want to give discount to customer, here no option showing"*
+// (2026-08-17).
+//
+// `mb_core::discount` proves the arithmetic in isolation and has since P02.
+// What was missing was any way to reach it: `CartState.bill_discount` was set
+// to `None` at birth and never written again. These prove the door.
+// ---------------------------------------------------------------------------
+
+/// **A percentage comes off, and the tax comes off with it.**
+///
+/// This is the whole reason a bill discount is spread across the lines BEFORE
+/// tax rather than taken off the grand total (audit B11): take 10% off the
+/// total after tax and the tax already printed is wrong for every rate, the
+/// rate-wise summary does not tie, and a CA cannot file from the bill.
+#[test]
+fn a_percentage_comes_off_the_bill_before_the_tax() {
+    let scratch = Scratch::new("discount_percent");
+    let app = a_shop(&scratch, "discount");
+    as_owner(&app, "staff_meena", "Meena");
+    let full = one_dosa(&app);
+
+    let view = crate::ipc::cart_set_discount_on(
+        &app,
+        "percent".to_owned(),
+        "10".to_owned(),
+        None,
+    )
+    .expect("the discount is given");
+
+    // 120.00 of dosa, 10% off is 12.00, and the 5% GST is charged on 108.00.
+    assert_eq!(view.bill.bill_discount.text, "12.00", "{:?}", view.bill.bill_discount);
+    assert_eq!(view.bill.subtotal.text, "120.00", "the subtotal is before the discount");
+    assert!(
+        view.bill.grand_total.paise < full.paise(),
+        "the bill did not get smaller: {} then {}",
+        full.to_plain_string(),
+        view.bill.grand_total.text
+    );
+    // The tax was charged on the DISCOUNTED value, which is the claim.
+    let taxed: i64 = view.bill.tax_rows.iter().map(|r| r.taxable.paise).sum();
+    assert_eq!(taxed, 10_800, "tax was charged on the undiscounted value");
+
+    // And taking it away puts the bill back exactly where it was — a discount
+    // is not a payment and must not leave a trace in the money.
+    let back = crate::ipc::cart_clear_discount_on(&app).expect("cleared");
+    assert_eq!(back.bill.grand_total.paise, full.paise());
+    assert_eq!(back.bill.bill_discount.paise, 0);
+}
+
+/// **A flat amount, and half a per cent, both without a float.**
+///
+/// "12.5" is 1250 basis points. Parsed with `f64` it is 12.5 exactly and 0.1
+/// is not, which is the class of bug that puts a bill a paisa off what the
+/// customer was promised — so the percentage is parsed digit by digit.
+#[test]
+fn a_discount_is_parsed_without_a_float() {
+    let scratch = Scratch::new("discount_parse");
+    let app = a_shop(&scratch, "discount");
+    as_owner(&app, "staff_meena", "Meena");
+    one_dosa(&app);
+
+    // Half a per cent of 120.00 is 0.60.
+    let view =
+        crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "0.5".to_owned(), None)
+            .expect("half a per cent");
+    assert_eq!(view.bill.bill_discount.text, "0.60", "{:?}", view.bill.bill_discount);
+
+    // 12.5% of 120.00 is 15.00 — and "12.5" must be 1250bp, not 125bp.
+    let view =
+        crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "12.5".to_owned(), None)
+            .expect("twelve and a half");
+    assert_eq!(view.bill.bill_discount.text, "15.00", "{:?}", view.bill.bill_discount);
+
+    // And rupees off.
+    let view =
+        crate::ipc::cart_set_discount_on(&app, "amount".to_owned(), "50".to_owned(), None)
+            .expect("fifty rupees");
+    assert_eq!(view.bill.bill_discount.text, "50.00", "{:?}", view.bill.bill_discount);
+}
+
+/// **The refusals a cashier can act on**, in the words Rust already wrote.
+#[test]
+fn a_discount_that_makes_no_sense_is_refused_in_words() {
+    let scratch = Scratch::new("discount_refused");
+    let app = a_shop(&scratch, "discount");
+    as_owner(&app, "staff_meena", "Meena");
+    one_dosa(&app);
+
+    for (kind, value) in [
+        ("percent", "101"),      // more than the whole bill
+        ("percent", "abc"),      // not a number
+        ("percent", ""),         // nothing typed
+        ("percent", "10.555"),   // finer than basis points go
+        ("amount", "-5"),        // a "negative discount" is a charge
+        ("nonsense", "10"),      // neither kind
+    ] {
+        assert!(
+            crate::ipc::cart_set_discount_on(&app, kind.to_owned(), value.to_owned(), None)
+                .is_err(),
+            "{kind} {value:?} was accepted"
+        );
+    }
+
+    // And none of that left a discount behind on the bill.
+    let has = app
+        .with_cart(|state| Ok(state.bill_discount.is_some()))
+        .expect("the cart");
+    assert!(!has, "a refused discount was applied anyway");
+}

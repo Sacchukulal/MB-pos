@@ -13,40 +13,151 @@ use crate::paper::Paper;
 
 /// How big, and how heavy.
 ///
-/// `scale` is 1, 2 or 3 — the ESC/POS multiplier P07 will emit, and the number
-/// of columns a character occupies here. It is **capped by the layout** so text
-/// can never overflow the paper (crown jewel 18), never rejected.
+/// # Two ways of saying how big, because there are two engines
+///
+/// `scale` is 1, 2 or 3 — the ESC/POS multiplier, and the number of columns a
+/// character occupies. It is **capped by the layout** so text can never
+/// overflow the paper (crown jewel 18), never rejected. That is the whole of
+/// what a thermal printer's *own* font can do, so it is what the **text**
+/// engine emits and it is not going anywhere.
+///
+/// `px` is a height in dots, added 2026-08-17 when the owner asked for sizes
+/// that step in twos rather than in multiples of the printer's cell:
+///
+/// > *"size of fonts now showing 24px, 48px, 72px only 3 and its completly
+/// > wrong, i want like small changes also like 2px increasing… a number wise
+/// > drop down selection for size."*
+///
+/// The **graphics** engine rasterises the receipt as a picture, so it can draw
+/// any height it likes. `px` is `None` for a document that has not asked for
+/// one, and then the height is `scale` cells exactly — which is why every
+/// receipt tuned before this change still prints identically.
+///
+/// # Why both, rather than px replacing scale
+///
+/// Because the text engine cannot honour px and must not silently ignore it.
+/// Keeping the multiplier means a shop on the Text engine gets the nearest
+/// size its printer can actually form ([`Style::scale`]) instead of a setting
+/// that appears to work and does nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Style {
-    pub scale: u8,
+    /// **The height of this text in dots.**
+    ///
+    /// # Why it is still called `scale` on the wire
+    ///
+    /// It used to BE the multiplier — 1, 2 or 3 — and that name is the key a
+    /// shop's tuned sizes are stored against
+    /// (`receipt.sections.store_name.scale`). Renaming the field would rename
+    /// the row, and every shop that had chosen a size would silently get the
+    /// default back on upgrade. The name is history; the value is dots.
+    ///
+    /// [`Style::size_from_wire`] is what lets a value written by an older
+    /// build still mean what it meant then.
+    #[serde(rename = "scale", deserialize_with = "Style::size_from_wire")]
+    pub size: u16,
     pub bold: bool,
 }
 
 impl Style {
+    /// One cell of the printer's own font — 24 dots. What `scale: 1` was.
+    pub const CELL: u16 = 24;
+
     pub const NORMAL: Style = Style {
-        scale: 1,
+        size: Style::CELL,
         bold: false,
     };
     pub const BOLD: Style = Style {
-        scale: 1,
+        size: Style::CELL,
         bold: true,
     };
 
+    /// A size given as the ESC/POS multiplier, which is how every template in
+    /// this crate still asks for one.
     #[must_use]
     pub const fn new(scale: u8, bold: bool) -> Self {
-        Style { scale, bold }
+        Style {
+            size: (scale as u16) * Style::CELL,
+            bold,
+        }
     }
 
-    /// Clamped to the range the printers actually support.
+    /// **A size in dots** — what a shop chooses on the settings screen since
+    /// 2026-08-17. `base` is kept in the signature because the caller knows
+    /// the printer's cell and this type should not have to assume it twice.
+    #[must_use]
+    pub const fn px(px: u16, bold: bool, base: u16) -> Self {
+        let _ = base;
+        Style { size: px, bold }
+    }
+
+    /// **The multiplier that comes closest to this size**, for the ESC/POS text
+    /// engine — which has one font at 1×, 2× and 3× and can do nothing else.
+    ///
+    /// Nearest, not floor: 40 dots is closer to 2× (48) than to 1× (24), and a
+    /// shop that asked for something large should not get small on the engine
+    /// that cannot be exact.
+    // Dots into cells, and the answer is clamped to 1..=3 three lines later —
+    // so there is nothing a remainder or a narrowing cast could lose. The
+    // workspace denies both because of D7, and D7 is about MONEY: no amount is
+    // computed anywhere in this file.
+    #[expect(
+        clippy::integer_division,
+        clippy::cast_possible_truncation,
+        reason = "cells, not money — clamped to 1..=3 immediately below"
+    )]
     #[must_use]
     pub const fn scale(self) -> u8 {
-        if self.scale == 0 {
+        let steps = (self.size + Style::CELL / 2) / Style::CELL;
+        if steps == 0 {
             1
-        } else if self.scale > 3 {
+        } else if steps > 3 {
             3
         } else {
-            self.scale
+            steps as u8
         }
+    }
+
+    /// **How tall this text is in dots** — the graphics engine's question.
+    ///
+    /// `base` is what one multiplier step is worth, and is used only for a
+    /// style that carries no size of its own (which cannot happen through the
+    /// constructors, and is what a hand-built literal would leave).
+    #[must_use]
+    pub const fn height(self, base: u32) -> u32 {
+        if self.size == 0 {
+            base
+        } else {
+            self.size as u32
+        }
+    }
+
+    /// The same style at a different multiplier. Used by the layout when it has
+    /// to cap something to fit the paper.
+    #[must_use]
+    pub const fn at_scale(self, scale: u8, base: u16) -> Self {
+        Style {
+            size: (scale as u16) * base,
+            bold: self.bold,
+        }
+    }
+
+    /// **A size written by an older build still means what it meant then.**
+    ///
+    /// Before 2026-08-17 this field held the multiplier: 1, 2 or 3. It holds
+    /// dots now. A shop's stored row and an exported configuration file both
+    /// carry the old numbers, and reading `2` as two DOTS would print a bill
+    /// nobody can see — so anything at or below 3 is read as the multiplier it
+    /// was. No real size is that small: the smallest this product offers is 12.
+    fn size_from_wire<'de, D>(d: D) -> Result<u16, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = u16::deserialize(d)?;
+        Ok(if raw <= 3 {
+            raw.max(1) * Style::CELL
+        } else {
+            raw
+        })
     }
 }
 
@@ -239,6 +350,46 @@ impl Document {
         Document {
             paper,
             blocks: Vec::new(),
+        }
+    }
+
+    /// **The same document with every size rounded to a whole cell** — for the
+    /// ESC/POS text engine, which has the printer's own font at 1×, 2× and 3×
+    /// and cannot draw anything between.
+    ///
+    /// See `layout::Grid`. Snapping here, before anything is measured, is what
+    /// keeps the wrapping, the column widths and the emitted characters
+    /// agreeing with each other on that engine.
+    #[must_use]
+    pub fn snapped_to_cells(&self) -> Document {
+        let snap = |style: &Style| Style {
+            size: u16::from(style.scale()) * Style::CELL,
+            bold: style.bold,
+        };
+        Document {
+            paper: self.paper,
+            blocks: self
+                .blocks
+                .iter()
+                .map(|block| match block {
+                    Block::Text { content, style, align } => Block::Text {
+                        content: content.clone(),
+                        style: snap(style),
+                        align: *align,
+                    },
+                    Block::Row { left, right, style } => Block::Row {
+                        left: left.clone(),
+                        right: right.clone(),
+                        style: snap(style),
+                    },
+                    Block::Columns { columns, rows, style } => Block::Columns {
+                        columns: columns.clone(),
+                        rows: rows.clone(),
+                        style: snap(style),
+                    },
+                    other => other.clone(),
+                })
+                .collect(),
         }
     }
 

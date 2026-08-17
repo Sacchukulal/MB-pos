@@ -151,47 +151,93 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
                 "The kitchen already has everything on this bill.",
             ));
         }
-        let lines: Vec<mb_print::template::TicketLine> = delta
+        // Each line keeps its ITEM as well as its words, because which station
+        // cooks it is decided by the item's category further down.
+        let lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)> = delta
             .iter()
-            .map(|(identity, qty)| mb_print::template::TicketLine {
-                // The ledger stores ids; the name comes from the cart line's
-                // frozen snapshot (crown jewel 4).
-                name: state
-                    .cart
-                    .lines()
-                    .iter()
-                    .find(|line| &line.identity() == identity)
-                    .map_or_else(|| "Item".to_owned(), |line| line.snapshot.name.clone()),
-                qty: *qty,
-                note: identity.note.clone(),
-                modifiers: Vec::new(),
+            .map(|(identity, qty)| {
+                (
+                    identity.item_id.clone(),
+                    mb_print::template::TicketLine {
+                        // The ledger stores ids; the name comes from the cart
+                        // line's frozen snapshot (crown jewel 4).
+                        name: state
+                            .cart
+                            .lines()
+                            .iter()
+                            .find(|line| &line.identity() == identity)
+                            .map_or_else(|| "Item".to_owned(), |line| line.snapshot.name.clone()),
+                        qty: *qty,
+                        note: identity.note.clone(),
+                        modifiers: Vec::new(),
+                    },
+                )
             })
             .collect();
         Ok((delta, lines, state.order_type, state.table.clone()))
     })?;
 
-    // 2. Build it and hand it to the queue.
-    let printer = default_printer(app)?;
+    // 2. **Split the ticket by station** — scope 3.1, and see `routed_printer`
+    //    for why this is new. Each line goes to its category's printer; every
+    //    line whose category has no route of its own shares the default
+    //    kitchen printer, which is the single ticket this used to always be.
+    //
+    //    Grouped by printer id and NOT by category: a shop with six categories
+    //    and two printers wants two tickets, not six. Getting that wrong would
+    //    have been a worse bug than the one being fixed, because a cook would
+    //    see it as the counter sending duplicates.
+    let fallback = default_kitchen_printer(app)?;
+    let categories = categories_of(app, &lines.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>());
+
+    let mut stations: Vec<(PrinterConfig, Vec<mb_print::template::TicketLine>)> = Vec::new();
+    for (item, line) in lines {
+        let printer = routed_printer(app, categories.get(item.as_str()).map(String::as_str))
+            .unwrap_or_else(|| fallback.clone());
+        match stations.iter_mut().find(|(p, _)| p.id == printer.id) {
+            Some((_, theirs)) => theirs.push(line),
+            None => stations.push((printer, vec![line])),
+        }
+    }
+
     // P17: the shop's own, not this crate's idea of a sensible one.
     let settings = app.shop_config().kitchen;
-    let ctx = mb_print::template::KitchenContext {
-        kind: mb_print::template::TicketKind::New,
-        token: None,
-        bill_number: None,
-        order_type,
-        table: table.as_deref(),
-        time: None,
-        station: None,
-        lines: &lines,
-        settings: &settings,
-    };
-    let document =
-        mb_print::template::kitchen_document(printer.paper, &ctx).map_err(|e| words::from_print(&e))?;
-
     let reason = table
         .clone()
         .map_or_else(|| "kitchen ticket".to_owned(), |t| format!("table {t}"));
-    let id = app.print(Job::new(JobKind::Kitchen, &printer.id, document, today(at)).because(reason),)?;
+
+    // The id of the FIRST ticket is what comes back, because the caller uses it
+    // for one thing — telling the cashier something is printing.
+    let mut id = String::new();
+    for (printer, station_lines) in &stations {
+        let ctx = mb_print::template::KitchenContext {
+            kind: mb_print::template::TicketKind::New,
+            token: None,
+            bill_number: None,
+            order_type,
+            table: table.as_deref(),
+            time: None,
+            // **Which station this roll belongs to**, on the paper. Two
+            // stations printing two different halves of one order, with
+            // nothing on either saying which is which, is how a cook ends up
+            // making the other station's food.
+            station: if stations.len() > 1 {
+                Some(printer.name.as_str())
+            } else {
+                None
+            },
+            lines: station_lines,
+            settings: &settings,
+        };
+        let document = mb_print::template::kitchen_document(printer.paper, &ctx)
+            .map_err(|e| words::from_print(&e))?;
+        let queued = app.print(
+            Job::new(JobKind::Kitchen, &printer.id, document, today(at))
+                .because(reason.clone()),
+        )?;
+        if id.is_empty() {
+            id = queued;
+        }
+    }
 
     // 2b. **The order goes on disk BEFORE the paper.** Same rule as
     //     `complete_bill`, and the same reason (D4): if the order is not saved
@@ -270,7 +316,11 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
         }
     }
 
-    log_info!("kitchen ticket queued with {} line(s)", lines.len());
+    log_info!(
+        "{} kitchen ticket(s) queued with {} line(s) between them",
+        stations.len(),
+        stations.iter().map(|(_, l)| l.len()).sum::<usize>()
+    );
     Ok(id)
 }
 
@@ -468,7 +518,21 @@ pub(crate) fn queue_bill_print(
 // single place mb-db's vocabulary becomes mb-print's, exactly as
 // `state::printer_config_for` is for a printer.
 
-/// Where a job goes before P17 sets up routing.
+/// **Where a BILL goes.**
+///
+/// # It reads the role now, and that is a bug fix
+///
+/// This was `find(is_default).or(first)`, which ignored `role` completely — so
+/// a shop that set its kitchen printer as the default, or that had only a
+/// printer marked *"Kitchen tickets only"*, had every customer's bill printed
+/// on the pass. The three role choices on the printer screen were collected,
+/// stored, shown back, and never consulted by anything (2026-08-17).
+///
+/// The order is: the default, if it may print bills; else any printer that may
+/// print bills; else the default whatever it is; else the first row. The last
+/// two steps matter — a shop whose only printer is marked kitchen-only should
+/// still get its bill on paper rather than silently nothing, because a wrong
+/// setting is a thing somebody can see and fix and a missing bill is not.
 pub(crate) fn default_printer(app: &App) -> UiResult<PrinterConfig> {
     let rows = app.with_shop(|shop| {
         shop.db
@@ -476,8 +540,12 @@ pub(crate) fn default_printer(app: &App) -> UiResult<PrinterConfig> {
             .map_err(|e| words::from_db(&e))
     })?;
 
+    let prints_bills = |p: &&mb_db::repo::settings::Printer| p.role == "bill" || p.role == "both";
+
     rows.iter()
-        .find(|p| p.is_default)
+        .find(|p| p.is_default && prints_bills(p))
+        .or_else(|| rows.iter().find(prints_bills))
+        .or_else(|| rows.iter().find(|p| p.is_default))
         .or_else(|| rows.first())
         .map(crate::state::printer_config_for)
         // Start-up saves a stand-in when the shop has none (see
@@ -493,6 +561,90 @@ pub(crate) fn default_printer(app: &App) -> UiResult<PrinterConfig> {
                  Add a printer in Settings.",
             )
         })
+}
+
+/// **Where a KITCHEN TICKET goes, and it is the category that decides.**
+///
+/// # This is scope 3.1, and until 2026-08-17 it was decoration
+///
+/// `route_category` has written a row per category since P17, the settings
+/// screen has drawn a dropdown per category, and the owner could set the
+/// tandoor's food to the tandoor printer and watch it save. **Nothing ever
+/// read it.** `print_kitchen_ticket_on` asked `default_printer` and sent every
+/// ticket there, so a two-printer kitchen got both stations' food on one roll
+/// and the setting that was supposed to fix that did nothing at all. The owner
+/// found it the way it deserved to be found — *"more importently just not show
+/// off, make it functional also"*.
+///
+/// Returns `None` when this category has no route of its own, which is the
+/// ordinary case and means "the kitchen printer everything else uses".
+fn routed_printer(app: &App, category: Option<&str>) -> Option<PrinterConfig> {
+    let category = category?;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).settings().category_printers(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })
+    .ok()?
+    .into_iter()
+    .find(|(c, _)| c == category)
+    .and_then(|(_, printer_id)| printer_by_id(app, &printer_id).ok())
+}
+
+/// Where a kitchen ticket goes when its category has no route of its own.
+///
+/// The same shape and the same fix as [`default_printer`]: prefer a printer
+/// that may print kitchen tickets, and only fall back to "whatever there is"
+/// so that a shop with one mis-marked printer still gets paper.
+fn default_kitchen_printer(app: &App) -> UiResult<PrinterConfig> {
+    let rows = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    let prints_tickets =
+        |p: &&mb_db::repo::settings::Printer| p.role == "kitchen" || p.role == "both";
+
+    rows.iter()
+        .find(|p| p.is_default && prints_tickets(p))
+        .or_else(|| rows.iter().find(prints_tickets))
+        .or_else(|| rows.iter().find(|p| p.is_default))
+        .or_else(|| rows.first())
+        .map(crate::state::printer_config_for)
+        .ok_or_else(|| {
+            UiError::new(
+                "print.no_printer",
+                "This shop has no printer set up, and the stand-in is missing. \
+                 Add a printer in Settings.",
+            )
+        })
+}
+
+/// **Which category each item on this ticket belongs to.**
+///
+/// One read of the menu rather than one per line: a sixty-line wedding order
+/// would otherwise open sixty transactions on the billing path (budget B1).
+fn categories_of(app: &App, items: &[mb_core::ItemId]) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(menu) = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, false))
+            .map_err(|e| words::from_db(&e))
+    }) else {
+        // A menu that will not read is not a reason to lose the ticket: every
+        // line falls through to the default kitchen printer, which is where
+        // they all went before routing existed at all.
+        return out;
+    };
+    for item in menu {
+        if items.iter().any(|wanted| wanted == &item.id)
+            && let Some(category) = item.category_id
+        {
+            out.insert(item.id.as_str().to_owned(), category.as_str().to_owned());
+        }
+    }
+    out
 }
 
 /// **One named printer** — P29, for the label printer, which is chosen by id
@@ -512,6 +664,132 @@ pub(crate) fn printer_by_id(app: &App, id: &str) -> UiResult<PrinterConfig> {
                 "That printer is not set up any more. Choose another one in                  Settings, under Devices.",
             )
         })
+}
+
+/// **Carry the bill to the table** — the owner's fourth ask of 2026-08-17:
+/// *"one small print logo inside; if any order inside, it should print the
+/// bill."*
+///
+/// # It does not take the money, and that is the feature
+///
+/// An Indian restaurant settles in two steps: the party asks for the bill, the
+/// waiter brings it, they read it, and *then* somebody pays at the counter.
+/// Until now this counter could only do the second half — `complete_bill`
+/// settles and prints in one press, so the only way to show a table what it
+/// owed was to close the bill before they had paid it.
+///
+/// So this **prints and changes nothing**. The order stays open, the table
+/// stays busy, no bill number is claimed that was not already claimed, no
+/// payment is recorded, and the cash drawer does not open (`should_kick`
+/// refuses anything that is not [`Copy::Original`](mb_print::template::Copy),
+/// which is the right answer here for free). Press it twice and you get two
+/// pieces of paper and no other difference — which is what a waiter who lost
+/// the first one needs.
+///
+/// # Why the bill is recomputed rather than read
+///
+/// An open order has no `bills` row: there is no bill yet, only what one would
+/// say right now. `billing::running_total` already recomputes it for the floor
+/// tile, for exactly the same reason (R2 — a second money path is two answers).
+/// This wants the whole [`Bill`](mb_core::Bill) rather than its total, so it
+/// calls `compute_bill` the same way with the same inputs. The paper and the
+/// tile therefore cannot disagree about what the table owes.
+pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
+    let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+    let id = mb_core::OrderId::new(order_id.clone());
+
+    let found = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).orders().find(&id))
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    // **Only an OPEN order.** A settled one has a real bill and its own button
+    // (Bills > Reprint, which counts the copy — D7); a cancelled or voided one
+    // is not something to hand anybody. Saying which is why this is not one
+    // `let else`.
+    let open = match found {
+        Some(mb_core::AnyOrder::Open(open)) => open,
+        Some(mb_core::AnyOrder::Settled(_)) => {
+            return Err(UiError::new(
+                "bill.already_settled",
+                "This bill is already paid. Print another copy from Bills.",
+            ));
+        }
+        _ => {
+            return Err(UiError::new(
+                "bill.not_open",
+                "There is no open order on that table any more.",
+            ));
+        }
+    };
+
+    if open.core.cart.is_empty() {
+        return Err(UiError::new(
+            "bill.empty",
+            "There is nothing on this table's bill yet.",
+        ));
+    }
+
+    let config = app.shop_config();
+    let charges = config.billing.charges_for(open.core.order_type);
+    let bill = mb_core::compute_bill(
+        mb_core::BillInput::new(&open.core.cart)
+            .with_order_type(open.core.order_type)
+            .with_place_of_supply(config.store.place_of_supply())
+            .with_rounding(config.billing.rounding)
+            .with_charges(&charges),
+    )
+    .map_err(|e| {
+        UiError::new(
+            "bill.money",
+            "This table's bill could not be worked out. Nothing has been changed.",
+        )
+        .with_detail(e.to_string())
+    })?;
+
+    let table = open.core.table.clone();
+    let order = mb_core::AnyOrder::Open(open);
+    queue_bill_copy(app, &order, &bill, &who.name, mb_print::template::Copy::NotPaid)?;
+
+    // **What the shop calls this table, not what the database calls it.**
+    //
+    // This said `table.as_str()`, which is a `TableId` — so pressing the print
+    // mark raised a toast reading *"The bill for table
+    // tbl_outlet_default_sec_ac_2_ is printing."* Found by pressing it in the
+    // running window, which is the only place that string has ever existed:
+    // every test asserted on the code, and the id is a perfectly good value
+    // for `format!` to accept. Audit F8, and UI_GUIDELINES §6 — never a system
+    // message, and an internal id is the purest form of one.
+    //
+    // A label that cannot be read is not a failure worth refusing a printed
+    // bill over: the paper is already queued, so this falls back to the
+    // sentence without a table in it.
+    let label = table.as_ref().and_then(|id| table_label(app, id));
+
+    log_info!(
+        "the bill for {} was carried out by {}",
+        label.as_deref().unwrap_or("an order with no table"),
+        who.name
+    );
+    Ok(match label {
+        Some(label) => format!("The bill for table {label} is printing."),
+        None => "The bill is printing.".to_owned(),
+    })
+}
+
+/// What the shop calls a table. `None` rather than an error: a caller that has
+/// already done the important thing should not fail over a name.
+fn table_label(app: &App, id: &mb_core::TableId) -> Option<String> {
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).floor().list_tables(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })
+    .ok()?
+    .into_iter()
+    .find(|t| t.id.as_str() == id.as_str())
+    .map(|t| t.label)
 }
 
 /// **One template, another argument** — P12's reprint, and audit D7.
@@ -536,6 +814,7 @@ pub(crate) fn queue_bill_copy(
         mb_print::template::Copy::Original => "bill".to_owned(),
         mb_print::template::Copy::Duplicate { number } => format!("copy {number}"),
         mb_print::template::Copy::Voided { .. } => "voided copy".to_owned(),
+        mb_print::template::Copy::NotPaid => "bill to the table".to_owned(),
     };
 
     let document = mb_print::template::bill_document(
@@ -680,4 +959,9 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
 #[tauri::command]
 pub fn complete_bill(app: State<'_, App>) -> UiResult<String> {
     complete_bill_on(&app)
+}
+
+#[tauri::command]
+pub fn print_open_bill(app: State<'_, App>, order_id: String) -> UiResult<String> {
+    print_open_bill_on(&app, order_id)
 }

@@ -185,6 +185,23 @@ export interface Commands {
     returns: CartView;
   };
   cart_clear_payments: { args: void; returns: CartView };
+  /**
+   * **Money off this bill** — scope 1.12, and the command that had no door
+   * until 2026-08-17.
+   *
+   * `kind` is `percent` or `amount`; `value` is TEXT ("10", "12.5", "50.00")
+   * because every rupee and every rate in this product is parsed in Rust (R8,
+   * D39). The discount is spread across the lines BEFORE tax, so a bill mixing
+   * rates still ties rate by rate.
+   *
+   * Refused, in words, when it is over what the signed-in person may give or
+   * when the shop's policy wants a reason.
+   */
+  cart_set_discount: {
+    args: { kind: string; value: string; reason: string | null };
+    returns: CartView;
+  };
+  cart_clear_discount: { args: void; returns: CartView };
   open_orders: { args: void; returns: TableView[] };
   menu_items: { args: void; returns: MenuItemView[] };
   /** Ranked search — the rule lives in Rust (P10, budget B2). */
@@ -198,6 +215,16 @@ export interface Commands {
   print_kitchen_ticket: { args: void; returns: string };
   /** settle() — one transaction — and THEN the print (audit D4). */
   complete_bill: { args: void; returns: string };
+  /**
+   * **The bill a waiter carries to the table**, before anybody has paid.
+   *
+   * Prints and changes nothing: the order stays open, the table stays busy, no
+   * payment is recorded and the drawer does not open. The paper is marked
+   * `*** NOT PAID ***` so it can never be mistaken for a settled bill.
+   *
+   * `complete_bill` is the other half and is a different press.
+   */
+  print_open_bill: { args: { orderId: string }; returns: string };
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
@@ -674,6 +701,23 @@ export interface Commands {
   /** A whole sample BILL, not a slip — a slip cannot show whether a bill is
    *  centred, and that is what somebody at the printer is asking. */
   print_sample_bill: { args: { printerId: string }; returns: string };
+  /**
+   * **Where bills print.** One dropdown on the Printers screen, and the
+   * command that makes it mean something — before this, the only way to change
+   * the default was a checkbox at the bottom of the add-a-printer dialog, so
+   * shops kept printing to the stand-in that prints nothing.
+   *
+   * It writes the whole list, so "exactly one default" holds afterwards.
+   */
+  set_default_printer: { args: { printerId: string }; returns: PrintersView };
+  /**
+   * **How wide the roll is** — 58 (2 inch), 80 (3 inch) or 100 (4 inch).
+   *
+   * Written on the printer bills go to, so the bill designer's picker and the
+   * Printers screen are two doors onto one value. The preview redraws on it,
+   * because paper width changes what every other receipt setting does.
+   */
+  set_paper_size: { args: { mm: number }; returns: PrintersView };
   /** Scope 7.11 — print, look at the paper, nudge, print again. */
   nudge_printer: {
     args: { printerId: string; dxMm: number; dyMm: number };

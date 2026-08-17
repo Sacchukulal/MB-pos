@@ -440,6 +440,32 @@ export function Settings() {
           />
         ) : active ? (
           <div className="mb-stack">
+            {/* **The paper, at the top, before anything else on this screen.**
+
+                The owner, 2026-08-17: *"the paper size selection in top, it
+                should 2 inch 3 inch 4 inch."* It was only in Printers, and
+                they are right that it belongs here too: paper width is the one
+                setting that changes what every OTHER setting on this screen
+                does. A shop heading that fits on 80 mm is capped on 58; the
+                item table goes two-line on a roll with no room for four
+                columns. Tuning a receipt against the wrong width is tuning the
+                wrong receipt — and the preview to the right redraws on it.
+
+                Not a `Field`: it is not one of the catalogue's scalars. Paper
+                lives on the PRINTER (a shop can have an 80 mm bill printer and
+                a 58 mm kitchen printer), so this sets it on the printer bills
+                go to — the same one the preview draws. */}
+            {SHOWS_PAPER.has(active.code) ? (
+              <PaperWidth
+                paper={paper}
+                onChanged={() => {
+                  // Nudge the preview to re-ask. It keys off `edits`, and the
+                  // paper is not an edit — so without this the settings on
+                  // screen would be right and the paper beside them stale.
+                  setEdits((was) => ({ ...was }));
+                }}
+              />
+            ) : null}
             {active.settings.length > 0 ? (
               <Section
                 section={active}
@@ -618,6 +644,66 @@ function Section({
 }
 
 /**
+ * **How wide the roll is** — 2, 3 or 4 inch, at the top of the bill designer.
+ *
+ * The three widths are the ones a thermal counter printer comes in, and they
+ * are named the way a shopkeeper buys paper (in inches) with the millimetres
+ * beside them, because the box says 80 mm and the dealer says three inch.
+ *
+ * It writes through `set_paper_size`, which puts it on the printer bills go
+ * to — so this control and the Printers screen are two doors onto one value
+ * and cannot drift apart.
+ */
+const PAPER_WIDTHS = [
+  { value: '58', label: '2 inch (58 mm)' },
+  { value: '80', label: '3 inch (80 mm)' },
+  { value: '100', label: '4 inch (100 mm)' },
+];
+
+function PaperWidth({
+  paper,
+  onChanged,
+}: {
+  paper: PreviewView | null;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  // The preview says which paper it drew on ("80 mm (3 inch)"); the number in
+  // it is the value. Read from there rather than kept in a second piece of
+  // state, so the dropdown cannot disagree with the paper beside it.
+  const current = paper?.paper.match(/^(\d+)/)?.[1] ?? '80';
+
+  return (
+    <Card>
+      <div className="mb-settings__head">
+        <h2 className="mb-settings__title">Paper</h2>
+        <span className="mb-field__hint">
+          The roll your bills print on. Everything below is laid out to fit it.
+        </span>
+      </div>
+      <div className="mb-settings__fields">
+        <Select
+          label="Paper width"
+          value={current}
+          options={PAPER_WIDTHS}
+          onChange={(event) => {
+            const mm = Number(event.currentTarget.value);
+            call('set_paper_size', { mm })
+              .then(() => {
+                toast.show('ok', `Bills print on ${mm} mm paper now.`);
+                onChanged();
+              })
+              .catch((cause) => {
+                if (isUiError(cause)) toast.show('danger', cause.message);
+              });
+          }}
+        />
+      </div>
+    </Card>
+  );
+}
+
+/**
  * **The paper, beside the settings that change it.**
  *
  * Audit D1 is why this is a sink and not a drawing:
@@ -651,7 +737,13 @@ function Paper({
 
       {preview ? (
         <>
-          <Receipt doc={preview.doc} />
+          {/* In the face the paper will be, and — for a proportional one —
+              laid out by the layout's own boxes. 2026-08-17. */}
+          <Receipt
+            doc={preview.doc}
+            font={preview.font}
+            monospace={preview.fontIsMonospace}
+          />
           {/* Half-typed is a normal state, and saying which box is not usable
               yet beats blanking the paper or shouting on every keystroke. */}
           {preview.notUsableYet.length > 0 ? (

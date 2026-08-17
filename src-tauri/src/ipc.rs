@@ -428,8 +428,11 @@ macro_rules! commands {
             $crate::ipc::menu_items,
             $crate::ipc::search_items,
             $crate::ipc::open_table,
+            $crate::ipc::cart_set_discount,
+            $crate::ipc::cart_clear_discount,
             $crate::flows::print_kitchen_ticket,
             $crate::flows::complete_bill,
+            $crate::flows::print_open_bill,
             // P11 — signing in, the people, the history. `guard.rs` has a test
             // that every one of these has an access decision recorded.
             $crate::ipc::lock_state,
@@ -603,6 +606,8 @@ macro_rules! commands {
             $crate::settings::printers::save_printer,
             $crate::settings::printers::delete_printer,
             $crate::settings::printers::route_category,
+            $crate::settings::printers::set_default_printer,
+            $crate::settings::printers::set_paper_size,
             $crate::settings::printers::print_sample_bill,
             $crate::settings::printers::nudge_printer,
             $crate::settings::backup::backup_status,
@@ -1005,6 +1010,160 @@ pub fn cart_clear_payments(
         cart_view(state, &app.shop_config())
     });
     shown(&handle, view)
+}
+
+// ---------------------------------------------------------------------------
+// Money off a bill — scope 1.12, audit B7, and the owner's 2026-08-17
+// *"where is discount option?? i want to give discount to customer, here no
+// option showing."*
+// ---------------------------------------------------------------------------
+
+/// **Take money off this bill.**
+///
+/// # Everything for this existed except the door
+///
+/// `mb_core::Discount` spreads a bill-level discount across the lines *before*
+/// tax, so a bill mixing 5% food and 18% packaged goods still ties rate by rate
+/// (audit B11); `DiscountPolicy` decides who may give how much and when a
+/// reason is compulsory; `Actor::discount_policy` builds one from the signed-in
+/// person's role; `BillDiscountBill` is a permission with a checkbox on the
+/// roles screen; `CartState.bill_discount` is read by `CartState::bill` and
+/// printed by the bill template. **All of it was reachable from nothing.**
+/// `bill_discount` was assigned `None` in `Default` and never written again, so
+/// no cashier could give a customer a rupee off, ever, by any route.
+///
+/// # Percent or amount, and the arithmetic is Rust's
+///
+/// `value` arrives as TEXT — "10" for a percentage, "50.00" for rupees — for
+/// the reason every money field in this product does (R8, D39): parsing it in
+/// TypeScript is how `0.30000000000000004` gets onto a bill.
+///
+/// # The policy is checked against the person, not the shop
+///
+/// A waiter may be allowed 5% and a manager 20%. `check` is given the SUBTOTAL,
+/// because that is what a percentage is a percentage of, and its refusals are
+/// already sentences a cashier can act on.
+pub fn cart_set_discount_on(
+    app: &App,
+    kind: String,
+    value: String,
+    reason: Option<String>,
+) -> UiResult<CartView> {
+    let who = guard::require(app, Permission::BillDiscountBill)?;
+    let config = app.shop_config();
+
+    let discount = match kind.as_str() {
+        "percent" => {
+            // Basis points, from text, without a float: "12.5" is 1250.
+            let bp = percent_to_bp(&value)?;
+            mb_core::Discount::percent_bp(bp).ok_or_else(|| {
+                UiError::new(
+                    "discount.too_much",
+                    "A discount cannot be more than 100%.",
+                )
+            })?
+        }
+        "amount" => {
+            let money = mb_core::Money::parse(value.trim()).map_err(|e| {
+                UiError::new("discount.amount", "Type how much to take off, like 50 or 50.00.")
+                    .with_detail(e.to_string())
+            })?;
+            mb_core::Discount::amount(money).ok_or_else(|| {
+                UiError::new(
+                    "discount.negative",
+                    "A discount takes money off. To add something on, use a charge.",
+                )
+            })?
+        }
+        _ => {
+            return Err(UiError::new(
+                "discount.kind",
+                "A discount is a percentage or an amount.",
+            ));
+        }
+    };
+
+    let reason = reason.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
+    let mut entry = mb_core::DiscountEntry::new(discount);
+    if let Some(reason) = reason {
+        entry = entry.with_reason(reason);
+    }
+    // **Who allowed it**, which is what makes the audit row worth having and
+    // what `DiscountEntry::authorised_by` has been waiting for since P02.
+    entry = entry.authorised_by(who.staff_id.clone());
+
+    app.with_cart_mut(|state| {
+        // The base a percentage is taken off. Computed from the cart as it is
+        // now, with no discount applied, which is what `check` compares against.
+        let base = state.bill(&config)?.subtotal;
+        who.discount_policy()
+            .check(&entry, base)
+            .map_err(|e| UiError::new("discount.refused", e.to_string()))?;
+        state.bill_discount = Some(entry);
+        cart_view(state, &config)
+    })
+}
+
+/// **Clear the discount.** Separate from setting one so that "no discount" is
+/// never expressed as "a discount of zero", which would print a zero line on
+/// the bill and read as a mistake.
+pub fn cart_clear_discount_on(app: &App) -> UiResult<CartView> {
+    guard::require(app, Permission::BillDiscountBill)?;
+    app.with_cart_mut(|state| {
+        state.bill_discount = None;
+        cart_view(state, &app.shop_config())
+    })
+}
+
+/// `"12.5"` to `1250` basis points, **without a float**.
+///
+/// `f64` gets 12.5 exactly and 0.1 not at all, and a percentage that is a
+/// hair under what was typed produces a discount a paisa off what the customer
+/// was promised. Two decimal places is the resolution basis points have.
+fn percent_to_bp(typed: &str) -> UiResult<u32> {
+    let typed = typed.trim();
+    let wrong = || {
+        UiError::new(
+            "discount.percent",
+            "Type the percentage, like 10 or 12.5.",
+        )
+    };
+    if typed.is_empty() {
+        return Err(wrong());
+    }
+    let (whole, fraction) = match typed.split_once('.') {
+        Some((w, f)) => (w, f),
+        None => (typed, ""),
+    };
+    if fraction.len() > 2 || !fraction.chars().all(|c| c.is_ascii_digit()) {
+        return Err(wrong());
+    }
+    let whole: u32 = whole.parse().map_err(|_| wrong())?;
+    // "12.5" is 50 hundredths, not 5 — pad on the right, not the left.
+    let hundredths: u32 = match fraction.len() {
+        0 => 0,
+        1 => fraction.parse::<u32>().map_err(|_| wrong())? * 10,
+        _ => fraction.parse().map_err(|_| wrong())?,
+    };
+    whole
+        .checked_mul(100)
+        .and_then(|w| w.checked_add(hundredths))
+        .ok_or_else(wrong)
+}
+
+#[tauri::command]
+pub fn cart_set_discount(
+    app: tauri::State<'_, App>,
+    kind: String,
+    value: String,
+    reason: Option<String>,
+) -> UiResult<CartView> {
+    cart_set_discount_on(&app, kind, value, reason)
+}
+
+#[tauri::command]
+pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
+    cart_clear_discount_on(&app)
 }
 
 /// The floor — **the only view of open orders** (scope 1.4).

@@ -16,13 +16,11 @@
 //! [`PARAMS`] is the OWASP minimum for Argon2id (19 MiB, t = 2, p = 1). Not
 //! more, because of the 4 GB; not less, because less is not a defence.
 //!
-//! # Six to eight digits
+//! # Four digits
 //!
-//! BACKEND-**D1** asked for a six-digit minimum and this takes it — even
-//! though the threat there (a public internet endpoint behind a deliberately
-//! public restaurant code) is not the threat here (a person standing at a
-//! counter). Two extra keypresses twice a day is not a cost worth arguing
-//! about, and the offline attack is only ever answered by digits × cost.
+//! See [`MIN_DIGITS`]. The offline attack is answered by digits × cost, and
+//! four digits at 19 MiB per guess is still a wall; the counter attack is
+//! answered by the lockout, not by length.
 //!
 //! # The plaintext exists in exactly two function arguments
 //!
@@ -37,10 +35,26 @@ use argon2::{Algorithm, Argon2, Params, Version};
 
 use crate::error::AuthError;
 
-/// A PIN is 6 to 8 digits. Both ends are deliberate: six because fewer is not
-/// worth hashing, eight because a cashier types this six times a day and there
-/// is no auto-submit to hide behind.
-pub const MIN_DIGITS: usize = 6;
+/// **A PIN is four digits** — the owner's instruction of 2026-08-17:
+/// *"i want only 4 digit pin, not 8."*
+///
+/// This was six to eight, taken from BACKEND-D1, whose threat model was a
+/// public internet endpoint behind a deliberately public restaurant code. That
+/// is not the threat here: this is a person standing at a counter, in front of
+/// a screen that locks itself, with a lockout after a handful of wrong tries
+/// — and it is the same four digits they already use at an ATM. Two extra
+/// keypresses twelve times a day was argued to be free; a cashier who cannot
+/// remember their PIN writes it on the till, which costs everything.
+///
+/// # Why the maximum is still eight
+///
+/// **Nobody gets locked out of their own shop by an upgrade.** Shops already
+/// running have six-digit PINs on disk; dropping the ceiling to four would
+/// refuse every one of them at the pad and send an owner hunting for a
+/// recovery code they were shown once, months ago. So four is what a *new* PIN
+/// is and what the pad is built for, and a longer one that already exists
+/// keeps working until somebody changes it.
+pub const MIN_DIGITS: usize = 4;
 pub const MAX_DIGITS: usize = 8;
 
 /// **The cost decision.** OWASP's Argon2id minimum: 19 MiB, two passes, one
@@ -236,18 +250,36 @@ mod tests {
         assert!(!verify_pin(&Pin::parse("123457").expect("valid"), &hash));
     }
 
+    /// **Four digits is a PIN**, and this test used to assert the opposite.
+    ///
+    /// It was `four_digits_are_refused_with_a_reason`, written for
+    /// BACKEND-D1's six-digit minimum. The owner asked for four on
+    /// 2026-08-17 — *"i want only 4 digit pin, not 8"* — and the reasoning is
+    /// in [`MIN_DIGITS`]: that minimum was carried over from a threat model
+    /// (a public internet endpoint) that this product does not have.
+    ///
+    /// Three is still refused, so the floor is a real floor rather than a
+    /// number nobody checks.
     #[test]
-    fn four_digits_are_refused_with_a_reason() {
-        // BACKEND-D1: v1's PIN was four digits. This is the line where that
-        // stops being possible.
-        let err = Pin::parse("1234").expect_err("too short");
+    fn four_digits_are_a_pin_and_three_are_not() {
+        assert!(Pin::parse("1234").is_ok(), "four digits is what a PIN is now");
+
+        let err = Pin::parse("123").expect_err("too short");
         assert_eq!(
             err,
             AuthError::BadPin {
                 what: "that is too short"
             }
         );
-        assert!(err.to_string().contains("6 to 8"));
+    }
+
+    /// **A PIN a shop already has keeps working.** The ceiling stayed at eight
+    /// so that lowering the floor could not lock anybody out of their own
+    /// counter — see [`MIN_DIGITS`].
+    #[test]
+    fn a_longer_pin_that_already_exists_still_verifies() {
+        let hash = hash_pin(&Pin::parse("482913").expect("six digits")).expect("hashes");
+        assert!(verify_pin(&Pin::parse("482913").expect("six digits"), &hash));
     }
 
     #[test]

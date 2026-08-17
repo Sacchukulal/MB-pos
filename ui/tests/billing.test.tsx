@@ -1,4 +1,4 @@
-/**
+﻿/**
  * **T2, T3, T4 and T5 — the billing screen.**
  *
  * The Rust side proves the figures (`src-tauri/src/billing.rs`); this proves
@@ -51,6 +51,7 @@ describe('the table grid (scope 1.4)', () => {
         ]}
         filter=""
         onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
       />,
     );
 
@@ -76,6 +77,7 @@ describe('the table grid (scope 1.4)', () => {
         ]}
         filter=""
         onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
       />,
     );
     const tile = screen.getByRole('button');
@@ -92,13 +94,15 @@ describe('the table grid (scope 1.4)', () => {
       );
 
     const small = render(
-      <TableGrid tables={many(4)} filter="" onOpen={vi.fn()} />,
+      <TableGrid tables={many(4)} filter="" onOpen={vi.fn()}
+        onPrintBill={vi.fn()} />,
     );
     expect(small.container.querySelector('[data-dense="true"]')).toBeNull();
     cleanup();
 
     const big = render(
-      <TableGrid tables={many(DENSE_ABOVE + 36)} filter="" onOpen={vi.fn()} />,
+      <TableGrid tables={many(DENSE_ABOVE + 36)} filter="" onOpen={vi.fn()}
+        onPrintBill={vi.fn()} />,
     );
     expect(
       big.container.querySelector('[data-dense="true"]'),
@@ -124,6 +128,7 @@ describe('the table grid (scope 1.4)', () => {
         ]}
         filter=""
         onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
       />,
     );
     expect(screen.getByText('No table')).toBeInTheDocument();
@@ -137,6 +142,7 @@ describe('the table grid (scope 1.4)', () => {
         tables={[table({ id: '1', label: '1' }), table({ id: '2', label: '12' })]}
         filter="12"
         onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
       />,
     );
     expect(screen.getByText('12')).toBeInTheDocument();
@@ -249,12 +255,14 @@ describe('the totals block (audit B10 and B11)', () => {
  */
 describe('an empty floor (P30.5)', () => {
   it('takes no space when there is nothing to show and no filter', () => {
-    const { container } = render(<TableGrid tables={[]} filter="" onOpen={vi.fn()} />);
+    const { container } = render(<TableGrid tables={[]} filter="" onOpen={vi.fn()}
+        onPrintBill={vi.fn()} />);
     expect(container.textContent).toBe('');
   });
 
   it('still says why when a filter is what emptied it', () => {
-    render(<TableGrid tables={[]} filter="9" onOpen={vi.fn()} />);
+    render(<TableGrid tables={[]} filter="9" onOpen={vi.fn()}
+        onPrintBill={vi.fn()} />);
     expect(screen.getByText('No table matches that')).toBeTruthy();
   });
 });

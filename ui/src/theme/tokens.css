@@ -167,12 +167,25 @@
      preview at once. Set by ThemeProvider on <html>. */
   --type-scale: 1;
 
-  --text-xs: calc(0.75rem * var(--type-scale));
-  --text-sm: calc(0.875rem * var(--type-scale));
+  /* **The bottom of the scale came up** — the owner's second complaint of
+     2026-08-17: *"boxes are big inside letters are now very small."*
+
+     They are describing a real ratio, not a preference. A table tile is 4.5rem
+     tall and its seat count was 0.75rem; a payment button is 44px tall and its
+     word was 1rem. The box was sized for a finger and the text for a mouse, so
+     every control on the counter read as mostly empty.
+
+     The fix is at the BOTTOM of the scale, not the top. `xs` and `sm` carry
+     every caption, label, cell and hint in the product — which is most of the
+     words on any screen — and `md` upward was never the complaint. Raising
+     these two and leaving the headings alone also keeps the steps between
+     sizes, so the hierarchy the type contract sets up still reads. */
+  --text-xs: calc(0.8125rem * var(--type-scale));
+  --text-sm: calc(0.9375rem * var(--type-scale));
   --text-md: calc(1rem * var(--type-scale));
-  --text-lg: calc(1.125rem * var(--type-scale));
-  --text-xl: calc(1.375rem * var(--type-scale));
-  --text-2xl: calc(1.75rem * var(--type-scale));
+  --text-lg: calc(1.1875rem * var(--type-scale));
+  --text-xl: calc(1.4375rem * var(--type-scale));
+  --text-2xl: calc(1.875rem * var(--type-scale));
 
   --weight-normal: 400;
   --weight-medium: 500;
@@ -364,6 +377,15 @@
   --z-lock: 300;
 
   --focus-ring-width: 2px;
+  /* **A second line weight, and it is the owner's complaint of 2026-08-17**:
+     *"the lines and letters brightness not correctly visble."*
+
+     Colour was only half of that (the ramps below are the other half). A
+     1px hairline is a hairline whatever colour it is — on a table tile, which
+     is a box a cashier picks out of forty at a glance from two feet away, the
+     outline has to be a real edge. Two weights, and no third: HAIRLINE
+     separates, THICK outlines something that is its own object. */
+  --border-width-thick: 2px;
   /* The rule under the current screen in the top bar. A token because it is a
      size, and every size in this product is one (D21) — the lint does not scan
      inside box-shadow, which is exactly why this needs saying rather than
@@ -389,15 +411,24 @@
 
   /* line — two weights and they do different jobs. `--border` separates
      things that belong together (rows in a table); `--border-strong` outlines
-     things you can act on (an input, a secondary button). */
-  --border: #e4e7ec;
-  --border-strong: #cfd4dc;
+     things you can act on (an input, a secondary button).
+
+     **Both came up on 2026-08-17, and the amount is computed, not chosen.**
+     `--border-strong` was #cfd4dc, which is 1.49:1 against white — an input
+     whose outline you cannot see is an input that does not look like one, and
+     WCAG 1.4.11 asks 3:1 of exactly this. It is 3.14:1 now. `--border` is a
+     separator rather than an outline, so it is held to a lower bar (1.64:1,
+     up from 1.24:1) — a row rule at 3:1 stops separating rows and starts
+     drawing a grid. `contrast.test.ts` checks both, in every theme, which is
+     what stops this drifting back. */
+  --border: #c2c7d0;
+  --border-strong: #868d9b;
 
   /* text — three steps, and the gap between them is deliberate. Muted is for
      a label, faint is for a hint nobody has to read. */
   --text: #101828;
-  --text-muted: #5b6474;
-  --text-faint: #8b94a3;
+  --text-muted: #545d6d;
+  --text-faint: #6f7889;
 
   /* accent — PROVISIONAL DEFAULT, indigo.
      Chosen so that green, amber and red stay free for paid / warning /
@@ -448,12 +479,21 @@
   --surface-2: #1e222b;
   --surface-sunk: #0a0c10;
 
-  --border: #272c36;
-  --border-strong: #3a414f;
+  /* **This is the pair the owner was actually looking at.** The screenshot of
+     2026-08-17 is the dark theme, and `--border-strong` was #3a414f: 1.68:1
+     against `--surface`. Every input, every secondary button, every payment
+     key and every table tile was outlined in a line that is, measurably,
+     almost not there. 3.12:1 now. `--border` goes 1.23:1 → 1.96:1. */
+  --border: #454b57;
+  --border-strong: #5f6979;
 
   --text: #e9ecf2;
-  --text-muted: #98a1b2;
-  --text-faint: #6c7484;
+  /* Lifted with the lines, and for the same reading. "4 seats", "5%", every
+     field label and every section note is one of these two, and on this ground
+     they were doing the greyed-out-and-disabled impression rather than the
+     secondary-information one. Faint goes 3.66:1 → 5.20:1. */
+  --text-muted: #a9b3c4;
+  --text-faint: #838da0;
 
   /* The same indigo, lifted so it holds its contrast on a dark ground.
      Change these two lines with the light ones above. */

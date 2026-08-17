@@ -139,17 +139,49 @@
 
 /* --- A tile. State in FORM as well as colour (§2 rule 2) ----------------- */
 
+/* **A REAL BOX** — the owner, 2026-08-17: *"tables looks very very light and
+   very simple, i want to redesign this tables eliment, dark border with
+   rectangular, round cornerd."*
+
+   Three things were wrong and only one of them was the colour:
+
+   1. the outline was `--border` at 1px, which was 1.23:1 on this ground. It is
+      `--border-strong` at `--border-width-thick` now, which is 3.12:1 and two
+      pixels — a tile is an OBJECT a cashier picks out of forty at a glance,
+      not a row in a list, and it gets the outline of one;
+   2. the corner was `--radius-md`, halfway between square and soft and
+      therefore neither. `--radius-lg` reads as a deliberate rounded rectangle;
+   3. the left edge carried a `--space-1` coloured stripe, which meant the box
+      had a different border on one side and did not read as a rectangle at
+      all. The stripe is an inset shadow now, so the outline stays a single
+      even rectangle the whole way round and the state signal sits INSIDE it.  */
+
 .mb-tile {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
   min-height: var(--tile-height);
-  padding: var(--space-2) var(--space-3);
   background: var(--surface);
   color: var(--text);
-  border: var(--border-width) solid var(--border);
-  border-left: var(--space-1) solid transparent;
-  border-radius: var(--radius-md);
+  border: var(--border-width-thick) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+}
+
+/* The whole tile, as a press. It fills the box, so nothing about reaching a
+   table changed when the print button arrived beside it. */
+.mb-tile__face {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  /* Room on the right for the print button to sit without ever landing on the
+     amount. The face keeps its full width on a free tile, where there is no
+     button — hence the modifier below rather than a padding for every tile. */
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+  background: transparent;
+  color: inherit;
+  border: none;
+  border-radius: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -157,39 +189,89 @@
 
 .mb-floor--dense .mb-tile {
   min-height: var(--tile-height-dense);
+}
+
+.mb-floor--dense .mb-tile__face {
   padding: var(--space-1) var(--space-2);
 }
 
-/* FREE: dashed outline, no fill, quiet text — and no colour at all. */
+/* FREE: dashed outline, no fill, quiet text — and no colour at all. The dash
+   is the form half of the signal (§2 rule 2) and it survives grey-scale; it is
+   simply a dash somebody can now see. */
 .mb-tile--free {
   background: transparent;
   border-style: dashed;
-  border-left-color: transparent;
+  border-color: var(--border);
   color: var(--text-faint);
 }
 
-/* OCCUPIED: solid card, left stripe, amount in mono. */
+/* OCCUPIED: the stripe, inset, so the rectangle stays a rectangle. */
 .mb-tile--occupied {
-  border-left-color: var(--accent);
+  box-shadow: inset var(--space-1) 0 0 0 var(--accent);
 }
 
 /* LATE: the same stripe in danger, plus an emphasised timer. §4 calls this
    "the single most useful thing a floor view can show". */
 .mb-tile--late {
-  border-left-color: var(--danger);
   background: var(--danger-soft);
+  border-color: var(--danger);
+  box-shadow: inset var(--space-1) 0 0 0 var(--danger);
 }
 
-/* LOADED: border and a soft ring. */
+/* WAITING sits between the two and is set further down the file. */
+
+/* LOADED: the accent outline and a soft ring outside it. */
 .mb-tile--loaded {
   border-color: var(--accent);
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-line);
+  box-shadow:
+    inset var(--space-1) 0 0 0 var(--accent),
+    0 0 0 var(--focus-ring-width) var(--accent-line);
 }
 
+/* **The table number is the thing the tile exists to say**, and it was
+   `--text-lg` inside a 4.5rem box — which is the owner's *"boxes are big
+   inside letters are now very small"* in one line. It is the largest type on
+   the floor now, which is what makes a tile readable across a room. */
 .mb-tile__label {
-  font-size: var(--text-lg);
+  font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
+}
+
+/* The dense step is past 24 tables, where the number has to give some of that
+   back to fit ten columns — but not all of it. */
+.mb-floor--dense .mb-tile__label {
+  font-size: var(--text-lg);
+}
+
+/* **The print mark** — the owner's *"one small print logo inside; if any order
+   inside it should print the bill."*
+
+   Top right, out of the way of the label at the top left and the amount below
+   it. It is `--target-min` wide on a touch monitor and it is the only thing on
+   the tile that is not "open this table", so it says what it does on hover and
+   to a screen reader. */
+.mb-tile__print {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-7);
+  height: var(--space-7);
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mb-tile__print:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: var(--border-strong);
 }
 
 .mb-tile__amount {
@@ -198,19 +280,45 @@
   font-size: var(--text-sm);
 }
 
+/* **Two timers have to fit, and neither may be cut in half.**
+   A tile is 7.5rem wide and a busy table can carry both "2h 36m" (since the
+   party sat) and "food 2h 36m" (since the kitchen was told, scope 14.2). Side
+   by side those overflow, and `space-between` broke the first one across two
+   lines as "2h / 36m" — a duration split down the middle is unreadable at a
+   glance, which is the only way a floor is ever read.
+
+   So each timer is kept whole and the LINE wraps instead. `flex-start` rather
+   than `space-between`: pushed apart, one timer sat against each edge of the
+   tile and read as two unrelated numbers. */
 .mb-tile__meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+.mb-tile__meta > * {
+  white-space: nowrap;
 }
 
 /* The emphasised timer — form, not just colour. */
 .mb-tile__timer--late {
   font-weight: var(--weight-bold);
   color: var(--danger);
+}
+
+/* "food 18m" — scope 14.2's second timer, quieter than the table timer because
+   it is the second question, not the first.
+
+   It lived in `floor.css` as `.mb-floor__kitchen`, styling the Floor screen's
+   own copy of this tile. A tile's own second line needing a class out of a
+   SCREEN's stylesheet is how the two drifted apart in the first place, so it
+   is here with the rest of the tile. */
+.mb-tile__food {
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* **The kitchen has not been told about this table.**
@@ -220,6 +328,9 @@
    is wrong yet, somebody just has not pressed Kitchen ticket. */
 .mb-tile__kitchen {
   flex-shrink: 0;
+  /* Pushed to the end of the line, which is what `space-between` used to do
+     for it before the meta line learned to wrap. */
+  margin-left: auto;
   width: var(--space-2);
   height: var(--space-2);
   background: var(--warn);
@@ -533,6 +644,14 @@
   cursor: pointer;
 }
 
+/* A price in the suggestion list. Mono and tabular, because a column of rupees
+   that does not line up looks broken to a shopkeeper (§3). */
+.mb-suggestion__price {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+
 /* The highlight is a fill AND a stripe, so it survives grey-scale — §2 rule 2
    applies to the thing a cashier is looking at most of all. */
 .mb-suggestion--on {
@@ -604,7 +723,7 @@
    LATE as well as the colour (stripe only, no wash), so grey-scaling the
    screen still tells them apart. */
 .mb-tile--waiting {
-  border-left-color: var(--warn);
+  box-shadow: inset var(--space-1) 0 0 0 var(--warn);
 }
 
 /* What the floor did while this bill was being typed (P20, D83).

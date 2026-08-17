@@ -33,6 +33,21 @@ pub enum Copy {
     Duplicate { number: u32 },
     /// Scope 1.17.
     Voided { reason: String },
+    /// **The bill a waiter carries to the table**, before anyone has paid.
+    ///
+    /// The owner asked for it on 2026-08-17 as a print button on the table
+    /// tile, and it is how an Indian restaurant has always worked: the party
+    /// asks for the bill, reads it, and *then* pays at the counter.
+    ///
+    /// **It has to be marked, and this is the whole reason it is a variant
+    /// rather than [`Copy::Original`].** An open order prints no payment lines
+    /// (there are none), so without a mark this paper is byte-for-byte a
+    /// settled bill minus a section nobody counts — which is a slip a customer
+    /// could reasonably hold up as proof of payment, and a shop could
+    /// reasonably mistake for one. `should_kick` also refuses to open the cash
+    /// drawer for anything that is not `Original`, which is the right answer
+    /// here for free: no money is being taken yet.
+    NotPaid,
 }
 
 /// The shop, as the bill header needs it.
@@ -152,6 +167,15 @@ fn header(doc: &mut Document, ctx: &BillContext<'_>) {
         Copy::Voided { reason } => {
             doc.text("*** VOIDED ***", Style::new(2, true), Align::Centre);
             doc.text(format!("Reason: {reason}"), Style::BOLD, Align::Centre);
+            doc.separator(s.pattern);
+        }
+        /* Double height and bold, the same weight VOIDED gets, because it is
+           the same KIND of fact: what this piece of paper is not. The second
+           line is for the customer holding it — "NOT PAID" alone reads as an
+           accusation, and the point is that nothing has gone wrong yet. */
+        Copy::NotPaid => {
+            doc.text("*** NOT PAID ***", Style::new(2, true), Align::Centre);
+            doc.text("Please pay at the counter", Style::BOLD, Align::Centre);
             doc.separator(s.pattern);
         }
     }

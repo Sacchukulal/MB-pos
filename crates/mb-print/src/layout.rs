@@ -73,6 +73,32 @@ pub enum LaidContent {
     Blank,
 }
 
+/// **Where one aligned run sits on a line**, measured in characters of that
+/// line's own size.
+///
+/// # Why a padded string is not enough any more
+///
+/// Alignment used to be spaces: `align_to` padded a cell to its width and the
+/// sinks drew the result. That is exact while every character is the same
+/// width — and from 2026-08-17 a shop can choose Times New Roman, where a space
+/// is about a third of a digit. Padded to the same COUNT, an amount lands a
+/// long way left of the right edge, and a bill's figures stop lining up: the
+/// one thing a shopkeeper checks a bill for.
+///
+/// So the layout says where each run's box is and how the run sits in it. The
+/// text is still padded — the ESC/POS text sink prints with the printer's own
+/// fixed font and wants exactly that — and a sink that can measure uses the
+/// boxes instead. **Both describe the same line**, which is what keeps them
+/// from drifting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Segment {
+    /// Characters from the start of the line's text.
+    pub start: usize,
+    /// How many characters wide the box is.
+    pub width: usize,
+    pub align: Align,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaidLine {
     pub content: LaidContent,
@@ -80,6 +106,13 @@ pub struct LaidLine {
     /// Columns from the left edge of the paper, **offset already applied**. A
     /// sink positions from this and never recomputes it.
     pub indent: usize,
+    /// The aligned runs on this line — see [`Segment`].
+    ///
+    /// Empty means "one run, left, the whole line", which is what a plain line
+    /// of text is and what every line was before proportional faces existed.
+    /// `serde(default)` so a document written by an older build still reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segments: Vec<Segment>,
 }
 
 /// Something the layout had to do to make the document fit, that a person might
@@ -88,7 +121,12 @@ pub struct LaidLine {
 #[serde(tag = "note", rename_all = "snake_case")]
 pub enum Note {
     /// Crown jewel 18. P17 shows this as "too big for this paper".
-    ScaleCapped { asked: u8, used: u8 },
+    ///
+    /// **In dots, since 2026-08-17.** It carried the ESC/POS multiplier, which
+    /// meant a heading could only ever be reported as coming down a whole cell
+    /// — and, worse, could only ever be *capped* by a whole cell. A shop that
+    /// set 46 got 24.
+    ScaleCapped { asked: u16, used: u16 },
     /// Scope 7.11. P07's test print shows this as "clamped to +N".
     OffsetClamped { asked_mm: i32, used_columns: i32 },
     /// A row's label wrapped so its amount could stay whole. Rule three.
@@ -130,12 +168,57 @@ impl Laid {
     }
 }
 
-/// Lay a document out for its paper.
+/// **What a character is measured in, which depends on who is printing.**
+///
+/// # The one thing the two engines cannot share
+///
+/// A receipt is laid out once and rendered by every sink, and that is D29 —
+/// which is what stops the preview and the paper disagreeing. It works because
+/// every sink can draw what the layout describes.
+///
+/// From 2026-08-17 one of them cannot. The **graphics** engine rasterises the
+/// receipt itself, so it draws text of any height. The **text** engine sends
+/// characters to the printer's own font, which has one size and three
+/// multipliers — 24, 48 and 72 dots and nothing between. Lay a bill out with
+/// 32-dot text and 36 characters to the line, and the graphics engine prints it
+/// perfectly while the printer's own font runs 4 characters off the edge of the
+/// roll. `t3_the_wire_is_what_it_was` caught exactly that.
+///
+/// So the layout is told which grid it is for. Nothing else about it changes:
+/// both engines still get one document, one set of wrapping decisions, and one
+/// answer about where a line breaks — for the grid they can each actually draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Grid {
+    /// Any height, in dots. The graphics engine, and the preview beside it.
+    #[default]
+    Dots,
+    /// Whole cells of the printer's own font. The ESC/POS text engine.
+    Cells,
+}
+
+/// Lay a document out for its paper, for the graphics engine.
 ///
 /// The only fallible case is rule three's last clause: an amount that is wider
 /// than the paper at scale 1. Nothing sensible can be printed and pretending
 /// otherwise is worse than saying so.
 pub fn layout(doc: &Document) -> Result<Laid, PrintError> {
+    layout_for(doc, Grid::Dots)
+}
+
+/// Lay a document out for a particular engine's grid — see [`Grid`].
+pub fn layout_for(doc: &Document, grid: Grid) -> Result<Laid, PrintError> {
+    // **Snapped once, at the door.** Every size becomes a whole cell before
+    // anything measures anything, so the wrapping, the column widths, the caps
+    // and the rendered output all agree — rather than each rounding in its own
+    // way, which is how two sinks come to disagree.
+    let snapped;
+    let doc = match grid {
+        Grid::Dots => doc,
+        Grid::Cells => {
+            snapped = doc.snapped_to_cells();
+            &snapped
+        }
+    };
     let paper = doc.paper;
     let columns = paper.columns();
     let mut notes = Vec::new();
@@ -155,6 +238,7 @@ pub fn layout(doc: &Document) -> Result<Laid, PrintError> {
             content: LaidContent::Blank,
             style: Style::NORMAL,
             indent: 0,
+            segments: Vec::new(),
         });
     }
 
@@ -162,8 +246,18 @@ pub fn layout(doc: &Document) -> Result<Laid, PrintError> {
     // still fits rather than falling off the right edge.
     let usable = columns.saturating_sub(indent).max(1);
 
-    for block in &doc.blocks {
-        lay_block(block, usable, indent, &mut lines, &mut notes)?;
+    let table_needs = table_needs(doc);
+
+    for (index, block) in doc.blocks.iter().enumerate() {
+        lay_block(
+            block,
+            usable,
+            indent,
+            grid,
+            table_needs.get(index).copied().unwrap_or(0),
+            &mut lines,
+            &mut notes,
+        )?;
     }
 
     Ok(Laid {
@@ -189,10 +283,61 @@ fn clamp_offset(wanted: i32, columns: usize, notes: &mut Vec<Note>, asked_mm: i3
     usize::try_from(used).unwrap_or(0)
 }
 
+/// **How much room each table would like, shared across the blocks that make
+/// up one table.**
+///
+/// # The item table is two blocks, and they must not be two sizes
+///
+/// A bill's item table is pushed as a `Columns` block for the headings and a
+/// second one for the rows, so a separator can go between them. Capped
+/// independently they cap differently — the headings are four short words and
+/// the rows carry "Paneer Butter Masala" — and the paper comes out with a
+/// heading row visibly bigger than the rows underneath it. The owner's printed
+/// bill on 2026-08-17 had exactly that.
+///
+/// So every `Columns` block with the same shape and the same style is one
+/// table, and they all get the largest need among them. One cap, one size.
+fn table_needs(doc: &Document) -> Vec<usize> {
+    let own: Vec<usize> = doc
+        .blocks
+        .iter()
+        .map(|block| match block {
+            Block::Columns { columns, rows, .. } => columns_need(columns, rows),
+            _ => 0,
+        })
+        .collect();
+
+    doc.blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| {
+            let Block::Columns { columns, style, .. } = block else {
+                return 0;
+            };
+            doc.blocks
+                .iter()
+                .enumerate()
+                .filter(|(_, other)| match other {
+                    Block::Columns {
+                        columns: theirs,
+                        style: their_style,
+                        ..
+                    } => their_style == style && theirs == columns,
+                    _ => false,
+                })
+                .map(|(other, _)| own.get(other).copied().unwrap_or(0))
+                .max()
+                .unwrap_or_else(|| own.get(index).copied().unwrap_or(0))
+        })
+        .collect()
+}
+
 fn lay_block(
     block: &Block,
     usable: usize,
     indent: usize,
+    grid: Grid,
+    table_need: usize,
     lines: &mut Vec<LaidLine>,
     notes: &mut Vec<Note>,
 ) -> Result<(), PrintError> {
@@ -203,6 +348,7 @@ fn lay_block(
                     content: LaidContent::Blank,
                     style: Style::NORMAL,
                     indent,
+            segments: Vec::new(),
                 });
             }
         }
@@ -216,6 +362,7 @@ fn lay_block(
                     },
                     style: Style::NORMAL,
                     indent,
+                    segments: Vec::new(),
                 });
             }
         }
@@ -232,6 +379,7 @@ fn lay_block(
             },
             style: Style::NORMAL,
             indent,
+            segments: Vec::new(),
         }),
 
         Block::QrCode {
@@ -246,6 +394,7 @@ fn lay_block(
             },
             style: Style::NORMAL,
             indent,
+            segments: Vec::new(),
         }),
 
         Block::Barcode {
@@ -260,6 +409,7 @@ fn lay_block(
             },
             style: Style::NORMAL,
             indent,
+            segments: Vec::new(),
         }),
 
         Block::Text {
@@ -267,26 +417,35 @@ fn lay_block(
             style,
             align,
         } => {
-            let style = cap_scale(*style, longest_word(content), usable, notes);
-            let width = usable / usize::from(style.scale());
+            let style = cap_scale(*style, longest_word(content), usable, grid, notes);
+            let width = chars_across(usable, style);
             for line in wrap(content, width.max(1)) {
                 lines.push(LaidLine {
                     content: LaidContent::Text { text: align_to(&line, width.max(1), *align) },
                     style,
                     indent,
+                    // One box, the whole line. A centred heading in Times New
+                    // Roman is centred by MEASURE, not by counting the spaces
+                    // `align_to` padded it with.
+                    segments: vec![Segment {
+                        start: 0,
+                        width: width.max(1),
+                        align: *align,
+                    }],
                 });
             }
         }
 
         Block::Row { left, right, style } => {
             let needed = left.chars().count() + right.chars().count() + 1;
-            let style = cap_scale(*style, needed, usable, notes);
-            let width = (usable / usize::from(style.scale())).max(1);
-            for line in fit_row(left, right, width, notes)? {
+            let style = cap_scale(*style, needed, usable, grid, notes);
+            let width = chars_across(usable, style);
+            for (line, segments) in fit_row(left, right, width, notes)? {
                 lines.push(LaidLine {
                     content: LaidContent::Text { text: line },
                     style,
                     indent,
+                    segments,
                 });
             }
         }
@@ -317,15 +476,26 @@ fn lay_block(
             // and a roll of paper per bill. The owner found it on a real
             // install; no test caught it because every test used the default
             // size.
-            let style = cap_scale(*style, columns_need(columns), usable, notes);
-            let width = (usable / usize::from(style.scale())).max(1);
+            // A table cannot go below its fixed columns plus a readable fill;
+            // if it has to come down, it comes down far enough for its names.
+            let style = cap_to(
+                *style,
+                columns_need(columns, &[]),
+                // The whole table's need, not this block's — see `table_needs`.
+                table_need.max(columns_need(columns, rows)),
+                usable,
+                grid,
+                notes,
+            );
+            let width = chars_across(usable, style);
             let widths = fit_columns(columns, width);
             for row in rows {
-                for line in lay_row(columns, &widths, row) {
+                for (line, segments) in lay_row(columns, &widths, row) {
                     lines.push(LaidLine {
                         content: LaidContent::Text { text: line },
                         style,
                         indent,
+                        segments,
                     });
                 }
             }
@@ -349,33 +519,166 @@ const MIN_FILL: usize = 10;
 /// Fixed columns need exactly what they asked for. A fill column needs enough
 /// to be read — see [`MIN_FILL`] — because "fill" means *take what is left*,
 /// and what is left can be one character.
-fn columns_need(columns: &[Column]) -> usize {
+///
+/// # It looks at what is actually IN the column, since 2026-08-17
+///
+/// `MIN_FILL` alone is the bare minimum, and capping to the bare minimum is
+/// how "Paneer Butter Masala" came out as
+///
+/// ```text
+/// Paneer
+/// Butter
+/// Masala
+/// ```
+///
+/// at a size that technically fitted. Before sizes were continuous the cap
+/// could only land on a whole multiple of the printer's cell, and it happened
+/// to land somewhere the name fitted on one line — the guarantee this
+/// function's own test was written for, after an owner found every dish
+/// printing vertically.
+///
+/// So a fill column asks for its longest CELL. The table then prints as large
+/// as it can with its names intact, and a size that cannot manage that comes
+/// down until it can. **The reduction is reported** (`Note::ScaleCapped`) and
+/// the preview shows the same thing the paper will, so a shop that would
+/// rather have big text than whole names can see the trade and pick.
+fn columns_need(columns: &[Column], rows: &[Vec<String>]) -> usize {
     columns
         .iter()
-        .map(|c| match c.width {
+        .enumerate()
+        .map(|(index, column)| match column.width {
             Width::Fixed(n) => n,
-            Width::Fill => MIN_FILL,
+            Width::Fill => rows
+                .iter()
+                .filter_map(|row| row.get(index))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(MIN_FILL)
+                .max(MIN_FILL),
         })
         .sum()
 }
 
-/// Rule two, crown jewel 18: reduce the scale until the content fits.
+
+/// Rule two, crown jewel 18: reduce the size until the content fits.
 ///
 /// Reduce, never refuse. A shop whose heading is too big for 58 mm paper gets a
 /// slightly smaller heading, not an error in the middle of service.
-fn cap_scale(style: Style, needed: usize, usable: usize, notes: &mut Vec<Note>) -> Style {
-    let asked = style.scale();
-    let mut used = asked;
-    while used > 1 && needed * usize::from(used) > usable {
-        used -= 1;
+///
+/// # It comes down by dots now, not by whole cells — 2026-08-17
+///
+/// This reduced the ESC/POS MULTIPLIER: 3× to 2× to 1×. That was the only
+/// vocabulary a size had, so it was also the only way to cap one. Now that a
+/// shop can ask for any height, capping by multiplier means **a size of 46
+/// dots that does not fit comes back as 24** — half of what was asked, when
+/// 44 would have fitted.
+///
+/// The owner found it on a printed bill: they had set the item list to 46 and
+/// the paper came out at the same size as everything else. *"the printed real
+/// page is completely different then the setting i set."*
+///
+/// So the largest size that fits is worked out directly. `needed` characters
+/// fit in `usable` columns when `needed × size ≤ usable × CELL` — the same
+/// arithmetic `chars_across` does, rearranged — and the answer is used as-is
+/// rather than rounded to anything.
+fn cap_scale(style: Style, needed: usize, usable: usize, grid: Grid, notes: &mut Vec<Note>) -> Style {
+    cap_to(style, needed, needed, usable, grid, notes)
+}
+
+/// **How small AUTO-capping may make text: never below the ordinary body
+/// size.**
+///
+/// This is a floor on the layout's own decision, not on the shop's. A shop that
+/// chooses a small size still gets it — `cap_to` only ever reduces, so a size
+/// already below this passes through untouched.
+///
+/// It is one whole cell for both grids, and the reason is the same on each. The
+/// printer's own font has three sizes and 1× is the smallest, so "reduce below
+/// 1×" is not an instruction it can take. The graphics engine COULD go smaller,
+/// and letting it did something nobody asked for: a 58 mm tax summary that used
+/// to print at the normal size came out at 21 dots because the layout decided
+/// four columns would fit better if it shrank them. `t3_the_wire_is_what_it_was`
+/// caught it — a shop's bill quietly getting smaller is exactly the kind of
+/// change a golden file exists to make visible.
+const fn floor_for(_grid: Grid) -> u16 {
+    BASE_CELL_PX
+}
+
+/// **Whether to cap, and how far, are two different questions.**
+///
+/// `least` is what the block cannot go below — a table's fixed columns plus a
+/// readable minimum for its fill. If that fits, nothing is capped and the shop
+/// gets the size it asked for, even if a long name wraps: a kitchen ticket's
+/// food stays big and "Paneer Butter Masala" spilling onto a second line is
+/// exactly right there.
+///
+/// `comfortable` is what the block would like — the longest thing actually in
+/// the fill column. It is used **only once a cap is already needed**, to decide
+/// how far down to go, because stopping at `least` is what left the bill's item
+/// names in six-letter chunks.
+///
+/// Two numbers rather than one because a single one cannot express both: raise
+/// it and the kitchen ticket shrinks for no reason; lower it and the bill's
+/// names fragment. Each test in this module holds one of those halves down.
+fn cap_to(
+    style: Style,
+    least: usize,
+    comfortable: usize,
+    usable: usize,
+    grid: Grid,
+    notes: &mut Vec<Note>,
+) -> Style {
+    let asked = style.height(u32::from(BASE_CELL_PX));
+    if least == 0 {
+        return style;
     }
-    if used != asked {
-        notes.push(Note::ScaleCapped { asked, used });
+    let room = usable * usize::from(BASE_CELL_PX);
+    // Does it fit at all at the size that was asked for?
+    if least * (asked as usize) <= room {
+        return style;
     }
+    let fits = (room / comfortable.max(least)).max(usize::from(floor_for(grid)));
+    let used = u32::try_from(fits).unwrap_or(u32::MAX).min(asked);
+    if used >= asked {
+        // **Nothing was capped, so nothing is rewritten.** Returning a rebuilt
+        // style here rounded every in-between size away — see the note on
+        // `Note::ScaleCapped` for what that cost.
+        return style;
+    }
+    notes.push(Note::ScaleCapped {
+        asked: u16::try_from(asked).unwrap_or(u16::MAX),
+        used: u16::try_from(used).unwrap_or(u16::MAX),
+    });
     Style {
-        scale: used,
+        size: u16::try_from(used).unwrap_or(u16::MAX),
         bold: style.bold,
     }
+}
+
+/// What one multiplier step is worth, in dots.
+///
+/// The printer's own cell is 12 × 24, so a `scale` of 1 is 24 dots tall. This
+/// is the number `Style::px` and `Style::at_scale` convert against, and it is
+/// the printer's fact rather than the paper's — every roll this product prints
+/// on uses the same 24-dot Font A.
+const BASE_CELL_PX: u16 = 24;
+
+/// **How many characters of this size fit across `usable` scale-1 columns.**
+///
+/// This was `usable / style.scale()`, which is why there were only ever three
+/// sizes: the multiplier was the only thing that could divide the paper.
+///
+/// A character is half as wide as it is tall (`Cell::for_column`), so a line
+/// `height` dots tall advances `height / 2` dots per character against a column
+/// of `BASE / 2` — which is `usable × BASE / height`. At 24 dots that is
+/// `usable` exactly, at 48 it is `usable / 2`, at 72 `usable / 3`: **the three
+/// old answers, unchanged**, and an answer for every size between them.
+///
+/// The raster sink computes its cell from the same ratio, which is what keeps
+/// the two agreeing about where a line breaks.
+fn chars_across(usable: usize, style: Style) -> usize {
+    let height = style.height(u32::from(BASE_CELL_PX)).max(1) as usize;
+    (usable * usize::from(BASE_CELL_PX) / height).max(1)
 }
 
 /// Rule three. **The money wins.**
@@ -397,7 +700,7 @@ fn fit_row(
     right: &str,
     width: usize,
     notes: &mut Vec<Note>,
-) -> Result<Vec<String>, PrintError> {
+) -> Result<Vec<(String, Vec<Segment>)>, PrintError> {
     let right_len = right.chars().count();
     if right_len > width {
         return Err(PrintError::AmountTooWide {
@@ -416,7 +719,21 @@ fn fit_row(
     let pad = width
         .saturating_sub(first.chars().count())
         .saturating_sub(right_len);
-    out.push(format!("{first}{}{right}", " ".repeat(pad)));
+    // **The boxes, said by the thing that built the line.**
+    //
+    // Where the amount begins is decided right here, and a sink that has to
+    // measure text should be told rather than left to work it out from the
+    // padding — the first attempt looked for the last run of spaces, which is
+    // right for this line and wrong for every continuation line below it,
+    // where there is no amount at all.
+    let label_box = width.saturating_sub(right_len);
+    out.push((
+        format!("{first}{}{right}", " ".repeat(pad)),
+        vec![
+            Segment { start: 0, width: label_box, align: Align::Left },
+            Segment { start: label_box, width: right_len, align: Align::Right },
+        ],
+    ));
 
     if left_lines.len() > 1 {
         notes.push(Note::LabelWrapped {
@@ -425,7 +742,11 @@ fn fit_row(
         for line in &left_lines[1..] {
             // Indented by two, so a continuation reads as part of the line
             // above rather than as a new item.
-            out.push(format!("  {line}"));
+            out.push((
+                format!("  {line}"),
+                // All label, no amount — see above.
+                vec![Segment { start: 0, width, align: Align::Left }],
+            ));
         }
     }
     Ok(out)
@@ -490,7 +811,11 @@ fn fit_columns(columns: &[Column], width: usize) -> Vec<usize> {
     widths
 }
 
-fn lay_row(columns: &[Column], widths: &[usize], cells: &[String]) -> Vec<String> {
+fn lay_row(
+    columns: &[Column],
+    widths: &[usize],
+    cells: &[String],
+) -> Vec<(String, Vec<Segment>)> {
     // Wrap every cell first, then emit as many lines as the tallest one needs.
     let wrapped: Vec<Vec<String>> = cells
         .iter()
@@ -502,13 +827,26 @@ fn lay_row(columns: &[Column], widths: &[usize], cells: &[String]) -> Vec<String
     let mut out = Vec::with_capacity(height);
     for row in 0..height {
         let mut line = String::new();
+        // **The item table's boxes, which this function has always known.**
+        // Qty, Rate and Amount are right-aligned columns; padded with spaces
+        // they line up only while every character is the same width, and a
+        // shop can choose Times New Roman since 2026-08-17. Saying where each
+        // column is means a measuring sink lands them on the same edges the
+        // printer's own font does.
+        let mut segments = Vec::with_capacity(wrapped.len());
+        let mut at = 0;
         for (i, cell_lines) in wrapped.iter().enumerate() {
             let w = widths.get(i).copied().unwrap_or(1).max(1);
             let align = columns.get(i).map_or(Align::Left, |c| c.align);
             let text = cell_lines.get(row).map_or("", String::as_str);
             line.push_str(&align_to(text, w, align));
+            segments.push(Segment { start: at, width: w, align });
+            at += w;
         }
-        out.push(line.trim_end().to_owned());
+        // The trim is what the text sink wants — trailing spaces are paper. The
+        // boxes describe the line before it, which is what a measuring sink
+        // wants, and neither loses anything the other needs.
+        out.push((line.trim_end().to_owned(), segments));
     }
     out
 }
@@ -622,10 +960,20 @@ mod tests {
             &mut notes,
         )
         .expect("fits");
-        assert!(out[0].ends_with("1,240.00"), "the amount is not intact");
+        assert!(out[0].0.ends_with("1,240.00"), "the amount is not intact");
         assert!(out.len() > 1, "the label should have wrapped");
         assert!(notes.iter().any(|n| matches!(n, Note::LabelWrapped { .. })));
-        assert_eq!(out[0].chars().count(), 32);
+        assert_eq!(out[0].0.chars().count(), 32);
+
+        // **And the boxes say where the amount is**, so a proportional face
+        // puts it against the same right edge the padding does.
+        let amount = out[0].1.last().expect("a row has two boxes");
+        assert_eq!(amount.align, Align::Right);
+        assert_eq!(amount.start + amount.width, 32, "the amount box is not at the edge");
+        // A continuation line is all label and no amount — the case a
+        // "find the last run of spaces" guess got wrong.
+        assert_eq!(out[1].1.len(), 1, "a continuation line has an amount box");
+        assert_eq!(out[1].1[0].align, Align::Left);
     }
 
     #[test]

@@ -266,6 +266,30 @@
   flex-wrap: wrap;
 }
 
+/* **Every printer the shop has** — the cupboard below the one it prints on
+   (2026-08-17). A list of rows rather than a list of cards: they were cards,
+   all the same size, and that is most of why the one that mattered did not
+   look different from the stand-in that prints nothing. */
+.mb-printers__all {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mb-printers__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.mb-printers__row:nth-child(even) {
+  background: var(--surface-2);
+}
+
 .mb-printers__name {
   display: flex;
   align-items: center;

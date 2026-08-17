@@ -53,6 +53,7 @@ import {
 type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
+import { DiscountDialog } from './Discount';
 import { Split } from './Split';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
@@ -95,6 +96,8 @@ export function Billing() {
   const [cancelReason, setCancelReason] = useState(false);
   /** P14, scope 1.21-1.24 — split it evenly, split off some food, how many guests. */
   const [splitting, setSplitting] = useState(false);
+  /** Scope 1.12 — money off this bill (2026-08-17). */
+  const [discounting, setDiscounting] = useState(false);
   /// P15 — the customer picker for a bill going on an account.
   const [onAccount, setOnAccount] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -491,6 +494,31 @@ export function Billing() {
     [tables],
   );
 
+  /**
+   * **Carry the bill to the table** — the print mark on a tile, 2026-08-17.
+   *
+   * It does NOT open the table first. That was the tempting version and it is
+   * the wrong one: opening a table replaces whatever is in the cart, so a
+   * cashier halfway through typing a parcel order who pressed print on table 4
+   * would lose the parcel. `print_open_bill` reads the order off disk and
+   * touches neither the cart nor the floor, so this is a press with no
+   * consequence beyond a piece of paper — which is what the button looks like
+   * it does.
+   */
+  const printTheBill = useCallback(
+    async (table: TableView) => {
+      // The button only exists on a tile that has one; this is the type
+      // narrowing, not a second opinion about whether to print.
+      if (!table.orderId) return;
+      try {
+        toast.show('ok', await call('print_open_bill', { orderId: table.orderId }));
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [report, toast],
+  );
+
   const seedDemo = useCallback(async () => {
     setBusy(true);
     try {
@@ -737,34 +765,56 @@ export function Billing() {
                 </Button>
               }
             />
+          ) : tables.length === 0 ? (
+            /*
+              **A shop with a menu and no tables** — and this branch is back
+              because of what the owner asked for on 2026-08-17.
+
+              P30.5 deliberately drew NOTHING here, and its reasoning is still
+              in `TableGrid`: a tea stall and a parcel counter have no tables
+              and never will, so a permanent card explaining tables was
+              furniture on the one screen a cashier lives on. That was right
+              **while the menu grid filled the pane underneath it.** With the
+              menu grid gone this pane is now empty from the search box to the
+              bottom of the window — half the counter, blank — which is a
+              worse answer than a sentence.
+
+              So it says the one useful thing and gets out of the way. No
+              button: a screen is rendered with no props (`SHIPPED_SCREENS`),
+              so it cannot navigate, and "Floor" is a word in the bar directly
+              above. Billing works completely without ever coming here — type
+              the item, press Enter, take the money.
+            */
+            <EmptyState
+              title="No tables yet"
+              body="Add your tables on the Floor screen and they will show here. A counter with no tables does not need any — search for an item above and start the bill."
+            />
           ) : (
-            /* An empty floor draws NOTHING here — see `TableGrid`, P30.5. */
-            <TableGrid tables={tables} filter={filter} onOpen={openTable} />
+            <TableGrid
+              tables={tables}
+              filter={filter}
+              onOpen={openTable}
+              onPrintBill={printTheBill}
+            />
           )}
 
-          {menu.length > 0 ? (
-            <div className="mb-floor__section">
-              <SectionHeader
-                title="Menu"
-                note="Type to search, or press one."
-              />
-              <div className="mb-floor__grid">
-                {menu.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="mb-tile mb-tile--occupied"
-                    onClick={() => void addItem(item.id)}
-                    aria-label={`Add ${item.name}, ${item.price.text}`}
-                  >
-                    <span className="mb-cartline__name">{item.name}</span>
-                    <span className="mb-tile__amount">{item.price.text}</span>
-                    <span className="mb-cartline__rate">{item.rateLabel}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          {/* **THE MENU GRID IS NOT ON THIS SCREEN** — the owner, 2026-08-17:
+              *"in billing page some changes required, menu section dont show
+              here in the billing page, remove it, use the space for tables
+              showcasing."*
+
+              It was a second grid of `mb-tile`s under the floor, sharing the
+              floor's own layout, so a shop with fifty items had its tables
+              pushed up into a strip and everything below the fold was food.
+              The screen is the FLOOR now, whole, which is what makes P31's
+              bigger tiles affordable.
+
+              Nothing is lost: the search box at the top of this screen already
+              searches the menu and P10's keyboard engine adds what it finds —
+              that path has been the fast one since P10 and is what a busy
+              counter actually uses. `menu` is still loaded here because the
+              search needs it and because `tables.length === 0 && menu.length
+              === 0` is how this screen knows a shop is brand new. */}
         </div>
 
         {/* THE CART IS PERMANENT. It never moves and never hides (§1). */}
@@ -1002,6 +1052,24 @@ export function Billing() {
                 reports will look for it. Clearing the screen would leave an
                 open order in the database forever. That is `cancel_order` —
                 which was written at P12 and had nothing calling it. */}
+            {/* **Money off** — the owner, 2026-08-17: *"where is discount
+                option?? i want to give discount to customer, here no option
+                showing."*
+
+                They were right that there was none, anywhere. `mb_core` has
+                spread a bill discount across the lines before tax since P02,
+                `DiscountPolicy` decides who may give how much, the roles
+                screen has had the permission checkbox since P11, and the
+                totals block below already draws the line when there is one.
+                `CartState.bill_discount` was set to `None` at birth and never
+                written again — the whole feature with no door into it. */}
+            <Button
+              variant="quiet"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => setDiscounting(true)}
+            >
+              {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
+            </Button>
             {/* P14's scope 1.21-1.24, reachable at last: what each person
                 owes, some of the food onto its own bill, and how many are
                 sitting there. Three commands that had no button. */}
@@ -1112,6 +1180,14 @@ export function Billing() {
               })
               .catch(report);
           }}
+        />
+      ) : null}
+
+      {discounting && cart ? (
+        <DiscountDialog
+          cart={cart}
+          onClose={() => setDiscounting(false)}
+          onChanged={setCart}
         />
       ) : null}
 

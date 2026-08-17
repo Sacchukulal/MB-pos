@@ -1,4 +1,4 @@
-//! **P24's tests, against a real database and the real command bodies.**
+﻿//! **P24's tests, against a real database and the real command bodies.**
 //!
 //! `mb-core`'s `kitchen_delivery` proves the state machine in isolation. These
 //! prove the counter: that a ticket reaches the right station, that a cook's
@@ -657,6 +657,149 @@ fn a_ticket_goes_amber_and_then_red_on_its_own_time() {
         "the card does not say how long it has been waiting: {}",
         seven.waiting
     );
+}
+
+// ---------------------------------------------------------------------------
+// Scope 3.1 — the tandoor's food goes to the tandoor's printer.
+//
+// The owner, 2026-08-17: *"below catogory wise items selection printer, and
+// more importently just not show off, make it functional also, cross check
+// weather its functions working or not."*
+//
+// They were right to ask. `route_category` had written a row per category
+// since P17 and the settings screen had drawn a dropdown per category, and
+// **no print path had ever read either.** `print_kitchen_ticket_on` asked
+// `default_printer` and sent every ticket there.
+// ---------------------------------------------------------------------------
+
+/// Put a printer on this shop and hand back its id.
+fn a_station(app: &App, name: &str) -> String {
+    let view = crate::settings::printers::save_printer_on(
+        app,
+        crate::settings::printers::PrinterEdit {
+            id: String::new(),
+            name: name.to_owned(),
+            kind: "spooler".to_owned(),
+            address: format!("Windows {name}"),
+            paper_mm: 80,
+            is_default: false,
+            role: "both".to_owned(),
+            engine: "raster".to_owned(),
+            is_bold_dark: false,
+            can_kick_drawer: false,
+        },
+    )
+    .expect("the printer saves");
+    view.printers
+        .iter()
+        .find(|p| p.name == name)
+        .expect("it is in the list")
+        .id
+        .clone()
+}
+
+/// **Two stations, two rolls, and the right food on each.**
+///
+/// This drives `print_kitchen_ticket_on` — the actual button — rather than
+/// `kitchen::send`, because the routing being tested lives on the paper path
+/// and not on the screen path.
+#[test]
+fn each_category_goes_to_its_own_printer() {
+    let scratch = Scratch::new("kitchen_routing");
+    let app = a_kitchen(&scratch, "routing");
+
+    // The counter, which everything falls back to, and the tandoor.
+    a_station(&app, "Counter");
+    let tandoor = a_station(&app, "Tandoor printer");
+    crate::settings::printers::route_category_on(&app, "cat_tandoor".to_owned(), tandoor)
+        .expect("the route saves");
+
+    // A naan (tandoor) and some noodles (chinese, unrouted) on one bill.
+    app.with_cart_mut(|state| {
+        for id in ["itm_naan", "itm_noodles"] {
+            let item = app.find_menu_item(id).expect("on the menu");
+            state
+                .cart
+                .add(
+                    crate::billing::snapshot_for(&item),
+                    mb_core::Qty::from_whole(1).expect("in range"),
+                    None,
+                    Vec::new(),
+                )
+                .expect("added");
+        }
+        state.table = Some("tbl_5".to_owned());
+        Ok(())
+    })
+    .expect("a cart");
+
+    crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
+
+    let tickets: Vec<_> = app
+        .print_queue_snapshot()
+        .into_iter()
+        .filter(|j| j.what == "Kitchen ticket")
+        .collect();
+
+    assert_eq!(
+        tickets.len(),
+        2,
+        "one ticket for two stations — the routing did nothing: {tickets:?}"
+    );
+    assert!(
+        tickets.iter().any(|j| j.printer == "Tandoor printer"),
+        "the naan never reached the tandoor: {tickets:?}"
+    );
+    assert!(
+        tickets.iter().any(|j| j.printer == "Counter"),
+        "the noodles did not fall back to the counter: {tickets:?}"
+    );
+}
+
+/// **And a shop with no routes still gets exactly one ticket.**
+///
+/// The grouping is by PRINTER, not by category, and getting that wrong would
+/// be a worse bug than the one being fixed: three categories on a bill would
+/// become three rolls of paper, which a cook reads as the counter sending
+/// duplicates.
+#[test]
+fn an_unrouted_shop_still_prints_one_ticket() {
+    let scratch = Scratch::new("kitchen_one_ticket");
+    let app = a_kitchen(&scratch, "one_ticket");
+    a_station(&app, "Counter");
+
+    app.with_cart_mut(|state| {
+        // Three items across three different categories.
+        for id in ["itm_naan", "itm_noodles", "itm_lassi"] {
+            let item = app.find_menu_item(id).expect("on the menu");
+            state
+                .cart
+                .add(
+                    crate::billing::snapshot_for(&item),
+                    mb_core::Qty::from_whole(1).expect("in range"),
+                    None,
+                    Vec::new(),
+                )
+                .expect("added");
+        }
+        state.table = Some("tbl_5".to_owned());
+        Ok(())
+    })
+    .expect("a cart");
+
+    crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
+
+    let tickets: Vec<_> = app
+        .print_queue_snapshot()
+        .into_iter()
+        .filter(|j| j.what == "Kitchen ticket")
+        .collect();
+    assert_eq!(
+        tickets.len(),
+        1,
+        "three categories became three rolls of paper: {tickets:?}"
+    );
+    assert_eq!(tickets[0].printer, "Counter");
 }
 
 /// **Ageing is done by moving the clock, not by rewriting the row.**

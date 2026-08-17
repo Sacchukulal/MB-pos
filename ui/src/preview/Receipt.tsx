@@ -38,16 +38,42 @@ import type { PreviewLine } from '../ipc/generated/PreviewLine';
 
 import './receipt.css';
 
-export function Receipt({ doc }: { doc: PreviewDoc }) {
+export function Receipt({
+  doc,
+  font,
+  monospace = true,
+}: {
+  doc: PreviewDoc;
+  /**
+   * **The typeface the printer will use**, as a Windows family name — so the
+   * preview is in the face the paper will be (2026-08-17). Empty for the
+   * built-in one, which the screen draws in its own monospace stack.
+   */
+  font?: string;
+  /**
+   * Whether that face has one width for every character. A proportional one is
+   * laid out by the layout's BOXES rather than by the spaces it padded with —
+   * see `Segments`.
+   */
+  monospace?: boolean;
+}) {
   return (
     <div className="mb-receipt">
       <pre
-        className="mb-receipt__paper"
+        className={[
+          'mb-receipt__paper',
+          monospace ? '' : 'mb-receipt__paper--proportional',
+        ]
+          .filter(Boolean)
+          .join(' ')}
         data-columns={doc.columns}
         aria-label="Preview of the printed bill"
+        /* The face by NAME, which is a value out of Rust and not a design
+           choice — the same argument as the per-line size below. */
+        style={font ? { fontFamily: `${font}, monospace` } : undefined} /* mb-tokens-allow: the shop's chosen printer face, named by Rust */
       >
         {doc.lines.map((line, index) => (
-          <Line key={index} line={line} />
+          <Line key={index} line={line} monospace={monospace} />
         ))}
       </pre>
       {doc.notes.length > 0 ? (
@@ -61,22 +87,73 @@ export function Receipt({ doc }: { doc: PreviewDoc }) {
   );
 }
 
-function Line({ line }: { line: PreviewLine }) {
+function Line({ line, monospace }: { line: PreviewLine; monospace: boolean }) {
   // One arm per variant. An arm that quietly did nothing would be a sink
   // forgetting a block — the exact thing D29 exists to prevent — so every
   // variant is handled and the ones with nothing to draw say so out loud.
   switch (line.kind) {
     case 'text':
+      /*
+        **A proportional face is aligned by its BOXES, not by its spaces.**
+
+        The layout pads a line with spaces so the ESC/POS text sink — which
+        prints with the printer's own fixed font — gets a line it can send
+        straight out. In Times New Roman a space is about a third of a digit,
+        so those same spaces put an amount nowhere near the right edge.
+
+        `mb_print::layout::Segment` says where each box is and how the text
+        sits in it, and `raster.rs` draws the paper from exactly those numbers.
+        Laying the boxes out at the same widths here is what keeps the preview
+        and the paper agreeing about where a figure lands.
+      */
+      if (!monospace && line.segments.length > 0) {
+        return (
+          <span className="mb-receipt__line">
+            <Indent columns={line.indent} />
+            {line.segments.map((segment, index) => (
+              <span
+                key={index}
+                className={[
+                  'mb-receipt__text',
+                  'mb-receipt__box',
+                  `mb-receipt__box--${segment.align}`,
+                  line.bold ? 'mb-receipt__line--bold' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={{ ['--receipt-px' as string]: line.px, ['--receipt-cols' as string]: segment.width }} /* mb-tokens-allow: a box width and size computed by Rust, not design values */
+              >
+                {segment.text}
+              </span>
+            ))}
+            {'\n'}
+          </span>
+        );
+      }
       return (
         <span className="mb-receipt__line">
           <Indent columns={line.indent} />
           <span
             className={[
-              line.scale > 1 ? `mb-receipt__line--x${line.scale}` : '',
+              'mb-receipt__text',
               line.bold ? 'mb-receipt__line--bold' : '',
             ]
               .filter(Boolean)
               .join(' ')}
+            /* **The one inline style in this product, and it is data.**
+             *
+             * A size used to be 1x, 2x or 3x, so three CSS classes covered it.
+             * A shop chooses from twenty-two heights now (2026-08-17), and the
+             * height is a NUMBER RUST COMPUTED for this line — not a design
+             * value somebody typed, which is what `check-tokens.mjs` exists to
+             * keep out. The alternative is twenty-two hand-written classes
+             * that have to be kept in step with `catalog.rs` by hand, which is
+             * the kind of second list this codebase keeps deleting.
+             *
+             * The relative size is `px / one cell`, so the preview has the same
+             * proportions the paper will.
+             */
+            style={{ ['--receipt-px' as string]: line.px }} /* mb-tokens-allow: a per-line size computed by Rust, not a design value */
           >
             {line.text}
           </span>
@@ -85,8 +162,15 @@ function Line({ line }: { line: PreviewLine }) {
       );
 
     case 'rule':
+      /* **A separator is always on the printer's own grid, in both places.**
+         `raster.rs` draws a rule with the paper's cell and never with the
+         chosen face's size — a line across the bill is as wide as the paper,
+         not as wide as whatever section is above it. So the preview draws it
+         in the monospace stack too: rendered in Times New Roman the same count
+         of dashes came out two thirds of the width, and a preview whose rules
+         stop short of the ones on the paper is a preview that lies. */
       return (
-        <span className="mb-receipt__line">
+        <span className="mb-receipt__line mb-receipt__rule">
           <Indent columns={line.indent} />
           {line.glyph.repeat(line.width)}
           {'\n'}

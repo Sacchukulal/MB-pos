@@ -94,16 +94,15 @@ export function Groups({
   };
 
   return (
-    <Modal open title="Groups" onClose={onClose} wide>
+    <Modal open title="Categories" onClose={onClose} wide>
       <p className="mb-muted">
-        Groups are how your items are arranged on the billing screen — Tiffin,
-        Drinks, Tandoor. Each group can also send its kitchen tickets to its own
-        printer.
+        Categories are how your menu is arranged — Tiffin, Drinks, Tandoor.
+        Each category can also send its kitchen tickets to its own printer.
       </p>
 
       <div className="mb-groups__add">
         <Input
-          label="Add a group"
+          label="Add a category"
           value={adding}
           autoFocus
           placeholder="Tandoor"
@@ -120,8 +119,8 @@ export function Groups({
 
       {categories.length === 0 ? (
         <p className="mb-muted">
-          No groups yet. A shop with a short menu does not need any — every item
-          simply shows on one screen.
+          No categories yet. A shop with a short menu does not need any — every
+          item simply shows on one screen.
         </p>
       ) : (
         <ul className="mb-groups">

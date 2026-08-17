@@ -412,23 +412,81 @@ fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
     }
 }
 
-/// The owner asked for sizes in px. This is that, made mechanical: a label that
-/// goes back to "Large" fails the build.
+/// **Ten sizes, numbered 1 to 10, and nothing else on the label.**
+///
+/// The owner, 2026-08-17, on the twenty-two `px` values that replaced the
+/// original three:
+///
+/// > *"u given 22 selectors thats too not working, just 5 to 10 is enough…
+/// > dont use px, just like numbers u use 1,2,3..... etc, dont write smal
+/// > mediam, just think as a user how they feel."*
+///
+/// Made mechanical, because this is the third version of this list in one day:
+/// a label that goes back to "px", to "Large", or to a list of twenty-two
+/// fails the build.
 #[test]
-fn the_text_sizes_are_given_in_px() {
+fn the_text_sizes_are_plain_numbers() {
     use super::catalog::SIZES;
 
-    for choice in SIZES {
+    assert!(
+        (5..=10).contains(&SIZES.len()),
+        "there are {} sizes — the owner asked for five to ten",
+        SIZES.len()
+    );
+
+    for (index, choice) in SIZES.iter().enumerate() {
+        assert_eq!(
+            choice.label,
+            (index + 1).to_string(),
+            "a size label is not its position on the list"
+        );
         assert!(
-            choice.label.contains(" px"),
-            "the owner asked for sizes in px, and this one says {:?}",
+            !choice.label.contains("px") && !choice.label.contains(' '),
+            "{:?} is not a plain number",
             choice.label
         );
     }
-    // 24, 48 and 72 — the paper's own cell (12x24 dots) times the ESC/POS
-    // multiplier. If a paper size ever changes those, this is where it is said.
-    let labels: Vec<&str> = SIZES.iter().map(|c| c.label).collect();
-    assert!(labels[0].starts_with("24 px"), "{labels:?}");
-    assert!(labels[1].starts_with("48 px"), "{labels:?}");
-    assert!(labels[2].starts_with("72 px"), "{labels:?}");
 }
+
+/// **Every step is a different size on paper, and they only go up.**
+///
+/// The label is 1 to 10; the VALUE is the height in dots the printer draws. A
+/// list whose numbers went up while its dots did not would be ten choices that
+/// change nothing — which is what "thats too not working" meant.
+#[test]
+fn every_size_is_bigger_than_the_one_before_it() {
+    use super::catalog::SIZES;
+
+    let dots: Vec<u16> = SIZES
+        .iter()
+        .map(|c| c.value.parse().expect("a size is a number of dots"))
+        .collect();
+
+    assert!(
+        dots.windows(2).all(|w| w[0] < w[1]),
+        "the sizes are out of order or repeat: {dots:?}"
+    );
+    assert_eq!(dots.last().copied(), Some(72), "the biggest is the printer's own 3x");
+
+    // **24, 48 and 72 are still on the list**, so a shop that tuned its receipt
+    // before any of this keeps exactly the bill it tuned — those are the three
+    // sizes that ever existed, and `modernise` maps the old rows onto them.
+    for kept in [24, 48, 72] {
+        assert!(dots.contains(&kept), "{kept} dots is gone and a tuned receipt moved");
+    }
+}
+
+/// **A size is described to a shop by its number**, not by dots and not by "×".
+#[test]
+fn a_capped_size_is_reported_as_a_number_a_shop_can_pick() {
+    // Exactly on the list.
+    assert_eq!(super::size_label(24), "3");
+    assert_eq!(super::size_label(72), "10");
+    // The layout caps to whatever fits, which is rarely a round number — it
+    // reports as the nearest size below, because that is what a person would
+    // have had to choose to get it.
+    assert_eq!(super::size_label(34), "5");
+    // And below the smallest is still the smallest anybody can ask for.
+    assert_eq!(super::size_label(4), "1");
+}
+

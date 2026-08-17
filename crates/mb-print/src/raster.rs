@@ -53,7 +53,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::doc::{Align, Pattern};
+use crate::doc::{Align, Pattern, Style};
 use crate::error::PrintError;
 use crate::font::{Cell, Font};
 use crate::image::Monochrome;
@@ -300,21 +300,129 @@ impl RasterSink<'_> {
         cell_height / 8
     }
 
-    /// Draw one string of `scale`-sized characters starting at `indent`
-    /// scale-1 columns from the left edge. Returns the dots it fired.
-    fn draw_text(&mut self, text: &str, indent: usize, scale: u32, bold: bool) -> u32 {
-        let cell_w = self.per_column * scale;
+    /// **How tall this style is on THIS paper, in dots.**
+    ///
+    /// A size is chosen against the printer's standard 24-dot cell, because
+    /// that is the number a shop sees on the settings screen and it must mean
+    /// the same thing whatever roll is loaded. **100 mm paper does not have a
+    /// 24-dot cell**: it is 832 dots over 64 columns, so its cell is 13 × 26.
+    ///
+    /// Found by `t3_the_wire_is_what_it_was`, the golden ESC/POS test, which
+    /// noticed the 100 mm raster change height when nothing about the document
+    /// had changed — the first version divided by the paper's 26 and multiplied
+    /// by the standard 24, and quietly shrank every line on the widest roll.
+    fn height_of(&self, style: Style) -> u32 {
+        let (_, base) = Cell::for_column(self.per_column);
+        style.height(base) * base / u32::from(Style::CELL)
+    }
+
+    /// **One laid-out line, drawn the way its face needs.**
+    ///
+    /// # Two paths, and only one of them is new
+    ///
+    /// A **typewriter** face is drawn exactly as it always was: every character
+    /// in its own cell, on the grid, one row of dots at a time. That path is
+    /// what the golden ESC/POS files assert, and it does not change.
+    ///
+    /// A **proportional** face — Times New Roman and its family, offered since
+    /// 2026-08-17 — cannot be. Its characters are different widths, so the
+    /// spaces the layout padded with are worth about a third of a digit and an
+    /// amount padded to the right edge lands nowhere near it. So each of the
+    /// line's boxes ([`Segment`]) is drawn on its own: the text inside is
+    /// trimmed, measured, and put against the box's left edge, right edge or
+    /// centre — which is how an invoice has always aligned, and which lands the
+    /// figures on exactly the edges the typewriter path lands them on.
+    fn draw_line(&mut self, line: &LaidLine, text: &str) -> u32 {
+        let height = self.height_of(line.style);
+        if self.font.is_monospace() || line.segments.is_empty() {
+            return self.draw_text(text, line.indent, height, line.style.bold);
+        }
+
         let (_, base_height) = Cell::for_column(self.per_column);
-        let cell_h = base_height * scale;
+        let cell_w = (self.per_column * height / base_height.max(1)).max(1);
+        let cell = self.font.cell(cell_w, height.max(1));
+        let top = self.add_line_rows(height.max(1));
+        let chars: Vec<char> = text.chars().collect();
+        let left_edge = u32::try_from(line.indent)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(self.per_column);
+
+        let mut dots = 0;
+        for segment in &line.segments {
+            let end = segment.start.saturating_add(segment.width).min(chars.len());
+            if segment.start >= end {
+                continue;
+            }
+            let run: String = chars[segment.start..end].iter().collect();
+            let run = run.trim();
+            if run.is_empty() {
+                continue;
+            }
+
+            let box_left = left_edge
+                .saturating_add(u32::try_from(segment.start).unwrap_or(0).saturating_mul(cell_w));
+            let box_width = u32::try_from(segment.width).unwrap_or(0).saturating_mul(cell_w);
+            let measured = self.font.measure(run, cell);
+            // A run wider than its box starts at the box's left edge and runs
+            // on: the layout already wrapped to fit, so this is a face whose
+            // letters are wider than the grid assumed, and the honest answer is
+            // to print all of it rather than to lose characters (rule one).
+            let spare = box_width.saturating_sub(measured);
+            let x0 = match segment.align {
+                Align::Left => box_left,
+                Align::Centre => box_left + spare / 2,
+                Align::Right => box_left + spare,
+            };
+
+            let mut pen = x0;
+            for ch in run.chars() {
+                if pen >= self.width {
+                    break;
+                }
+                let glyph = self.font.glyph_at(ch, cell, pen);
+                dots += self.blit(&glyph, pen, top);
+                if line.style.bold {
+                    dots += self.blit(&glyph, pen + 1, top);
+                }
+                pen += self.font.advance(ch, cell);
+            }
+        }
+        dots
+    }
+
+    /// Draw one string `height` dots tall, starting at `indent` scale-1 columns
+    /// from the left edge. Returns the dots it fired.
+    ///
+    /// # A height in dots, not a multiplier — 2026-08-17
+    ///
+    /// This took `scale` (1, 2 or 3) and worked the cell out as `per_column ×
+    /// scale`. It takes the height a shop actually chose, and works the cell
+    /// out from the same ratio: **a character is half as wide as it is tall**,
+    /// which is what `Cell::for_column` has always said and what keeps 24, 48
+    /// and 72 dots drawing exactly the pixels they drew before. Every size in
+    /// between now has an answer too, which is the whole point.
+    fn draw_text(&mut self, text: &str, indent: usize, height: u32, bold: bool) -> u32 {
+        let (_, base_height) = Cell::for_column(self.per_column);
+        // Scaled from the paper's own column, so a monospace face at one of the
+        // old three sizes gets byte-for-byte the old cell. `.max(1)` because a
+        // height smaller than the base would otherwise round to a zero-width
+        // column and draw every character on top of the last.
+        let cell_w = (self.per_column * height / base_height.max(1)).max(1);
+        let cell_h = height.max(1);
         let cell = self.font.cell(cell_w, cell_h);
         let top = self.add_line_rows(cell_h);
 
         let mut dots = 0;
         for (position, ch) in text.chars().enumerate() {
-            let column = indent + position * (scale as usize);
-            let x0 = u32::try_from(column)
+            // The indent is in the paper's own scale-1 columns; the text then
+            // advances by ITS cell, which is what makes a 16-dot line fit more
+            // characters in the same width than a 24-dot one.
+            let x0 = u32::try_from(indent)
                 .unwrap_or(u32::MAX)
-                .saturating_mul(self.per_column);
+                .saturating_mul(self.per_column)
+                .saturating_add(
+                    u32::try_from(position).unwrap_or(u32::MAX).saturating_mul(cell_w),
+                );
             if x0 >= self.width {
                 // The layout guarantees this cannot happen; if it ever does,
                 // stopping is better than wrapping a character onto the row
@@ -397,17 +505,18 @@ impl RasterSink<'_> {
 impl Sink for RasterSink<'_> {
     fn line(&mut self, line: &LaidLine, index: usize) {
         if let LaidContent::Text { text } = &line.content {
-            let scale = u32::from(line.style.scale());
-            let dots = self.draw_text(text, line.indent, scale, line.style.bold);
+            let dots = self.draw_line(line, text);
             self.ink.push(LineInk { index, dots });
         }
     }
 
     fn rule(&mut self, pattern: Pattern, width: usize, indent: usize, index: usize) {
         // Drawn as the same repeated character the text sink writes, so the two
-        // sinks cannot disagree about how long a separator is.
+        // sinks cannot disagree about how long a separator is. Always at the
+        // paper's own cell: a separator is as wide as the paper, not as wide as
+        // whatever size the section above it happens to be.
         let body: String = std::iter::repeat_n(pattern.glyph(), width).collect();
-        let dots = self.draw_text(&body, indent, 1, false);
+        let dots = self.draw_text(&body, indent, self.height_of(Style::NORMAL), false);
         self.ink.push(LineInk { index, dots });
     }
 

@@ -221,6 +221,18 @@
   margin-bottom: var(--gap-group);
 }
 
+/* **The category field inside the item dialog** (2026-08-17). A field and the
+   button that makes a new one, on one line: `end` so the button's bottom edge
+   sits on the select's, rather than floating level with the label above it.
+   `auto` twice in the naming state, because Add and Cancel are both as wide as
+   their words and neither should stretch. */
+.mb-catadd {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
 .mb-groups {
   display: flex;
   flex-direction: column;

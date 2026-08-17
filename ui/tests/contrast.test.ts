@@ -98,6 +98,33 @@ const PAIRS: readonly { ink: string; ground: string; least: number }[] = [
   { ink: '--text', ground: '--warn-soft', least: 4.5 },
   { ink: '--text', ground: '--danger-soft', least: 4.5 },
   { ink: '--text', ground: '--accent-soft', least: 4.5 },
+
+  /*
+   * **THE LINES, and their absence here is why the owner had to report this.**
+   *
+   * On 2026-08-17 the owner installed the counter and said *"very light in
+   * opacity, the lines and letters brightness not correctly visble."* Every
+   * pair above passed. They still passed. The letters were a near miss; the
+   * LINES were not close, and nothing checked them:
+   *
+   *   dark   --border-strong on --surface   1.68:1
+   *   light  --border-strong on --surface   1.49:1
+   *
+   * That token outlines every input, every secondary button and every table
+   * tile in the product. WCAG 1.4.11 asks 3:1 of a control's boundary for the
+   * same reason a person does — a box you cannot see the edge of does not read
+   * as a box. So it is held to 3:1 here, against both grounds it is ever drawn
+   * on, in every theme, including the ones nobody has written yet.
+   *
+   * `--border` is deliberately NOT held to the same bar. It separates rows
+   * that belong together; at 3:1 it would stop being a separator and start
+   * being a grid, which is a different and worse screen. 1.5 is the floor for
+   * "present" rather than for "prominent".
+   */
+  { ink: '--border-strong', ground: '--surface', least: 3 },
+  { ink: '--border-strong', ground: '--bg', least: 3 },
+  { ink: '--border', ground: '--surface', least: 1.5 },
+  { ink: '--border', ground: '--bg', least: 1.5 },
 ];
 
 describe('every theme is readable (T6, UI_GUIDELINES §2)', () => {

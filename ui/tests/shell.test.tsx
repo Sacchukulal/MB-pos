@@ -113,6 +113,12 @@ function answer(command: string): Promise<unknown> {
               isOpenPrice: false,
             },
           ]);
+    // The menu's route onto the billing screen since the tile grid came off it
+    // (2026-08-17). Refused while locked for the same reason `menu_items` is.
+    case 'search_items':
+      return signedInAs === null
+        ? Promise.reject({ code: 'auth.locked', message: 'The screen is locked.' })
+        : answer('menu_items');
     case 'login':
       signedInAs = 'Meena';
       return answer('lock_state');
@@ -155,7 +161,20 @@ it('does not mount the screen behind the lock', async () => {
   expect(call).not.toHaveBeenCalledWith('menu_items');
 });
 
-it('mounts the screen with a session behind it, so its data arrives', async () => {
+/*
+  **Given longer than the default five seconds, and not because it is slow.**
+
+  This is the heaviest test in the suite: it mounts the WHOLE shell, waits for
+  the lock, drives six taps through the PIN pad, signs in, mounts the billing
+  screen behind it and waits for a search to come back. It takes about 400 ms
+  when the machine is idle — and vitest runs twenty-five files at once, so on a
+  busy machine it intermittently crossed five seconds and failed a test about
+  session plumbing for a reason that had nothing to do with sessions.
+
+  A flaky test is worse than a slow one: it teaches whoever sees it to re-run
+  the suite instead of reading it.
+*/
+it('mounts the screen with a session behind it, so its data arrives', { timeout: 20_000 }, async () => {
   show();
   await screen.findByText('Who is at the counter?');
 
@@ -172,5 +191,23 @@ it('mounts the screen with a session behind it, so its data arrives', async () =
   // out with a session behind it, so it comes back with the shop's menu in it
   // rather than a refusal nobody can see.
   await waitFor(() => expect(call).toHaveBeenCalledWith('menu_items'));
-  expect(await screen.findByText('Masala Dosa')).toBeTruthy();
+
+  /*
+    **And the shop's menu is really on the screen, not merely asked for.**
+
+    This used to read `findByText('Masala Dosa')`, because the billing screen
+    drew every item as a tile under the floor. The owner had that grid removed
+    on 2026-08-17 — *"menu section dont show here in the billing page"* — so
+    the assertion had nothing to find and this test failed for a reason that
+    had nothing to do with what it is about.
+
+    It is asked through the search box instead, which is the route the grid's
+    removal leaves and the one a busy counter was already using. That makes
+    this a slightly stronger test than it was: before, a menu that arrived and
+    could not be reached would still have passed.
+  */
+  fireEvent.change(screen.getByRole('searchbox', { name: /Search the menu/ }), {
+    target: { value: 'dosa' },
+  });
+  expect(await screen.findByRole('option', { name: /Masala Dosa/ })).toBeTruthy();
 });

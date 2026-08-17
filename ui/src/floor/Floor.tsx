@@ -1,4 +1,4 @@
-/**
+﻿/**
  * **The floor** — scope 14.1 the plan, 14.2 the timers, 14.3 the occupancy
  * line, and the three operations (1.21, 1.22, 1.23).
  *
@@ -41,6 +41,9 @@ import {
   type Column,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
+/* **The one table tile in the product.** This screen used to have a second
+   copy — see the note where it was. */
+import { Tile } from '../billing/TableGrid';
 import type { FloorView } from '../ipc/generated/FloorView';
 import type { TableRowView } from '../ipc/generated/TableRowView';
 import type { TableView } from '../ipc/generated/TableView';
@@ -69,6 +72,29 @@ export function Floor() {
   const load = useCallback(() => {
     call('floor_plan').then(setFloor).catch(report);
   }, [report]);
+
+  /**
+   * **Carry the bill to this table, from the Floor screen too.**
+   *
+   * The owner, 2026-08-17: *"the users are keeps open that floor page for
+   * billing also, so print button inside table cards also wil appeare here."*
+   *
+   * The same command the billing grid's tiles call, doing the same nothing to
+   * the cart: it reads the order off disk, prints it marked NOT PAID, and
+   * leaves the table open. Nothing about this screen's state changes, which is
+   * why it does not reload the floor afterwards.
+   */
+  const printTheBill = useCallback(
+    async (tile: TableView) => {
+      if (!tile.orderId) return;
+      try {
+        toast.show('ok', await call('print_open_bill', { orderId: tile.orderId }));
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [report, toast],
+  );
 
   useEffect(load, [load]);
 
@@ -171,11 +197,19 @@ export function Floor() {
       </div>
 
       {floor.hasLayout ? (
-        <Plan floor={floor} tiles={shown} onFailed={report} onChanged={setFloor} onMove={setMoving} />
+        <Plan
+          floor={floor}
+          tiles={shown}
+          onFailed={report}
+          onChanged={setFloor}
+          onMove={setMoving}
+          onPrintBill={printTheBill}
+        />
       ) : (
         <Grid
           tiles={shown}
           onMove={setMoving}
+          onPrintBill={printTheBill}
           none={floor.tables.length === 0}
           onSetUp={() => setMaster(true)}
         />
@@ -225,11 +259,13 @@ export function Floor() {
 function Grid({
   tiles,
   onMove,
+  onPrintBill,
   none,
   onSetUp,
 }: {
   tiles: readonly TableView[];
   onMove: (tile: TableView) => void;
+  onPrintBill: (tile: TableView) => void;
   /** True when the shop has no tables at all, rather than none in this view. */
   none?: boolean;
   onSetUp?: () => void;
@@ -260,7 +296,12 @@ function Grid({
   return (
     <div className="mb-floor__grid">
       {tiles.map((tile) => (
-        <Tile key={tile.id} tile={tile} onOpen={() => onMove(tile)} />
+        <Tile
+          key={tile.id}
+          table={tile}
+          onOpen={() => onMove(tile)}
+          onPrintBill={() => onPrintBill(tile)}
+        />
       ))}
     </div>
   );
@@ -279,12 +320,14 @@ function Plan({
   onFailed,
   onChanged,
   onMove,
+  onPrintBill,
 }: {
   floor: FloorView;
   tiles: readonly TableView[];
   onFailed: (cause: unknown) => void;
   onChanged: (floor: FloorView) => void;
   onMove: (tile: TableView) => void;
+  onPrintBill: (tile: TableView) => void;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const placed = useMemo(
@@ -314,7 +357,11 @@ function Plan({
         >
           {tile ? (
             <div draggable onDragStart={() => setDragging(tile.id)}>
-              <Tile tile={tile} onOpen={() => onMove(tile)} />
+              <Tile
+                table={tile}
+                onOpen={() => onMove(tile)}
+                onPrintBill={() => onPrintBill(tile)}
+              />
             </div>
           ) : null}
         </div>,
@@ -324,11 +371,10 @@ function Plan({
 
   return (
     <>
-      <div
-        className="mb-plan"
-        style={undefined}
-        data-grid={floor.grid}
-      >
+      {/* `style={undefined}` was here — the fossil of an inline style somebody
+          removed without removing the prop. The grid size travels as a data
+          attribute and the CSS reads it. */}
+      <div className="mb-plan" data-grid={floor.grid}>
         {squares}
       </div>
       {placed.size === 0 ? null : (
@@ -341,35 +387,29 @@ function Plan({
   );
 }
 
-/** One tile. The state arrives decided; this only draws it. */
-function Tile({ tile, onOpen }: { tile: TableView; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      className={`mb-tile mb-tile--${tile.state}`}
-      onClick={onOpen}
-      aria-label={`Table ${tile.label}`}
-    >
-      <span className="mb-tile__label">{tile.label}</span>
-      {tile.total ? <span className="mb-tile__amount">{tile.total.text}</span> : null}
-      <span className="mb-tile__meta">
-        {tile.minutes === null ? null : <span>{tile.minutes}m</span>}
-        {/* Scope 14.2's second timer, and the one that catches a forgotten
-            table: food went to the kitchen and nothing has since. */}
-        {tile.kitchenMinutes === null ? null : (
-          <span className="mb-floor__kitchen">· food {tile.kitchenMinutes}m</span>
-        )}
-        {tile.orderId && !tile.kitchenTold ? (
-          <span
-            className="mb-tile__kitchen"
-            title="The kitchen has not been told"
-            aria-label="The kitchen has not been told"
-          />
-        ) : null}
-      </span>
-    </button>
-  );
-}
+/*
+  **THE FLOOR'S OWN `Tile` USED TO BE HERE, AND IT IS THE BUG.**
+
+  The owner, 2026-08-17: *"in floor page the table icons differently showing.
+  As already i told you from starting to till, dont hardcode any styling
+  themes, that must be global theme follow… if anything hardcoded, remove
+  hardcode immediately, that is the very very strict instruction forever."*
+
+  This file had a second table tile. It reached for the same `mb-tile` classes
+  but drew different markup — a `<button>` rather than the box-and-face the
+  billing grid uses, its own meta line, its own `mb-floor__kitchen` class for
+  the food timer, and no print mark. So the two screens had never actually
+  matched, and when the billing tile was restructured on 2026-08-17 this copy
+  kept the old shape, lost the padding that now lives on `.mb-tile__face`, and
+  every busy table on this screen collapsed into overlapping text.
+
+  **That is the real cost of a duplicate**: not that the two look different,
+  but that fixing one silently breaks the other, and nothing fails to tell you.
+
+  There is one tile now — `billing/TableGrid.tsx` — and both screens import it.
+  The food timer went with it, because it belongs to a tile rather than to a
+  screen.
+*/
 
 /** What you can do to the order on a table — scope 1.21, 1.22, 1.23. */
 function TableActions({

@@ -66,7 +66,7 @@ use crate::drawer::DrawerConfig;
 use crate::error::PrintError;
 use crate::escpos::{self, JobOptions};
 use crate::font::Typefaces;
-use crate::layout::layout;
+use crate::layout::{Grid, layout_for};
 use crate::printer::{Engine, PrinterConfig};
 use crate::raster::{RasterOptions, to_raster};
 use crate::transport::{RealTransports, TransportError, TransportFactory};
@@ -830,7 +830,19 @@ fn print_once(
     let mut document = payload.document.clone();
     document.paper = printer.paper;
 
-    let laid = layout(&document).map_err(|e| Failure {
+    // **Laid out for the engine that will draw it.** The graphics engine draws
+    // text of any height; the printer's own font has three sizes and nothing
+    // between, so a bill of 32-dot text laid out in dots would run off the roll
+    // on that engine. See `layout::Grid`.
+    let mut engine = printer.effective_engine();
+    let laid = layout_for(
+        &document,
+        match engine {
+            Engine::Text => Grid::Cells,
+            Engine::Raster => Grid::Dots,
+        },
+    )
+    .map_err(|e| Failure {
         message: e.to_string(),
         // An amount wider than the paper is a template bug, not a printer that
         // is switched off. Retrying it is theatre.
@@ -844,7 +856,6 @@ fn print_once(
         bold_dark: printer.bold_dark,
     };
 
-    let mut engine = printer.effective_engine();
     let bytes = match engine {
         Engine::Raster => {
             let raster = to_raster(

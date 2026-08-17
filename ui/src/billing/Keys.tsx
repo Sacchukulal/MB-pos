@@ -44,7 +44,12 @@ export function Suggestions({
           >
             <span className="mb-cartline__name">{item.name}</span>
             <span className="mb-cartline__rate">{item.rateLabel}</span>
-            <span className="mb-tile__amount">{item.price.text}</span>
+            {/* Its own class, not the table tile's. It borrowed
+                `mb-tile__amount` for a mono, tabular price — which is a
+                perfectly good look and exactly the borrowing that lets two
+                things drift apart when one of them is restyled. The look is
+                the same; the owner of it is now this list. */}
+            <span className="mb-suggestion__price">{item.price.text}</span>
           </button>
         </li>
       ))}

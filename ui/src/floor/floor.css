@@ -96,11 +96,12 @@
   color: var(--text);
 }
 
-/* "food 18m" — scope 14.2's second timer, quieter than the table timer
-   because it is the second question, not the first. */
-.mb-floor__kitchen {
-  color: var(--text-muted);
-}
+/* `.mb-floor__kitchen` was here. It styled the food timer on the Floor
+   screen's own copy of the table tile — and the fact that the tile's second
+   line needed a class from a SCREEN's stylesheet is exactly how the two
+   screens' tiles drifted apart. The tile is one component now
+   (`billing/TableGrid.tsx`) and the timer is `.mb-tile__food` beside the rest
+   of the tile's styling, where a change reaches both screens. */
 
 .mb-floor__mergelist {
   display: flex;

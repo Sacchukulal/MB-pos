@@ -51,17 +51,74 @@
   font-weight: var(--weight-bold);
 }
 
-/* The ESC/POS size multipliers, shown as they will print.
-   **Actual multiples**, and they were not: x2 was `--text-lg`, which is 1.29
-   times `--text-sm`, so the preview showed "Large" as a third bigger when the
-   printer makes it twice as big. A preview that understates the one setting it
-   is there to demonstrate is worse than no preview. */
-.mb-receipt__line--x2 {
-  font-size: calc(var(--receipt-char) * 2);
+/* **The size this line will print at, shown at that size.**
+
+   It was three classes — x2 and x3 — because a size was 1x, 2x or 3x of the
+   printer's cell and there was nothing in between. A shop chooses from
+   twenty-two heights since 2026-08-17, so the height arrives as a number on
+   the line (`--receipt-px`, set by `Receipt.tsx` from what Rust laid out) and
+   this turns it into a proportion of one cell.
+
+   **Actual multiples, and they were not**: x2 used to be `--text-lg`, which is
+   1.29 times `--text-sm`, so the preview showed "Large" as a third bigger when
+   the printer makes it twice as big. A preview that understates the one
+   setting it exists to demonstrate is worse than no preview. `24` here is one
+   cell of the printer's own font — the unit every size is given in, and the
+   same divisor `raster.rs` uses. */
+.mb-receipt__text {
+  font-size: calc(var(--receipt-char) * var(--receipt-px, 24) / 24);
 }
 
-.mb-receipt__line--x3 {
-  font-size: calc(var(--receipt-char) * 3);
+/* **One aligned box on a line drawn in a proportional face** — 2026-08-17.
+
+   A typewriter face needs none of this: the layout padded the line with spaces
+   and every space is exactly one column, so the line arrives already aligned.
+   Times New Roman's space is about a third of its digit, so the same padded
+   line puts an amount nowhere near the right edge — and a column of rupees
+   that does not line up is the one thing a shopkeeper checks a bill for.
+
+   So each box is laid out at the width the LAYOUT gave it (`--receipt-cols`
+   characters, the same number `raster.rs` positions the paper from) and the
+   text is aligned inside it. `ch` is the width of a '0' in the current face,
+   which is the unit the layout counts in — and every face on offer draws its
+   digits at one width, so a box of N characters is N zeroes wide. */
+.mb-receipt__box {
+  display: inline-block;
+  width: calc(var(--receipt-cols, 1) * 1ch);
+  /* **It does not clip.** `overflow: hidden` cut "SAMPLE" to "SAMPL" the first
+     time this was looked at: `1ch` is the width of a '0', and capital letters
+     in Times New Roman are wider, so a box counted in characters is narrower
+     than the characters in it. The printer does not clip either — `raster.rs`
+     starts an over-wide run at its box's left edge and lets it run on, because
+     rule one is wrap, never truncate. Losing a character off a bill to make a
+     column tidy is the wrong trade in both places. */
+  white-space: pre;
+  vertical-align: baseline;
+}
+
+.mb-receipt__box--left {
+  text-align: left;
+}
+
+.mb-receipt__box--right {
+  text-align: right;
+}
+
+.mb-receipt__box--centre {
+  text-align: center;
+}
+
+/* A proportional preview cannot rely on the paper's own `ch` for its total
+   width, so the paper keeps its column count and the boxes divide it. */
+.mb-receipt__paper--proportional {
+  white-space: pre-wrap;
+}
+
+/* **A separator stays on the printer's grid**, whatever face the bill is in —
+   see the note in `Receipt.tsx`. The raster sink draws rules at the paper's own
+   cell and not at the chosen size, so this is the preview agreeing with it. */
+.mb-receipt__rule {
+  font-family: var(--font-mono);
 }
 
 .mb-receipt__qr {

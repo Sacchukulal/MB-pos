@@ -169,7 +169,13 @@ describe('the floor (scope 14.1–14.3)', () => {
 
     // Table 2 is busy; open it and move its order to table 1, which the view
     // says is free.
-    fireEvent.click(screen.getByLabelText('Table 2'));
+    //
+    // **A prefix match, because the tile announces its state too.** This
+    // screen had its own copy of the table tile until 2026-08-17, whose whole
+    // aria-label was "Table 2"; it uses the shared one now, which says
+    // "Table 2, Hall, busy, 646.00, 12m" so a blind cashier hears whether the
+    // table is free. Matching the number exactly was matching the duplicate.
+    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
     fireEvent.change(await screen.findByLabelText('To table'), {
       target: { value: 'tbl_1' },
     });
@@ -184,7 +190,7 @@ describe('the floor (scope 14.1–14.3)', () => {
     show();
     await screen.findByText('3 of 4 tables busy');
 
-    fireEvent.click(screen.getByLabelText('Table 1'));
+    fireEvent.click(screen.getByLabelText(/^Table 1\b/));
     expect(screen.getByText(/This table is free/)).toBeTruthy();
   });
 });
@@ -232,5 +238,42 @@ describe('empty is not a lecture (P30.5)', () => {
     // The way to fix it is on the screen, and there are two of it: the toolbar
     // button a busy shop uses, and this one.
     expect(screen.getAllByRole('button', { name: 'Set up the room' }).length).toBe(2);
+  });
+
+  /**
+   * **The Floor screen draws the SAME tile as the billing screen, from the
+   * same file** — the owner, 2026-08-17:
+   *
+   * > *"billing screen table structure and in floor page tables cards
+   * > structure completely looks different, instead use same in both, bcz the
+   * > users are keeps open that floor page for billing also, so print button
+   * > inside table cards also wil appeare here also, so make sure both are
+   * > same source file."*
+   *
+   * This screen had its own copy of the tile until then — same class names,
+   * different markup — so the two never quite matched and a fix to one silently
+   * broke the other. The print mark is the visible proof that the shared one is
+   * what is on screen: the copy never had it, and could not have grown it
+   * without being edited a second time.
+   *
+   * `check-layout.mjs` guards the same claim from the other side: it fails the
+   * build if any file but `billing/TableGrid.tsx` writes an `mb-tile` class.
+   */
+  it('offers the same print-the-bill mark the billing screen has', async () => {
+    call.mockResolvedValue(floor());
+    show();
+    await screen.findByText('3 of 4 tables busy');
+
+    // Table 2 is busy, so it can be printed. Table 1 is free, so it cannot —
+    // a print button whose only possible outcome is an error message is worse
+    // than no button.
+    const print = screen.getByRole('button', { name: 'Print the bill for table 2' });
+    expect(screen.queryByRole('button', { name: 'Print the bill for table 1' })).toBeNull();
+
+    call.mockClear();
+    call.mockResolvedValue('The bill for table 2 is printing.');
+    fireEvent.click(print);
+
+    expect(call).toHaveBeenCalledWith('print_open_bill', { orderId: 'ord_2' });
   });
 });

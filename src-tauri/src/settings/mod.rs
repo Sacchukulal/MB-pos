@@ -81,6 +81,55 @@ use serde::{Deserialize, Serialize};
 use crate::search::MatchMode;
 use value::{Invalid, Value};
 
+/// **What one ESC/POS multiplier step is worth, in dots.**
+///
+/// A thermal printer's own Font A cell is 12 × 24, so `scale: 1` is 24 dots
+/// tall. Every px size a shop chooses is converted against this — see
+/// `mb_print::doc::Style::px` — and it is the printer's fact rather than the
+/// paper's: all three roll widths use the same cell height.
+pub const BASE_CELL_PX: u16 = 24;
+
+/// Is this one of the sizes the screen offers?
+///
+/// The catalogue's list is the authority and this reads it, so adding a size
+/// there is the whole of adding a size — there is no second list to keep in
+/// step, which is how the three sizes and the three labels drifted before.
+#[must_use]
+pub fn is_a_size(px: u16) -> bool {
+    catalog::SIZES
+        .iter()
+        .any(|choice| choice.value.parse::<u16>() == Ok(px))
+}
+
+/// **What a shop calls this height** — "1" to "10", the numbers on the
+/// dropdown.
+///
+/// A height that is not exactly on the list (the layout caps to whatever fits,
+/// which is rarely one of ten round numbers) reports as the nearest one below
+/// it, because that is the size a person would have had to pick to get this.
+#[must_use]
+pub fn size_label(px: u16) -> String {
+    let mut best: Option<(u16, &str)> = None;
+    for choice in catalog::SIZES {
+        let Ok(dots) = choice.value.parse::<u16>() else {
+            continue;
+        };
+        if dots <= px && best.is_none_or(|(had, _)| dots >= had) {
+            best = Some((dots, choice.label));
+        }
+    }
+    // Below the smallest on the list is still the smallest a person can ask
+    // for, so it is what they should be told.
+    best.map_or_else(
+        || {
+            catalog::SIZES
+                .first()
+                .map_or_else(|| px.to_string(), |c| c.label.to_owned())
+        },
+        |(_, label)| label.to_owned(),
+    )
+}
+
 /// The shop, as a person fills it in.
 ///
 /// **Not `mb_db`'s `StoreProfile`, and the difference is `Option`.** Every
@@ -616,6 +665,8 @@ pub fn load(repos: &Repos<'_>, outlet: &str) -> Result<ShopConfig, DbError> {
             Value::Text(_) => settings.get::<String>(outlet, entry.key)?.map(Value::Text),
         };
         let Some(stored) = stored else { continue };
+        // **What an older build wrote, in the words this one uses.**
+        let stored = modernise(entry, stored);
         // **A stored value is checked on the way IN, not only on the way out.**
         // A limit that tightened in a later build must fail loudly on the old
         // value rather than printing it.
@@ -628,6 +679,75 @@ pub fn load(repos: &Repos<'_>, outlet: &str) -> Result<ShopConfig, DbError> {
     }
 
     Ok(config)
+}
+
+/// **A value an older build wrote, in the words this one uses.**
+///
+/// # Why this exists at all
+///
+/// A text size used to be the ESC/POS multiplier — `1`, `2` or `3` — and is a
+/// height in dots since 2026-08-17. Every shop that has ever changed a size has
+/// one of the old numbers on disk, and `Kind::check` runs BEFORE `write`, so
+/// the compatibility built into the `size!` macro was never reached: the
+/// counter opened, refused its own settings row, and fell back to the standard
+/// receipt with a line in the log. Found by opening a shop that had a size set.
+///
+/// # Why here and not in the macro
+///
+/// Because the check is the thing that rejected it, and the check reads the
+/// catalogue's list. This is the one place that knows a stored value has a
+/// history, it is named, and it is keyed on the exact list that changed — so
+/// when there is nothing left on disk from before that day, deleting this
+/// function is the whole of removing it.
+fn modernise(entry: &catalog::Entry, stored: Value) -> Value {
+    let Value::Text(text) = &stored else {
+        return stored;
+    };
+    // Sizes and nothing else. `ptr::eq` on the choice list rather than a match
+    // on the key, so a size added to another section is covered without
+    // anybody remembering to add it here.
+    let value::Kind::Choice(choices) = entry.kind else {
+        return stored;
+    };
+    if !std::ptr::eq(choices, catalog::SIZES) {
+        return stored;
+    }
+    let Ok(stored_dots) = text.parse::<u16>() else {
+        return stored;
+    };
+    // 1, 2 and 3 were the multiplier. No size on the list is that small — the
+    // smallest is 16 — so there is nothing to be ambiguous about.
+    let dots = if (1..=3).contains(&stored_dots) {
+        stored_dots * BASE_CELL_PX
+    } else {
+        stored_dots
+    };
+
+    // **A height that is no longer on the list becomes the nearest one that
+    // is.**
+    //
+    // The list has changed three times in one day — three multipliers, then
+    // twenty-two `px` values, then ten plain numbers — and each time a shop had
+    // rows on disk holding a value the new list did not contain. `Kind::check`
+    // refuses those, so the counter opened, refused its own settings row, and
+    // printed the STANDARD receipt while the screen still said what the shop
+    // had chosen. The owner hit it twice.
+    //
+    // Snapping is the honest answer: a shop that chose 46 dots wanted "a bit
+    // bigger than normal", and the nearest thing this build can print is what
+    // they should get — not the default, and not a counter that refuses to
+    // read its own configuration.
+    if is_a_size(dots) {
+        return Value::Text(dots.to_string());
+    }
+    let nearest = catalog::SIZES
+        .iter()
+        .filter_map(|choice| choice.value.parse::<u16>().ok())
+        .min_by_key(|offered| offered.abs_diff(dots));
+    match nearest {
+        Some(dots) => Value::Text(dots.to_string()),
+        None => stored,
+    }
 }
 
 /// **Write only what changed.**
