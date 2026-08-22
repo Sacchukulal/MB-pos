@@ -13,8 +13,10 @@
     "test:watch": "vitest",
     "lint:tokens": "node scripts/check-tokens.mjs",
     "lint:money": "node scripts/check-no-money.mjs",
+    "lint:fields": "node scripts/check-fields.mjs",
+    "lint:ids": "node scripts/check-ids.mjs",
     "lint:views": "node scripts/check-view-names.mjs",
-    "lint": "npm run lint:tokens && npm run lint:layout && npm run lint:money && npm run lint:views && npm run lint:wiring",
+    "lint": "npm run lint:tokens && npm run lint:layout && npm run lint:fields && npm run lint:ids && npm run lint:money && npm run lint:views && npm run lint:wiring",
     "check": "npm run typecheck && npm run lint && npm run test",
     "lint:layout": "node scripts/check-layout.mjs",
     "lint:wiring": "node ../scripts/audit-wiring.mjs"

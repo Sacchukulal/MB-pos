@@ -272,3 +272,81 @@ fn a_payout_needs_a_reason_and_an_expense_needs_a_description() {
     .expect_err("refused");
     assert_eq!(blank.code, "expense.what");
 }
+
+/// **Two spends made in the very same instant are two spends.**
+///
+/// The worst half of the clock-id bug lived here. `expenses` is an **upsert**,
+/// because saving an edited spend reuses its id — so when two spends were given
+/// the same id, the second did not fail. It silently **replaced** the first.
+/// Money gone from the day's list, no error, nothing on screen to say why.
+///
+/// # Why the timestamp is handed in rather than waited for
+///
+/// The first version of this test confirmed two reminders back to back and
+/// hoped they landed in the same millisecond. **They did not**, so it passed
+/// with the bug deliberately put back — which is a test that proves nothing.
+/// Checked, and that is how this one came to be written the other way.
+///
+/// One timestamp, two ids, both through the real command. Deterministic, and it
+/// fails the moment an id is a clock reading again.
+#[test]
+fn two_spends_made_in_the_same_instant_are_two_spends() {
+    let scratch = Scratch::new("exp_same_instant");
+    let app = a_shop(&scratch);
+
+    // The same instant, stated rather than raced for.
+    let at = crate::flows::now();
+    let first = crate::newid::fresh_at("exp", at);
+    let second = crate::newid::fresh_at("exp", at);
+    assert_ne!(first, second, "the id is still coming out of the clock");
+
+    spend(&app, &first, "Rent", "1000", "cash");
+    spend(&app, &second, "Electricity", "1000", "cash");
+    let view = crate::expenses::expenses_on(&app).expect("the screen");
+
+    let recorded: Vec<&str> = view
+        .rows
+        .iter()
+        .map(|r| r.description.as_str())
+        .filter(|d| *d == "Rent" || *d == "Electricity")
+        .collect();
+    assert_eq!(recorded.len(), 2, "one spend replaced the other: {recorded:?}");
+}
+
+/// And the flow it protects: two reminders due on the same day can both be
+/// confirmed. A smoke test for the path, not the proof above.
+#[test]
+fn two_reminders_due_together_can_both_be_confirmed() {
+    let scratch = Scratch::new("recurring_race");
+    let app = a_shop(&scratch);
+
+    for (id, what) in [("rec_rent", "Rent"), ("rec_power", "Electricity")] {
+        crate::expenses::save_recurring_on(
+            &app,
+            id.to_owned(),
+            what.to_owned(),
+            "1000".to_owned(),
+            "cash".to_owned(),
+            "monthly".to_owned(),
+            None,
+        )
+        .expect("a reminder");
+    }
+
+    // Back to back, as fast as the machine goes — which is what "the same
+    // instant" means in practice.
+    crate::expenses::confirm_due_on(&app, "rec_rent".to_owned()).expect("rent");
+    let view = crate::expenses::confirm_due_on(&app, "rec_power".to_owned()).expect("power");
+
+    let recorded: Vec<&str> = view
+        .rows
+        .iter()
+        .map(|r| r.description.as_str())
+        .filter(|d| *d == "Rent" || *d == "Electricity")
+        .collect();
+    assert_eq!(
+        recorded.len(),
+        2,
+        "one spend replaced the other: {recorded:?}",
+    );
+}

@@ -23,8 +23,12 @@ import {
   Button,
   Card,
   EmptyState,
+  freshId,
   Input,
   Modal,
+  MoneyInput,
+  onlyAmount,
+  PhoneInput,
   Select,
   Table,
   Tabs,
@@ -262,7 +266,7 @@ export function Buying() {
                 small
                 onClick={() =>
                   setEditingSupplier({
-                    id: `sup_${Date.now().toString(36)}`,
+                    id: freshId('sup'),
                     name: '',
                     phone: null,
                     gstin: null,
@@ -448,7 +452,7 @@ function PurchaseEntry({
   const save = () => {
     call('save_purchase', {
       edit: {
-        id: `pur_${Date.now().toString(36)}`,
+        id: freshId('pur'),
         supplierId,
         invoiceNo,
         lines: lines.filter((l) => l.materialId !== '' && l.qty.trim() !== ''),
@@ -609,17 +613,17 @@ function PurchaseEntry({
           ))}
 
         <div className="mb-row">
-          <Input label="Transport / loading" value={charges} onChange={(e) => setCharges(e.target.value)} />
-          <Input label="Discount on the whole invoice" value={discount} onChange={(e) => setDiscount(e.target.value)} />
-          <Input
+          <MoneyInput label="Transport / loading" value={charges} onChange={setCharges} />
+          <MoneyInput label="Discount on the whole invoice" value={discount} onChange={setDiscount} />
+          <MoneyInput
             label="Total on the paper"
             value={statedTotal}
-            onChange={(e) => setStatedTotal(e.target.value)}
+            onChange={setStatedTotal}
           />
         </div>
 
         <div className="mb-row">
-          <Input label="Paid now" value={paidNow} onChange={(e) => setPaidNow(e.target.value)} />
+          <MoneyInput label="Paid now" value={paidNow} onChange={setPaidNow} />
           <Select label="How" value={paidMode} onChange={(e) => setPaidMode(e.target.value)} options={MODES} />
         </div>
 
@@ -675,7 +679,7 @@ function SupplierEditor({
     <Modal open title={supplier.name === '' ? 'A new supplier' : supplier.name} onClose={onClose}>
       <div className="mb-buying__form">
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        <PhoneInput label="Phone" value={phone} onChange={setPhone} />
         <Input label="GST number" value={gstin} onChange={(e) => setGstin(e.target.value)} />
         <Input label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
         <Input
@@ -754,7 +758,7 @@ function SupplierAccount({
       </div>
 
       <div className="mb-row">
-        <Input label="Pay them" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <MoneyInput label="Pay them" value={amount} onChange={setAmount} />
         <Select label="How" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
         <Input label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} />
         <Button
@@ -791,7 +795,8 @@ function SupplierAccount({
             label="By how much"
             value={adjust}
             inputMode="decimal"
-            onChange={(e) => setAdjust(e.target.value)}
+            className="mb-input--number"
+            onChange={(e) => setAdjust(onlyAmount(e.target.value))}
           />
           <Select
             label="Which way"
@@ -1076,10 +1081,10 @@ function RaiseOrder({
             value={line.unit}
             onChange={(e) => setLine(index, { unit: e.target.value })}
           />
-          <Input
+          <MoneyInput
             label="Rate you expect"
             value={line.rate}
-            onChange={(e) => setLine(index, { rate: e.target.value })}
+            onChange={(next) => setLine(index, { rate: next })}
           />
         </div>
       ))}
@@ -1107,7 +1112,7 @@ function RaiseOrder({
             setBusy(true);
             call('save_purchase_order', {
               edit: {
-                id: `po_${Date.now().toString(36)}`,
+                id: freshId('po'),
                 supplierId,
                 number,
                 expected,

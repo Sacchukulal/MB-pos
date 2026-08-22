@@ -317,13 +317,20 @@ pub fn save_customer_on(app: &App, edit: CustomerEdit) -> UiResult<Vec<CustomerV
     if edit.name.trim().is_empty() {
         return Err(UiError::new("credit.name", "A customer needs a name."));
     }
-    let phone = edit.phone.trim().to_owned();
-    if !phone.is_empty() && credit::phone_key(&phone).is_none() {
-        return Err(UiError::new(
-            "credit.phone",
-            "That is not a phone number — ten digits, with or without +91.",
-        ));
-    }
+    // **`Phone::parse`, and what it returns is what is stored.**
+    //
+    // This used to check `credit::phone_key(..).is_none()`, which asks a
+    // different question: that function takes the LAST ten digits of anything
+    // with ten or more, because it exists to decide whether two spellings of a
+    // number are one customer. As a gate it let a thirteen-digit number through
+    // and stored it as typed — so the shop had one customer whose number could
+    // not be dialled and one whose number was matched on its tail.
+    //
+    // The ten digits go in, so the row and the key agree by construction. See
+    // `mb_core::phone` (owner, 2026-08-22).
+    let phone = mb_core::Phone::parse_optional(&edit.phone)
+        .map_err(|e| UiError::new("credit.phone", e.to_string()))?
+        .map_or_else(String::new, |p| p.as_str().to_owned());
     let limit = if edit.credit_limit.trim().is_empty() {
         // Blank is NO LIMIT, not a limit of zero. A shop that types nothing
         // has not said "this customer may owe nothing".
@@ -419,7 +426,7 @@ pub fn record_repayment_on(
                 repos.money().record_credit_payment(
                     OUTLET,
                     &CreditPayment {
-                        id: format!("crp_{}", at.millis()),
+                        id: crate::newid::fresh_at("crp", at),
                         customer_id: CustomerId::new(customer_id.clone()),
                         amount,
                         mode: mode.clone(),
@@ -476,7 +483,7 @@ pub fn save_adjustment_on(
                 repos.money().save_credit_adjustment(
                     OUTLET,
                     &CreditAdjustment {
-                        id: format!("adj_{}", at.millis()),
+                        id: crate::newid::fresh_at("adj", at),
                         customer_id: CustomerId::new(customer_id.clone()),
                         amount,
                         increases,

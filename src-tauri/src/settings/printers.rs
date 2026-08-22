@@ -234,7 +234,7 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
 
     let at = crate::flows::now();
     let id = if edit.id.trim().is_empty() {
-        format!("prn_{}", at.millis())
+        crate::newid::fresh_at("prn", at)
     } else {
         edit.id.clone()
     };

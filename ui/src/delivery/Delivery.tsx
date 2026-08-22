@@ -29,6 +29,7 @@ import {
   Icon,
   Input,
   Modal,
+  MoneyInput,
   Notice,
   Page,
   PageHeader,
@@ -366,11 +367,11 @@ export function Delivery() {
         onClose={() => setHandback(null)}
       >
         <Stack>
-          <Input
+          <MoneyInput
             label="How much they handed over"
             value={amount}
             autoFocus
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={setAmount}
           />
           <Row end>
             <Button variant="quiet" onClick={() => setHandback(null)}>

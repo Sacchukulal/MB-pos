@@ -31,7 +31,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Icon, Input, Modal, Select } from '../kit';
+import { Badge, Button, freshId, Icon, Input, Modal, Select } from '../kit';
 import { call } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { PrintersView } from '../ipc/generated/PrintersView';
@@ -89,7 +89,7 @@ export function Groups({
     // The id is ours to make and never shown. `save_menu_category` upserts on
     // it, so a fresh one is what makes this an ADD rather than a rename of
     // whatever happened to be there.
-    await save(`cat_${Date.now().toString(36)}`, name, true);
+    await save(freshId('cat'), name, true);
     setAdding('');
   };
 

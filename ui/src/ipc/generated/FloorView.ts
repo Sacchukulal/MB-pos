@@ -19,4 +19,18 @@ grid: number, warnMinutes: number, lateMinutes: number,
  * what gets drawn — and that is not a degraded mode: no shop should have
  * to draw a floor plan before it can bill.
  */
-hasLayout: boolean, };
+hasLayout: boolean, 
+/**
+ * **Whether this person may change the room.**
+ *
+ * Asked here rather than worked out on the screen, for R8's reason: the
+ * rule is `Permission::TablesManage`, every command on this screen already
+ * checks it with `guard::require`, and a second copy of it in TypeScript is
+ * a second copy that can drift.
+ *
+ * It is a **courtesy and not the control** — hiding the panel saves a
+ * waiter from a row of buttons that can only fail; `guard::require` is
+ * what actually refuses, and there is a test that calls the commands
+ * without going near this field.
+ */
+canArrange: boolean, };

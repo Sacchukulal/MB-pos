@@ -20,6 +20,7 @@ use mb_core::{
     AnyOrder, BusinessDay, Cart, DraftOrder, ItemSnapshot, Money, OrderId, OrderType, Qty, StaffId,
     TableId, TaxRate,
 };
+use mb_auth::RolePreset;
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::{Db, DbConfig, Repos};
 
@@ -655,12 +656,23 @@ fn only_one_table_is_ever_marked() {
     }
 }
 
-/// **The billing grid and the floor plan agree.** They are two commands
-/// (`open_orders_on` and `floor_on`) reading two different code paths into the
-/// same `floor_view`, and the owner uses both screens for billing — a table
-/// that is ringed on one and not the other is worse than neither.
+/// **The floor plan marks NOTHING, and that is not an oversight.**
+///
+/// The owner, 2026-08-22: *"why is the table i selected in the billing section
+/// is highlighted in floor section also? it makes no sense."*
+///
+/// They are right, and the test that used to sit here asserted the opposite —
+/// `both_screens_mark_the_same_table`, written a day earlier on the reasoning
+/// that two screens showing the same room should agree. The reasoning was
+/// wrong because the two screens are not asking the same question. A ring says
+/// **"this is the table your cart is on"**; the billing grid has a cart behind
+/// it and the Floor screen does not. Marking a tile there answered a question
+/// nobody on that screen had asked.
+///
+/// `Room::cart_is_on` is an `Option` for this reason: the Floor screen says
+/// `None` out loud rather than passing two empty ids and hoping.
 #[test]
-fn both_screens_mark_the_same_table() {
+fn the_floor_plan_marks_no_table_because_it_has_no_cart() {
     let scratch = Scratch::new("selected_both");
     let app = a_shop_with_a_room(&scratch);
     crate::ipc::open_table_on(&app, "tbl_3".to_owned()).expect("opened");
@@ -673,15 +685,140 @@ fn both_screens_mark_the_same_table() {
             .collect()
     };
 
+    // The billing grid marks it, because that is where the cart is.
     let grid = crate::ipc::open_orders_on(&app).expect("the grid");
-    // `FloorView::tiles` is the same `TableView` the billing grid gets;
-    // `FloorView::tables` is the plan's own row type and has no state on it.
-    let plan = floor_on(&app).expect("the plan");
-
     assert_eq!(marked(&grid), ["3"]);
-    assert_eq!(
+
+    // The floor plan does not. `FloorView::tiles` is the same `TableView` the
+    // billing grid gets, so this is a real assertion and not a type accident.
+    let plan = floor_on(&app).expect("the plan");
+    assert!(
+        marked(&plan.tiles).is_empty(),
+        "the floor plan is ringing the billing screen's table: {:?}",
         marked(&plan.tiles),
-        ["3"],
-        "the floor plan disagrees with the billing grid"
     );
+}
+
+/// **Several tables at once, and all or nothing.**
+///
+/// The Floor screen ticks tables and acts on the lot (owner, 2026-08-22:
+/// *"make the tables selectable… and then i should be able to delete them"*).
+/// Doing that as a loop from TypeScript would be N round trips that can stop
+/// halfway, leaving a room half-changed and a screen that has to explain which
+/// half. It is one command and one transaction, so the interesting case is the
+/// one where part of the set cannot go.
+#[test]
+fn a_bulk_delete_takes_all_the_tables_or_none_of_them() {
+    let scratch = Scratch::new("bulk_delete");
+    let app = a_shop_with_a_room(&scratch);
+
+    // Four tables; table 2 has an order sitting on it.
+    seat(&app, "ord_busy", "tbl_2", &[("itm_tea", 2_000, 1)], None);
+
+    let refused = crate::floor::delete_tables_on(
+        &app,
+        vec!["tbl_1".to_owned(), "tbl_2".to_owned(), "tbl_3".to_owned()],
+    )
+    .expect_err("a busy table was deleted");
+    assert_eq!(refused.code, "db.failed");
+    assert!(
+        refused.detail.unwrap_or_default().contains("open order"),
+        "the refusal must name what stopped it",
+    );
+
+    // **And nothing went.** A partial delete would be worse than the refusal:
+    // the owner would be looking at a room missing two tables with no idea why
+    // the third survived.
+    let floor = floor_on(&app).expect("the floor");
+    assert_eq!(floor.tables.len(), 4, "part of the set was deleted anyway");
+
+    // Without the busy one, all three go in one command.
+    crate::floor::delete_tables_on(
+        &app,
+        vec!["tbl_1".to_owned(), "tbl_3".to_owned(), "tbl_4".to_owned()],
+    )
+    .expect("three free tables");
+    let floor = floor_on(&app).expect("the floor");
+    assert_eq!(
+        floor.tables.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
+        ["2"],
+    );
+}
+
+/// Hiding is the same bargain, and it is what a table with history gets
+/// instead of a delete.
+#[test]
+fn a_bulk_hide_takes_them_off_the_floor_and_keeps_their_history() {
+    let scratch = Scratch::new("bulk_hide");
+    let app = a_shop_with_a_room(&scratch);
+
+    crate::floor::set_tables_active_on(
+        &app,
+        vec!["tbl_1".to_owned(), "tbl_2".to_owned()],
+        false,
+    )
+    .expect("two off the floor");
+
+    let floor = floor_on(&app).expect("the floor");
+    let off: Vec<&str> = floor
+        .tables
+        .iter()
+        .filter(|t| !t.is_active)
+        .map(|t| t.label.as_str())
+        .collect();
+    assert_eq!(off, ["1", "2"]);
+    assert_eq!(floor.tables.len(), 4, "hiding is not deleting");
+
+    // And a hidden table is not on the billing grid, which is the point of it.
+    let grid = crate::ipc::open_orders_on(&app).expect("the grid");
+    assert_eq!(
+        grid.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
+        ["3", "4"],
+    );
+
+    // Back again, same command.
+    crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], true).expect("put back");
+    let floor = floor_on(&app).expect("the floor");
+    assert_eq!(floor.tables.iter().filter(|t| !t.is_active).count(), 1);
+}
+
+/// **`can_arrange` is the same question the commands ask**, answered once for
+/// the screen — and it is a courtesy, not the control.
+///
+/// The Floor screen hides its arranging panel when this is false, so a waiter
+/// does not get a column of buttons that can only answer "you do not have
+/// permission". `guard::require` is what actually refuses, and this test calls
+/// the commands directly to prove the screen is not what is holding the door.
+#[test]
+fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
+    let scratch = Scratch::new("can_arrange");
+    let app = a_shop_with_a_room(&scratch);
+    crate::signin_tests::hire(&app, "staff_boss", "Meena", RolePreset::Owner);
+    crate::signin_tests::hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
+
+    crate::ipc::set_staff_pin_on(&app, "staff_boss".to_owned(), Some("2468".to_owned()))
+        .expect("pin");
+    crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");
+    assert!(floor_on(&app).expect("the floor").can_arrange);
+
+    crate::ipc::set_staff_pin_on(&app, "staff_waiter".to_owned(), Some("1357".to_owned()))
+        .expect("pin");
+    crate::ipc::lock_now_on(&app).expect("locked");
+    crate::ipc::login_on(&app, "staff_waiter".to_owned(), "1357".to_owned()).expect("Priya");
+
+    let floor = floor_on(&app).expect("a waiter can still see the floor");
+    assert!(!floor.can_arrange, "a waiter was offered the arranging panel");
+
+    // **And the panel being hidden is not what stops them.** Called directly,
+    // the way a screen never would.
+    for refused in [
+        crate::floor::delete_tables_on(&app, vec!["tbl_1".to_owned()]),
+        crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], false),
+        crate::floor::save_thresholds_on(&app, 5, 10),
+    ] {
+        assert_eq!(
+            refused.expect_err("a waiter arranged the room").code,
+            "auth.denied",
+        );
+    }
 }

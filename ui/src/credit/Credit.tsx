@@ -25,13 +25,17 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  freshId,
   Icon,
   Input,
   Modal,
+  MoneyInput,
   Page,
   PageHeader,
   Panel,
+  PhoneInput,
   SearchField,
+  SectionHeader,
   Select,
   Table,
   Toolbar,
@@ -123,7 +127,7 @@ export function Credit() {
 
   const addCustomer = () =>
     setEditing({
-      id: `cus_${Date.now().toString(36)}`,
+      id: freshId('cus'),
       name: '',
       phone: null,
       gstin: null,
@@ -268,13 +272,18 @@ function Account({
         <span className="mb-credit__old">Over 90 {account.ageing.days90.text}</span>
       </div>
 
-      <h3 className="mb-credit__heading">Take a repayment</h3>
-      <p className="mb-credit__note">
-        In a real payment mode — cash, card or UPI. Money arriving is money
-        arriving, and it has to show in the day&rsquo;s takings as what it was.
-      </p>
+      <SectionHeader
+        title="Take a repayment"
+        note={
+          <>
+            In a real payment mode — cash, card or UPI. Money arriving is money
+            arriving, and it has to show in the day&rsquo;s takings as what it
+            was.
+          </>
+        }
+      />
       <div className="mb-comp__choice">
-        <Input label="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <MoneyInput label="Amount" value={amount} onChange={setAmount} />
         <Select
           label="How"
           value={mode}
@@ -361,17 +370,17 @@ function Account({
       </div>
 
       {adjusting ? (
-        <Modal open title="Adjust the account" onClose={() => setAdjusting(false)}>
-          <p className="mb-credit__note">
-            An opening balance from the notebook, or money written off. It needs
-            a reason — this is the one place money can leave an account without
-            anybody paying.
-          </p>
-          <Input
+        <Modal
+          open
+          title="Adjust the account"
+          note="An opening balance from the notebook, or money written off. It needs a reason — this is the one place money can leave an account without anybody paying."
+          onClose={() => setAdjusting(false)}
+        >
+          <MoneyInput
             label="Amount"
             value={adjustment}
             autoFocus
-            onChange={(e) => setAdjustment(e.target.value)}
+            onChange={setAdjustment}
           />
           <Checkbox
             label="They owe MORE (an opening balance, or a bill somebody missed)"
@@ -431,17 +440,17 @@ function EditCustomer({
   return (
     <Modal open title={customer.name === '' ? 'Add a customer' : customer.name} onClose={onClose}>
       <Input label="Name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
-      <Input
+      <PhoneInput
         label="Phone"
         hint="The number IS the customer here — one number, one account."
         value={phone}
-        onChange={(e) => setPhone(e.target.value)}
+        onChange={setPhone}
       />
-      <Input
+      <MoneyInput
         label="Credit limit"
         hint="Leave it blank for no limit. Blank is not a limit of zero."
         value={limit}
-        onChange={(e) => setLimit(e.target.value)}
+        onChange={setLimit}
       />
       <Input label="GSTIN" value={gstin} onChange={(e) => setGstin(e.target.value)} />
       <Input label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />

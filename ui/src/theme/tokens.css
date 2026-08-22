@@ -310,6 +310,12 @@
   /* The alerts panel (P30.6). Wide enough for a licence sentence on two lines
      with a button beside it, and never taller than a short window's screen. */
   --alerts-width: 26rem;
+  /* The Floor screen's arranging panel. Wide enough for two fields side by
+     side (From and To) and no wider — the room is what the screen is for. */
+  --arrange-width: 18rem;
+  /* An info tip holds a sentence or two. Wider and it stops being a tip and
+     becomes the paragraph it replaced. */
+  --tip-width: 20rem;
   --alerts-tall: 70vh;
   /* (--totals-min was here and is GONE. It was a floor on the totals block,
      and a floor is an absolute promise: two of them plus a payment block is
@@ -375,6 +381,9 @@
      lock is above both, because a toast that floated over a locked screen
      would be information leaking past the lock. */
   --z-lock: 300;
+  /* An info tip sits above the panel it explains and below everything that
+     covers the screen — it is part of the page, not an overlay over it. */
+  --z-tip: 50;
 
   --focus-ring-width: 2px;
   /* **A second line weight, and it is the owner's complaint of 2026-08-17**:

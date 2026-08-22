@@ -1228,7 +1228,10 @@ pub fn record_movement_on(app: &App, edit: MovementEdit) -> UiResult<InventoryVi
     };
 
     let mut movement = Movement::new(
-        format!("stk_{}_{}", at.millis(), id),
+        // The material is in the id so a movement is recognisable in a log;
+        // the tail is what stops two movements of the SAME material in one
+        // millisecond being one movement.
+        format!("{}_{id}", crate::newid::fresh_at("stk", at)),
         id.clone(),
         wanted,
         signed_base,

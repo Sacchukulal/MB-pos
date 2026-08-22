@@ -206,11 +206,20 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // one away destroys a bill number and is gated like a void.
     ("floor_plan", Access::Needs(Permission::BillCreate)),
     ("save_floor_section", Access::Needs(Permission::TablesManage)),
+    // The bulk pair. Same permission as the one-at-a-time commands they stand
+    // in for — a set of tables is not a different question from a table.
+    (
+        "delete_dining_tables",
+        Access::Needs(Permission::TablesManage),
+    ),
+    (
+        "set_dining_tables_active",
+        Access::Needs(Permission::TablesManage),
+    ),
     ("delete_floor_section", Access::Needs(Permission::TablesManage)),
     ("save_dining_table", Access::Needs(Permission::TablesManage)),
     ("add_dining_tables", Access::Needs(Permission::TablesManage)),
     ("place_dining_table", Access::Needs(Permission::TablesManage)),
-    ("set_dining_table_active", Access::Needs(Permission::TablesManage)),
     ("delete_dining_table", Access::Needs(Permission::TablesManage)),
     ("save_floor_thresholds", Access::Needs(Permission::TablesManage)),
     ("move_order", Access::Needs(Permission::BillCreate)),

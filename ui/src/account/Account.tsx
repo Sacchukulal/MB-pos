@@ -269,7 +269,20 @@ export function Account() {
         </div>
       </Card>
 
-      {/* --- the dialogs ---------------------------------------------------- */}
+      {/* --- the dialogs ----------------------------------------------------
+
+          **Two of these keep their paragraph, and the difference is the rule.**
+
+          The owner asked for explanations to become hover tips (2026-08-22) and
+          most of them did. A sentence that says **what pressing the button will
+          DO** is not an explanation — it is the confirmation, and
+          UI_GUIDELINES §6 says *"a button says exactly what happens; the
+          confirmation echoes it."* Hiding *"this will stop the licence working
+          on the computer it is on now"* behind a hover would be hiding the
+          consequence of an irreversible action.
+
+          So: what a thing IS goes in `note`. What a press will DO stays on the
+          screen.                                                              */}
 
       <Modal
         open={asking === 'activate' || asking === 'transfer'}
@@ -323,11 +336,14 @@ export function Account() {
         </div>
       </Modal>
 
-      <Modal open={asking === 'trial'} title="Start a free trial" onClose={() => setAsking(null)}>
-        <p className="mb-account__note">
-          Tell us where to reach you and everything switches on. You can choose a
-          plan later without setting anything up again.
-        </p>
+      <Modal
+        open={asking === 'trial'}
+        title="Start a free trial"
+        note="Tell us where to reach you and everything switches on. You can choose a plan later without setting anything up again."
+        onClose={() => setAsking(null)}
+      >
+        {/* field-lint-ok: it is a mobile OR an email — the licence server takes
+            either, and a ten-digit box cannot hold an address. */}
         <Input label="Mobile or email" value={contact} onChange={(e) => setContact(e.target.value)} autoFocus />
         <div className="mb-row mb-row--end">
           <Button variant="quiet" onClick={() => setAsking(null)}>
@@ -346,13 +362,9 @@ export function Account() {
       <Modal
         open={asking === 'emergency'}
         title="Emergency unlock code"
+        note="Call us and we will read out a code. It switches everything back on for three days, so you can keep working while we sort the licence out. Billing and printing are never affected."
         onClose={() => setAsking(null)}
       >
-        <p className="mb-account__note">
-          Call us and we will read out a code. It switches everything back on for
-          three days, so you can keep working while we sort the licence out.
-          Billing and printing are never affected.
-        </p>
         <Input
           label="Code"
           value={code}

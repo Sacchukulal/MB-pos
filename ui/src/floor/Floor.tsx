@@ -1,44 +1,71 @@
-﻿/**
+/**
  * **The floor** — scope 14.1 the plan, 14.2 the timers, 14.3 the occupancy
  * line, and the three operations (1.21, 1.22, 1.23).
  *
  * The billing screen's grid stays exactly where it is and keeps working. This
  * is the room: an owner's own layout, the two timers that say which table
- * needs somebody, and the master behind both.
+ * needs somebody, and the arranging of both.
  *
  * # Why this is its own rail item rather than a mode of the billing grid
  *
  * Because it answers a different question. Billing asks *"which table am I
- * putting this dosa on"*; the floor asks *"which table needs me"*. Audit F5 is
- * the second one going unanswered — *"no search or filter on the Processing
- * orders list; with 20 tables open it becomes a scrolling exercise"* — and a
- * mode toggle on a screen a cashier is mid-bill on would make it a question
- * they have to close a bill to ask.
+ * putting this dosa on"*; the floor asks *"which table needs me"*, and — since
+ * 2026-08-22 — *"what is my room made of"*. A mode toggle on a screen a cashier
+ * is mid-bill on would make those questions ones they have to close a bill to
+ * ask.
+ *
+ * # The room is arranged HERE, not in a dialog
+ *
+ * The owner, 2026-08-22: *"No need for popup for setup room. Redesign the Floor
+ * section page to have a adding tables section in one side (at the starting side
+ * of the screen)… no need to show table list as it will already be visible in
+ * the screen in proper square format. just add small edit symbol and delete
+ * symbol, icon on top of the table squares when hovered. make the tables
+ * selectable… and then i should be able to delete them."*
+ *
+ * So: a panel down the left holds the three things that MAKE a room — sections,
+ * a run of tables, and the two timers — and the room itself fills the rest of
+ * the screen. **The squares are the table list.** The old dialog carried a
+ * seven-column table of every table beside a grid drawing the same tables,
+ * which is the same information twice and the reason the dialog needed its own
+ * scrollbar.
+ *
+ * What each square can do lives on the square: hover for the pencil and the
+ * bin, press to tick it, and the bar above the room acts on everything ticked.
+ *
+ * # Ticked is not selected
+ *
+ * `table.selected` means *"the billing cart is on this table"* and is **always
+ * false here** — this screen has no cart (owner, same day: *"why is the table i
+ * selected in the billing section is highlighted in floor section also? it makes
+ * no sense"*). `picked` means *"I have ticked this one"*. Two facts, two props,
+ * two marks. See `TableView::selected` and `Room::cart_is_on`.
  *
  * # Nothing here decides anything
  *
  * The tile states arrive decided (Rust compared the minutes to the shop's own
- * thresholds), the occupancy line arrives as sentences, and a dragged tile is
- * a square reported to Rust which accepts or refuses it. R8, and the drag is
- * the interesting case: following the mouse is not a business rule; deciding
- * whether two tables may share a square is.
+ * thresholds), the occupancy line arrives as sentences, whether this person may
+ * arrange the room arrives as `canArrange`, and a dragged tile is a square
+ * reported to Rust which accepts or refuses it. R8, and the drag is the
+ * interesting case: following the mouse is not a business rule; deciding whether
+ * two tables may share a square is.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
-  Badge,
   Button,
   Checkbox,
+  ConfirmDialog,
   EmptyState,
+  freshId,
   Icon,
   Input,
   Modal,
+  SectionHeader,
   Select,
-  Table,
   Toolbar,
   useToast,
-  type Column,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 /* **The one table tile in the product.** This screen used to have a second
@@ -58,8 +85,18 @@ export function Floor() {
   const [section, setSection] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<TableRowView | null>(null);
-  const [master, setMaster] = useState(false);
   const [moving, setMoving] = useState<TableView | null>(null);
+  /**
+   * **The ticked tables, by id.**
+   *
+   * Ids and not rows, so a floor that reloads under a selection does not leave
+   * stale copies of rows behind — everything is read back out of `floor` when
+   * it is needed. Ids that no longer exist are dropped on every reload.
+   */
+  const [picked, setPicked] = useState<readonly string[]>([]);
+  const [confirming, setConfirming] = useState<'delete' | 'hide' | null>(null);
+  /** The one table the bin on a tile is about — see the note on `Tile`. */
+  const [deletingOne, setDeletingOne] = useState<TableRowView | null>(null);
   const toast = useToast();
 
   const report = useCallback(
@@ -69,9 +106,32 @@ export function Floor() {
     [toast],
   );
 
+  /**
+   * **One place the floor comes back from Rust**, and the one place a stale
+   * tick is dropped.
+   *
+   * Every command on this screen returns the whole `FloorView`, so a table
+   * deleted by one of them is gone from `fresh.tables` — and a tick still
+   * pointing at it would be a bulk action that fails on a row nobody can see.
+   */
+  const arrived = useCallback((fresh: FloorView) => {
+    setFloor(fresh);
+    setPicked((was) => {
+      const kept = was.filter((id) => fresh.tables.some((t) => t.id === id));
+      // **The SAME array back when nothing was dropped**, so React can bail out
+      // of the update. `filter` always builds a new one, and a new one is a
+      // render — every reload of the floor would have forced one whether or not
+      // a tick had actually gone. Found by a test hanging: the reload effect
+      // re-runs on a render, so a render it caused is a reload it causes.
+      return kept.length === was.length ? was : kept;
+    });
+  }, []);
+
   const load = useCallback(() => {
-    call('floor_plan').then(setFloor).catch(report);
-  }, [report]);
+    call('floor_plan').then(arrived).catch(report);
+  }, [arrived, report]);
+
+  useEffect(load, [load]);
 
   /**
    * **Carry the bill to this table, from the Floor screen too.**
@@ -96,8 +156,6 @@ export function Floor() {
     [report, toast],
   );
 
-  useEffect(load, [load]);
-
   const shown = useMemo(() => {
     if (!floor) return [];
     return floor.tiles.filter((tile) => {
@@ -119,11 +177,71 @@ export function Floor() {
     });
   }, [floor, section, filter]);
 
+  const toggle = useCallback((id: string) => {
+    setPicked((was) => (was.includes(id) ? was.filter((x) => x !== id) : [...was, id]));
+  }, []);
+
+  const rowFor = useCallback(
+    (tileId: string) => floor?.tables.find((t) => t.id === tileId) ?? null,
+    [floor],
+  );
+
   if (!floor) {
     return <div className="mb-floor" />;
   }
 
   const sections = ['All', ...floor.sections.map((s) => s.name)];
+
+  /**
+   * **A tile you can tick is a tile that IS a table.**
+   *
+   * The floor also shows parcel and self-service orders — §4's *"so no order is
+   * ever invisible"* — and those are tiles with an order and no table behind
+   * them. There is nothing to hide or delete, so there is nothing to tick.
+   *
+   * Getting this wrong made the bar lie: it counted `floor.tables` rows while
+   * the ticks came from `floor.tiles`, so ticking four tiles on a floor with
+   * two tables and two parcel orders read *"2 ticked"*. Found by driving it.
+   */
+  const isATable = (id: string) => floor.tables.some((t) => t.id === id);
+  const pickable = floor.canArrange;
+  /** Only what is on screen and is a table — the bar acts on what you can see. */
+  const ticked = picked.filter((id) => shown.some((t) => t.id === id) && isATable(id));
+  const tickable = shown.filter((t) => isATable(t.id));
+
+  /**
+   * **What the ticked tables are about to have done to them.**
+   *
+   * Each of these is ONE command over the whole set — see
+   * `floor::delete_tables_on`. A loop here would be a room that can end up half
+   * changed, and a message that has to explain which half.
+   */
+  const act = (what: 'delete' | 'hide' | 'show') => {
+    const how = ticked.length;
+    const sent =
+      what === 'delete'
+        ? call('delete_dining_tables', { tableIds: ticked })
+        : call('set_dining_tables_active', { tableIds: ticked, active: what === 'show' });
+
+    sent
+      .then((fresh) => {
+        arrived(fresh);
+        setPicked([]);
+        setConfirming(null);
+        toast.show(
+          'ok',
+          what === 'delete'
+            ? `${how} table(s) deleted.`
+            : what === 'hide'
+              ? `${how} table(s) taken off the floor.`
+              : `${how} table(s) put back.`,
+        );
+      })
+      .catch((cause) => {
+        setConfirming(null);
+        report(cause);
+      });
+  };
 
   return (
     <div className="mb-floor">
@@ -141,29 +259,26 @@ export function Floor() {
         like the order type on the billing screen) and the VIEW is a set of
         tabs (a lens over what the segment chose). Different shapes, because
         they are different questions.
+
+        The "Set up the room" button that used to sit at the end is gone with
+        the dialog it opened.
       */}
       <Toolbar
         end={
-          <>
-            <div className="mb-tabs" role="tablist" aria-label="Which tables">
-              {(['all', 'busy', 'attention'] as const).map((which) => (
-                <button
-                  key={which}
-                  type="button"
-                  role="tab"
-                  className="mb-tab"
-                  aria-selected={filter === which}
-                  onClick={() => setFilter(which)}
-                >
-                  {which === 'all' ? 'Everything' : which === 'busy' ? 'Busy' : 'Needs attention'}
-                </button>
-              ))}
-            </div>
-            <Button small variant="secondary" onClick={() => setMaster(true)}>
-              <Icon name="settings" size="sm" />
-              Set up the room
-            </Button>
-          </>
+          <div className="mb-tabs" role="tablist" aria-label="Which tables">
+            {(['all', 'busy', 'attention'] as const).map((which) => (
+              <button
+                key={which}
+                type="button"
+                role="tab"
+                className="mb-tab"
+                aria-selected={filter === which}
+                onClick={() => setFilter(which)}
+              >
+                {which === 'all' ? 'Everything' : which === 'busy' ? 'Busy' : 'Needs attention'}
+              </button>
+            ))}
+          </div>
         }
       >
         {/* **No rooms, no room picker** (P30.5). A shop with no sections got a
@@ -196,34 +311,82 @@ export function Floor() {
         <span>{floor.occupancy.average}</span>
       </div>
 
-      {floor.hasLayout ? (
-        <Plan
-          floor={floor}
-          tiles={shown}
-          onFailed={report}
-          onChanged={setFloor}
-          onMove={setMoving}
-          onPrintBill={printTheBill}
-        />
-      ) : (
-        <Grid
-          tiles={shown}
-          onMove={setMoving}
-          onPrintBill={printTheBill}
-          none={floor.tables.length === 0}
-          onSetUp={() => setMaster(true)}
-        />
-      )}
+      <div className="mb-floor__body">
+        {/* **The starting side of the screen** (owner, 2026-08-22). Hidden
+            entirely from somebody who may not arrange the room — a panel of
+            controls that can only answer "you do not have permission" is worse
+            than no panel. `guard::require` is still the control; see
+            `FloorView::can_arrange`. */}
+        {pickable ? (
+          <Arrange floor={floor} onChanged={arrived} onFailed={report} />
+        ) : null}
 
-      {master ? (
-        <RoomSetup
-          floor={floor}
-          onClose={() => setMaster(false)}
-          onChanged={setFloor}
-          onEdit={setEditing}
-          onFailed={report}
-        />
-      ) : null}
+        <div className="mb-floor__room">
+          {/* Only when there is something ticked. A bar that is always there is
+              furniture; a bar that appears is an answer to what you just did. */}
+          {pickable && ticked.length > 0 ? (
+            <Picked
+              floor={floor}
+              ticked={ticked}
+              onEdit={setEditing}
+              onOrder={setMoving}
+              onClear={() => setPicked([])}
+              onDelete={() => setConfirming('delete')}
+              onHide={() => setConfirming('hide')}
+              onShow={() => act('show')}
+              onPrint={printTheBill}
+            />
+          ) : null}
+
+          {pickable && tickable.length > 0 ? (
+            <div className="mb-floor__pickall">
+              <Checkbox
+                label={
+                  ticked.length === tickable.length
+                    ? `All ${tickable.length} ticked`
+                    : `Tick all ${tickable.length}`
+                }
+                checked={ticked.length === tickable.length && tickable.length > 0}
+                onChange={(event) =>
+                  setPicked(event.target.checked ? tickable.map((t) => t.id) : [])
+                }
+              />
+            </div>
+          ) : null}
+
+          {floor.hasLayout ? (
+            <Plan
+              floor={floor}
+              tiles={shown}
+              picked={picked}
+              pickable={pickable}
+              onFailed={report}
+              onChanged={arrived}
+              onPress={(tile) =>
+                pickable && isATable(tile.id) ? toggle(tile.id) : setMoving(tile)
+              }
+              onEdit={(tile) => setEditing(rowFor(tile.id))}
+              onDelete={(tile) => setDeletingOne(rowFor(tile.id))}
+              canTick={(tile) => pickable && isATable(tile.id)}
+              onPrintBill={printTheBill}
+            />
+          ) : (
+            <Grid
+              tiles={shown}
+              picked={picked}
+              onPress={(tile) =>
+                pickable && isATable(tile.id) ? toggle(tile.id) : setMoving(tile)
+              }
+              onEdit={(tile) => setEditing(rowFor(tile.id))}
+              onDelete={(tile) => setDeletingOne(rowFor(tile.id))}
+              canTick={(tile) => pickable && isATable(tile.id)}
+              onPrintBill={printTheBill}
+              none={floor.tables.length === 0}
+              canArrange={floor.canArrange}
+            />
+          )}
+        </div>
+      </div>
 
       {editing ? (
         <EditTable
@@ -231,7 +394,7 @@ export function Floor() {
           floor={floor}
           onClose={() => setEditing(null)}
           onSaved={(fresh) => {
-            setFloor(fresh);
+            arrived(fresh);
             setEditing(null);
           }}
           onFailed={report}
@@ -244,53 +407,348 @@ export function Floor() {
           floor={floor}
           onClose={() => setMoving(null)}
           onDone={(fresh, said) => {
-            setFloor(fresh);
+            arrived(fresh);
             setMoving(null);
+            setPicked([]);
             toast.show('ok', said);
           }}
           onFailed={report}
+        />
+      ) : null}
+
+      {/* **The bin on a tile.** One table, named, and still confirmed — Rust
+          refuses a table with history, and this says so before the press
+          rather than after it. */}
+      {deletingOne ? (
+        <ConfirmDialog
+          open
+          title={`Delete ${deletingOne.printed}?`}
+          body={
+            Number(deletingOne.history) > 0
+              ? `This table has ${Number(deletingOne.history)} order(s) against it, so it cannot be deleted — take it off the floor instead and it keeps its history.`
+              : 'It has no orders against it, so it can go for good.'
+          }
+          confirmLabel={Number(deletingOne.history) > 0 ? 'Take it off the floor' : 'Delete it'}
+          destructive
+          onCancel={() => setDeletingOne(null)}
+          onConfirm={() => {
+            const one = deletingOne;
+            const sent =
+              Number(one.history) > 0
+                ? call('set_dining_tables_active', { tableIds: [one.id], active: false })
+                : call('delete_dining_tables', { tableIds: [one.id] });
+            sent
+              .then((fresh) => {
+                arrived(fresh);
+                setDeletingOne(null);
+                toast.show(
+                  'ok',
+                  Number(one.history) > 0
+                    ? `${one.printed} is off the floor.`
+                    : `${one.printed} deleted.`,
+                );
+              })
+              .catch((cause) => {
+                setDeletingOne(null);
+                report(cause);
+              });
+          }}
+        />
+      ) : null}
+
+      {confirming ? (
+        <ConfirmDialog
+          open
+          title={
+            confirming === 'delete'
+              ? `Delete ${ticked.length} table(s)?`
+              : `Take ${ticked.length} table(s) off the floor?`
+          }
+          body={
+            confirming === 'delete'
+              ? 'A table that has ever had an order on it cannot be deleted. If one of these has, none of them is deleted and nothing changes.'
+              : 'They stay in the shop and keep their history. Put them back at any time.'
+          }
+          confirmLabel={confirming === 'delete' ? 'Delete them' : 'Take them off'}
+          destructive={confirming === 'delete'}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => act(confirming)}
         />
       ) : null}
     </div>
   );
 }
 
-/** The fallback: sections and tiles, exactly as the billing screen draws them. */
+/**
+ * **The room, as three things you can add to it** — sections, tables, timers.
+ *
+ * This was a modal called *Set up the room* holding all of this plus a
+ * seven-column table of every table in the shop. The owner asked for the dialog
+ * to go and for the list to go with it: the squares to the right of this panel
+ * ARE the list, and a room drawn twice is a room that can disagree with itself.
+ *
+ * Everything the dialog could do is still here. Hiding and deleting moved to
+ * the tiles and the ticked-bar, which is where you can see what you are acting
+ * on — and they act on a set, so the one-table-at-a-time `set_dining_table_active`
+ * was left with no caller and deleted. `audit-wiring.mjs` is what said so.
+ */
+function Arrange({
+  floor,
+  onChanged,
+  onFailed,
+}: {
+  floor: FloorView;
+  onChanged: (floor: FloorView) => void;
+  onFailed: (cause: unknown) => void;
+}) {
+  const [sectionName, setSectionName] = useState('');
+  const [rangeSection, setRangeSection] = useState('');
+  const [from, setFrom] = useState('1');
+  const [to, setTo] = useState('10');
+  const [prefix, setPrefix] = useState('');
+  const [seats, setSeats] = useState('4');
+  const [warn, setWarn] = useState(String(floor.warnMinutes));
+  const [late, setLate] = useState(String(floor.lateMinutes));
+
+  const addSection = () => {
+    if (sectionName.trim() === '') return;
+    call('save_floor_section', {
+      id: freshId('sec'),
+      name: sectionName.trim(),
+      sortOrder: floor.sections.length,
+      isActive: true,
+    })
+      .then((fresh) => {
+        onChanged(fresh);
+        setSectionName('');
+      })
+      .catch(onFailed);
+  };
+
+  return (
+    <aside className="mb-arrange" aria-label="Arrange the room">
+      <SectionHeader
+        title="Rooms"
+        note="A room is what a table prints under — AC 1, Garden 4. A shop with one dining area does not need any."
+      />
+      <div className="mb-arrange__add">
+        <Input
+          label="Room name"
+          value={sectionName}
+          placeholder="AC"
+          onChange={(event) => setSectionName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') addSection();
+          }}
+        />
+        <Button onClick={addSection}>Add</Button>
+      </div>
+      {floor.sections.length > 0 ? (
+        <ul className="mb-arrange__rooms">
+          {floor.sections.map((s) => (
+            <li key={s.id} className="mb-arrange__room">
+              <span className="mb-arrange__roomname">{s.name}</span>
+              <span className="mb-arrange__count">{Number(s.tableCount)}</span>
+              <button
+                type="button"
+                className="mb-arrange__drop"
+                title={`Delete the room ${s.name}`}
+                aria-label={`Delete the room ${s.name}`}
+                onClick={() => {
+                  call('delete_floor_section', { id: s.id }).then(onChanged).catch(onFailed);
+                }}
+              >
+                <Icon name="trash" size="sm" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <SectionHeader
+        title="Tables"
+        note="Added as a run, because a room of twenty is twenty forms otherwise. If any name in the range is already taken, none of them is created."
+      />
+      <div className="mb-arrange__fields">
+        <Select
+          label="Room"
+          value={rangeSection}
+          onChange={(event) => setRangeSection(event.target.value)}
+          options={[
+            { value: '', label: 'No room' },
+            ...floor.sections.map((s) => ({ value: s.id, label: s.name })),
+          ]}
+        />
+        <Input label="Before the number" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+        <div className="mb-arrange__pair">
+          <Input label="From" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Input label="To" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        <Input label="Seats" value={seats} onChange={(e) => setSeats(e.target.value)} />
+        <Button
+          variant="primary"
+          onClick={() => {
+            call('add_dining_tables', {
+              sectionId: rangeSection === '' ? null : rangeSection,
+              prefix,
+              from: Number(from),
+              to: Number(to),
+              seats: Number(seats),
+            })
+              .then(onChanged)
+              .catch(onFailed);
+          }}
+        >
+          Add them
+        </Button>
+      </div>
+
+      <SectionHeader
+        title="Timers"
+        note="A dosa counter turns a table in eight minutes and a dining room takes ninety. These are yours, and the floor colours itself by them."
+      />
+      <div className="mb-arrange__fields">
+        <Input label="Keep an eye after (min)" value={warn} onChange={(e) => setWarn(e.target.value)} />
+        <Input label="Late after (min)" value={late} onChange={(e) => setLate(e.target.value)} />
+        <Button
+          onClick={() => {
+            call('save_floor_thresholds', { warn: Number(warn), late: Number(late) })
+              .then(onChanged)
+              .catch(onFailed);
+          }}
+        >
+          Save
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * **What you can do to the tables you ticked.**
+ *
+ * One bar rather than a menu per tile, because everything here is about a SET —
+ * and because the number in it is the confirmation that you ticked what you
+ * meant to. With exactly one table ticked it also carries what used to need a
+ * click on the tile: editing it, and the order operations.
+ */
+function Picked({
+  floor,
+  ticked,
+  onEdit,
+  onOrder,
+  onClear,
+  onDelete,
+  onHide,
+  onShow,
+  onPrint,
+}: {
+  floor: FloorView;
+  ticked: readonly string[];
+  onEdit: (row: TableRowView) => void;
+  onOrder: (tile: TableView) => void;
+  onClear: () => void;
+  onDelete: () => void;
+  onHide: () => void;
+  onShow: () => void;
+  onPrint: (tile: TableView) => void;
+}) {
+  const rows = floor.tables.filter((t) => ticked.includes(t.id));
+  const one = rows.length === 1 ? rows[0] : null;
+  const tile = one ? floor.tiles.find((t) => t.id === one.id) : undefined;
+  const hidden = rows.filter((r) => !r.isActive).length;
+
+  return (
+    <div className="mb-picked" role="group" aria-label="What to do with the ticked tables">
+      <span className="mb-picked__count">
+        {rows.length} ticked
+        {hidden > 0 ? ` · ${hidden} off the floor` : ''}
+      </span>
+
+      {one ? (
+        <Button small onClick={() => onEdit(one)}>
+          <Icon name="pencil" size="sm" />
+          Edit
+        </Button>
+      ) : null}
+
+      {/* The order operations — scope 1.21 and 1.22. They belong to one table
+          with one order on it, so they appear exactly then. */}
+      {tile && tile.orderId ? (
+        <>
+          <Button small onClick={() => onPrint(tile)}>
+            <Icon name="printer" size="sm" />
+            Print the bill
+          </Button>
+          <Button small onClick={() => onOrder(tile)}>
+            Move or merge
+          </Button>
+        </>
+      ) : null}
+
+      {hidden < rows.length ? (
+        <Button small onClick={onHide}>
+          Take off the floor
+        </Button>
+      ) : null}
+      {hidden > 0 ? (
+        <Button small onClick={onShow}>
+          Put back
+        </Button>
+      ) : null}
+
+      <Button small variant="danger" onClick={onDelete}>
+        <Icon name="trash" size="sm" />
+        Delete
+      </Button>
+
+      <Button small variant="quiet" onClick={onClear}>
+        Clear
+      </Button>
+    </div>
+  );
+}
+
+/** The fallback: tiles, exactly as the billing screen draws them. */
 function Grid({
   tiles,
-  onMove,
+  picked,
+  onPress,
+  onEdit,
+  onDelete,
+  canTick,
   onPrintBill,
   none,
-  onSetUp,
+  canArrange,
 }: {
   tiles: readonly TableView[];
-  onMove: (tile: TableView) => void;
+  picked: readonly string[];
+  onPress: (tile: TableView) => void;
+  onEdit: (tile: TableView) => void;
+  onDelete: (tile: TableView) => void;
+  /** A parcel order is a tile with no table behind it — nothing to tick. */
+  canTick: (tile: TableView) => boolean;
   onPrintBill: (tile: TableView) => void;
   /** True when the shop has no tables at all, rather than none in this view. */
   none?: boolean;
-  onSetUp?: () => void;
+  canArrange: boolean;
 }) {
   if (tiles.length === 0) {
     // **Two different emptinesses** (P30.5). "Try another section" is useless
     // advice to a shop that has never added a table, and it was the only thing
-    // this screen said on a fresh install.
+    // this screen said on a fresh install. The advice changed with the layout:
+    // the panel that adds a table is now on this screen, not behind a button.
     return none ? (
       <EmptyState
         title="No tables yet"
-        body="Add your rooms and tables and they appear here. A shop that does only parcel and counter sales never needs this."
-        action={
-          onSetUp ? (
-            <Button variant="primary" onClick={onSetUp}>
-              Set up the room
-            </Button>
-          ) : undefined
+        body={
+          canArrange
+            ? 'Add a room and a run of tables on the left, and they appear here.'
+            : 'Somebody who manages tables can add them.'
         }
       />
     ) : (
-      <EmptyState
-        title="Nothing here"
-        body="Try another section, or show everything."
-      />
+      <EmptyState title="Nothing here" body="Try another room, or show everything." />
     );
   }
   return (
@@ -299,7 +757,10 @@ function Grid({
         <Tile
           key={tile.id}
           table={tile}
-          onOpen={() => onMove(tile)}
+          picked={canTick(tile) ? picked.includes(tile.id) : undefined}
+          onOpen={() => onPress(tile)}
+          onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
+          onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
           onPrintBill={() => onPrintBill(tile)}
         />
       ))}
@@ -317,16 +778,26 @@ function Grid({
 function Plan({
   floor,
   tiles,
+  picked,
+  pickable,
   onFailed,
   onChanged,
-  onMove,
+  onPress,
+  onEdit,
+  onDelete,
+  canTick,
   onPrintBill,
 }: {
   floor: FloorView;
   tiles: readonly TableView[];
+  picked: readonly string[];
+  pickable: boolean;
   onFailed: (cause: unknown) => void;
   onChanged: (floor: FloorView) => void;
-  onMove: (tile: TableView) => void;
+  onPress: (tile: TableView) => void;
+  onEdit: (tile: TableView) => void;
+  onDelete: (tile: TableView) => void;
+  canTick: (tile: TableView) => boolean;
   onPrintBill: (tile: TableView) => void;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
@@ -359,7 +830,10 @@ function Plan({
             <div draggable onDragStart={() => setDragging(tile.id)}>
               <Tile
                 table={tile}
-                onOpen={() => onMove(tile)}
+                picked={canTick(tile) ? picked.includes(tile.id) : undefined}
+                onOpen={() => onPress(tile)}
+                onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
+                onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
                 onPrintBill={() => onPrintBill(tile)}
               />
             </div>
@@ -377,11 +851,8 @@ function Plan({
       <div className="mb-plan" data-grid={floor.grid}>
         {squares}
       </div>
-      {placed.size === 0 ? null : (
-        <p className="mb-floor__hint">
-          Drag a table onto an empty square to move it. Tables you have not
-          placed stay in the section grid.
-        </p>
+      {placed.size === 0 || !pickable ? null : (
+        <p className="mb-floor__hint">Drag a table onto an empty square to move it.</p>
       )}
     </>
   );
@@ -408,7 +879,7 @@ function Plan({
 
   There is one tile now — `billing/TableGrid.tsx` — and both screens import it.
   The food timer went with it, because it belongs to a tile rather than to a
-  screen.
+  screen. The pencil and the bin were added there for the same reason.
 */
 
 /** What you can do to the order on a table — scope 1.21, 1.22, 1.23. */
@@ -446,11 +917,10 @@ function TableActions({
 
   return (
     <Modal open title={`Table ${tile.label}`} onClose={onClose} wide>
-      <h3 className="mb-floor__heading">Move this order</h3>
-      <p className="mb-floor__note">
-        The party changed seats. Nothing else changes — same bill number, same
-        food, and the kitchen is not told again.
-      </p>
+      <SectionHeader
+        title="Move this order"
+        note="The party changed seats. Nothing else changes — same bill number, same food, and the kitchen is not told again."
+      />
       <div className="mb-comp__choice">
         <Select
           label="To table"
@@ -484,11 +954,10 @@ function TableActions({
         </Button>
       </div>
 
-      <h3 className="mb-floor__heading">Merge into another table</h3>
-      <p className="mb-floor__note">
-        Both parties pay together. This table&rsquo;s food joins the other
-        bill; its own order is kept and marked as merged, never deleted.
-      </p>
+      <SectionHeader
+        title="Merge into another table"
+        note="Both parties pay together. This table's food joins the other bill; its own order is kept and marked as merged, never deleted."
+      />
       {busy.length === 0 ? (
         <EmptyState title="Nothing to merge with" body="No other table has an order on it." />
       ) : (
@@ -525,192 +994,13 @@ function TableActions({
   );
 }
 
-/** The master: sections, tables, a numbered range, and the two thresholds. */
-function RoomSetup({
-  floor,
-  onClose,
-  onChanged,
-  onEdit,
-  onFailed,
-}: {
-  floor: FloorView;
-  onClose: () => void;
-  onChanged: (floor: FloorView) => void;
-  onEdit: (row: TableRowView) => void;
-  onFailed: (cause: unknown) => void;
-}) {
-  const [sectionName, setSectionName] = useState('');
-  const [rangeSection, setRangeSection] = useState('');
-  const [from, setFrom] = useState('1');
-  const [to, setTo] = useState('10');
-  const [prefix, setPrefix] = useState('');
-  const [seats, setSeats] = useState('4');
-  const [warn, setWarn] = useState(String(floor.warnMinutes));
-  const [late, setLate] = useState(String(floor.lateMinutes));
-
-  const columns: Column<TableRowView>[] = [
-    { key: 'printed', header: 'Prints as', render: (r) => r.printed },
-    {
-      key: 'section',
-      header: 'Section',
-      render: (r) =>
-        floor.sections.find((s) => s.id === r.sectionId)?.name ?? 'No section',
-    },
-    { key: 'seats', header: 'Seats', numeric: true, render: (r) => String(r.seats) },
-    {
-      key: 'where',
-      header: 'On the plan',
-      render: (r) => (r.x === null ? 'Not placed' : `${r.x + 1}, ${(r.y ?? 0) + 1}`),
-    },
-    {
-      key: 'state',
-      header: '',
-      render: (r) =>
-        r.isBusy ? (
-          <Badge tone="warn">In use</Badge>
-        ) : r.isActive ? (
-          <Badge tone="ok">On the floor</Badge>
-        ) : (
-          <Badge tone="neutral">Hidden</Badge>
-        ),
-    },
-    {
-      key: 'do',
-      header: '',
-      render: (r) => (
-        <div className="mb-row">
-          <Button small onClick={() => onEdit(r)}>
-            Edit
-          </Button>
-          <Button
-            small
-            variant="quiet"
-            onClick={() => {
-              call('set_dining_table_active', { tableId: r.id, active: !r.isActive })
-                .then(onChanged)
-                .catch(onFailed);
-            }}
-          >
-            {r.isActive ? 'Hide' : 'Put back'}
-          </Button>
-        </div>
-      ),
-    },
-  ];
-
-  return (
-    <Modal open title="Set up the room" onClose={onClose} wide>
-      <h3 className="mb-floor__heading">Sections</h3>
-      <div className="mb-comp__choice">
-        <Input
-          label="Add a section"
-          hint="AC, Garden, Rooftop."
-          value={sectionName}
-          onChange={(event) => setSectionName(event.target.value)}
-        />
-        <Button
-          onClick={() => {
-            call('save_floor_section', {
-              id: `sec_${Date.now().toString(36)}`,
-              name: sectionName,
-              sortOrder: floor.sections.length,
-              isActive: true,
-            })
-              .then((fresh) => {
-                onChanged(fresh);
-                setSectionName('');
-              })
-              .catch(onFailed);
-          }}
-        >
-          Add
-        </Button>
-      </div>
-      <ul className="mb-comp__list">
-        {floor.sections.map((s) => (
-          <li key={s.id} className="mb-comp__row">
-            <span>{s.name}</span>
-            <span className="mb-comp__rule">{Number(s.tableCount)} table(s)</span>
-            <Button
-              small
-              variant="quiet"
-              onClick={() => {
-                call('delete_floor_section', { id: s.id }).then(onChanged).catch(onFailed);
-              }}
-            >
-              Remove
-            </Button>
-          </li>
-        ))}
-      </ul>
-
-      <h3 className="mb-floor__heading">Add a run of tables</h3>
-      <p className="mb-floor__note">
-        A room of twenty is twenty forms otherwise. If any name in the range is
-        already taken, none of them is created.
-      </p>
-      <div className="mb-comp__choice">
-        <Select
-          label="Section"
-          value={rangeSection}
-          onChange={(event) => setRangeSection(event.target.value)}
-          options={[
-            { value: '', label: 'No section' },
-            ...floor.sections.map((s) => ({ value: s.id, label: s.name })),
-          ]}
-        />
-        <Input label="Before the number" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
-        <Input label="From" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <Input label="To" value={to} onChange={(e) => setTo(e.target.value)} />
-        <Input label="Seats" value={seats} onChange={(e) => setSeats(e.target.value)} />
-        <Button
-          onClick={() => {
-            call('add_dining_tables', {
-              sectionId: rangeSection === '' ? null : rangeSection,
-              prefix,
-              from: Number(from),
-              to: Number(to),
-              seats: Number(seats),
-            })
-              .then(onChanged)
-              .catch(onFailed);
-          }}
-        >
-          Add them
-        </Button>
-      </div>
-
-      <h3 className="mb-floor__heading">The tables</h3>
-      <Table rows={[...floor.tables]} columns={columns} rowKey={(r) => r.id} />
-
-      <h3 className="mb-floor__heading">When a table has been waiting</h3>
-      <p className="mb-floor__note">
-        A dosa counter turns a table in eight minutes and a dining room takes
-        ninety. These are yours, and the floor colours itself by them.
-      </p>
-      <div className="mb-comp__choice">
-        <Input label="Keep an eye after (minutes)" value={warn} onChange={(e) => setWarn(e.target.value)} />
-        <Input label="Late after (minutes)" value={late} onChange={(e) => setLate(e.target.value)} />
-        <Button
-          onClick={() => {
-            call('save_floor_thresholds', { warn: Number(warn), late: Number(late) })
-              .then(onChanged)
-              .catch(onFailed);
-          }}
-        >
-          Save
-        </Button>
-      </div>
-
-      <div className="mb-row mb-row--end">
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
-    </Modal>
-  );
-}
-
+/**
+ * One table's own details.
+ *
+ * Still a dialog, and deliberately: this is a form about a single thing, opened
+ * on purpose, with a Save. The dialog the owner asked to remove was the one
+ * that held the whole room behind a button.
+ */
 function EditTable({
   row,
   floor,
@@ -733,12 +1023,12 @@ function EditTable({
     <Modal open title={row.printed} onClose={onClose}>
       <Input label="Name" value={label} autoFocus onChange={(e) => setLabel(e.target.value)} />
       <Select
-        label="Section"
-        hint="The section is part of what the table prints as — AC 1."
+        label="Room"
+        hint="Part of what the table prints as — AC 1."
         value={sectionId}
         onChange={(e) => setSectionId(e.target.value)}
         options={[
-          { value: '', label: 'No section' },
+          { value: '', label: 'No room' },
           ...floor.sections.map((s) => ({ value: s.id, label: s.name })),
         ]}
       />
@@ -748,13 +1038,6 @@ function EditTable({
         checked={active}
         onChange={(e) => setActive(e.target.checked)}
       />
-      {Number(row.history) > 0 ? (
-        <p className="mb-floor__note">
-          This table has {Number(row.history)} order(s) against it, so it can be
-          hidden but never deleted — hiding takes it off the floor and keeps its
-          history.
-        </p>
-      ) : null}
       <div className="mb-row mb-row--end">
         {Number(row.history) === 0 && !row.isBusy ? (
           <Button

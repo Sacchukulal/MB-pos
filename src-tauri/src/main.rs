@@ -89,6 +89,8 @@ mod licensing;
 mod licence_tests;
 mod logging;
 mod menu;
+/// **Where a new row's id comes from** — one place, since 2026-08-22.
+mod newid;
 mod preview;
 /// P24. **The kitchen display** — a screen on the kitchen wall instead of a
 /// paper ticket, and the paper fallback that means the kitchen never goes

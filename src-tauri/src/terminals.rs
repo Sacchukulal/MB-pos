@@ -420,7 +420,7 @@ pub fn join_on(
     // **A new identity for this machine.** Not `terminal_default` — that id
     // belongs to the shop's first till and is on every bill it has ever
     // written.
-    let id = format!("term_{}", at.millis());
+    let id = crate::newid::fresh_at("term", at);
     let config_dir = crate::config::AppConfig::directory();
     let mine = Me {
         terminal_id: id.clone(),

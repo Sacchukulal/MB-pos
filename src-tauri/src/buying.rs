@@ -552,10 +552,16 @@ pub fn save_supplier_on(app: &App, edit: SupplierEdit) -> UiResult<BuyingView> {
         ));
     }
 
+    // The same rule as a customer's — one `mb_core::Phone`, one shape on
+    // disk. A supplier form that stored a name in the phone column is what the
+    // owner found on 2026-08-22.
+    let phone = mb_core::Phone::parse_optional(&edit.phone)
+        .map_err(|e| UiError::new("supplier.phone", e.to_string()))?;
+
     let supplier = Supplier {
         id: edit.id.clone(),
         name: edit.name.trim().to_owned(),
-        phone: trimmed(&edit.phone),
+        phone: phone.map(|p| p.as_str().to_owned()),
         gstin,
         address: trimmed(&edit.address),
         terms_days,
@@ -906,7 +912,7 @@ pub fn record_supplier_payment_on(
                 repos.buying().record_payment(
                     OUTLET,
                     &SupplierPayment {
-                        id: format!("spay_{}", at.millis()),
+                        id: crate::newid::fresh_at("spay", at),
                         supplier_id: supplier_id.clone(),
                         amount,
                         mode: mode.clone(),
@@ -961,7 +967,7 @@ pub fn save_supplier_adjustment_on(
                 repos.buying().save_adjustment(
                     OUTLET,
                     &SupplierAdjustment {
-                        id: format!("sadj_{}", at.millis()),
+                        id: crate::newid::fresh_at("sadj", at),
                         supplier_id: supplier_id.clone(),
                         amount,
                         increases,
@@ -1039,7 +1045,20 @@ pub fn save_purchase_order_on(app: &App, edit: PoEdit) -> UiResult<BuyingView> {
     }
 
     let number = if edit.number.trim().is_empty() {
-        format!("PO-{}", at.millis() % 1_000_000)
+        // **This was `at.millis() % 1_000_000`, which repeats every sixteen
+        // minutes.** `purchases` is UNIQUE on (outlet, number), so a shop
+        // entering two invoices without typing their own numbers, a quarter of
+        // an hour apart, was refused with "the shop's data could not be read".
+        // Not a millisecond coincidence — a Tuesday morning.
+        //
+        // It is a number somebody reads, so it stays readable: the business day
+        // and a short tail. Sorted by day, unique for good, and it says which
+        // day it was entered on, which the old one did not.
+        format!(
+            "PO-{}-{}",
+            today(at).days_since_epoch(),
+            crate::newid::tail_only()
+        )
     } else {
         edit.number.trim().to_owned()
     };

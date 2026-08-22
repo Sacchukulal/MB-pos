@@ -31,7 +31,7 @@
 
 import { useState } from 'react';
 
-import { Button, Input, Modal, Select } from '../kit';
+import { Button, Input, Modal, Select, onlyAmount } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 
@@ -136,8 +136,14 @@ export function DiscountDialog({
           setProblem(null);
         }}
       />
+{/* **Money and a percentage are the same characters and not the same thing.**
+          Both take digits and one dot, so both go through `onlyAmount` — but
+          only one of them is rupees, so only one wears the ₹. A per-cent field
+          with a rupee mark on it would be the screen lying about what it is
+          about to do to the bill. */}
       <Input
         label={kind === 'percent' ? 'Per cent' : 'Rupees'}
+        prefix={kind === 'percent' ? undefined : '₹'}
         hint={
           kind === 'percent'
             ? 'Like 10, or 12.5. It comes off before tax, so the tax on the bill stays correct.'
@@ -146,9 +152,10 @@ export function DiscountDialog({
         value={value}
         autoFocus
         inputMode="decimal"
+        className="mb-input--money"
         error={problem ?? undefined}
         onChange={(event) => {
-          setValue(event.target.value);
+          setValue(onlyAmount(event.target.value));
           setProblem(null);
         }}
         onKeyDown={(event) => {

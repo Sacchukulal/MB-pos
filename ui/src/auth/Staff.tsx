@@ -23,15 +23,16 @@ import {
   Badge,
   Button,
   Checkbox,
+  freshId,
   Input,
   Modal,
+  Page,
+  PageHeader,
   Select,
   Table,
   Tabs,
   useToast,
   type Column,
-  Page,
-  PageHeader,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
@@ -162,7 +163,7 @@ function People() {
           variant="primary"
           onClick={() =>
             setEditing({
-              id: `staff_${Date.now()}`,
+              id: freshId('staff'),
               name: '',
               code: null,
               role: null,

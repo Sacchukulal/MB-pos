@@ -8,7 +8,7 @@ export type SettingView = { key: string,
  */
 topic: string, label: string, help: string, 
 /**
- * `tick`, `number`, `amount`, `words` or `choice` — what kind of control
+ * `tick`, `number`, `amount`, `phone`, `words` or `choice` — what control
  * to draw. Words rather than a Rust type name, because the screen reads it.
  */
 control: string, 

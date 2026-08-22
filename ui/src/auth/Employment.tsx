@@ -36,7 +36,9 @@ import {
   Icon,
   Input,
   Modal,
+  MoneyInput,
   Panel,
+  PhoneInput,
   Row,
   Select,
   Stack,
@@ -821,11 +823,7 @@ function SetSalary({
             { value: 'hourly', label: 'Hour worked' },
           ]}
         />
-        <Input
-          label="How much"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
+        <MoneyInput label="How much" value={amount} onChange={setAmount} />
       </Stack>
     </Modal>
   );
@@ -878,7 +876,7 @@ function GiveAdvance({
         <p className="mb-muted">
           This comes out of the drawer today and off the next payroll run.
         </p>
-        <Input label="How much" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <MoneyInput label="How much" value={amount} onChange={setAmount} />
         <Input
           label="Over how many runs"
           hint="1 is all of it next month."
@@ -1236,11 +1234,10 @@ function RunSheet({
                 What was worked out stays on the record. This says what you are
                 actually handing over, and why.
               </p>
-              <Input
+              <MoneyInput
                 label="To hand over"
                 value={fixing.net}
-                inputMode="decimal"
-                onChange={(e) => setFixing({ ...fixing, net: e.target.value })}
+                onChange={(net) => setFixing({ ...fixing, net })}
               />
               <Input
                 label="Why"
@@ -1416,11 +1413,10 @@ export function EmploymentDetails({
           value={emergencyName}
           onChange={(e) => setEmergencyName(e.target.value)}
         />
-        <Input
+        <PhoneInput
           label="On this number"
           value={emergencyPhone}
-          inputMode="tel"
-          onChange={(e) => setEmergencyPhone(e.target.value)}
+          onChange={setEmergencyPhone}
         />
         <Input
           label="ID they gave you"

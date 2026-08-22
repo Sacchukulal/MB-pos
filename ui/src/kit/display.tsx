@@ -12,10 +12,11 @@
  * legible.
  */
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import type { MoneyView } from '../ipc/generated/MoneyView';
 import { Button } from './controls';
+import { Icon } from './Icon';
 
 export function Card({
   children,
@@ -31,19 +32,69 @@ export function Card({
   );
 }
 
+/**
+ * **The explanation you can ask for, instead of the one you are given.**
+ *
+ * The owner, 2026-08-22: *"you are adding these explaination texts everywhere
+ * in the app, it is not needed, it makes the app look cluttered and
+ * unprofessional… make it a kind of popup text, when hovered on the section
+ * heading… (in a small popup, which is common in many apps, its like info
+ * text)"*
+ *
+ * And the reason, which is the part worth keeping: *"you keep forgetting that
+ * i am the developer… I will sell this app to customers (restaurant owners)."*
+ * The paragraphs were written to explain the product to the person building it.
+ * A shopkeeper who has used the till for a week is reading them for the two
+ * hundredth time.
+ *
+ * # No JavaScript in it
+ *
+ * `:hover` and `:focus-within` do the showing, so there is no open/closed state
+ * to get stuck, nothing to clean up on unmount, and no way for two of these to
+ * be open at once. The button is a real `<button>` so a keyboard reaches it,
+ * and `aria-describedby` ties the bubble to it for a screen reader — which is
+ * how this stays as accessible as the paragraph it replaces.
+ */
+export function InfoTip({ children, label }: { children: ReactNode; label?: string }) {
+  const id = useId();
+  return (
+    <span className="mb-tip">
+      <button
+        type="button"
+        className="mb-tip__ask"
+        aria-label={label ?? 'What is this?'}
+        aria-describedby={id}
+      >
+        <Icon name="info" size="sm" />
+      </button>
+      <span className="mb-tip__bubble" id={id} role="tooltip">
+        {children}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * A heading for a block within a screen.
+ *
+ * `note` is **not drawn**; it becomes an [`InfoTip`] beside the title. That is
+ * one change rather than thirty: every screen that already passed a note gets
+ * the hover behaviour without being touched, and a screen that wants to explain
+ * something has nowhere to put a paragraph.
+ */
 export function SectionHeader({
   title,
   note,
   action,
 }: {
   title: string;
-  note?: string;
+  note?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <div className="mb-section">
       <h3 className="mb-section__title">{title}</h3>
-      {note ? <span className="mb-section__note">{note}</span> : null}
+      {note ? <InfoTip label={`About ${title}`}>{note}</InfoTip> : null}
       {action}
     </div>
   );

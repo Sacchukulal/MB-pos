@@ -23,9 +23,11 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  freshId,
   Icon,
   Input,
   Modal,
+  MoneyInput,
   Page,
   PageHeader,
   Select,
@@ -75,7 +77,7 @@ export function Expenses() {
     if (what.trim() === '' || amount.trim() === '') return;
     call('save_expense', {
       edit: {
-        id: `exp_${Date.now().toString(36)}`,
+        id: freshId('exp'),
         categoryId: category === '' ? null : category,
         description: what,
         amount,
@@ -165,10 +167,10 @@ export function Expenses() {
             if (e.key === 'Enter') quickAdd();
           }}
         />
-        <Input
+        <MoneyInput
           label="Amount"
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={setAmount}
           onKeyDown={(e) => {
             if (e.key === 'Enter') quickAdd();
           }}
@@ -341,12 +343,12 @@ function MoveCash({
   const [reason, setReason] = useState('');
 
   return (
-    <Modal open title="Move cash" onClose={onClose}>
-      <p className="mb-expenses__note">
-        The float you started with, a top-up from the owner, a payout, or money
-        taken to the bank. A purchase is not one of these — record that as an
-        expense and the drawer follows it.
-      </p>
+    <Modal
+      open
+      title="Move cash"
+      note="The float you started with, a top-up from the owner, a payout, or money taken to the bank. A purchase is not one of these — record that as an expense and the drawer follows it."
+      onClose={onClose}
+    >
       <Select
         label="What happened"
         value={kind}
@@ -358,7 +360,7 @@ function MoveCash({
           { value: 'bank_drop', label: 'Taken to the bank' },
         ]}
       />
-      <Input label="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <MoneyInput label="Amount" value={amount} onChange={setAmount} />
       <Input
         label="Why"
         hint="Money leaving a drawer without a reason is how a shortfall becomes an argument."
@@ -410,7 +412,7 @@ function EditExpense({
   return (
     <Modal open title={row.description} onClose={onClose} wide>
       <Input label="What" value={what} autoFocus onChange={(e) => setWhat(e.target.value)} />
-      <Input label="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <MoneyInput label="Amount" value={amount} onChange={setAmount} />
       <Select
         label="Category"
         value={category}
@@ -462,7 +464,7 @@ function EditExpense({
             (recurring
               ? save.then(() =>
                   call('save_recurring_expense', {
-                    id: `rec_${Date.now().toString(36)}`,
+                    id: freshId('rec'),
                     description: what,
                     amount,
                     mode,
@@ -541,7 +543,7 @@ function SpendCategories({
           onChange={(e) => setAdding(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== 'Enter' || adding.trim() === '') return;
-            void save(`exc_${Date.now().toString(36)}`, adding.trim(), true);
+            void save(freshId('exc'), adding.trim(), true);
             setAdding('');
           }}
         />
@@ -549,7 +551,7 @@ function SpendCategories({
           variant="primary"
           disabled={busy || adding.trim() === ''}
           onClick={() => {
-            void save(`exc_${Date.now().toString(36)}`, adding.trim(), true);
+            void save(freshId('exc'), adding.trim(), true);
             setAdding('');
           }}
         >

@@ -516,7 +516,7 @@ pub fn save_movement_on(
                 repos.money().save_cash_movement(
                     OUTLET,
                     &CashMovement {
-                        id: format!("cm_{}", at.millis()),
+                        id: crate::newid::fresh_at("cm", at),
                         kind: kind.clone(),
                         amount,
                         reason: reason.trim().to_owned(),
@@ -645,7 +645,7 @@ pub fn confirm_due_on(app: &App, id: String) -> UiResult<ExpensesView> {
                 repos.money().save_expense(
                     OUTLET,
                     &Expense {
-                        id: format!("exp_{}", at.millis()),
+                        id: crate::newid::fresh_at("exp", at),
                         category_id: template.category_id.clone(),
                         description: template.description.clone(),
                         amount: template.amount,

@@ -55,6 +55,172 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* --- The two halves of the screen --------------------------------------- */
+
+/* **The arranging panel, then the room.** The owner, 2026-08-22: *"have a
+   adding tables section in one side (at the starting side of the screen) and
+   then have space for adding sections and tables."*
+
+   A grid rather than flex so the panel's width is stated once and the room
+   takes whatever is left — a flex panel with a min-width fights its own
+   contents every time a room name is long. `minmax(0, 1fr)` on the room is
+   what lets its inner grid scroll instead of pushing the panel off screen. */
+.mb-floor__body {
+  display: grid;
+  grid-template-columns: var(--arrange-width) minmax(0, 1fr);
+  gap: var(--gap-group);
+  min-height: 0;
+  flex: 1;
+}
+
+/* A shop whose cashier may not arrange the room gets no panel at all, and the
+   room takes the whole width. */
+.mb-floor__body:has(> .mb-floor__room:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mb-floor__room {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  min-width: 0;
+}
+
+.mb-floor__pickall {
+  flex: 0 0 auto;
+}
+
+/* --- Arrange: sections, a run of tables, the timers ---------------------- */
+
+.mb-arrange {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+  padding-right: var(--gap-field);
+  border-right: var(--border-width) solid var(--border);
+  /* Down only. Anything that would scroll sideways here is a field that has
+     not been told it may shrink — see the pair below. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* A name and the button that adds it, on one line. */
+.mb-arrange__add {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.mb-arrange__add > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.mb-arrange__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* From and To are one question asked twice, so they sit together. */
+.mb-arrange__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+/* **A grid track will not shrink below its content unless it is told to**, and
+   an `<input>` carries an intrinsic width of about twenty characters. Without
+   this the From/To pair pushed the panel wider than its column and the whole
+   thing grew a horizontal scrollbar with "To" hanging off the edge. Found by
+   opening the screen and looking at it. */
+.mb-arrange__pair > *,
+.mb-arrange__fields > * {
+  min-width: 0;
+}
+
+.mb-arrange .mb-input,
+.mb-arrange .mb-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.mb-arrange__rooms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mb-arrange__room {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.mb-arrange__roomname {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* How many tables are in it — the number that says why a room will not delete. */
+.mb-arrange__count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.mb-arrange__drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  background: none;
+  color: var(--text-faint);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+/* Destructive is a semantic colour and never the accent (§2 rule 1). */
+.mb-arrange__drop:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* --- The ticked bar ------------------------------------------------------ */
+
+/* **It appears because something is ticked.** A bar that is always on screen is
+   furniture; a bar that arrives is an answer to what you just pressed. */
+.mb-picked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent-soft);
+  border: var(--border-width) solid var(--accent-line);
+  border-radius: var(--radius-md);
+  flex: 0 0 auto;
+}
+
+.mb-picked__count {
+  margin-right: auto;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}
+
 /* The fallback, and it is NOT a degraded mode: a shop that has never drawn a
    floor plan gets this and everything works. */
 .mb-floor__grid {
@@ -82,19 +248,20 @@
   border-radius: var(--radius-sm);
 }
 
-.mb-floor__hint,
-.mb-floor__note {
+.mb-floor__hint {
   margin: 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
-.mb-floor__heading {
-  margin: var(--space-4) 0 0;
-  font-size: var(--text-md);
-  font-weight: var(--weight-bold);
-  color: var(--text);
-}
+/* `.mb-floor__note` and `.mb-floor__heading` were here.
+
+   The owner, 2026-08-22: *"you are adding these explaination texts everywhere
+   in the app, it is not needed, it makes the app look cluttered and un
+   professional… make it a kind of popup text, when hovered on the section
+   heading."* The note is an `InfoTip` on a `SectionHeader` now, and the heading
+   is the kit's. Both classes are deleted rather than left unused: a class with
+   no rule is a second way to write a heading, waiting for somebody to use it. */
 
 /* `.mb-floor__kitchen` was here. It styled the food timer on the Floor
    screen's own copy of the table tile — and the fact that the tile's second

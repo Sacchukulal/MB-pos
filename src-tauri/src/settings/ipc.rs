@@ -80,7 +80,7 @@ pub struct SettingView {
     pub topic: String,
     pub label: String,
     pub help: String,
-    /// `tick`, `number`, `amount`, `words` or `choice` — what kind of control
+    /// `tick`, `number`, `amount`, `phone`, `words` or `choice` — what control
     /// to draw. Words rather than a Rust type name, because the screen reads it.
     pub control: String,
     /// The current value, always as text. See the module note.
@@ -182,6 +182,14 @@ fn control_for(kind: Kind) -> &'static str {
         Kind::Bool => "tick",
         Kind::Int { .. } => "number",
         Kind::Money { .. } => "amount",
+        // **A phone is not "words"**, and calling it words is why the shop's
+        // own number was the one phone box in the product you could type a name
+        // into (owner, 2026-08-22). The screen draws a `PhoneInput` for this,
+        // which is ten digits and nothing else.
+        Kind::Text {
+            shape: super::value::Shape::Phone,
+            ..
+        } => "phone",
         Kind::Text { .. } => "words",
         Kind::Choice(_) => "choice",
     }
@@ -221,6 +229,29 @@ fn off_the_wire(entry: &Entry, raw: &str) -> UiResult<Value> {
             )
             .with_detail(format!("setting {} — {e}", entry.key))
         })?),
+        // **A phone is normalised before it is checked.**
+        //
+        // `Shape::Phone` insists on ten bare digits because that is what goes
+        // on disk; a person pasting "+91 98400 11223" out of their contacts
+        // means the same number and should not be argued with. So the typed
+        // form becomes the stored form here, once, and the check downstream
+        // sees what will actually be written. See `mb_core::phone`.
+        //
+        // An empty box stays empty — a shop with no phone number is a shop.
+        Kind::Text {
+            shape: super::value::Shape::Phone,
+            ..
+        } => Value::Text(
+            mb_core::Phone::parse_optional(raw)
+                .map_err(|e| {
+                    UiError::new(
+                        "settings.invalid",
+                        format!("\"{raw}\" is not a phone number — {e}."),
+                    )
+                    .with_detail(format!("setting {}", entry.key))
+                })?
+                .map_or_else(String::new, |p| p.as_str().to_owned()),
+        ),
         Kind::Text { .. } | Kind::Choice(_) => Value::Text(raw.to_owned()),
     };
     super::check(entry, &value).map_err(UiError::from)?;

@@ -31,6 +31,7 @@
 import type { ReactNode } from 'react';
 
 import { Icon, type IconName } from './Icon';
+import { InfoTip } from './display';
 
 /**
  * The page. **Owns the page margin and nothing else owns it.**
@@ -138,7 +139,15 @@ export function Panel({
   className,
 }: {
   title?: string;
-  note?: string;
+  /**
+   * The explanation, as something you can **ask** for.
+   *
+   * Not drawn under the title — it becomes an `InfoTip` beside it. Same change
+   * and same reason as `SectionHeader`: the owner, 2026-08-22, *"it makes the
+   * app look cluttered and un professional… make it a kind of popup text, when
+   * hovered."*
+   */
+  note?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   flush?: boolean;
@@ -154,7 +163,7 @@ export function Panel({
         <div className="mb-panel__head">
           <div className="mb-panel__what">
             {title ? <h2 className="mb-panel__title">{title}</h2> : null}
-            {note ? <span className="mb-panel__note">{note}</span> : null}
+            {note ? <InfoTip label={title ? `About ${title}` : undefined}>{note}</InfoTip> : null}
           </div>
           {actions ? <div className="mb-panel__actions">{actions}</div> : null}
         </div>

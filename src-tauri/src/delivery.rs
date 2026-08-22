@@ -439,7 +439,7 @@ pub fn record_handback_on(
 
                 d.record_handback(
                     OUTLET,
-                    &format!("hbk_{}", at.millis()),
+                    &crate::newid::fresh_at("hbk", at),
                     &rider_id,
                     amount,
                     at,

@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Input, Modal, Notice } from '../kit';
+import { Button, Input, Modal, Notice, onlyAmount, SectionHeader } from '../kit';
 import { call } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { EvenSplitView } from '../ipc/generated/EvenSplitView';
@@ -104,11 +104,10 @@ export function Split({
         />
       </div>
 
-      <h3 className="mb-split__heading">Split it evenly</h3>
-      <p className="mb-split__note">
-        This only tells you what each person owes. It does not make separate
-        bills — the table still pays one.
-      </p>
+      <SectionHeader
+        title="Split it evenly"
+        note="This only tells you what each person owes. It does not make separate bills — the table still pays one."
+      />
 
       <div className="mb-split__ways">
         <Button
@@ -146,12 +145,10 @@ export function Split({
         </Notice>
       ) : null}
 
-      <h3 className="mb-split__heading">Or put some of the food on its own bill</h3>
-      <p className="mb-split__note">
-        Type how many of each item move across. The new bill gets its own
-        number and sits at the same table as a second seat; the kitchen is not
-        told again, because the food is already cooking.
-      </p>
+      <SectionHeader
+        title="Or put some of the food on its own bill"
+        note="Type how many of each item move across. The new bill gets its own number and sits at the same table as a second seat; the kitchen is not told again, because the food is already cooking."
+      />
 
       {cart.orderId === null ? (
         <Notice tone="warn">
@@ -171,8 +168,12 @@ export function Split({
                   value={moving[line.index] ?? ''}
                   inputMode="decimal"
                   placeholder="0"
+                  className="mb-input--number"
                   onChange={(event) =>
-                    setMoving({ ...moving, [line.index]: event.target.value })
+                    setMoving({
+                      ...moving,
+                      [line.index]: onlyAmount(event.target.value),
+                    })
                   }
                 />
               </li>

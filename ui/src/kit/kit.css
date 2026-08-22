@@ -214,6 +214,51 @@
   cursor: pointer;
 }
 
+/* --- A field with a mark in it: ₹, +91 ----------------------------------- */
+
+/* **The mark is beside the value, never inside it** (2026-08-22). See
+   `MoneyInput`: what reaches Rust is the digits alone, so the symbol cannot
+   reach the database and cannot reach `Money::parse`.
+
+   The same shape as `.mb-search` below — a positioned box with the control
+   filling it and the mark sitting in padding reserved for it. An `<input>` is a
+   replaced element, so `::before` on it draws nothing; this is a browser fact,
+   not a preference. */
+.mb-adorned {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.mb-adorned .mb-input {
+  width: 100%;
+  min-width: 0;
+  padding-left: var(--space-7);
+}
+
+/* `+91` is three characters where `₹` is one, so the box gives it more room
+   rather than the mark shrinking to fit. */
+.mb-adorned:has(.mb-input--phone) .mb-input {
+  padding-left: var(--space-8);
+}
+
+.mb-adorned__mark {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  /* The box behind it is what gets clicked. */
+  pointer-events: none;
+}
+
+/* Money and phones are both columns of digits somebody compares (§3). */
+.mb-input--money,
+.mb-input--phone {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .mb-search {
   position: relative;
   display: flex;
@@ -295,6 +340,16 @@
 .mb-modal--wide {
   max-width: none;
   width: var(--modal-width-wide);
+}
+
+/* The title and, when the dialog has one, the tip that says what it is for.
+   A row rather than the title alone, because the ⓘ belongs beside the words it
+   explains — a tip somewhere else on the panel is a tip about the panel. */
+.mb-modal__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .mb-modal__title {
@@ -429,11 +484,17 @@
 
 .mb-section {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
   padding-bottom: var(--space-2);
   border-bottom: var(--border-width) solid var(--border);
+}
+
+/* The heading takes what it needs and the action sits at the far end. The
+   info tip belongs to the title, so it goes next to it and not across the
+   room from it. */
+.mb-section > :last-child:not(.mb-section__title):not(.mb-tip) {
+  margin-left: auto;
 }
 
 /* **The note gives way, never the heading** (P31).
@@ -451,10 +512,100 @@
   font-weight: var(--weight-bold);
 }
 
-.mb-section__note {
-  min-width: 0;
+/* --- InfoTip: the explanation you ask for -------------------------------- */
+
+/* The owner, 2026-08-22: *"you are adding these explaination texts everywhere
+   in the app… it makes the app look cluttered and un professional… make it a
+   kind of popup text, when hovered on the section heading."*
+
+   `.mb-section__note` used to be here and drew that sentence permanently. It
+   is gone, not restyled — a note is a tip now (see `SectionHeader`), and
+   leaving the class behind would leave a second way to say the same thing. */
+
+.mb-tip {
+  display: inline-flex;
+  align-items: center;
+  /* **The anchor's name is scoped to this tip**, so every tip on the screen can
+     use the same one. Without `anchor-scope` a shared `anchor-name` resolves to
+     whichever element is last in the document, and every bubble on the Floor
+     screen would have flown to the bottom-most ⓘ. */
+  anchor-scope: --mb-tip;
+}
+
+.mb-tip__ask {
+  anchor-name: --mb-tip;
+}
+
+.mb-tip__ask {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: help;
+}
+
+.mb-tip__ask:hover,
+.mb-tip:focus-within .mb-tip__ask {
+  color: var(--accent);
+}
+
+/* **No JavaScript decides this.** `:hover` and `:focus-within` are the whole
+   mechanism — nothing to get stuck open, nothing to clean up, and two of them
+   can never be open at once. */
+/* **`fixed`, not `absolute`, and that is the whole reason this works.**
+
+   An absolutely positioned bubble is clipped by any ancestor that scrolls — and
+   the Floor screen's arranging panel scrolls, so the first version of this came
+   out with half a sentence cut off at the panel's edge. Found by opening the
+   screen and looking at it, which is the only way it could have been.
+
+   A fixed element escapes ancestor overflow, and CSS anchor positioning is what
+   keeps it glued to its ⓘ afterwards — so there is no measuring, no scroll
+   listener, and still no JavaScript in this component. */
+.mb-tip__bubble {
+  position: fixed;
+  position-anchor: --mb-tip;
+  /* Below, growing rightwards. */
+  position-area: bottom span-right;
+  /* Near an edge it flips rather than hanging off the screen. */
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  /* And if the ⓘ itself scrolls out of view, the bubble goes with it instead of
+     floating over the middle of the screen. */
+  position-visibility: anchors-visible;
+  margin: var(--space-1) 0;
+  z-index: var(--z-tip);
+  width: max-content;
+  max-width: var(--tip-width);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
   font-size: var(--text-sm);
-  color: var(--text-muted);
+  font-weight: var(--weight-normal);
+  line-height: var(--line-normal);
+  text-align: left;
+  /* `visibility` rather than `display`, so the bubble keeps its box for a
+     screen reader to describe and can fade rather than blink. */
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.mb-tip:hover .mb-tip__bubble,
+.mb-tip:focus-within .mb-tip__bubble {
+  visibility: visible;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mb-tip__bubble {
+    transition: none;
+  }
 }
 
 /* --- Badge: shape as well as colour ------------------------------------- */

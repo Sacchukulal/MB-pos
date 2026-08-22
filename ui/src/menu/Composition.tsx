@@ -26,8 +26,12 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  freshId,
+  InfoTip,
   Input,
   Modal,
+  MoneyInput,
+  SectionHeader,
   Select,
   Table,
   type Column,
@@ -40,10 +44,16 @@ import type { ModifierEdit } from '../ipc/generated/ModifierEdit';
 import type { ModifierGroupView } from '../ipc/generated/ModifierGroupView';
 import type { VariantView } from '../ipc/generated/VariantView';
 
-/** A fresh id. The same shape the rest of the menu screen uses. */
-function freshId(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
-}
+/* **This screen had its own `freshId` and it was nearly right.**
+
+   It was `Date.now() + Math.floor(Math.random() * 1000)` — the only id in the
+   product with any randomness at all, which is why sizes and choices never hit
+   the collision the rest of the app did. A thousand values is not enough
+   though: by the birthday rule you would expect a repeat inside one
+   millisecond after about forty of them, and `Math.random` is not a source
+   anybody should be counting on.
+
+   It is the kit's `freshId` now, like everything else. */
 
 // ---------------------------------------------------------------------------
 // One item: its sizes, and which groups it offers.
@@ -69,11 +79,10 @@ export function Composition({
 
   return (
     <Modal open title={`${row.name} — sizes and choices`} onClose={onClose} wide>
-      <h3 className="mb-comp__heading">Sizes</h3>
-      <p className="mb-comp__note">
-        Each size carries its own price. A half plate is a different thing to
-        cook, not a discount off the full one.
-      </p>
+      <SectionHeader
+        title="Sizes"
+        note="Each size carries its own price. A half plate is a different thing to cook, not a discount off the full one."
+      />
 
       {made === null || made.variants.length === 0 ? (
         <EmptyState
@@ -111,11 +120,10 @@ export function Composition({
         </Button>
       </div>
 
-      <h3 className="mb-comp__heading">Choices this item offers</h3>
-      <p className="mb-comp__note">
-        Groups are shared across the menu. Tick the ones this item should ask
-        about at the counter.
-      </p>
+      <SectionHeader
+        title="Choices this item offers"
+        note="Groups are shared across the menu. Tick the ones this item should ask about at the counter."
+      />
 
       {made === null || made.groups.length === 0 ? (
         <EmptyState
@@ -196,11 +204,7 @@ function EditSize({
         autoFocus
         onChange={(event) => setName(event.target.value)}
       />
-      <Input
-        label="Price"
-        value={price}
-        onChange={(event) => setPrice(event.target.value)}
-      />
+      <MoneyInput label="Price" value={price} onChange={setPrice} />
       <Checkbox
         label="On the menu"
         checked={active}
@@ -247,6 +251,10 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
     <section className="mb-menu__classes">
       <div className="mb-row">
         <h2 className="mb-menu__heading">Choices</h2>
+        <InfoTip label="About choices">
+          Made once, offered on as many items as you like — open an item&rsquo;s
+          sizes and choices to tick it on.
+        </InfoTip>
         <Button
           small
           variant="quiet"
@@ -265,10 +273,6 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
           Add a group
         </Button>
       </div>
-      <p className="mb-comp__note">
-        Made once, offered on as many items as you like — open an item&rsquo;s
-        sizes and choices to tick it on.
-      </p>
 
       {groups.length === 0 ? (
         <EmptyState
@@ -376,11 +380,15 @@ function EditGroup({
         ]}
       />
 
-      <h3 className="mb-comp__heading">The choices</h3>
-      <p className="mb-comp__note">
-        Leave the price blank when a choice is free. It may be a minus —
-        &ldquo;No onion, &minus;5&rdquo; takes money off.
-      </p>
+      <SectionHeader
+        title="The choices"
+        note={
+          <>
+            Leave the price blank when a choice is free. It may be a minus —
+            &ldquo;No onion, &minus;5&rdquo; takes money off.
+          </>
+        }
+      />
       {choices.map((choice, index) => (
         <div key={choice.id} className="mb-comp__choice">
           <Input
@@ -388,10 +396,10 @@ function EditGroup({
             value={choice.name}
             onChange={(event) => change(index, { name: event.target.value })}
           />
-          <Input
+          <MoneyInput
             label="Price difference"
             value={choice.priceDelta}
-            onChange={(event) => change(index, { priceDelta: event.target.value })}
+            onChange={(next) => change(index, { priceDelta: next })}
           />
           <Button
             small
@@ -494,6 +502,13 @@ export function Combos({
     <section className="mb-menu__classes">
       <div className="mb-row">
         <h2 className="mb-menu__heading">Combos</h2>
+        {/* A real rule and not a reassurance, so it is kept — just asked for
+            rather than given. */}
+        <InfoTip label="About combos">
+          The combo price is shared across what is in it, in proportion to what
+          each part sells for on its own — so a meal that mixes a 5% dish with
+          an 18% bottle still adds up correctly on the rate summary.
+        </InfoTip>
         <Button
           small
           variant="quiet"
@@ -511,11 +526,6 @@ export function Combos({
           Add a combo
         </Button>
       </div>
-      <p className="mb-comp__note">
-        The combo price is shared across what is in it, in proportion to what
-        each part sells for on its own — so a meal that mixes a 5% dish with an
-        18% bottle still adds up correctly on the rate summary.
-      </p>
 
       {combos.length === 0 ? (
         <EmptyState
@@ -575,11 +585,11 @@ function EditCombo({
         autoFocus
         onChange={(event) => setName(event.target.value)}
       />
-      <Input
+      <MoneyInput
         label="Combo price"
         hint="What the customer pays for the lot."
         value={price}
-        onChange={(event) => setPrice(event.target.value)}
+        onChange={setPrice}
       />
 
       <h3 className="mb-comp__heading">What is in it</h3>

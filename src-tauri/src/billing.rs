@@ -565,16 +565,21 @@ fn money_error(e: impl std::fmt::Display) -> UiError {
 /// takes four arguments instead of eight, the same trick [`Seat`] plays one
 /// level down.
 pub struct Room<'a> {
-    /// The saved order the cart is holding, once it has one.
-    pub loaded_order: Option<&'a str>,
-    /// **The table the cart is on, order or no order.**
+    /// **Where the cashier's cart is — or `None` when the screen asking has no
+    /// cart behind it.**
     ///
-    /// Both, because a cart is on a table from the moment somebody taps it and
-    /// only gets an order once a line is typed — and "which tile am I looking
-    /// at" has to be answerable in the gap between those two. Answering it from
-    /// the order alone is what left an empty selected table looking like every
-    /// other empty table (owner, 2026-08-22). See [`TableView::selected`].
-    pub loaded_table: Option<&'a str>,
+    /// The Floor screen passes `None`, and that is the whole of it. The owner,
+    /// 2026-08-22: *"why is the table i selected in the billing section is
+    /// highlighted in floor section also? it makes no sense."* They are right.
+    /// A ring on a tile means **"this is the table your cart is on"**, which is
+    /// a fact about the billing screen; the Floor screen is a view of the room
+    /// and has no cart. Marking a tile there answered a question nobody on that
+    /// screen had asked.
+    ///
+    /// An `Option` rather than two `None`s so the caller has to say which it
+    /// is. A screen that forgets to pass a cart and a screen that has none
+    /// would otherwise look identical here.
+    pub cart_is_on: Option<CartIsOn<'a>>,
     pub now: Timestamp,
     /// **Both thresholds come from settings** (P14, scope 14.2). A dosa counter
     /// turns a table in eight minutes and a fine-dining room in ninety; the one
@@ -587,6 +592,20 @@ pub struct Room<'a> {
     pub config: &'a crate::settings::ShopConfig,
 }
 
+/// **Which tile the cart is on**, in the two ways it can be said.
+///
+/// Both, because a cart is on a table from the moment somebody taps it and only
+/// gets an order once a line is typed — and "which tile am I looking at" has to
+/// be answerable in the gap between those two. Answering it from the order
+/// alone is what left an empty selected table looking like every other empty
+/// table (owner, 2026-08-22). See [`TableView::selected`].
+pub struct CartIsOn<'a> {
+    /// The saved order the cart is holding, once it has one.
+    pub order: Option<&'a str>,
+    /// The table the cart is on, order or no order.
+    pub table: Option<&'a str>,
+}
+
 pub fn floor_view(
     tables: &[mb_db::repo::floor::DiningTable],
     sections: &[mb_db::repo::floor::Section],
@@ -594,13 +613,16 @@ pub fn floor_view(
     room: Room<'_>,
 ) -> Vec<TableView> {
     let Room {
-        loaded_order,
-        loaded_table,
+        cart_is_on,
         now,
         warn_after,
         late_after,
         config,
     } = room;
+    // Split out once. A screen with no cart marks nothing, and every comparison
+    // below is against `None`, which nothing matches.
+    let (loaded_order, loaded_table) = cart_is_on
+        .map_or((None, None), |cart| (cart.order, cart.table));
     let mut out = Vec::with_capacity(tables.len() + open.len());
 
     for table in tables.iter().filter(|t| t.is_active) {
@@ -871,10 +893,13 @@ impl CartState {
     ) -> UiResult<mb_core::DraftOrder> {
         let day = mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
         let id = mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| {
-            // A new order gets an id from the clock plus the terminal. D13 says
-            // ids are text because two terminals collide on integers, and this
-            // is that rule honoured rather than restated.
-            format!("ord_{}_{till}", at.millis())
+            // **The terminal used to be the whole of the uniqueness**, on the
+            // reasoning that D13 makes ids text because two terminals collide
+            // on integers. True, and not enough: two orders on the SAME till in
+            // one millisecond collided with each other. The random tail is what
+            // makes an id unique; the till stays because a support screenshot
+            // that says which counter wrote a row is worth the four characters.
+            format!("{}_{till}", crate::newid::fresh_at("ord", at))
         }));
 
         let mut draft = mb_core::DraftOrder::new(id, day, at, self.order_type, by);

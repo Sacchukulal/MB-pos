@@ -248,7 +248,15 @@ pub fn back_up_now_on(app: &App) -> UiResult<BackupView> {
     let folder = folder_for(app, &config);
 
     let at = crate::flows::now();
-    let name = format!("magicbill-{}.db", at.millis());
+    // **id-lint-ok: this is a FILE NAME, and the time in it is the point.**
+    //
+    // A shop looking in the backup folder reads these; a name that was only a
+    // random tail would tell them nothing about which copy is which. The tail
+    // is on the end because two backups in the same millisecond would otherwise
+    // be one file name, and the second would land on top of the first — a shop
+    // that pressed the button twice would have one copy where it thought it had
+    // two.
+    let name = format!("magicbill-{}-{}.db", at.millis(), crate::newid::tail_only());
     let target = folder.join(name);
 
     let backup = app.with_shop(|shop| {

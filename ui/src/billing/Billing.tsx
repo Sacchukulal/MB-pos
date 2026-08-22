@@ -28,6 +28,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Icon,
+  onlyAmount,
   Page,
   SearchField,
   SectionHeader,
@@ -903,7 +904,12 @@ export function Billing() {
                         aria-label={`Quantity of ${line.name}`}
                         value={typingQty.text}
                         onChange={(e) =>
-                          setTypingQty({ index: line.index, text: e.target.value })
+                          setTypingQty({
+                            index: line.index,
+                            // Digits and one dot. A quantity may be 0.75 kg; it
+                            // may never be "2a", which is what this accepted.
+                            text: onlyAmount(e.target.value),
+                          })
                         }
                         onBlur={() => void commitQty()}
                         onKeyDown={(e) => {

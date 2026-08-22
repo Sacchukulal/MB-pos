@@ -13,7 +13,7 @@
  * 4. a move sends the table the screen showed, not the one it guessed.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const call = vi.fn();
@@ -89,6 +89,9 @@ function floor(over: Partial<FloorView> = {}): FloorView {
     warnMinutes: 20,
     lateMinutes: 45,
     hasLayout: false,
+    // The default is an owner, because the interesting cases are about the
+    // arranging panel. A waiter is its own test.
+    canArrange: true,
     ...over,
   };
 }
@@ -168,15 +171,22 @@ describe('the floor (scope 14.1–14.3)', () => {
     show();
     await screen.findByText('3 of 4 tables busy');
 
-    // Table 2 is busy; open it and move its order to table 1, which the view
+    // Table 2 is busy; tick it and move its order to table 1, which the view
     // says is free.
     //
-    // **A prefix match, because the tile announces its state too.** This
-    // screen had its own copy of the table tile until 2026-08-17, whose whole
-    // aria-label was "Table 2"; it uses the shared one now, which says
-    // "Table 2, Hall, busy, 646.00, 12m" so a blind cashier hears whether the
-    // table is free. Matching the number exactly was matching the duplicate.
+    // **Tick, then act.** Pressing a tile used to open the order dialog
+    // straight away. Since the room is arranged on this screen (2026-08-22) a
+    // press ticks the table, and everything you can do to what you ticked is on
+    // the bar — which also means the screen names the table before it offers to
+    // move it.
+    //
+    // A prefix match, because the tile announces its state too: this screen had
+    // its own copy of the table tile until 2026-08-17, whose whole aria-label
+    // was "Table 2". It uses the shared one now, which says "Table 2, Hall,
+    // busy, 646.00, 12m" so a blind cashier hears whether the table is free.
     fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move or merge' }));
+
     fireEvent.change(await screen.findByLabelText('To table'), {
       target: { value: 'tbl_1' },
     });
@@ -186,13 +196,138 @@ describe('the floor (scope 14.1–14.3)', () => {
     expect(sent?.[1]).toEqual({ orderId: 'ord_2', toTable: 'tbl_1' });
   });
 
-  it('offers nothing to do to a free table but says so', async () => {
+  it('offers no order actions for a free table', async () => {
     call.mockResolvedValue(floor());
     show();
     await screen.findByText('3 of 4 tables busy');
 
     fireEvent.click(screen.getByLabelText(/^Table 1\b/));
-    expect(screen.getByText(/This table is free/)).toBeTruthy();
+    // It ticks, like any other table — free tables are the ones you delete.
+    expect(await screen.findByText('1 ticked')).toBeTruthy();
+    // But there is no order on it, so nothing about an order is offered ON THE
+    // BAR. Scoped to the bar deliberately: table 2 is busy and still wears its
+    // own print mark, which is a fact about that tile and not about this tick.
+    const bar = screen.getByRole('group', { name: 'What to do with the ticked tables' });
+    expect(within(bar).queryByRole('button', { name: 'Move or merge' })).toBeNull();
+    expect(within(bar).queryByRole('button', { name: /Print the bill/ })).toBeNull();
+  });
+});
+
+/**
+ * **The room is arranged on the screen, not in a dialog** — the owner,
+ * 2026-08-22.
+ *
+ * > *"No need for popup for setup room. Redesign the Floor section page to have
+ * > a adding tables section in one side (at the starting side of the screen)…
+ * > no need to show table list as it will already be visible in the screen in
+ * > proper square format… make the tables selectable… and then i should be able
+ * > to delete them."*
+ */
+describe('arranging the room (2026-08-22)', () => {
+  it('puts the panel on the screen and no dialog behind a button', async () => {
+    call.mockResolvedValue(floor());
+    show();
+    await screen.findByText('3 of 4 tables busy');
+
+    expect(screen.getByRole('complementary', { name: 'Arrange the room' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Set up the room' })).toBeNull();
+  });
+
+  it('hides the panel from somebody who may not arrange the room', async () => {
+    // A courtesy, not the control — guard::require is what refuses, and
+    // FloorView::can_arrange is that same question asked once.
+    call.mockResolvedValue(floor({ canArrange: false }));
+    show();
+    await screen.findByText('3 of 4 tables busy');
+
+    expect(screen.queryByRole('complementary', { name: 'Arrange the room' })).toBeNull();
+    // And a press does what it always did on a screen you cannot arrange.
+    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    expect(await screen.findByText(/Move this order/)).toBeTruthy();
+  });
+
+  it('ticks one at a time, and all of them at once', async () => {
+    call.mockResolvedValue(floor());
+    show();
+    await screen.findByText('3 of 4 tables busy');
+
+    fireEvent.click(screen.getByLabelText(/^Table 1\b/));
+    expect(await screen.findByText('1 ticked')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    expect(await screen.findByText('2 ticked')).toBeTruthy();
+
+    // Pressing a ticked table again unticks it.
+    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    expect(await screen.findByText('1 ticked')).toBeTruthy();
+
+    // **"Section wise" — the room segment narrows what is shown, and this ticks
+    // all of what a tick can mean anything about.**
+    //
+    // Two of the four tiles in this fixture are tables; the other two are open
+    // orders with no table behind them (§4, "so no order is ever invisible").
+    // You cannot delete or hide one of those, so it cannot be ticked — and the
+    // count says two, not four. Getting that wrong made the bar say "2 ticked"
+    // after ticking four things, which is a screen contradicting itself.
+    fireEvent.click(screen.getByLabelText(/^Tick all 2/));
+    expect(await screen.findByText('2 ticked')).toBeTruthy();
+  });
+
+  /** **The point of ticking.** */
+  it('deletes everything ticked in ONE command', async () => {
+    call.mockResolvedValue(floor());
+    show();
+    await screen.findByText('3 of 4 tables busy');
+
+    fireEvent.click(screen.getByLabelText(/^Table 1\b/));
+    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    // **Scoped to the bar.** Each tile wears a bin of its own now ("Delete
+    // table 1"), so a loose /^Delete/ finds three buttons meaning two different
+    // things — one table, or everything ticked.
+    const bar = await screen.findByRole('group', {
+      name: 'What to do with the ticked tables',
+    });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Delete' }));
+    // Deleting a table cannot be undone, so it is confirmed.
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete them' }));
+
+    const sent = call.mock.calls.filter((c) => c[0] === 'delete_dining_tables');
+    expect(sent, 'a bulk delete became a loop of single deletes').toHaveLength(1);
+    expect(sent[0]?.[1]).toEqual({ tableIds: ['tbl_1', 'tbl_2'] });
+  });
+
+  it('adds a run of tables from the panel', async () => {
+    call.mockResolvedValue(floor());
+    show();
+    await screen.findByText('3 of 4 tables busy');
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add them' }));
+
+    const sent = call.mock.calls.find((c) => c[0] === 'add_dining_tables');
+    expect(sent?.[1]).toMatchObject({ from: 5, to: 8, seats: 4 });
+  });
+
+  /**
+   * **The explanations are asked for, not given** — the owner, same day:
+   * *"you are adding these explaination texts everywhere in the app, it is not
+   * needed, it makes the app look cluttered and un professional."*
+   *
+   * The words are not deleted. They move into a tip, so the screen is quiet and
+   * the answer is still one hover away.
+   */
+  it('keeps the timer explanation in a tip rather than on the screen', async () => {
+    call.mockResolvedValue(floor());
+    const { container } = show();
+    await screen.findByText('3 of 4 tables busy');
+
+    expect(screen.getByText('Timers')).toBeTruthy();
+    const bubbles = [...container.querySelectorAll('.mb-tip__bubble[role="tooltip"]')];
+    expect(bubbles.length, 'nothing on this screen offers a tip').toBeGreaterThan(0);
+    expect(
+      bubbles.some((b) => b.textContent?.includes('dosa counter')),
+      'the timer explanation went missing rather than moving into a tip',
+    ).toBe(true);
   });
 });
 
@@ -236,9 +371,12 @@ describe('empty is not a lecture (P30.5)', () => {
     show();
     expect(await screen.findByText('No tables yet')).toBeTruthy();
     expect(screen.queryByText(/Try another section/)).toBeNull();
-    // The way to fix it is on the screen, and there are two of it: the toolbar
-    // button a busy shop uses, and this one.
-    expect(screen.getAllByRole('button', { name: 'Set up the room' }).length).toBe(2);
+    // **The way to fix it is now beside the words rather than behind a button.**
+    // It used to say "Set up the room" twice — a toolbar button and an empty
+    // state — and both opened the same dialog. The panel is on the screen, so
+    // the empty state points at it.
+    expect(screen.getByRole('complementary', { name: 'Arrange the room' })).toBeTruthy();
+    expect(screen.getByText(/Add a room and a run of tables on the left/)).toBeTruthy();
   });
 
   /**

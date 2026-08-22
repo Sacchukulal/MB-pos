@@ -103,6 +103,18 @@ pub struct FloorView {
     /// what gets drawn — and that is not a degraded mode: no shop should have
     /// to draw a floor plan before it can bill.
     pub has_layout: bool,
+    /// **Whether this person may change the room.**
+    ///
+    /// Asked here rather than worked out on the screen, for R8's reason: the
+    /// rule is `Permission::TablesManage`, every command on this screen already
+    /// checks it with `guard::require`, and a second copy of it in TypeScript is
+    /// a second copy that can drift.
+    ///
+    /// It is a **courtesy and not the control** — hiding the panel saves a
+    /// waiter from a row of buttons that can only fail; `guard::require` is
+    /// what actually refuses, and there is a test that calls the commands
+    /// without going near this field.
+    pub can_arrange: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -151,13 +163,12 @@ pub fn thresholds(app: &App) -> UiResult<(i64, i64)> {
 
 pub fn floor_on(app: &App) -> UiResult<FloorView> {
     guard::require(app, Permission::BillCreate)?;
+    // Asked, not assumed. `guard::require` returns the actor when it allows, so
+    // "may this person arrange the room" is the same question the arranging
+    // commands ask, answered once for the screen.
+    let can_arrange = guard::require(app, Permission::TablesManage).is_ok();
     let at = now();
     let (warn, late) = thresholds(app)?;
-    // **Both halves of "where is the cashier".** The order is `None` until a
-    // line is typed; the table is set the moment one is tapped. See
-    // `TableView::selected`.
-    let (loaded, on_table) =
-        app.with_cart(|state| Ok((state.order_id.clone(), state.table.clone())))?;
     // Taken once, outside the transaction: a tile's running total is rounded
     // and charged the way the bill will be, and reading that inside the loop
     // would be a lock per table.
@@ -183,8 +194,13 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                         &sections,
                         &open,
                         crate::billing::Room {
-                            loaded_order: loaded.as_deref(),
-                            loaded_table: on_table.as_deref(),
+                            // **This screen has no cart, so it marks nothing.**
+                            // The owner, 2026-08-22: *"why is the table i
+                            // selected in the billing section is highlighted in
+                            // floor section also? it makes no sense."* The ring
+                            // means "your cart is on this table", and the Floor
+                            // screen is a view of the room, not of a bill.
+                            cart_is_on: None,
                             now: at,
                             warn_after: warn,
                             late_after: late,
@@ -264,6 +280,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                     },
                     grid: crate::ipc::count(mb_db::repo::floor::GRID_CELLS),
                     has_layout: tables.iter().any(|t| t.pos.is_some()),
+                    can_arrange,
                     warn_minutes: crate::ipc::count(warn),
                     late_minutes: crate::ipc::count(late),
                 })
@@ -420,23 +437,18 @@ pub fn place_table_on(app: &App, table_id: String, x: Option<i64>, y: Option<i64
     floor_on(app)
 }
 
-pub fn set_table_active_on(app: &App, table_id: String, active: bool) -> UiResult<FloorView> {
-    guard::require(app, Permission::TablesManage)?;
-    let at = now();
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                mb_db::Repos::new(tx).floor().set_active(
-                    OUTLET,
-                    &TableId::new(table_id.clone()),
-                    active,
-                    at,
-                )
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-    floor_on(app)
-}
+// **`set_table_active_on` was here, and `audit-wiring.mjs` is why it is not.**
+//
+// It was the Hide / Put back button in the *Set up the room* dialog. The dialog
+// went (owner, 2026-08-22) and hiding moved to the ticked-tables bar, which acts
+// on a set — so the singular command was left with no screen, and the wiring
+// lint said so on the first run after the redesign. That lint exists because
+// P31 found 29 commands nobody could reach.
+//
+// It is deleted rather than kept "in case": [`set_tables_active_on`] with one id
+// in the list does exactly the same thing, and two ways to hide a table is two
+// places for the rule to drift. `delete_table_on` stayed, because the Edit
+// dialog's own Delete button still calls it on the one table it is about.
 
 pub fn delete_table_on(app: &App, table_id: String) -> UiResult<FloorView> {
     guard::require(app, Permission::TablesManage)?;
@@ -447,6 +459,61 @@ pub fn delete_table_on(app: &App, table_id: String) -> UiResult<FloorView> {
                 mb_db::Repos::new(tx)
                     .floor()
                     .delete_table(OUTLET, &TableId::new(table_id.clone()), at)
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    floor_on(app)
+}
+
+/// **Several tables at once — one transaction, all or nothing.**
+///
+/// The Floor screen lets an owner pick tables and act on the lot (owner,
+/// 2026-08-22: *"make the tables selectable… and then i should be able to
+/// delete them"*). Doing that as a loop of `delete_dining_table` from
+/// TypeScript would be N round trips that can stop halfway, leaving a room
+/// half-changed and a screen that has to explain which half.
+///
+/// So it is one command and one transaction. If any table in the set cannot go
+/// — an open order on it, or history behind it — **none of them goes**, and the
+/// refusal is the one `mb_db` already writes, naming the table that stopped it.
+/// That is the same bargain `add_tables_on` makes about a range of names, and a
+/// shopkeeper only has to learn it once.
+pub fn delete_tables_on(app: &App, table_ids: Vec<String>) -> UiResult<FloorView> {
+    guard::require(app, Permission::TablesManage)?;
+    let at = now();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let floor = mb_db::Repos::new(tx).floor();
+                for id in &table_ids {
+                    floor.delete_table(OUTLET, &TableId::new(id.clone()), at)?;
+                }
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    floor_on(app)
+}
+
+/// The same bargain for hiding and putting back — see [`delete_tables_on`].
+///
+/// Hiding is refused on a table with an order sitting on it, so this can fail
+/// part way through in exactly the same way, and answers it the same way.
+pub fn set_tables_active_on(
+    app: &App,
+    table_ids: Vec<String>,
+    active: bool,
+) -> UiResult<FloorView> {
+    guard::require(app, Permission::TablesManage)?;
+    let at = now();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let floor = mb_db::Repos::new(tx).floor();
+                for id in &table_ids {
+                    floor.set_active(OUTLET, &TableId::new(id.clone()), active, at)?;
+                }
+                Ok(())
             })
             .map_err(|e| words::from_db(&e))
     })?;
@@ -787,7 +854,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 // does not jump to tomorrow's series.
                 let (moved_cart, moved_kitchen) = moved.clone().into_parts();
                 let mut fresh = mb_core::DraftOrder::new(
-                    mb_core::OrderId::new(format!("ord_{}", at.millis())),
+                    mb_core::OrderId::new(crate::newid::fresh_at("ord", at)),
                     day,
                     at,
                     order.core().order_type,
@@ -967,17 +1034,25 @@ pub fn place_dining_table(
 }
 
 #[tauri::command]
-pub fn set_dining_table_active(
-    app: tauri::State<'_, App>,
-    table_id: String,
-    active: bool,
-) -> UiResult<FloorView> {
-    set_table_active_on(&app, table_id, active)
+pub fn delete_dining_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<FloorView> {
+    delete_table_on(&app, table_id)
 }
 
 #[tauri::command]
-pub fn delete_dining_table(app: tauri::State<'_, App>, table_id: String) -> UiResult<FloorView> {
-    delete_table_on(&app, table_id)
+pub fn delete_dining_tables(
+    app: tauri::State<'_, App>,
+    table_ids: Vec<String>,
+) -> UiResult<FloorView> {
+    delete_tables_on(&app, table_ids)
+}
+
+#[tauri::command]
+pub fn set_dining_tables_active(
+    app: tauri::State<'_, App>,
+    table_ids: Vec<String>,
+    active: bool,
+) -> UiResult<FloorView> {
+    set_tables_active_on(&app, table_ids, active)
 }
 
 #[tauri::command]

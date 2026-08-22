@@ -204,8 +204,19 @@ fn check_shape(shape: Shape, text: &str) -> Result<(), Invalid> {
     }
     match shape {
         Shape::Free | Shape::Folder => Ok(()),
+        // **What is STORED is ten bare digits, and this says so.**
+        //
+        // `mb_core::Phone` is the rule for what a person may TYPE — it forgives
+        // "+91", a trunk zero and spacing, because that is how a number arrives
+        // from a contact list. Forgiving it *here* would mean the forgiven form
+        // going onto disk, so the normalising happens on the way in
+        // (`settings::ipc::off_the_wire`) and this checks the result.
+        //
+        // A check and a parse are two different jobs. Conflating them is how a
+        // setting ends up holding "+919880012345" while every other phone in
+        // the product holds ten digits.
         Shape::Phone => {
-            if text.len() == 10 && text.chars().all(|c| c.is_ascii_digit()) {
+            if text.len() == mb_core::PHONE_DIGITS && text.chars().all(|c| c.is_ascii_digit()) {
                 Ok(())
             } else {
                 Err(Invalid::new(

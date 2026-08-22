@@ -375,11 +375,19 @@ export interface Commands {
     args: { tableId: string; x: number | null; y: number | null };
     returns: FloorView;
   };
-  set_dining_table_active: {
-    args: { tableId: string; active: boolean };
+  delete_dining_table: { args: { tableId: string }; returns: FloorView };
+  /**
+   * **The bulk pair** — one transaction, all or nothing.
+   *
+   * The Floor screen ticks tables and acts on the lot. A loop of the two
+   * commands above would be N round trips that can stop halfway and leave a
+   * room half-changed; see `floor::delete_tables_on`.
+   */
+  delete_dining_tables: { args: { tableIds: readonly string[] }; returns: FloorView };
+  set_dining_tables_active: {
+    args: { tableIds: readonly string[]; active: boolean };
     returns: FloorView;
   };
-  delete_dining_table: { args: { tableId: string }; returns: FloorView };
   save_floor_thresholds: { args: { warn: number; late: number }; returns: FloorView };
   move_order: { args: { orderId: string; toTable: string }; returns: FloorView };
   merge_orders: { args: { fromOrder: string; intoOrder: string }; returns: FloorView };

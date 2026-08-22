@@ -484,8 +484,9 @@ macro_rules! commands {
             $crate::floor::save_dining_table,
             $crate::floor::add_dining_tables,
             $crate::floor::place_dining_table,
-            $crate::floor::set_dining_table_active,
+            $crate::floor::set_dining_tables_active,
             $crate::floor::delete_dining_table,
+            $crate::floor::delete_dining_tables,
             $crate::floor::save_floor_thresholds,
             $crate::floor::move_order,
             $crate::floor::merge_orders,
@@ -1194,8 +1195,8 @@ pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
 pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     guard::require(app, Permission::BillCreate)?;
     // **Both halves of "where is the cashier"** — see `TableView::selected`.
-    // The billing grid and the floor plan read the same two, for the same
-    // reason they read the same thresholds.
+    // The order is `None` until a line is typed; the table is set the moment
+    // one is tapped.
     let (loaded, on_table) =
         app.with_cart(|state| Ok((state.order_id.clone(), state.table.clone())))?;
     // The same two thresholds the floor screen uses, from the same place —
@@ -1219,8 +1220,12 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
             &sections,
             &open,
             crate::billing::Room {
-                loaded_order: loaded.as_deref(),
-                loaded_table: on_table.as_deref(),
+                // The billing grid IS the cart's view of the room, so it is the
+                // one screen that marks a tile. See `TableView::selected`.
+                cart_is_on: Some(crate::billing::CartIsOn {
+                    order: loaded.as_deref(),
+                    table: on_table.as_deref(),
+                }),
                 now: Timestamp::from_millis(now_millis()),
                 warn_after: warn,
                 late_after: late,

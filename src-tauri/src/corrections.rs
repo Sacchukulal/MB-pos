@@ -772,7 +772,10 @@ pub fn refund_on(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let refund = Refund {
-                    id: format!("ref_{order_id}_{}", at.millis()),
+                    // The order is in the id because a refund belongs to one,
+                    // and the tail is what makes it unique — two refunds on one
+                    // bill in the same millisecond used to be one refund.
+                    id: format!("{}_{order_id}", crate::newid::fresh_at("ref", at)),
                     order_id: OrderId::new(order_id.clone()),
                     amount: Money::from_paise(amount_paise),
                     mode: mode.clone(),

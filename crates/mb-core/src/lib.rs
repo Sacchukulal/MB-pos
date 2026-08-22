@@ -64,6 +64,8 @@ pub mod numbering;
 pub mod kitchen_delivery;
 pub mod order;
 pub mod payment;
+/// **What a phone number is**, in the one place that decides it (2026-08-22).
+pub mod phone;
 /// P26. What a delivery actually cost — pure, and the free bag is a
 /// denominator (D123).
 /// P29, scope 8.3/8.4. **Did the money actually arrive?** — the seam a real
@@ -91,6 +93,7 @@ pub use discount::{
     Discount, DiscountEntry, DiscountOutcome, DiscountPolicy, DiscountPolicyError,
 };
 pub use ids::{CategoryId, CustomerId, ItemId, MaterialId, ModifierId, OrderId, StaffId, TableId};
+pub use phone::{PHONE_DIGITS, Phone, PhoneError};
 pub use item::{ItemSnapshot, Modifier, OrderType};
 pub use money::{Money, MoneyError, RoundingMode};
 pub use numbering::{Claimed, Counter, Numbering};

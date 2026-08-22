@@ -72,7 +72,11 @@ fn a_shop(scratch: &Scratch) -> App {
 }
 
 /// Add somebody with a role, the way the Staff screen does.
-fn hire(app: &App, id: &str, name: &str, role: RolePreset) {
+///
+/// `pub(crate)` so `floor_tests` can use it: proving that a waiter cannot
+/// arrange the room needs a waiter, and a second copy of this in that file is
+/// a second place for "what a Waiter may do" to drift.
+pub(crate) fn hire(app: &App, id: &str, name: &str, role: RolePreset) {
     save_staff_member_on(
         app,
         StaffEdit {

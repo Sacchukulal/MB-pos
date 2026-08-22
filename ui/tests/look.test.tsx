@@ -437,3 +437,89 @@ describe('the cart column', () => {
     expect(totals).toContain('flex: 0 1 auto');
   });
 });
+
+/**
+ * **The lint that keeps an id out of the clock** — 2026-08-22.
+ *
+ * Twenty-one places in Rust and seventeen on the screens built a row's id from
+ * the current millisecond, so two rows saved in the same thousandth of a second
+ * got the same id. Most writes then refused with *"The shop's data could not be
+ * read"*; on Spends, which upserts, the second spend silently **replaced** the
+ * first.
+ *
+ * Nobody wrote that on purpose — each one reached for the clock because it was
+ * to hand. So the rule is a lint, and a lint nobody has watched fail is a lint
+ * nobody knows works.
+ */
+describe('check-ids.mjs', () => {
+  const cases: { name: string; file: string; body: string; says: string }[] = [
+    {
+      name: 'a screen building an id out of the clock',
+      file: 'Bad.tsx',
+      body: 'const id = `cus_${Date.now().toString(36)}`;\nexport const Bad = () => id;\n',
+      says: 'Date.now() in a string',
+    },
+    {
+      name: 'Rust building an id out of the clock',
+      file: 'bad.rs',
+      body: 'fn bad(at: Timestamp) -> String { format!("adj_{}", at.millis()) }\n',
+      says: 'a clock reading inside format!',
+    },
+  ];
+
+  for (const bad of cases) {
+    it(`fails the build on ${bad.name}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'mb-ids-'));
+      const src = join(dir, 'src');
+      mkdirSync(src, { recursive: true });
+      writeFileSync(join(src, bad.file), bad.body, 'utf8');
+
+      let output = '';
+      let failed = false;
+      try {
+        execFileSync(process.execPath, ['scripts/check-ids.mjs', src], { encoding: 'utf8' });
+      } catch (cause) {
+        failed = true;
+        const e = cause as { stderr?: string; stdout?: string };
+        output = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+
+      expect(failed, `the lint accepted ${bad.name}`).toBe(true);
+      expect(output).toContain(bad.says);
+    });
+  }
+
+  /**
+   * **An id derived from the business day is not the bug** — `close_{day}` is
+   * one per day on purpose, and a second one has to collide so the database
+   * refuses it. Randomness there would quietly allow two closes for one day.
+   */
+  it('leaves an id that is derived from the business day alone', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mb-ids-ok-'));
+    const src = join(dir, 'src');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, 'fine.rs'),
+      'fn ok(day: BusinessDay) -> String { format!("close_{}", day.days_since_epoch()) }\n',
+      'utf8',
+    );
+    try {
+      const out = execFileSync(process.execPath, ['scripts/check-ids.mjs', src], {
+        encoding: 'utf8',
+      });
+      expect(out).toContain('ids: clean');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** And it passes on the real tree, which is the other half of the claim. */
+  it('passes on the product', () => {
+    const out = execFileSync(process.execPath, ['scripts/check-ids.mjs'], {
+      encoding: 'utf8',
+    });
+    expect(out).toContain('ids: clean');
+  });
+});

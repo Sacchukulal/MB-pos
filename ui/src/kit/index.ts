@@ -23,12 +23,44 @@ import './kit.css';
  */
 export { Fields, Notice, Page, PageHeader, Panel, Row, Sections, Stack, Toolbar } from './layout';
 
+/**
+ * **Where a new row's id comes from** (2026-08-22). A screen never reads the
+ * clock for one — see `ids.ts`, and `scripts/check-ids.mjs` fails the build if
+ * one tries.
+ */
+export { freshId } from './ids';
+
 /** **The icon set** (P27.5). One set, one stroke, one optical size. */
 export { Icon } from './Icon';
 export type { IconName, IconProps } from './Icon';
 
-export { Button, Checkbox, Input, Keypad, NumberInput, Radio, SearchField, Select } from './controls';
-export type { ButtonProps, InputProps, SelectProps } from './controls';
+export {
+  Button,
+  Checkbox,
+  Input,
+  Keypad,
+  /**
+   * **The two fields that have a shape** (2026-08-22). Every phone in the
+   * product is a `PhoneInput` and every amount is a `MoneyInput`; a plain
+   * `Input` for either is what `check-fields.mjs` fails the build over.
+   */
+  MoneyInput,
+  NumberInput,
+  PhoneInput,
+  PHONE_DIGITS,
+  onlyAmount,
+  onlyPhone,
+  Radio,
+  SearchField,
+  Select,
+} from './controls';
+export type {
+  ButtonProps,
+  InputProps,
+  MoneyInputProps,
+  PhoneInputProps,
+  SelectProps,
+} from './controls';
 
 export { ConfirmDialog, Modal, ToastProvider, useToast } from './overlays';
 export type { ToastTone } from './overlays';
@@ -38,6 +70,7 @@ export {
   Card,
   DateRangePicker,
   EmptyState,
+  InfoTip,
   Locked,
   Money,
   Numeric,

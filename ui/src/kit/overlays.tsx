@@ -30,11 +30,25 @@ import {
 } from 'react';
 
 import { Button } from './controls';
+import { InfoTip } from './display';
 import { Icon } from './Icon';
 
 export interface ModalProps {
   open: boolean;
   title: string;
+  /**
+   * What this dialog is for, as something you can **ask** for.
+   *
+   * An `InfoTip` beside the title, never a paragraph above the fields. Same
+   * change and same reason as `SectionHeader` and `Panel` — the owner,
+   * 2026-08-22: *"it makes the app look cluttered and un professional… make it
+   * a kind of popup text, when hovered."*
+   *
+   * A dialog's title IS its heading, so this is where a dialog's explanation
+   * belongs. Every one that used to open with a sentence of prose now opens
+   * with the field somebody came to fill in.
+   */
+  note?: ReactNode;
   onClose: () => void;
   children?: ReactNode;
   actions?: ReactNode;
@@ -44,6 +58,7 @@ export interface ModalProps {
 export function Modal({
   open,
   title,
+  note,
   onClose,
   children,
   actions,
@@ -110,7 +125,10 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
       >
-        <h2 className="mb-modal__title">{title}</h2>
+        <div className="mb-modal__head">
+          <h2 className="mb-modal__title">{title}</h2>
+          {note ? <InfoTip label={`About ${title}`}>{note}</InfoTip> : null}
+        </div>
         <div className="mb-modal__body">{children}</div>
         {actions ? <div className="mb-modal__actions">{actions}</div> : null}
       </div>

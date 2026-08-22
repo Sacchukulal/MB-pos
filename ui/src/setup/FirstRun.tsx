@@ -29,7 +29,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Checkbox, Icon, Input, Notice, Select } from '../kit';
+import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput, Select } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
@@ -240,7 +240,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     }
     setBusy(true);
     setProblem('');
-    const id = personId === '' ? `staff_${Date.now().toString(36)}` : personId;
+    const id = personId === '' ? freshId('staff') : personId;
     setPersonId(id);
     call('save_staff_member', {
       staff: {
@@ -275,7 +275,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     setProblem('');
     call('save_menu_item', {
       edit: {
-        id: `itm_${Date.now().toString(36)}`,
+        id: freshId('itm'),
         name: itemName.trim(),
         categoryId: null,
         price: itemPrice.trim(),
@@ -450,11 +450,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 placeholder="14 Kamaraj Street, Chennai"
                 onChange={(e) => setAddress(e.target.value)}
               />
-              <Input
+              <PhoneInput
                 label="Phone"
                 value={phone}
-                placeholder="98400 11223"
-                onChange={(e) => setPhone(e.target.value)}
+                placeholder="9840011223"
+                onChange={setPhone}
               />
               <Input
                 label="GSTIN (leave blank if you do not have one)"
@@ -584,13 +584,12 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                     ?.focus();
                 }}
               />
-              <Input
+              <MoneyInput
                 label="Price"
                 name="firstrun-price"
                 value={itemPrice}
-                inputMode="decimal"
                 placeholder="80"
-                onChange={(e) => setItemPrice(e.target.value)}
+                onChange={setItemPrice}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') addItem();
                 }}

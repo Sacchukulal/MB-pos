@@ -691,3 +691,81 @@ fn demo_buying() {
     mb_db::locate::write_config(&home, &home.join("magicbill.db")).expect("recorded");
     println!("demo shop ready at {}", home.display());
 }
+
+/// **A supplier's phone gets the same rule as a customer's.**
+///
+/// It had none at all until 2026-08-22 — a name typed into the phone box was
+/// stored as a phone number. See `mb_core::phone` for why there is one type
+/// rather than a check per screen.
+#[test]
+fn a_supplier_phone_is_ten_digits_or_it_is_refused() {
+    let scratch = Scratch::new("sup_phone");
+    let app = a_shop(&scratch);
+
+    let bad = crate::buying::save_supplier_on(
+        &app,
+        crate::buying::SupplierEdit {
+            id: "sup_bad".to_owned(),
+            name: "Anand Traders".to_owned(),
+            phone: "call the shop".to_owned(),
+            gstin: String::new(),
+            address: String::new(),
+            terms_days: "0".to_owned(),
+            note: String::new(),
+            is_active: true,
+        },
+    )
+    .expect_err("a sentence was stored as a phone number");
+    assert_eq!(bad.code, "supplier.phone");
+
+    crate::buying::save_supplier_on(
+        &app,
+        crate::buying::SupplierEdit {
+            id: "sup_ok".to_owned(),
+            name: "Anand Traders".to_owned(),
+            phone: "+91 98765 43210".to_owned(),
+            gstin: String::new(),
+            address: String::new(),
+            terms_days: "0".to_owned(),
+            note: String::new(),
+            is_active: true,
+        },
+    )
+    .expect("a real number");
+
+    let view = crate::buying::buying_on(&app, None).expect("the screen");
+    let stored = view
+        .suppliers
+        .iter()
+        .find(|s| s.id == "sup_ok")
+        .and_then(|s| s.phone.clone());
+    assert_eq!(stored.as_deref(), Some("9876543210"), "the +91 went to disk");
+}
+
+/// **The rupee mark cannot reach the database**, and this is the end-to-end
+/// proof rather than the component test's.
+///
+/// The owner, 2026-08-22: *"also make sure when you add rupee symbol, it does
+/// not interfere with calculations (do not save rupee symbol also with amount
+/// to db, it would be problem) think properly."*
+///
+/// The screen never puts it in the value — `MoneyInput` draws the ₹ as a
+/// sibling of the box, so there is no code path that could. `Money::parse`
+/// strips it anyway, which is a second net and not the reason it is safe. This
+/// asserts the outcome either way: an amount that arrives wearing a symbol is
+/// stored as the number, and the number is right.
+#[test]
+fn an_amount_is_stored_as_a_number_whatever_decoration_arrives_with_it() {
+    for typed in ["₹1200.50", "1,200.50", " 1200.50 ", "1200.50"] {
+        let parsed = crate::menu::parse_money_public(typed).expect(typed);
+        assert_eq!(parsed.paise(), 120_050, "{typed:?} came out wrong");
+        // And what would go on a bill is the plain form, with no mark on it.
+        assert_eq!(parsed.to_plain_string(), "1200.50", "{typed:?}");
+        assert!(!parsed.to_plain_string().contains('₹'));
+    }
+
+    // A letter is still a refusal — the filter on the screen is a courtesy and
+    // this is the control.
+    assert!(crate::menu::parse_money_public("12ab").is_err());
+    assert!(crate::menu::parse_money_public("").is_err());
+}

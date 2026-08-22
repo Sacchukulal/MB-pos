@@ -274,3 +274,86 @@ fn the_list_and_the_account_never_disagree() {
     assert_eq!(one.balance.paise, account.customer.balance.paise);
     assert_eq!(one.oldest, account.ageing.oldest);
 }
+
+/// **A phone number is ten digits, and the phone box is not a notes field.**
+///
+/// The owner, 2026-08-22, adding a credit customer on a real install: *"i can
+/// enter alphabets, more than 10 numbers, fix it, this app is india only so
+/// only 10 digits needed."*
+///
+/// The screen refuses these now, character by character (`PhoneInput`, and
+/// `check-fields.mjs` proves every phone box in the product is one). This is
+/// the other half: **the command refuses them too**, so the rule survives a
+/// screen somebody writes next year.
+///
+/// The gate here used to be `credit::phone_key(..).is_none()`, which asks a
+/// different question — it takes the LAST ten digits of anything with ten or
+/// more, because it exists to decide whether two spellings of one number are
+/// one customer. As a gate it let thirteen digits through and stored them.
+#[test]
+fn a_customer_phone_is_ten_digits_or_it_is_refused() {
+    let scratch = Scratch::new("cus_phone");
+    let app = a_shop(&scratch);
+
+    for (typed, why) in [
+        ("Ravi Kumar", "a name in the phone box"),
+        ("98765abcde", "letters among the digits"),
+        ("98765", "too few"),
+        ("98765432100123", "too many"),
+    ] {
+        let refused = save_customer_on(&app, edit("cus_bad", "Somebody", typed, ""))
+            .expect_err(why);
+        assert_eq!(refused.code, "credit.phone", "{why}: {typed:?}");
+    }
+
+    // **And what IS stored is the ten digits**, however they were typed — so
+    // the row and `phone_key` agree by construction rather than by luck.
+    for typed in ["+91 98765 43210", "098765-43210", "9876543210"] {
+        let people = save_customer_on(&app, edit("cus_ok", "Rekha", typed, ""))
+            .expect("a real number");
+        let stored = people
+            .iter()
+            .find(|c| c.id == "cus_ok")
+            .and_then(|c| c.phone.clone());
+        assert_eq!(stored.as_deref(), Some("9876543210"), "{typed:?}");
+    }
+}
+
+/// **Two records saved in the same instant are two records.**
+///
+/// This is the bug that made the suite flake twice — `UNIQUE constraint failed:
+/// credit_adjustments.id`, then `purchases.id`. Ids were built out of the
+/// clock, so two rows written in the same thousandth of a second asked for the
+/// same id.
+///
+/// A person on one till almost never manages it. **A computer does**, which is
+/// why the tests found it, and two tills in one shop would — `mb_core::ids`
+/// chose text ids for exactly that reason and then the ids were filled in from
+/// the clock anyway.
+///
+/// Driven through the real command, in a loop, as fast as the machine goes.
+#[test]
+fn a_hundred_adjustments_in_a_row_are_a_hundred_adjustments() {
+    let scratch = Scratch::new("adj_race");
+    let app = a_shop(&scratch);
+    save_customer_on(&app, edit("cus_race", "Rekha", "9876543210", "")).expect("a customer");
+
+    for n in 0..100 {
+        save_adjustment_on(
+            &app,
+            "cus_race".to_owned(),
+            "10".to_owned(),
+            true,
+            format!("opening balance {n}"),
+        )
+        .unwrap_or_else(|e| panic!("adjustment {n} collided: {e:?}"));
+    }
+
+    let account = who_owes_on(&app).expect("the screen");
+    let rekha = account
+        .iter()
+        .find(|c| c.id == "cus_race")
+        .expect("the customer");
+    // A hundred adjustments of ten rupees each, and not one of them lost.
+    assert_eq!(rekha.balance.paise, 100_000, "some adjustments went missing");
+}

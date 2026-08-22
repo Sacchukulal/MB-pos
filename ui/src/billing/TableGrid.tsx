@@ -196,6 +196,9 @@ export function Tile({
   dense = false,
   onOpen,
   onPrintBill,
+  picked,
+  onEdit,
+  onDelete,
 }: {
   table: TableView;
   /** The floor's dense step past `DENSE_ABOVE` tables. Off unless asked for. */
@@ -214,6 +217,20 @@ export function Tile({
    * mark. There is no such caller today.
    */
   onPrintBill?: () => void;
+  /**
+   * **Ticked for a bulk action on the Floor screen** — a different fact from
+   * `table.selected`, and a separate prop on purpose.
+   *
+   * `table.selected` means *"your billing cart is on this table"*. This means
+   * *"I have ticked this one to hide or delete"*. They are two questions, they
+   * belong to two screens, and putting them in one field is the mistake that
+   * cost round 6 (`TableState::Loaded`, which hid `Late`). Never merge them.
+   */
+  picked?: boolean;
+  /** The pencil, on hover. Only where the caller can actually edit. */
+  onEdit?: () => void;
+  /** The bin, on hover. Rust still decides whether it may go. */
+  onDelete?: () => void;
 }) {
   const late = table.state === 'late';
   // Amber and red are two states, not one — see TableState::Waiting. The
@@ -227,6 +244,7 @@ export function Tile({
     'mb-tile',
     `mb-tile--${table.state}`,
     table.selected ? 'mb-tile--selected' : '',
+    picked ? 'mb-tile--picked' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -236,7 +254,11 @@ export function Tile({
         type="button"
         className="mb-tile__face"
         onClick={onOpen}
-        aria-label={describe(table)}
+        aria-label={describe(table, picked)}
+        // Only where pressing it means "tick this", which is the Floor screen.
+        // On the billing grid a press opens the table and this would be a
+        // toggle that never toggles.
+        aria-pressed={picked === undefined ? undefined : picked}
       >
         <span className="mb-tile__label">{table.label}</span>
 
@@ -285,11 +307,16 @@ export function Tile({
         ) : null}
       </button>
 
-      {/* **Only where there is something to print**, and only where the caller
-          offers it. A free table shows no mark at all — a print button on an
-          empty table is a button whose only possible outcome is an error
-          message, and forty of them on the floor is forty invitations to get
-          one. */}
+      {/* **The corner, and only what this caller actually offers.**
+
+          Each of these is a real capability rather than decoration, which is
+          why they are all optional props: the billing grid passes only the
+          printer, so nothing about that screen changed when the Floor screen
+          grew a pencil and a bin.
+
+          A free table shows no printer at all — a print button on an empty
+          table is a button whose only possible outcome is an error message,
+          and forty of them on the floor is forty invitations to get one. */}
       {table.orderId && onPrintBill ? (
         <button
           type="button"
@@ -301,6 +328,37 @@ export function Tile({
           <Icon name="printer" size="sm" />
         </button>
       ) : null}
+
+      {/* **On hover, and on keyboard focus.** The owner, 2026-08-22: *"just add
+          small edit symbol and delete symbol, icon on top of the table squares
+          when hovered."* CSS reveals them; they are in the markup the whole
+          time so a keyboard reaches them and a screen reader lists them. */}
+      {onEdit || onDelete ? (
+        <div className="mb-tile__tools">
+          {onEdit ? (
+            <button
+              type="button"
+              className="mb-tile__tool"
+              onClick={onEdit}
+              title={`Edit table ${table.label}`}
+              aria-label={`Edit table ${table.label}`}
+            >
+              <Icon name="pencil" size="sm" />
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              className="mb-tile__tool mb-tile__tool--danger"
+              onClick={onDelete}
+              title={`Delete table ${table.label}`}
+              aria-label={`Delete table ${table.label}`}
+            >
+              <Icon name="trash" size="sm" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -311,8 +369,10 @@ export function Tile({
  * A tile is a button with a number on it; without this it announces as "6",
  * which tells a blind cashier nothing about whether the table is busy.
  */
-function describe(table: TableView): string {
+function describe(table: TableView, picked?: boolean): string {
   const parts = [`Table ${table.label}`];
+  // First, because it is the thing that changes when you press.
+  if (picked) parts.push('ticked');
   if (table.section) parts.push(table.section);
   switch (table.state) {
     case 'free':

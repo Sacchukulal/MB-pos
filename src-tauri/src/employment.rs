@@ -911,7 +911,7 @@ pub fn clock_in_on(app: &App, terminal_id: Option<String>) -> UiResult<Attendanc
                 repos.employment().save_attendance(
                     OUTLET,
                     &Attendance {
-                        id: format!("att_{}", at.millis()),
+                        id: crate::newid::fresh_at("att", at),
                         staff_id: staff_id.clone(),
                         day,
                         terminal_id: terminal_id.clone(),
@@ -1193,7 +1193,7 @@ pub fn request_leave_on(
 
     let at = now();
     let day = today(at);
-    let id = format!("lvr_{}", at.millis());
+    let id = crate::newid::fresh_at("lvr", at);
 
     app.with_shop(|shop| {
         shop.db
@@ -1316,7 +1316,7 @@ pub fn decide_leave_on(
                     // finds in March and cannot explain.
                     repos.employment().post_leave(
                         OUTLET,
-                        &format!("lvl_{}", at.millis()),
+                        &crate::newid::fresh_at("lvl", at),
                         &request.staff_id,
                         &request.leave_type_id,
                         LeaveKind::Taken,
@@ -1390,7 +1390,7 @@ pub fn adjust_leave_on(
                 let repos = mb_db::Repos::new(tx);
                 repos.employment().post_leave(
                     OUTLET,
-                    &format!("lvl_{}", at.millis()),
+                    &crate::newid::fresh_at("lvl", at),
                     &staff_id,
                     &leave_type_id,
                     if accrual {
@@ -1457,6 +1457,14 @@ pub fn save_employee_on(app: &App, edit: EmployeeEdit) -> UiResult<Vec<EmployeeV
         Some(parse_day(&edit.left_on, "staff.left_on")?)
     };
 
+    // **The number somebody rings when there is an accident**, so it is worth
+    // the same rule as every other phone in the product. It was stored exactly
+    // as typed, which meant it could be a name (owner, 2026-08-22). See
+    // `mb_core::phone`.
+    let emergency_phone = mb_core::Phone::parse_optional(&edit.emergency_phone)
+        .map_err(|e| UiError::new("staff.emergency_phone", e.to_string()))?
+        .map(|p| p.as_str().to_owned());
+
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -1472,7 +1480,7 @@ pub fn save_employee_on(app: &App, edit: EmployeeEdit) -> UiResult<Vec<EmployeeV
                     blank_to_none(&edit.department).as_deref(),
                     blank_to_none(&edit.address).as_deref(),
                     blank_to_none(&edit.emergency_name).as_deref(),
-                    blank_to_none(&edit.emergency_phone).as_deref(),
+                    emergency_phone.as_deref(),
                     blank_to_none(&edit.id_proof).as_deref(),
                     &edit.employment_type,
                     left_on,
@@ -1711,7 +1719,7 @@ pub fn give_advance_on(
 
                 // **The drawer, today.** An advance that only appears at month
                 // end is a drawer that is short all month and nobody knows why.
-                let movement_id = format!("cm_adv_{}", at.millis());
+                let movement_id = crate::newid::fresh_at("cm_adv", at);
                 repos.money().save_cash_movement(
                     OUTLET,
                     &CashMovement {
@@ -1725,7 +1733,7 @@ pub fn give_advance_on(
                     },
                 )?;
 
-                let id = format!("adv_{}", at.millis());
+                let id = crate::newid::fresh_at("adv", at);
                 repos.employment().save_advance(
                     OUTLET,
                     &id,
@@ -2287,7 +2295,7 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
                 let recovered = Money::try_sum(lines.iter().map(|l| l.advance_recovered))
                     .map_err(|e| mb_db::DbError::invariant(format!("payroll: {e}")))?;
 
-                let expense_id = format!("exp_pay_{}", at.millis());
+                let expense_id = crate::newid::fresh_at("exp_pay", at);
                 repos.money().save_expense(
                     OUTLET,
                     &Expense {
@@ -2314,7 +2322,7 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
                 // The compensating drawer row. Only when something was actually
                 // recovered — a run with no advances writes one row, not two.
                 let movement_id = if recovered.is_positive() {
-                    let id = format!("cm_pay_{}", at.millis());
+                    let id = crate::newid::fresh_at("cm_pay", at);
                     repos.money().save_cash_movement(
                         OUTLET,
                         &CashMovement {

@@ -30,9 +30,11 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  freshId,
   Icon,
   Input,
   Modal,
+  MoneyInput,
   Page,
   PageHeader,
   SearchField,
@@ -167,10 +169,18 @@ export function Menu() {
 
   const addItem = () =>
     setEditing({
-      id: `itm_${Date.now()}`,
+      id: freshId('itm'),
       name: '',
       categoryId: chosen,
-      price: { paise: 0n, text: '0.00' },
+      // **Empty, not "0.00"** — the owner, 2026-08-22: *"in menu item adding,
+      // there is 0.00, but in other places empty. make it look same, no need
+      // for 0.00, just keep it empty."*
+      //
+      // A price nobody has typed is not zero rupees, it is nothing yet, and a
+      // field that opens with a number in it is a field somebody has to clear
+      // before they can type. Every other new-row seed in the product already
+      // used `''` (see `Composition`); this was the one that did not.
+      price: { paise: 0n, text: '' },
       taxClassId: classes[0]?.id ?? null,
       rate: '',
       hsn: null,
@@ -543,11 +553,11 @@ function EditItem({
   return (
     <Modal open title={row.name === '' ? 'Add an item' : row.name} onClose={onClose} wide>
       <Input label="Name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
-      <Input
+      <MoneyInput
         label="Price"
         hint="What the customer pays, before tax is added — unless the class says tax is included."
         value={price}
-        onChange={(e) => setPrice(e.target.value)}
+        onChange={setPrice}
       />
       {/* **The category, and a way to MAKE one** — the owner, 2026-08-17:
           *"there is no catogory selection option while menu adding, and there
@@ -610,11 +620,11 @@ function EditItem({
         onChange={(e) => setPrepMinutes(e.target.value)}
       />
       {row.cost !== null || row.margin !== null || cost !== '' ? (
-        <Input
+        <MoneyInput
           label="What it costs you"
           hint="Only you see this. It is what makes a margin report possible."
           value={cost}
-          onChange={(e) => setCost(e.target.value)}
+          onChange={setCost}
         />
       ) : null}
       <Checkbox
@@ -677,7 +687,7 @@ function AddCategory({
       // The id is ours to make and never shown — the same shape `Groups` uses,
       // because `save_menu_category` upserts on it and a fresh one is what
       // makes this an add rather than a rename of whatever was there.
-      const id = `cat_${Date.now().toString(36)}`;
+      const id = freshId('cat');
       onChanged(await call('save_menu_category', { id, name: wanted, isActive: true }));
       onChoose(id);
       setName('');

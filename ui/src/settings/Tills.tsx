@@ -203,13 +203,17 @@ export function Tills() {
 
       {view.mayManage ? (
         <Card>
-          <h3 className="mb-tills__title">Add this computer to a shop</h3>
-          <p className="mb-tills__note">
-            Do this on the NEW till, not on the main one. On the main till open
-            Settings, Phones, and press "Add a phone" — it shows the address, the
-            security code and a short code to type here. Somebody at the main
-            till has to press Allow.
-          </p>
+          <SectionHeader
+            title="Add this computer to a shop"
+            note={
+              <>
+                Do this on the NEW till, not on the main one. On the main till
+                open Settings, Phones, and press &ldquo;Add a phone&rdquo; — it
+                shows the address, the security code and a short code to type
+                here. Somebody at the main till has to press Allow.
+              </>
+            }
+          />
           <div className="mb-row--end">
             <Button variant="primary" onClick={() => setJoining(NOTHING_TYPED)}>
               Join a shop

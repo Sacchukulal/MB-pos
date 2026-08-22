@@ -632,7 +632,7 @@ fn open_order(
     }
 
     let mut draft = mb_core::DraftOrder::new(
-        mb_core::OrderId::new(format!("ord_{}", mb_auth::random_token(12))),
+        mb_core::OrderId::new(crate::newid::fresh_at("ord", at)),
         day,
         at,
         order_type,

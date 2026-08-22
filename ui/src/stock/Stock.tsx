@@ -33,17 +33,19 @@ import {
   Card,
   Checkbox,
   EmptyState,
+  freshId,
   Icon,
   Input,
   Locked,
   Modal,
+  MoneyInput,
   Page,
   PageHeader,
   SearchField,
   Select,
   Table,
-  Toolbar,
   Tabs,
+  Toolbar,
   useToast,
   type Column,
 } from '../kit';
@@ -583,7 +585,7 @@ function MaterialForm({
   const save = () => {
     call('save_material', {
       edit: {
-        id: m?.id ?? `mat_${Date.now().toString(36)}`,
+        id: m?.id ?? freshId('mat'),
         name,
         dimension,
         category,
@@ -774,10 +776,10 @@ function MoveForm({
           />
         </div>
         {buying ? (
-          <Input
+          <MoneyInput
             label={`Price for one ${unit}`}
             value={cost}
-            onChange={(e) => setCost(e.target.value)}
+            onChange={setCost}
             hint="What you paid. The material's cost is the average of what actually came in."
           />
         ) : null}

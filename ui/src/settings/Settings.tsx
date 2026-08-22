@@ -29,7 +29,9 @@ import {
   EmptyState,
   Input,
   Modal,
+  MoneyInput,
   NumberInput,
+  PhoneInput,
   SaveBar,
   SearchField,
   Select,
@@ -892,17 +894,32 @@ function Field({
             }
             value={value}
             disabled={disabled}
-            onChange={(event) => onChange(event.currentTarget.value)}
+            /* A count, so digits and nothing else — `Kind::Int` has no room
+               for a dot and less for a letter. */
+            onChange={(event) => onChange(event.currentTarget.value.replace(/[^0-9-]/g, ''))}
           />
         );
       case 'amount':
         return (
-          <NumberInput
+          <MoneyInput
             label={setting.label}
             hint={hint}
             value={value}
             disabled={disabled}
-            onChange={(event) => onChange(event.currentTarget.value)}
+            onChange={onChange}
+          />
+        );
+      /* **The shop's own number, and it is a phone like every other.** It fell
+         into the text box below until 2026-08-22, which is why a name could be
+         typed into it — `Kind::Text { shape: Phone }` says "phone" now. */
+      case 'phone':
+        return (
+          <PhoneInput
+            label={setting.label}
+            hint={hint}
+            value={value}
+            disabled={disabled}
+            onChange={onChange}
           />
         );
       default:

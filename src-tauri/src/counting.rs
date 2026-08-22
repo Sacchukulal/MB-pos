@@ -200,7 +200,7 @@ pub fn open_stock_count_on(app: &App, location: String) -> UiResult<StockCountVi
     } else {
         location.trim().to_owned()
     };
-    let id = format!("cnt_{}", at.millis());
+    let id = crate::newid::fresh_at("cnt", at);
 
     app.with_shop(|shop| {
         shop.db

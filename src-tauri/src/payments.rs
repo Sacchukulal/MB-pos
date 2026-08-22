@@ -182,7 +182,7 @@ pub fn ask_about(
             .transaction(|tx| {
                 mb_db::Repos::new(tx).payments().record_attempt(
                     OUTLET,
-                    &format!("try_{}", at.millis()),
+                    &crate::newid::fresh_at("try", at),
                     order_id,
                     provider.name(),
                     &tag,
