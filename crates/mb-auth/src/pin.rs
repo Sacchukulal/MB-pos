@@ -16,11 +16,13 @@
 //! [`PARAMS`] is the OWASP minimum for Argon2id (19 MiB, t = 2, p = 1). Not
 //! more, because of the 4 GB; not less, because less is not a defence.
 //!
-//! # Four digits
+//! # Four digits, and exactly four
 //!
-//! See [`MIN_DIGITS`]. The offline attack is answered by digits × cost, and
+//! See [`PIN_DIGITS`]. The offline attack is answered by digits × cost, and
 //! four digits at 19 MiB per guess is still a wall; the counter attack is
-//! answered by the lockout, not by length.
+//! answered by the lockout, not by length. That the length is *exact* is a
+//! separate decision from the number itself, and it is the one the pad on the
+//! lock screen is built out of.
 //!
 //! # The plaintext exists in exactly two function arguments
 //!
@@ -35,27 +37,39 @@ use argon2::{Algorithm, Argon2, Params, Version};
 
 use crate::error::AuthError;
 
-/// **A PIN is four digits** — the owner's instruction of 2026-08-17:
-/// *"i want only 4 digit pin, not 8."*
+/// **A PIN is four digits. Exactly four — not four to eight.**
 ///
-/// This was six to eight, taken from BACKEND-D1, whose threat model was a
-/// public internet endpoint behind a deliberately public restaurant code. That
-/// is not the threat here: this is a person standing at a counter, in front of
-/// a screen that locks itself, with a lockout after a handful of wrong tries
-/// — and it is the same four digits they already use at an ATM. Two extra
-/// keypresses twelve times a day was argued to be free; a cashier who cannot
-/// remember their PIN writes it on the till, which costs everything.
+/// The owner's instruction of 2026-08-22: *"make sure login pin is only 4
+/// numbers not more … not even for this test laptop login or anything else …
+/// in future any new user in any other restaurant too."*
 ///
-/// # Why the maximum is still eight
+/// # Why there is one number here and not two
 ///
-/// **Nobody gets locked out of their own shop by an upgrade.** Shops already
-/// running have six-digit PINs on disk; dropping the ceiling to four would
-/// refuse every one of them at the pad and send an owner hunting for a
-/// recovery code they were shown once, months ago. So four is what a *new* PIN
-/// is and what the pad is built for, and a longer one that already exists
-/// keeps working until somebody changes it.
-pub const MIN_DIGITS: usize = 4;
-pub const MAX_DIGITS: usize = 8;
+/// This was `MIN_DIGITS = 4` with `MAX_DIGITS = 8`. The four came from the
+/// owner on 2026-08-17; the eight was left behind from BACKEND-D1, whose
+/// threat model was a public internet endpoint behind a deliberately public
+/// restaurant code. That is not the threat here: this is a person standing at
+/// a counter, in front of a screen that locks itself, with a lockout after a
+/// handful of wrong tries — the same four digits they already use at an ATM.
+///
+/// The **range** was the actual defect, and leaving it in place is what made
+/// "the pad is four digits" a thing the screen only pretended to be. A pad
+/// that accepts four to eight cannot know when a PIN is finished, so it cannot
+/// draw the right number of empty circles, and it cannot refuse the fifth
+/// keypress. Both of those went wrong in front of the owner. One number gives
+/// them back: four circles, and the fifth keypress does nothing.
+///
+/// # What this costs a shop that is already running
+///
+/// A PIN longer than four that is already on disk can no longer be *typed*, so
+/// it can no longer be verified. That is deliberate rather than overlooked:
+/// the way back is the recovery code (see [`crate::recovery`]), which is
+/// exactly the path that exists for a PIN nobody can use, and somebody who
+/// manages staff can set a fresh four-digit PIN for anybody else. Refusing the
+/// long PIN at the door and sending one person to the printed slip is honest.
+/// Quietly keeping a second, longer shape alive is what left eight circles on
+/// a screen the owner had already asked to show four.
+pub const PIN_DIGITS: usize = 4;
 
 /// **The cost decision.** OWASP's Argon2id minimum: 19 MiB, two passes, one
 /// lane. Changing these numbers does not invalidate stored hashes — the
@@ -89,12 +103,12 @@ impl Pin {
                 what: "digits only",
             });
         }
-        if typed.len() < MIN_DIGITS {
+        if typed.len() < PIN_DIGITS {
             return Err(AuthError::BadPin {
                 what: "that is too short",
             });
         }
-        if typed.len() > MAX_DIGITS {
+        if typed.len() > PIN_DIGITS {
             return Err(AuthError::BadPin {
                 what: "that is too long",
             });
@@ -239,61 +253,73 @@ mod tests {
 
     #[test]
     fn a_pin_round_trips() {
-        let pin = Pin::parse("123456").expect("six digits");
+        let pin = Pin::parse("2468").expect("four digits");
         let hash = hash_pin(&pin).expect("hashes");
         assert!(verify_pin(&pin, &hash));
     }
 
     #[test]
     fn the_wrong_pin_is_refused() {
-        let hash = hash_pin(&Pin::parse("123456").expect("valid")).expect("hashes");
-        assert!(!verify_pin(&Pin::parse("123457").expect("valid"), &hash));
+        let hash = hash_pin(&Pin::parse("2468").expect("valid")).expect("hashes");
+        assert!(!verify_pin(&Pin::parse("2469").expect("valid"), &hash));
     }
 
-    /// **Four digits is a PIN**, and this test used to assert the opposite.
+    /// **A PIN is four digits, and every other length is refused.**
     ///
-    /// It was `four_digits_are_refused_with_a_reason`, written for
-    /// BACKEND-D1's six-digit minimum. The owner asked for four on
-    /// 2026-08-17 — *"i want only 4 digit pin, not 8"* — and the reasoning is
-    /// in [`MIN_DIGITS`]: that minimum was carried over from a threat model
-    /// (a public internet endpoint) that this product does not have.
+    /// This test has been rewritten twice, and the rewrites are the history of
+    /// the bug. It began as `four_digits_are_refused_with_a_reason`, for
+    /// BACKEND-D1's six-digit minimum. On 2026-08-17 the owner asked for four
+    /// and it became "four is a PIN and three is not" — which passed happily
+    /// while eight was *also* still a PIN, so nothing here objected when the
+    /// pad let somebody type eight digits in front of the owner.
     ///
-    /// Three is still refused, so the floor is a real floor rather than a
-    /// number nobody checks.
+    /// The lesson is worth more than the test: a rule with a floor and no
+    /// ceiling test is half a rule. Both ends are asserted now.
     #[test]
-    fn four_digits_are_a_pin_and_three_are_not() {
-        assert!(Pin::parse("1234").is_ok(), "four digits is what a PIN is now");
+    fn a_pin_is_four_digits_and_no_other_length() {
+        assert!(Pin::parse("1234").is_ok(), "four digits is what a PIN is");
 
-        let err = Pin::parse("123").expect_err("too short");
         assert_eq!(
-            err,
-            AuthError::BadPin {
+            Pin::parse("123"),
+            Err(AuthError::BadPin {
                 what: "that is too short"
-            }
+            })
         );
+        for too_long in ["12345", "123456", "12345678"] {
+            assert_eq!(
+                Pin::parse(too_long),
+                Err(AuthError::BadPin {
+                    what: "that is too long"
+                }),
+                "{too_long:?} was accepted"
+            );
+        }
     }
 
-    /// **A PIN a shop already has keeps working.** The ceiling stayed at eight
-    /// so that lowering the floor could not lock anybody out of their own
-    /// counter — see [`MIN_DIGITS`].
+    /// **A PIN that is longer than four cannot be verified either**, because
+    /// it cannot be parsed, and parsing is the only door into `verify_pin`.
+    ///
+    /// The ceiling used to be eight so that a shop already running could keep
+    /// signing in with a six-digit PIN. That compromise is what kept the range
+    /// alive; see [`PIN_DIGITS`] for why it was given up and what replaces it
+    /// (the recovery code, and any manager setting a fresh PIN).
     #[test]
-    fn a_longer_pin_that_already_exists_still_verifies() {
-        let hash = hash_pin(&Pin::parse("482913").expect("six digits")).expect("hashes");
-        assert!(verify_pin(&Pin::parse("482913").expect("six digits"), &hash));
+    fn a_longer_pin_that_already_exists_is_now_a_recovery_job() {
+        assert!(Pin::parse("482913").is_err(), "six digits is not a PIN any more");
     }
 
     #[test]
     fn a_pin_is_digits_only() {
-        assert!(Pin::parse("12345a").is_err());
+        assert!(Pin::parse("12a4").is_err());
         assert!(Pin::parse("").is_err());
-        assert!(Pin::parse("123456789").is_err());
+        assert!(Pin::parse("12 4").is_err());
     }
 
     #[test]
     fn the_same_pin_twice_stores_differently() {
-        // Per-person salt. Two staff who both chose 111111 must not have equal
+        // Per-person salt. Two staff who both chose 1111 must not have equal
         // rows, or the table leaks who shares a PIN.
-        let pin = Pin::parse("111111").expect("valid");
+        let pin = Pin::parse("1111").expect("valid");
         let a = hash_pin(&pin).expect("hashes");
         let b = hash_pin(&pin).expect("hashes");
         assert_ne!(a.as_str(), b.as_str());
@@ -304,17 +330,30 @@ mod tests {
     fn a_pin_never_prints_itself() {
         // T2. The plaintext must not be able to reach a log line, a panic
         // message or an audit row through Debug — which is how it would.
-        let pin = Pin::parse("246813").expect("valid");
+        let pin = Pin::parse("2468").expect("valid");
         let printed = format!("{pin:?}");
-        assert!(!printed.contains("246813"), "{printed}");
+        assert!(!printed.contains("2468"), "{printed}");
         assert_eq!(printed, "Pin(******)");
 
         let hash = hash_pin(&pin).expect("hashes");
         let printed = format!("{hash:?}");
-        assert!(!printed.contains("246813"), "{printed}");
+        assert!(!printed.contains("2468"), "{printed}");
         // And the stored form does not contain it either — that is what a hash
         // is, but it is worth one line to say so out loud.
-        assert!(!hash.as_str().contains("246813"));
+        assert!(!hash.as_str().contains("2468"));
+    }
+
+    /// **What the screen actually says when the shape is wrong.**
+    ///
+    /// The sentence lived in `AuthError` and said *"a PIN is 6 to 8 digits"*
+    /// for five days after the rule became four — so somebody who mistyped was
+    /// told, by the program, to type six. Nothing tested the words, only the
+    /// variant. Now something does.
+    #[test]
+    fn the_refusal_says_the_rule_that_is_actually_in_force() {
+        let said = Pin::parse("12345").expect_err("too long").to_string();
+        assert!(said.contains("4 digits"), "{said}");
+        assert!(!said.contains('6') && !said.contains('8'), "{said}");
     }
 
     #[test]
@@ -333,7 +372,7 @@ mod tests {
             );
         }
         let truncated = PinHash("$argon2id$v=19$m=19456,t=2".to_owned());
-        assert!(!verify_pin(&Pin::parse("123456").expect("valid"), &truncated));
+        assert!(!verify_pin(&Pin::parse("1234").expect("valid"), &truncated));
     }
 
     #[test]
@@ -348,7 +387,7 @@ mod tests {
     fn the_stored_form_carries_its_own_parameters() {
         // Which is why raising the cost later does not invalidate a shop's
         // existing PINs.
-        let hash = hash_pin(&Pin::parse("135790").expect("valid")).expect("hashes");
+        let hash = hash_pin(&Pin::parse("1357").expect("valid")).expect("hashes");
         assert!(hash.as_str().starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{}", hash.as_str());
         assert!(PinHash::from_stored(hash.as_str()).is_ok());
     }

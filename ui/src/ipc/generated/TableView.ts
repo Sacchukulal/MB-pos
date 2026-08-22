@@ -35,4 +35,26 @@ kitchenTold: boolean,
  * kitchen believes NOW and its rows are rewritten whenever the order
  * changes, so a timestamp on them would reset when a cashier typed.
  */
-kitchenMinutes: number | null, orderId: string | null, };
+kitchenMinutes: number | null, orderId: string | null, 
+/**
+ * **This is the tile the cashier is looking at** — the cart is on it.
+ *
+ * A flag and not a [`TableState`], and that is the fix rather than a
+ * detail of it. It WAS a state, `TableState::Loaded`, and two things
+ * followed from that which the owner found on 2026-08-22:
+ *
+ * 1. **An empty table could not be selected.** `Loaded` was decided by
+ *    matching the cart's ORDER against the tile's order, and a table with
+ *    nothing typed on it yet has no order — the order is not created until
+ *    the first line. So tapping table 2 opened the cart for table 2 and
+ *    left every tile on the floor looking identical. *"user should know
+ *    which table he selected right?"*
+ * 2. **Selecting a late table hid that it was late.** One field cannot
+ *    hold two facts, so `Loaded` overrode `Late` — and §4 calls the late
+ *    signal *"the single most useful thing a floor view can show"*.
+ *
+ * Being selected is not a condition the table is in; it is a fact about
+ * where the cashier is. So the tile draws the state AND the ring, and a
+ * late table that is selected is visibly both.
+ */
+selected: boolean, };

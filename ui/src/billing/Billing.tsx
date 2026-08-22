@@ -952,29 +952,17 @@ export function Billing() {
 
           {cart ? <Totals bill={cart.bill} /> : null}
 
+          {/* **The payment modes.** Two things about this block were wrong when
+              the owner looked at it on 2026-08-22 — *"the payment mode selection
+              is also not visible, and it also shows some error notification"* —
+              and both come from the same place: the buttons knew nothing about
+              what had already been paid. See `PaymentModes`. */}
           <div className="mb-payment">
-            <div className="mb-payment__modes">
-              {['Cash', 'Card', 'UPI'].map((mode) => (
-                <Button
-                  key={mode}
-                  small
-                  onClick={() => void takePayment(mode)}
-                  disabled={!cart || cart.isEmpty}
-                >
-                  {mode}
-                </Button>
-              ))}
-              {/* P15 made this real. A credit sale happens mid-bill with the
-                  customer standing there, so the picker opens here rather
-                  than sending a cashier to another screen. */}
-              <Button
-                small
-                disabled={!cart || cart.isEmpty}
-                onClick={() => setOnAccount(true)}
-              >
-                Credit
-              </Button>
-            </div>
+            <PaymentModes
+              cart={cart}
+              onTake={(mode) => void takePayment(mode)}
+              onCredit={() => setOnAccount(true)}
+            />
 
             {cart && cart.payments.length > 0 ? (
               <div className="mb-payment__taken">
@@ -1247,5 +1235,112 @@ export function Billing() {
         />
       ) : null}
     </Page>
+  );
+}
+
+/**
+ * **The four ways to pay, and what each of them knows about the bill.**
+ *
+ * The owner, 2026-08-22, looking at a settled bill: *"the payment mode
+ * selection is also not visible, and it also shows some error notification,
+ * what is it?"*
+ *
+ * The notification was **"That payment could not be taken — a payment has to be
+ * more than zero"**, and it was the screen's fault rather than Rust's. Each of
+ * these buttons takes *the balance Rust computed*. Once Cash has covered the
+ * bill that balance is zero, and the buttons carried on offering themselves —
+ * so pressing one sent a zero-rupee payment, which `mb_core::Payment::new`
+ * refuses, correctly and always: a zero-rupee row is noise in every report
+ * downstream. **The button whose only possible outcome is an error is the bug**,
+ * not the refusal. It is the same argument the tile makes about a print mark on
+ * an empty table.
+ *
+ * The other half of the sentence is the answer to it. Nothing on this row ever
+ * said which mode had been used — four identical outlines before the money and
+ * four identical outlines after it — so there was no way to see that the bill
+ * was already paid and therefore no way to guess why the press failed. A mode
+ * that has taken money now says so, and keeps saying so while the bill sits
+ * there.
+ *
+ * # Why "taken" is not just "disabled"
+ *
+ * When the bill is covered every mode is unpressable, so disabling alone would
+ * grey out all four equally and lose the one fact worth keeping: **which one
+ * the customer actually paid with.** That is what a cashier looks at when the
+ * customer asks, and what they need before pressing *Clear payments*.
+ *
+ * # Exported so it can be tested without a counter
+ *
+ * The same reason `Totals` and `Tile` are. What went wrong here is a rule
+ * about a number Rust sends, and a rule like that should be assertable without
+ * standing up a shop, an order and a payment provider first.
+ */
+export function PaymentModes({
+  cart,
+  onTake,
+  onCredit,
+}: {
+  cart: CartView | null;
+  onTake: (mode: string) => void;
+  onCredit: () => void;
+}) {
+  // **Rust's number, compared, never computed** (R8). `check-no-money.mjs`
+  // fails the build on arithmetic here, and this is a comparison.
+  const owing = cart !== null && cart.balance.paise > 0n;
+  const ready = cart !== null && !cart.isEmpty;
+  const taken = new Set(cart?.payments.map((payment) => payment.mode) ?? []);
+
+  const mode = (label: string, press: () => void) => {
+    const used = taken.has(label);
+    return (
+      <Button
+        key={label}
+        small
+        className={used ? 'mb-payment__mode mb-payment__mode--taken' : 'mb-payment__mode'}
+        onClick={press}
+        disabled={!ready || !owing}
+        // Said out loud, because the visual difference is a colour and a tick
+        // and §2 rule 2 does not stop at the tiles.
+        aria-pressed={used}
+        title={
+          used
+            ? `${label} has been taken on this bill`
+            : owing
+              ? `Take the rest of the bill as ${label}`
+              : 'This bill is already paid'
+        }
+      >
+        {label}
+        {/* The form half of the signal (§2 rule 2), and it is the kit's tick
+            rather than a ✓ character — one set, one stroke weight, one optical
+            size. `check-layout.mjs` caught the glyph, which is the lint doing
+            exactly the job the owner asked it to do on 2026-08-17. */}
+        {used ? <Icon name="check" size="sm" /> : null}
+      </Button>
+    );
+  };
+
+  return (
+    <>
+      <div className="mb-payment__modes">
+        {['Cash', 'Card', 'UPI'].map((label) => mode(label, () => onTake(label)))}
+        {/* P15 made this real. A credit sale happens mid-bill with the
+            customer standing there, so the picker opens here rather than
+            sending a cashier to another screen. */}
+        {mode('Credit', onCredit)}
+      </div>
+
+      {/* **Why the buttons are off, in one line.** A row of four dead buttons
+          with no explanation is the version of this that generates the support
+          call the error toast used to. It appears only once there is something
+          to explain — a bill nobody has paid yet says nothing, because nothing
+          is unusual about it. */}
+      {ready && !owing ? (
+        <p className="mb-payment__settled">
+          This bill is paid in full. Press <strong>Complete bill</strong>, or
+          clear the payments to take it a different way.
+        </p>
+      ) : null}
+    </>
   );
 }

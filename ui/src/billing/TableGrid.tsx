@@ -29,7 +29,21 @@
  * §2 rule 2, and it is not decoration — bright rooms, cheap monitors, tired
  * eyes, colour-blind cashiers. Grey-scale the screen and all four states are
  * still distinguishable: free is *dashed with no fill*, occupied is *solid with
- * a stripe*, late *emphasises the timer*, loaded *has a ring*.
+ * a stripe*, waiting and late *emphasise the timer*.
+ *
+ * # Being selected is drawn ON TOP of the state, not instead of it
+ *
+ * "Which table am I on" used to be a fifth state, `loaded`. It could not be
+ * one: a state field holds a single fact, so selecting a late table turned the
+ * late signal off — and an **empty** table could not be selected at all,
+ * because that state was decided by matching the cart's ORDER and a table with
+ * nothing typed on it has no order yet.
+ *
+ * The owner found the second one on 2026-08-22: *"selected table is not
+ * highlighted. user should know which table he selected right?"*
+ *
+ * It is `table.selected` now — a separate flag from Rust, drawn as a ring
+ * around whatever the tile already is. See `TableView::selected`.
  */
 
 import { useMemo } from 'react';
@@ -206,8 +220,18 @@ export function Tile({
   // timer is emphasised for both, because a table somebody should look at and
   // a table somebody must look at are both read off the timer.
   const overdue = late || table.state === 'waiting';
+  // **Two classes, never one.** The state says what the table is doing; the
+  // modifier says the cashier is standing on it. See the note above this
+  // component for what conflating them cost.
+  const classes = [
+    'mb-tile',
+    `mb-tile--${table.state}`,
+    table.selected ? 'mb-tile--selected' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <div className={`mb-tile mb-tile--${table.state}`}>
+    <div className={classes}>
       <button
         type="button"
         className="mb-tile__face"
@@ -303,10 +327,11 @@ function describe(table: TableView): string {
     case 'late':
       parts.push('busy, waiting a long time');
       break;
-    case 'loaded':
-      parts.push('open in the cart');
-      break;
   }
+  // **Said as well as the state, not instead of it** — the same reason the ring
+  // is drawn on top of the colour rather than replacing it. A blind cashier
+  // needs to hear that a table is late AND that it is the one they are on.
+  if (table.selected) parts.push('open in the cart');
   if (table.total) parts.push(table.total.text);
   if (table.minutes !== null) parts.push(formatMinutes(table.minutes));
   return parts.join(', ');

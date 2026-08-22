@@ -52,7 +52,7 @@ fn three(mut f: impl FnMut()) -> Duration {
 
 #[test]
 fn b10_a_pin_is_verified_inside_its_budget() {
-    let pin = Pin::parse("246813").expect("a valid PIN");
+    let pin = Pin::parse("2468").expect("a valid PIN");
     let stored = hash_pin(&pin).expect("hashes");
 
     let verify = three(|| {
@@ -86,8 +86,8 @@ fn b10_a_pin_is_verified_inside_its_budget() {
 /// exists and which PIN is close, and no lockout helps with that.
 #[test]
 fn a_wrong_pin_costs_what_a_right_one_costs() {
-    let right = Pin::parse("246813").expect("valid");
-    let wrong = Pin::parse("111111").expect("valid");
+    let right = Pin::parse("2468").expect("valid");
+    let wrong = Pin::parse("1111").expect("valid");
     let stored = hash_pin(&right).expect("hashes");
 
     let good = three(|| {

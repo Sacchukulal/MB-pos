@@ -30,7 +30,7 @@
 //!
 //! # What it deliberately does NOT try to find
 //!
-//! A four-digit number. A PIN is four to six digits and so is a table count, a
+//! A bare four-digit number. A PIN is four digits, and so is a table count, a
 //! quantity, a port and half the timestamps in the file. A rule that flags
 //! those is a rule somebody switches off. [`Kind::Pin`] fires only on a digit
 //! run that is sitting next to the word, which is what a careless format string
@@ -136,8 +136,13 @@ fn rules() -> &'static Rules {
         // P21's emergency code: four groups of five Crockford base32
         // characters. The alphabet excludes I, L, O and U.
         emergency: build(r"\b[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}\b"),
-        // **Only next to the word.** See the module note: a bare six-digit
-        // number is a quantity as often as it is a PIN.
+        // **Only next to the word.** See the module note: a bare run of
+        // digits is a quantity as often as it is a PIN.
+        //
+        // The run stays 4-to-8 even though `mb_auth::pin::PIN_DIGITS` is now
+        // exactly 4. A scanner is not the rule, it is the net under the rule,
+        // and a shop upgraded from a six-digit build still has six-digit PINs
+        // that could reach a log line on the way out.
         pin: build(r"(?i)\bpins?\b[^0-9\n]{0,12}\b\d{4,8}\b"),
         // An Indian mobile, with or without the country code. The word
         // boundaries are load-bearing: without the leading one, every

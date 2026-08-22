@@ -48,6 +48,7 @@ function tile(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Table
     kitchenTold: true,
     kitchenMinutes: null,
     orderId: null,
+    selected: false,
     ...over,
   };
 }

@@ -243,6 +243,17 @@ export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
 export interface KeypadProps {
   onPress: (key: string) => void;
   disabled?: boolean;
+  /**
+   * Whether the decimal point is one of the keys. Default yes — a money pad
+   * needs it.
+   *
+   * **A PIN pad does not**, and the one on the lock screen was drawing it
+   * anyway. A key that is guaranteed to do nothing is not neutral: it is the
+   * bottom-left corner of a three-by-four grid, exactly where a thumb lands,
+   * and it teaches somebody who presses it that the pad is ignoring them. The
+   * reducer already threw the dot away; this stops offering it.
+   */
+  dot?: boolean;
 }
 
 /**
@@ -252,21 +263,27 @@ export interface KeypadProps {
  * It sends the same keys the keyboard sends, so P10's keyboard engine handles
  * both and there is one state machine rather than two.
  */
-export function Keypad({ onPress, disabled }: KeypadProps) {
-  const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '⌫'];
+export function Keypad({ onPress, disabled, dot = true }: KeypadProps) {
+  const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', dot ? '.' : '', '0', '⌫'];
   return (
     <div className="mb-keypad" role="group" aria-label="Number pad">
-      {keys.map((key) => (
-        <Button
-          key={key}
-          className="mb-keypad__key"
-          disabled={disabled}
-          onClick={() => onPress(key === '⌫' ? 'Backspace' : key)}
-          aria-label={key === '⌫' ? 'Delete' : key}
-        >
-          {key}
-        </Button>
-      ))}
+      {keys.map((key, index) =>
+        key === '' ? (
+          // The hole keeps 0 and ⌫ where fingers already expect them. A grid
+          // that reflows when the dot goes is a grid that moves Delete.
+          <span key={`gap-${index}`} className="mb-keypad__gap" aria-hidden="true" />
+        ) : (
+          <Button
+            key={key}
+            className="mb-keypad__key"
+            disabled={disabled}
+            onClick={() => onPress(key === '⌫' ? 'Backspace' : key)}
+            aria-label={key === '⌫' ? 'Delete' : key}
+          >
+            {key}
+          </Button>
+        ),
+      )}
     </div>
   );
 }

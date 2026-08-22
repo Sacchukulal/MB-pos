@@ -555,3 +555,133 @@ fn there_is_no_bill_to_carry_for_an_order_that_is_not_open() {
         .expect_err("printed an empty bill");
     assert_eq!(empty.code, "bill.empty", "{empty:?}");
 }
+
+/// **The table the cashier is on is marked, even when nothing is on it yet.**
+///
+/// The owner, 2026-08-22, from a real install: *"In billing page, selected
+/// table is not highlighted. user should know which table he selected right?"*
+///
+/// This is the whole bug in one test. "Which tile am I on" was a fifth
+/// `TableState`, `Loaded`, decided by matching the cart's **order id** against
+/// the tile's — and an order does not exist until the first line is typed. So
+/// tapping an empty table opened the cart for it and left every tile on the
+/// floor looking identical. The screen knew; the view it was handed did not.
+///
+/// It is `TableView::selected` now, matched on the **table**, which is set the
+/// moment one is tapped.
+#[test]
+fn an_empty_table_is_marked_the_moment_it_is_opened() {
+    let scratch = Scratch::new("selected_empty");
+    let app = a_shop_with_a_room(&scratch);
+
+    // Nothing is open, so nothing is selected. If this passed on an untouched
+    // floor the test below would prove nothing.
+    let before = crate::ipc::open_orders_on(&app).expect("the floor");
+    assert!(
+        before.iter().all(|tile| !tile.selected),
+        "a floor nobody has touched has a table selected"
+    );
+
+    // Tap table 2 and type nothing at all — the exact case in the screenshot.
+    crate::ipc::open_table_on(&app, "tbl_2".to_owned()).expect("opened");
+    assert!(
+        app.with_cart(|state| Ok(state.order_id.clone())).expect("cart").is_none(),
+        "an empty table must not have an order yet, or this test is not the bug",
+    );
+
+    let after = crate::ipc::open_orders_on(&app).expect("the floor");
+    let selected: Vec<&str> = after
+        .iter()
+        .filter(|tile| tile.selected)
+        .map(|tile| tile.label.as_str())
+        .collect();
+    assert_eq!(selected, ["2"], "the tapped table is the one that is marked");
+
+    // And it is still FREE. Being looked at is not a condition the table is in
+    // — which is the other half of why this was not a state.
+    let two = after.iter().find(|t| t.label == "2").expect("table 2");
+    assert_eq!(two.state, crate::billing::TableState::Free);
+    assert!(two.order_id.is_none());
+}
+
+/// **Selecting a table costs it none of its own signal.**
+///
+/// `TableState::Loaded` overrode `Late`, so opening a late table in the cart
+/// turned off the one thing UI_GUIDELINES §4 calls *"the single most useful
+/// thing a floor view can show… not optional."* Nobody would have found that
+/// from a screenshot; it falls out of the same fix.
+#[test]
+fn a_late_table_that_is_open_in_the_cart_still_looks_late() {
+    let scratch = Scratch::new("selected_late");
+    let app = a_shop_with_a_room(&scratch);
+    // `seat` stamps the order an hour into fixture time, which is the past
+    // against a real clock — comfortably late at any threshold.
+    seat(&app, "ord_late", "tbl_3", &[("itm_dosa", 12_000, 1)], None);
+
+    let before = crate::ipc::open_orders_on(&app).expect("the floor");
+    let three = before.iter().find(|t| t.label == "3").expect("table 3");
+    assert_eq!(three.state, crate::billing::TableState::Late);
+    assert!(!three.selected);
+
+    crate::ipc::open_table_on(&app, "tbl_3".to_owned()).expect("opened");
+
+    let after = crate::ipc::open_orders_on(&app).expect("the floor");
+    let three = after.iter().find(|t| t.label == "3").expect("table 3");
+    assert!(three.selected, "the open table is not marked");
+    assert_eq!(
+        three.state,
+        crate::billing::TableState::Late,
+        "opening a late table hid that it was late",
+    );
+}
+
+/// **One table at a time**, and moving on releases the last one. A floor with
+/// two rings on it is a floor that has lost track of where the cashier is.
+#[test]
+fn only_one_table_is_ever_marked() {
+    let scratch = Scratch::new("selected_one");
+    let app = a_shop_with_a_room(&scratch);
+    seat(&app, "ord_busy", "tbl_4", &[("itm_tea", 2_000, 1)], None);
+
+    for (tapped, label) in [("tbl_1", "1"), ("tbl_4", "4"), ("tbl_2", "2")] {
+        crate::ipc::open_table_on(&app, tapped.to_owned()).expect("opened");
+        let floor = crate::ipc::open_orders_on(&app).expect("the floor");
+        let marked: Vec<&str> = floor
+            .iter()
+            .filter(|tile| tile.selected)
+            .map(|tile| tile.label.as_str())
+            .collect();
+        assert_eq!(marked, [label], "after tapping {tapped}");
+    }
+}
+
+/// **The billing grid and the floor plan agree.** They are two commands
+/// (`open_orders_on` and `floor_on`) reading two different code paths into the
+/// same `floor_view`, and the owner uses both screens for billing — a table
+/// that is ringed on one and not the other is worse than neither.
+#[test]
+fn both_screens_mark_the_same_table() {
+    let scratch = Scratch::new("selected_both");
+    let app = a_shop_with_a_room(&scratch);
+    crate::ipc::open_table_on(&app, "tbl_3".to_owned()).expect("opened");
+
+    let marked = |tiles: &[crate::billing::TableView]| -> Vec<String> {
+        tiles
+            .iter()
+            .filter(|t| t.selected)
+            .map(|t| t.label.clone())
+            .collect()
+    };
+
+    let grid = crate::ipc::open_orders_on(&app).expect("the grid");
+    // `FloorView::tiles` is the same `TableView` the billing grid gets;
+    // `FloorView::tables` is the plan's own row type and has no state on it.
+    let plan = floor_on(&app).expect("the plan");
+
+    assert_eq!(marked(&grid), ["3"]);
+    assert_eq!(
+        marked(&plan.tiles),
+        ["3"],
+        "the floor plan disagrees with the billing grid"
+    );
+}

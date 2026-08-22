@@ -246,6 +246,13 @@
   font-size: var(--text-lg);
 }
 
+/* The hole where the decimal point is on a money pad and is not on a PIN pad.
+   It holds the cell open so 0 and Delete stay in the two places a hand already
+   knows — a grid that reflows is a grid that moves Delete under the thumb. */
+.mb-keypad__gap {
+  min-height: var(--target-min);
+}
+
 /* --- Overlays ----------------------------------------------------------- */
 
 .mb-overlay {

@@ -86,11 +86,11 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
     let _ = crate::ipc::set_staff_pin_on(
         app,
         "staff_owner".to_owned(),
-        Some("483920".to_owned()),
+        Some("4839".to_owned()),
     );
-    let _ = crate::ipc::login_on(app, "staff_owner".to_owned(), "483920".to_owned());
+    let _ = crate::ipc::login_on(app, "staff_owner".to_owned(), "4839".to_owned());
     // And a wrong one, which is the path that logs a failure.
-    let _ = crate::ipc::login_on(app, "staff_owner".to_owned(), "111111".to_owned());
+    let _ = crate::ipc::login_on(app, "staff_owner".to_owned(), "1111".to_owned());
 
     // --- a customer, with a real-looking mobile number ----------------------
     let _ = crate::credit::save_customer_on(

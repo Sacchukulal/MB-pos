@@ -670,6 +670,12 @@ export function Shell() {
       {locked ? (
         <Lock
           people={lock?.people ?? []}
+          // Two lists, because they are two questions. `people` is who can sign
+          // in; `recoverable` is who the recovery code may set a PIN for, and a
+          // manager with no PIN is on the second and not the first. See
+          // `LockState::recoverable` for the lockout that comes of conflating
+          // them.
+          recoverable={lock?.recoverable ?? []}
           canRecover={lock?.canRecover ?? false}
           onSignedIn={reloadLock}
         />

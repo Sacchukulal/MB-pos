@@ -50,6 +50,7 @@ function table(label: string, busy = false): TableView {
     kitchenTold: true,
     kitchenMinutes: null,
     orderId: busy ? `ord_${label}` : null,
+    selected: false,
   };
 }
 

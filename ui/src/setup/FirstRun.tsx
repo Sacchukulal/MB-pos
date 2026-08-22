@@ -31,7 +31,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Button, Checkbox, Icon, Input, Notice, Select } from '../kit';
 import { call, isUiError } from '../ipc/call';
-import { MIN_PIN } from '../auth/keyboard';
+import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
 
 import './firstrun.css';
@@ -220,14 +220,18 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       setProblem('Type your name, so the bills say who took the money.');
       return;
     }
-    // **The same rule Rust holds** — `mb_auth::pin::MIN_DIGITS`/`MAX_DIGITS`.
+    // **The same rule Rust holds** — `mb_auth::pin::PIN_DIGITS`.
+    //
     // The first draft said four here while Rust wanted six, which meant the
     // screen invited a PIN the program then refused. A form that asks for
-    // something impossible is worse than one that asks for nothing. Rust says
-    // four now (owner, 2026-08-17) and so does this — the two move together or
-    // not at all.
-    if (pin.length !== MIN_PIN) {
-      setProblem(`A PIN is ${MIN_PIN} digits.`);
+    // something impossible is worse than one that asks for nothing.
+    //
+    // It is one constant on each side now rather than a pair. This screen was
+    // already right — `length !== 4` — and the lock screen next door was not,
+    // because it read the *minimum* of a range and let a PIN grow past it. Two
+    // numbers is what made "the same rule" a thing you had to check by hand.
+    if (pin.length !== PIN_DIGITS) {
+      setProblem(`A PIN is ${PIN_DIGITS} digits.`);
       return;
     }
     if (pin !== pinAgain) {
@@ -485,8 +489,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 onChange={(e) => setPerson(e.target.value)}
               />
               <Input
-                label={`A PIN, ${MIN_PIN} digits`}
-                maxLength={MIN_PIN}
+                label={`A PIN, ${PIN_DIGITS} digits`}
+                maxLength={PIN_DIGITS}
                 value={pin}
                 type="password"
                 inputMode="numeric"
@@ -494,7 +498,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
               <Input
                 label="The same PIN again"
-                maxLength={MIN_PIN}
+                maxLength={PIN_DIGITS}
                 value={pinAgain}
                 type="password"
                 inputMode="numeric"
@@ -516,9 +520,16 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         {step === 'code' ? (
           <section className="mb-firstrun__body">
             <h1 className="mb-firstrun__title">Write this down</h1>
+            {/* **"and it is printing" is true as of 2026-08-22.** The slip was
+                promised by `mb_auth::recovery` and by the audit log and was
+                never put on a printer — see `ipc::print_the_recovery_slip`. It
+                is said here because this is the screen where somebody decides
+                whether they need a pen. */}
             <p className="mb-firstrun__lede">
               If the PIN is ever forgotten, this code is the only way back into
-              your shop. It is not shown again.
+              your shop. It is not shown again. It is printing on your printer
+              now as well — but write it down, because a first run often has no
+              printer set up yet.
             </p>
 
             <p className="mb-firstrun__code">{recovery}</p>

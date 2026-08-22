@@ -76,7 +76,7 @@ fn seed_masters(db: &Db) {
                 // so a fixture with a fake one would be testing a shop that
                 // cannot exist.
                 pin_hash: Some(
-                    mb_auth::hash_pin(&mb_auth::Pin::parse("123456").expect("a valid PIN"))
+                    mb_auth::hash_pin(&mb_auth::Pin::parse("1234").expect("a valid PIN"))
                         .expect("hashes")
                         .as_str()
                         .to_owned(),

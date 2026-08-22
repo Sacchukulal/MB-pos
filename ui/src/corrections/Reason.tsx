@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { Button, Input, Modal, Radio } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { ReasonView } from '../ipc/generated/ReasonView';
+import { PIN_DIGITS } from '../auth/keyboard';
 
 import './corrections.css';
 
@@ -130,10 +131,16 @@ export function ReasonDialog({
               />
             ))}
           </div>
+          {/* **The same four digits as the lock screen.** This box had no
+              ceiling at all, so a manager approving a void could keep typing
+              past the length of a PIN and only find out from Rust. One rule —
+              `mb_auth::pin::PIN_DIGITS` — and every box that takes a PIN holds
+              to it. */}
           <Input
             label="Their PIN"
             type="password"
             inputMode="numeric"
+            maxLength={PIN_DIGITS}
             value={pin}
             onChange={(event) => setPin(event.target.value.replace(/[^0-9]/g, ''))}
           />

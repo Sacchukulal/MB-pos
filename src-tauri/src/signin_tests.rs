@@ -102,7 +102,7 @@ fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
 
     // 2. The owner adds themselves and gives themselves a PIN.
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    let recovery = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned()))
+    let recovery = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
         .expect("pin set");
     let recovery = recovery.expect("the first PIN issues a recovery code");
     assert_eq!(recovery.len(), 11, "ten characters and a dash: {recovery}");
@@ -116,14 +116,14 @@ fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
     assert!(state.can_recover);
 
     // 4. The wrong PIN is refused, in Rust, in words.
-    let refused = login_on(&app, "staff_owner".to_owned(), "111111".to_owned())
+    let refused = login_on(&app, "staff_owner".to_owned(), "1111".to_owned())
         .expect_err("the wrong PIN was accepted");
     assert_eq!(refused.code, "auth.wrong_pin");
     assert!(lock_state_on(&app).expect("state").signed_in_as.is_none());
 
     // 5. The right one is not.
     let state =
-        login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("the owner signs in");
+        login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner signs in");
     assert_eq!(state.signed_in_as.as_deref(), Some("Sachin"));
     assert_eq!(state.role.as_deref(), Some("Owner"));
     assert!(state.permissions.contains(&"staff.manage".to_owned()));
@@ -139,8 +139,8 @@ fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
     assert!(what.contains(&"New recovery code printed"), "{what:?}");
     assert!(
         history.entries.iter().all(|e| {
-            !e.after.as_deref().unwrap_or_default().contains("246813")
-                && !e.before.as_deref().unwrap_or_default().contains("246813")
+            !e.after.as_deref().unwrap_or_default().contains("2468")
+                && !e.before.as_deref().unwrap_or_default().contains("2468")
         }),
         "T2: the PIN reached the audit trail"
     );
@@ -154,11 +154,11 @@ fn the_lockout_is_real_and_outlives_the_process() {
     {
         let app = a_shop(&scratch);
         hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned()))
+        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
             .expect("pin set");
 
         for attempt in 1..=5 {
-            let refused = login_on(&app, "staff_owner".to_owned(), "111111".to_owned())
+            let refused = login_on(&app, "staff_owner".to_owned(), "1111".to_owned())
                 .expect_err("the wrong PIN was accepted");
             if attempt < 5 {
                 assert_eq!(refused.code, "auth.wrong_pin", "attempt {attempt}");
@@ -167,7 +167,7 @@ fn the_lockout_is_real_and_outlives_the_process() {
 
         // The fifth failure has started the wait, and even the RIGHT PIN is
         // refused now.
-        let refused = login_on(&app, "staff_owner".to_owned(), "246813".to_owned())
+        let refused = login_on(&app, "staff_owner".to_owned(), "2468".to_owned())
             .expect_err("the lockout let somebody straight in");
         assert_eq!(refused.code, "auth.locked_out");
         assert!(refused.message.contains("Try again in"), "{}", refused.message);
@@ -181,7 +181,7 @@ fn the_lockout_is_real_and_outlives_the_process() {
 
     // A new process, the same shop.
     let app = a_shop(&scratch);
-    let refused = login_on(&app, "staff_owner".to_owned(), "246813".to_owned())
+    let refused = login_on(&app, "staff_owner".to_owned(), "2468".to_owned())
         .expect_err("restarting cleared the lockout");
     assert_eq!(refused.code, "auth.locked_out");
 
@@ -189,6 +189,192 @@ fn the_lockout_is_real_and_outlives_the_process() {
     // there typing into a pad that cannot succeed.
     let state = lock_state_on(&app).expect("state");
     assert!(state.people[0].locked_out.is_some());
+}
+
+/// **Four digits, at every door that takes a PIN.**
+///
+/// The owner, 2026-08-22: *"make sure login pin is only 4 numbers not more …
+/// not even for this test laptop login or anything else … (not just for test
+/// laptop login, in future any new user in any other restaurant too)."*
+///
+/// `mb_auth::pin` has the unit tests for the rule itself. This one is about
+/// **reach**, because reach is where it went wrong: the rule was already four
+/// on the way in and eight on the way out, and the screen quietly used the
+/// eight. There are three commands in this product that accept a typed PIN —
+/// sign in, set somebody's PIN, and spend the recovery code — and a rule that
+/// only two of them enforce is not a rule. Every one of them is named here, so
+/// a fourth door added later has an obvious place to be added too.
+#[test]
+fn a_pin_longer_than_four_digits_is_refused_by_every_command_that_takes_one() {
+    let scratch = Scratch::new("pin_length");
+    let app = a_shop(&scratch);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
+
+    // 1. Setting one. Five digits and eight, because eight was the old ceiling
+    //    and is the number that would come back if anybody restored it.
+    for too_long in ["12345", "12345678"] {
+        let refused = set_staff_pin_on(&app, "staff_owner".to_owned(), Some(too_long.to_owned()))
+            .expect_err("a long PIN was accepted");
+        assert_eq!(refused.code, "auth.pin_shape", "{too_long}");
+        // And the sentence is the rule that is actually in force — this said
+        // "6 to 8 digits" for five days after the rule became four.
+        assert!(refused.message.contains("4 digits"), "{}", refused.message);
+    }
+    assert!(
+        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("123".to_owned())).is_err(),
+        "three digits is not a PIN either"
+    );
+
+    let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
+        .expect("four digits is a PIN")
+        .expect("a code");
+
+    // 2. Signing in. A long PIN cannot even be offered for checking, so it
+    //    never reaches Argon2 and never costs a lockout attempt.
+    let refused = login_on(&app, "staff_owner".to_owned(), "246813".to_owned())
+        .expect_err("a long PIN was checked");
+    assert_eq!(refused.code, "auth.pin_shape");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("four digits signs in");
+
+    // 3. The recovery code. This is the door that MUST hold: it is the one
+    //    somebody reaches when they are already locked out, and a long PIN set
+    //    here would be a PIN that can never be typed again afterwards.
+    lock_now_on(&app).expect("locked");
+    let refused = recover_with_code_on(
+        &app,
+        code.clone(),
+        "staff_owner".to_owned(),
+        "135790".to_owned(),
+    )
+    .expect_err("the recovery code set a six-digit PIN");
+    assert_eq!(refused.code, "auth.pin_shape");
+
+    // The refusal must not have spent the code. A shape mistake at the very
+    // last step of the way back in cannot be allowed to burn the slip.
+    let fresh = recover_with_code_on(&app, code, "staff_owner".to_owned(), "1357".to_owned())
+        .expect("four digits, and the code still works");
+    assert_eq!(fresh.len(), 11, "{fresh}");
+    login_on(&app, "staff_owner".to_owned(), "1357".to_owned()).expect("the new PIN works");
+}
+
+/// **The forgotten-PIN screen must be able to reach somebody with no PIN.**
+///
+/// The lock screen's `people` list is *who can sign in*, so it holds only staff
+/// who already have one. The recovery screen was drawing its list from that,
+/// and the two questions are not the same question — which is a way to be shut
+/// out of your own shop permanently:
+///
+/// 1. A shop has an owner and a cashier, both with PINs.
+/// 2. The owner taps **Remove the PIN** on themselves. Perfectly allowed.
+/// 3. The cashier still has one, so the counter still locks.
+/// 4. The owner is not on `people`, so the recovery code — the one thing that
+///    exists for this — has nobody it can be spent on. The shop is now a
+///    restored backup or a support visit.
+///
+/// `LockState::recoverable` is built from the permission instead of from the
+/// pad, so it holds the owner in step 4. It is the same rule
+/// `recover_with_code_on` enforces, which is the point: one rule, sent up, and
+/// no second copy of it in TypeScript to drift.
+#[test]
+fn the_recovery_list_holds_a_manager_who_has_no_pin() {
+    let scratch = Scratch::new("recoverable");
+    let app = a_shop(&scratch);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
+    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
+
+    // The shop's one recovery code, issued with the first manager's PIN. There
+    // is never a second — a new code would silently retire the slip already in
+    // the drawer — so it is caught here and used at the end.
+    let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
+        .expect("pin")
+        .expect("the shop's first recovery code");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("signed in");
+    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
+
+    // Both lists agree while everybody has a PIN.
+    let state = lock_state_on(&app).expect("state");
+    assert_eq!(state.people.len(), 2);
+    assert_eq!(
+        state.recoverable.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["staff_owner"],
+        "a cashier is not somebody the recovery code may touch"
+    );
+
+    // The owner removes their own PIN — step 2 above.
+    set_staff_pin_on(&app, "staff_owner".to_owned(), None).expect("pin removed");
+    let state = lock_state_on(&app).expect("state");
+
+    assert!(
+        !state.nobody_has_a_pin,
+        "the cashier still has one, so this shop still locks"
+    );
+    assert_eq!(
+        state.people.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["staff_cashier"],
+        "the owner cannot sign in, which is right"
+    );
+    assert_eq!(
+        state.recoverable.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["staff_owner"],
+        "and the recovery code has nobody to help — this is the lockout"
+    );
+
+    // And the code really does work on somebody who is on one list and not the
+    // other — the half a screen-only fix would have missed. This is the shop in
+    // step 4, with the owner shut out and the slip in their hand.
+    lock_now_on(&app).expect("locked");
+    recover_with_code_on(&app, code, "staff_owner".to_owned(), "9999".to_owned())
+        .expect("the recovery code set a PIN for a manager who had none");
+    login_on(&app, "staff_owner".to_owned(), "9999".to_owned()).expect("and they are back in");
+}
+
+/// **The recovery code goes on PAPER, both times it is issued.**
+///
+/// This is the same shape of bug as `closing_the_day_with_the_slip_actually_
+/// queues_it`, and it hid for the same reason. `mb_auth::recovery` said the
+/// code was *"shown once, and printed on the shop's own printer"*; the audit
+/// log read back **"New recovery code printed"**; and nothing anywhere put it
+/// on a printer. A shop that pressed *I have written it down* without a pen to
+/// hand had lost its only way back into its own counter, and its own history
+/// said a slip had come out.
+///
+/// The print failure is deliberately swallowed — the PIN and the new code hash
+/// are already committed when it runs, so a printer that is off must not turn a
+/// successful recovery into an error. **That swallow is right and stays. This
+/// is the test that says the thing being swallowed is not happening.**
+#[test]
+fn issuing_a_recovery_code_actually_queues_the_slip() {
+    let scratch = Scratch::new("recovery_slip");
+    let app = a_shop(&scratch);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
+
+    // 1. The shop's first code, issued with the first manager's PIN.
+    let before = app.print_queue_snapshot().len();
+    let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
+        .expect("pin set")
+        .expect("a code");
+
+    let after = app.print_queue_snapshot();
+    assert!(
+        after.len() > before,
+        "a recovery code was issued and no slip reached the queue"
+    );
+    assert!(
+        after.iter().any(|job| job.what == "Recovery code"),
+        "the queue shows what each job IS: {:?}",
+        after.iter().map(|j| j.what.clone()).collect::<Vec<_>>()
+    );
+
+    // 2. And again when the code is SPENT, which is the half that matters more:
+    //    somebody using it is somebody who has already lost the first slip.
+    let before = app.print_queue_snapshot().len();
+    let fresh = recover_with_code_on(&app, code, "staff_owner".to_owned(), "1357".to_owned())
+        .expect("recovered");
+    assert_ne!(fresh.len(), 0);
+    assert!(
+        app.print_queue_snapshot().len() > before,
+        "the code was replaced and the new one was never printed"
+    );
 }
 
 /// **The way back in.** And the shape of it: it needs somebody who manages
@@ -199,7 +385,7 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
     let app = a_shop(&scratch);
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
-    let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned()))
+    let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
         .expect("pin set")
         .expect("a code");
 
@@ -209,7 +395,7 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
         &app,
         code.clone(),
         "staff_waiter".to_owned(),
-        "999999".to_owned(),
+        "9999".to_owned(),
     )
     .expect_err("a waiter was given a PIN by the recovery code");
     assert_eq!(refused.code, "db.failed");
@@ -219,7 +405,7 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
         &app,
         "ABCDE-FGHJK".to_owned(),
         "staff_owner".to_owned(),
-        "999999".to_owned(),
+        "9999".to_owned(),
     )
     .expect_err("the wrong code worked");
     assert_eq!(refused.code, "auth.recovery_wrong");
@@ -229,20 +415,20 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
         &app,
         code.clone(),
         "staff_owner".to_owned(),
-        "999999".to_owned(),
+        "9999".to_owned(),
     )
     .expect("recovered");
     assert_ne!(fresh, code, "the same code came back");
 
     // The new PIN works and the old one does not.
-    assert!(login_on(&app, "staff_owner".to_owned(), "999999".to_owned()).is_ok());
+    assert!(login_on(&app, "staff_owner".to_owned(), "9999".to_owned()).is_ok());
     lock_now_on(&app).expect("locked");
-    assert!(login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).is_err());
+    assert!(login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).is_err());
 
     // And the old code is dead.
     lock_now_on(&app).expect("locked");
     assert!(
-        recover_with_code_on(&app, code, "staff_owner".to_owned(), "555555".to_owned()).is_err(),
+        recover_with_code_on(&app, code, "staff_owner".to_owned(), "5555".to_owned()).is_err(),
         "the used code still works"
     );
 }
@@ -327,18 +513,18 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     let app = a_shop(&scratch);
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned())).expect("pin");
+    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
     // **The first PIN locks the counter**, so the owner signs in with it before
     // setting anybody else's — which is the point of locking there and then,
     // and is the flow a real owner walks.
-    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("the owner proves it");
-    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("135790".to_owned())).expect("pin");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner proves it");
+    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
     lock_now_on(&app).expect("locked");
 
-    login_on(&app, "staff_cashier".to_owned(), "135790".to_owned()).expect("Rekha signs in");
+    login_on(&app, "staff_cashier".to_owned(), "1357".to_owned()).expect("Rekha signs in");
     lock_now_on(&app).expect("locked");
 
-    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("the owner signs in");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner signs in");
     save_staff_member_on(
         &app,
         StaffEdit {
@@ -352,7 +538,7 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     .expect("Rekha leaves");
     lock_now_on(&app).expect("locked");
 
-    let refused = login_on(&app, "staff_cashier".to_owned(), "135790".to_owned())
+    let refused = login_on(&app, "staff_cashier".to_owned(), "1357".to_owned())
         .expect_err("somebody who has left signed in");
     assert_eq!(refused.code, "auth.not_active");
 
@@ -365,7 +551,7 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
             .iter()
             .all(|p| p.id != "staff_cashier")
     );
-    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("the owner signs in");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner signs in");
     assert!(
         list_staff_on(&app)
             .expect("staff")
@@ -385,15 +571,15 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
     let app = a_shop(&scratch);
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned())).expect("pin");
+    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
     // **The first PIN locks the counter**, so the owner signs in with it before
     // setting anybody else's — which is the point of locking there and then,
     // and is the flow a real owner walks.
-    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("the owner proves it");
-    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("135790".to_owned())).expect("pin");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner proves it");
+    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
     lock_now_on(&app).expect("locked");
 
-    login_on(&app, "staff_cashier".to_owned(), "135790".to_owned()).expect("Rekha signs in");
+    login_on(&app, "staff_cashier".to_owned(), "1357".to_owned()).expect("Rekha signs in");
     app.with_cart_mut(|state| {
         state.table = Some("tbl_7".to_owned());
         state.opened_by = Some(mb_core::StaffId::new("staff_cashier"));
@@ -402,7 +588,7 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
     .expect("a table is open");
 
     lock_now_on(&app).expect("locked");
-    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("the owner takes over");
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner takes over");
 
     app.with_cart(|state| {
         assert_eq!(state.table.as_deref(), Some("tbl_7"));
@@ -464,7 +650,7 @@ fn a_pin_needs_a_role_behind_it() {
     )
     .expect("hired with no role");
 
-    let refused = set_staff_pin_on(&app, "staff_nobody".to_owned(), Some("246813".to_owned()))
+    let refused = set_staff_pin_on(&app, "staff_nobody".to_owned(), Some("2468".to_owned()))
         .expect_err("a PIN with no role was allowed");
     assert!(
         refused.detail.unwrap_or_default().contains("role"),
@@ -805,17 +991,17 @@ fn a_big_void_needs_a_second_person() {
     // (b) an approver who may not void. The owner gets a PIN first, because
     // the FIRST PIN in a shop locks the counter (P11 item 9) and everything
     // after it would be refused as `auth.locked`.
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("246813".to_owned()))
+    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
         .expect("a PIN for the owner");
-    login_on(&app, "staff_owner".to_owned(), "246813".to_owned()).expect("signed back in");
-    set_staff_pin_on(&app, "staff_waiter".to_owned(), Some("111111".to_owned()))
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("signed back in");
+    set_staff_pin_on(&app, "staff_waiter".to_owned(), Some("1111".to_owned()))
         .expect("a PIN for Priya");
     let refused = void_bill_on(
         &app,
         target.clone(),
         "Wrong price".to_owned(),
         Some("staff_waiter".to_owned()),
-        Some("111111".to_owned()),
+        Some("1111".to_owned()),
     )
     .expect_err("a waiter waved a void through");
     assert_eq!(refused.code, "void.approver_denied");
@@ -826,7 +1012,7 @@ fn a_big_void_needs_a_second_person() {
         target.clone(),
         "Wrong price".to_owned(),
         Some("staff_owner".to_owned()),
-        Some("999999".to_owned()),
+        Some("9999".to_owned()),
     )
     .expect_err("a wrong PIN approved a void");
     assert_eq!(refused.code, "void.approver_wrong_pin");
@@ -837,7 +1023,7 @@ fn a_big_void_needs_a_second_person() {
         target,
         "Wrong price".to_owned(),
         Some("staff_owner".to_owned()),
-        Some("246813".to_owned()),
+        Some("2468".to_owned()),
     )
     .expect("an approved void was still refused");
 }

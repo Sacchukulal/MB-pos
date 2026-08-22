@@ -108,9 +108,16 @@
 
    The pad drew eight dots with a tick under the sixth, because a PIN was six
    to eight digits and nothing else on screen said when Enter would be
-   accepted. A PIN is four digits now (owner, 2026-08-17), the row is four dots
+   accepted. A PIN is four digits (owner, 2026-08-17), the row is four dots
    long, and "the row is full" says it without a mark — which is what the mark
-   was standing in for all along. */
+   was standing in for all along.
+
+   **And the row is four dots long unconditionally now** (owner, 2026-08-22).
+   It was drawn as `max(4, digits typed)`, which is four dots right up until
+   somebody keeps pressing — and then it grew to eight in front of the owner,
+   because the RULE underneath was still four-to-eight. A row that can grow is
+   a row that cannot mean "full". `mb_auth::pin::PIN_DIGITS` is one number now,
+   and so is this. */
 
 .mb-lock__problem {
   margin: 0;

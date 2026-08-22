@@ -335,6 +335,26 @@ pub struct TableView {
     /// changes, so a timestamp on them would reset when a cashier typed.
     pub kitchen_minutes: Option<u32>,
     pub order_id: Option<String>,
+    /// **This is the tile the cashier is looking at** — the cart is on it.
+    ///
+    /// A flag and not a [`TableState`], and that is the fix rather than a
+    /// detail of it. It WAS a state, `TableState::Loaded`, and two things
+    /// followed from that which the owner found on 2026-08-22:
+    ///
+    /// 1. **An empty table could not be selected.** `Loaded` was decided by
+    ///    matching the cart's ORDER against the tile's order, and a table with
+    ///    nothing typed on it yet has no order — the order is not created until
+    ///    the first line. So tapping table 2 opened the cart for table 2 and
+    ///    left every tile on the floor looking identical. *"user should know
+    ///    which table he selected right?"*
+    /// 2. **Selecting a late table hid that it was late.** One field cannot
+    ///    hold two facts, so `Loaded` overrode `Late` — and §4 calls the late
+    ///    signal *"the single most useful thing a floor view can show"*.
+    ///
+    /// Being selected is not a condition the table is in; it is a fact about
+    /// where the cashier is. So the tile draws the state AND the ring, and a
+    /// late table that is selected is visibly both.
+    pub selected: bool,
 }
 
 /// **State is carried in form as well as colour** (UI_GUIDELINES §2 rule 2).
@@ -358,9 +378,13 @@ pub enum TableState {
     /// §4: *"the single most useful thing a floor view can show, and no
     /// version of Magic Bill has ever had it. It is not optional."*
     Late,
-    /// The order currently in the cart. Border plus a soft ring.
-    Loaded,
 }
+
+// **There was a fifth variant, `Loaded`, and removing it is the fix.** It meant
+// "the order currently in the cart", which is not a condition of the table at
+// all — see [`TableView::selected`] for the two bugs that came of keeping it
+// here. Nothing replaces it in this enum on purpose: a state that can hide
+// `Late` is a state that should not be in the same field as `Late`.
 
 /// A menu item, as the screen offers it. P13 owns the menu properly; this is
 /// what the billing screen needs to put something in a cart.
@@ -541,7 +565,16 @@ fn money_error(e: impl std::fmt::Display) -> UiError {
 /// takes four arguments instead of eight, the same trick [`Seat`] plays one
 /// level down.
 pub struct Room<'a> {
+    /// The saved order the cart is holding, once it has one.
     pub loaded_order: Option<&'a str>,
+    /// **The table the cart is on, order or no order.**
+    ///
+    /// Both, because a cart is on a table from the moment somebody taps it and
+    /// only gets an order once a line is typed — and "which tile am I looking
+    /// at" has to be answerable in the gap between those two. Answering it from
+    /// the order alone is what left an empty selected table looking like every
+    /// other empty table (owner, 2026-08-22). See [`TableView::selected`].
+    pub loaded_table: Option<&'a str>,
     pub now: Timestamp,
     /// **Both thresholds come from settings** (P14, scope 14.2). A dosa counter
     /// turns a table in eight minutes and a fine-dining room in ninety; the one
@@ -562,6 +595,7 @@ pub fn floor_view(
 ) -> Vec<TableView> {
     let Room {
         loaded_order,
+        loaded_table,
         now,
         warn_after,
         late_after,
@@ -583,6 +617,12 @@ pub fn floor_view(
                 .is_some_and(|t| t.as_str() == table.id.as_str())
         });
 
+        // **Decided here, where both halves are in scope**, and nowhere else.
+        // `tile_for` can see the order and `floor_view` can see the table; a
+        // rule that needs both belongs to whichever can see both.
+        let selected = loaded_table == Some(table.id.as_str())
+            || order.is_some_and(|o| loaded_order == Some(o.core().id.as_str()));
+
         out.push(match order {
             Some(order) => tile_for(
                 order,
@@ -590,7 +630,7 @@ pub fn floor_view(
                     label: table.label.clone(),
                     section,
                     seats: table.seats,
-                    loaded_order,
+                    selected,
                     now,
                     warn_after,
                     late_after,
@@ -602,7 +642,11 @@ pub fn floor_view(
                 label: table.label.clone(),
                 section,
                 seats: crate::ipc::count(table.seats),
+                // **A free table is free even while it is being looked at.**
+                // This used to be the whole of the bug: there was nowhere to
+                // put "and the cashier is on it", so the tile said nothing.
                 state: TableState::Free,
+                selected,
                 total: None,
                 minutes: None,
                 kitchen_told: false,
@@ -620,9 +664,12 @@ pub fn floor_view(
         // table is labelled by its order type. P10 shows the token once an
         // order has been opened and numbered.
         let label = order_type_label(order.core().order_type).to_owned();
+        // A parcel or self-service order has no table, so the order is the
+        // only thing there is to match on.
+        let selected = loaded_order == Some(order.core().id.as_str());
         out.push(tile_for(
             order,
-            Seat { label, section: None, seats: 0, loaded_order, now, warn_after, late_after, config },
+            Seat { label, section: None, seats: 0, selected, now, warn_after, late_after, config },
         ));
     }
 
@@ -636,7 +683,10 @@ struct Seat<'a> {
     label: String,
     section: Option<String>,
     seats: i64,
-    loaded_order: Option<&'a str>,
+    /// Already decided by [`floor_view`] — see [`TableView::selected`]. It
+    /// arrives answered rather than as the two ids to compare, because the
+    /// comparison needs the table and this struct describes one seat.
+    selected: bool,
     now: Timestamp,
     warn_after: i64,
     late_after: i64,
@@ -644,22 +694,23 @@ struct Seat<'a> {
 }
 
 fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
-    let Seat { label, section, seats, loaded_order, now, warn_after, late_after, config } = seat;
+    let Seat { label, section, seats, selected, now, warn_after, late_after, config } = seat;
     let core = order.core();
     let id = core.id.as_str().to_owned();
     let minutes = (now.millis() - core.created_at.millis()).div_euclid(60_000).max(0);
-    let loaded = loaded_order == Some(id.as_str());
 
     TableView {
-        state: if loaded {
-            TableState::Loaded
-        } else if minutes >= late_after {
+        // **Being selected no longer costs the table its state.** This match
+        // began with `if loaded { Loaded }`, so opening a late table in the
+        // cart turned off the one signal §4 calls not optional.
+        state: if minutes >= late_after {
             TableState::Late
         } else if minutes >= warn_after {
             TableState::Waiting
         } else {
             TableState::Occupied
         },
+        selected,
         total: running_total(order, config),
         minutes: Some(crate::ipc::count(minutes)),
                 // The delta ledger (crown jewel 2) answers "is there anything the

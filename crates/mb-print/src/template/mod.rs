@@ -13,11 +13,15 @@ pub mod delivery;
 pub mod kitchen;
 /// P30. The payslip — scope 9.14's third part, which P28 named as not done.
 pub mod payslip;
+/// The shop's recovery code, on paper. Round 5, 2026-08-22 — it was always
+/// meant to print and never did.
+pub mod recovery;
 
 pub use bill::{BillContext, BillCustomer, Copy, EInvoice, Store, bill_document};
 pub use delivery::{DeliveryContext, SlipLine as DeliverySlipLine, delivery_document};
 pub use payslip::{PaySlipLine, PayslipContext, payslip_document};
 pub use dayclose::{CountedNote, DayCloseContext, SlipLine, day_close_document};
+pub use recovery::{RecoveryContext, recovery_document};
 pub use kitchen::{
     KitchenContext, LabelContext, TicketKind, TicketLine, kitchen_document, label_document,
 };

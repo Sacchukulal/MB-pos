@@ -336,3 +336,49 @@ somebody says the money arrived.
       read at a gate in the dark, and either **COLLECT ₹640** or **PAID** — a
       rider who cannot tell those apart asks for money that has already been
       paid.
+
+---
+
+## 11. The recovery code — RUN, and what is left is the paper
+
+The sign-in screen was rebuilt on **2026-08-22** after you found three things
+wrong with it on a real install: the pad took eight digits instead of four,
+*Somebody else* rubbed out one digit per press instead of leaving, and the
+forgotten-PIN flow could be started and never finished.
+
+All three are fixed. The forgotten-PIN flow now walks four steps — the code,
+who it is for, the new PIN on a keypad, and the same PIN again — and the whole
+of it was driven in the real window on a **fresh shop**, with a real recovery
+code: the code was accepted, the new PIN was typed on the keypad, it signed in
+afterwards, and the old PIN was refused. So the software half is checked.
+
+**One thing was also found and fixed while going through this, and it is the
+part only you can now confirm.** The recovery code was supposed to print. The
+program said so on the screen, `mb_auth::recovery` said so in the code, and
+your own history says *"New recovery code printed"* — and nothing had ever put
+it on a printer. If you had closed that dialog without a pen to hand, the code
+was gone. It queues a slip now, both when the code is first issued and when it
+is spent, and the queue was checked. **I cannot see the paper.**
+
+- [ ] **Set a PIN for somebody who manages staff on a shop that has no recovery
+      code yet** — or watch it on your next fresh install — and check a slip
+      comes out of the printer.
+- [ ] Read the slip. The code should be the **biggest thing on it**, in two
+      groups of five, with the shop's name and the date. It must **not** name
+      the person whose PIN it set.
+- [ ] Check both halves of the code are inside the paper edges on your 80 mm
+      roll.
+
+### Your own shop's code — I did not touch it
+
+Using a code retires it and issues a new one, so testing the flow with your
+real slip would have silently invalidated the paper in your drawer. On your
+shop I ran a deliberately wrong code instead, and the program answered
+correctly: *"That is not this shop's recovery code."*
+
+- [ ] Find the recovery slip that printed when this shop was set up. If you
+      cannot find it, **say so** rather than testing it — without a code the
+      only way back into a shop is a restored backup, and there is no hurry to
+      discover that on a Saturday. A manager can always set a fresh PIN for
+      anybody else from the Staff screen; the code is only for when nobody can
+      get in at all.

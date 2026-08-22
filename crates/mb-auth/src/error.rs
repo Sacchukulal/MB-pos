@@ -6,7 +6,12 @@ use crate::permission::Permission;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthError {
     /// The PIN rule, in the words the person typing it needs.
-    #[error("a PIN is 6 to 8 digits — {what}")]
+    ///
+    /// **The number here is the one the pad is built out of**, so it is
+    /// interpolated rather than typed. It said "6 to 8" for five days after
+    /// the rule became four, and told people who mistyped to add two digits
+    /// the program would then refuse. See [`crate::pin::PIN_DIGITS`].
+    #[error("a PIN is {} digits — {what}", crate::pin::PIN_DIGITS)]
     BadPin { what: &'static str },
 
     /// BACKEND-G7's fix, as an error rather than a silent denial.

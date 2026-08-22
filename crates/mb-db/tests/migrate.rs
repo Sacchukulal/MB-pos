@@ -20,6 +20,18 @@ use common::Scratch;
 use mb_db::{DbError, MIGRATIONS, checksum, migrate};
 use rusqlite::Connection;
 
+/// **Every version this build ships, in order.**
+///
+/// These assertions used to be `vec![1]` written out by hand, which is a test
+/// that fails on the day somebody adds a migration — and adding a migration is
+/// the one thing this file exists to make safe. Three of them broke when
+/// `0002_recovery_slip` arrived, all of them saying nothing worse than "there
+/// are two now". Derived from `MIGRATIONS` instead, so the next one costs
+/// nothing here and a genuine gap or reorder still fails loudly below.
+fn every_version() -> Vec<u32> {
+    MIGRATIONS.iter().map(|m| m.version).collect()
+}
+
 /// T1. A fresh database runs every migration, in order, and records one row
 /// each — not a high-water mark.
 #[test]
@@ -28,7 +40,7 @@ fn t1_fresh_database_runs_every_migration_and_records_each_one() {
     let mut conn = Connection::open(scratch.db_path()).expect("open");
 
     let applied = migrate::apply_all(&mut conn).expect("migrations run");
-    assert_eq!(applied.ran, vec![1]);
+    assert_eq!(applied.ran, every_version());
     assert!(applied.already.is_empty());
 
     let rows: Vec<(i64, String, String, i64)> = conn
@@ -65,7 +77,7 @@ fn t2_running_migrations_twice_is_a_no_op() {
 
     let applied = migrate::apply_all(&mut conn).expect("second run");
     assert!(applied.ran.is_empty(), "nothing should have run again");
-    assert_eq!(applied.already, vec![1]);
+    assert_eq!(applied.already, every_version());
 
     assert_eq!(before, ledger(&conn), "the ledger must be untouched");
 }
@@ -135,7 +147,8 @@ fn t20_a_failed_migration_leaves_the_previous_version() {
     assert!(!tables.contains(&"half_b".to_owned()), "half_b must have rolled back");
 
     let versions: Vec<i64> = ledger(&conn).into_iter().map(|(v, _)| v).collect();
-    assert_eq!(versions, vec![1], "the ledger must not have gained a row");
+    let expected: Vec<i64> = every_version().into_iter().map(i64::from).collect();
+    assert_eq!(versions, expected, "the ledger must not have gained a row");
 }
 
 /// T21. A file written by a newer build is refused rather than used.

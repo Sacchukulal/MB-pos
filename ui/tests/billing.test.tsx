@@ -10,9 +10,11 @@
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { PaymentModes } from '../src/billing/Billing';
 import { DENSE_ABOVE, TableGrid } from '../src/billing/TableGrid';
 import { Totals } from '../src/billing/Totals';
 import type { BillView } from '../src/ipc/generated/BillView';
+import type { CartView } from '../src/ipc/generated/CartView';
 import type { MoneyView } from '../src/ipc/generated/MoneyView';
 import type { TableView } from '../src/ipc/generated/TableView';
 
@@ -32,6 +34,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     kitchenTold: true,
     kitchenMinutes: null,
     orderId: null,
+    selected: false,
     ...over,
   };
 }
@@ -39,15 +42,15 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
 describe('the table grid (scope 1.4)', () => {
   it('tells all four states apart WITHOUT colour', () => {
     // §2 rule 2: "colour is never the only signal." The class carries the
-    // form — dashed vs solid, stripe, ring — and a grey-scale reading of the
-    // screen must still distinguish them.
+    // form — dashed vs solid, stripe — and a grey-scale reading of the screen
+    // must still distinguish them.
     const { container } = render(
       <TableGrid
         tables={[
           table({ id: '1', label: '1', state: 'free' }),
           table({ id: '2', label: '2', state: 'occupied', total: money(64_600, '646.00') }),
-          table({ id: '3', label: '3', state: 'late', minutes: 47 }),
-          table({ id: '4', label: '4', state: 'loaded' }),
+          table({ id: '3', label: '3', state: 'waiting', minutes: 20 }),
+          table({ id: '4', label: '4', state: 'late', minutes: 47 }),
         ]}
         filter=""
         onOpen={vi.fn()}
@@ -55,12 +58,51 @@ describe('the table grid (scope 1.4)', () => {
       />,
     );
 
-    for (const state of ['free', 'occupied', 'late', 'loaded']) {
+    for (const state of ['free', 'occupied', 'waiting', 'late']) {
       expect(
         container.querySelector(`.mb-tile--${state}`),
         `the ${state} state has no form of its own`,
       ).toBeTruthy();
     }
+  });
+
+  /**
+   * **The table you are on is marked, and being on it costs nothing else.**
+   *
+   * The owner, 2026-08-22: *"In billing page, selected table is not
+   * highlighted. user should know which table he selected right?"*
+   *
+   * There used to be a fifth STATE for this, `loaded`, and the test above
+   * asserted it happily — while the screen could not mark an empty table at
+   * all, because that state was decided by matching the cart's order and an
+   * empty table has no order. A state is one fact; this is two.
+   */
+  it('marks the selected table WITHOUT taking its state away', () => {
+    const { container } = render(
+      <TableGrid
+        tables={[
+          // The case the owner hit: nothing typed on it yet.
+          table({ id: '1', label: '1', state: 'free', selected: true }),
+          // And the case that would have gone wrong the other way — a late
+          // table must not stop looking late because somebody opened it. §4
+          // calls the late signal "not optional".
+          table({ id: '2', label: '2', state: 'late', minutes: 47, selected: true }),
+          table({ id: '3', label: '3', state: 'free' }),
+        ]}
+        filter=""
+        onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('.mb-tile--selected')).toHaveLength(2);
+    expect(container.querySelector('.mb-tile--free.mb-tile--selected')).toBeTruthy();
+    expect(
+      container.querySelector('.mb-tile--late.mb-tile--selected'),
+      'a selected table stopped looking late',
+    ).toBeTruthy();
+    // And an unselected one is left alone.
+    expect(container.querySelectorAll('.mb-tile--free')).toHaveLength(2);
   });
 
   it('names every tile for a screen reader, not just "6"', () => {
@@ -266,3 +308,192 @@ describe('an empty floor (P30.5)', () => {
     expect(screen.getByText('No table matches that')).toBeTruthy();
   });
 });
+
+/**
+ * **The payment modes** — the owner's second point, 2026-08-22.
+ *
+ * > *"the payment mode selection is also not visible, and it also shows some
+ * > error notification, what is it? check properly."*
+ *
+ * The notification was **"That payment could not be taken — a payment has to be
+ * more than zero"**. Each mode button takes *the balance Rust computed*; once
+ * the bill was covered that balance was zero, and the buttons went on offering
+ * themselves. Rust's refusal is right and stays — a zero-rupee payment row is
+ * noise in every report downstream. The button that could only ever produce it
+ * was the bug.
+ *
+ * Nothing here reaches Rust. That is the point: the rule is about a number Rust
+ * already sent, and it is now assertable in four lines.
+ */
+describe('the payment modes (2026-08-22)', () => {
+  function cart(over: Partial<CartView> = {}): CartView {
+    return {
+      lines: [],
+      bill: emptyBill,
+      orderType: 'dine_in',
+      table: 'tbl_3',
+      payments: [],
+      paid: money(0, '0.00'),
+      balance: money(10_500, '105.00'),
+      change: money(0, '0.00'),
+      isEmpty: false,
+      kitchenUpToDate: true,
+      kitchenTold: false,
+      covers: null,
+      orderId: 'ord_1',
+      fromTheFloor: [],
+      lengthSays: '',
+      ...over,
+    };
+  }
+
+  /** One mode button by its label. `getByRole` throws if it is not there. */
+  const mode = (label: string) =>
+    screen.getByRole('button', { name: new RegExp(`^${label}`) });
+  const modes = () => ['Cash', 'Card', 'UPI', 'Credit'].map(mode);
+
+  it('offers every mode while there is something left to pay', () => {
+    render(<PaymentModes cart={cart()} onTake={vi.fn()} onCredit={vi.fn()} />);
+    for (const button of modes()) expect(button).toBeEnabled();
+  });
+
+  /** **This is the error the owner photographed.** */
+  it('offers NO mode once the balance is zero', () => {
+    render(
+      <PaymentModes
+        cart={cart({
+          balance: money(0, '0.00'),
+          paid: money(10_500, '105.00'),
+          payments: [{ index: 0, mode: 'Cash', amount: money(10_500, '105.00'), reference: null }],
+        })}
+        onTake={vi.fn()}
+        onCredit={vi.fn()}
+      />,
+    );
+    for (const button of modes()) {
+      expect(button, `${button.textContent} could still send a zero payment`).toBeDisabled();
+    }
+  });
+
+  it('says WHY they are off, rather than going quietly dead', () => {
+    render(
+      <PaymentModes
+        cart={cart({ balance: money(0, '0.00'), paid: money(10_500, '105.00') })}
+        onTake={vi.fn()}
+        onCredit={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/paid in full/i)).toBeTruthy();
+  });
+
+  it('says nothing about a bill nobody has paid yet', () => {
+    // A row of four live buttons needs no explanation, and furniture on the
+    // one screen a cashier lives on is what P30.5 spent a session removing.
+    render(<PaymentModes cart={cart()} onTake={vi.fn()} onCredit={vi.fn()} />);
+    expect(screen.queryByText(/paid in full/i)).toBeNull();
+  });
+
+  /**
+   * The other half of the owner's sentence. Four identical outlines before the
+   * money and four identical outlines after it is why a settled bill looked
+   * exactly like an unpaid one.
+   */
+  it('marks the mode the money was taken in, and only that one', () => {
+    render(
+      <PaymentModes
+        cart={cart({
+          balance: money(0, '0.00'),
+          paid: money(10_500, '105.00'),
+          payments: [{ index: 0, mode: 'Card', amount: money(10_500, '105.00'), reference: null }],
+        })}
+        onTake={vi.fn()}
+        onCredit={vi.fn()}
+      />,
+    );
+    expect(mode('Card').getAttribute('aria-pressed')).toBe('true');
+    expect(mode('Card').className).toContain('mb-payment__mode--taken');
+    for (const other of ['Cash', 'UPI', 'Credit']) {
+      expect(mode(other).getAttribute('aria-pressed')).toBe('false');
+      expect(mode(other).className).not.toContain('--taken');
+    }
+  });
+
+  it('marks BOTH halves of a part-cash part-card bill', () => {
+    // Audit B9: v1 allowed one mode per bill and the cashier had to lie about
+    // it. Two rows means two marks, or the screen is telling the old lie.
+    render(
+      <PaymentModes
+        cart={cart({
+          balance: money(0, '0.00'),
+          paid: money(10_500, '105.00'),
+          payments: [
+            { index: 0, mode: 'Cash', amount: money(5_000, '50.00'), reference: null },
+            { index: 1, mode: 'Card', amount: money(5_500, '55.00'), reference: null },
+          ],
+        })}
+        onTake={vi.fn()}
+        onCredit={vi.fn()}
+      />,
+    );
+    expect(mode('Cash').className).toContain('--taken');
+    expect(mode('Card').className).toContain('--taken');
+    expect(mode('UPI').className).not.toContain('--taken');
+  });
+
+  it('keeps the mark on a part-paid bill, where the modes are still live', () => {
+    // Cash covered half; there is still 55.00 owing, so every mode stays
+    // pressable AND the cashier can see what has already gone in.
+    render(
+      <PaymentModes
+        cart={cart({
+          balance: money(5_500, '55.00'),
+          paid: money(5_000, '50.00'),
+          payments: [{ index: 0, mode: 'Cash', amount: money(5_000, '50.00'), reference: null }],
+        })}
+        onTake={vi.fn()}
+        onCredit={vi.fn()}
+      />,
+    );
+    expect(mode('Cash')).toBeEnabled();
+    expect(mode('Cash').className).toContain('--taken');
+    expect(mode('Card').className).not.toContain('--taken');
+    expect(screen.queryByText(/paid in full/i)).toBeNull();
+  });
+
+  it('offers nothing at all on an empty bill', () => {
+    render(
+      <PaymentModes cart={cart({ isEmpty: true, balance: money(0, '0.00') })} onTake={vi.fn()} onCredit={vi.fn()} />,
+    );
+    for (const button of modes()) expect(button).toBeDisabled();
+    // And no "paid in full" either — an empty bill is not a paid one.
+    expect(screen.queryByText(/paid in full/i)).toBeNull();
+  });
+
+  it('takes the whole balance when a live mode is pressed', () => {
+    const onTake = vi.fn();
+    const onCredit = vi.fn();
+    render(<PaymentModes cart={cart()} onTake={onTake} onCredit={onCredit} />);
+    mode('Cash').click();
+    expect(onTake).toHaveBeenCalledWith('Cash');
+    // Credit is a dialog, not a payment — P15.
+    mode('Credit').click();
+    expect(onCredit).toHaveBeenCalledTimes(1);
+    expect(onTake).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A bill with nothing on it — the payment tests never read these figures. */
+const emptyBill: BillView = {
+  subtotal: money(0, '0.00'),
+  lineDiscount: money(0, '0.00'),
+  billDiscount: money(0, '0.00'),
+  totalDiscount: money(0, '0.00'),
+  discountCapped: false,
+  charges: [],
+  taxRows: [],
+  nonGstValue: money(0, '0.00'),
+  exemptValue: money(0, '0.00'),
+  taxTotal: money(0, '0.00'),
+  roundOff: money(0, '0.00'),
+  grandTotal: money(10_500, '105.00'),
+};

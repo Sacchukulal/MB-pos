@@ -17,6 +17,15 @@
  *
  * Two people get two big buttons; thirty get a code box and a filtered list.
  * The same screen does both, because two screens is two things to keep working.
+ *
+ * # One pad, drawn once
+ *
+ * Sign-in and the two steps of the recovery flow all draw [`Pad`]. That is not
+ * tidiness: the recovery flow's new-PIN step had *no* pad at all, only a row of
+ * bullets counting digits there was no way to type, and it stayed that way
+ * because nothing forced the two halves of this screen to look like each other.
+ * One component means a change to how a PIN is entered cannot reach one flow
+ * and miss the other.
  */
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
@@ -24,24 +33,38 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { Button, Input, Keypad } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
-import { MIN_PIN, initial, reduce, take, type State } from './keyboard';
+import {
+  PIN_DIGITS,
+  initial,
+  reduce,
+  take,
+  type Event,
+  type State,
+} from './keyboard';
 
 import './auth.css';
 
 export interface LockProps {
+  /** Who can sign in: active, and holding a PIN. */
   people: readonly PersonView[];
+  /**
+   * Who the recovery code may set a PIN for — Rust's `LockState::recoverable`,
+   * which is **not** a subset of `people`. A manager with no PIN is on this
+   * list and not on that one, and is precisely who the code is for.
+   */
+  recoverable: readonly PersonView[];
   canRecover: boolean;
   /** Called when somebody got in. The shell reloads itself from Rust. */
   onSignedIn: () => void;
 }
 
-export function Lock({ people, canRecover, onSignedIn }: LockProps) {
+export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initial);
   const runningSeq = useRef(0);
 
   useEffect(() => {
-    dispatch({ kind: 'people', people, canRecover });
-  }, [people, canRecover]);
+    dispatch({ kind: 'people', people, recoverable, canRecover });
+  }, [people, recoverable, canRecover]);
 
   // **The commands ride in the state.** StrictMode double-invokes the reducer,
   // so performing them inside it would sign somebody in twice (P10 found this
@@ -83,6 +106,12 @@ export function Lock({ people, canRecover, onSignedIn }: LockProps) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Tab') return;
       // Let the text inputs have their own typing; the reducer takes the rest.
+      //
+      // **This line is why the recovery flow could not be finished.** The
+      // recovery-code box was on screen at the same time as the new PIN, and it
+      // had focus, so every digit went into the box and none of them reached
+      // the reducer. The flow is four steps now and the box shares a step with
+      // nothing — see `keyboard.ts`. The rule itself is right and stays.
       const target = event.target as HTMLElement | null;
       if (target?.tagName === 'INPUT' && event.key !== 'Enter') return;
       dispatch({ kind: 'key', key: event.key });
@@ -96,26 +125,28 @@ export function Lock({ people, canRecover, onSignedIn }: LockProps) {
     else if (key !== '.') dispatch({ kind: 'digit', digit: key });
   }, []);
 
+  const mode = state.mode;
+
   return (
     <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Sign in">
       <div className="mb-lock__card">
-        {state.mode.kind === 'recovered' ? (
-          <Recovered code={state.mode.freshCode} onDone={() => dispatch({ kind: 'done' })} />
-        ) : state.mode.kind === 'recover' ? (
-          <Recover state={state} dispatch={dispatch} />
-        ) : state.mode.kind === 'pin' ? (
+        {mode.kind === 'recovered' ? (
+          <Recovered code={mode.freshCode} onDone={() => dispatch({ kind: 'done' })} />
+        ) : mode.kind === 'recover' ? (
+          <Recover state={state} dispatch={dispatch} onPad={onPad} />
+        ) : mode.kind === 'pin' ? (
           <PinPad
-            person={state.mode.person}
-            digits={state.mode.digits}
+            person={mode.person}
+            digits={mode.digits}
             busy={state.busy}
             onPad={onPad}
-            onBack={() => dispatch({ kind: 'back' })}
+            onCancel={() => dispatch({ kind: 'cancel' })}
             onSubmit={() => dispatch({ kind: 'submit' })}
           />
         ) : (
           <Who
             people={state.people}
-            typed={state.mode.typed}
+            typed={mode.typed}
             onType={(text) => dispatch({ kind: 'typed', text })}
             onChoose={(person) => dispatch({ kind: 'choose', person })}
           />
@@ -127,17 +158,61 @@ export function Lock({ people, canRecover, onSignedIn }: LockProps) {
           </p>
         ) : null}
 
-        {canRecover && state.mode.kind !== 'recover' && state.mode.kind !== 'recovered' ? (
-          <Button
-            variant="quiet"
-            small
-            onClick={() => dispatch({ kind: 'start-recovery' })}
-          >
+        {canRecover && mode.kind !== 'recover' && mode.kind !== 'recovered' ? (
+          <Button variant="quiet" small onClick={() => dispatch({ kind: 'start-recovery' })}>
             Forgotten your PIN?
           </Button>
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * **The PIN itself: four dots and a pad.**
+ *
+ * Dots, not digits. Somebody is always standing behind the counter.
+ *
+ * **Four of them, and only ever four.** It drew `MAX_PIN`, which was eight, so
+ * a shop typing a four-digit PIN looked at eight circles with four filled —
+ * which reads as a half-finished PIN every single time. The first fix drew
+ * `Math.max(MIN_PIN, digits.length)`, and that still grew to eight the moment
+ * somebody kept pressing, because the *rule* underneath was still a range. The
+ * rule is one number now (`PIN_DIGITS`), so this can be written as one number
+ * too, and there is no arithmetic left in it to be wrong.
+ */
+function Pad({
+  digits,
+  busy,
+  onPad,
+  label,
+}: {
+  digits: string;
+  busy: boolean;
+  onPad: (key: string) => void;
+  label: string;
+}) {
+  return (
+    <>
+      <div className="mb-lock__dots" aria-label={`${digits.length} of ${PIN_DIGITS} digits typed`}>
+        {Array.from({ length: PIN_DIGITS }, (_, index) => (
+          <span
+            key={index}
+            className={[
+              'mb-lock__dot',
+              index < digits.length ? 'mb-lock__dot--filled' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          />
+        ))}
+      </div>
+
+      {/* No decimal point. A PIN has no decimal point, and the key sat exactly
+          where a thumb lands. See `Keypad`. */}
+      <Keypad onPress={onPad} disabled={busy} dot={false} />
+      <span className="mb-visually-hidden">{label}</span>
+    </>
   );
 }
 
@@ -153,13 +228,14 @@ function Who({
   onChoose: (person: PersonView) => void;
 }) {
   const wanted = typed.trim().toLowerCase();
-  const shown = wanted === ''
-    ? people
-    : people.filter(
-        (p) =>
-          p.name.toLowerCase().includes(wanted) ||
-          (p.code ?? '').toLowerCase() === wanted,
-      );
+  const shown =
+    wanted === ''
+      ? people
+      : people.filter(
+          (p) =>
+            p.name.toLowerCase().includes(wanted) ||
+            (p.code ?? '').toLowerCase() === wanted,
+        );
 
   return (
     <>
@@ -210,14 +286,14 @@ function PinPad({
   digits,
   busy,
   onPad,
-  onBack,
+  onCancel,
   onSubmit,
 }: {
   person: PersonView;
   digits: string;
   busy: boolean;
   onPad: (key: string) => void;
-  onBack: () => void;
+  onCancel: () => void;
   onSubmit: () => void;
 }) {
   return (
@@ -225,33 +301,14 @@ function PinPad({
       <h1 className="mb-lock__title">{person.name}</h1>
       <p className="mb-muted">{person.role ?? ''}</p>
 
-      {/* Dots, not digits. Somebody is always standing behind the counter.
-
-          **Four of them, not eight** (owner, 2026-08-17). It drew `MAX_PIN`,
-          so a shop typing a four-digit PIN was looking at a row of eight
-          empty circles and four filled ones — which reads as a half-finished
-          PIN every single time. It draws what a PIN IS, and grows only for
-          somebody whose older, longer PIN is still on file. The marker at the
-          minimum goes with it: with the row already the right length there is
-          nothing left for it to mark. */}
-      <div className="mb-lock__dots" aria-label={`${digits.length} digits typed`}>
-        {Array.from({ length: Math.max(MIN_PIN, digits.length) }, (_, index) => (
-          <span
-            key={index}
-            className={[
-              'mb-lock__dot',
-              index < digits.length ? 'mb-lock__dot--filled' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          />
-        ))}
-      </div>
-
-      <Keypad onPress={onPad} disabled={busy} />
+      <Pad digits={digits} busy={busy} onPad={onPad} label={`${person.name}'s PIN`} />
 
       <div className="mb-lock__actions">
-        <Button variant="quiet" onClick={onBack}>
+        {/* **`cancel`, not `back`.** This button used to send the same event as
+            Backspace, so it rubbed out one digit per press and only reached the
+            staff list once the pad was empty — four taps to do what it says.
+            The owner found that on a real install (2026-08-22). */}
+        <Button variant="quiet" onClick={onCancel} disabled={busy}>
           Somebody else
         </Button>
         <Button variant="primary" onClick={onSubmit} disabled={busy}>
@@ -262,52 +319,123 @@ function PinPad({
   );
 }
 
+/**
+ * **The way back in, as four screens.**
+ *
+ * The owner, 2026-08-22: *"Forgotton pin also not working, i typed recovery
+ * code, but cant even type new pin."*
+ *
+ * Everything used to be on one screen — the code box, the staff list and a row
+ * of bullets standing in for the new PIN. There was no field and no pad behind
+ * those bullets, and the code box held the keyboard focus, so a digit could
+ * only ever land in the code box. The flow could be entered and not left.
+ *
+ * The steps are `code → who → pin → again`, one at a time. On the two pad steps
+ * there is no text input on screen at all, which is what makes the digits
+ * reachable rather than a rule that has to be remembered.
+ */
 function Recover({
   state,
   dispatch,
+  onPad,
 }: {
   state: State;
-  dispatch: (event: import('./keyboard').Event) => void;
+  dispatch: (event: Event) => void;
+  onPad: (key: string) => void;
 }) {
   if (state.mode.kind !== 'recover') return null;
-  const { code, person, newPin } = state.mode;
+  const { step, code, person, newPin, again } = state.mode;
+  const candidates = state.recoverable;
+
+  const actions = (next: string) => (
+    <div className="mb-lock__actions">
+      <Button variant="quiet" onClick={() => dispatch({ kind: 'cancel' })} disabled={state.busy}>
+        Back
+      </Button>
+      <Button variant="primary" onClick={() => dispatch({ kind: 'submit' })} disabled={state.busy}>
+        {state.busy ? 'Setting…' : next}
+      </Button>
+    </div>
+  );
+
+  if (step === 'code') {
+    return (
+      <>
+        <h1 className="mb-lock__title">Forgotten PIN</h1>
+        <p className="mb-muted">
+          Type the recovery code from the slip that printed when this shop was
+          set up. It can only set a PIN for somebody who manages staff, and
+          using it prints a new code.
+        </p>
+        <Input
+          label="Recovery code"
+          value={code}
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="ABCDE-FGHJK"
+          onChange={(event) => dispatch({ kind: 'typed', text: event.target.value })}
+        />
+        {actions('Next')}
+      </>
+    );
+  }
+
+  if (step === 'who') {
+    return (
+      <>
+        <h1 className="mb-lock__title">Whose PIN?</h1>
+        <p className="mb-muted">
+          {/* Only the people Rust will accept. Offering the whole staff list
+              meant the refusal arrived after the code had been spent. */}
+          The recovery code sets a PIN for somebody who manages staff.
+        </p>
+        <div className="mb-lock__people">
+          {candidates.length === 0 ? (
+            <p className="mb-muted">
+              Nobody here manages staff, so this code has no PIN to set. Ring
+              support, with your licence key to hand.
+            </p>
+          ) : (
+            candidates.map((candidate) => (
+              <Button
+                key={candidate.id}
+                wide
+                variant={person?.id === candidate.id ? 'primary' : 'secondary'}
+                className="mb-lock__person"
+                onClick={() => dispatch({ kind: 'choose', person: candidate })}
+              >
+                <span className="mb-lock__name">{candidate.name}</span>
+                <span className="mb-lock__role">{candidate.role ?? ''}</span>
+              </Button>
+            ))
+          )}
+        </div>
+        {actions('Next')}
+      </>
+    );
+  }
+
+  const typing = step === 'pin' ? newPin : again;
   return (
     <>
-      <h1 className="mb-lock__title">Forgotten PIN</h1>
+      <h1 className="mb-lock__title">
+        {step === 'pin' ? 'A new PIN' : 'The same PIN again'}
+      </h1>
       <p className="mb-muted">
-        Type the recovery code from the slip that printed when this shop was set
-        up. It can only set a PIN for somebody who manages staff, and using it
-        prints a new code.
+        {step === 'pin'
+          ? `${person?.name ?? 'This person'} will sign in with these ${PIN_DIGITS} digits.`
+          : 'Type it a second time, so one slipped finger does not lock them out.'}
       </p>
-      <Input
-        label="Recovery code"
-        value={code}
-        autoFocus
-        onChange={(event) => dispatch({ kind: 'typed', text: event.target.value })}
+
+      <Pad
+        digits={typing}
+        busy={state.busy}
+        onPad={onPad}
+        label={step === 'pin' ? 'The new PIN' : 'The new PIN again'}
       />
-      <div className="mb-lock__people">
-        {state.people.map((candidate) => (
-          <Button
-            key={candidate.id}
-            wide
-            variant={person?.id === candidate.id ? 'primary' : 'secondary'}
-            onClick={() => dispatch({ kind: 'choose', person: candidate })}
-          >
-            {candidate.name}
-          </Button>
-        ))}
-      </div>
-      <p className="mb-muted">
-        New PIN: {'•'.repeat(newPin.length)} — type {MIN_PIN} digits.
-      </p>
-      <div className="mb-lock__actions">
-        <Button variant="quiet" onClick={() => dispatch({ kind: 'back' })}>
-          Back
-        </Button>
-        <Button variant="primary" onClick={() => dispatch({ kind: 'submit' })}>
-          Set the PIN
-        </Button>
-      </div>
+
+      {actions(step === 'pin' ? 'Next' : 'Set the PIN')}
     </>
   );
 }

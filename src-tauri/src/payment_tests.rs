@@ -466,3 +466,63 @@ fn a_discount_that_makes_no_sense_is_refused_in_words() {
         .expect("the cart");
     assert!(!has, "a refused discount was applied anyway");
 }
+
+// ---------------------------------------------------------------------------
+// The press that could only ever fail — 2026-08-22
+// ---------------------------------------------------------------------------
+
+/// **A zero-rupee payment is refused before anything outside this process is
+/// touched.**
+///
+/// The owner, from a real install: *"the payment mode selection is also not
+/// visible, and it also shows some error notification, what is it?"* The
+/// notification was **"That payment could not be taken — a payment has to be
+/// more than zero"**, and it came from pressing a mode on a bill that was
+/// already fully paid: each button takes *the balance*, and the balance was
+/// nought.
+///
+/// The screen is the half that was wrong and is fixed in `PaymentModes` — a
+/// button whose only possible outcome is an error should not be pressable. This
+/// test is about the other half. The refusal itself is correct and stays: a
+/// zero-rupee row is noise in every report downstream. But it used to happen
+/// **after** `ask_about`, so a press that could never succeed had already gone
+/// out to the payment provider and written a row in the attempts ledger.
+///
+/// Nothing that leaves the process may happen on the way to a refusal that was
+/// decidable from the arguments.
+#[test]
+fn a_zero_payment_is_refused_without_asking_the_provider() {
+    let scratch = Scratch::new("pay_zero");
+    let app = a_shop(&scratch, "zero");
+    as_owner(&app, "staff_boss", "Meena");
+
+    let total = one_dosa(&app);
+    cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("taken");
+
+    // The bill is covered. This is the press the owner made.
+    let refused = cart_add_payment_on(&app, "Card".to_owned(), 0, None)
+        .expect_err("a zero payment was accepted");
+    assert_eq!(refused.code, "payment.invalid");
+    assert_eq!(
+        refused.detail.as_deref(),
+        Some("a payment has to be more than zero"),
+        "the reason a shopkeeper reads must still be the real one",
+    );
+
+    // **Card is the mode on purpose**: cash and credit skip the ledger anyway,
+    // so only a mode that WOULD be written down can prove nothing was.
+    let view = payments_on(&app).expect("the payments screen");
+    assert!(
+        view.attempts.is_empty(),
+        "a doomed press reached the machine and left a row behind: {:?}",
+        view.attempts,
+    );
+
+    // And a negative amount is the same refusal, not a credit note by accident.
+    assert_eq!(
+        cart_add_payment_on(&app, "Card".to_owned(), -100, None)
+            .expect_err("a negative payment was accepted")
+            .code,
+        "payment.invalid",
+    );
+}

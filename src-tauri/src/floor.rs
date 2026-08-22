@@ -153,7 +153,11 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
     guard::require(app, Permission::BillCreate)?;
     let at = now();
     let (warn, late) = thresholds(app)?;
-    let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    // **Both halves of "where is the cashier".** The order is `None` until a
+    // line is typed; the table is set the moment one is tapped. See
+    // `TableView::selected`.
+    let (loaded, on_table) =
+        app.with_cart(|state| Ok((state.order_id.clone(), state.table.clone())))?;
     // Taken once, outside the transaction: a tile's running total is rounded
     // and charged the way the bill will be, and reading that inside the loop
     // would be a lock per table.
@@ -180,6 +184,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                         &open,
                         crate::billing::Room {
                             loaded_order: loaded.as_deref(),
+                            loaded_table: on_table.as_deref(),
                             now: at,
                             warn_after: warn,
                             late_after: late,

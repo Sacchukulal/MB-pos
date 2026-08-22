@@ -37,7 +37,7 @@ import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import type { RoleView } from '../ipc/generated/RoleView';
 
-import { MIN_PIN } from './keyboard';
+import { PIN_DIGITS } from './keyboard';
 import { Attendance, EmploymentDetails, Leave, Payroll, Salary } from './Employment';
 import type { EmployeeView } from '../ipc/generated/EmployeeView';
 
@@ -296,6 +296,21 @@ function EditPerson({
   );
 }
 
+/**
+ * **Setting somebody else's PIN.**
+ *
+ * Two things changed here on 2026-08-22, both from the same review of the
+ * sign-in path:
+ *
+ * * It is asked for **twice**. Set-up (`FirstRun`) already did, and this did
+ *   not — so the one screen where a manager types a PIN for somebody who is not
+ *   in the room was also the one screen where a slipped finger went unnoticed
+ *   until that person could not sign in. The cost of being wrong is highest
+ *   exactly here.
+ * * The box is a password box. A manager sets a waiter's PIN at the counter,
+ *   with the waiter standing next to them — and the note underneath already
+ *   promised it "cannot be read back", which was not true of the screen.
+ */
 function SetPin({
   person,
   onClose,
@@ -306,8 +321,25 @@ function SetPin({
   onDone: () => void;
 }) {
   const [pin, setPin] = useState('');
+  const [again, setAgain] = useState('');
+  const [problem, setProblem] = useState('');
   const [recovery, setRecovery] = useState<string | null>(null);
   const toast = useToast();
+
+  const setIt = () => {
+    // The same rule Rust holds — `mb_auth::pin::PIN_DIGITS`. Said here so the
+    // form does not invite a shape the program then refuses.
+    if (pin.length !== PIN_DIGITS) {
+      setProblem(`A PIN is ${PIN_DIGITS} digits.`);
+      return;
+    }
+    if (pin !== again) {
+      setProblem('The two PINs are not the same. Type it again.');
+      return;
+    }
+    setProblem('');
+    void save(pin);
+  };
 
   const save = async (value: string | null) => {
     try {
@@ -328,10 +360,15 @@ function SetPin({
   if (recovery) {
     return (
       <Modal open title="Write this down" onClose={() => { onDone(); onClose(); }}>
+        {/* **It says "and printed" because it now is** — round 5, 2026-08-22.
+            The slip was promised here and in `mb_auth::recovery` and by the
+            audit log, and nothing put it on a printer. See
+            `ipc::print_the_recovery_slip`. */}
         <p>
           This is the shop&rsquo;s recovery code. It is the way back in if the
-          owner forgets their PIN, it is shown here <strong>once</strong>, and it
-          cannot be looked up afterwards.
+          owner forgets their PIN. It is shown here <strong>once</strong> and
+          printed on your printer, and it cannot be looked up afterwards — so
+          keep the slip somewhere only you can reach.
         </p>
         <p className="mb-lock__code">{recovery}</p>
         <Button variant="primary" wide onClick={() => { onDone(); onClose(); }}>
@@ -345,13 +382,30 @@ function SetPin({
     <Modal open title={`${person.name}'s PIN`} onClose={onClose}>
       <Input
         label="New PIN"
-        hint={`${MIN_PIN} digits. It is stored scrambled and cannot be read back.`}
-        maxLength={MIN_PIN}
+        hint={`${PIN_DIGITS} digits. It is stored scrambled and cannot be read back.`}
+        maxLength={PIN_DIGITS}
         value={pin}
         autoFocus
+        type="password"
         inputMode="numeric"
         onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}
       />
+      <Input
+        label="The same PIN again"
+        maxLength={PIN_DIGITS}
+        value={again}
+        type="password"
+        inputMode="numeric"
+        onChange={(e) => setAgain(e.target.value.replace(/[^0-9]/g, ''))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') setIt();
+        }}
+      />
+      {problem ? (
+        <p className="mb-lock__problem" role="alert">
+          {problem}
+        </p>
+      ) : null}
       <p className="mb-muted">
         Setting the first PIN in this shop locks the screen straight away, so
         the person it belongs to can prove it works before they walk off.
@@ -365,7 +419,7 @@ function SetPin({
         <Button variant="quiet" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" onClick={() => void save(pin)}>
+        <Button variant="primary" onClick={setIt}>
           Set the PIN
         </Button>
       </div>

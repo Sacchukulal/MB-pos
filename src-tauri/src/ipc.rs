@@ -339,6 +339,10 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             K::Drawer => "Cash drawer",
             K::DayClose => "Closing slip",
             K::Delivery => "Delivery slip",
+            // Named plainly, because this is the job a shopkeeper must notice
+            // if it fails: the code on it is on screen for one dialog and
+            // nowhere else afterwards.
+            K::Recovery => "Recovery code",
         }
         .to_owned(),
         state: match status.state {
@@ -951,6 +955,26 @@ pub fn cart_add_payment_on(
         other => mb_core::PaymentMode::Other(other.to_owned()),
     };
     let amount = mb_core::Money::from_paise(amount_paise);
+
+    // **The shape is checked before anything is asked.** `Payment::new` below
+    // refuses a zero or negative amount, and it is right to — a zero-rupee
+    // payment row is noise in every report downstream. But that check used to
+    // happen AFTER `ask_about`, which means a doomed press had already gone out
+    // to the card machine and written a row in the attempts ledger.
+    //
+    // Found on 2026-08-22 alongside the owner's *"it also shows some error
+    // notification"*: the screen was offering the modes on a bill that was
+    // already paid, so every press sent zero. The screen no longer offers them
+    // (see `PaymentModes`), and this is the same refusal moved to the front of
+    // the queue so nothing outside this process is touched on the way to it.
+    if !amount.is_positive() {
+        return Err(UiError::new(
+            "payment.invalid",
+            "That payment could not be taken.",
+        )
+        .with_detail(mb_core::PaymentError::NonPositiveAmount.to_string()));
+    }
+
     let reference = reference.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
     let order_id = app.with_cart(|state| Ok(state.order_id.clone()))?;
 
@@ -1169,7 +1193,11 @@ pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
 /// The floor — **the only view of open orders** (scope 1.4).
 pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     guard::require(app, Permission::BillCreate)?;
-    let loaded = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    // **Both halves of "where is the cashier"** — see `TableView::selected`.
+    // The billing grid and the floor plan read the same two, for the same
+    // reason they read the same thresholds.
+    let (loaded, on_table) =
+        app.with_cart(|state| Ok((state.order_id.clone(), state.table.clone())))?;
     // The same two thresholds the floor screen uses, from the same place —
     // a billing grid and a floor plan disagreeing about which table is late
     // would be worse than neither of them saying so.
@@ -1192,6 +1220,7 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
             &open,
             crate::billing::Room {
                 loaded_order: loaded.as_deref(),
+                loaded_table: on_table.as_deref(),
                 now: Timestamp::from_millis(now_millis()),
                 warn_after: warn,
                 late_after: late,
@@ -1516,6 +1545,25 @@ pub struct LockState {
     /// Whether this shop has a recovery code at all, so the lock screen only
     /// offers "forgotten your PIN?" when there is something to offer.
     pub can_recover: bool,
+    /// **Who the recovery code may set a PIN for**, which is *not* a subset of
+    /// [`Self::people`] — and the difference is a way to be locked out of your
+    /// own shop for good.
+    ///
+    /// `people` is "who can sign in", so it holds only staff who already have a
+    /// PIN. The forgotten-PIN screen was drawing its list from it, and that is
+    /// fine right up until the one person who manages staff has **no** PIN: a
+    /// manager who taps *Remove the PIN* on themselves while a cashier still has
+    /// one leaves a shop that locks (somebody has a PIN, so it locks) and whose
+    /// owner is not on the list (they have none, so they are filtered out). The
+    /// recovery code is the way back from exactly that, and it had nobody to
+    /// offer it to.
+    ///
+    /// So this list is drawn from what the code is *allowed* to do rather than
+    /// from what the pad can do with it: everybody active who holds
+    /// `staff.manage`, PIN or no PIN. It is the same rule
+    /// `recover_with_code_on` enforces, sent up so the screen cannot invite a
+    /// refusal — or, worse, offer nothing at all.
+    pub recoverable: Vec<PersonView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -1573,6 +1621,18 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
                 .collect()
         }),
         nobody_has_a_pin: people.iter().all(|p| !p.has_pin),
+        // Two lists off one read, and they are deliberately different. See
+        // `LockState::recoverable` for the lockout that made them different.
+        recoverable: people
+            .iter()
+            .filter(|p| {
+                p.status == "active"
+                    && p.permissions
+                        .iter()
+                        .any(|code| code == Permission::StaffManage.code())
+            })
+            .cloned()
+            .collect(),
         // Only people who can actually sign in. A name that cannot be chosen is
         // a support call about a screen that "does nothing".
         people: people
@@ -1885,7 +1945,10 @@ pub fn recover_with_code_on(
     })?;
 
     log_warn!("the recovery code was used, and a new one was issued");
-    // Returned so the screen can show it once and print it. From this moment it
+    // On paper as well as on screen — see `print_the_recovery_slip`. This one
+    // replaces a code that was working a moment ago, so the slip says so.
+    print_the_recovery_slip(app, &fresh.to_print(), day, true);
+    // Returned so the screen can show it once as well. From this moment it
     // exists nowhere else.
     Ok(fresh.to_print())
 }
@@ -2271,12 +2334,92 @@ pub fn set_staff_pin_on(
             .map_err(|e| words::from_db(&e))
     })?;
 
+    // **On paper as well as on screen**, and BEFORE the relock below — a shop
+    // whose first PIN has just been set is about to be looking at a lock
+    // screen, and the slip should already be coming out of the printer by then.
+    // This is the shop's first code, so there is no older one to retire.
+    if let Some(code) = issued.as_deref() {
+        print_the_recovery_slip(app, code, day, false);
+    }
+
     // **Setting the first PIN locks the app, here and now.** Proving it works
     // while that person is still standing at the counter is worth four seconds;
     // finding out at 8 am tomorrow is not.
     app.relock_if_this_was_the_first_pin(had_a_pin);
 
     Ok(issued)
+}
+
+/// **Put the shop's recovery code on paper.**
+///
+/// `mb_auth::recovery` has always said this printed, and the audit log has
+/// always read back *"New recovery code printed"* — and until 2026-08-22
+/// nothing did it. The code went to the screen, was shown once, and a shop that
+/// closed that dialog without a pen to hand had lost the only thing that gets
+/// it back into its own counter, with its own history saying a slip had come
+/// out. Found going through the sign-in path after the owner asked for it to be
+/// gone through properly.
+///
+/// # It cannot fail the thing it is part of
+///
+/// By the time this runs the new PIN and the new code hash are **committed**.
+/// So a printer that is off, out of paper, or not configured at all must not
+/// turn a successful recovery into an error: the caller would report failure
+/// for something that has already happened, and the screen would throw away a
+/// code that is now the only working one. It logs and returns.
+///
+/// That is the same trade `relock_if_this_was_the_first_pin` makes on the line
+/// below, and it is why the code is **also** returned to the screen. Two ways
+/// out for one secret, because there is no third chance at it.
+fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_older: bool) {
+    let printed = crate::flows::default_printer(app).and_then(|printer| {
+        let config = app.shop_config();
+        let store = config.store.to_print_store();
+        let document = mb_print::template::recovery_document(
+            printer.paper,
+            &mb_print::template::RecoveryContext {
+                code,
+                // A PIN can be set before the shop profile is finished, and a
+                // slip with no name on it is better than no slip.
+                store: (!store.name.trim().is_empty()).then_some(&store),
+                issued_on: &day_in_words(day),
+                replaces_an_older_code: replaces_an_older,
+            },
+        );
+        app.print(
+            Job::new(JobKind::Recovery, &printer.id, document, day)
+                .because("recovery code".to_owned()),
+        )
+    });
+
+    if let Err(cause) = printed {
+        // Loud, because the shop is now one closed dialog away from having no
+        // way back in — and this is the line a support call starts from.
+        log_warn!(
+            "the recovery slip could not be printed ({}) — the code is on screen only",
+            cause.message
+        );
+    }
+}
+
+/// "22 August 2026". The slip is read months later by somebody who is stuck, so
+/// it gets the month in words rather than `2026-08-22` — there is no ambiguity
+/// to have about which number is the day.
+fn day_in_words(day: BusinessDay) -> String {
+    const MONTHS: [&str; 12] = [
+        "January", "February", "March", "April", "May", "June", "July", "August", "September",
+        "October", "November", "December",
+    ];
+    let (year, month, d) = day.to_ymd();
+    // `month` is 1..=12 from `to_ymd`; this arrives at the right name without
+    // a cast that D7 would have to argue about, and at "" if it ever does not.
+    let name = usize::try_from(month)
+        .ok()
+        .and_then(|month| month.checked_sub(1))
+        .and_then(|index| MONTHS.get(index))
+        .copied()
+        .unwrap_or_default();
+    format!("{d} {name} {year}")
 }
 
 // ---------------------------------------------------------------------------

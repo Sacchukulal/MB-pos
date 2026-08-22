@@ -55,6 +55,6 @@ pub use device::{DeviceSecret, new_device_secret, random_token, short_code, veri
 pub use error::AuthError;
 pub use lockout::{LOCKOUT_FREE_ATTEMPTS, lockout_after};
 pub use permission::{Permission, PermissionSet};
-pub use pin::{Pin, PinHash, hash_pin, hash_secret, verify_pin, verify_secret};
+pub use pin::{PIN_DIGITS, Pin, PinHash, hash_pin, hash_secret, verify_pin, verify_secret};
 pub use recovery::{RecoveryCode, new_recovery_code, verify_recovery_code};
 pub use role::{RolePreset, RoleShape};

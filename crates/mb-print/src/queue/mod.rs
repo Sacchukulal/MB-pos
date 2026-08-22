@@ -93,6 +93,16 @@ pub enum JobKind {
     /// Z-report is — the queue tells a person what each job IS, and a rider's
     /// slip is not a parcel label.
     Delivery,
+    /// **The shop's recovery code, on paper.** `mb_auth::recovery` always said
+    /// this printed, and the audit log has always read back "New recovery code
+    /// printed" — but nothing put it on a printer until 2026-08-22, so a shop
+    /// that closed the dialog without a pen had lost its only way back in.
+    ///
+    /// Its own kind, for the reason the Z-report and the rider's slip are: the
+    /// queue tells a person what each job IS, and a shopkeeper looking at a
+    /// failed job needs to know that *this* is the one to reprint before the
+    /// dialog is gone.
+    Recovery,
 }
 
 impl JobKind {
@@ -110,6 +120,7 @@ impl JobKind {
         JobKind::Drawer,
         JobKind::DayClose,
         JobKind::Delivery,
+        JobKind::Recovery,
     ];
 
     #[must_use]
@@ -122,6 +133,7 @@ impl JobKind {
             JobKind::Drawer => "drawer",
             JobKind::DayClose => "day_close",
             JobKind::Delivery => "delivery",
+            JobKind::Recovery => "recovery",
         }
     }
 
@@ -135,6 +147,7 @@ impl JobKind {
             "drawer" => Some(JobKind::Drawer),
             "day_close" => Some(JobKind::DayClose),
             "delivery" => Some(JobKind::Delivery),
+            "recovery" => Some(JobKind::Recovery),
             _ => None,
         }
     }
@@ -156,6 +169,13 @@ impl JobKind {
             // With the food, so it goes at kitchen speed and not at label
             // speed: the rider is standing there.
             JobKind::Delivery => 25,
+            // **Ahead of a bill, and it is the only thing that is.** This slip
+            // is printed at the one moment somebody is standing there having
+            // just been shown a code they cannot look up again — see
+            // `JobKind::Recovery`. Everything else in this list can be printed
+            // a second time; this cannot. It is also one job, once in the life
+            // of a shop, so it costs the counter nothing to let it past.
+            JobKind::Recovery => 6,
             JobKind::Test | JobKind::Label => 50,
         }
     }
@@ -458,11 +478,16 @@ impl Queue {
             // A delivery slip is the same argument: the rider is at the counter
             // and a shop with one kitchen printer must still be able to send
             // an address out with them.
+            // The recovery slip goes wherever anything goes, for the
+            // strongest version of that argument: a shop with one kitchen
+            // printer that could not print this would be handed a code it can
+            // only keep by hand-copying it off a dialog.
             JobKind::DayClose
             | JobKind::Label
             | JobKind::Test
             | JobKind::Drawer
-            | JobKind::Delivery => true,
+            | JobKind::Delivery
+            | JobKind::Recovery => true,
         };
         if !allowed {
             return Err(PrintError::invalid(format!(

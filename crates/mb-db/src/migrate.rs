@@ -42,11 +42,24 @@ pub struct Migration {
 }
 
 /// Every migration this build knows, in order.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "0001_initial",
-    sql: include_str!("migrations/0001_initial.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_initial",
+        sql: include_str!("migrations/0001_initial.sql"),
+    },
+    // **The first migration after the initial one**, and it is worth saying why
+    // it is a second file rather than an edit to the first. 0001 has run on the
+    // owner's laptop; `apply_all` checksums a shipped migration and refuses a
+    // file that has changed since it ran, precisely so a real shop's disk
+    // cannot drift away from the code that reads it. So the CHECK is widened
+    // forwards, never in place.
+    Migration {
+        version: 2,
+        name: "0002_recovery_slip",
+        sql: include_str!("migrations/0002_recovery_slip.sql"),
+    },
+];
 
 /// The highest version this build understands. A file above it is refused —
 /// see [`DbError::NewerSchema`].

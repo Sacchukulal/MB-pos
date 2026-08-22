@@ -220,12 +220,44 @@
 
 /* WAITING sits between the two and is set further down the file. */
 
-/* LOADED: the accent outline and a soft ring outside it. */
-.mb-tile--loaded {
+/* **SELECTED: the tile the cashier is on.** Drawn on TOP of the state above,
+   never instead of it.
+
+   This was a fifth state, `.mb-tile--loaded`, and being a state was the whole
+   problem (owner, 2026-08-22 — *"selected table is not highlighted"*). Two
+   things followed from it, and this rule fixes both:
+
+   1. it replaced FREE, so a free tile that was selected lost its dash — and,
+      worse, an empty table could never be marked at all, because the state
+      behind it was matched on an order that does not exist until a line is
+      typed;
+   2. it replaced LATE, so opening a late table in the cart turned off the one
+      signal §4 calls *"not optional"*.
+
+   The ring sits OUTSIDE the border, so nothing about the tile's own outline
+   moves when it is selected — a tile that changed border style on selection
+   would jump by a pixel and read as a different object. `--accent` on the
+   border still comes along, because at 40 tables across a room the ring alone
+   is a thin thing to find. */
+.mb-tile--selected {
   border-color: var(--accent);
-  box-shadow:
-    inset var(--space-1) 0 0 0 var(--accent),
-    0 0 0 var(--focus-ring-width) var(--accent-line);
+  border-style: solid;
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: var(--border-width);
+}
+
+/* **The state's own inset stripe has to survive the ring**, and `box-shadow`
+   is one property — so a selected occupied tile setting `box-shadow` here
+   would erase the stripe it is drawn over. That is why the ring above is an
+   `outline` and not a second shadow: two different properties cannot fight.
+
+   A selected FREE tile has no stripe of its own, and gets one, because a table
+   somebody has open is not "nothing" any more. It is the accent at the width
+   every other state uses, so the four tiles still read as one family. */
+.mb-tile--free.mb-tile--selected {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset var(--space-1) 0 0 0 var(--accent);
 }
 
 /* **The table number is the thing the tile exists to say**, and it was
@@ -592,6 +624,43 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(var(--space-8), 1fr));
   gap: var(--space-1);
+}
+
+/* The tick sits beside the word rather than replacing it — a button that
+   swaps its label for a symbol is a button whose meaning you have to remember. */
+.mb-payment__mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+/* **A mode that has taken money says so, even while it is disabled.**
+
+   The owner, 2026-08-22: *"the payment mode selection is also not visible."*
+   Four identical outlines before the money and four identical outlines after
+   it, so a settled bill looked exactly like an unpaid one — which is also why
+   the error toast underneath it made no sense.
+
+   `!important` is not used and the disabled rule is not fought: this is a more
+   specific selector than `.mb-button:disabled`, deliberately, because the one
+   fact worth keeping when all four go dead is WHICH ONE was used. Colour is not
+   the only carrier — the tick is the form half (§2 rule 2). */
+.mb-payment__mode--taken,
+.mb-payment__mode--taken:disabled {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: var(--weight-bold);
+  opacity: 1;
+}
+
+/* Why the modes are off. Quiet, and only on a bill that is actually covered —
+   see `PaymentModes`. */
+.mb-payment__settled {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .mb-payment__taken {

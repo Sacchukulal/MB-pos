@@ -20,6 +20,22 @@
 //! drawer is a better place for this than a screenshot. Only its Argon2 hash is
 //! stored.
 //!
+//! # That sentence was not true until 2026-08-22
+//!
+//! It was written here when this file was, and nothing ever printed anything.
+//! The code was handed to the screen, shown once in a dialog, and that was the
+//! whole of it — so a shop that pressed *I have written it down* without a pen
+//! to hand had lost the only thing that gets it back into its own counter,
+//! while `recovery.issued` in the audit log read back to them as **"New
+//! recovery code printed"**. Found going through the sign-in path after the
+//! owner asked for it to be gone through properly.
+//!
+//! It is `mb_print::template::recovery` and `JobKind::Recovery` now, queued by
+//! `ipc::print_the_recovery_slip` from both places a code is issued, with
+//! `signin_tests::issuing_a_recovery_code_actually_queues_the_slip` standing
+//! guard over it. **A claim in a doc comment is not a feature**, and this
+//! paragraph is here so the next one is easier to spot.
+//!
 //! Using it sets a new PIN for one `staff.manage` staff member, kills the old
 //! code, issues and prints a new one, and writes an audit row.
 //!
