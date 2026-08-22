@@ -107,7 +107,7 @@ if (unreachable.length > 0) {
   bad += unreachable.length;
   console.log(`\n  ${unreachable.length} command(s) NO SCREEN CAN REACH.`);
   console.log('  A command with a test and no button is a feature the shop');
-  console.log('  cannot use — see docs/NOT_WIRED.md.');
+  console.log('  cannot use. Give it a button, or delete it.');
   for (const name of unreachable) console.log(`    ${name}`);
 }
 
