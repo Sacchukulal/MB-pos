@@ -29,6 +29,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { isUiError } from '../ipc/call';
 import { Button } from './controls';
 import { InfoTip } from './display';
 import { Icon } from './Icon';
@@ -312,4 +313,39 @@ export function useToast(): ToastApi {
   const found = useContext(ToastContext);
   if (!found) throw new Error('useToast was called outside ToastProvider');
   return found;
+}
+
+/**
+ * **Say what came back, as loudly as it deserves** — the owner's round of
+ * 22 Aug 2026.
+ *
+ * Every screen had written its own three lines of this, and every one of them
+ * showed everything in red. So pressing the kitchen button a second time — when
+ * the kitchen already has the food, and nothing at all has gone wrong — raised
+ * the same alarm as a printer that had died. A counter where the harmless
+ * message and the real one look identical is a counter where the cashier learns
+ * to ignore both.
+ *
+ * **The engine decides the tone, not the screen.** `Tone` travels on the error
+ * itself, from the file where the words were written. A list of codes kept here
+ * in TypeScript would be a second place to change every time a message is added,
+ * and within a month the two would disagree.
+ */
+export function useReport(): (cause: unknown) => void {
+  const toast = useToast();
+  return useCallback(
+    (cause: unknown) => {
+      if (isUiError(cause)) {
+        toast.show(
+          cause.tone === 'notice' ? 'info' : 'danger',
+          cause.message,
+          cause.detail ?? undefined,
+        );
+        return;
+      }
+      // Not one of ours: a bug rather than a refusal, and always loud.
+      toast.show('danger', String(cause));
+    },
+    [toast],
+  );
 }

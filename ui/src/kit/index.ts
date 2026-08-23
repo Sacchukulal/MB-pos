@@ -62,7 +62,8 @@ export type {
   SelectProps,
 } from './controls';
 
-export { ConfirmDialog, Modal, ToastProvider, useToast } from './overlays';
+export { useAction, type Action } from './action';
+export { ConfirmDialog, Modal, ToastProvider, useReport, useToast } from './overlays';
 export type { ToastTone } from './overlays';
 
 export {

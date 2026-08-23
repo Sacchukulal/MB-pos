@@ -28,8 +28,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, useToast } from '../kit';
-import { call, inApp, isUiError } from '../ipc/call';
+import { Button, useReport } from '../kit';
+import { call, inApp } from '../ipc/call';
 import type { KitchenTicket } from '../ipc/generated/KitchenTicket';
 import type { KitchenView } from '../ipc/generated/KitchenView';
 import { useTick } from '../clock';
@@ -39,17 +39,13 @@ import './kitchen.css';
 export function Kitchen() {
   const [view, setView] = useState<KitchenView | null>(null);
   const [station, setStation] = useState<string | null>(null);
-  const toast = useToast();
 
   // **ONE clock for the whole screen** — see the note above.
   const tick = useTick();
 
-  const report = useCallback(
-    (cause: unknown) => {
-      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-    },
-    [toast],
-  );
+  // One reporter for the whole product, obeying the tone the engine set — so
+  // "the kitchen already has this" is not shown in the colour of a real fault.
+  const report = useReport();
 
   const load = useCallback(() => {
     if (!inApp()) return;

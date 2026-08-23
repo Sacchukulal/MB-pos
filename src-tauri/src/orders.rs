@@ -893,6 +893,9 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
 ///
 /// When an item has since left the menu.
 pub fn take_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView> {
+    // One counter action at a time — see `App::begin_action`. Held for the
+    // whole flow, so a second press cannot land between the read and the write.
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
     let changes = app.with_cart(|state| Ok(state.from_the_floor.clone()))?;
 

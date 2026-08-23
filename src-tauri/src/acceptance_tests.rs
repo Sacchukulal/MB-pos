@@ -834,3 +834,183 @@ fn a_locked_day_refuses_the_corrections_that_would_change_it() {
         "a REFUSAL must not arrive as a database failure (D75): {message}"
     );
 }
+
+/// **A settled order can never be settled a second time** — FIX PLAN 1, A2.
+///
+/// `settling_the_same_cart_twice_bills_once` above covers the ordinary double
+/// press: the cart is cleared by the first settle, so the second finds nothing
+/// and stops. That is the whole defence, and it is one line of state.
+///
+/// This is the case that got past it. Settling reads the cart, releases it,
+/// writes the order, prints, and only then clears — so a second press that
+/// arrives inside that window still holds a cart pointing at the order that
+/// has just been settled. It looked the order up, did not match `Open`, and
+/// fell through to "open a new one", which **claims a fresh bill number and
+/// upserts the settled row away**. One sale, two bill numbers, and a GST book
+/// with a hole in it.
+///
+/// `park_open_order` had answered this properly all along. Settling had not.
+#[test]
+fn a_settled_order_is_never_given_a_second_bill_number() {
+    let scratch = Scratch::new("acceptance_resettle");
+    let app = a_shop(&scratch, "resettle");
+
+    app.with_cart_mut(|state| {
+        state.order_type = mb_core::OrderType::Parcel;
+        Ok(())
+    })
+    .expect("parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
+        .expect("added");
+    let total = app
+        .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
+        .expect("bill");
+    cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("paid");
+    let first = crate::flows::complete_bill_on(&app).expect("settled");
+
+    // The order that was just settled.
+    let settled_id = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| mb_db::Repos::new(tx).orders().list_for_day(OUTLET, today()))
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the day's orders")
+        .into_iter()
+        .find_map(|o| match o {
+            mb_core::AnyOrder::Settled(s) => Some(s.core.id.as_str().to_owned()),
+            _ => None,
+        })
+        .expect("something was settled");
+
+    // A cart still pointing at it — what the losing press is holding.
+    app.with_cart_mut(|state| {
+        state.order_type = mb_core::OrderType::Parcel;
+        state.order_id = Some(settled_id);
+        Ok(())
+    })
+    .expect("the second press still holds the order");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
+        .expect("added");
+    let again = app
+        .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
+        .expect("bill");
+    cart_add_payment_on(&app, "Cash".to_owned(), again.paise(), None).expect("paid");
+
+    let second = crate::flows::complete_bill_on(&app);
+
+    assert!(!first.is_empty());
+    assert!(
+        second.is_err(),
+        "a settled order was settled again and got bill {second:?}"
+    );
+    assert_eq!(
+        totals(&app).bills,
+        1,
+        "one sale became two bills in the day's book"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FIX PLAN 1 — one counter action at a time.
+//
+// The cart lock is taken and released per call, so its promise holds inside one
+// call and not across a flow. Settling reads the cart, releases it, writes the
+// order, prints, and only then clears — and a second press landing inside that
+// window read a cart that was still full. `settling_the_same_cart_twice_bills_once`
+// could not catch it, because pressing twice in a test is two calls in a row,
+// and in a row is exactly the case that already worked.
+// ---------------------------------------------------------------------------
+
+/// **A second action waits for the first to finish.**
+///
+/// Deterministic, and about the mechanism rather than the symptom: the counter
+/// is held, a second action is started on another thread, and it must still be
+/// waiting. Everything else in this round rests on this being true.
+#[test]
+fn a_second_action_waits_while_the_counter_is_busy() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let scratch = Scratch::new("acceptance_one_at_a_time");
+    let app = a_shop(&scratch, "one_at_a_time");
+    app.with_cart_mut(|state| {
+        state.order_type = mb_core::OrderType::Parcel;
+        Ok(())
+    })
+    .expect("parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
+        .expect("added");
+
+    let held = app.begin_action();
+    let reached = AtomicBool::new(false);
+    let finished = AtomicBool::new(false);
+
+    std::thread::scope(|threads| {
+        threads.spawn(|| {
+            reached.store(true, Ordering::SeqCst);
+            let _ = crate::flows::print_kitchen_ticket_on(&app);
+            finished.store(true, Ordering::SeqCst);
+        });
+
+        while !reached.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(
+            !finished.load(Ordering::SeqCst),
+            "a second action ran straight through while the counter was busy"
+        );
+
+        drop(held);
+    });
+
+    assert!(
+        finished.load(Ordering::SeqCst),
+        "the waiting action never ran after the counter was free"
+    );
+}
+
+/// **Two settles at the same instant produce one bill.**
+///
+/// This is the press-twice-quickly case as it actually happens: not one call
+/// after another, but two at once. Before the counter was serialised both
+/// threads read a full cart, and the loser went on to claim a second bill
+/// number for the same sale.
+#[test]
+fn two_settles_at_the_same_instant_make_one_bill() {
+    let scratch = Scratch::new("acceptance_race_settle");
+    let app = a_shop(&scratch, "race_settle");
+
+    app.with_cart_mut(|state| {
+        state.order_type = mb_core::OrderType::Parcel;
+        Ok(())
+    })
+    .expect("parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
+        .expect("added");
+    let total = app
+        .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
+        .expect("bill");
+    cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("paid");
+
+    let gate = std::sync::Barrier::new(2);
+    let outcomes = std::sync::Mutex::new(Vec::new());
+
+    std::thread::scope(|threads| {
+        for _ in 0..2 {
+            threads.spawn(|| {
+                gate.wait();
+                let out = crate::flows::complete_bill_on(&app);
+                outcomes.lock().expect("not poisoned").push(out.is_ok());
+            });
+        }
+    });
+
+    let outs = outcomes.into_inner().expect("not poisoned");
+    assert_eq!(
+        outs.iter().filter(|ok| **ok).count(),
+        1,
+        "both presses billed the same sale: {outs:?}"
+    );
+    assert_eq!(totals(&app).bills, 1, "one sale became two bills");
+}

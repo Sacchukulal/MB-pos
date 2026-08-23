@@ -604,6 +604,9 @@ pub fn put_on_account_on(
     customer_id: String,
     override_limit: bool,
 ) -> UiResult<crate::billing::CartView> {
+    // One counter action at a time — see `App::begin_action`. Held for the
+    // whole flow, so a second press cannot land between the read and the write.
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
     let room = headroom_on(app, customer_id.clone())?;

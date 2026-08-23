@@ -948,6 +948,9 @@ pub fn cart_add_payment_on(
     amount_paise: i64,
     reference: Option<String>,
 ) -> UiResult<CartView> {
+    // One counter action at a time — see `App::begin_action`. Held for the
+    // whole flow, so a second press cannot land between the read and the write.
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
     let mode = match mode.as_str() {
         "Cash" => mb_core::PaymentMode::Cash,

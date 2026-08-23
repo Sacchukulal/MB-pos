@@ -65,9 +65,10 @@ import {
   SectionHeader,
   Select,
   Toolbar,
+  useReport,
   useToast,
 } from '../kit';
-import { call, isUiError } from '../ipc/call';
+import { call } from '../ipc/call';
 /* **The one table tile in the product.** This screen used to have a second
    copy — see the note where it was. */
 import { Tile } from '../billing/TableGrid';
@@ -99,12 +100,9 @@ export function Floor() {
   const [deletingOne, setDeletingOne] = useState<TableRowView | null>(null);
   const toast = useToast();
 
-  const report = useCallback(
-    (cause: unknown) => {
-      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-    },
-    [toast],
-  );
+  // One reporter for the whole product, obeying the tone the engine set — so
+  // "the kitchen already has this" is not shown in the colour of a real fault.
+  const report = useReport();
 
   /**
    * **One place the floor comes back from Rust**, and the one place a stale

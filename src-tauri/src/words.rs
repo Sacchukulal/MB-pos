@@ -24,6 +24,28 @@
 use serde::Serialize;
 use ts_rs::TS;
 
+/// **How loudly to say it** — the owner's round of 22 Aug 2026.
+///
+/// Every answer the engine gave used to reach the counter the same way and come
+/// out red. "The kitchen already has everything on this bill" is not a failure;
+/// it is the true and useful answer to a button that was pressed twice, and
+/// showing it in the same colour as a printer that has died teaches a cashier
+/// to ignore both.
+///
+/// The tone is decided here, where the words are written, and not on the screen.
+/// A list of codes kept in TypeScript would be a second place to change every
+/// time a message is added, and the two would drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub enum Tone {
+    /// Something failed, or was refused. The cashier has to do something.
+    #[default]
+    Problem,
+    /// Nothing to do, or already done. Worth saying once, quietly.
+    Notice,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +56,8 @@ pub struct UiError {
     pub message: String,
     /// For the log and the "details" disclosure. Shown on request.
     pub detail: Option<String>,
+    /// How loudly to say it. [`Tone::Problem`] unless someone said otherwise.
+    pub tone: Tone,
 }
 
 impl UiError {
@@ -42,12 +66,24 @@ impl UiError {
             code: code.to_owned(),
             message: message.into(),
             detail: None,
+            tone: Tone::Problem,
         }
     }
 
     #[must_use]
     pub fn with_detail(mut self, detail: impl Into<String>) -> UiError {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// **Nothing went wrong.** Say it quietly.
+    ///
+    /// For the answers that are refusals only in the sense that there is
+    /// nothing left to do: the kitchen already has the food, the bill is
+    /// already paid, the course has already gone.
+    #[must_use]
+    pub fn quietly(mut self) -> UiError {
+        self.tone = Tone::Notice;
         self
     }
 }

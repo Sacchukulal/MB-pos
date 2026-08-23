@@ -53,6 +53,8 @@ pub struct App {
     /// **The cart lives in Rust** (P09). One counter, one cart, recomputed from
     /// scratch on every change — see billing.rs for why it is not in React.
     cart: Mutex<CartState>,
+    /// **One counter action at a time** — see [`App::begin_action`].
+    action: Mutex<()>,
     /// **The faces this counter can print in**, loaded once each (P07/D33,
     /// P31). Rasterising a receipt is 2 ms with a warm glyph cache and rather
     /// more with a cold one, so a face is parsed once and shared by every
@@ -181,6 +183,7 @@ impl App {
             shop: Mutex::new(None),
             config: Mutex::new(config),
             cart: Mutex::new(CartState::default()),
+            action: Mutex::new(()),
             faces: Arc::new(faces),
             sessions,
             shop_config: Mutex::new(crate::settings::ShopConfig::default()),
@@ -1144,6 +1147,32 @@ impl App {
 
 impl App {
     /// Read the cart.
+    /// **The counter does one thing at a time.** Hold this for a whole flow.
+    ///
+    /// The cart lock below is taken and released *per call*, so its promise —
+    /// "two commands arriving together can never interleave" — holds inside one
+    /// call and not across a sequence of them. Every flow that matters is such
+    /// a sequence: settling reads the cart, releases it, writes the order,
+    /// prints, and only then clears. Two presses landing inside that window
+    /// both read a cart that is still full, and both go on to bill it.
+    ///
+    /// That is how one press of Settle could claim a second bill number, how a
+    /// payment could be added twice, and how five taps on the kitchen button
+    /// became five tickets. A cashier at a counter presses again when nothing
+    /// has happened yet; the app has to be the one that says no.
+    ///
+    /// Held from the top of each flow and released when it returns — including
+    /// on the `?` that leaves early, because the guard is dropped either way.
+    /// It goes in the flows and never in their helpers: `park_open_order` runs
+    /// *inside* the kitchen flow, and a lock in both would be a counter that
+    /// stops dead on its first kitchen ticket.
+    ///
+    /// The background threads take it too, so the twenty-second kitchen
+    /// reprint cannot cut into a sale that is halfway written.
+    pub fn begin_action(&self) -> MutexGuard<'_, ()> {
+        lock(&self.action)
+    }
+
     pub fn with_cart<T>(&self, f: impl FnOnce(&CartState) -> UiResult<T>) -> UiResult<T> {
         f(&lock(&self.cart))
     }

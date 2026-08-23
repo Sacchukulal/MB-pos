@@ -25,7 +25,6 @@ use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
 use mb_core::{AnyOrder, BusinessDay, Money, OrderId, StaffId, Timestamp};
 use mb_db::repo::corrections::{Refund, Reason};
-use mb_print::queue::{Job, JobKind};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -537,44 +536,23 @@ fn print_cancellation(
     lines: &[(mb_core::LineIdentity, mb_core::Qty)],
     table: Option<&str>,
 ) -> UiResult<()> {
-    let printer = crate::flows::default_printer(app)?;
     // P17: a cancellation slip is a kitchen ticket, so it obeys the shop's
     // kitchen-ticket settings. A slip that looked different from every other
     // ticket would be the one the kitchen does not recognise.
-    let settings = app.shop_config().kitchen;
-    let ticket: Vec<mb_print::template::TicketLine> = lines
-        .iter()
-        .map(|(identity, qty)| mb_print::template::TicketLine {
-            name: core
-                .cart
-                .lines()
-                .iter()
-                .find(|line| &line.identity() == identity)
-                .map_or_else(|| identity.item_id.as_str().to_owned(), |line| {
-                    line.snapshot.name.clone()
-                }),
-            qty: *qty,
-            note: identity.note.clone(),
-            modifiers: Vec::new(),
-        })
-        .collect();
-
-    let ctx = mb_print::template::KitchenContext {
-        kind: mb_print::template::TicketKind::Cancellation,
-        token: None,
-        bill_number: None,
-        order_type: core.order_type,
+    //
+    // And it goes where every other kitchen ticket goes. This asked for
+    // `default_printer` — the BILL printer — so in a shop with a real kitchen
+    // printer the queue refused it and the slip that says STOP COOKING was
+    // thrown away in silence while the cook carried on.
+    crate::flows::queue_kitchen_lines(
+        app,
+        mb_print::template::TicketKind::Cancellation,
+        core.order_type,
         table,
-        time: None,
-        station: None,
-        lines: &ticket,
-        settings: &settings,
-    };
-    let document = mb_print::template::kitchen_document(printer.paper, &ctx)
-        .map_err(|e| words::from_print(&e))?;
-
-    app.print(Job::new(JobKind::Kitchen, &printer.id, document, today(now()))
-                    .because("cancellation".to_owned()),)?;
+        None,
+        crate::flows::ticket_lines(&core.cart, lines),
+        "cancellation".to_owned(),
+    )?;
     Ok(())
 }
 
@@ -589,6 +567,9 @@ fn print_cancellation(
 /// nobody, **print**, and only then `mark_cancelled`. Recording before the
 /// paper is durable loses the cancellation silently and the kitchen carries on.
 pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::billing::CartView> {
+    // One counter action at a time — see `App::begin_action`. Held for the
+    // whole flow, so a second press cannot land between the read and the write.
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::OrderItemVoid)?;
     let at = now();
     let day = today(at);

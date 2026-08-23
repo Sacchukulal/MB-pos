@@ -813,3 +813,244 @@ fn later(seconds: i64) -> mb_core::Timestamp {
         crate::flows::now().millis().saturating_add(seconds * 1_000),
     )
 }
+
+// ---------------------------------------------------------------------------
+// FIX PLAN 1 — the owner's round of 22 August 2026.
+//
+// **One press made two rolls of paper.** The button prints the ticket and also
+// tells the kitchen screen; twenty seconds later, when no screen had drawn it,
+// the fallback printed the SAME ORDER again. It asked `default_printer` — the
+// BILL printer — and it printed the whole cart instead of what the kitchen had
+// not seen. Both are the opposite of what the button does.
+//
+// What a shop actually suffers depends on how its printers are set up, and
+// both endings are bad:
+//
+//   one printer, role "both"   -> the whole order printed a second time
+//   separate bill and kitchen  -> the queue REFUSES a kitchen job on a bill
+//                                 printer, so the ticket is silently lost and
+//                                 the delivery is still marked "printed"
+//
+// It survived 1,344 tests because every kitchen test drove `kitchen::send`
+// directly, never the button, and used one printer whose role was "both" —
+// the one arrangement where choosing the bill printer cannot be seen.
+// ---------------------------------------------------------------------------
+
+/// A printer with a stated ROLE, so "the bill printer" and "the kitchen
+/// printer" can be two different machines and the wrong one can be caught.
+fn a_printer(app: &App, name: &str, role: &str, is_default: bool) -> String {
+    let view = crate::settings::printers::save_printer_on(
+        app,
+        crate::settings::printers::PrinterEdit {
+            id: String::new(),
+            name: name.to_owned(),
+            kind: "spooler".to_owned(),
+            address: format!("Windows {name}"),
+            paper_mm: 80,
+            is_default,
+            role: role.to_owned(),
+            engine: "raster".to_owned(),
+            is_bold_dark: false,
+            can_kick_drawer: false,
+        },
+    )
+    .expect("the printer saves");
+    view.printers
+        .iter()
+        .find(|p| p.name == name)
+        .expect("it is in the list")
+        .id
+        .clone()
+}
+
+/// Put a naan on the bill and seat it at table 5.
+fn a_naan_on_table_5(app: &App) {
+    app.with_cart_mut(|state| {
+        let item = app.find_menu_item("itm_naan").expect("on the menu");
+        state
+            .cart
+            .add(
+                crate::billing::snapshot_for(&item),
+                mb_core::Qty::from_whole(1).expect("in range"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        state.table = Some("tbl_5".to_owned());
+        Ok(())
+    })
+    .expect("a cart");
+}
+
+fn kitchen_paper(app: &App) -> Vec<crate::state::PrintJobView> {
+    app.print_queue_snapshot()
+        .into_iter()
+        .filter(|j| j.what == "Kitchen ticket")
+        .collect()
+}
+
+/// **The owner's bug, in the owner's own shop.** One printer that does both
+/// jobs — the commonest small-shop counter — and one press of the button.
+///
+/// Before the fix this printed the naan, and then printed the whole order
+/// again twenty seconds later, because nothing had drawn it on a screen.
+#[test]
+fn one_press_makes_one_ticket_when_one_printer_does_both_jobs() {
+    let scratch = Scratch::new("fix1_one_press_both");
+    let app = a_kitchen(&scratch, "one_press_both");
+    a_printer(&app, "Counter", "both", true);
+    a_naan_on_table_5(&app);
+
+    crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
+    assert_eq!(kitchen_paper(&app).len(), 1, "the press itself printed twice");
+
+    // Nobody draws it, and the fallback comes round.
+    let printed = kitchen::print_what_nobody_drew_at(&app, later(ACK_SECONDS + 1));
+
+    let paper = kitchen_paper(&app);
+    assert_eq!(
+        paper.len(),
+        1,
+        "the fallback printed the order a second time: {paper:?}"
+    );
+
+    // **And it says nothing went to paper, because nothing did.**
+    //
+    // This counts what the fallback actually printed, and the counter reads
+    // that number. Found on the owner's counter the morning after the fix: the
+    // duplicate was gone, but the log still said "went to paper (printed)"
+    // twenty seconds after every press, which is the exact sentence the bug
+    // used to write. A log that cries wolf about a bug that has been fixed is
+    // its own defect.
+    assert_eq!(
+        printed, 0,
+        "the fallback reported paper for a ticket the counter had already printed"
+    );
+}
+
+/// **And a kitchen ticket is never lost in a shop with two machines.**
+///
+/// Here the fallback has real work: lines the kitchen has not seen, with no
+/// paper behind them — the shape a fired course leaves. Before the fix it
+/// asked for the bill printer, the queue refused the job, and the delivery was
+/// marked "printed" all the same. The kitchen went blind and nothing said so.
+#[test]
+fn a_pending_ticket_reaches_the_kitchen_printer_and_is_not_lost() {
+    let scratch = Scratch::new("fix1_not_lost");
+    let app = a_kitchen(&scratch, "not_lost");
+    a_printer(&app, "Bill printer", "bill", true);
+    a_printer(&app, "Kitchen printer", "kitchen", false);
+    a_naan_on_table_5(&app);
+
+    // Parked, and the screen told — but no paper has been printed for it.
+    crate::flows::park_open_order(&app).expect("parked");
+    let order_id = app
+        .with_cart(|state| Ok(state.order_id.clone()))
+        .expect("a cart")
+        .expect("parked");
+    kitchen::send(&app, &order_id, None).expect("the screen was told");
+    assert!(kitchen_paper(&app).is_empty(), "nothing should be on paper yet");
+
+    let _ = kitchen::print_what_nobody_drew_at(&app, later(ACK_SECONDS + 1));
+
+    let paper = kitchen_paper(&app);
+    assert_eq!(paper.len(), 1, "the pending ticket never reached paper: {paper:?}");
+    assert_eq!(
+        paper[0].printer, "Kitchen printer",
+        "a kitchen ticket went to the wrong machine: {:?}",
+        paper[0]
+    );
+    assert!(
+        paper[0].last_error.is_none(),
+        "the queue refused the ticket: {:?}",
+        paper[0]
+    );
+
+    // And it is remembered, so the next round does not print it again.
+    let _ = kitchen::print_what_nobody_drew_at(&app, later(ACK_SECONDS * 4));
+    assert_eq!(
+        kitchen_paper(&app).len(),
+        1,
+        "the fallback printed the same pending line twice"
+    );
+}
+
+/// **A cancellation slip is a kitchen ticket, so it goes to the kitchen.**
+///
+/// It carries the words "stop cooking this", and it was being sent to the
+/// counter's bill printer — where, in a shop with a real kitchen printer, the
+/// queue refuses it outright and the cook keeps cooking.
+#[test]
+fn a_cancellation_slip_goes_to_the_kitchen_printer() {
+    let scratch = Scratch::new("fix1_cancel");
+    let app = a_kitchen(&scratch, "cancel");
+    a_printer(&app, "Bill printer", "bill", true);
+    a_printer(&app, "Kitchen printer", "kitchen", false);
+    a_naan_on_table_5(&app);
+
+    crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
+    let order_id = app
+        .with_cart(|state| Ok(state.order_id.clone()))
+        .expect("a cart")
+        .expect("parked");
+    let before = kitchen_paper(&app).len();
+
+    crate::corrections::cancel_order_on(&app, order_id, "Customer left".to_owned())
+        .expect("cancelled");
+
+    let paper = kitchen_paper(&app);
+    assert_eq!(paper.len(), before + 1, "no cancellation slip was printed: {paper:?}");
+    let slip = paper.last().expect("a slip");
+    assert_eq!(
+        slip.printer, "Kitchen printer",
+        "the stop-cooking slip went to the counter: {slip:?}"
+    );
+    assert!(
+        slip.last_error.is_none(),
+        "the queue refused the cancellation slip: {slip:?}"
+    );
+}
+
+/// **A dine-in order with no table is refused BEFORE the paper** — FIX PLAN 1,
+/// C1.
+///
+/// The rule existed. It sat in `park_open_order`, which the kitchen flow calls
+/// at step 2b — *after* the tickets have already been queued. So the paper went
+/// out, the cook started cooking, and only then did the counter say the order
+/// could not be saved. At the till the same rule fired only at settle, which is
+/// after the customer has paid.
+#[test]
+fn a_dine_in_order_with_no_table_prints_nothing() {
+    let scratch = Scratch::new("fix1_no_table");
+    let app = a_kitchen(&scratch, "no_table");
+    a_printer(&app, "Counter", "both", true);
+
+    app.with_cart_mut(|state| {
+        let item = app.find_menu_item("itm_naan").expect("on the menu");
+        state
+            .cart
+            .add(
+                crate::billing::snapshot_for(&item),
+                mb_core::Qty::from_whole(1).expect("in range"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        state.order_type = mb_core::OrderType::DineIn;
+        state.table = None;
+        Ok(())
+    })
+    .expect("a cart with no table");
+
+    let outcome = crate::flows::print_kitchen_ticket_on(&app);
+
+    assert!(
+        outcome.is_err(),
+        "a dine-in order with no table was sent to the kitchen: {outcome:?}"
+    );
+    assert!(
+        kitchen_paper(&app).is_empty(),
+        "paper went out before the table was asked for: {:?}",
+        kitchen_paper(&app)
+    );
+}

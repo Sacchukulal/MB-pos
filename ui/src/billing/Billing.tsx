@@ -33,9 +33,11 @@ import {
   SearchField,
   SectionHeader,
   Spinner,
+  useAction,
+  useReport,
   useToast,
 } from '../kit';
-import { call, inApp, isUiError, subscribe } from '../ipc/call';
+import { call, inApp, subscribe } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
@@ -178,16 +180,12 @@ export function Billing() {
     strokes.current = { text, gaps: [], at: now };
   }, []);
 
-  const report = useCallback(
-    (cause: unknown) => {
-      if (isUiError(cause)) {
-        toast.show('danger', cause.message, cause.detail ?? undefined);
-      } else {
-        toast.show('danger', String(cause));
-      }
-    },
-    [toast],
-  );
+  // One reporter for the whole product — and it obeys the tone the engine set,
+  // so "the kitchen already has everything on this bill" no longer arrives in
+  // the same red as a printer that has died.
+  const report = useReport();
+  // One action at a time on this screen, matching the counter in Rust.
+  const [act, acting] = useAction();
 
   // **Silent on failure, and deliberately.** This runs on every tick of the
   // shared clock, so a shop that is not open yet would otherwise raise a toast
@@ -572,11 +570,13 @@ export function Billing() {
         case 'focus-search':
           searchBox.current?.focus();
           return;
+        // Through the same one-at-a-time gate as the buttons: a held-down
+        // shortcut key repeats, and the counter must answer it the same way.
         case 'print-kitchen':
-          await printKitchen();
+          act(printKitchen);
           return;
         case 'complete-bill':
-          await completeBill();
+          act(completeBill);
           return;
         case 'merge-into':
           await openTableById(command.tableId);
@@ -998,16 +998,21 @@ export function Billing() {
           </div>
 
           <div className="mb-actions">
+            {/*
+              **Dead while their own work runs** — the two presses that used to
+              be repeatable. `acting` refuses the second press outright; the
+              disabled state is so the cashier can see why.
+            */}
             <Button
-              disabled={!cart || cart.isEmpty}
-              onClick={() => void printKitchen()}
+              disabled={!cart || cart.isEmpty || acting}
+              onClick={() => act(printKitchen)}
             >
               Kitchen ticket
             </Button>
             <Button
               variant="primary"
-              disabled={!cart || cart.isEmpty}
-              onClick={() => void completeBill()}
+              disabled={!cart || cart.isEmpty || acting}
+              onClick={() => act(completeBill)}
             >
               Complete bill
             </Button>

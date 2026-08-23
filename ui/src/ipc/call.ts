@@ -871,6 +871,8 @@ function asUiError(cause: unknown): UiError {
       'Magic Bill could not reach its own engine. Close it and open it again — ' +
       'nothing has been lost.',
     detail: String(cause),
+    // The bridge is down: that is a problem, not a notice.
+    tone: 'problem',
   };
 }
 

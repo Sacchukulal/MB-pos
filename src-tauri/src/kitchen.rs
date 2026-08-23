@@ -572,7 +572,8 @@ pub fn fire_on(app: &App, order_id: String, course: String) -> UiResult<KitchenV
         return Err(UiError::new(
             "kitchen.already_fired",
             format!("The kitchen already has the {course} for this table."),
-        ));
+        )
+        .quietly());
     }
 
     let station = send(app, &order_id, Some(&course))?;
@@ -716,6 +717,12 @@ pub fn print_what_nobody_drew(app: &App) -> u32 {
 /// `print_what_nobody_drew`, at a stated time — see `look_at` for why the clock
 /// is an argument.
 pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
+    // This runs on its own thread every five seconds, so it is the one caller
+    // that can genuinely collide with a cashier. It waits its turn like every
+    // other action — a reprint must not land in the middle of a sale that is
+    // halfway written.
+    let _one_at_a_time = app.begin_action();
+
     let overdue = app
         .with_shop(|shop| {
             shop.db
@@ -732,20 +739,49 @@ pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
         // The paper first, then the mark. A mark written before the paper is a
         // ticket the counter believes it printed and nobody has.
         let sent = crate::flows::print_kitchen_ticket_for(app, &ticket.delivery.order_id);
+
+        // **An empty id means there was nothing left to send**, because the
+        // counter had already put this food on paper when the button was
+        // pressed. That is the ordinary case in a shop with no kitchen screen,
+        // and it is not a warning: no paper is missing and nobody has to go and
+        // look at anything.
+        let nothing_left_to_send = matches!(&sent, Ok(id) if id.is_empty());
+
         let outcome = with_ticket(app, &ticket.delivery.id.clone(), |t| {
             t.delivery.printed();
             Ok(())
         });
-        if outcome.is_ok() {
-            printed += 1;
+
+        // **And when the mark fails, say so.** It used to be silent: the paper
+        // had gone out, the ticket was still waiting to be drawn, and five
+        // seconds later this printed it again — and again, for as long as the
+        // order was open, with nothing in the log to explain the pile of paper.
+        if let Err(e) = &outcome {
             crate::log_warn!(
-                "order={} no kitchen screen drew this in time, so it went to paper \
-                 ({}). Check the screen at the {} station.",
+                "order={} went to paper but could not be marked as printed ({e}). \
+                 It will be tried again in a few seconds.",
                 ticket.delivery.order_id,
-                if sent.is_ok() { "printed" } else { "and the printer refused too" },
-                ticket.delivery.station,
             );
+            continue;
         }
+
+        if nothing_left_to_send {
+            crate::log_info!(
+                "order={} no kitchen screen drew this, but the counter had already \
+                 printed it — nothing more was sent.",
+                ticket.delivery.order_id,
+            );
+            continue;
+        }
+
+        printed += 1;
+        crate::log_warn!(
+            "order={} no kitchen screen drew this in time, so it went to paper \
+             ({}). Check the screen at the {} station.",
+            ticket.delivery.order_id,
+            if sent.is_ok() { "printed" } else { "and the printer refused too" },
+            ticket.delivery.station,
+        );
     }
     printed
 }

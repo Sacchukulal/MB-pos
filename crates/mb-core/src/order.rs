@@ -187,6 +187,23 @@ impl AnyOrder {
         }
     }
 
+    /// The same, to change — for the one thing that legitimately moves on an
+    /// order after it has been written: **what the kitchen has been told.**
+    ///
+    /// The paper fallback records its own ticket in the ledger, and it holds an
+    /// order it read back from the database rather than a cart. Without this it
+    /// would have to take the order apart and put it together again, variant by
+    /// variant, at every call site that needs it.
+    pub fn core_mut(&mut self) -> &mut OrderCore {
+        match self {
+            AnyOrder::Draft(o) => &mut o.core,
+            AnyOrder::Open(o) => &mut o.core,
+            AnyOrder::Settled(o) => &mut o.core,
+            AnyOrder::Cancelled(o) => &mut o.core,
+            AnyOrder::Voided(o) => &mut o.core,
+        }
+    }
+
     /// The bill number, once one has been claimed.
     #[must_use]
     pub fn bill_number(&self) -> Option<&Claimed> {
