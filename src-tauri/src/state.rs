@@ -604,12 +604,55 @@ impl App {
         lock(&self.shop).is_some()
     }
 
-    /// The built-in face. Callers that lay a document out themselves — the
-    /// preview, the diagnostics slip — do not choose a typeface: the queue is
-    /// what draws a job, and the queue asks [`crate::typefaces::SystemFaces`].
+    /// The built-in face, for a caller that has no shop settings to consult.
     #[must_use]
     pub fn font(&self) -> Arc<Font> {
         self.faces.builtin()
+    }
+
+    /// **The metrics a job of this kind will actually be drawn with** — P32.
+    ///
+    /// The queue picks the face from the job's kind ([`App::face_for`]) and the
+    /// engine from the printer, and the template has to know both **before** it
+    /// builds the document: how many characters fit decides whether the item
+    /// table is one line or two. Asking the same two questions here is what
+    /// keeps the document that was built and the document that gets drawn in
+    /// agreement.
+    /// Returns the engine's name beside it, because every screen that shows a
+    /// preview has to say which of the two it is drawing.
+    #[must_use]
+    pub fn metrics_for(
+        &self,
+        kind: mb_print::queue::JobKind,
+        printer: &mb_print::printer::PrinterConfig,
+    ) -> (mb_print::metrics::Metrics, &'static str) {
+        match printer.effective_engine() {
+            mb_print::printer::Engine::Text => (
+                mb_print::metrics::Metrics::printer_font(printer.paper),
+                "text",
+            ),
+            mb_print::printer::Engine::Raster => (
+                mb_print::metrics::Metrics::face(
+                    printer.paper,
+                    self.face_for(kind)
+                        .map_or_else(|| self.font(), |key| self.face_named(&key)),
+                ),
+                "raster",
+            ),
+        }
+    }
+
+    /// **The face a key names, the same way the queue resolves it** — P32.
+    ///
+    /// The preview used to draw in the built-in face whatever the shop had
+    /// chosen, on the grounds that "the queue is what draws a job". That is
+    /// true and it is exactly why the preview has to ask the same question: a
+    /// shop on Times New Roman was being shown a bill in IBM Plex Mono, and
+    /// the two do not wrap in the same places.
+    #[must_use]
+    pub fn face_named(&self, key: &str) -> Arc<Font> {
+        use mb_print::font::Typefaces;
+        self.faces.face(Some(key))
     }
 
     pub fn config(&self) -> AppConfig {

@@ -125,6 +125,25 @@ export function Bills() {
             <Button small onClick={() => setPending({ kind: 'reprint', bill: b })}>
               Reprint
             </Button>
+            {/* **Scope 7.10 — the A4 invoice a B2B customer asks for.** The PDF
+                sink has existed since P06 and nothing but the report exporter
+                ever called it, so a customer asking for an invoice got a
+                three-inch till roll. */}
+            <Button
+              small
+              variant="quiet"
+              onClick={() => {
+                call('bill_pdf', { orderId: b.orderId })
+                  .then((saved) => toast.show('ok', saved.message))
+                  .catch((cause) => {
+                    if (isUiError(cause)) {
+                      toast.show('danger', cause.message, cause.detail ?? undefined);
+                    }
+                  });
+              }}
+            >
+              Invoice PDF
+            </Button>
             {b.state === 'settled' ? (
               <Button
                 small

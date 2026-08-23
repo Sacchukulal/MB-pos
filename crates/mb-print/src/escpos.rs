@@ -309,6 +309,20 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
     let mut bold = false;
     out.size(1).emphasis(false);
 
+    // The layout counts in dots (P32); this engine prints with the printer's
+    // own fixed font, so it divides back — exactly, because
+    // `Metrics::printer_font` only ever answers in whole multiples of it.
+    let advance = laid.base_advance.max(1);
+    let columns_of = |dots: u32| -> usize {
+        #[expect(
+            clippy::integer_division,
+            reason = "dots back into whole characters, not money"
+        )]
+        {
+            (dots / advance) as usize
+        }
+    };
+
     for line in &laid.lines {
         match &line.content {
             LaidContent::Text { text } => {
@@ -320,7 +334,7 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                     bold = line.style.bold;
                     out.emphasis(bold);
                 }
-                let indent = " ".repeat(line.indent);
+                let indent = " ".repeat(columns_of(line.indent_dots));
                 out.line(&format!("{indent}{}", text.trim_end()));
             }
             LaidContent::Separator { pattern, width } => {
@@ -332,9 +346,30 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                     bold = false;
                     out.emphasis(false);
                 }
-                let indent = " ".repeat(line.indent);
-                let body: String = std::iter::repeat_n(pattern.glyph(), *width).collect();
+                let indent = " ".repeat(columns_of(line.indent_dots));
+                let across = columns_of(*width).max(1);
+                let body: String = std::iter::repeat_n(pattern.glyph(), across).collect();
                 out.line(&format!("{indent}{body}"));
+            }
+            // **The letterhead's picture cannot be drawn by the printer's own
+            // font; its text still must be.** Dropping the whole band would
+            // lose the shop's name on every text-engine printer.
+            LaidContent::Band { lines, .. } => {
+                if scale != 1 {
+                    scale = 1;
+                    out.size(1);
+                }
+                for text in lines {
+                    if text.style.scale() != scale {
+                        scale = text.style.scale();
+                        out.size(scale);
+                    }
+                    if text.style.bold != bold {
+                        bold = text.style.bold;
+                        out.emphasis(bold);
+                    }
+                    out.align(text.align).line(text.text.trim()).align(Align::Left);
+                }
             }
             LaidContent::QrCode { payload, align, .. } => {
                 if caps.native_qr {

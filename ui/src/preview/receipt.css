@@ -1,6 +1,14 @@
-/* The receipt preview. Monospace, exactly as wide as the paper, and it looks
-   like paper rather than like a text box — the point of a preview is that the
-   owner can tell at a glance whether the real thing will look right. */
+/* The receipt preview.
+
+   **Everything on this page is measured in printer dots** — P32. One variable,
+   `--dot`, says how many screen pixels a dot is worth, and every position, size
+   and height is a dot count Rust computed. Change `--dot` and the paper zooms;
+   nothing else can move relative to anything else.
+
+   It used to lay text out in `ch` units and scale a size against 24, while the
+   printer scaled the face to fit a twelve-dot column. Two size models, and the
+   paper was the only place anybody could see them disagree: the screen said 24
+   and the roll drew 13. */
 
 .mb-receipt {
   display: flex;
@@ -8,132 +16,200 @@
   gap: var(--space-3);
   /* `flex-start` shrink-wrapped the paper to its content, which is right in the
      gallery and wrong everywhere narrow: a flex item's min-width is `auto`, so
-     the `<pre>` refused to shrink, its own `overflow-x` never engaged, and the
-     WHOLE SCREEN scrolled sideways instead. UI_GUIDELINES §1 forbids that
-     outright — "no horizontal scrolling, ever" — and P17 found it by putting
-     the preview beside the settings. */
+     the paper refused to shrink and the WHOLE SCREEN scrolled sideways
+     instead. UI_GUIDELINES §1 forbids that outright. */
   align-items: stretch;
   min-width: 0;
+  /* **So `cqw` below is a real length.** See `--receipt-paper`. */
+  container-type: inline-size;
 }
 
 .mb-receipt__paper {
+  /* **The one number the page is drawn from.** The paper is as wide as the
+     panel allows, up to a comfortable reading size, and a dot is that width
+     divided by the dots the roll actually has. So an 80 mm roll and a 58 mm
+     roll are drawn at the same width on screen and a dot on the narrow one is
+     bigger — which is exactly right: the two rolls are the same size in the
+     hand and differ in how much fits on them.
+
+     **`cqw`, not `%`, and that was a real bug.** A percentage inside `--dot`
+     is resolved against the containing block's WIDTH when the variable lands
+     in `width` and against its HEIGHT when it lands in `height` — and the
+     paper's height is `auto`, so every row collapsed to nothing and the whole
+     preview drew as a thin strip of rules with no text in it. Found on the
+     owner's screen, P32. A container query unit is a length wherever it is
+     used, which is the property this needs. */
+  --receipt-paper: min(100cqw, var(--panel-width));
+  --dot: calc(var(--receipt-paper) / var(--receipt-dots, 576));
+
+  position: relative;
+  width: var(--receipt-paper);
   margin: 0;
-  /* The other half of the same fix. Without this the `overflow-x` below is
-     decoration: a `<pre>` inside a grid or flex parent is sized by its content
-     unless it is told it may be smaller. */
-  min-width: 0;
-  max-width: 100%;
-  padding: var(--space-4);
+  padding: calc(var(--dot) * 16) 0;
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
-  /* The character grid IS the model (P06): a monospace face with tabular
-     figures is the only way the preview and the paper agree column for
-     column. */
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  /* **One character width, and every other size is a multiple of it.**
-     A caller that has less room sets this and nothing else — the settings
-     screen does, so a 48-column bill fits beside its own settings. */
-  --receipt-char: var(--text-sm);
-  font-size: var(--receipt-char);
-  line-height: var(--line-tight);
+  line-height: 1;
+  /* Never wraps and never re-flows: the layout already decided every break, and
+     a preview that re-wrapped would be a second layout engine (D1). */
   white-space: pre;
-  /* Never wraps. If something is too wide for the box the box scrolls — the
-     layout already decided every break, and a preview that re-wrapped would be
-     a second layout engine (D1). */
-  overflow-x: auto;
+  overflow: hidden;
 }
 
-.mb-receipt__line--bold {
-  font-weight: var(--weight-bold);
+/* One row of the roll. Its height is what the paper will actually spend. */
+.mb-receipt__row {
+  position: relative;
+  height: calc(var(--tall, 0) * var(--dot));
 }
 
-/* **The size this line will print at, shown at that size.**
+/* **One aligned box**, at the dots the layout put it at.
 
-   It was three classes — x2 and x3 — because a size was 1x, 2x or 3x of the
-   printer's cell and there was nothing in between. A shop chooses from
-   twenty-two heights since 2026-08-17, so the height arrives as a number on
-   the line (`--receipt-px`, set by `Receipt.tsx` from what Rust laid out) and
-   this turns it into a proportion of one cell.
-
-   **Actual multiples, and they were not**: x2 used to be `--text-lg`, which is
-   1.29 times `--text-sm`, so the preview showed "Large" as a third bigger when
-   the printer makes it twice as big. A preview that understates the one
-   setting it exists to demonstrate is worse than no preview. `24` here is one
-   cell of the printer's own font — the unit every size is given in, and the
-   same divisor `raster.rs` uses. */
-.mb-receipt__text {
-  font-size: calc(var(--receipt-char) * var(--receipt-px, 24) / 24);
-}
-
-/* **One aligned box on a line drawn in a proportional face** — 2026-08-17.
-
-   A typewriter face needs none of this: the layout padded the line with spaces
-   and every space is exactly one column, so the line arrives already aligned.
-   Times New Roman's space is about a third of its digit, so the same padded
-   line puts an amount nowhere near the right edge — and a column of rupees
-   that does not line up is the one thing a shopkeeper checks a bill for.
-
-   So each box is laid out at the width the LAYOUT gave it (`--receipt-cols`
-   characters, the same number `raster.rs` positions the paper from) and the
-   text is aligned inside it. `ch` is the width of a '0' in the current face,
-   which is the unit the layout counts in — and every face on offer draws its
-   digits at one width, so a box of N characters is N zeroes wide. */
+   A typewriter face and a proportional one are drawn the same way here, which
+   is what `raster.rs` does too: the box is where the layout said, and the text
+   is aligned inside it. That is what lands a column of amounts on the same
+   right edge whatever face a shop chooses — the one thing a shopkeeper checks a
+   bill for. */
 .mb-receipt__box {
-  display: inline-block;
-  width: calc(var(--receipt-cols, 1) * 1ch);
-  /* **It does not clip.** `overflow: hidden` cut "SAMPLE" to "SAMPL" the first
-     time this was looked at: `1ch` is the width of a '0', and capital letters
-     in Times New Roman are wider, so a box counted in characters is narrower
-     than the characters in it. The printer does not clip either — `raster.rs`
-     starts an over-wide run at its box's left edge and lets it run on, because
-     rule one is wrap, never truncate. Losing a character off a bill to make a
-     column tidy is the wrong trade in both places. */
-  white-space: pre;
-  vertical-align: baseline;
+  position: absolute;
+  left: calc(var(--at, 0) * var(--dot));
+  top: calc(var(--down, 0) * var(--dot));
+  width: calc(var(--wide, 0) * var(--dot));
+  height: calc(var(--tall, 0) * var(--dot));
+  display: flex;
+  align-items: center;
+  /* **The size the printer will draw, converted once.** The layout speaks in
+     cap heights and a browser sizes by em; 0.72 is the cap ratio of every face
+     on offer to within a few per cent. See `CAP_RATIO` in `Receipt.tsx`. */
+  font-size: calc(var(--cap, 15) * var(--dot) / 0.72);
+  /* It does not clip. The printer does not either — `raster.rs` starts an
+     over-wide run at its box's left edge and lets it run on, because rule one
+     is wrap, never truncate. Losing a character off a bill to make a column
+     tidy is the wrong trade in both places. */
+  overflow: visible;
 }
 
 .mb-receipt__box--left {
-  text-align: left;
+  justify-content: flex-start;
 }
 
 .mb-receipt__box--right {
-  text-align: right;
+  justify-content: flex-end;
 }
 
 .mb-receipt__box--centre {
-  text-align: center;
+  justify-content: center;
 }
 
-/* A proportional preview cannot rely on the paper's own `ch` for its total
-   width, so the paper keeps its column count and the boxes divide it. */
-.mb-receipt__paper--proportional {
-  white-space: pre-wrap;
+.mb-receipt__box--bold {
+  font-weight: var(--weight-bold);
 }
 
-/* **A separator stays on the printer's grid**, whatever face the bill is in —
-   see the note in `Receipt.tsx`. The raster sink draws rules at the paper's own
-   cell and not at the chosen size, so this is the preview agreeing with it. */
+/* **A rule is a rule.** Solid, thick, doubled or dashed — drawn, at the
+   thickness and the spacing `layout::Rule` gives the printer. */
 .mb-receipt__rule {
-  font-family: var(--font-mono);
+  position: absolute;
+  left: calc(var(--at, 0) * var(--dot));
+  width: calc(var(--wide, 0) * var(--dot));
+  height: calc(var(--thick, 1) * var(--dot));
+  /* Centred in its row, and the strokes stacked from there — the same
+     arithmetic `RasterSink::draw_rule` does. */
+  top: calc(
+    (var(--tall, 0) - var(--strokes, 1)) * var(--dot) / 2 + var(--stroke, 0) * var(--dot)
+  );
+  background: currentColor;
 }
 
-.mb-receipt__qr {
-  color: var(--text-muted);
+.mb-receipt__rule[data-dashed='yes'] {
+  background: repeating-linear-gradient(
+    to right,
+    currentColor 0,
+    currentColor calc(var(--on, 6) * var(--dot)),
+    transparent calc(var(--on, 6) * var(--dot)),
+    transparent calc((var(--on, 6) + var(--off, 4)) * var(--dot))
+  );
 }
 
-/* The printer draws real bars; the screen shows what they encode, so a person
-   can check the bill number is the one they expect. Same treatment as the QR
-   because it is the same kind of stand-in. */
-.mb-receipt__barcode {
-  color: var(--text-muted);
-}
-
+/* The shop's own logo, at the size it will print. A shop could never see that
+   before it printed one (P32). */
 .mb-receipt__logo {
-  color: var(--text-faint);
+  position: absolute;
+  left: calc(var(--at, 0) * var(--dot));
+  top: calc(var(--down, 0) * var(--dot));
+  width: calc(var(--wide, 0) * var(--dot));
+  height: calc(var(--tall, 0) * var(--dot));
+  image-rendering: pixelated;
+}
+
+.mb-receipt__nologo {
+  position: absolute;
+  left: calc(var(--at, 0) * var(--dot));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* The QR square, at the size the printer's own encoder will make it. The
+   payload is on the title, because what a shop tuning a letterhead needs to
+   know is how much paper this costs — see the note in `Receipt.tsx`. */
+.mb-receipt__qr {
+  position: absolute;
+  left: calc(var(--at, 0) * var(--dot));
+  width: calc(var(--wide, 0) * var(--dot));
+  height: calc(var(--tall, 0) * var(--dot));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: calc(var(--dot) * 6) solid currentColor;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      currentColor 0,
+      currentColor calc(var(--dot) * 4),
+      transparent calc(var(--dot) * 4),
+      transparent calc(var(--dot) * 10)
+    );
+  color: var(--text);
+}
+
+.mb-receipt__barcode {
+  position: absolute;
+  left: calc(var(--at, 0) * var(--dot));
+  right: 0;
+  height: calc(var(--tall, 0) * var(--dot));
+  background: repeating-linear-gradient(
+    to right,
+    currentColor 0,
+    currentColor calc(var(--dot) * 2),
+    transparent calc(var(--dot) * 2),
+    transparent calc(var(--dot) * 5)
+  );
+}
+
+.mb-receipt__code {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  background: var(--surface);
+  padding: 0 var(--space-1);
+}
+
+.mb-receipt__code--under {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-weight: var(--weight-regular);
+}
+
+/* **How much roll this costs.** The owner's complaint began with paper being
+   eaten; the screen says how much before it is. */
+.mb-receipt__length {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .mb-receipt__notes {
@@ -141,10 +217,4 @@
   padding-left: var(--space-5);
   color: var(--text-muted);
   font-size: var(--text-sm);
-}
-
-/* The indent is in PAPER columns (see `Indent`), so it is always drawn at the
-   base character width — never at the size of the line it precedes. */
-.mb-receipt__indent {
-  font-size: var(--receipt-char);
 }

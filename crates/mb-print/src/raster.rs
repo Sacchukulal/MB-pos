@@ -57,9 +57,10 @@ use crate::doc::{Align, Pattern, Style};
 use crate::error::PrintError;
 use crate::font::{Cell, Font};
 use crate::image::Monochrome;
-use crate::layout::{Laid, LaidContent, LaidLine};
+use crate::layout::{BandText, Laid, LaidContent, LaidLine, Rule as LayoutRule};
+use crate::metrics::Metrics;
 use crate::paper::Paper;
-use crate::render::{Sink, render};
+use crate::render::{BandImage, Sink, render};
 
 /// How many dot rows one `GS v 0` carries.
 ///
@@ -162,11 +163,17 @@ impl Default for RasterOptions {
 
 /// Draw a laid-out document as dots.
 ///
-/// Fails only for A4, which has no dots: it is the PDF sink's paper and a
-/// thermal head is not involved.
+/// Fails for A4, which has no dots (it is the PDF sink's paper and a thermal
+/// head is not involved), and for metrics that carry no face — the printer's
+/// own font cannot be rasterised by us, which is the whole point of it.
+///
+/// **It takes the same [`Metrics`] the layout was given.** That is P32's other
+/// half: the layout decided where every line breaks using these measurements,
+/// and handing the sink a different set is exactly how the paper and the
+/// preview came to disagree.
 pub fn to_raster(
     laid: &Laid,
-    font: &Font,
+    metrics: &Metrics,
     options: RasterOptions,
 ) -> Result<Raster, PrintError> {
     let Some(dots) = laid.paper.kind.dots() else {
@@ -174,20 +181,21 @@ pub fn to_raster(
             "A4 has no dots — an A4 invoice is the PDF sink's job, not the printer's",
         ));
     };
-    let Some(per_column) = laid.paper.dots_per_column() else {
-        return Err(PrintError::invalid("this paper has no column width in dots"));
+    let Some(font) = metrics.font() else {
+        return Err(PrintError::invalid(
+            "the graphics engine needs a typeface; these metrics are the printer's own font",
+        ));
     };
 
     let mut sink = RasterSink {
         font,
+        metrics,
         width: dots,
-        per_column,
         canvas: Canvas::new(dots),
         bands: Vec::new(),
         notes: Vec::new(),
         ink: Vec::new(),
         options,
-        columns: laid.paper.columns(),
     };
     render(laid, &mut sink);
 
@@ -278,11 +286,9 @@ impl Canvas {
 #[derive(Debug)]
 struct RasterSink<'a> {
     font: &'a Font,
+    metrics: &'a Metrics,
     /// Printable dots across.
     width: u32,
-    /// Dots in one column at scale 1.
-    per_column: u32,
-    columns: usize,
     canvas: Canvas,
     bands: Vec<Band>,
     notes: Vec<RasterNote>,
@@ -291,62 +297,38 @@ struct RasterSink<'a> {
 }
 
 impl RasterSink<'_> {
-    /// The gap under a line of text.
-    ///
-    /// An eighth of the cell, which is what ESC/POS's default line spacing
-    /// comes to for its own 24-dot font (30 dots for 24). Receipts are dense;
-    /// this is the difference between dense and cramped.
-    const fn leading(cell_height: u32) -> u32 {
-        cell_height / 8
-    }
-
-    /// **How tall this style is on THIS paper, in dots.**
-    ///
-    /// A size is chosen against the printer's standard 24-dot cell, because
-    /// that is the number a shop sees on the settings screen and it must mean
-    /// the same thing whatever roll is loaded. **100 mm paper does not have a
-    /// 24-dot cell**: it is 832 dots over 64 columns, so its cell is 13 × 26.
-    ///
-    /// Found by `t3_the_wire_is_what_it_was`, the golden ESC/POS test, which
-    /// noticed the 100 mm raster change height when nothing about the document
-    /// had changed — the first version divided by the paper's 26 and multiplied
-    /// by the standard 24, and quietly shrank every line on the widest roll.
-    fn height_of(&self, style: Style) -> u32 {
-        let (_, base) = Cell::for_column(self.per_column);
-        style.height(base) * base / u32::from(Style::CELL)
+    /// The cell this style draws in. Straight out of the metrics the layout
+    /// used, so the sink cannot pick a different size from the one the line
+    /// was wrapped for.
+    fn cell(&self, style: Style) -> Cell {
+        self.font
+            .cell_for_cap(u32::from(self.metrics.size(style).cap))
     }
 
     /// **One laid-out line, drawn the way its face needs.**
     ///
-    /// # Two paths, and only one of them is new
+    /// # Two paths, and they land on the same edges
     ///
-    /// A **typewriter** face is drawn exactly as it always was: every character
-    /// in its own cell, on the grid, one row of dots at a time. That path is
-    /// what the golden ESC/POS files assert, and it does not change.
+    /// A **typewriter** face is drawn on the grid: every character in its own
+    /// cell, one advance apart. That is what the ESC/POS golden files assert
+    /// and it does not change.
     ///
-    /// A **proportional** face — Times New Roman and its family, offered since
-    /// 2026-08-17 — cannot be. Its characters are different widths, so the
-    /// spaces the layout padded with are worth about a third of a digit and an
-    /// amount padded to the right edge lands nowhere near it. So each of the
-    /// line's boxes ([`Segment`]) is drawn on its own: the text inside is
-    /// trimmed, measured, and put against the box's left edge, right edge or
-    /// centre — which is how an invoice has always aligned, and which lands the
-    /// figures on exactly the edges the typewriter path lands them on.
+    /// A **proportional** face cannot be. Its characters are different widths,
+    /// so the spaces the layout padded with are worth about a third of a digit
+    /// and an amount padded to the right edge lands nowhere near it. So each of
+    /// the line's boxes ([`crate::layout::Segment`]) is drawn on its own: the
+    /// text inside is trimmed, measured, and put against the box's left edge,
+    /// right edge or centre — which is how an invoice has always aligned, and
+    /// which lands the figures on exactly the edges the typewriter path does.
     fn draw_line(&mut self, line: &LaidLine, text: &str) -> u32 {
-        let height = self.height_of(line.style);
+        let cell = self.cell(line.style);
+        let top = self.canvas.add_rows(line.row_dots.max(1));
+
         if self.font.is_monospace() || line.segments.is_empty() {
-            return self.draw_text(text, line.indent, height, line.style.bold);
+            return self.draw_grid(text, line.indent_dots, cell, line.style.bold, top);
         }
 
-        let (_, base_height) = Cell::for_column(self.per_column);
-        let cell_w = (self.per_column * height / base_height.max(1)).max(1);
-        let cell = self.font.cell(cell_w, height.max(1));
-        let top = self.add_line_rows(height.max(1));
         let chars: Vec<char> = text.chars().collect();
-        let left_edge = u32::try_from(line.indent)
-            .unwrap_or(u32::MAX)
-            .saturating_mul(self.per_column);
-
         let mut dots = 0;
         for segment in &line.segments {
             let end = segment.start.saturating_add(segment.width).min(chars.len());
@@ -358,71 +340,36 @@ impl RasterSink<'_> {
             if run.is_empty() {
                 continue;
             }
-
-            let box_left = left_edge
-                .saturating_add(u32::try_from(segment.start).unwrap_or(0).saturating_mul(cell_w));
-            let box_width = u32::try_from(segment.width).unwrap_or(0).saturating_mul(cell_w);
-            let measured = self.font.measure(run, cell);
-            // A run wider than its box starts at the box's left edge and runs
-            // on: the layout already wrapped to fit, so this is a face whose
-            // letters are wider than the grid assumed, and the honest answer is
-            // to print all of it rather than to lose characters (rule one).
-            let spare = box_width.saturating_sub(measured);
-            let x0 = match segment.align {
-                Align::Left => box_left,
-                Align::Centre => box_left + spare / 2,
-                Align::Right => box_left + spare,
-            };
-
-            let mut pen = x0;
-            for ch in run.chars() {
-                if pen >= self.width {
-                    break;
-                }
-                let glyph = self.font.glyph_at(ch, cell, pen);
-                dots += self.blit(&glyph, pen, top);
-                if line.style.bold {
-                    dots += self.blit(&glyph, pen + 1, top);
-                }
-                pen += self.font.advance(ch, cell);
-            }
+            let box_left = line.indent_dots.saturating_add(
+                u32::try_from(segment.start)
+                    .unwrap_or(0)
+                    .saturating_mul(cell.width),
+            );
+            let box_width = u32::try_from(segment.width)
+                .unwrap_or(0)
+                .saturating_mul(cell.width);
+            dots += self.draw_run(
+                run,
+                box_left,
+                box_width,
+                segment.align,
+                cell,
+                line.style.bold,
+                top,
+            );
         }
         dots
     }
 
-    /// Draw one string `height` dots tall, starting at `indent` scale-1 columns
-    /// from the left edge. Returns the dots it fired.
-    ///
-    /// # A height in dots, not a multiplier — 2026-08-17
-    ///
-    /// This took `scale` (1, 2 or 3) and worked the cell out as `per_column ×
-    /// scale`. It takes the height a shop actually chose, and works the cell
-    /// out from the same ratio: **a character is half as wide as it is tall**,
-    /// which is what `Cell::for_column` has always said and what keeps 24, 48
-    /// and 72 dots drawing exactly the pixels they drew before. Every size in
-    /// between now has an answer too, which is the whole point.
-    fn draw_text(&mut self, text: &str, indent: usize, height: u32, bold: bool) -> u32 {
-        let (_, base_height) = Cell::for_column(self.per_column);
-        // Scaled from the paper's own column, so a monospace face at one of the
-        // old three sizes gets byte-for-byte the old cell. `.max(1)` because a
-        // height smaller than the base would otherwise round to a zero-width
-        // column and draw every character on top of the last.
-        let cell_w = (self.per_column * height / base_height.max(1)).max(1);
-        let cell_h = height.max(1);
-        let cell = self.font.cell(cell_w, cell_h);
-        let top = self.add_line_rows(cell_h);
-
+    /// Characters on the grid: one advance apart, whatever they measure.
+    fn draw_grid(&mut self, text: &str, left: u32, cell: Cell, bold: bool, top: usize) -> u32 {
         let mut dots = 0;
         for (position, ch) in text.chars().enumerate() {
-            // The indent is in the paper's own scale-1 columns; the text then
-            // advances by ITS cell, which is what makes a 16-dot line fit more
-            // characters in the same width than a 24-dot one.
-            let x0 = u32::try_from(indent)
-                .unwrap_or(u32::MAX)
-                .saturating_mul(self.per_column)
-                .saturating_add(
-                    u32::try_from(position).unwrap_or(u32::MAX).saturating_mul(cell_w),
-                );
+            let x0 = left.saturating_add(
+                u32::try_from(position)
+                    .unwrap_or(u32::MAX)
+                    .saturating_mul(cell.width),
+            );
             if x0 >= self.width {
                 // The layout guarantees this cannot happen; if it ever does,
                 // stopping is better than wrapping a character onto the row
@@ -441,8 +388,46 @@ impl RasterSink<'_> {
         dots
     }
 
-    fn add_line_rows(&mut self, cell_h: u32) -> usize {
-        self.canvas.add_rows(cell_h + RasterSink::leading(cell_h))
+    /// **One run of text, measured and aligned inside a box.** The letterhead
+    /// and every proportional line go through here.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a position, a box, an alignment and a size — every one of them decided elsewhere"
+    )]
+    fn draw_run(
+        &mut self,
+        run: &str,
+        box_left: u32,
+        box_width: u32,
+        align: Align,
+        cell: Cell,
+        bold: bool,
+        top: usize,
+    ) -> u32 {
+        let measured = self.font.measure(run, cell);
+        // A run wider than its box starts at the box's left edge and runs on:
+        // the layout already wrapped to fit, so this is a face whose letters
+        // are wider than the grid assumed, and the honest answer is to print
+        // all of it rather than to lose characters (rule one).
+        let spare = box_width.saturating_sub(measured);
+        let mut pen = match align {
+            Align::Left => box_left,
+            Align::Centre => box_left + spare / 2,
+            Align::Right => box_left + spare,
+        };
+        let mut dots = 0;
+        for ch in run.chars() {
+            if pen >= self.width {
+                break;
+            }
+            let glyph = self.font.glyph_at(ch, cell, pen);
+            dots += self.blit(&glyph, pen, top);
+            if bold {
+                dots += self.blit(&glyph, pen + 1, top);
+            }
+            pen += self.font.advance(ch, cell);
+        }
+        dots
     }
 
     fn blit(&mut self, glyph: &crate::font::Glyph, x0: u32, top: usize) -> u32 {
@@ -467,28 +452,144 @@ impl RasterSink<'_> {
         dots
     }
 
-    fn draw_image(&mut self, data: &[u8], width_pct: u8, align: Align) -> u32 {
-        let image = match Monochrome::decode(data) {
-            Ok(image) => image,
+    /// **A rule, drawn as dots** — P32.
+    ///
+    /// It used to be the pattern's character repeated across the paper, and
+    /// measured on the owner's own bill a `-` is five dots of ink inside a
+    /// twelve-dot cell: a row of widely spaced ticks where the preview drew a
+    /// near-solid line. Three dots in Times New Roman.
+    ///
+    /// A rule is a rule. The dash is spaced so the **first and last strokes
+    /// land on the paper's edges**, because a rule that stops short of one
+    /// reads as a fault.
+    fn draw_rule(&mut self, line: &LaidLine, pattern: Pattern, width: u32) -> u32 {
+        let rule = LayoutRule::of(pattern);
+        let rows = line.row_dots.max(rule.row());
+        let top = self.canvas.add_rows(rows);
+        let ink_rows =
+            rule.thickness * rule.strokes + rule.stroke_gap * rule.strokes.saturating_sub(1);
+        let first = top + ((rows.saturating_sub(ink_rows)) / 2) as usize;
+
+        let mut dots = 0;
+        for stroke in 0..rule.strokes {
+            let y = first + (stroke * (rule.thickness + rule.stroke_gap)) as usize;
+            for thickness in 0..rule.thickness {
+                let row = y + thickness as usize;
+                match rule.dash {
+                    None => {
+                        for x in 0..width {
+                            if self.canvas.set(line.indent_dots + x, row) {
+                                dots += 1;
+                            }
+                        }
+                    }
+                    Some((on, off)) => {
+                        // **The last dash ends on the right edge.**
+                        //
+                        // A fixed step loses the remainder — 96 dashes of 2 on
+                        // 576 dots at a step of 6 stop at dot 571, and a rule
+                        // that stops five dots short of the paper reads as a
+                        // fault. Each start is computed from its own index
+                        // instead, so the first is at 0 and the last is at
+                        // `width - on` exactly.
+                        let period = (on + off).max(1);
+                        let count = ((width + off) / period).max(1);
+                        let span = width.saturating_sub(on);
+                        for n in 0..count {
+                            let start = if count > 1 { n * span / (count - 1) } else { 0 };
+                            for x in start..(start + on).min(width) {
+                                if self.canvas.set(line.indent_dots + x, row) {
+                                    dots += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        dots
+    }
+
+    /// **The letterhead: a logo and the shop's name, side by side** — P32.
+    ///
+    /// Every position was decided by the layout. This blits and draws.
+    fn draw_band(&mut self, line: &LaidLine, image: &BandImage<'_>, lines: &[BandText]) -> u32 {
+        let top = self.canvas.add_rows(line.row_dots.max(1));
+        let mut dots = 0;
+
+        match Monochrome::decode(image.data) {
+            Ok(picture) => {
+                let scaled = picture.scaled_to(image.width.min(self.width).max(1));
+                for y in 0..scaled.height {
+                    for x in 0..scaled.width {
+                        if scaled.ink(x, y)
+                            && self
+                                .canvas
+                                .set(image.left + x, top + (image.top + y) as usize)
+                        {
+                            dots += 1;
+                        }
+                    }
+                }
+            }
             Err(e) => {
-                // D37: a shop with a corrupt logo still gets its bill.
+                // D37: a shop with a corrupt logo still gets its bill. The
+                // layout has already put the text where it goes.
                 self.notes.push(RasterNote::LogoSkipped {
                     reason: e.to_string(),
                 });
+            }
+        }
+
+        for text in lines {
+            let run = text.text.trim();
+            if run.is_empty() {
+                continue;
+            }
+            let cell = self.cell(text.style);
+            dots += self.draw_run(
+                run,
+                text.left,
+                text.width,
+                text.align,
+                cell,
+                text.style.bold,
+                top + text.top as usize,
+            );
+        }
+        dots
+    }
+
+    /// A logo on its own line.
+    ///
+    /// **The print offset moves it** — P32. It did not, so a shop that nudged
+    /// its printer got every line of text moved and its logo left behind.
+    fn draw_image(&mut self, line: &LaidLine, data: &[u8], width_pct: u8, align: Align) -> u32 {
+        let image = match Monochrome::decode(data) {
+            Ok(image) => image,
+            Err(e) => {
+                self.notes.push(RasterNote::LogoSkipped {
+                    reason: e.to_string(),
+                });
+                // The row was still reserved by the layout, so the paper does
+                // not jump: keep it blank rather than closing the gap.
+                self.canvas.add_rows(line.row_dots);
                 return 0;
             }
         };
+        let usable = self.width.saturating_sub(line.indent_dots).max(1);
         let pct = u32::from(width_pct.clamp(1, 100));
-        let target = (self.width * pct / 100).max(1);
-        let scaled = image.scaled_to(target.min(self.width));
+        let target = (usable * pct / 100).max(1);
+        let scaled = image.scaled_to(target.min(usable));
 
-        let top = self.canvas.add_rows(scaled.height);
-        let spare = self.width.saturating_sub(scaled.width);
-        let x0 = match align {
-            Align::Left => 0,
-            Align::Centre => spare / 2,
-            Align::Right => spare,
-        };
+        let top = self.canvas.add_rows(line.row_dots.max(scaled.height));
+        let spare = usable.saturating_sub(scaled.width);
+        let x0 = line.indent_dots
+            + match align {
+                Align::Left => 0,
+                Align::Centre => spare / 2,
+                Align::Right => spare,
+            };
 
         let mut dots = 0;
         for y in 0..scaled.height {
@@ -510,27 +611,33 @@ impl Sink for RasterSink<'_> {
         }
     }
 
-    fn rule(&mut self, pattern: Pattern, width: usize, indent: usize, index: usize) {
-        // Drawn as the same repeated character the text sink writes, so the two
-        // sinks cannot disagree about how long a separator is. Always at the
-        // paper's own cell: a separator is as wide as the paper, not as wide as
-        // whatever size the section above it happens to be.
-        let body: String = std::iter::repeat_n(pattern.glyph(), width).collect();
-        let dots = self.draw_text(&body, indent, self.height_of(Style::NORMAL), false);
+    fn rule(&mut self, line: &LaidLine, pattern: Pattern, width: u32, index: usize) {
+        let dots = self.draw_rule(line, pattern, width);
         self.ink.push(LineInk { index, dots });
     }
 
-    fn image(&mut self, data: &[u8], width_pct: u8, align: Align, index: usize) {
-        let dots = self.draw_image(data, width_pct, align);
+    fn image(&mut self, line: &LaidLine, data: &[u8], width_pct: u8, align: Align, index: usize) {
+        let dots = self.draw_image(line, data, width_pct, align);
         self.ink.push(LineInk { index, dots });
     }
 
-    fn qr(&mut self, payload: &str, width_pct: u8, align: Align, index: usize) {
+    fn band(&mut self, line: &LaidLine, image: &BandImage<'_>, lines: &[BandText], index: usize) {
+        let dots = self.draw_band(line, image, lines);
+        self.ink.push(LineInk { index, dots });
+    }
+
+    fn qr(&mut self, line: &LaidLine, payload: &str, width_pct: u8, align: Align, index: usize) {
         if self.options.native_qr {
             // A command has to sit between two pictures, so the picture so far
             // becomes a band and a new one starts after it.
             self.canvas.drain_into(&mut self.bands);
             let _ = width_pct;
+            // **The print offset cannot reach a native QR**, and saying so is
+            // better than pretending: the printer's own encoder positions the
+            // square with `ESC a`, which knows nothing about a millimetre
+            // correction. A shop that needs the QR nudged turns the native
+            // encoder off and gets the payload as text, which the offset does
+            // move.
             self.bands.push(Band::Qr {
                 payload: payload.to_owned(),
                 module: self.options.qr_module.clamp(1, 16),
@@ -547,19 +654,44 @@ impl Sink for RasterSink<'_> {
         }
 
         self.notes.push(RasterNote::QrAsText);
-        let width = self.columns.max(1);
+        let cell = self.cell(Style::NORMAL);
+        let across = self
+            .metrics
+            .body()
+            .chars_across(self.width.saturating_sub(line.indent_dots));
         let mut dots = 0;
         let chars: Vec<char> = payload.chars().collect();
-        for chunk in chars.chunks(width) {
+        for chunk in chars.chunks(across.max(1)) {
             let text: String = chunk.iter().collect();
-            dots += self.draw_text(&text, 0, 1, false);
+            let top = self.canvas.add_rows(cell.height);
+            dots += self.draw_grid(&text, line.indent_dots, cell, false, top);
         }
         self.ink.push(LineInk { index, dots });
     }
 
-    fn blank(&mut self, index: usize) {
-        let (_, height) = Cell::for_column(self.per_column);
-        self.canvas.add_rows(height);
+    fn barcode(
+        &mut self,
+        line: &LaidLine,
+        payload: &str,
+        human_readable: bool,
+        align: Align,
+        index: usize,
+    ) {
+        // The printer's own `GS k` draws the bars (P29). The raster path
+        // reserves the rows the layout allowed for them and hands the drawing
+        // over, exactly as the QR arm does — so the two codes on a bill are
+        // made by the same encoder on both engines.
+        let _ = (payload, human_readable, align);
+        self.canvas.add_rows(line.row_dots);
+        self.ink.push(LineInk { index, dots: 1 });
+    }
+
+    fn blank(&mut self, line: &LaidLine, index: usize) {
+        // **The row the layout reserved**, not a height of this sink's own.
+        // A blank used to be a bare cell while a line of text was a cell plus
+        // leading, so a blank line was three dots shorter than the line above
+        // it for no reason anybody chose.
+        self.canvas.add_rows(line.row_dots);
         self.ink.push(LineInk { index, dots: 0 });
     }
 
@@ -577,8 +709,9 @@ mod tests {
     use crate::layout::layout;
     use crate::paper::PaperKind;
 
-    fn font() -> Font {
-        Font::builtin().expect("the shipped face loads")
+    fn metrics(kind: PaperKind) -> Metrics {
+        let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
+        Metrics::face(Paper::new(kind), font)
     }
 
     #[test]
@@ -586,7 +719,7 @@ mod tests {
         let mut doc = Document::new(Paper::new(PaperKind::Mm80));
         doc.text("TOTAL 240.00", Style::BOLD, Align::Left);
         let laid = layout(&doc).expect("lays out");
-        let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+        let raster = to_raster(&laid, &metrics(laid.paper.kind), RasterOptions::default()).expect("rasters");
 
         assert_eq!(raster.paper.kind, PaperKind::Mm80);
         assert!(raster.height() > 0, "nothing was drawn");
@@ -606,7 +739,7 @@ mod tests {
         let mut doc = Document::new(Paper::new(PaperKind::A4));
         doc.line("INVOICE");
         let laid = layout(&doc).expect("lays out");
-        assert!(to_raster(&laid, &font(), RasterOptions::default()).is_err());
+        assert!(to_raster(&laid, &metrics(laid.paper.kind), RasterOptions::default()).is_err());
     }
 
     #[test]
@@ -616,7 +749,7 @@ mod tests {
             doc.line(format!("line {n}"));
         }
         let laid = layout(&doc).expect("lays out");
-        let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+        let raster = to_raster(&laid, &metrics(laid.paper.kind), RasterOptions::default()).expect("rasters");
         assert!(
             raster.bands.len() > 1,
             "sixty lines is more than one band and a printer's buffer is finite"
@@ -635,7 +768,7 @@ mod tests {
             doc.text("MAGIC BILL", Style::NORMAL, Align::Left);
             to_raster(
                 &layout(&doc).expect("lays out"),
-                &font(),
+                &metrics(PaperKind::Mm80),
                 RasterOptions::default(),
             )
             .expect("rasters")
@@ -645,7 +778,7 @@ mod tests {
             doc.text("MAGIC BILL", Style::BOLD, Align::Left);
             to_raster(
                 &layout(&doc).expect("lays out"),
-                &font(),
+                &metrics(PaperKind::Mm80),
                 RasterOptions::default(),
             )
             .expect("rasters")
@@ -664,7 +797,7 @@ mod tests {
             doc.text("HELLO", Style::new(scale, false), Align::Left);
             to_raster(
                 &layout(&doc).expect("lays out"),
-                &font(),
+                &metrics(PaperKind::Mm80),
                 RasterOptions::default(),
             )
             .expect("rasters")

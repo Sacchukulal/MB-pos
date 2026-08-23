@@ -93,7 +93,7 @@
   --gap-section: var(--space-6);
   /** The page's own margin. Set by `Page` and by nothing else, ever. */
   --page-pad-x: var(--space-6);
-  --page-pad-y: var(--space-5);
+  --page-pad-y: var(--space-3);
 
   /* -----------------------------------------------------------------------
      THE TYPE CONTRACT — the same argument as spacing.
@@ -236,6 +236,10 @@
      same 48px strip the navigation runs along. Net cost against the old rail:
      nothing, and the billing screen gets 76px of width back. */
   --topbar-height: 48px;
+  /* A control that sits INSIDE the top strip. It must be shorter than
+     --topbar-height or its fill and its underline are drawn across the bar's
+     bottom border. */
+  --topbar-control-height: 2.25rem;
   --topbar-item-gap: var(--space-1);
   --titlebar-height: var(--topbar-height);
   /* The "More" sheet. Wide enough for the longest label plus its icon with
@@ -250,8 +254,8 @@
   --modal-width: 26rem;
   --modal-width-wide: 42rem;
   --panel-width: 22rem;
-  --toast-width-min: 18rem;
-  --toast-width-max: 26rem;
+  --toast-width-min: 14rem;
+  --toast-width-max: 20rem;
 
   /* The billing screen (P09). The cart is permanent and never moves, so its
      width is a look decision and belongs here — "the cart is too narrow" is
@@ -260,9 +264,16 @@
      minimum packs seven columns; the dense step past 24 tables packs ten and
      the tile drops its secondary line. */
   --cart-width: 24rem;
+  /* The processing-orders panel, between the floor and the cart. Narrower than
+     the cart: a line of it is a label, a number, a time and an amount. */
+  --queue-width: 17rem;
   /* P31. How wide the minus and plus on a cart line are. Square and tight: the
      cart is 24rem and the item name has to survive three buttons beside it. */
   --cart-step-size: 1.75rem;
+  /* The lock beside the order type on the billing bar, 2026-08-23. The owner
+     asked for "a very tiny lock icon": a square the size of a small icon plus
+     one step of air, and no words. */
+  --billbar-lock-size: 1.5rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
   --tile-height: 4.5rem;
@@ -386,6 +397,19 @@
   --z-tip: 50;
 
   --focus-ring-width: 2px;
+  /* **A ring sits ON the edge, never around it** — the owner, 2026-08-23:
+     *"basically border itself colour changes, another border shouldn't appear
+     around it."*
+
+     A positive `outline-offset` puts the ring outside the border box, so a
+     box that already has a border ends up wearing two: its own, a gap, and a
+     halo. A NEGATIVE offset of the ring's own width lays the ring exactly over
+     the outermost pixels instead, and what a shopkeeper sees is the border
+     changing colour and thickening — one edge, not two.
+
+     Every focus and every selection in this product uses this. There is no
+     second way to draw a ring. */
+  --focus-ring-inset: calc(var(--focus-ring-width) * -1);
   /* **A second line weight, and it is the owner's complaint of 2026-08-17**:
      *"the lines and letters brightness not correctly visble."*
 
@@ -607,8 +631,11 @@ textarea {
 
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+  outline-offset: var(--focus-ring-inset);
+  /* No `border-radius` here. It used to force --radius-sm, which did not
+     restyle the RING — it restyled the ELEMENT, so a pill button and a tile
+     both changed shape the moment they were focused. With the ring inset it
+     follows whatever corner the box already has, which is the right one. */
 }
 
 /* **The scrollbars** — P27.5, and they are not a detail.

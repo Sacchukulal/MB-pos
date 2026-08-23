@@ -20,18 +20,17 @@
  * rather than remembered.
  */
 
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 
 import {
-  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
   Icon,
+  MoneyInput,
   onlyAmount,
   Page,
   SearchField,
-  SectionHeader,
   Spinner,
   useAction,
   useReport,
@@ -40,6 +39,7 @@ import {
 import { call, inApp, subscribe } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
+import type { EvenSplitView } from '../ipc/generated/EvenSplitView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
@@ -57,9 +57,10 @@ type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
 import { DiscountDialog } from './Discount';
-import { Split } from './Split';
+import { SeparateBill } from './SeparateBill';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
+import { Before, type Paper } from '../preview/Before';
 
 import './billing.css';
 
@@ -77,6 +78,8 @@ export function Billing() {
   const filter = '';
   const [locked, setLocked] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // **Audit D6 — see it before it prints.** `null` is closed.
+  const [preview, setPreview] = useState<Paper | null>(null);
   /**
    * **The line somebody is voiding, once the kitchen has been told.**
    *
@@ -97,13 +100,33 @@ export function Billing() {
   const [typingQty, setTypingQty] = useState<{ index: number; text: string } | null>(null);
   /** The reason for cancelling a parked order (P12). */
   const [cancelReason, setCancelReason] = useState(false);
-  /** P14, scope 1.21-1.24 — split it evenly, split off some food, how many guests. */
+  /** Moving some of the food onto a second bill — the only part of the old
+      "Split" dialog that still needs a screen. */
   const [splitting, setSplitting] = useState(false);
+  /** How many are sharing this bill, and what Rust says each one owes. */
+  const [ways, setWays] = useState(2);
+  const [even, setEven] = useState<EvenSplitView | null>(null);
   /** Scope 1.12 — money off this bill (2026-08-17). */
   const [discounting, setDiscounting] = useState(false);
   /// P15 — the customer picker for a bill going on an account.
   const [onAccount, setOnAccount] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** Which way this bill is being paid. Nothing is charged until it is
+      completed — the row is a choice, not an action. */
+  const [payMode, setPayMode] = useState('Cash');
+  /** The cash handed over, as typed. Empty means "the whole bill". */
+  const [cashGiven, setCashGiven] = useState('');
+  /** Everything under the cart's two main buttons, folded away until asked for. */
+  const [moreActions, setMoreActions] = useState(false);
+  const moreActionsId = useId();
+  /** The orders being cooked right now, folded away until asked for. */
+  const [processing, setProcessing] = useState(false);
+  const processingId = useId();
+
+  const openOrders = useMemo(
+    () => tables.filter((table) => table.orderId !== null),
+    [tables],
+  );
 
   // ONE shared clock (§5 rule 10). The tiles do not each own a timer; they
   // re-read the elapsed minutes the order already carries when this ticks.
@@ -234,6 +257,9 @@ export function Billing() {
         call('current_cart')
           .then(setCart)
           .catch(() => undefined);
+        // Same push, same source: whatever changed the floor changed which
+        // orders are open, so the queue follows it instead of the clock.
+        void refreshFloor();
       }
     })
       .then((off) => {
@@ -241,6 +267,7 @@ export function Billing() {
       })
       .catch(() => undefined);
     return () => stop?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The floor re-reads on every tick, which is how a timer that lives on the
@@ -427,7 +454,7 @@ export function Billing() {
     [report],
   );
 
-  const takePayment = useCallback(
+  const takeTheBalance = useCallback(
     async (mode: string) => {
       if (!cart) return;
       try {
@@ -454,7 +481,23 @@ export function Billing() {
     try {
       await call('print_kitchen_ticket');
       setCart(await call('current_cart'));
+      // The ticket is what turns a cart into an open order, so the floor is
+      // re-read here rather than on the next tick fifteen seconds later.
+      await refreshFloor();
       toast.show('ok', 'Kitchen ticket sent.');
+    } catch (cause) {
+      report(cause);
+    }
+  }, [refreshFloor, report, toast]);
+
+  /**
+   * **The cook lost the paper** — P32. The whole order again, marked as a
+   * reprint, with the ledger untouched: the next delta is still the delta.
+   */
+  const reprintKitchen = useCallback(async () => {
+    try {
+      await call('reprint_kitchen_ticket');
+      toast.show('ok', 'The whole ticket has been sent again, marked as a reprint.');
     } catch (cause) {
       report(cause);
     }
@@ -466,25 +509,71 @@ export function Billing() {
    */
   const completeBill = useCallback(async () => {
     try {
+      // Whatever is still owing goes down in the mode that is lit. On the
+      // ordinary bill that is the whole of it and the cashier typed nothing.
+      if (cart && cart.balance.paise > 0n) await takeTheBalance(payMode);
       const number = await call('complete_bill');
       setCart(await call('current_cart'));
+      setCashGiven('');
       await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
       report(cause);
     }
-  }, [refreshFloor, report, toast]);
+  }, [cart, payMode, refreshFloor, report, takeTheBalance, toast]);
 
-  const clearPayments = useCallback(async () => {
-    try {
-      setCart(await call('cart_clear_payments'));
-    } catch (cause) {
-      report(cause);
-    }
-  }, [report]);
+  /**
+   * **The cash box, committed.** It owns the cash line: typing again replaces
+   * it, emptying it takes it off. Rust parses the rupees (R8).
+   */
+  const commitCash = useCallback(
+    async (typed: string) => {
+      try {
+        setCart(
+          typed.trim() === ''
+            ? await call('cart_clear_payments')
+            : await call('cart_cash_given', { amount: typed.trim() }),
+        );
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [report],
+  );
 
   // A tap goes through the SAME reducer a key does, so touch and keyboard
   // cannot drift apart (scope 1.28, and test T10).
+  /**
+   * **How many people are sharing it.**
+   *
+   * One number does both jobs the old dialog asked separately: it is what the
+   * bill is divided by, and it is the covers every per-head figure in Reports
+   * had nothing to divide by until P31.
+   */
+  const setPeople = useCallback(async (howMany: number) => {
+    setWays(howMany);
+    try {
+      setEven(await call('even_split', { ways: howMany }));
+      await call('set_covers', { covers: howMany });
+    } catch {
+      // A split nobody can work out is a blank line, not a toast: the cashier
+      // asked a question, and the answer is simply not there.
+      setEven(null);
+    }
+  }, []);
+
+  // Asked only while the fold is open, and only ever a question — even_split
+  // creates nothing.
+  useEffect(() => {
+    if (!moreActions || !cart || cart.isEmpty) {
+      setEven(null);
+      return;
+    }
+    call('even_split', { ways })
+      .then(setEven)
+      .catch(() => setEven(null));
+  }, [moreActions, ways, cart]);
+
   const openTable = useCallback(
     (table: TableView) => {
       const index = tables.findIndex((t) => t.id === table.id);
@@ -639,10 +728,12 @@ export function Billing() {
   // click into anything first.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Let the browser have the ordinary editing keys inside a field.
       const editing =
         event.target instanceof HTMLInputElement ||
         event.target instanceof HTMLTextAreaElement;
+      // Only the boxes that belong to the keyboard engine feed it. Any other
+      // field on this screen owns its own keys.
+      if (editing && (event.target as HTMLElement).dataset.keys !== 'engine') return;
       const interesting = [
         'Enter', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '?',
       ];
@@ -691,37 +782,19 @@ export function Billing() {
        page margin, which after P27.5 no screen sets for itself. */
     <Page scroll={false} className="mb-billing">
       <div className="mb-billbar">
-        <div className="mb-segment" role="group" aria-label="Order type">
-          {ORDER_TYPES.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className="mb-segment__option"
-              aria-pressed={cart?.orderType === kind}
-              onClick={() => void setOrderType(kind)}
-            >
-              {kind}
-            </button>
-          ))}
-        </div>
-
-        <Button
-          variant={locked ? 'primary' : 'secondary'}
-          onClick={() => setLocked((was) => !was)}
-          aria-pressed={locked}
-          title="Keep this order type for the next order"
-        >
-          <Icon name="lock" size="sm" />
-          {locked ? 'Type locked' : 'Lock type'}
-        </Button>
-
+        {/* **Search first.** The owner's change list of 2026-08-23: the box a
+            cashier types in all day was third, behind two controls that are
+            touched once a shift, and it was stretched across the whole bar
+            while they were squashed into the left corner. The order is the
+            frequency now — search, then the order type, then the lock. */}
         <div className="mb-billbar__search">
           {/* P10 owns search behaviour (budget B2). It lives here now so the
               layout is not re-cut next session. */}
           <SearchField
-            what="Search the menu, or type a table number"
+            what="Item or table number"
             value={keys.text}
             ref={searchBox}
+            data-keys="engine"
             // The box searches the MENU and accepts a table number. It does
             // NOT filter the floor: typing "dos" was emptying the grid, which
             // is the opposite of useful — a cashier searching for a dosa still
@@ -743,10 +816,61 @@ export function Billing() {
             onPick={(index) => dispatch({ kind: 'tap-suggestion', index })}
           />
         </div>
+
+        <button
+          type="button"
+          className="mb-processing__head"
+          aria-expanded={processing}
+          aria-controls={processingId}
+          onClick={() => setProcessing((was) => !was)}
+        >
+          <Icon name={processing ? 'chevron-up' : 'chevron-down'} size="sm" />
+          Processing orders
+          <span className="mb-processing__count">{openOrders.length}</span>
+        </button>
+
+        <div className="mb-billbar__type">
+          <div className="mb-segment" role="group" aria-label="Order type">
+            {ORDER_TYPES.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className="mb-segment__option"
+                aria-pressed={cart?.orderType === kind}
+                onClick={() => void setOrderType(kind)}
+              >
+                {kind}
+              </button>
+            ))}
+          </div>
+
+        {/* **The lock is a picture now, not a pill.** Two words and an icon at
+            full button size claimed about as much of the bar as all four order
+            types together, for "keep this order type for the next order" — a
+            thing pressed once a shift. Icon only and tiny. Nothing is lost to a
+            reader: the fill says on or off, `aria-pressed` says it out loud,
+            and the tooltip still spells the sentence out (§7). */}
+        <Button
+          className="mb-billbar__lock"
+          variant={locked ? 'primary' : 'quiet'}
+          onClick={() => setLocked((was) => !was)}
+          aria-pressed={locked}
+          title={
+            locked
+              ? 'Type locked — press to let the order type change again'
+              : 'Keep this order type for the next order'
+          }
+        >
+          <Icon name="lock" size="sm" label={locked ? 'Type locked' : 'Lock type'} />
+        </Button>
+        </div>
       </div>
 
-      <div className="mb-billing__body">
+      <div
+        className={processing ? 'mb-billing__body mb-billing__body--queue' : 'mb-billing__body'}
+      >
         <div className="mb-billing__floor">
+
           {/* **The set-up list is not on this screen any more** — P30.6.
               D102 put it beside the till and was right that it must never be
               a gate; it was wrong that the till is where it belongs. The
@@ -818,16 +942,36 @@ export function Billing() {
               === 0` is how this screen knows a shop is brand new. */}
         </div>
 
+        {processing ? (
+          <div className="mb-queuepanel" id={processingId}>
+            <div className="mb-queuepanel__list">
+              {openOrders.length === 0 ? (
+                <EmptyState small title="Nothing being cooked" body="Sent orders show here." />
+              ) : null}
+              {openOrders.map((order) => (
+                <button
+                  type="button"
+                  key={order.id}
+                  className={
+                    order.selected ? 'mb-queueline mb-queueline--on' : 'mb-queueline'
+                  }
+                  aria-pressed={order.selected}
+                  onClick={() => openTable(order)}
+                >
+                  <span className="mb-queueline__where">{order.label}</span>
+                  <span className="mb-queueline__amount">{order.total?.text ?? ''}</span>
+                  <span className="mb-queueline__no">{order.billNumber ?? '—'}</span>
+                  <span className="mb-queueline__when">
+                    {order.minutes === null ? '' : `${order.minutes}m`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* THE CART IS PERMANENT. It never moves and never hides (§1). */}
         <div className="mb-billing__cart">
-          <SectionHeader
-            title={cart?.table ? `Table ${cart.table}` : (cart?.orderType ?? 'Order')}
-            note={
-              cart?.isEmpty
-                ? 'Empty'
-                : `${cart?.lines.length ?? 0} ${cart?.lines.length === 1 ? 'line' : 'lines'}`
-            }
-          />
 
           {/* **Audit I6 — a very long bill says so** (P30). Not a refusal:
               a wedding party really does order sixty dishes, and a counter
@@ -956,53 +1100,44 @@ export function Billing() {
             )}
           </div>
 
-          {cart ? <Totals bill={cart.bill} /> : null}
-
-          {/* **The payment modes.** Two things about this block were wrong when
-              the owner looked at it on 2026-08-22 — *"the payment mode selection
-              is also not visible, and it also shows some error notification"* —
-              and both come from the same place: the buttons knew nothing about
-              what had already been paid. See `PaymentModes`. */}
           <div className="mb-payment">
             <PaymentModes
-              cart={cart}
-              onTake={(mode) => void takePayment(mode)}
+              mode={payMode}
+              onPick={setPayMode}
               onCredit={() => setOnAccount(true)}
             />
 
-            {cart && cart.payments.length > 0 ? (
-              <div className="mb-payment__taken">
-                {cart.payments.map((payment) => (
-                  <div className="mb-totals__row" key={payment.index}>
-                    <span>{payment.mode}</span>
-                    <span className="mb-totals__value">{payment.amount.text}</span>
-                  </div>
-                ))}
-                <div className="mb-totals__row">
-                  <span>Balance</span>
-                  <span className="mb-totals__value">{cart.balance.text}</span>
-                </div>
-                {cart.change.paise > 0n ? (
-                  <div className="mb-totals__row">
-                    <span>
-                      <Badge tone="ok">Change due</Badge>
-                    </span>
-                    <span className="mb-totals__value">{cart.change.text}</span>
-                  </div>
+            {/* The one box a cashier types money into, and only for the one
+                thing that is counted by hand. Card and UPI are always exact. */}
+            {payMode === 'Cash' ? (
+              <div className="mb-payment__cash">
+                <MoneyInput
+                  label="Cash given"
+                  value={cashGiven}
+                  onChange={setCashGiven}
+                  onBlur={() => void commitCash(cashGiven)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void commitCash(cashGiven);
+                  }}
+                />
+                {cart && cart.change.paise > 0n ? (
+                  <span className="mb-payment__answer">
+                    Change <strong>{cart.change.text}</strong>
+                  </span>
+                ) : cart && cart.payments.length > 0 && cart.balance.paise > 0n ? (
+                  <span className="mb-payment__answer">
+                    Still owing <strong>{cart.balance.text}</strong>
+                  </span>
                 ) : null}
-                <Button small variant="quiet" onClick={() => void clearPayments()}>
-                  Clear payments
-                </Button>
               </div>
             ) : null}
           </div>
 
+          {cart ? <Totals bill={cart.bill} /> : null}
+
+          {/* Two buttons, and a fold. `acting` refuses a second press while
+              the first is still running; disabled is so it can be seen. */}
           <div className="mb-actions">
-            {/*
-              **Dead while their own work runs** — the two presses that used to
-              be repeatable. `acting` refuses the second press outright; the
-              disabled state is so the cashier can see why.
-            */}
             <Button
               disabled={!cart || cart.isEmpty || acting}
               onClick={() => act(printKitchen)}
@@ -1016,12 +1151,80 @@ export function Billing() {
             >
               Complete bill
             </Button>
+
+            <button
+              type="button"
+              className="mb-actions__toggle"
+              aria-expanded={moreActions}
+              aria-controls={moreActionsId}
+              title={moreActions ? 'Hide the rest' : 'The rest of the actions'}
+              onClick={() => setMoreActions((was) => !was)}
+            >
+              <Icon
+                name={moreActions ? 'chevron-up' : 'chevron-down'}
+                size="sm"
+                label={moreActions ? 'Hide the rest' : 'The rest of the actions'}
+              />
+            </button>
+          </div>
+
+          <div
+            id={moreActionsId}
+            className="mb-actions mb-actions--more"
+            hidden={!moreActions}
+          >
+            {/* "What do we each owe?" — a question, answered in place. It makes
+                no bills, and Rust writes the sentence, remainder and all. */}
+            <div className="mb-eachpays">
+              <span className="mb-eachpays__label">Each pays</span>
+              <Button
+                small
+                variant="quiet"
+                disabled={ways <= 2}
+                onClick={() => void setPeople(ways - 1)}
+                aria-label="One fewer person"
+              >
+                <Icon name="minus" size="sm" />
+              </Button>
+              <span className="mb-eachpays__count">{ways}</span>
+              <Button
+                small
+                variant="quiet"
+                disabled={ways >= 50}
+                onClick={() => void setPeople(ways + 1)}
+                aria-label="One more person"
+              >
+                <Icon name="plus" size="sm" />
+              </Button>
+              <span className="mb-eachpays__says">{even ? even.note : ''}</span>
+            </div>
+
+            <Button
+              variant="quiet"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => setPreview('bill')}
+            >
+              Preview bill
+            </Button>
+            <Button
+              variant="quiet"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => setPreview('kitchen')}
+            >
+              Preview ticket
+            </Button>
+            {/* Only once a ticket has gone: before that, "Kitchen ticket" is
+                the button. */}
+            {cart?.orderId ? (
+              <Button variant="quiet" onClick={() => act(reprintKitchen)}>
+                Send ticket again
+              </Button>
+            ) : null}
             <Button variant="quiet" onClick={() => void newOrder()}>
               New order
             </Button>
-            {/* **P29, scope 7.9 — a parcel label.** Only when this shop has a
-                label printer set up: a button for hardware nobody owns is a
-                promise that fails when pressed. */}
+            {/* Only when this shop has a label printer: a button for hardware
+                nobody owns is a promise that fails when pressed. */}
             {hasLabels ? (
               <Button
                 variant="quiet"
@@ -1040,28 +1243,6 @@ export function Billing() {
                 Label
               </Button>
             ) : null}
-            {/* **Two different actions behind one word, and the difference is
-                whether the shop's books know about this order yet.**
-
-                Nothing parked: the cart is somebody typing, and clearing it is
-                clearing it.
-
-                Parked (a kitchen ticket went, or a table was opened): the
-                order has a bill number, the kitchen may be cooking, and the
-                reports will look for it. Clearing the screen would leave an
-                open order in the database forever. That is `cancel_order` —
-                which was written at P12 and had nothing calling it. */}
-            {/* **Money off** — the owner, 2026-08-17: *"where is discount
-                option?? i want to give discount to customer, here no option
-                showing."*
-
-                They were right that there was none, anywhere. `mb_core` has
-                spread a bill discount across the lines before tax since P02,
-                `DiscountPolicy` decides who may give how much, the roles
-                screen has had the permission checkbox since P11, and the
-                totals block below already draws the line when there is one.
-                `CartState.bill_discount` was set to `None` at birth and never
-                written again — the whole feature with no door into it. */}
             <Button
               variant="quiet"
               disabled={!cart || cart.isEmpty}
@@ -1069,15 +1250,12 @@ export function Billing() {
             >
               {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
             </Button>
-            {/* P14's scope 1.21-1.24, reachable at last: what each person
-                owes, some of the food onto its own bill, and how many are
-                sitting there. Three commands that had no button. */}
             <Button
               variant="quiet"
-              disabled={!cart || cart.isEmpty}
+              disabled={!cart || cart.isEmpty || !cart.orderId}
               onClick={() => setSplitting(true)}
             >
-              Split
+              Separate bill
             </Button>
             <Button
               variant="quiet"
@@ -1142,6 +1320,18 @@ export function Billing() {
         <HelpSheet onClose={() => dispatch({ kind: 'key', key: 'Escape' })} />
       ) : null}
 
+      {/* **The paper, before it is paper** — audit D6, built at P32. */}
+      <Before
+        what={preview ?? 'bill'}
+        open={preview !== null}
+        onClose={() => setPreview(null)}
+        onPrint={
+          preview === 'kitchen'
+            ? () => act(printKitchen)
+            : () => act(completeBill)
+        }
+      />
+
       <ConfirmDialog
         open={confirmCancel}
         title="Cancel this order?"
@@ -1191,7 +1381,7 @@ export function Billing() {
       ) : null}
 
       {splitting && cart ? (
-        <Split
+        <SeparateBill
           cart={cart}
           onClose={() => {
             setSplitting(false);
@@ -1287,71 +1477,57 @@ export function Billing() {
  * standing up a shop, an order and a payment provider first.
  */
 export function PaymentModes({
-  cart,
-  onTake,
+  mode,
+  onPick,
   onCredit,
 }: {
-  cart: CartView | null;
-  onTake: (mode: string) => void;
+  /** Which mode is lit. */
+  mode: string;
+  onPick: (mode: string) => void;
   onCredit: () => void;
 }) {
-  // **Rust's number, compared, never computed** (R8). `check-no-money.mjs`
-  // fails the build on arithmetic here, and this is a comparison.
-  const owing = cart !== null && cart.balance.paise > 0n;
-  const ready = cart !== null && !cart.isEmpty;
-  const taken = new Set(cart?.payments.map((payment) => payment.mode) ?? []);
-
-  const mode = (label: string, press: () => void) => {
-    const used = taken.has(label);
-    return (
-      <Button
-        key={label}
-        small
-        className={used ? 'mb-payment__mode mb-payment__mode--taken' : 'mb-payment__mode'}
-        onClick={press}
-        disabled={!ready || !owing}
-        // Said out loud, because the visual difference is a colour and a tick
-        // and §2 rule 2 does not stop at the tiles.
-        aria-pressed={used}
-        title={
-          used
-            ? `${label} has been taken on this bill`
-            : owing
-              ? `Take the rest of the bill as ${label}`
-              : 'This bill is already paid'
-        }
-      >
-        {label}
-        {/* The form half of the signal (§2 rule 2), and it is the kit's tick
-            rather than a ✓ character — one set, one stroke weight, one optical
-            size. `check-layout.mjs` caught the glyph, which is the lint doing
-            exactly the job the owner asked it to do on 2026-08-17. */}
-        {used ? <Icon name="check" size="sm" /> : null}
-      </Button>
-    );
-  };
+  const [showCredit, setShowCredit] = useState(false);
+  const creditId = useId();
 
   return (
     <>
       <div className="mb-payment__modes">
-        {['Cash', 'Card', 'UPI'].map((label) => mode(label, () => onTake(label)))}
-        {/* P15 made this real. A credit sale happens mid-bill with the
-            customer standing there, so the picker opens here rather than
-            sending a cashier to another screen. */}
-        {mode('Credit', onCredit)}
+        {['Cash', 'Card', 'UPI'].map((label) => (
+          <Button
+            key={label}
+            small
+            className={
+              mode === label ? 'mb-payment__mode mb-payment__mode--on' : 'mb-payment__mode'
+            }
+            aria-pressed={mode === label}
+            onClick={() => onPick(label)}
+          >
+            {label}
+          </Button>
+        ))}
+        <button
+          type="button"
+          className="mb-payment__reveal"
+          aria-expanded={showCredit}
+          aria-controls={creditId}
+          title={showCredit ? 'Hide credit billing' : 'Show credit billing'}
+          onClick={() => setShowCredit((was) => !was)}
+        >
+          <Icon
+            name={showCredit ? 'chevron-up' : 'chevron-down'}
+            size="sm"
+            label={showCredit ? 'Hide credit billing' : 'Show credit billing'}
+          />
+        </button>
       </div>
 
-      {/* **Why the buttons are off, in one line.** A row of four dead buttons
-          with no explanation is the version of this that generates the support
-          call the error toast used to. It appears only once there is something
-          to explain — a bill nobody has paid yet says nothing, because nothing
-          is unusual about it. */}
-      {ready && !owing ? (
-        <p className="mb-payment__settled">
-          This bill is paid in full. Press <strong>Complete bill</strong>, or
-          clear the payments to take it a different way.
-        </p>
-      ) : null}
+      {/* A credit sale happens mid-bill with the customer standing there, so
+          the picker opens here rather than on another screen. */}
+      <div id={creditId} className="mb-payment__credit" hidden={!showCredit}>
+        <Button small wide variant="quiet" className="mb-payment__mode" onClick={onCredit}>
+          Credit
+        </Button>
+      </div>
     </>
   );
 }

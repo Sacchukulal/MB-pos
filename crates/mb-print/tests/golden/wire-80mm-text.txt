@@ -11,53 +11,45 @@ GS ! 0x00     character size
 ESC E 0      emphasis
 TEXT "    12 MG Road, Jayanagar, Bengaluru 560011"
 LF
-TEXT "                 Ph: 9880012345"
+TEXT "                 Ph 9880012345"
 LF
-TEXT "             GSTIN: 29ABCDE1234F1ZW"
+TEXT "             GSTIN 29ABCDE1234F1ZW"
 LF
-TEXT "             FSSAI: 11223344556677"
+TEXT "              FSSAI 11223344556677"
 LF
 TEXT "------------------------------------------------"
 LF
-TEXT "Bill No                                 BIR/1207"
+ESC E 1      emphasis
+TEXT "                  TAX INVOICE"
 LF
-TEXT "Date                                  2026-08-03"
+GS ! 0x11     character size
+TEXT "        TOKEN 42"
 LF
-TEXT "Type                                     Dine In"
+GS ! 0x00     character size
+ESC E 0      emphasis
+TEXT "Bill BIR/1207   2026-08-03 19:42         Dine In"
 LF
-TEXT "Table                                          6"
+TEXT "Table 6                             Cashier Ravi"
 LF
-TEXT "Cashier                                     Ravi"
+TEXT "Order Suresh"
 LF
 TEXT "Customer                          Suresh Traders"
 LF
 TEXT "Cust GSTIN                       29ZYXWV9876K1Z2"
 LF
-TEXT "------------------------------------------------"
-LF
-GS ! 0x11     character size
-ESC E 1      emphasis
-TEXT "        TOKEN 42"
-LF
-GS ! 0x00     character size
-ESC E 0      emphasis
-TEXT "------------------------------------------------"
-LF
-TEXT "Item               HSN    Qty     Rate    Amount"
+TEXT "Item                 HSN    Qty    Rate   Amount"
 LF
 TEXT "------------------------------------------------"
 LF
-TEXT "Paneer Butter      2106     2   240.00    478.80"
+TEXT "Paneer Butter Masala 2106     2  240.00   480.00"
 LF
-TEXT "Masala (Half) -"
-LF
-TEXT "Extra Spicy"
+TEXT "(Half) - Extra Spicy"
 LF
 TEXT "(no onion)"
 LF
-TEXT "Water 1L           2201     3    20.00      0.00"
+TEXT "Water 1L             2201     3   20.00    60.00"
 LF
-TEXT "Beer 650ml                  2   220.00    418.00"
+TEXT "Beer 650ml                    2  220.00   440.00"
 LF
 TEXT "------------------------------------------------"
 LF
@@ -65,13 +57,13 @@ TEXT "Subtotal                                  980.00"
 LF
 TEXT "Discount                                 -106.00"
 LF
-TEXT "Service Charge                             45.89"
+TEXT "Service Charge                             43.70"
 LF
 TEXT "Donation                                    5.00"
 LF
-TEXT "CGST                                       12.50"
+TEXT "CGST 5%                                    12.50"
 LF
-TEXT "SGST                                       12.49"
+TEXT "SGST 5%                                    12.49"
 LF
 TEXT "Non-GST value                             418.00"
 LF
@@ -79,8 +71,6 @@ TEXT "Exempt value                                5.00"
 LF
 TEXT "Round off                                   0.31"
 LF
-LF
-TEXT "------------------------------------------------"
 LF
 GS ! 0x11     character size
 ESC E 1      emphasis
@@ -98,8 +88,6 @@ TEXT "5%                      499.70    12.50    12.49"
 LF
 TEXT "18%                       0.00     0.00     0.00"
 LF
-TEXT "------------------------------------------------"
-LF
 TEXT "Card                                      484.00"
 LF
 TEXT "Sodexo                                    242.00"
@@ -107,8 +95,6 @@ LF
 TEXT "Credit                                    242.00"
 LF
 TEXT "Tip                                        20.00"
-LF
-TEXT "------------------------------------------------"
 LF
 ESC a 1      align
 GS ( k       QR model (4 bytes)
@@ -118,7 +104,6 @@ GS ( k       QR store (64 bytes)
 GS ( k       QR print (3 bytes)
 ESC a 0      align
 TEXT "             Thank you, visit again"
-LF
 LF
 LF
 ESC d 3      feed lines

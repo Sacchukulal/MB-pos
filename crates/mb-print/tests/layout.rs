@@ -35,7 +35,7 @@ fn t2_golden_files() {
         ("100mm", PaperKind::Mm100),
         ("a4", PaperKind::A4),
     ] {
-        let doc = bill_document(Paper::new(kind), &fixture.context(Copy::Original))
+        let doc = bill_document(&common::metrics(kind), &fixture.context(Copy::Original))
             .expect("builds");
         let rendered = text::to_text(&layout(&doc).expect("lays out"));
 
@@ -112,7 +112,7 @@ fn t4_the_item_table_fills_the_paper_exactly() {
                 settings: &settings,
                 ..fixture.context(Copy::Original)
             };
-            let doc = bill_document(Paper::new(kind), &ctx).expect("builds");
+            let doc = bill_document(&common::metrics(kind), &ctx).expect("builds");
             let laid = layout(&doc).expect("lays out");
 
             // The separator lines are laid to the full usable width, so they
@@ -125,9 +125,14 @@ fn t4_the_item_table_fills_the_paper_exactly() {
                     _ => None,
                 })
                 .expect("a bill has separators");
+            // A rule is DOTS wide since P32, and it spans the whole paper.
+            // A4 has no thermal dots, so its width is its column count at the
+            // base advance — the same fiction `Metrics::dots` reports.
+            let expected = kind.dots().unwrap_or_else(|| {
+                u32::try_from(kind.columns()).unwrap_or(0) * laid.base_advance
+            });
             assert_eq!(
-                rule_width,
-                kind.columns(),
+                rule_width, expected,
                 "{kind:?} hsn={hsn}: the rules do not span the paper"
             );
 
@@ -178,10 +183,14 @@ fn t5_the_money_wins() {
     // right of a row, and that is a template bug this guard turns into a clear
     // error instead of a silently short line. The unit test in `layout.rs`
     // covers the amount case at a narrower width directly.
+    // **Longer than P32 made it need to be.** The layout now steps the size
+    // down the ladder before it refuses, so a forty-character right-hand side
+    // fits at the smallest size — which is the better outcome and exactly what
+    // rule three asks for. Sixty characters cannot fit at any size.
     let mut impossible = Document::new(Paper::new(PaperKind::Mm58));
     impossible.row(
         "x",
-        "THIS IS NOT AN AMOUNT IT IS FORTY CHARACTERS",
+        "THIS IS NOT AN AMOUNT AND IT IS SIXTY-FOUR CHARACTERS LONG ON ITS OWN",
         Style::NORMAL,
     );
     match layout(&impossible) {
@@ -210,14 +219,20 @@ fn t6_a_heading_too_big_is_capped_and_stays_complete() {
             _ => None,
         })
         .expect("the cap was not recorded");
-    // **In dots since 2026-08-17**, not in the ESC/POS multiplier. `Style::new(3, …)`
-    // is 3 cells, which is 72 dots, and the note says what was asked for and
-    // what was used in the same unit a shop's size setting is in.
-    assert_eq!(used.0, 72, "it should have been asked for at three cells");
-    assert!(used.1 < 72, "it should have come down");
+    // **In cap-height dots since P32.** `Style::new(3, …)` is the top rung of
+    // `Style::LADDER`, and the note says what was asked for and what was used
+    // in the same unit a shop's size setting is in.
+    assert_eq!(
+        used.0,
+        mb_print::Style::LARGEST,
+        "it should have been asked for at the largest size"
+    );
+    assert!(used.1 < used.0, "it should have come down");
+    // And it came down to a size a shop could have picked, not to an arbitrary
+    // number — which is what made five dropdown entries print identically.
     assert!(
-        used.1 >= 24,
-        "capping must not take a heading below the ordinary body size: {used:?}"
+        mb_print::Style::LADDER.contains(&used.1),
+        "capping landed off the ladder: {used:?}"
     );
 
     let rendered = text::to_text(&laid);
@@ -232,7 +247,8 @@ fn t7_the_offset_moves_everything_and_clamps() {
     let fixture = Fixture::new();
     let build = |offset: Offset| {
         let paper = Paper::new(PaperKind::Mm80).with_offset(offset);
-        let doc = bill_document(paper, &fixture.context(Copy::Original)).expect("builds");
+        let doc = bill_document(&common::metrics_on(paper), &fixture.context(Copy::Original))
+            .expect("builds");
         layout(&doc).expect("lays out")
     };
 
@@ -242,10 +258,11 @@ fn t7_the_offset_moves_everything_and_clamps() {
     // 3 mm on 80 mm paper is 2 columns, and EVERY line moves by the same
     // amount — a partial shift would mean two sinks disagreeing about the
     // origin, which is the thing this crate exists to prevent.
+    let moved = shifted.base_advance * 2;
     for line in &shifted.lines {
-        assert_eq!(line.indent, 2, "a line did not move with the rest");
+        assert_eq!(line.indent_dots, moved, "a line did not move with the rest");
     }
-    assert!(plain.lines.iter().all(|l| l.indent == 0));
+    assert!(plain.lines.iter().all(|l| l.indent_dots == 0));
 
     // Nothing falls off the right edge: the usable width shrank to match.
     for line in shifted.text_lines() {
@@ -272,7 +289,7 @@ fn t7_the_offset_moves_everything_and_clamps() {
 
     // Negative clamps at the left edge rather than going off it.
     let left = build(Offset::new(-10, 0));
-    assert!(left.lines.iter().all(|l| l.indent == 0));
+    assert!(left.lines.iter().all(|l| l.indent_dots == 0));
 }
 
 /// T8. The printed GST summary sums to the bill's tax.
@@ -284,7 +301,7 @@ fn t7_the_offset_moves_everything_and_clamps() {
 fn t8_the_printed_tax_summary_sums_to_the_bills_tax() {
     let fixture = Fixture::new();
     let doc = bill_document(
-        Paper::new(PaperKind::Mm80),
+        &common::metrics(PaperKind::Mm80),
         &fixture.context(Copy::Original),
     )
     .expect("builds");
@@ -358,10 +375,13 @@ fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
         kind: TicketKind::New,
         token: Some("42"),
         bill_number: Some("BIR/1207"),
+        kot_number: Some("14"),
         order_type: OrderType::DineIn,
         table: Some("6"),
         time: Some("21:40"),
+        waiter: Some("Suresh"),
         station: None,
+        reprint: false,
         lines: &lines,
         settings: &settings,
     };
@@ -411,10 +431,13 @@ fn a_cancellation_slip_says_cancel() {
         kind: TicketKind::Cancellation,
         token: Some("42"),
         bill_number: None,
+        kot_number: Some("14"),
         order_type: OrderType::DineIn,
         table: Some("6"),
         time: None,
+        waiter: Some("Suresh"),
         station: None,
+        reprint: false,
         lines: &lines,
         settings: &settings,
     };

@@ -35,6 +35,9 @@ use crate::error::DbError;
 pub enum CounterKind {
     Token,
     Bill,
+    /// **P32 — the kitchen ticket's own running number.** Resets daily, like
+    /// the token: a kitchen talks about "KOT 14" within a shift.
+    Kot,
 }
 
 impl CounterKind {
@@ -43,6 +46,7 @@ impl CounterKind {
         match self {
             CounterKind::Token => "token",
             CounterKind::Bill => "bill",
+            CounterKind::Kot => "kot",
         }
     }
 }
@@ -194,6 +198,7 @@ pub fn counters(
         out.push(Counter {
             kind: match kind.as_str() {
                 "token" => CounterKind::Token,
+                "kot" => CounterKind::Kot,
                 _ => CounterKind::Bill,
             },
             prefix,

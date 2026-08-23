@@ -744,7 +744,6 @@ function Paper({
           <Receipt
             doc={preview.doc}
             font={preview.font}
-            monospace={preview.fontIsMonospace}
           />
           {/* Half-typed is a normal state, and saying which box is not usable
               yet beats blanking the paper or shouting on every keystroke. */}

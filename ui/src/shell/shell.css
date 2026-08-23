@@ -115,10 +115,9 @@
   display: flex;
   align-items: center;
   gap: var(--gap-inline);
-  height: var(--space-8);
-  /* Not --target-min: this sits in a 48px strip, and the touch requirement is
-     met by the WIDTH plus the full height of the bar. A 44px-tall pill inside
-     a 48px bar leaves a 2px seam above and below that reads as a mistake. */
+  height: var(--topbar-control-height);
+  /* Shorter than --target-min on purpose: it sits in the top strip, and the
+     touch target is the width plus the full height of the bar. */
   padding: 0 var(--gap-inline);
   background: transparent;
   color: var(--text-muted);
@@ -245,7 +244,7 @@
   align-items: center;
   justify-content: center;
   width: var(--space-7);
-  height: var(--space-8);
+  height: var(--topbar-control-height);
   background: transparent;
   color: var(--text-muted);
   border: none;
@@ -283,7 +282,7 @@
   display: flex;
   align-items: center;
   gap: var(--gap-inline);
-  height: var(--space-8);
+  height: var(--topbar-control-height);
   padding: 0 var(--gap-field);
   background: transparent;
   color: var(--text-muted);
@@ -569,7 +568,7 @@
   align-items: center;
   justify-content: center;
   width: var(--space-7);
-  height: var(--space-8);
+  height: var(--topbar-control-height);
   background: transparent;
   color: var(--text-muted);
   border: var(--border-width) solid transparent;

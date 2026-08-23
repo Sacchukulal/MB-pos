@@ -222,17 +222,31 @@ const ROW_HEIGHTS: &[Choice] = &[
 /// A shop on the **Text** print engine gets the nearest multiplier its printer
 /// can form (`Style::scale` rounds to it) — that hardware has one font at
 /// three sizes and no setting here can change it.
+/// **The ten sizes, as cap heights in dots** — P32.
+///
+/// The number is **the height of a capital letter**: a thermal head is 8 dots
+/// to the millimetre, so size 4 is a capital just under 2 mm tall and a person
+/// can hold a ruler against it.
+///
+/// It used to be a nominal row height, and **nothing drew that height**. The
+/// raster sink scaled the face until an `M` fitted a twelve-dot column, so a
+/// request for 24 dots put a 13-dot capital on the paper — and the top five
+/// entries on this list all printed identically, because the layout capped them
+/// to the same number. Measured on the owner's own bill, 2026-08-23.
+///
+/// The values mirror `mb_print::doc::Style::LADDER`, which is the authority the
+/// printer resolves against; the test below fails the build if they disagree.
 pub(super) const SIZES: &[Choice] = &[
-    Choice { value: "16", label: "1" },
-    Choice { value: "20", label: "2" },
-    Choice { value: "24", label: "3" },
-    Choice { value: "28", label: "4" },
-    Choice { value: "32", label: "5" },
-    Choice { value: "36", label: "6" },
-    Choice { value: "40", label: "7" },
-    Choice { value: "48", label: "8" },
-    Choice { value: "60", label: "9" },
-    Choice { value: "72", label: "10" },
+    Choice { value: "9", label: "1" },
+    Choice { value: "11", label: "2" },
+    Choice { value: "13", label: "3" },
+    Choice { value: "15", label: "4" },
+    Choice { value: "17", label: "5" },
+    Choice { value: "19", label: "6" },
+    Choice { value: "22", label: "7" },
+    Choice { value: "26", label: "8" },
+    Choice { value: "33", label: "9" },
+    Choice { value: "41", label: "10" },
 ];
 
 /// **The typefaces** — the owner's *"5-6 choices"*.
@@ -262,7 +276,12 @@ pub(super) const FONTS: &[Choice] = &[
 
 const LOGO_POSITIONS: &[Choice] = &[
     Choice { value: "none", label: "Do not print the logo" },
-    Choice { value: "top", label: "At the top" },
+    Choice { value: "top", label: "Above the shop name" },
+    // P32, the owner's ask of 2026-08-23. The picture takes `logo_width_pct`
+    // of the paper on its side and the shop's name, address and numbers are
+    // centred in the rest.
+    Choice { value: "left", label: "Beside the shop name, on the left" },
+    Choice { value: "right", label: "Beside the shop name, on the right" },
 ];
 
 const QR_MODES: &[Choice] = &[
@@ -473,17 +492,16 @@ macro_rules! pick {
     };
 }
 
-/// **Per-section text size, in dots** — 2026-08-17.
+/// **Per-section text size, as the height of a capital letter** — P32.
 ///
-/// It stored the ESC/POS multiplier (1, 2 or 3) and nothing else, which is why
-/// there were only ever three sizes. It stores a HEIGHT now, and
-/// `Style::px` works the multiplier out from it so the text engine still has
-/// the number its hardware understands.
+/// Three vocabularies have been written to this row: the ESC/POS multiplier
+/// (1, 2, 3), a nominal row height (16 … 72), and now a cap height (9 … 41).
+/// The three sets do not overlap, which is what lets `Style::from_stored` tell
+/// them apart exactly rather than guessing — see `mb_print::doc::Style::LADDER`.
 ///
-/// **A shop that saved `1`, `2` or `3` before today still reads back right.**
-/// Those rows are on disk in every shop that has ever changed a size, and
-/// refusing them would be an upgrade that resets a tuned receipt — so they are
-/// read as the multiplier they were and turned into the dots they meant.
+/// **A shop that tuned its receipt keeps what it chose.** Rung for rung: a
+/// stored `24` was the third-from-bottom size and reads back as the
+/// third-from-bottom size.
 macro_rules! size {
     ($key:literal, $group:ident, $label:literal, $help:literal,
      [$($syn:literal),* $(,)?], $($field:ident).+) => {
@@ -497,17 +515,19 @@ macro_rules! size {
             kind: Kind::Choice(SIZES),
             read: |c| Value::Text(c.$($field).+.size.to_string()),
             write: |c, v| {
-                let px: u16 = match v.as_text()?.parse::<u16>() {
-                    // **The old values, still understood.** 1/2/3 were the
-                    // multiplier; anything larger is already a height. The same
-                    // rule `Style::size_from_wire` applies to a config file.
-                    Ok(n @ 1..=3) => n * crate::settings::BASE_CELL_PX,
-                    Ok(n) if crate::settings::is_a_size(n) => n,
+                let cap: u16 = match v.as_text()?.parse::<u16>() {
+                    // **Every vocabulary this row has held**, told apart by
+                    // `Style::from_stored` — the one rule, shared with the
+                    // config file's own deserialiser so a stored row and an
+                    // exported file can never be read differently.
+                    Ok(n) if crate::settings::is_a_size(mb_print::Style::from_stored(n)) => {
+                        mb_print::Style::from_stored(n)
+                    }
                     _ => return Err(Invalid::new(
-                        "Pick a size from the list — 12 px to 72 px.",
+                        "Pick a size from the list — 1 to 10.",
                     )),
                 };
-                c.$($field).+.size = px;
+                c.$($field).+.size = cap;
                 Ok(())
             },
         }
@@ -562,6 +582,8 @@ const fn logo_to(l: LogoPosition) -> &'static str {
     match l {
         LogoPosition::None => "none",
         LogoPosition::Top => "top",
+        LogoPosition::Left => "left",
+        LogoPosition::Right => "right",
     }
 }
 
@@ -569,6 +591,8 @@ fn logo_from(text: &str) -> Option<LogoPosition> {
     match text {
         "none" => Some(LogoPosition::None),
         "top" => Some(LogoPosition::Top),
+        "left" => Some(LogoPosition::Left),
+        "right" => Some(LogoPosition::Right),
         _ => None,
     }
 }
@@ -765,6 +789,29 @@ pub const CATALOG: &[Entry] = &[
         "\"Cash 300 / UPI 200\" under the total.",
         ["payment", "split", "cash", "card"], receipt.show.payment_lines),
 
+    // --- P32, 2026-08-23. Five things a real bill needs and none of them had.
+    flag!("receipt.show.title", Receipt, Row, "Print \"TAX INVOICE\"",
+        "A GST document has to say what it is. A composition dealer gets \
+         \"BILL OF SUPPLY\"; a shop with no GST number gets neither.",
+        ["tax invoice", "title", "heading", "gst", "bill of supply"],
+        receipt.show.title),
+    flag!("receipt.show.time", Receipt, Row, "Print the time",
+        "Beside the date. A restaurant bill without a time is not much of a \
+         record.", ["time", "clock", "hour"], receipt.show.time),
+    flag!("receipt.show.covers", Receipt, Row, "Print how many people",
+        "Only when the order says. Most do not.", ["covers", "persons", "pax", "guests"],
+        receipt.show.covers),
+    flag!("receipt.show.waiter", Receipt, Row, "Print who took the order",
+        "As well as who took the money.", ["waiter", "steward", "server", "staff"],
+        receipt.show.waiter),
+    flag!("receipt.show.place_of_supply", Receipt, Row, "Print the place of supply",
+        "The state code. A B2B customer's accounts department asks for it.",
+        ["place of supply", "state", "gst"], receipt.show.place_of_supply),
+    flag!("receipt.show.amount_in_words", Receipt, Row, "Print the total in words",
+        "\"Rupees One Thousand Two Hundred only\" under the total. Two more \
+         lines of paper on every bill.",
+        ["words", "rupees", "amount in words"], receipt.show.amount_in_words),
+
     flag!("receipt.separators.below_store_header", Receipt, Row, "Line under the shop header",
         "", ["separator", "line", "header"], receipt.separators.below_store_header),
     flag!("receipt.separators.below_meta", Receipt, Row, "Line under the bill details",
@@ -779,6 +826,13 @@ pub const CATALOG: &[Entry] = &[
         "", ["separator", "line", "subtotal"], receipt.separators.below_subtotals),
     flag!("receipt.separators.below_grand_total", Receipt, Row, "Line under the total",
         "", ["separator", "line", "total"], receipt.separators.below_grand_total),
+    // **P32 — two rules the template drew with no setting in front of them.**
+    // A rule nobody can switch off is the same fault as a setting nobody reads.
+    flag!("receipt.separators.below_tax_summary", Receipt, Row, "Line under the tax summary",
+        "", ["separator", "line", "tax", "summary"],
+        receipt.separators.below_tax_summary),
+    flag!("receipt.separators.below_payments", Receipt, Row, "Line under the payment lines",
+        "", ["separator", "line", "payment"], receipt.separators.below_payments),
 
     // P31, the owner's fourth item. First among the look settings, because it
     // is a decision about the whole piece of paper rather than about one line.
@@ -853,6 +907,9 @@ pub const CATALOG: &[Entry] = &[
         "", ["kot", "table"], kitchen.show_table),
     flag!("kitchen.show_time", Kitchen, Row, "Print the time",
         "", ["kot", "time", "clock"], kitchen.show_time),
+    // P32 — a cook could not say "KOT 14", because there was no such number.
+    flag!("kitchen.show_kot_number", Kitchen, Row, "Print the ticket number",
+        "Its own running number, so the kitchen and the counter can talk about \n         one ticket.", ["kot", "number", "ticket"], kitchen.show_kot_number),
     flag!("kitchen.show_column_names", Kitchen, Row, "Print column names",
         "A \"Qty  Item\" heading above the food.", ["kot", "columns", "heading"],
         kitchen.show_column_names),

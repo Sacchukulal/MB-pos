@@ -1,5 +1,13 @@
 /**
- * **The totals block — a feature, not a footer.**
+ * **The totals block on the till.**
+ *
+ * Four figures: what it came to, what came off, the tax, and what to say out
+ * loud. The rate-by-rate breakdown — taxable value, CGST, SGST, IGST, the
+ * liquor line — is still computed for every bill and still goes on the PRINTED
+ * bill and into the reports. It is not on this screen, because a cashier
+ * reading a total to a customer is not filing a return.
+ *
+ * The old note, still true of the numbers themselves:
  *
  * > Audit **B11**: *"the tax report splits GST 50/50 into CGST/SGST always. No
  * > IGST, no inter-state, no HSN summary, and nothing that can be filed
@@ -53,32 +61,7 @@ export function Totals({ bill }: { bill: BillView }) {
         />
       ))}
 
-      {/* Tax, BROKEN OUT BY RATE — scope 2.7. */}
-      {bill.taxRows.length > 0 ? (
-        <div className="mb-totals__tax">
-          {bill.taxRows.map((row) => (
-            <div key={row.rateLabel}>
-              <Row muted label={`Taxable @ ${row.rateLabel}`} value={row.taxable} />
-              {row.isInterstate ? (
-                <Row label={`IGST ${row.rateLabel}`} value={row.igst} />
-              ) : (
-                <>
-                  <Row label={`CGST ${halfOf(row.rateLabel)}`} value={row.cgst} />
-                  <Row label={`SGST ${halfOf(row.rateLabel)}`} value={row.sgst} />
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {/* Scope 2.3 — the liquor line. NEVER inside a GST total. */}
-      {isPositive(bill.nonGstValue) ? (
-        <Row label="Non-GST value" value={bill.nonGstValue} />
-      ) : null}
-      {isPositive(bill.exemptValue) ? (
-        <Row label="Exempt value" value={bill.exemptValue} />
-      ) : null}
+      {isPositive(bill.taxTotal) ? <Row label="Tax" value={bill.taxTotal} /> : null}
 
       {isNonZero(bill.roundOff) ? (
         <Row muted label="Round off" value={bill.roundOff} />
@@ -127,21 +110,6 @@ function Row({
       </span>
     </div>
   );
-}
-
-/**
- * "5%" → "2.5%".
- *
- * String work on a label, not arithmetic on money: CGST and SGST are each half
- * the rate by law, and the rate is a name here. The *amounts* were split in
- * mb-core, and this never touches them.
- */
-function halfOf(rateLabel: string): string {
-  const digits = rateLabel.replace('%', '');
-  const asNumber = Number(digits);
-  if (!Number.isFinite(asNumber)) return rateLabel;
-  const half = asNumber / 2;
-  return `${half % 1 === 0 ? half : half.toFixed(2).replace(/0$/, '')}%`;
 }
 
 function isPositive(value: MoneyView): boolean {

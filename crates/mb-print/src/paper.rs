@@ -12,6 +12,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// **Dots to the millimetre**, on every roll this product prints on.
+///
+/// A 203 dpi head, which is what every thermal receipt printer sold is. It is a
+/// constant rather than a division because all three roll widths agree — 384
+/// over 48 mm, 576 over 72 mm, 832 over 104 mm — and a test below says so, so
+/// the print offset and "how long is this bill" have one answer instead of
+/// three roundings.
+pub const DOTS_PER_MM: u32 = 8;
+
 /// What is in the printer.
 ///
 /// **The grid is the model.** A thermal receipt is a character grid — that is
@@ -187,6 +196,20 @@ mod tests {
                 kind.dots().expect("thermal paper has dots"),
                 "{kind:?} does not divide evenly into columns"
             );
+        }
+    }
+
+    /// [`DOTS_PER_MM`] is a constant, and this is what entitles it to be one.
+    #[test]
+    fn every_roll_is_eight_dots_to_the_millimetre() {
+        for kind in [PaperKind::Mm58, PaperKind::Mm80, PaperKind::Mm100] {
+            let dots = kind.dots().expect("thermal paper has dots");
+            assert_eq!(
+                dots / kind.printable_mm(),
+                DOTS_PER_MM,
+                "{kind:?} is not a 203 dpi head"
+            );
+            assert_eq!(dots % kind.printable_mm(), 0, "{kind:?} does not divide");
         }
     }
 

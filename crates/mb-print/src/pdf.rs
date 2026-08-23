@@ -34,8 +34,8 @@
 )]
 
 use crate::doc::{Align, Pattern};
-use crate::layout::{Laid, LaidContent, LaidLine};
-use crate::render::{Sink, render};
+use crate::layout::{BandText, Laid, LaidContent, LaidLine};
+use crate::render::{BandImage, Sink, render};
 
 /// A4 at 72 dpi, which is what PDF's default user space is.
 const PAGE_WIDTH: f64 = 595.0;
@@ -58,7 +58,10 @@ const LINE_HEIGHT: f64 = FONT_SIZE * 1.25;
 /// dropped can be put back in order.
 #[must_use]
 pub fn to_pdf(laid: &Laid) -> Vec<u8> {
-    let mut sink = PdfSink::default();
+    let mut sink = PdfSink {
+        advance: laid.base_advance.max(1),
+        ..PdfSink::default()
+    };
     render(laid, &mut sink);
     sink.finish_document()
 }
@@ -76,6 +79,9 @@ struct Placed {
 #[derive(Debug)]
 struct PdfSink {
     placed: Vec<Placed>,
+    /// One character of the body size, in dots — what the layout counts an
+    /// indent in, and what this sink divides by to get back to columns (P32).
+    advance: u32,
     /// Points down from the top margin **of the current page**. A cursor rather
     /// than a row index, because a 2× line is twice as tall and a row index
     /// cannot say that.
@@ -87,6 +93,7 @@ impl Default for PdfSink {
     fn default() -> Self {
         PdfSink {
             placed: Vec::new(),
+            advance: 12,
             cursor: 0.0,
             page: 0,
         }
@@ -238,29 +245,90 @@ fn escape(text: &str) -> String {
     out
 }
 
+impl PdfSink {
+    /// An indent given in dots, as the columns this fixed-pitch page counts in.
+    #[expect(
+        clippy::integer_division,
+        reason = "dots back into whole characters, not money"
+    )]
+    const fn columns_of(dots: u32, advance: u32) -> usize {
+        if advance == 0 {
+            return 0;
+        }
+        (dots / advance) as usize
+    }
+}
+
 impl Sink for PdfSink {
     fn line(&mut self, line: &LaidLine, _index: usize) {
         if let LaidContent::Text { text } = &line.content {
-            self.place(line.indent, text, line.style.scale());
+            let indent = PdfSink::columns_of(line.indent_dots, self.advance);
+            self.place(indent, text, line.style.scale());
         }
     }
 
-    fn rule(&mut self, pattern: Pattern, width: usize, indent: usize, _index: usize) {
-        let body: String = std::iter::repeat_n(pattern.glyph(), width).collect();
-        self.place(indent, &body, 1);
+    fn rule(&mut self, line: &LaidLine, pattern: Pattern, width: u32, _index: usize) {
+        // **A real line, like the raster sink draws** — P32. A row of hyphens
+        // in Courier has a visible gap between every one of them, and this page
+        // is what a shop emails to a customer.
+        let indent = PdfSink::columns_of(line.indent_dots, self.advance);
+        let across = PdfSink::columns_of(width, self.advance).max(1);
+        let rule = crate::layout::Rule::of(pattern);
+        for _ in 0..rule.strokes {
+            self.place(indent, &"_".repeat(across), 1);
+        }
     }
 
-    fn image(&mut self, _data: &[u8], _width_pct: u8, _align: Align, _index: usize) {
+    fn image(
+        &mut self,
+        _line: &LaidLine,
+        _data: &[u8],
+        _width_pct: u8,
+        _align: Align,
+        _index: usize,
+    ) {
         // An image needs an XObject and a compressed stream, which is where the
         // no-crate calculation stops working. Deliberately nothing, and the
         // module doc says why.
     }
 
-    fn qr(&mut self, payload: &str, _width_pct: u8, _align: Align, _index: usize) {
+    fn band(
+        &mut self,
+        _line: &LaidLine,
+        _image: &BandImage<'_>,
+        lines: &[BandText],
+        _index: usize,
+    ) {
+        // The picture cannot be drawn here either; the letterhead still must
+        // be. Same decision as the text sink, for the same reason.
+        for text in lines {
+            self.place(0, text.text.trim(), text.style.scale());
+        }
+    }
+
+    fn qr(
+        &mut self,
+        _line: &LaidLine,
+        payload: &str,
+        _width_pct: u8,
+        _align: Align,
+        _index: usize,
+    ) {
         self.place(0, payload, 1);
     }
 
-    fn blank(&mut self, _index: usize) {
+    fn barcode(
+        &mut self,
+        _line: &LaidLine,
+        payload: &str,
+        _human_readable: bool,
+        _align: Align,
+        _index: usize,
+    ) {
+        self.place(0, payload, 1);
+    }
+
+    fn blank(&mut self, _line: &LaidLine, _index: usize) {
         self.cursor += LINE_HEIGHT;
     }
 }

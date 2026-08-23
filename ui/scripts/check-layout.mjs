@@ -139,6 +139,20 @@ const CHECKS = [
     fix: 'Add it to kit/Icon.tsx and use <Icon name="…" />.',
   },
   {
+    // The owner, 2026-08-23, on the search box and the selected table:
+    // *"basically border itself colour changes, another border shouldn't
+    // appear around it."* A positive outline-offset is that second border —
+    // the ring floats off the box and the shopkeeper sees two rectangles.
+    // src/theme owns the one ring in this product; a screen that wants a
+    // different one is the bug.
+    what: 'a ring drawn around a box instead of on its edge',
+    re: /outline-offset\s*:/,
+    only: 'css',
+    when: (line) =>
+      !line.includes('var(--focus-ring-inset)') && !/outline-offset\s*:\s*0\s*;/.test(line),
+    fix: 'Focus and selection use --focus-ring-inset, or change border-color. See :focus-visible in tokens.css.',
+  },
+  {
     what: 'a glyph used as an icon',
     re: new RegExp(`[${GLYPH_ICONS.join('')}]`, 'u'),
     only: 'both',

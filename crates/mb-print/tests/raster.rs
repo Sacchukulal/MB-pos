@@ -29,6 +29,10 @@ fn font() -> Font {
     Font::builtin().expect("the shipped face loads")
 }
 
+fn metrics(paper: Paper) -> mb_print::metrics::Metrics {
+    mb_print::metrics::Metrics::face(paper, std::sync::Arc::new(font()))
+}
+
 /// T1. **THE ANTI-DRIFT TEST GAINS ITS THIRD SINK.**
 ///
 /// Every block of a bill with everything on it reaches the raster sink, and
@@ -37,12 +41,12 @@ fn font() -> Font {
 fn t1_the_raster_sink_cannot_drop_anything_either() {
     let fixture = Fixture::new();
     let ctx = fixture.context(Copy::Duplicate { number: 2 });
-    let doc = bill_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds");
+    let doc = bill_document(&common::metrics(PaperKind::Mm80), &ctx).expect("builds");
     let laid = layout(&doc).expect("lays out");
 
     let mut recorder = Recorder::new();
     render(&laid, &mut recorder);
-    let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
 
     // The traversal handed over every line, and the sink acknowledged each one.
     assert_eq!(
@@ -102,11 +106,17 @@ fn t13_the_two_sinks_put_the_same_character_in_the_same_column() {
     // half of the claim that catches an off-by-one.
     doc.text("AB  CD  240.00", Style::NORMAL, Align::Left);
 
-    let laid = layout(&doc).expect("lays out");
+    // **One `Metrics` for both sinks**, and the column is that face's own
+    // advance — not the printer grid's 12. P32: a character's width is
+    // measured now, so "the same column" means the same multiple of the
+    // measured advance. Comparing the raster's dots against the printer's grid
+    // was comparing two different rulers, and it only ever agreed by accident.
+    let m = metrics(paper);
+    let laid = mb_print::layout::layout_for(&doc, &m).expect("lays out");
     let text = to_text(&laid);
-    let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let raster = to_raster(&laid, &m, RasterOptions::default()).expect("rasters");
 
-    let per_column = paper.dots_per_column().expect("thermal paper has dots");
+    let per_column = m.body().advance;
     let line: Vec<char> = text.lines().next().expect("a line").chars().collect();
 
     let image = first_ink(&raster);
@@ -139,12 +149,12 @@ fn t13_the_two_sinks_put_the_same_character_in_the_same_column() {
 fn t19_a_logo_that_cannot_be_read_is_skipped_and_the_bill_still_prints() {
     let fixture = Fixture::new();
     let doc = bill_document(
-        Paper::new(PaperKind::Mm80),
+        &common::metrics(PaperKind::Mm80),
         &fixture.context(Copy::Original),
     )
     .expect("builds");
     let laid = layout(&doc).expect("lays out");
-    let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
 
     assert!(
         raster
@@ -178,7 +188,7 @@ fn a_real_logo_is_drawn_at_the_width_it_asked_for() {
     });
 
     let laid = layout(&doc).expect("lays out");
-    let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
     assert!(raster.notes.is_empty(), "a good logo was refused");
 
     // 50 % of 576 dots is 288 wide, and a 64x32 source scales to 144 tall.
@@ -202,7 +212,7 @@ fn the_qr_is_the_printers_when_it_has_one_and_text_when_it_does_not() {
     });
     let laid = layout(&doc).expect("lays out");
 
-    let native = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let native = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
     assert!(
         native.bands.iter().any(|b| matches!(b, Band::Qr { .. })),
         "a printer with an encoder should be sent the payload, not a picture"
@@ -210,7 +220,7 @@ fn the_qr_is_the_printers_when_it_has_one_and_text_when_it_does_not() {
 
     let drawn = to_raster(
         &laid,
-        &font(),
+        &metrics(laid.paper),
         RasterOptions {
             native_qr: false,
             ..RasterOptions::default()
@@ -236,7 +246,7 @@ fn each_paper_size_rasterises_to_its_own_width() {
         let mut doc = Document::new(Paper::new(kind));
         doc.line("TOTAL 646.00");
         let laid = layout(&doc).expect("lays out");
-        let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+        let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
         assert_eq!(first_ink(&raster).width, dots, "{kind:?}");
     }
 }
@@ -259,7 +269,7 @@ fn first_ink(raster: &mb_print::raster::Raster) -> &Monochrome {
 fn laying_out_twice_gives_the_same_answer() {
     let fixture = Fixture::new();
     let doc = bill_document(
-        Paper::new(PaperKind::Mm80),
+        &common::metrics(PaperKind::Mm80),
         &fixture.context(Copy::Original),
     )
     .expect("builds");
@@ -281,11 +291,11 @@ fn laying_out_twice_gives_the_same_answer() {
 
 /// Lay one line out at a size and report how tall the picture came out and how
 /// many characters the layout let onto the line.
-fn at_size(px: u16, text: &str) -> (u32, usize) {
+fn at_size(cap: u16, text: &str) -> (u32, usize) {
     let mut doc = Document::new(Paper::new(PaperKind::Mm80));
-    doc.text(text, Style::px(px, false, 24), Align::Left);
+    doc.text(text, Style { size: cap, bold: false }, Align::Left);
     let laid = layout(&doc).expect("lays out");
-    let raster = to_raster(&laid, &font(), RasterOptions::default()).expect("rasters");
+    let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
     let longest = laid
         .lines
         .iter()
@@ -335,46 +345,50 @@ fn wrappable() -> String {
 /// crate exists to prevent.
 #[test]
 fn a_smaller_size_fits_more_characters_across() {
-    let (_, wide) = at_size(24, &wrappable());
-    let (_, narrow) = at_size(12, &wrappable());
+    let (_, wide) = at_size(Style::LADDER[3], &wrappable());
+    let (_, narrow) = at_size(Style::LADDER[0], &wrappable());
 
     assert!(
         narrow > wide,
         "12 px fitted {narrow} characters and 24 px fitted {wide} — the smaller \
          size did not fit more"
     );
-    // Half the height is half the width, so about twice as many. "About",
-    // because a line breaks on a word boundary and the last word rarely lands
-    // exactly on the edge.
+    // Rung 1 is a 9-dot capital against rung 4's 15, so about half the width
+    // and about half again as many characters. "About", because a line breaks
+    // on a word boundary and the last word rarely lands exactly on the edge.
     assert!(
-        narrow >= wide * 2 - 4,
-        "12 px fitted {narrow}, which is not about twice {wide}"
+        narrow * 3 >= wide * 4,
+        "the small size fitted {narrow}, which is not meaningfully more than {wide}"
     );
 }
 
-/// **The three old sizes draw exactly what they always drew.**
+/// **A size a shop tuned before P32 still means what it meant.**
 ///
 /// The whole risk of this change is a shop that had tuned its receipt finding
-/// it different on a Tuesday. 24, 48 and 72 px are 1x, 2x and 3x, and the
-/// golden ESC/POS files assert the bytes; this asserts the geometry.
+/// it different on a Tuesday. A stored 24, 48 or 72 was the third, eighth and
+/// tenth rung of the old list; it reads back as the third, eighth and tenth
+/// rung of the new one, and still emits the multiplier it always did on the
+/// text engine.
 #[test]
 fn the_old_three_sizes_are_unchanged() {
-    for (px, scale) in [(24_u16, 1_u8), (48, 2), (72, 3)] {
+    for (stored, rung, scale) in [(24_u16, 2_usize, 1_u8), (48, 7, 2), (72, 9, 3)] {
+        let cap = Style::from_stored(stored);
+        assert_eq!(cap, Style::LADDER[rung], "{stored} moved off its rung");
         assert_eq!(
-            Style::px(px, false, 24).scale(),
+            Style { size: cap, bold: false }.scale(),
             scale,
-            "{px} px stopped being {scale}x for the text engine"
+            "{stored} stopped being {scale}x for the text engine"
         );
     }
     // And the layout still gives them the widths they always had: 48 columns
-    // on 80 mm paper, halved at 2x and thirded at 3x. Measured as "the longest
-    // line that came out", so a line that broke early on a word boundary is
-    // within a word of the limit rather than exactly on it.
-    for (px, limit) in [(24_u16, 48_usize), (48, 24), (72, 16)] {
-        let longest = at_size(px, &wrappable()).1;
+    // on 80 mm paper at the body size, and fewer as the letter grows. Measured
+    // as "the longest line that came out", so a line that broke early on a word
+    // boundary is within a word of the limit rather than exactly on it.
+    for (stored, limit) in [(24_u16, 52_usize), (48, 26), (72, 16)] {
+        let longest = at_size(Style::from_stored(stored), &wrappable()).1;
         assert!(
             longest <= limit && longest + 4 >= limit,
-            "{px} px filled {longest} of {limit} columns"
+            "a stored {stored} filled {longest} of {limit} columns"
         );
     }
 }
@@ -417,8 +431,12 @@ fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
     let mut doc = Document::new(paper);
     doc.row("Subtotal", "920.00", Style::NORMAL)
         .row("Grand Total", "1,240.00", Style::NORMAL);
-    let laid = layout(&doc).expect("lays out");
-    let raster = to_raster(&laid, &font, RasterOptions::default()).expect("rasters");
+    // **One `Metrics` for the layout AND the sink.** Laying out with the
+    // built-in face and drawing with Times is exactly the drift P32 exists to
+    // remove, and this test did it.
+    let metrics = mb_print::metrics::Metrics::face(paper, std::sync::Arc::new(font));
+    let laid = mb_print::layout::layout_for(&doc, &metrics).expect("lays out");
+    let raster = to_raster(&laid, &metrics, RasterOptions::default()).expect("rasters");
 
     // The rightmost dot of each line, which is the last digit of the amount.
     let edges: Vec<u32> = raster
@@ -451,12 +469,14 @@ fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
 #[test]
 fn a_proportional_face_is_drawn_proportionally() {
     let Some(font) = proportional() else { return };
+    let font = std::sync::Arc::new(font);
 
     let ink_width = |text: &str| {
         let mut doc = Document::new(Paper::new(PaperKind::Mm80));
         doc.text(text, Style::NORMAL, Align::Left);
-        let laid = layout(&doc).expect("lays out");
-        let raster = to_raster(&laid, &font, RasterOptions::default()).expect("rasters");
+        let metrics = mb_print::metrics::Metrics::face(doc.paper, std::sync::Arc::clone(&font));
+        let laid = mb_print::layout::layout_for(&doc, &metrics).expect("lays out");
+        let raster = to_raster(&laid, &metrics, RasterOptions::default()).expect("rasters");
         raster
             .bands
             .iter()

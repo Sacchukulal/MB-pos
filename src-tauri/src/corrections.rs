@@ -500,7 +500,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
     // The order is on disk and the table is free. NOW the paper — the same
     // order of operations as `complete_bill`, and for the same reason (D4).
     if !told.is_empty()
-        && let Err(e) = print_cancellation(app, &open.core, &told, table.as_deref())
+        && let Err(e) = print_cancellation(app, &open.core, &told, table.as_deref(), Some(&mb_core::AnyOrder::Open(open.clone())))
     {
         log_warn!("order {order_id} was cancelled but the kitchen slip failed: {e}");
     }
@@ -535,6 +535,9 @@ fn print_cancellation(
     core: &mb_core::OrderCore,
     lines: &[(mb_core::LineIdentity, mb_core::Qty)],
     table: Option<&str>,
+    // The order, when the caller has one — so the slip carries the same token
+    // and bill number the ticket that started the cooking did (P32).
+    order: Option<&mb_core::AnyOrder>,
 ) -> UiResult<()> {
     // P17: a cancellation slip is a kitchen ticket, so it obeys the shop's
     // kitchen-ticket settings. A slip that looked different from every other
@@ -549,8 +552,9 @@ fn print_cancellation(
         mb_print::template::TicketKind::Cancellation,
         core.order_type,
         table,
-        None,
+        order,
         crate::flows::ticket_lines(&core.cart, lines),
+        false,
         "cancellation".to_owned(),
     )?;
     Ok(())
@@ -605,7 +609,7 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
     // 2. The paper, before the ledger.
     if !cancel.is_empty() {
         let table = app.with_cart(|state| Ok(state.table_label.clone()))?;
-        if let Err(e) = print_cancellation(app, &core, &cancel, table.as_deref()) {
+        if let Err(e) = print_cancellation(app, &core, &cancel, table.as_deref(), None) {
             // Deliberately not fatal, and deliberately loud: the line IS off
             // the bill, so the customer is not charged. What failed is telling
             // the kitchen, and the cashier has to be the one who does that now.

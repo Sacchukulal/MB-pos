@@ -156,6 +156,16 @@ export interface Commands {
     args: { printerId: string | null };
     returns: PreviewDoc;
   };
+  /**
+   * **The REAL bill for the REAL order, before it prints** — audit D6, built at
+   * P32 after five sessions of a comment promising it.
+   *
+   * `orderId: null` is the order on this counter's cart, which is what the
+   * billing screen's Preview button asks for.
+   */
+  preview_order: { args: { orderId: string | null }; returns: PreviewDoc };
+  /** The kitchen ticket that would print right now — the delta, as sent. */
+  preview_kitchen: { args: { orderId: string | null }; returns: PreviewDoc };
   retry_print_job: { args: { id: string }; returns: void };
 
   // The billing screen (P09). Every cart command returns the WHOLE new view:
@@ -185,6 +195,7 @@ export interface Commands {
     returns: CartView;
   };
   cart_clear_payments: { args: void; returns: CartView };
+  cart_cash_given: { args: { amount: string }; returns: CartView };
   /**
    * **Money off this bill** — scope 1.12, and the command that had no door
    * until 2026-08-17.
@@ -213,6 +224,12 @@ export interface Commands {
   open_table: { args: { tableId: string }; returns: CartView };
   /** The delta only, from the order's own ledger (crown jewel 2). */
   print_kitchen_ticket: { args: void; returns: string };
+  /**
+   * **The cook lost the paper** — P32. The WHOLE order again, marked
+   * `*** REPRINT ***`, with the kitchen ledger untouched so the next delta is
+   * still the same delta.
+   */
+  reprint_kitchen_ticket: { args: void; returns: string };
   /** settle() — one transaction — and THEN the print (audit D4). */
   complete_bill: { args: void; returns: string };
   /**
@@ -278,6 +295,11 @@ export interface Commands {
   cancel_order: { args: { orderId: string; reason: string }; returns: void };
   void_line: { args: { index: number; reason: string }; returns: CartView };
   reprint_bill: { args: { orderId: string; reason: string }; returns: string };
+  /**
+   * **Scope 7.10 — the A4 invoice**, as a PDF a shop can email. P32: the sink
+   * had existed since P06 and nothing but the report exporter ever called it.
+   */
+  bill_pdf: { args: { orderId: string }; returns: SavedFileView };
   refund_bill: {
     args: {
       orderId: string;

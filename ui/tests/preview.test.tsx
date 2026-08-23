@@ -2,7 +2,8 @@
  * **T8 — anti-drift, across the IPC boundary.**
  *
  * P06's T1 proved no *sink* can drop anything. This proves the same across the
- * wire: everything the layout produced reaches the screen, in order, unchanged.
+ * wire: everything the layout produced reaches the screen, in order, unchanged,
+ * **and at the size and the place the paper will put it**.
  *
  * > Audit D1: *"the same bill is drawn three separate times, by hand, in three
  * > places… this is the single biggest source of 'the preview does not match
@@ -10,8 +11,16 @@
  *
  * The fixture is the shape Rust really sends. `src-tauri/src/preview.rs` tests
  * the other half — that its conversion carries every line of a real `Laid`
- * through character for character. Between that test and this one, the chain
- * from `mb_print::layout` to a pixel has no gap in it.
+ * through character for character, in the same dots the raster sink draws from.
+ * Between that test and this one, the chain from `mb_print::layout` to a pixel
+ * has no gap in it.
+ *
+ * # What P32 changed here
+ *
+ * Every assertion about a size or a position used to be about characters and
+ * `ch` units, because the preview drew in a character grid while the printer
+ * scaled a face to fit a twelve-dot column. It is all dots now, and the dots
+ * are Rust's.
  */
 
 import { render, screen, cleanup } from '@testing-library/react';
@@ -23,64 +32,85 @@ import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
 
 afterEach(cleanup);
 
+/** One line of body text, as Rust sends it. */
+function text(
+  content: string,
+  extra: Partial<Extract<PreviewLine, { kind: 'text' }>> = {},
+): PreviewLine {
+  return {
+    kind: 'text',
+    text: content,
+    indent: 0,
+    row: 24,
+    cap: 15,
+    advance: 13,
+    scale: 1,
+    bold: false,
+    segments: [{ text: content.trim(), width: content.length, align: 'left' }],
+    ...extra,
+  };
+}
+
 const BILL: PreviewDoc = {
-  columns: 48,
+  dots: 576,
+  columns: 44,
+  millimetres: 64,
+  engine: 'raster',
   lines: [
-    {
-      kind: 'text',
-      text: '                  ANNA KUTEERA',
-      indent: 0,
+    text('       ANNA KUTEERA       ', {
+      cap: 26,
+      row: 40,
+      advance: 22,
       scale: 2,
-      px: 48,
-      segments: [],
       bold: true,
-    },
-    { kind: 'rule', glyph: '=', width: 48, indent: 0 },
+      segments: [{ text: 'ANNA KUTEERA', width: 26, align: 'centre' }],
+    }),
     {
-      kind: 'text',
-      text: 'Bill No                             BIR/1207',
+      kind: 'rule',
       indent: 0,
-      scale: 1,
-      px: 24,
-      segments: [],
-      bold: false,
+      width: 576,
+      row: 9,
+      thickness: 1,
+      strokes: 2,
+      gap: 3,
+      dash: null,
+    },
+    text('Masala Dosa                     240.00', {
+      segments: [
+        { text: 'Masala Dosa', width: 38, align: 'left' },
+        { text: '240.00', width: 6, align: 'right' },
+      ],
+    }),
+    {
+      kind: 'rule',
+      indent: 0,
+      width: 576,
+      row: 9,
+      thickness: 1,
+      strokes: 1,
+      gap: 0,
+      dash: [6, 4],
     },
     {
-      kind: 'text',
-      text: 'Masala Dosa                           240.00',
+      kind: 'qr',
+      payload: 'upi://pay?pa=anna@upi&cu=INR',
       indent: 0,
-      scale: 1,
-      px: 24,
-      segments: [],
-      bold: false,
+      row: 230,
+      size: 230,
     },
+    { kind: 'barcode', payload: 'BIR1207', indent: 0, row: 84, height: 60 },
     {
-      kind: 'text',
-      text: 'Beer 650ml                            440.00',
+      kind: 'logo',
       indent: 0,
-      scale: 1,
-      px: 24,
-      segments: [],
-      bold: false,
+      row: 32,
+      left: 0,
+      width: 4,
+      height: 2,
+      ink: [1, 0, 0, 1, 0, 1, 1, 0],
     },
-    { kind: 'rule', glyph: '-', width: 48, indent: 0 },
-    {
-      kind: 'text',
-      text: 'TOTAL                                 646.00',
-      indent: 0,
-      scale: 2,
-      px: 48,
-      segments: [],
-      bold: true,
-    },
-    { kind: 'blank' },
-    { kind: 'qr', payload: 'upi://pay?pa=anna@upi&am=646.00', indent: 0 },
-    { kind: 'barcode', payload: 'BIR1207', indent: 0 },
-    { kind: 'logo', indent: 0 },
+    { kind: 'blank', row: 24 },
   ],
-  notes: [
-    'A heading was too big for this paper, so it printed at 2× instead of 3×.',
-  ],
+  notes: ['Size 10 does not fit this paper here, so it printed at 8.'],
 };
 
 describe('the receipt preview is a sink, not a renderer', () => {
@@ -90,62 +120,81 @@ describe('the receipt preview is a sink, not a renderer', () => {
 
     for (const line of BILL.lines) {
       if (line.kind === 'text') {
-        expect(
-          shown,
-          `the preview dropped ${JSON.stringify(line.text)}`,
-        ).toContain(line.text);
+        for (const segment of line.segments) {
+          expect(
+            shown,
+            `the preview dropped ${JSON.stringify(segment.text)}`,
+          ).toContain(segment.text);
+        }
       }
     }
   });
 
-  it('does not re-wrap, re-align or trim anything', () => {
-    // The padding IS the alignment: `mb_print::layout` centred that heading by
-    // padding it, and a preview that trimmed would be centring it again — a
-    // second layout engine, which is D1 coming back by a different route.
+  it('draws every box at the dots the layout put it at', () => {
+    // **This is the assertion P32 exists for.** The amount's box starts at
+    // character 38 of a 13-dot advance — 494 dots — which is exactly where
+    // `raster.rs` starts it. A preview that placed it by counting spaces in a
+    // browser font would land it somewhere else, and did.
     const { container } = render(<Receipt doc={BILL} />);
-    expect(container.textContent).toContain('                  ANNA KUTEERA');
+    const boxes = [...container.querySelectorAll('.mb-receipt__box')];
+    const amount = boxes.find((b) => b.textContent === '240.00');
+    expect(amount, 'the amount was not drawn').toBeTruthy();
+    expect(amount?.getAttribute('style')).toContain('--at: 494');
+    expect(amount?.getAttribute('style')).toContain('--wide: 78');
+    expect(amount?.className).toContain('mb-receipt__box--right');
   });
 
-  it('draws a separator at exactly the width the layout gave it', () => {
+  it('draws text at the cap height the printer will draw', () => {
     const { container } = render(<Receipt doc={BILL} />);
-    expect(container.textContent).toContain('='.repeat(48));
-    expect(container.textContent).toContain('-'.repeat(48));
+    const heading = [...container.querySelectorAll('.mb-receipt__box')].find(
+      (b) => b.textContent === 'ANNA KUTEERA',
+    );
+    // 26 dots of capital, which is what the shop chose and what comes out.
+    expect(heading?.getAttribute('style')).toContain('--cap: 26');
   });
 
-  it('shows the QR payload, because a URI a customer can type beats a blank', () => {
+  it('spends the row the paper will spend', () => {
+    const { container } = render(<Receipt doc={BILL} />);
+    const rows = [...container.querySelectorAll('.mb-receipt__row')];
+    expect(rows).toHaveLength(BILL.lines.length);
+    expect(rows[0]?.getAttribute('style')).toContain('--tall: 40');
+    expect(rows[1]?.getAttribute('style')).toContain('--tall: 9');
+  });
+
+  it('draws a rule as a rule, not as a row of characters', () => {
+    // A `-` is five dots of ink in a twelve-dot cell on real paper, so the old
+    // preview — which repeated the character in a CSS monospace font — showed
+    // a near-solid line where the roll printed spaced ticks.
+    const { container } = render(<Receipt doc={BILL} />);
+    const rules = [...container.querySelectorAll('.mb-receipt__rule')];
+    // Two strokes for the double rule, one for the dashed.
+    expect(rules).toHaveLength(3);
+    expect(rules[0]?.getAttribute('style')).toContain('--wide: 576');
+    expect(rules[2]?.getAttribute('data-dashed')).toBe('yes');
+    expect(rules[2]?.getAttribute('style')).toContain('--on: 6');
+  });
+
+  it('draws the logo at the size it will print', () => {
+    const { container } = render(<Receipt doc={BILL} />);
+    const logo = container.querySelector('.mb-receipt__logo');
+    expect(logo, 'the logo was not drawn').toBeTruthy();
+    expect(logo?.getAttribute('style')).toContain('--wide: 4');
+    expect(logo?.getAttribute('style')).toContain('--tall: 2');
+  });
+
+  it('says how much paper the bill costs', () => {
     render(<Receipt doc={BILL} />);
-    expect(screen.getByText(/upi:\/\/pay/)).toBeInTheDocument();
+    expect(screen.getByText(/64 mm of paper/)).toBeInTheDocument();
+  });
+
+  it('says which engine it is showing', () => {
+    render(<Receipt doc={{ ...BILL, engine: 'text' }} />);
+    expect(screen.getByText(/the printer's own font/)).toBeInTheDocument();
   });
 
   it('explains what the layout had to do, in words', () => {
     render(<Receipt doc={BILL} />);
-    expect(screen.getByText(/too big for this paper/)).toBeInTheDocument();
-  });
-
-  it('is exactly as wide as the paper it is previewing', () => {
-    const { container } = render(<Receipt doc={BILL} />);
-    expect(container.querySelector('.mb-receipt__paper')).toHaveAttribute(
-      'data-columns',
-      '48',
-    );
-  });
-
-  it('handles every kind of line, including the ones it cannot draw', () => {
-    // A sink that quietly ignored a block would be the exact failure D29
-    // exists to prevent, so the logo gets a visible placeholder rather than
-    // nothing at all.
-    const { container } = render(<Receipt doc={BILL} />);
-    expect(container.textContent).toContain('[ logo ]');
-  });
-
-  it('shows the barcode payload, for the same reason as the QR', () => {
-    // **This is the test that was missing.** The component had no `barcode`
-    // arm at all: the switch fell off the end, returned `undefined`, and a
-    // shop with `receipt.bill_barcode` on saw a preview that did not have what
-    // the paper would. The fixture above claimed to hold "every kind of line"
-    // and did not hold this one.
-    render(<Receipt doc={BILL} />);
-    expect(screen.getByText('BIR1207')).toBeInTheDocument();
+    expect(screen.getByText(/does not fit this paper/)).toBeInTheDocument();
   });
 
   it('draws one thing per line, for every kind there is', () => {
@@ -154,30 +203,109 @@ describe('the receipt preview is a sink, not a renderer', () => {
     // `SAMPLES` is keyed by `PreviewLine['kind']`, so it is the TYPE CHECKER
     // that enforces the "every kind" part: add a variant in Rust, regenerate,
     // and this object stops compiling until somebody has decided what it looks
-    // like on screen. A fixture nobody updated is what let the barcode through.
+    // like on screen. A fixture nobody updated is what let the barcode through
+    // at P31.
     const SAMPLES: Record<PreviewLine['kind'], PreviewLine> = {
-      text: { kind: 'text', text: 'Masala Dosa', indent: 0, scale: 1, px: 24, segments: [], bold: false },
-      rule: { kind: 'rule', glyph: '-', width: 8, indent: 0 },
-      qr: { kind: 'qr', payload: 'upi://pay', indent: 0 },
-      barcode: { kind: 'barcode', payload: 'BIR1207', indent: 0 },
-      logo: { kind: 'logo', indent: 0 },
-      blank: { kind: 'blank' },
+      text: text('Masala Dosa'),
+      rule: {
+        kind: 'rule',
+        indent: 0,
+        width: 100,
+        row: 9,
+        thickness: 1,
+        strokes: 1,
+        gap: 0,
+        dash: null,
+      },
+      qr: { kind: 'qr', payload: 'upi://pay', indent: 0, row: 200, size: 200 },
+      barcode: { kind: 'barcode', payload: 'BIR1207', indent: 0, row: 84, height: 60 },
+      logo: { kind: 'logo', indent: 0, row: 20, left: 0, width: 2, height: 2, ink: [1, 0, 0, 1] },
+      band: {
+        kind: 'band',
+        row: 60,
+        image: { kind: 'logo', indent: 0, row: 60, left: 0, width: 2, height: 2, ink: [1, 1, 1, 1] },
+        lines: [
+          {
+            text: 'SADGURU',
+            left: 173,
+            top: 0,
+            width: 403,
+            row: 40,
+            cap: 26,
+            bold: true,
+            align: 'centre',
+          },
+        ],
+      },
+      blank: { kind: 'blank', row: 24 },
     };
 
     for (const [kind, line] of Object.entries(SAMPLES)) {
       cleanup();
-      const doc: PreviewDoc = { columns: 48, lines: [line], notes: [] };
+      const doc: PreviewDoc = {
+        dots: 576,
+        columns: 44,
+        millimetres: 10,
+        engine: 'raster',
+        lines: [line],
+        notes: [],
+      };
       const { container } = render(<Receipt doc={doc} />);
       const paper = container.querySelector('.mb-receipt__paper');
       expect(paper, `${kind} did not render`).not.toBeNull();
-      // A blank line is a newline and nothing else; every other kind must put
-      // something a person can see on the paper.
+      // A blank line is a gap and nothing else; every other kind must put
+      // something on the paper — ink, a rule, or a picture.
       if (kind !== 'blank') {
-        expect(
-          (paper?.textContent ?? '').trim().length,
-          `a "${kind}" line drew nothing at all`,
-        ).toBeGreaterThan(0);
+        const drew =
+          (paper?.textContent ?? '').trim().length > 0 ||
+          (paper?.querySelectorAll(
+            '.mb-receipt__rule, .mb-receipt__logo, .mb-receipt__qr, .mb-receipt__barcode',
+          ).length ?? 0) > 0;
+        expect(drew, `a "${kind}" line drew nothing at all`).toBe(true);
       }
     }
+  });
+
+  it('shows the letterhead beside the logo', () => {
+    cleanup();
+    const doc: PreviewDoc = {
+      dots: 576,
+      columns: 44,
+      millimetres: 10,
+      engine: 'raster',
+      lines: [
+        {
+          kind: 'band',
+          row: 60,
+          image: {
+            kind: 'logo',
+            indent: 0,
+            row: 60,
+            left: 0,
+            width: 2,
+            height: 2,
+            ink: [1, 1, 1, 1],
+          },
+          lines: [
+            {
+              text: 'SADGURU',
+              left: 173,
+              top: 0,
+              width: 403,
+              row: 40,
+              cap: 26,
+              bold: true,
+              align: 'centre',
+            },
+          ],
+        },
+      ],
+      notes: [],
+    };
+    const { container } = render(<Receipt doc={doc} />);
+    expect(container.textContent).toContain('SADGURU');
+    // The text starts where the logo's 30 % ends, which is the owner's ruling.
+    const box = container.querySelector('.mb-receipt__box');
+    expect(box?.getAttribute('style')).toContain('--at: 173');
   });
 });

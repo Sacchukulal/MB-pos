@@ -1640,7 +1640,12 @@ pub(crate) fn export_folder() -> std::path::PathBuf {
     documents_folder("Magic Bill reports")
 }
 
-fn save(name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
+/// Write a file into the shop's exports folder and say where it went.
+///
+/// `pub(crate)` since P32: the A4 invoice (scope 7.10) saves the same way a
+/// report does, and a second copy of "create the folder, write, say where" is
+/// a second answer to what happens when the disk is full.
+pub(crate) fn save(name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
     let folder = export_folder();
     std::fs::create_dir_all(&folder).map_err(|e| {
         UiError::new(

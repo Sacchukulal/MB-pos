@@ -124,6 +124,7 @@ export function QuantityPopup({
           placeholder="1"
           inputMode="decimal"
           aria-label="Quantity"
+          data-keys="engine"
           onChange={(event) => onType(event.target.value)}
         />
         <Button onClick={() => onType(step(shown, 1))} aria-label="One more">

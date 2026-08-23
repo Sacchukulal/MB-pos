@@ -715,13 +715,14 @@ fn modernise(entry: &catalog::Entry, stored: Value) -> Value {
     let Ok(stored_dots) = text.parse::<u16>() else {
         return stored;
     };
-    // 1, 2 and 3 were the multiplier. No size on the list is that small — the
-    // smallest is 16 — so there is nothing to be ambiguous about.
-    let dots = if (1..=3).contains(&stored_dots) {
-        stored_dots * BASE_CELL_PX
-    } else {
-        stored_dots
-    };
+    // **Every vocabulary this row has held, told apart exactly** — P32.
+    //
+    // 1/2/3 was the multiplier, 16…72 was a nominal row height, 9…41 is a cap
+    // height. The three sets are deliberately disjoint (see `Style::LADDER`),
+    // so this is a lookup and not a guess — and it is the SAME function the
+    // catalogue's `size!` writer and `Style`'s own deserialiser use, so a
+    // database row, a config file and an export cannot be read three ways.
+    let dots = mb_print::Style::from_stored(stored_dots);
 
     // **A height that is no longer on the list becomes the nearest one that
     // is.**

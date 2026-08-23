@@ -11,21 +11,51 @@
   min-height: 0;
 }
 
-/* --- Top bar: order type, lock, search. Always in the same place (§1). --- */
+/* --- Top bar: search, order type, lock — in that order since 2026-08-23,
+       which is how often each one is touched. Always in the same place (§1). */
 
 .mb-billbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr var(--queue-width) var(--cart-width);
   align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  gap: var(--space-4);
 }
 
 /* The segmented control moved to kit.css at P27.5 — the floor screen uses it
    for which room, and a component two screens share is a kit component. */
 
+/* **The search box is FIRST, and it is one width.** It was `flex: 1` with a
+   22rem floor, so it ate every pixel the other two controls did not need and
+   they sat squashed in the left corner. `--find-width` is the width of the
+   "find something on this screen" box on credit, menu and stock — billing was
+   the one screen with a search box of its own size, and now it is not.
+   `position: relative` is here because the suggestion list hangs off it. */
 .mb-billbar__search {
-  flex: 1;
-  min-width: var(--panel-width);
+  flex: none;
+  width: var(--find-width);
+  position: relative;
+}
+
+/* The order type and the lock share the cart's column, hard against its
+   right edge. */
+.mb-billbar__type {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* **The lock, as a picture.** A square barely bigger than the glyph inside it.
+   It is deliberately below `--target-min`: that 44px budget exists for the
+   things a thumb hits during a rush — Cash, Card, UPI, Complete bill — and
+   this is pressed about once a shift, by the owner, with a mouse. */
+.mb-billbar__lock {
+  flex: none;
+  width: var(--billbar-lock-size);
+  height: var(--billbar-lock-size);
+  min-height: var(--billbar-lock-size);
+  padding: 0;
+  border-radius: var(--radius-sm);
 }
 
 /* --- The two columns. The cart is PERMANENT: it never moves, never hides. -- */
@@ -35,6 +65,12 @@
   grid-template-columns: 1fr var(--cart-width);
   gap: var(--space-4);
   min-height: 0;
+}
+
+/* With the queue open the floor is simply given less; its grid packs with
+   auto-fill, so the tiles re-flow into what is left without being told. */
+.mb-billing__body--queue {
+  grid-template-columns: 1fr var(--queue-width) var(--cart-width);
 }
 
 .mb-billing__floor {
@@ -66,7 +102,7 @@
    */
   display: flex;
   flex-direction: column;
-  gap: var(--gap-field);
+  gap: var(--space-2);
   min-height: 0;
   /* **THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT.**
 
@@ -82,13 +118,130 @@
      a bill has six tax rates is having all six visible at once, which is the
      right thing to lose. */
   overflow: hidden;
-  padding: var(--gap-group);
+  padding: var(--space-3);
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   /* RAISED, per the elevation contract — the cart is a panel sitting on the
      page, and it is the one thing on this screen that never moves. */
   box-shadow: var(--level-raised);
+}
+
+/* --- Processing orders: the open ones, on their own -------------------- */
+
+.mb-queuepanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  overflow: hidden;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--level-raised);
+}
+
+.mb-queuepanel__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* One order, one line: where it is, its bill number, how long, how much. */
+.mb-queueline {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 0 var(--gap-inline);
+  padding: var(--space-2);
+  background: transparent;
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
+}
+
+.mb-queueline:hover {
+  background: var(--surface-2);
+}
+
+.mb-queueline--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.mb-queueline__where {
+  font-weight: var(--weight-bold);
+}
+
+.mb-queueline__amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-bold);
+  text-align: right;
+}
+
+.mb-queueline__no,
+.mb-queueline__when {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.mb-queueline__when {
+  text-align: right;
+}
+
+.mb-processing__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  width: 100%;
+  height: var(--target-min);
+  padding: 0 var(--gap-field);
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--type-label);
+  font-weight: var(--type-label-weight);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
+}
+
+/* The name takes the room so the count sits at the far end of the button. */
+.mb-processing__head > .mb-icon {
+  order: 2;
+  margin-left: auto;
+}
+
+.mb-processing__head[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.mb-processing__head:hover {
+  background: var(--surface-2);
+}
+
+.mb-processing__count {
+  min-width: var(--space-5);
+  padding: 0 var(--space-2);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* --- The table grid — the ONLY view of open orders (scope 1.4) -----------
@@ -234,16 +387,16 @@
    2. it replaced LATE, so opening a late table in the cart turned off the one
       signal §4 calls *"not optional"*.
 
-   The ring sits OUTSIDE the border, so nothing about the tile's own outline
-   moves when it is selected — a tile that changed border style on selection
-   would jump by a pixel and read as a different object. `--accent` on the
-   border still comes along, because at 40 tables across a room the ring alone
-   is a thin thing to find. */
+   **The border carries it, and nothing is drawn around the tile.** It was an
+   outline at a positive offset, which is a second rectangle floating a pixel
+   off the first — the owner's *"another border shouldn't appear around it"* of
+   2026-08-23. The tile's own edge is already --border-width-thick, so turning
+   it accent is a real change at forty tables' distance, and a free tile picks
+   up the accent fill below as well. Nothing moves: the border was always
+   there and only its colour and style change. */
 .mb-tile--selected {
   border-color: var(--accent);
   border-style: solid;
-  outline: var(--focus-ring-width) solid var(--accent);
-  outline-offset: var(--border-width);
 }
 
 /* **The state's own inset stripe has to survive the ring**, and `box-shadow`
@@ -378,9 +531,8 @@
    drawn differently on purpose — the two live on different screens and must
    never be learnt as the same mark.
 
-   Selected is an outline *around* the tile; picked fills it. Both survive
-   grey-scale: this one changes the surface and the border weight, not just a
-   hue. */
+   Selected turns the border accent and leaves the fill alone; picked fills
+   the tile and adds a tick. Both survive grey-scale. */
 .mb-tile--picked {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -577,11 +729,6 @@
   border-color: var(--border);
 }
 
-.mb-cartline__qty-value:focus-visible {
-  outline: var(--focus-width) solid var(--focus);
-  outline-offset: var(--focus-offset);
-}
-
 /* Exactly where the number was, and exactly as wide, so the line does not jump
    when it turns into a box. */
 .mb-cartline__qty-input {
@@ -618,8 +765,6 @@
   /* The breakdown scrolls; TOTAL and the buttons do not. See below. */
   overflow: hidden;
   gap: var(--space-1);
-  padding-top: var(--space-2);
-  border-top: var(--border-width) solid var(--border);
 }
 
 /* **Only the breakdown scrolls.**
@@ -668,10 +813,8 @@
      short window shrinks the block itself and clips TOTAL, which is failure
      (2) in that list. P30.5. */
   flex: 0 0 auto;
-  padding-top: var(--gap-field);
-  margin-top: var(--space-1);
-  border-top: var(--border-width) solid var(--border-strong);
-  font-size: var(--text-2xl);
+  padding-top: var(--space-1);
+  font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
 }
@@ -680,10 +823,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-2);
-  margin: var(--space-1) 0;
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
 }
 
 .mb-totals__label {
@@ -713,14 +852,69 @@
   flex-direction: column;
   flex: 0 0 auto;
   gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: var(--border-width) solid var(--border);
+}
+
+/* The one box a cashier types money into, with Rust's answer beside it. */
+.mb-payment__cash {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--gap-inline);
+}
+
+.mb-payment__cash .mb-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.mb-payment__answer {
+  padding-bottom: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.mb-payment__answer strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The mode that is lit. Colour is not the only carrier — it is also the only
+   filled button in the row (§2 rule 2). */
+.mb-payment__mode--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: var(--weight-bold);
 }
 
 .mb-payment__modes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--space-8), 1fr));
+  grid-template-columns: repeat(3, 1fr) auto;
   gap: var(--space-1);
+}
+
+.mb-payment__reveal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.mb-payment__reveal:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.mb-payment__credit[hidden] {
+  display: none;
 }
 
 /* The tick sits beside the word rather than replacing it — a button that
@@ -771,9 +965,42 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   flex: 0 0 auto;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: var(--border-width) solid var(--border);
+  column-gap: var(--space-2);
+  row-gap: var(--space-1);
+}
+
+/* The fold under the two main buttons. `hidden` closes it, so it costs no
+   height at all when it is shut. */
+.mb-actions--more {
+  border-top: none;
+  padding-top: 0;
+}
+
+.mb-actions--more[hidden] {
+  display: none;
+}
+
+/* The handle. Full width under both buttons, so it reads as belonging to the
+   pair rather than to either one. */
+.mb-actions__toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--space-4);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.mb-actions__toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 /* --- The keyboard: suggestions, quantity, help (P10) --------------------- */
@@ -823,10 +1050,6 @@
 .mb-suggestion--on {
   background: var(--accent-soft);
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
-}
-
-.mb-billbar__search {
-  position: relative;
 }
 
 .mb-quantity {
@@ -985,4 +1208,38 @@
 
 .mb-split__name {
   overflow-wrap: anywhere;
+}
+
+/* --- "What do we each owe?" ---------------------------------------------
+   A row in the fold, not a dialog. The old Split box asked this, how many
+   people are sitting there, and which food moves to a second bill, all at
+   once — "a complete rocket science for the hotel cashier" (owner,
+   2026-08-23). One number answers the first two; the sentence is Rust's. */
+
+.mb-eachpays {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--target-min);
+}
+
+.mb-eachpays__label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-eachpays__count {
+  min-width: var(--space-5);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-bold);
+  text-align: center;
+}
+
+.mb-eachpays__says {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  text-align: right;
 }

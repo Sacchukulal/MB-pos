@@ -66,7 +66,8 @@ use crate::drawer::DrawerConfig;
 use crate::error::PrintError;
 use crate::escpos::{self, JobOptions};
 use crate::font::Typefaces;
-use crate::layout::{Grid, layout_for};
+use crate::layout::layout_for;
+use crate::metrics::Metrics;
 use crate::printer::{Engine, PrinterConfig};
 use crate::raster::{RasterOptions, to_raster};
 use crate::transport::{RealTransports, TransportError, TransportFactory};
@@ -855,19 +856,21 @@ fn print_once(
     let mut document = payload.document.clone();
     document.paper = printer.paper;
 
-    // **Laid out for the engine that will draw it.** The graphics engine draws
-    // text of any height; the printer's own font has three sizes and nothing
-    // between, so a bill of 32-dot text laid out in dots would run off the roll
-    // on that engine. See `layout::Grid`.
+    // **Laid out with the metrics of the engine that will draw it** — P32.
+    //
+    // The graphics engine measures a real typeface; the printer's own font has
+    // three sizes and nothing between. One `Metrics`, made here, is handed to
+    // the layout AND to the sink, so the two cannot answer differently about
+    // how wide a character is — which is exactly how the paper and the preview
+    // used to drift.
     let mut engine = printer.effective_engine();
-    let laid = layout_for(
-        &document,
-        match engine {
-            Engine::Text => Grid::Cells,
-            Engine::Raster => Grid::Dots,
-        },
-    )
-    .map_err(|e| Failure {
+    let metrics = match engine {
+        Engine::Text => Metrics::printer_font(printer.paper),
+        Engine::Raster => {
+            Metrics::face(printer.paper, shared.faces.face(payload.font.as_deref()))
+        }
+    };
+    let laid = layout_for(&document, &metrics).map_err(|e| Failure {
         message: e.to_string(),
         // An amount wider than the paper is a template bug, not a printer that
         // is switched off. Retrying it is theatre.
@@ -885,7 +888,7 @@ fn print_once(
         Engine::Raster => {
             let raster = to_raster(
                 &laid,
-                &shared.faces.face(payload.font.as_deref()),
+                &metrics,
                 RasterOptions {
                     native_qr: printer.caps.native_qr,
                     ..RasterOptions::default()

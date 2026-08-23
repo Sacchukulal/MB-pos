@@ -335,6 +335,9 @@ pub struct TableView {
     /// changes, so a timestamp on them would reset when a cashier typed.
     pub kitchen_minutes: Option<u32>,
     pub order_id: Option<String>,
+    /// The bill number this order has already claimed, formatted as it will be
+    /// printed. Empty until there is an order.
+    pub bill_number: Option<String>,
     /// **This is the tile the cashier is looking at** — the cart is on it.
     ///
     /// A flag and not a [`TableState`], and that is the fix rather than a
@@ -674,6 +677,7 @@ pub fn floor_view(
                 kitchen_told: false,
                 kitchen_minutes: None,
                 order_id: None,
+                bill_number: None,
             },
         });
     }
@@ -747,6 +751,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         // ticket time known" rather than guessing from created_at.
         kitchen_minutes: None,
         order_id: Some(id.clone()),
+        bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
         id: core
             .table
             .as_ref()

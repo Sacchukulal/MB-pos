@@ -101,6 +101,10 @@
    weight, the ink) so it survives grey-scale. */
 .mb-segment {
   display: inline-flex;
+  box-sizing: border-box;
+  /* The same height as an input, so a segment and a search box in one row are
+     the same size. */
+  height: var(--target-min);
   gap: var(--space-1);
   padding: var(--space-1);
   background: var(--surface-sunk);
@@ -109,7 +113,8 @@
 }
 
 .mb-segment__option {
-  min-height: var(--space-8);
+  /* No height of its own: the segment sets one and flex stretches these to
+     it, so the control lines up with an input beside it. */
   padding: var(--space-2) var(--gap-field);
   background: transparent;
   color: var(--text-muted);
@@ -388,21 +393,22 @@
 
 .mb-toasts {
   position: fixed;
-  right: var(--space-5);
-  bottom: var(--space-5);
+  left: var(--space-4);
+  bottom: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
   z-index: 200;
 }
 
 .mb-toast {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
   min-width: var(--toast-width-min);
   max-width: var(--toast-width-max);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);

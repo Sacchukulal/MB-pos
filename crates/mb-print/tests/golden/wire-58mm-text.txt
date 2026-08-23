@@ -13,36 +13,32 @@ TEXT "12 MG Road, Jayanagar, Bengaluru"
 LF
 TEXT "             560011"
 LF
-TEXT "         Ph: 9880012345"
+TEXT "         Ph 9880012345"
 LF
-TEXT "     GSTIN: 29ABCDE1234F1ZW"
+TEXT "     GSTIN 29ABCDE1234F1ZW"
 LF
-TEXT "     FSSAI: 11223344556677"
+TEXT "      FSSAI 11223344556677"
 LF
 TEXT "--------------------------------"
 LF
-TEXT "Bill No                 BIR/1207"
+ESC E 1      emphasis
+TEXT "          TAX INVOICE"
 LF
-TEXT "Date                  2026-08-03"
+GS ! 0x11     character size
+TEXT "    TOKEN 42"
 LF
-TEXT "Type                     Dine In"
+GS ! 0x00     character size
+ESC E 0      emphasis
+TEXT "BIR/1207                   19:42"
 LF
-TEXT "Table                          6"
+TEXT "2026-08-03 Dine In Table 6"
 LF
-TEXT "Cashier                     Ravi"
+TEXT "Order Suresh        Cashier Ravi"
 LF
 TEXT "Customer          Suresh Traders"
 LF
 TEXT "Cust GSTIN       29ZYXWV9876K1Z2"
 LF
-TEXT "--------------------------------"
-LF
-GS ! 0x11     character size
-ESC E 1      emphasis
-TEXT "    TOKEN 42"
-LF
-GS ! 0x00     character size
-ESC E 0      emphasis
 TEXT "--------------------------------"
 LF
 TEXT "Paneer Butter Masala (Half) -"
@@ -51,15 +47,15 @@ TEXT "Extra Spicy [2106]"
 LF
 TEXT "(no onion)"
 LF
-TEXT "2 x 240.00                478.80"
+TEXT "2 x 240.00                480.00"
 LF
 TEXT "Water 1L [2201]"
 LF
-TEXT "3 x 20.00                   0.00"
+TEXT "3 x 20.00                  60.00"
 LF
 TEXT "Beer 650ml"
 LF
-TEXT "2 x 220.00                418.00"
+TEXT "2 x 220.00                440.00"
 LF
 TEXT "--------------------------------"
 LF
@@ -67,13 +63,13 @@ TEXT "Subtotal                  980.00"
 LF
 TEXT "Discount                 -106.00"
 LF
-TEXT "Service Charge             45.89"
+TEXT "Service Charge             43.70"
 LF
 TEXT "Donation                    5.00"
 LF
-TEXT "CGST                       12.50"
+TEXT "CGST 5%                    12.50"
 LF
-TEXT "SGST                       12.49"
+TEXT "SGST 5%                    12.49"
 LF
 TEXT "Non-GST value             418.00"
 LF
@@ -81,8 +77,6 @@ TEXT "Exempt value                5.00"
 LF
 TEXT "Round off                   0.31"
 LF
-LF
-TEXT "--------------------------------"
 LF
 GS ! 0x11     character size
 ESC E 1      emphasis
@@ -94,13 +88,11 @@ TEXT "--------------------------------"
 LF
 TEXT "Tax summary"
 LF
-TEXT "Rate   Taxable     CGST     SGST"
+TEXT "Rate       Taxable   CGST   SGST"
 LF
-TEXT "5%      499.70    12.50    12.49"
+TEXT "5%          499.70  12.50  12.49"
 LF
-TEXT "18%       0.00     0.00     0.00"
-LF
-TEXT "--------------------------------"
+TEXT "18%           0.00   0.00   0.00"
 LF
 TEXT "Card                      484.00"
 LF
@@ -110,8 +102,6 @@ TEXT "Credit                    242.00"
 LF
 TEXT "Tip                        20.00"
 LF
-TEXT "--------------------------------"
-LF
 ESC a 1      align
 GS ( k       QR model (4 bytes)
 GS ( k       QR module size (3 bytes)
@@ -120,7 +110,6 @@ GS ( k       QR store (64 bytes)
 GS ( k       QR print (3 bytes)
 ESC a 0      align
 TEXT "     Thank you, visit again"
-LF
 LF
 LF
 ESC d 3      feed lines

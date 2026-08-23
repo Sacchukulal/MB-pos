@@ -245,6 +245,11 @@ impl Fixture {
             settings: &self.settings,
             customer: Some(&self.customer),
             cashier: Some("Ravi"),
+            // P32: the table's own name, a time and a waiter — the values a
+            // real print resolves, so the fixture exercises the same shape.
+            table: Some("6"),
+            time: Some("19:42"),
+            waiter: Some("Suresh"),
             copy,
             einvoice: EInvoice::default(),
             logo: Some(self.logo.clone()),
@@ -341,4 +346,27 @@ pub fn until(mut check: impl FnMut() -> bool) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     false
+}
+
+/// **The built-in face's metrics for a roll** — what a test that only wants a
+/// document hands `bill_document`.
+///
+/// `bill_document` takes metrics since P32 because how many characters fit
+/// decides whether the item table is one line or two: measured on the owner's
+/// own install, items at size 10 in Times New Roman leave three characters for
+/// the dish name.
+pub fn metrics(kind: mb_print::paper::PaperKind) -> mb_print::metrics::Metrics {
+    mb_print::metrics::Metrics::face(
+        mb_print::paper::Paper::new(kind),
+        std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
+    )
+}
+
+/// The same, for a roll that carries a print offset — the offset lives on the
+/// `Paper`, and since P32 the paper reaches the template through the metrics.
+pub fn metrics_on(paper: mb_print::paper::Paper) -> mb_print::metrics::Metrics {
+    mb_print::metrics::Metrics::face(
+        paper,
+        std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
+    )
 }

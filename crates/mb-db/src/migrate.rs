@@ -59,6 +59,13 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0002_recovery_slip",
         sql: include_str!("migrations/0002_recovery_slip.sql"),
     },
+    // P32 — a kitchen ticket gets a running number of its own, so a cook can
+    // say "KOT 14". The same widen-forwards rule as 0002.
+    Migration {
+        version: 3,
+        name: "0003_kot_numbers",
+        sql: include_str!("migrations/0003_kot_numbers.sql"),
+    },
 ];
 
 /// The highest version this build understands. A file above it is refused —

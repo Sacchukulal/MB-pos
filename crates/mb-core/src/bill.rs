@@ -144,6 +144,37 @@ pub struct Bill {
     pub bill_discount_capped: bool,
     pub total_taxable: Money,
     pub total_tax: TaxAmounts,
+    /// **The part of `total_tax` that is already inside the prices** — the
+    /// inclusive-priced lines and charges. P32.
+    ///
+    /// # Why the bill carries it
+    ///
+    /// A printed bill shows item amounts **before tax**, so its column adds up
+    /// to `subtotal` — the owner ruled on that on 2026-08-23, after a real bill
+    /// printed `105.00` against an item and `100.00` as the subtotal and then
+    /// added the tax again underneath.
+    ///
+    /// For an inclusive line that would count the tax twice: its `gross` is
+    /// already tax-in, so the tax must not be added a second time below. So the
+    /// bill separates the two, `total_tax = tax_included + tax_added`, and the
+    /// template prints `tax_added` as the CGST/SGST lines and `tax_included` as
+    /// a memo. Then
+    ///
+    /// ```text
+    /// subtotal − discount + charges + tax_added + round_off = grand_total
+    /// ```
+    ///
+    /// exactly, which is requirement 7 by construction rather than by
+    /// coincidence.
+    ///
+    /// **A template may not compute this** (R2, D2) — a renderer that does
+    /// arithmetic on money is a second money path, so it is computed here once.
+    #[serde(default)]
+    pub tax_included: TaxAmounts,
+    /// `total_tax` less [`Bill::tax_included`] — the tax the customer is being
+    /// charged on top of the printed amounts.
+    #[serde(default)]
+    pub tax_added: TaxAmounts,
     pub non_gst_value: Money,
     pub exempt_value: Money,
     /// Step 7-8. Recorded as its own figure so the printed lines always sum to
@@ -160,6 +191,46 @@ impl Bill {
     pub fn tax_total(&self) -> std::result::Result<Money, MoneyError> {
         self.total_tax.total()
     }
+
+    /// **Fill [`Bill::tax_included`] and [`Bill::tax_added`] from the lines.**
+    ///
+    /// For a bill read back out of a database written before P32, where the two
+    /// columns do not exist. The split is a property of the lines themselves —
+    /// which of them were priced tax-inclusive — so it is recovered rather than
+    /// migrated, and there is one rule ([`tax_split`]) that both this and
+    /// [`compute_bill`] use.
+    pub fn with_tax_split(mut self) -> Result<Bill> {
+        let (included, added) = tax_split(&self.lines, &self.charges, self.total_tax)?;
+        self.tax_included = included;
+        self.tax_added = added;
+        Ok(self)
+    }
+}
+
+/// **The tax already inside the prices, and the tax added on top.**
+///
+/// One rule, used by [`compute_bill`] and by [`Bill::with_tax_split`], because
+/// a second copy of it is a second answer to "does this bill add up".
+fn tax_split(
+    lines: &[BillLine],
+    charges: &[BillCharge],
+    total: TaxAmounts,
+) -> Result<(TaxAmounts, TaxAmounts)> {
+    let mut included = TaxAmounts::default();
+    for line in lines
+        .iter()
+        .filter(|l| l.treatment == TaxTreatment::Inclusive)
+    {
+        included = included.add(line.tax)?;
+    }
+    for charge in charges
+        .iter()
+        .filter(|c| c.treatment == TaxTreatment::Inclusive)
+    {
+        included = included.add(charge.tax)?;
+    }
+    let added = total.sub(included)?;
+    Ok((included, added))
 }
 
 /// Compute a bill from a cart, following decision D4 exactly.
@@ -299,6 +370,11 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
     let total_taxable = summary.total_taxable()?;
     let total_tax = summary.total_tax()?;
 
+    // **The tax already inside the prices, kept apart from the tax added on
+    // top** — P32, and see `Bill::tax_included` for why a printed bill cannot
+    // add up without the split.
+    let (tax_included, tax_added) = tax_split(&computed, &bill_charges, total_tax)?;
+
     // The grand total is built from the lines and charges themselves, not from
     // subtotal − discount + charges + tax. Summing what will actually be
     // printed is what makes requirement 7 ("the printed lines always sum to the
@@ -336,6 +412,8 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
         bill_discount_capped,
         total_taxable,
         total_tax,
+        tax_included,
+        tax_added,
         round_off,
         grand_total,
         order_type: input.order_type,

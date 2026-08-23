@@ -3,13 +3,29 @@ import type { PreviewLine } from "./PreviewLine";
 
 export type PreviewDoc = { 
 /**
- * Characters across. The preview is exactly as wide as the paper, not
+ * Printable dots across. The preview is exactly as wide as the paper, not
  * "about right".
+ */
+dots: number, 
+/**
+ * Characters across at the body size — what the settings screen tells a
+ * shop it is choosing when it picks a size.
  */
 columns: number, lines: Array<PreviewLine>, 
 /**
- * Anything the layout had to do that a person might want to know — a
- * heading that was capped (crown jewel 18), an offset that was clamped
+ * **How much roll this costs.** The owner's complaint began with paper
+ * being eaten; the screen should say how much before it is.
+ */
+millimetres: number, 
+/**
+ * `raster` or `text` — which engine this preview is showing. A printer set
+ * to the text engine gets a different layout, and a preview that does not
+ * say which one it is drawing is a preview that can lie.
+ */
+engine: string, 
+/**
+ * Anything the layout had to do that a person might want to know — a size
+ * that had to come down (crown jewel 18), an offset that was clamped
  * (scope 7.11). P17 shows these beside the setting that caused them.
  */
 notes: Array<string>, };

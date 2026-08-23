@@ -166,7 +166,7 @@ mod tests {
         let faces = SystemFaces::new().expect("the built-in face loads");
         for family in mb_print::font::FAMILIES {
             let font = faces.face(Some(family.key));
-            let cell = font.cell(12, 24);
+            let cell = font.cell_for_cap(15);
             assert!(
                 !font.glyph('M', cell).is_blank(),
                 "{} gave a face that cannot draw an M",

@@ -37,6 +37,18 @@
 
 use serde::{Deserialize, Serialize};
 
+/// **How much of a shrinking box has to be ink before the dot fires.**
+///
+/// Thirty per cent, deliberately below half, for the same reason
+/// `font::INK_THRESHOLD` is 40 %: on a thermal head at 8 dots to the
+/// millimetre a stroke that vanishes is far worse than one that thickens.
+///
+/// The number is not arbitrary. A logo shrunk to a third — 576 stored dots
+/// down to the 173 a 30 % letterhead prints — averages a 3 x 3 box, so a
+/// one-dot stroke through it is exactly **a third** of the box. Anything at or
+/// above 34 % throws that stroke away, and thin strokes are most of a logo.
+const COVERAGE: u32 = 30;
+
 /// The four bytes that say "this is one of ours".
 const MAGIC: &[u8; 3] = b"MB1";
 const VERSION: u8 = 1;
@@ -106,6 +118,29 @@ impl Monochrome {
         }
     }
 
+    /// **How big this picture is, from the header alone** — P32.
+    ///
+    /// Eight bytes, no dots. [`crate::layout`] needs a logo's proportions to
+    /// work out how tall a letterhead band is, and reading four bytes is not
+    /// "decoding an image": D37's rule is that this crate does not turn a PNG
+    /// into dots, and that still stands. `None` for anything that is not one of
+    /// ours, which the caller treats as no logo at all.
+    #[must_use]
+    pub fn size(bytes: &[u8]) -> Option<(u32, u32)> {
+        if bytes.len() < HEADER || bytes.get(0..3) != Some(MAGIC.as_slice()) {
+            return None;
+        }
+        if bytes.get(3).copied() != Some(VERSION) {
+            return None;
+        }
+        let width = u32::from(read_u16(bytes, 4));
+        let height = u32::from(read_u16(bytes, 6));
+        if width == 0 || height == 0 || width > 4_096 || height > 4_096 {
+            return None;
+        }
+        Some((width, height))
+    }
+
     /// Read the format above.
     pub fn decode(bytes: &[u8]) -> Result<Monochrome, ImageError> {
         if bytes.len() < HEADER || bytes.get(0..3) != Some(MAGIC.as_slice()) {
@@ -158,11 +193,26 @@ impl Monochrome {
         out
     }
 
-    /// Nearest-neighbour resize.
+    /// Resize.
     ///
-    /// Nearest neighbour and not anything cleverer, because the source is
-    /// already one bit: there is nothing to interpolate between, and a filter
-    /// would only produce greys that have to be thresholded back again.
+    /// # Shrinking averages; growing repeats — P32
+    ///
+    /// It was nearest neighbour both ways, on the reasoning that a one-bit
+    /// source has nothing to interpolate between. That is true of one dot and
+    /// false of a picture: **shrinking by picking one dot in four throws away
+    /// three quarters of every stroke**, and a logo is mostly thin strokes.
+    /// The owner's SADGURU logo came out ragged on real paper for exactly that
+    /// reason — stored at 576 dots and printed at 173.
+    ///
+    /// So a destination dot that covers a box of source dots asks how much of
+    /// that box is ink, and fires if enough of it is. [`COVERAGE`] is the
+    /// threshold, and it is deliberately below half for the same reason
+    /// `font::INK_THRESHOLD` is: on a thermal head a stroke that vanishes is
+    /// far worse than one that thickens.
+    ///
+    /// Growing is still nearest neighbour, because there genuinely is nothing
+    /// to interpolate between and a filter would only make greys somebody has
+    /// to threshold back.
     #[must_use]
     pub fn scaled_to(&self, width: u32) -> Monochrome {
         if width == 0 || width == self.width || self.width == 0 {
@@ -173,11 +223,38 @@ impl Monochrome {
             .max(1);
         let height = u32::try_from(height).unwrap_or(self.height);
         let mut out = Monochrome::blank(width, height);
+
+        if width >= self.width {
+            for y in 0..height {
+                let src_y = scale_index(y, self.height, height);
+                for x in 0..width {
+                    let src_x = scale_index(x, self.width, width);
+                    if self.ink(src_x, src_y) {
+                        out.set(x, y);
+                    }
+                }
+            }
+            return out;
+        }
+
         for y in 0..height {
-            let src_y = scale_index(y, self.height, height);
+            let top = scale_index(y, self.height, height);
+            let bottom = scale_index(y + 1, self.height, height).max(top + 1).min(self.height);
             for x in 0..width {
-                let src_x = scale_index(x, self.width, width);
-                if self.ink(src_x, src_y) {
+                let left = scale_index(x, self.width, width);
+                let right = scale_index(x + 1, self.width, width).max(left + 1).min(self.width);
+
+                let mut lit = 0_u32;
+                let mut total = 0_u32;
+                for sy in top..bottom {
+                    for sx in left..right {
+                        total += 1;
+                        if self.ink(sx, sy) {
+                            lit += 1;
+                        }
+                    }
+                }
+                if total > 0 && lit * 100 >= total * COVERAGE {
                     out.set(x, y);
                 }
             }
@@ -260,5 +337,59 @@ mod tests {
         assert_eq!(small.width, 20);
         assert_eq!(small.height, 10);
         assert!(small.bits.iter().any(|b| *b != 0), "everything went white");
+    }
+
+    /// **A thin stroke survives being shrunk** — P32.
+    ///
+    /// The owner's logo is stored at up to 576 dots and printed at about 170.
+    /// Nearest neighbour picked one source dot in three and a one-dot stroke
+    /// disappeared two times out of three, which is the ragged SADGURU on the
+    /// photograph. Averaging keeps it.
+    #[test]
+    fn a_one_dot_stroke_survives_being_shrunk() {
+        // A grid of single-dot lines every four dots, which is what the inside
+        // of a logo looks like.
+        let mut image = Monochrome::blank(300, 300);
+        for n in (0..300).step_by(4) {
+            for at in 0..300 {
+                image.set(n, at);
+                image.set(at, n);
+            }
+        }
+        let small = image.scaled_to(100);
+        assert_eq!(small.width, 100);
+
+        let ink = (0..small.height)
+            .flat_map(|y| (0..small.width).map(move |x| (x, y)))
+            .filter(|(x, y)| small.ink(*x, *y))
+            .count();
+        // A third of the original's dots survive at a third of the size, near
+        // enough — which is what "the picture is still there" means. Nearest
+        // neighbour gave a quarter of that on this input.
+        assert!(
+            ink > 2_000,
+            "only {ink} dots of the grid survived; the strokes were thrown away"
+        );
+
+        // And every row and column of the shrunk picture still has something
+        // in it: a grid that came out as bands would be the same fault by a
+        // different name.
+        for y in 0..small.height {
+            assert!(
+                (0..small.width).any(|x| small.ink(x, y)),
+                "row {y} of the shrunk logo is empty"
+            );
+        }
+    }
+
+    /// Growing repeats rather than averaging — there is genuinely nothing to
+    /// interpolate between, and a filter would only make greys.
+    #[test]
+    fn growing_keeps_every_dot() {
+        let mut image = Monochrome::blank(4, 4);
+        image.set(1, 1);
+        let big = image.scaled_to(16);
+        assert_eq!(big.width, 16);
+        assert!(big.ink(4, 4), "the dot moved or vanished on the way up");
     }
 }

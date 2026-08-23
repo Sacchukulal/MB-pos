@@ -8,13 +8,28 @@
 //! No arithmetic happens here. If the template needs a number the [`Bill`] does
 //! not carry, the `Bill` is wrong — a renderer that computes is a second money
 //! path, and there is exactly one (R2, D2).
+//!
+//! # The 2026-08-23 redesign — P32
+//!
+//! The owner photographed a real bill. One dosa took **117 mm of print, of
+//! which 26 % was separator rules and only 1.75 % was ink**, and the item line
+//! read `105.00` above a subtotal of `100.00`. Three things changed here:
+//!
+//! * **The meta block is two rows, not five.** `Bill No`, `Date`, `Type`,
+//!   `Table` and `Cashier` were five full-width label/amount rows; they are two
+//!   three-column rows now, and they carry the **time** as well.
+//! * **The item Amount column is the amount before tax**, so the column adds up
+//!   to the subtotal exactly. The owner ruled on it. See [`totals`] for what
+//!   that costs on a bill with inclusive prices, and how `Bill::tax_added`
+//!   pays it.
+//! * **A title.** A GST document has to say what it is, and none of them did.
 
-use mb_core::{AnyOrder, Bill, OrderType, PlaceOfSupply};
+use mb_core::{AnyOrder, Bill, OrderType, PlaceOfSupply, TaxTreatment};
 use serde::{Deserialize, Serialize};
 
-use crate::doc::{Align, Block, Column, Document, Style};
+use crate::doc::{Align, BandLine, Block, Column, Document, Style};
 use crate::error::PrintError;
-use crate::paper::Paper;
+use crate::metrics::Metrics;
 use crate::settings::{LogoPosition, QrMode, ReceiptSettings};
 
 /// Which copy this is.
@@ -99,6 +114,28 @@ pub struct BillContext<'a> {
     pub settings: &'a ReceiptSettings,
     pub customer: Option<&'a BillCustomer>,
     pub cashier: Option<&'a str>,
+    /// **What the shop calls this table** — P32, and it is a label and never an
+    /// id.
+    ///
+    /// The bill used to print `core.table.as_str()`, which is a `TableId`, so a
+    /// real bill came out reading
+    /// `Table  tbl_outlet_default_sec_mt48cjqf_h1_` — 36 of the 48 columns on
+    /// 80 mm paper. The shop's own name for the table already existed
+    /// (`flows::table_label`) and reached a toast and the kitchen screen and no
+    /// piece of paper.
+    ///
+    /// `None` prints no table line at all. Falling back to the id would be
+    /// exactly the bug again: a bill with no table line is honest, and a bill
+    /// with a database key on it is not.
+    pub table: Option<&'a str>,
+    /// **The time of day, already formatted** — this crate owns no clock
+    /// (D5, D19), so the caller writes `19:42` and this puts it beside the
+    /// date. A restaurant bill without a time is not much of a record, and
+    /// none of them had one until P32.
+    pub time: Option<&'a str>,
+    /// Scope 9.x — who took the order, as against who took the money. `None`
+    /// prints nothing.
+    pub waiter: Option<&'a str>,
     pub copy: Copy,
     pub einvoice: EInvoice,
     /// The shop's logo bytes, if it has one and the settings show it.
@@ -106,15 +143,32 @@ pub struct BillContext<'a> {
 }
 
 /// Build the document for one bill.
-pub fn bill_document(paper: Paper, ctx: &BillContext<'_>) -> Result<Document, PrintError> {
+///
+/// # Why it takes the metrics — P32, second pass
+///
+/// **How many characters fit decides the SHAPE of the item table**, and only
+/// [`Metrics`] knows how many fit: it depends on the shop's size, its typeface
+/// and the roll. Found on the owner's own install — items set to size 10 in
+/// Times New Roman leaves the dish name **three characters**, so every name
+/// printed as a column of three-letter chunks and a bill came to 342 mm.
+///
+/// The template cannot answer "one line or two" without this, and the layout
+/// cannot answer it at all: turning a four-column table into a two-line one is
+/// a decision about what a bill looks like, and this file is the only place
+/// that is allowed to know.
+pub fn bill_document(
+    metrics: &Metrics,
+    ctx: &BillContext<'_>,
+) -> Result<Document, PrintError> {
     let s = ctx.settings;
-    let mut doc = Document::new(paper);
+    let mut doc = Document::new(metrics.paper());
 
     header(&mut doc, ctx);
-    meta(&mut doc, ctx)?;
-    items(&mut doc, ctx);
+    marks(&mut doc, ctx);
+    meta(&mut doc, metrics, ctx)?;
+    items(&mut doc, metrics, ctx);
     totals(&mut doc, ctx);
-    if s.show.tax_summary {
+    if s.show.tax_summary && more_than_one_rate(ctx.bill) {
         tax_summary(&mut doc, ctx);
     }
     payments(&mut doc, ctx);
@@ -123,37 +177,93 @@ pub fn bill_document(paper: Paper, ctx: &BillContext<'_>) -> Result<Document, Pr
     Ok(doc)
 }
 
-fn header(doc: &mut Document, ctx: &BillContext<'_>) {
+/// The shop's own lines, in the order a letterhead reads.
+///
+/// One function, because they are drawn in two places now — stacked down the
+/// paper, or beside the logo in a [`Block::Band`] — and two copies of this list
+/// would be two letterheads that drift.
+fn store_lines(ctx: &BillContext<'_>) -> Vec<BandLine> {
     let s = ctx.settings;
-
-    if s.logo == LogoPosition::Top
-        && let Some(bytes) = &ctx.logo
-    {
-        doc.push(Block::Image {
-            data: bytes.clone(),
-            width_pct: s.logo_width_pct,
-            align: Align::Centre,
-        });
-    }
-
-    doc.text(&ctx.store.name, s.sections.store_name, Align::Centre);
+    let mut lines = vec![BandLine::new(
+        &ctx.store.name,
+        s.sections.store_name,
+        Align::Centre,
+    )];
     if s.show.address && !ctx.store.address.is_empty() {
-        doc.text(&ctx.store.address, s.sections.meta, Align::Centre);
+        lines.push(BandLine::new(&ctx.store.address, s.sections.meta, Align::Centre));
     }
     if s.show.phone && let Some(phone) = &ctx.store.phone {
-        doc.text(format!("Ph: {phone}"), s.sections.meta, Align::Centre);
+        lines.push(BandLine::new(
+            format!("Ph {phone}"),
+            s.sections.meta,
+            Align::Centre,
+        ));
     }
     if s.show.gstin && let Some(gstin) = &ctx.store.gstin {
-        doc.text(format!("GSTIN: {gstin}"), s.sections.meta, Align::Centre);
+        lines.push(BandLine::new(
+            format!("GSTIN {gstin}"),
+            s.sections.meta,
+            Align::Centre,
+        ));
     }
     if s.show.fssai && let Some(fssai) = &ctx.store.fssai {
-        doc.text(format!("FSSAI: {fssai}"), s.sections.meta, Align::Centre);
+        lines.push(BandLine::new(
+            format!("FSSAI {fssai}"),
+            s.sections.meta,
+            Align::Centre,
+        ));
     }
+    lines
+}
+
+fn header(doc: &mut Document, ctx: &BillContext<'_>) {
+    let s = ctx.settings;
+    let lines = store_lines(ctx);
+
+    match (s.logo, &ctx.logo) {
+        // **The letterhead: logo on one side, the shop on the other** — P32.
+        //
+        // > *"if left right means the hotel name and address will cover 70% of
+        // > 3 inch or 4 inch paper, remaining 30% width for logo, also logo
+        // > correctly fit with that on ful size"*
+        (LogoPosition::Left | LogoPosition::Right, Some(bytes)) => {
+            doc.push(Block::Band {
+                image: bytes.clone(),
+                image_side: if s.logo == LogoPosition::Left {
+                    Align::Left
+                } else {
+                    Align::Right
+                },
+                image_pct: s.logo_width_pct,
+                text: lines,
+            });
+        }
+        (LogoPosition::Top, Some(bytes)) => {
+            doc.push(Block::Image {
+                data: bytes.clone(),
+                width_pct: s.logo_width_pct,
+                align: Align::Centre,
+            });
+            for line in lines {
+                doc.text(line.content, line.style, line.align);
+            }
+        }
+        _ => {
+            for line in lines {
+                doc.text(line.content, line.style, line.align);
+            }
+        }
+    }
+
     if s.separators.below_store_header {
         doc.separator(s.pattern);
     }
+}
 
-    // Audit D7, and it goes ABOVE the bill, not in a corner at the bottom.
+/// **What this piece of paper is not.** Audit D7, and it goes above the bill
+/// rather than in a corner at the bottom.
+fn marks(doc: &mut Document, ctx: &BillContext<'_>) {
+    let s = ctx.settings;
     match &ctx.copy {
         Copy::Original => {}
         Copy::Duplicate { number } => {
@@ -170,9 +280,9 @@ fn header(doc: &mut Document, ctx: &BillContext<'_>) {
             doc.separator(s.pattern);
         }
         /* Double height and bold, the same weight VOIDED gets, because it is
-           the same KIND of fact: what this piece of paper is not. The second
-           line is for the customer holding it — "NOT PAID" alone reads as an
-           accusation, and the point is that nothing has gone wrong yet. */
+           the same KIND of fact. The second line is for the customer holding
+           it — "NOT PAID" alone reads as an accusation, and the point is that
+           nothing has gone wrong yet. */
         Copy::NotPaid => {
             doc.text("*** NOT PAID ***", Style::new(2, true), Align::Centre);
             doc.text("Please pay at the counter", Style::BOLD, Align::Centre);
@@ -181,7 +291,34 @@ fn header(doc: &mut Document, ctx: &BillContext<'_>) {
     }
 }
 
-fn meta(doc: &mut Document, ctx: &BillContext<'_>) -> Result<(), PrintError> {
+/// **What this document is, in the words the law uses.**
+///
+/// A composition dealer may not collect GST and issues a *bill of supply*;
+/// everybody else registered issues a *tax invoice*. A shop with no GSTIN gets
+/// no title at all rather than a wrong one — printing "TAX INVOICE" over a bill
+/// from an unregistered shop is a worse fault than printing nothing.
+fn title_of(ctx: &BillContext<'_>) -> Option<&'static str> {
+    if !ctx.settings.show.title || ctx.store.gstin.is_none() {
+        return None;
+    }
+    Some(if ctx.store.is_composition {
+        "BILL OF SUPPLY"
+    } else {
+        "TAX INVOICE"
+    })
+}
+
+/// **The narrowest paper that can hold three columns of meta.**
+///
+/// Below this the bill goes two-line for its items and label/value for its
+/// meta — which is what every real 2-inch receipt does.
+const NARROW_BELOW: usize = 40;
+
+fn meta(
+    doc: &mut Document,
+    metrics: &Metrics,
+    ctx: &BillContext<'_>,
+) -> Result<(), PrintError> {
     let s = ctx.settings;
     let core = ctx.order.core();
 
@@ -190,23 +327,104 @@ fn meta(doc: &mut Document, ctx: &BillContext<'_>) -> Result<(), PrintError> {
         .bill_number()
         .ok_or_else(|| PrintError::invalid("a draft order has no bill number to print"))?;
 
-    doc.row("Bill No", &number.formatted, s.sections.meta);
-    doc.row("Date", core.business_day.to_string(), s.sections.meta);
-    doc.row(
-        "Type",
-        match core.order_type {
-            OrderType::DineIn => "Dine In",
-            OrderType::Parcel => "Parcel",
-            OrderType::SelfService => "Self Service",
-            OrderType::Delivery => "Delivery",
-        },
-        s.sections.meta,
-    );
-    if let Some(table) = &core.table {
-        doc.row("Table", table.as_str(), s.sections.meta);
+    if let Some(title) = title_of(ctx) {
+        doc.text(title, Style { size: s.sections.meta.size, bold: true }, Align::Centre);
     }
-    if s.show.cashier && let Some(cashier) = ctx.cashier {
-        doc.row("Cashier", cashier, s.sections.meta);
+
+    // **An empty token prints no line**, which is what a bill being previewed
+    // before it is an order has: the number is claimed when the order is
+    // parked, and a `TOKEN -` placeholder would be a number the paper will not
+    // have. Found on the first real preview (P32).
+    if s.show.token
+        && let Some(open) = token_of(ctx.order).filter(|t| !t.is_empty())
+    {
+        doc.text(format!("TOKEN {open}"), s.sections.token, Align::Centre);
+        if s.separators.below_token {
+            doc.separator(s.pattern);
+        }
+    }
+
+    let when = match (s.show.time, ctx.time) {
+        (true, Some(time)) => format!("{} {time}", core.business_day),
+        _ => core.business_day.to_string(),
+    };
+    let kind = match core.order_type {
+        OrderType::DineIn => "Dine In",
+        OrderType::Parcel => "Parcel",
+        OrderType::SelfService => "Self Service",
+        OrderType::Delivery => "Delivery",
+    };
+    let table = ctx.table.map(|t| format!("Table {t}"));
+    let covers = match (s.show.covers, core.covers) {
+        (true, Some(n)) if n > 0 => Some(format!("Covers {n}")),
+        _ => None,
+    };
+    let cashier = match (s.show.cashier, ctx.cashier) {
+        (true, Some(name)) => Some(format!("Cashier {name}")),
+        _ => None,
+    };
+    // **Not when it is the same person** — P32, found on a real counter. A
+    // one-person shop is one person, and `Order Ravi` under `Cashier Ravi` is a
+    // row of paper on every bill of the day to say so twice.
+    let waiter = match (s.show.waiter, ctx.waiter) {
+        (true, Some(name)) if Some(name) != ctx.cashier.filter(|_| s.show.cashier) => {
+            Some(format!("Order {name}"))
+        }
+        _ => None,
+    };
+
+    if narrow_table(metrics, ctx) {
+        // **Two inches: three rows, and no word spent on a label.**
+        //
+        // Five full-width `label ... value` rows do not fit a roll this narrow
+        // once the date carries a time as well — `Bill BIR/1207` plus
+        // `2026-08-03 19:42` is thirty characters of twenty-nine. So the number
+        // goes with the time, and the date goes with the type and the table:
+        // nothing is lost and nothing wraps.
+        doc.row(
+            &number.formatted,
+            ctx.time.filter(|_| s.show.time).unwrap_or(""),
+            s.sections.meta,
+        );
+        let mut second = vec![core.business_day.to_string(), kind.to_owned()];
+        second.extend(table.clone());
+        second.extend(covers.clone());
+        doc.text(second.join("  "), s.sections.meta, Align::Left);
+        if waiter.is_some() || cashier.is_some() {
+            doc.row(
+                waiter.clone().unwrap_or_default(),
+                cashier.clone().unwrap_or_default(),
+                s.sections.meta,
+            );
+        }
+    } else {
+        // **Three columns, two rows.** This was five full-width rows and it is
+        // the single biggest saving on the bill after the separators: 5 rows of
+        // paper became 2.
+        let columns = vec![
+            Column::fill(Align::Left),
+            Column::fixed(WHEN_COLUMNS, Align::Centre),
+            Column::fill(Align::Right),
+        ];
+        let mut rows = vec![vec![format!("Bill {}", number.formatted), when, kind.to_owned()]];
+        let second = vec![
+            table.unwrap_or_default(),
+            covers.unwrap_or_default(),
+            cashier.or(waiter.clone()).unwrap_or_default(),
+        ];
+        if second.iter().any(|cell| !cell.is_empty()) {
+            rows.push(second);
+        }
+        // A waiter as well as a cashier needs a third cell; it is rare enough
+        // that it earns its own row rather than a fourth column on every bill.
+        if let Some(waiter) = waiter.filter(|_| ctx.cashier.is_some() && s.show.cashier) {
+            rows.push(vec![waiter, String::new(), String::new()]);
+        }
+        doc.push(Block::Columns {
+            columns,
+            rows,
+            style: s.sections.meta,
+        });
     }
 
     if let Some(customer) = ctx.customer {
@@ -217,6 +435,19 @@ fn meta(doc: &mut Document, ctx: &BillContext<'_>) -> Result<(), PrintError> {
         }
     }
 
+    // Scope 2.4 — where the supply happened, which is what decides CGST/SGST
+    // against IGST. Carried on the store since P06 and printed by nothing.
+    if s.show.place_of_supply && let Some(code) = &ctx.store.state_code {
+        doc.row(
+            "Place of supply",
+            match ctx.bill.place_of_supply {
+                PlaceOfSupply::Intra => code.clone(),
+                PlaceOfSupply::Inter => format!("{code} (inter-state)"),
+            },
+            s.sections.meta,
+        );
+    }
+
     // Scope 2.12. Printed when it exists; absent until an IRP is wired up.
     if let Some(irn) = &ctx.einvoice.irn {
         doc.row("IRN", irn, s.sections.meta);
@@ -225,17 +456,11 @@ fn meta(doc: &mut Document, ctx: &BillContext<'_>) -> Result<(), PrintError> {
     if s.separators.below_meta {
         doc.separator(s.pattern);
     }
-
-    if s.show.token
-        && let Some(open) = token_of(ctx.order)
-    {
-        doc.text(format!("TOKEN {open}"), s.sections.token, Align::Centre);
-        if s.separators.below_token {
-            doc.separator(s.pattern);
-        }
-    }
     Ok(())
 }
+
+/// How many characters `2026-08-23 19:42` needs, plus one of air.
+const WHEN_COLUMNS: usize = 17;
 
 fn token_of(order: &AnyOrder) -> Option<String> {
     match order {
@@ -247,37 +472,94 @@ fn token_of(order: &AnyOrder) -> Option<String> {
     }
 }
 
-/// The narrowest paper on which a name, a quantity, a rate and an amount all
-/// fit on one line and the name is still readable.
+/// **What goes in the Amount column: the value before tax** — P32, the owner's
+/// ruling of 2026-08-23.
 ///
-/// Below this the table goes two-line — which is what every real 2-inch receipt
-/// does, and the golden file is what proved it was needed: at 58 mm with an HSN
-/// column the fixed columns left **three characters** for the item name, so
-/// "Paneer Butter Masala" came out as a vertical column of three-letter
-/// fragments. The layout was doing exactly what it was told; the template was
-/// telling it something stupid.
-const NARROW_BELOW: usize = 40;
+/// It was `gross_including_tax`, so a real bill printed
+///
+/// ```text
+/// MASALA DOSE   1   100.00   105.00
+/// Subtotal                   100.00
+/// CGST                         2.50
+/// SGST                         2.50
+/// TOTAL                      105.00
+/// ```
+///
+/// — a line that does not equal rate × quantity, above a subtotal that does not
+/// equal the column, with the tax then added a second time. `gross` is
+/// `unit price × qty` exactly, and `subtotal` is defined as the sum of it, so
+/// the column adds up by construction rather than by care.
+///
+/// **No arithmetic here.** The figure is one the `Bill` already carries.
+fn amount_of(line: &mb_core::BillLine) -> String {
+    line.gross.to_plain_string()
+}
 
-fn items(doc: &mut Document, ctx: &BillContext<'_>) {
-    if doc.paper.columns() < NARROW_BELOW {
+/// **The fewest characters a dish name may be given before the table gives
+/// way** — P32.
+///
+/// Ten, because that is about where a dish stops being recognisable: "Paneer
+/// But" can be guessed at, "Pan" cannot. It is a **floor on the shape of the
+/// table**, not on the shop's size — the size a shop picks is always used, and
+/// what changes when the name will not fit is that the bill goes two-line, the
+/// way every 2-inch receipt in the country already does.
+///
+/// This is the number whose absence produced a 342 mm bill on the owner's own
+/// counter: items at size 10 in Times New Roman leave three characters for the
+/// name, and "Paneer Butter Masala (Half) - Extra Spicy" became fourteen rows
+/// of three letters.
+const MIN_NAME: usize = 10;
+
+fn items(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) {
+    if narrow_table(metrics, ctx) {
         narrow_items(doc, ctx);
     } else {
         wide_items(doc, ctx);
     }
 }
 
+/// **One line per item, or two?**
+///
+/// Two whenever the four-column table would leave the dish name less than
+/// [`MIN_NAME`] characters — which is a measurement, not a guess about the
+/// roll: the same 80 mm paper holds a four-column table at size 4 and cannot at
+/// size 10.
+fn narrow_table(metrics: &Metrics, ctx: &BillContext<'_>) -> bool {
+    let across = metrics
+        .size(ctx.settings.sections.items)
+        .chars_across(metrics.dots());
+    let mut fixed = QTY + RATE + AMOUNT;
+    if ctx.settings.show.hsn {
+        fixed += HSN;
+    }
+    across < fixed + MIN_NAME
+}
+
+/// The fixed columns of the item table. Named, because [`narrow_table`] has to
+/// add them up and a second copy of the numbers is a second answer.
+const QTY: usize = 4;
+const RATE: usize = 8;
+const AMOUNT: usize = 9;
+const HSN: usize = 6;
+
 /// One line per item: name, qty, rate, amount across the paper.
 fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
     let s = ctx.settings;
     let with_hsn = s.show.hsn;
 
+    // **Tighter than they were.** Qty was 4 characters and rate 9 and amount
+    // 10 — 23 of the paper's characters for three numbers, leaving the dish
+    // name whatever was over. A quantity is rarely more than two digits and an
+    // amount on a restaurant bill rarely more than six; the columns still
+    // widen for anything bigger, because `fit_columns` gives the slack back to
+    // the widest column and `lay_row` wraps rather than truncates.
     let mut columns = vec![Column::fill(Align::Left)];
     if with_hsn {
-        columns.push(Column::fixed(6, Align::Left));
+        columns.push(Column::fixed(HSN, Align::Left));
     }
-    columns.push(Column::fixed(4, Align::Right)); // qty
-    columns.push(Column::fixed(9, Align::Right)); // rate
-    columns.push(Column::fixed(10, Align::Right)); // amount
+    columns.push(Column::fixed(QTY, Align::Right));
+    columns.push(Column::fixed(RATE, Align::Right));
+    columns.push(Column::fixed(AMOUNT, Align::Right));
 
     let mut head = vec!["Item".to_owned()];
     if with_hsn {
@@ -313,7 +595,7 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
         }
         row.push(line.qty.to_string());
         row.push(line.snapshot.unit_price.to_plain_string());
-        row.push(line.gross_including_tax.to_plain_string());
+        row.push(amount_of(line));
         rows.push(row);
 
         // Scope 1.9 — a per-line note is part of the bill, under its item.
@@ -344,10 +626,17 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
 fn narrow_items(doc: &mut Document, ctx: &BillContext<'_>) {
     let s = ctx.settings;
 
-    // No `below_column_names` rule here: there are no column names on this
-    // paper, and drawing a rule "below" something that is not printed gave two
-    // rules in a row — which the golden file showed and nobody would have
-    // noticed in code.
+    // **`below_column_names` is the rule ABOVE the items on this paper.**
+    //
+    // There are no column names on 32 columns, and drawing a rule "below"
+    // something that is not printed once gave two rules in a row. But a bill
+    // still needs the meta block separated from the food, and since P32 turned
+    // `below_meta` off by default there was nothing between them at all — the
+    // customer's GSTIN ran straight into the first dish. Same toggle, same
+    // place on the paper, and the one it duplicated is now off.
+    if s.separators.below_column_names {
+        doc.separator(s.pattern);
+    }
 
     for (n, line) in ctx.bill.lines.iter().enumerate() {
         if n > 0 {
@@ -371,7 +660,7 @@ fn narrow_items(doc: &mut Document, ctx: &BillContext<'_>) {
                 line.qty,
                 line.snapshot.unit_price.to_plain_string()
             ),
-            line.gross_including_tax.to_plain_string(),
+            amount_of(line),
             s.sections.items,
         );
     }
@@ -381,6 +670,17 @@ fn narrow_items(doc: &mut Document, ctx: &BillContext<'_>) {
     }
 }
 
+/// **The totals, and they reconcile exactly.**
+///
+/// ```text
+/// subtotal − discount + charges + tax_added + round_off = grand_total
+/// ```
+///
+/// `tax_added` rather than `total_tax` is what makes it true on a bill that
+/// mixes inclusive and exclusive prices: the tax already inside an inclusive
+/// price is in the Amount column, so adding it again below would count it
+/// twice. `Bill::tax_included` carries that part, printed as a memo, and
+/// `mb_core` computes both — this file does no arithmetic (R2, D2).
 fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
     let s = ctx.settings;
     let b = ctx.bill;
@@ -402,32 +702,39 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
     }
 
     for charge in &b.charges {
-        doc.row(
-            &charge.name,
-            charge.gross_including_tax.to_plain_string(),
-            style,
-        );
+        // **The charge before its own tax**, for the same reason the item
+        // column is: whatever tax is on it is in the CGST/SGST lines below, and
+        // printing the tax-in figure here would count it twice.
+        doc.row(&charge.name, charge.amount.to_plain_string(), style);
     }
 
-    if !b.total_tax.cgst.is_zero() {
-        doc.row("CGST", b.total_tax.cgst.to_plain_string(), style);
+    let label = rate_label(b);
+    if !b.tax_added.cgst.is_zero() {
+        doc.row(format!("CGST{label}"), b.tax_added.cgst.to_plain_string(), style);
     }
-    if !b.total_tax.sgst.is_zero() {
-        doc.row("SGST", b.total_tax.sgst.to_plain_string(), style);
+    if !b.tax_added.sgst.is_zero() {
+        doc.row(format!("SGST{label}"), b.tax_added.sgst.to_plain_string(), style);
     }
-    if !b.total_tax.igst.is_zero() {
-        doc.row("IGST", b.total_tax.igst.to_plain_string(), style);
+    if !b.tax_added.igst.is_zero() {
+        doc.row("IGST", b.tax_added.igst.to_plain_string(), style);
+    }
+    // The other half of the split: tax the customer has already paid inside the
+    // prices above. A memo, not an addition — it is why the total still works.
+    if !b.tax_included.is_zero()
+        && let Ok(included) = b.tax_included.total()
+    {
+        doc.text(
+            format!("  (includes tax {})", included.to_plain_string()),
+            style,
+            Align::Left,
+        );
     }
 
     // Scope 2.3 — liquor. **Listed separately and never inside a GST total.**
     // This line is the difference between a bar being able to use this product
     // and not.
     if !b.non_gst_value.is_zero() {
-        doc.row(
-            "Non-GST value",
-            b.non_gst_value.to_plain_string(),
-            style,
-        );
+        doc.row("Non-GST value", b.non_gst_value.to_plain_string(), style);
     }
     if !b.exempt_value.is_zero() {
         doc.row("Exempt value", b.exempt_value.to_plain_string(), style);
@@ -451,9 +758,38 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
         doc.separator(s.pattern);
     }
 
+    // Scope 2.9 — the total in words, which a B2B customer's accounts
+    // department asks for. Off by default: it is two lines of paper on every
+    // bill and a walk-in customer has never wanted it.
+    if s.show.amount_in_words {
+        doc.text(
+            format!("Rupees {}", b.grand_total.in_words()),
+            s.sections.meta,
+            Align::Left,
+        );
+    }
+
     if ctx.store.is_composition && !s.composition_note.is_empty() {
         doc.text(&s.composition_note, s.sections.meta, Align::Centre);
     }
+}
+
+/// `" 2.5%"` when every taxed line on this bill is at one rate, and nothing
+/// when they are not.
+///
+/// A customer reading `CGST 2.50` cannot tell what it was charged on. A
+/// customer reading `CGST 2.5%  2.50` can. On a mixed bill the rate belongs in
+/// the summary block and not on the total, so this says nothing there.
+fn rate_label(bill: &Bill) -> String {
+    let mut rates = bill.summary.rows().filter(|r| !r.tax.is_zero());
+    match (rates.next(), rates.next()) {
+        (Some(row), None) => format!(" {}", row.rate.label()),
+        _ => String::new(),
+    }
+}
+
+fn more_than_one_rate(bill: &Bill) -> bool {
+    bill.summary.rows().count() > 1
 }
 
 /// Scope 2.7, and audit B11 is why it exists.
@@ -462,6 +798,11 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
 /// > inter-state, no HSN summary, and nothing that can be filed directly."*
 ///
 /// A chartered accountant looks at this block first.
+///
+/// **Printed only when there is more than one rate on the bill** (P32). On a
+/// single-rate bill every figure in it is already on the CGST/SGST lines above,
+/// so it was three rows of paper repeating what was said a centimetre earlier.
+/// `show.tax_summary` still turns it off entirely.
 fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
     let b = ctx.bill;
     if b.summary.rows().next().is_none() {
@@ -472,11 +813,17 @@ fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
 
     doc.text("Tax summary", s.sections.subtotals, Align::Left);
 
+    // **Narrower columns on a narrow roll** — P32. Fixed at 7/9/9 they took 25
+    // of the 29 characters a 58 mm bill has, leaving four for "Taxable", which
+    // printed as `Taxa` over `ble`. The layout was doing exactly what it was
+    // told; the template was telling it something that could not work.
+    let narrow = doc.paper.columns() < NARROW_BELOW;
+    let (rate, money) = if narrow { (5, 7) } else { (7, 9) };
     let columns = vec![
-        Column::fixed(7, Align::Left),
+        Column::fixed(rate, Align::Left),
         Column::fill(Align::Right),
-        Column::fixed(9, Align::Right),
-        Column::fixed(9, Align::Right),
+        Column::fixed(money, Align::Right),
+        Column::fixed(money, Align::Right),
     ];
     let mut rows = vec![vec![
         "Rate".to_owned(),
@@ -505,7 +852,12 @@ fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
         rows,
         style: s.sections.subtotals,
     });
-    doc.separator(s.pattern);
+    // **A toggle in front of it** — P32. This was a bare `doc.separator`, so a
+    // shop could turn every rule off and still get this one. A rule nobody can
+    // switch off is the same fault as a setting nobody reads.
+    if s.separators.below_tax_summary {
+        doc.separator(s.pattern);
+    }
 }
 
 /// Scope 1.15. Audit B9: v1 was one bill, one payment mode, *"and today you
@@ -534,7 +886,10 @@ fn payments(doc: &mut Document, ctx: &BillContext<'_>) {
     {
         doc.row("Change", change.to_plain_string(), s.sections.subtotals);
     }
-    doc.separator(s.pattern);
+    // The second rule with no toggle in front of it — see `tax_summary`.
+    if s.separators.below_payments {
+        doc.separator(s.pattern);
+    }
 }
 
 fn settlement_of(order: &AnyOrder) -> Option<&mb_core::Settlement> {
@@ -597,15 +952,20 @@ fn footer(doc: &mut Document, ctx: &BillContext<'_>) {
     if !s.footer.is_empty() {
         doc.text(&s.footer, s.sections.footer, Align::Centre);
     }
-    doc.spacer(2 + s.row_height.gap());
+    // **One blank row, not four.** This was `2 + row_height.gap()`, on top of
+    // the three lines the job feeds before the cut — 6 mm of roll on every bill
+    // of the day, to clear a blade that was already clear.
+    doc.spacer(1);
 }
+
+/// Whether a line's price already contains its tax — used by nothing here, and
+/// kept as the one place the question is spelled out for a reader wondering why
+/// [`amount_of`] does not have to ask it. `Bill::subtotal` is the sum of
+/// `gross`, whatever the treatment, so the column adds up either way.
+const _: fn(TaxTreatment) -> bool = TaxTreatment::is_taxed;
 
 // **`Copy` deliberately has no `Default`.** clippy offered to derive one and it
 // is wrong to accept: a default would mean a caller could print a bill without
 // saying whether it is an original, and audit D7 is exactly that — *"a
 // reprinted bill is indistinguishable from the original, which is an obvious
 // fraud opening."* Making the caller say is the whole mechanism.
-//
-// There is also no `treatment_label` or `rule_if` helper here any more. Both
-// were written speculatively and nothing called them, which is the same
-// "no column nothing reads" rule D22 applies to the schema, applied to code.

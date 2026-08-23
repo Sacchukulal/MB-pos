@@ -102,11 +102,11 @@ fn p1_and_p2_a_bill_renders_well_inside_b6() {
     let paper = Paper::new(PaperKind::Mm80);
 
     // Warm the allocator so the first run is not the measurement.
-    let _ = layout(&bill_document(paper, &ctx).expect("builds")).expect("lays out");
+    let _ = layout(&bill_document(&common::metrics(paper.kind), &ctx).expect("builds")).expect("lays out");
 
     let started = Instant::now();
     for _ in 0..RUNS {
-        let doc = bill_document(paper, &ctx).expect("builds");
+        let doc = bill_document(&common::metrics(paper.kind), &ctx).expect("builds");
         let laid = layout(&doc).expect("lays out");
         let out = text::to_text(&laid);
         std::hint::black_box(out);
@@ -115,7 +115,7 @@ fn p1_and_p2_a_bill_renders_well_inside_b6() {
 
     let started = Instant::now();
     for _ in 0..RUNS {
-        let doc = bill_document(paper, &ctx).expect("builds");
+        let doc = bill_document(&common::metrics(paper.kind), &ctx).expect("builds");
         let laid = layout(&doc).expect("lays out");
         let out = pdf::to_pdf(&laid);
         std::hint::black_box(out);
@@ -161,10 +161,13 @@ fn p3_a_kitchen_ticket_renders_in_almost_no_time() {
         kind: TicketKind::New,
         token: Some("42"),
         bill_number: Some("BIR/1207"),
+        kot_number: Some("14"),
         order_type: OrderType::DineIn,
         table: Some("6"),
         time: Some("21:40"),
+        waiter: Some("Suresh"),
         station: Some("TANDOOR"),
+        reprint: false,
         lines: &lines,
         settings: &settings,
     };
@@ -207,22 +210,22 @@ fn p3_a_kitchen_ticket_renders_in_almost_no_time() {
 fn p4_a_bill_becomes_dots_inside_its_budget() {
     let fixture = big_fixture();
     let paper = Paper::new(PaperKind::Mm80);
-    let font = Font::builtin().expect("the shipped face loads");
-    let doc = bill_document(paper, &fixture.context(Copy::Original)).expect("builds");
+    let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
+    let doc = bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds");
     let laid = layout(&doc).expect("lays out");
 
     // Warmed once: the glyph cache fills on the first bill of the day and never
     // grows again, so the interesting number is the second bill and every one
     // after it. Measuring the first would be measuring the cache.
-    let warm = to_raster(&laid, &font, RasterOptions::default()).expect("rasters");
+    let warm = to_raster(&laid, &mb_print::metrics::Metrics::face(laid.paper, std::sync::Arc::clone(&font)), RasterOptions::default()).expect("rasters");
 
     let runs = 50;
     let started = Instant::now();
     for _ in 0..runs {
-        let doc = bill_document(paper, &fixture.context(Copy::Original)).expect("builds");
+        let doc = bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds");
         let laid = layout(&doc).expect("lays out");
         std::hint::black_box(
-            to_raster(&laid, &font, RasterOptions::default()).expect("rasters"),
+            to_raster(&laid, &mb_print::metrics::Metrics::face(laid.paper, std::sync::Arc::clone(&font)), RasterOptions::default()).expect("rasters"),
         );
     }
     let p4 = started.elapsed().as_secs_f64() * 1_000.0 / f64::from(runs);
@@ -282,10 +285,13 @@ fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
         kind: TicketKind::New,
         token: Some("42"),
         bill_number: Some("BIR/1207"),
+        kot_number: Some("14"),
         order_type: OrderType::DineIn,
         table: Some("6"),
         time: Some("21:40"),
+        waiter: Some("Suresh"),
         station: None,
+        reprint: false,
         lines: &lines,
         settings: &settings,
     };

@@ -27,7 +27,7 @@
 
 use mb_core::Money;
 
-use crate::doc::{Align, Document, Pattern, Style};
+use crate::doc::{Align, Block, Document, Pattern, Style};
 use crate::layout::{Note, layout};
 use crate::printer::{Engine, PrinterConfig, Target};
 use crate::template::Store;
@@ -77,8 +77,11 @@ pub fn test_document(printer: &PrinterConfig, store: Option<&Store>) -> Document
     // The ruler. Two lines: marks every fifth column, numbers every tenth.
     // ------------------------------------------------------------------
     doc.text("Alignment ruler", Style::BOLD, Align::Left);
-    doc.text(ruler_marks(columns), Style::NORMAL, Align::Left);
-    doc.text(ruler_numbers(columns), Style::NORMAL, Align::Left);
+    // **Drawn by the layout, at the width it measured** (P32). Built here from
+    // `paper.columns()` it ran off the right edge the moment a character's
+    // width stopped being an assumption.
+    doc.push(Block::Ruler { marks: true });
+    doc.push(Block::Ruler { marks: false });
     doc.text(
         "The first and last marks must sit at the edges of the paper.",
         Style::NORMAL,
@@ -203,12 +206,10 @@ fn describe_down(mm: i32, printer: &PrinterConfig) -> String {
 pub fn clamp_warning(doc: &Document) -> Option<String> {
     let laid = layout(doc).ok()?;
     laid.notes.iter().find_map(|note| match note {
-        Note::OffsetClamped {
-            asked_mm,
-            used_columns,
-        } => Some(format!(
+        Note::OffsetClamped { asked_mm, used_dots } => Some(format!(
             "NOTE: {asked_mm:+} mm was too far — it has been limited to \
-             {used_columns} characters so the bill still fits the paper."
+             {} mm so the bill still fits the paper.",
+            used_dots / i32::try_from(crate::paper::DOTS_PER_MM).unwrap_or(8)
         )),
         _ => None,
     })
@@ -231,7 +232,7 @@ mod tests {
     use crate::text::to_text;
 
     #[test]
-    fn the_ruler_is_exactly_as_wide_as_the_paper() {
+    fn the_ruler_is_exactly_as_wide_as_the_line() {
         for columns in [32_usize, 48, 64] {
             assert_eq!(ruler_marks(columns).chars().count(), columns);
             assert_eq!(ruler_numbers(columns).chars().count(), columns);

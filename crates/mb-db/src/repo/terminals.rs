@@ -173,7 +173,8 @@ impl<'a> TerminalRepo<'a> {
     fn seed_counters(&self, outlet: &str, terminal: &str, prefix: &str) -> Result<(), DbError> {
         // The defaults match migration 0001's seeded pair: a token resets
         // daily and is not padded; a bill runs on and is padded to four.
-        for (kind, reset_daily, pad) in [("token", 1, 0), ("bill", 0, 4)] {
+        // P32 adds the KOT series: daily, unpadded, like the token.
+        for (kind, reset_daily, pad) in [("token", 1, 0), ("bill", 0, 4), ("kot", 1, 0)] {
             self.tx.execute(
                 "INSERT INTO counters
                      (outlet_id, terminal_id, kind, last_issued, start, reset_daily,

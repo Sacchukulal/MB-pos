@@ -466,13 +466,23 @@ fn every_size_is_bigger_than_the_one_before_it() {
         dots.windows(2).all(|w| w[0] < w[1]),
         "the sizes are out of order or repeat: {dots:?}"
     );
-    assert_eq!(dots.last().copied(), Some(72), "the biggest is the printer's own 3x");
+    // **And it is the same list the printer resolves against** (P32). Two lists
+    // is how the labels and the dots drifted apart in the first place.
+    assert_eq!(
+        dots,
+        mb_print::Style::LADDER.to_vec(),
+        "the screen offers different sizes from the ones the printer draws"
+    );
 
-    // **24, 48 and 72 are still on the list**, so a shop that tuned its receipt
-    // before any of this keeps exactly the bill it tuned — those are the three
-    // sizes that ever existed, and `modernise` maps the old rows onto them.
-    for kept in [24, 48, 72] {
-        assert!(dots.contains(&kept), "{kept} dots is gone and a tuned receipt moved");
+    // **Deliberately disjoint from every value an older build stored** — the
+    // multipliers 1/2/3 and the nominal heights. That is what lets
+    // `Style::from_stored` tell a shop's old row from a new one exactly rather
+    // than guessing, so a tuned receipt keeps the rung it was tuned to.
+    for old in [1_u16, 2, 3, 16, 20, 24, 28, 32, 36, 40, 48, 60, 72] {
+        assert!(
+            !dots.contains(&old),
+            "{old} is on both the old list and the new one, so a stored row is ambiguous"
+        );
     }
 }
 
@@ -480,12 +490,11 @@ fn every_size_is_bigger_than_the_one_before_it() {
 #[test]
 fn a_capped_size_is_reported_as_a_number_a_shop_can_pick() {
     // Exactly on the list.
-    assert_eq!(super::size_label(24), "3");
-    assert_eq!(super::size_label(72), "10");
-    // The layout caps to whatever fits, which is rarely a round number — it
-    // reports as the nearest size below, because that is what a person would
-    // have had to choose to get it.
-    assert_eq!(super::size_label(34), "5");
+    assert_eq!(super::size_label(mb_print::Style::LADDER[2]), "3");
+    assert_eq!(super::size_label(mb_print::Style::LARGEST), "10");
+    // A size between two rungs reports as the nearest below, because that is
+    // what a person would have had to choose to get it.
+    assert_eq!(super::size_label(mb_print::Style::LADDER[4] + 1), "5");
     // And below the smallest is still the smallest anybody can ask for.
     assert_eq!(super::size_label(4), "1");
 }

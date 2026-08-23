@@ -108,18 +108,45 @@ pub(crate) fn require_a_table(state: &crate::billing::CartState) -> UiResult<()>
 ///
 /// An empty list is not an error: it means the kitchen already has everything,
 /// and there is no paper to make.
+///
+/// # Everything the paper needs is resolved HERE — P32
+///
+/// `token`, `time` and `bill_number` used to be arguments, and every caller
+/// passed `None` for at least one of them: `time` and `bill_number` were
+/// hard-coded `None` inside this function, and two of the three callers passed
+/// `token: None`. So `show_time`, `show_bill_number` and `show_token` were three
+/// settings that defaulted to *on* and could not do anything — while the
+/// settings screen's sample passed all three, so the preview showed lines the
+/// paper would never have.
+///
+/// A caller cannot forget what it is not asked for. The order goes in; the
+/// ticket comes out with a token, a time, a KOT number and the table's real
+/// name on it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the one door to kitchen paper — see the note above; every argument is \n              a thing only the caller knows, and splitting them into a struct would \n              let a caller build half of one"
+)]
 pub(crate) fn queue_kitchen_lines(
     app: &App,
     kind: mb_print::template::TicketKind,
     order_type: mb_core::OrderType,
     table: Option<&str>,
-    token: Option<&str>,
+    order: Option<&mb_core::AnyOrder>,
     lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)>,
+    reprint: bool,
     reason: String,
 ) -> UiResult<String> {
     if lines.is_empty() {
         return Ok(String::new());
     }
+    let at = now();
+    // **The table's own name, never its id.** This printed
+    // `tbl_outlet_default_sec_mt48cjqf_h1_` on real paper until P32.
+    let table = label_for(app, table);
+    let token = order.and_then(|o| o.token().map(|t| t.formatted.clone()));
+    let bill_number = order.and_then(|o| o.bill_number().map(|b| b.formatted.clone()));
+    let waiter = order.and_then(|o| staff_name(app, &o.core().created_by));
+    let time = clock_time(at);
 
     // **Grouped by printer id and NOT by category**: a shop with six categories
     // and two printers wants two tickets, not six. Getting that wrong would be
@@ -145,13 +172,20 @@ pub(crate) fn queue_kitchen_lines(
     // for one thing — telling the cashier something is printing.
     let mut id = String::new();
     for (printer, station_lines) in &stations {
+        // **One number per roll of paper.** Two stations cooking two halves of
+        // one order get KOT 14 and KOT 15, which is what a kitchen needs to
+        // talk about them.
+        let kot = claim_kot_number(app, today(at));
         let ctx = mb_print::template::KitchenContext {
             kind,
-            token,
-            bill_number: None,
+            token: token.as_deref(),
+            bill_number: bill_number.as_deref(),
+            kot_number: kot.as_deref(),
             order_type,
-            table,
-            time: None,
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: waiter.as_deref(),
+            reprint,
             // **Which station this roll belongs to**, on the paper. Two
             // stations printing two different halves of one order, with nothing
             // on either saying which is which, is how a cook ends up making the
@@ -262,14 +296,14 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
     }
 
     let table = core.table.as_ref().map(|t| t.as_str().to_owned());
-    let token = order.token().map(|t| t.formatted.clone());
     let queued = queue_kitchen_lines(
         app,
         mb_print::template::TicketKind::New,
         core.order_type,
         table.as_deref(),
-        token.as_deref(),
+        Some(&order),
         ticket_lines(&core.cart, &delta),
+        false,
         "no kitchen screen drew this in time".to_owned(),
     )?;
 
@@ -360,26 +394,38 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     //    and two printers wants two tickets, not six. Getting that wrong would
     //    have been a worse bug than the one being fixed, because a cook would
     //    see it as the counter sending duplicates.
-    let reason = table
-        .clone()
+    // **What the shop calls the table, in the print queue too** — P32. This
+    // said `table tbl_outlet_default_none_t1_`, which is the same fault as the
+    // one on the paper: the queue is a list a cashier reads.
+    let reason = label_for(app, table.as_deref())
         .map_or_else(|| "kitchen ticket".to_owned(), |t| format!("table {t}"));
-    let id = queue_kitchen_lines(
-        app,
-        mb_print::template::TicketKind::New,
-        order_type,
-        table.as_deref(),
-        None,
-        lines,
-        reason,
-    )?;
 
-    // 2b. **The order goes on disk BEFORE the paper.** Same rule as
+    // 2a. **The order goes on disk BEFORE the paper.** Same rule as
     //     `complete_bill`, and the same reason (D4): if the order is not saved
     //     first, a kitchen ticket exists for something the shop has no record
     //     of — and, until P12, there was no Open order on disk at all, so audit
     //     B6's "cancel the order" had nothing to cancel and the floor grid had
     //     nothing to show (scope 1.4).
+    //
+    // **It used to happen AFTER the queue, which is what left the ticket with
+    // no token on it** (P32). A token is claimed when a draft becomes an open
+    // order; queueing first meant there was no token to print, so this call
+    // site passed `None` and `show_token` — on by default — could never do
+    // anything on the ordinary path. The comment above already said the order
+    // goes on disk first; now it does.
     park_open_order(app)?;
+    let order = open_order_now(app);
+
+    let id = queue_kitchen_lines(
+        app,
+        mb_print::template::TicketKind::New,
+        order_type,
+        table.as_deref(),
+        order.as_ref(),
+        lines,
+        false,
+        reason,
+    )?;
 
     // 3. **Only once it is durably queued** do we remember it was told. Marking
     //    first and enqueuing second would lose the items silently if the
@@ -625,9 +671,13 @@ pub(crate) fn queue_bill_print(
     let store = config.store.to_print_store();
     let settings = &config.receipt;
     let order = mb_core::AnyOrder::Settled(settled.clone());
+    let table = order.core().table.as_ref().and_then(|t| table_label(app, t));
+    let time = clock_time(now());
+    let waiter = staff_name(app, &order.core().created_by);
 
+    let (metrics, _) = app.metrics_for(JobKind::Bill, &printer);
     let document = mb_print::template::bill_document(
-        printer.paper,
+        &metrics,
         &mb_print::template::BillContext {
             bill,
             order: &order,
@@ -635,6 +685,11 @@ pub(crate) fn queue_bill_print(
             settings,
             customer: None,
             cashier: Some(cashier),
+            // **P32 — the real values, resolved once, here.** The table used to
+            // print as its database id and the bill had no time at all.
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: waiter.as_deref(),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
             // **P31.** This was `None` here and at every other call site, so
@@ -928,7 +983,13 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
 
 /// What the shop calls a table. `None` rather than an error: a caller that has
 /// already done the important thing should not fail over a name.
-fn table_label(app: &App, id: &mb_core::TableId) -> Option<String> {
+///
+/// **Every piece of paper goes through here now** — P32. It used to reach a
+/// toast and the kitchen screen only, so a real bill printed
+/// `Table  tbl_outlet_default_sec_mt48cjqf_h1_` — the database key, 36 of the
+/// 48 columns on 80 mm paper. There is no fallback to the id: a bill with no
+/// table line is honest, and a bill with a primary key on it is not.
+pub(crate) fn table_label(app: &App, id: &mb_core::TableId) -> Option<String> {
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).floor().list_tables(OUTLET))
@@ -938,6 +999,497 @@ fn table_label(app: &App, id: &mb_core::TableId) -> Option<String> {
     .into_iter()
     .find(|t| t.id.as_str() == id.as_str())
     .map(|t| t.label)
+}
+
+/// The same, for a table held as a bare string on the cart.
+pub(crate) fn label_for(app: &App, id: Option<&str>) -> Option<String> {
+    table_label(app, &mb_core::TableId::new(id?))
+}
+
+/// **The shop's first table, by the name the shop gave it.**
+///
+/// Only the settings preview wants this, and it wants it for one reason: a
+/// sample that invents `"6"` cannot show a bill printing a database id, which
+/// is exactly what reached the owner's printer. Going through the real list is
+/// what makes the preview capable of showing the fault.
+#[must_use]
+pub fn first_table_label(app: &App) -> Option<String> {
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).floor().list_tables(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })
+    .ok()?
+    .into_iter()
+    .next()
+    .map(|t| t.label)
+}
+
+/// Who is signed in, by name. `None` on a first run, before anybody has a PIN.
+#[must_use]
+pub fn current_staff_name(app: &App) -> Option<String> {
+    app.sessions().current().map(|s| s.actor.name)
+}
+
+// ---------------------------------------------------------------------------
+// **Audit D6 — see the bill before it prints.** P32.
+//
+// > *"No bill preview before printing. You cannot see the actual bill for the
+// > actual order before it comes out of the printer."*
+//
+// Written into `ipc.rs` as a promise at P08 and never kept. These two functions
+// build the SAME document `queue_bill_print` and `queue_kitchen_lines` build —
+// the same template, the same table label, the same time, the same face, the
+// same engine — and hand it to the screen instead of the printer.
+//
+// **The same document, not a similar one.** A preview that took its own route
+// is exactly the sample-versus-real gap that let a database key reach paper.
+// ---------------------------------------------------------------------------
+
+/// The bill for an order, as it would print right now.
+///
+/// `None` means the order on this counter's cart — the common case, and the one
+/// the billing screen's Preview button uses. A settled order's id previews the
+/// bill that was printed.
+pub fn preview_order_on(
+    app: &App,
+    order_id: Option<String>,
+) -> UiResult<crate::preview::PreviewDoc> {
+    let printer = default_printer(app)?;
+    let config = app.shop_config();
+    let store = config.store.to_print_store();
+    let (metrics, engine) = app.metrics_for(JobKind::Bill, &printer);
+
+    let (bill, order) = match order_id {
+        Some(id) => {
+            let found = app.with_shop(|shop| {
+                shop.db
+                    .transaction(|tx| mb_db::Repos::new(tx).orders().find(&mb_core::OrderId::new(&id)))
+                    .map_err(|e| words::from_db(&e))
+            })?;
+            let order = found.ok_or_else(|| {
+                UiError::new("preview.no_order", "That order is not on this counter.")
+            })?;
+            let bill = bill_of(app, &order, &config)?;
+            (bill, order)
+        }
+        // **The cart's own order, when it has one** — P32, found by running it.
+        //
+        // A cart that has already sent a kitchen ticket is a parked order with
+        // a token and a bill number on disk, and the preview was building a
+        // fresh stand-in beside it: the paper would carry `TOKEN 3` and the
+        // screen showed none. The cart is only a stand-in before it is parked.
+        None if app.with_cart(|s| Ok(s.order_id.clone())).ok().flatten().is_some() => {
+            let bill = app.with_cart(|state| state.bill(&config))?;
+            let order = open_order_now(app).ok_or_else(|| {
+                UiError::new("preview.no_order", "That order is not on this counter.")
+            })?;
+            (bill, order)
+        }
+        None => {
+            let bill = app.with_cart(|state| state.bill(&config))?;
+            // A cart is not an order yet, so it is shown as the bill a waiter
+            // would carry to the table — which is what it is.
+            let at = now();
+            let day = today(at);
+            let mut core = app.with_cart(|state| Ok(state.to_core_for_printing()))?;
+            // **Today's date, not 1970.** `to_core_for_printing` stamps day
+            // zero because P12 only ever wanted it for looking line names up,
+            // and the first real preview printed `1970-01-01` at the top.
+            core.business_day = day;
+            core.created_at = at;
+            let open = mb_core::OpenOrder {
+                core,
+                token: mb_core::Claimed {
+                    value: 0,
+                    // **Empty, so no token line prints at all.** A token is
+                    // claimed when the order is parked; showing a placeholder
+                    // would be showing a number the paper will not have.
+                    formatted: String::new(),
+                    business_day: day,
+                },
+                bill_number: mb_core::Claimed {
+                    value: 0,
+                    // **Not a plausible number.** This bill has not been
+                    // settled and must not look as though it has.
+                    formatted: "NOT YET".to_owned(),
+                    business_day: day,
+                },
+            };
+            (bill, mb_core::AnyOrder::Open(open))
+        }
+    };
+
+    let table = order.core().table.as_ref().and_then(|t| table_label(app, t));
+    let time = clock_time(now());
+    let waiter = staff_name(app, &order.core().created_by);
+    let copy = match &order {
+        mb_core::AnyOrder::Settled(_) => mb_print::template::Copy::Original,
+        _ => mb_print::template::Copy::NotPaid,
+    };
+
+    // **The same `metrics` the layout below uses**, so the document is built
+    // for the shape it will be drawn in.
+    let document = mb_print::template::bill_document(
+        &metrics,
+        &mb_print::template::BillContext {
+            bill: &bill,
+            order: &order,
+            store: &store,
+            settings: &config.receipt,
+            customer: None,
+            cashier: current_staff_name(app).as_deref(),
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: waiter.as_deref(),
+            copy,
+            einvoice: mb_print::template::EInvoice::default(),
+            logo: crate::logo::stored(app),
+        },
+    )
+    .map_err(|e| words::from_print(&e))?;
+
+    let laid = mb_print::layout::layout_for(&document, &metrics)
+        .map_err(|e| words::from_print(&e))?;
+    Ok(crate::preview::to_preview(&laid, &metrics, engine))
+}
+
+/// The kitchen ticket that would print right now — the **delta**, exactly as
+/// the button would send it (crown jewel 2).
+pub fn preview_kitchen_on(
+    app: &App,
+    order_id: Option<String>,
+) -> UiResult<crate::preview::PreviewDoc> {
+    let printer = default_kitchen_printer(app)?;
+    let config = app.shop_config();
+    let (metrics, engine) = app.metrics_for(JobKind::Kitchen, &printer);
+
+    let (core, order) = match order_id {
+        Some(id) => {
+            let found = app.with_shop(|shop| {
+                shop.db
+                    .transaction(|tx| mb_db::Repos::new(tx).orders().find(&mb_core::OrderId::new(&id)))
+                    .map_err(|e| words::from_db(&e))
+            })?;
+            let order = found.ok_or_else(|| {
+                UiError::new("preview.no_order", "That order is not on this counter.")
+            })?;
+            (order.core().clone(), Some(order))
+        }
+        // **The CART's lines, with the ORDER's numbers.**
+        //
+        // The delta has to come off the cart — that is what is about to be
+        // sent, and the row on disk is a moment behind it. The token and the
+        // bill number have to come off the parked order, because that is where
+        // they are claimed. Taking both from the order showed an empty ticket
+        // for an item that had just been typed in; taking both from the cart
+        // showed a ticket with no token. Found by running it (P32).
+        None => (
+            app.with_cart(|state| Ok(state.to_core_for_printing()))?,
+            open_order_now(app),
+        ),
+    };
+
+    let delta = core.kitchen.pending(&core.cart).map_err(|e| {
+        UiError::new(
+            "kitchen.pending",
+            "What the kitchen still needs could not be worked out.",
+        )
+        .with_detail(e.to_string())
+    })?;
+    if delta.is_empty() {
+        return Err(UiError::new(
+            "kitchen.nothing",
+            "The kitchen already has everything on this bill.",
+        )
+        .quietly());
+    }
+
+    let lines: Vec<mb_print::template::TicketLine> = ticket_lines(&core.cart, &delta)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect();
+    let table = core.table.as_ref().and_then(|t| table_label(app, t));
+    let time = clock_time(now());
+    let waiter = staff_name(app, &core.created_by);
+    let token = order.as_ref().and_then(|o| o.token().map(|t| t.formatted.clone()));
+    let number = order
+        .as_ref()
+        .and_then(|o| o.bill_number().map(|b| b.formatted.clone()));
+
+    let document = mb_print::template::kitchen_document(
+        printer.paper,
+        &mb_print::template::KitchenContext {
+            kind: mb_print::template::TicketKind::New,
+            token: token.as_deref(),
+            bill_number: number.as_deref(),
+            // **Not claimed.** A preview that took a number would burn one out
+            // of the shop's own series every time somebody looked at it.
+            kot_number: None,
+            order_type: core.order_type,
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: waiter.as_deref(),
+            station: None,
+            reprint: false,
+            lines: &lines,
+            settings: &config.kitchen,
+        },
+    )
+    .map_err(|e| words::from_print(&e))?;
+
+    let laid = mb_print::layout::layout_for(&document, &metrics)
+        .map_err(|e| words::from_print(&e))?;
+    Ok(crate::preview::to_preview(&laid, &metrics, engine))
+}
+
+/// **Send the kitchen the whole order again** — P32, and the one caller of
+/// `reprint`.
+///
+/// # Why it is not the same button
+///
+/// "Kitchen ticket" prints the **delta** and marks the ledger, which is crown
+/// jewel 2 and must stay exactly as it is. This is the other question a shop
+/// actually asks: *the cook has lost the paper.* It prints everything on the
+/// order, marked `*** REPRINT ***`, and **touches nothing** — the ledger is not
+/// written, so the next delta is still the same delta.
+///
+/// The mark is the whole reason it is a separate path. A second identical
+/// ticket is a second lot of food; a ticket that says it is a reprint is a
+/// cook checking before they cook.
+pub fn reprint_kitchen_ticket_on(app: &App) -> UiResult<String> {
+    let _one_at_a_time = app.begin_action();
+    crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+
+    let (lines, order_type, table) = app.with_cart(|state| {
+        let lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)> = state
+            .cart
+            .lines()
+            .iter()
+            .map(|line| {
+                (
+                    line.snapshot.item_id.clone(),
+                    mb_print::template::TicketLine {
+                        name: line.snapshot.name.clone(),
+                        qty: line.qty,
+                        note: line.note.clone(),
+                        modifiers: line.modifiers.iter().map(|m| m.name.clone()).collect(),
+                    },
+                )
+            })
+            .collect();
+        Ok((lines, state.order_type, state.table.clone()))
+    })?;
+
+    if lines.is_empty() {
+        return Err(UiError::new(
+            "kitchen.nothing",
+            "There is nothing on this bill to send.",
+        )
+        .quietly());
+    }
+
+    let order = open_order_now(app);
+    queue_kitchen_lines(
+        app,
+        mb_print::template::TicketKind::New,
+        order_type,
+        table.as_deref(),
+        order.as_ref(),
+        lines,
+        true,
+        "reprint".to_owned(),
+    )
+}
+
+/// **The A4 tax invoice, as a PDF** — scope 7.10, and it had no caller.
+///
+/// # It was built and never reached
+///
+/// `mb_print::pdf` has existed since P06 and `PaperKind::A4` with it. The whole
+/// path was there: one document, one layout, a PDF sink with no crate behind
+/// it. **The only thing that ever called it was the report exporter** — so a
+/// B2B customer asking for an invoice on A4 got a 3-inch till roll, and a
+/// feature the scope calls BUILD was a library function nothing could reach
+/// (P32 found it by grepping `to_pdf`).
+///
+/// The same `bill_document` a thermal bill uses, on A4 paper. One template:
+/// a shop that changes its footer changes both.
+pub fn bill_pdf_on(app: &App, order_id: String) -> UiResult<crate::reports::SavedFileView> {
+    crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+    let config = app.shop_config();
+    let store = config.store.to_print_store();
+
+    let order = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| {
+                    mb_db::Repos::new(tx)
+                        .orders()
+                        .find(&mb_core::OrderId::new(&order_id))
+                })
+                .map_err(|e| words::from_db(&e))
+        })?
+        .ok_or_else(|| UiError::new("preview.no_order", "That bill is not on this counter."))?;
+    let bill = bill_of(app, &order, &config)?;
+
+    let number = order
+        .bill_number()
+        .map(|n| n.formatted.clone())
+        .ok_or_else(|| {
+            UiError::new(
+                "invoice.no_number",
+                "That order has no bill number yet, so there is no invoice to make.",
+            )
+        })?;
+    let table = order.core().table.as_ref().and_then(|t| table_label(app, t));
+    let time = clock_time(order.core().created_at);
+    let waiter = staff_name(app, &order.core().created_by);
+
+    // **The printer's own metrics, not a face's.** A4 has no thermal dots, so
+    // there is nothing to measure a typeface against — the PDF sink draws in
+    // Courier on a fixed grid and says so.
+    let metrics = mb_print::metrics::Metrics::printer_font(mb_print::paper::Paper::new(
+        mb_print::paper::PaperKind::A4,
+    ));
+    let document = mb_print::template::bill_document(
+        &metrics,
+        &mb_print::template::BillContext {
+            bill: &bill,
+            order: &order,
+            store: &store,
+            settings: &config.receipt,
+            customer: None,
+            cashier: None,
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: waiter.as_deref(),
+            copy: mb_print::template::Copy::Original,
+            einvoice: mb_print::template::EInvoice::default(),
+            // A4 is the PDF sink's paper and it cannot draw a picture — see
+            // `pdf.rs`. Handing it one would be a promise this file cannot keep.
+            logo: None,
+        },
+    )
+    .map_err(|e| words::from_print(&e))?;
+
+    let laid = mb_print::layout::layout_for(&document, &metrics)
+        .map_err(|e| words::from_print(&e))?;
+
+    let clean: String = number
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    crate::reports::save(&format!("Invoice-{clean}.pdf"), &mb_print::pdf::to_pdf(&laid))
+}
+
+/// The bill for a stored order — recomputed from its own cart, which is what
+/// every other reader of a stored order does (D4).
+fn bill_of(
+    app: &App,
+    order: &mb_core::AnyOrder,
+    config: &crate::settings::ShopConfig,
+) -> UiResult<mb_core::Bill> {
+    if let mb_core::AnyOrder::Settled(settled) = order {
+        // A settled order carries the bill it was settled with, and that is the
+        // one that was printed. Recomputing could produce a different number if
+        // a price or a charge has changed since — which is exactly what crown
+        // jewel 4 exists to prevent.
+        return Ok(settled.bill.clone());
+    }
+    let _ = app;
+    let core = order.core();
+    let charges = config.billing.charges_for(core.order_type);
+    let input = mb_core::BillInput::new(&core.cart)
+        .with_order_type(core.order_type)
+        .with_place_of_supply(config.store.place_of_supply())
+        .with_rounding(config.billing.rounding)
+        .with_charges(&charges);
+    mb_core::compute_bill(input).map_err(|e| {
+        UiError::new(
+            "bill.compute",
+            "This bill could not be worked out. Nothing has been changed.",
+        )
+        .with_detail(e.to_string())
+    })
+}
+
+/// **The clock, as a bill and a ticket want to read it.** `19:42`.
+///
+/// mb-print owns no clock (D5, D19), so every caller that puts a time on paper
+/// formats it here — one format, and one place to change it. India is UTC+5:30
+/// and this product runs on one counter in one shop, which is the same
+/// assumption `BusinessDay::of` already makes.
+#[must_use]
+#[expect(
+    clippy::integer_division,
+    reason = "seconds into hours and minutes for a printed clock; no amount is involved"
+)]
+pub fn clock_time(at: Timestamp) -> String {
+    // Minutes since midnight, local. `UtcOffset::INDIA` is the same constant
+    // the business day is stamped with, so a bill's time and its day can never
+    // disagree about which side of midnight they are on.
+    let local = at.millis() / 1_000 + i64::from(UtcOffset::INDIA.minutes()) * 60;
+    let of_day = local.rem_euclid(86_400);
+    let hours = of_day / 3_600;
+    let minutes = (of_day % 3_600) / 60;
+    format!("{hours:02}:{minutes:02}")
+}
+
+/// **The order this counter is working on, as it now stands on disk.**
+///
+/// Read back after [`park_open_order`] so the kitchen ticket can carry the
+/// token and the bill number the parking just claimed. `None` when there is
+/// nothing on the cart or the row cannot be read — a ticket without a token is
+/// a ticket, and a kitchen that gets no paper is a lost order.
+fn open_order_now(app: &App) -> Option<mb_core::AnyOrder> {
+    let id = app.with_cart(|state| Ok(state.order_id.clone())).ok()??;
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).orders().find(&mb_core::OrderId::new(&id)))
+            .map_err(|e| words::from_db(&e))
+    })
+    .ok()
+    .flatten()
+}
+
+/// **The ticket's own running number** — P32.
+///
+/// Claimed from the same per-till, per-day series machinery the token and the
+/// bill number use (`mb_db::numbering`), so a shop with two counters cannot
+/// print KOT 14 twice. It resets daily, like the token: a kitchen says "KOT 14"
+/// within a shift and a number in the tens of thousands is a number nobody says
+/// out loud.
+///
+/// `None` rather than an error. A ticket without a number is a ticket; a
+/// kitchen that gets no paper because a counter row was missing is a lost
+/// order, and requirement 3 says the food goes out.
+fn claim_kot_number(app: &App, day: BusinessDay) -> Option<String> {
+    let terminal: String = app.terminal_id().to_owned();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                mb_db::numbering::claim(tx, OUTLET, &terminal, mb_db::CounterKind::Kot, day)
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+    .inspect_err(|e| {
+        log_warn!("a kitchen ticket printed without a number: {}", e.message);
+    })
+    .ok()
+    .map(|claimed| claimed.formatted)
+}
+
+/// Who took the order, by name, for the paper. `None` when the staff row has
+/// gone — a name is worth having and never worth failing a print over.
+pub(crate) fn staff_name(app: &App, id: &mb_core::StaffId) -> Option<String> {
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).people().find_staff(OUTLET, id.as_str()))
+            .map_err(|e| words::from_db(&e))
+    })
+    .ok()?
+    .map(|s| s.name)
 }
 
 /// **One template, another argument** — P12's reprint, and audit D7.
@@ -964,9 +1516,13 @@ pub(crate) fn queue_bill_copy(
         mb_print::template::Copy::Voided { .. } => "voided copy".to_owned(),
         mb_print::template::Copy::NotPaid => "bill to the table".to_owned(),
     };
+    let table = order.core().table.as_ref().and_then(|t| table_label(app, t));
+    let time = clock_time(now());
+    let waiter = staff_name(app, &order.core().created_by);
 
+    let (metrics, _) = app.metrics_for(JobKind::Bill, &printer);
     let document = mb_print::template::bill_document(
-        printer.paper,
+        &metrics,
         &mb_print::template::BillContext {
             bill,
             order,
@@ -974,6 +1530,9 @@ pub(crate) fn queue_bill_copy(
             settings,
             customer: None,
             cashier: Some(cashier),
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: waiter.as_deref(),
             copy,
             einvoice: mb_print::template::EInvoice::default(),
             // P31 — a duplicate is the same paper as the original (D30), so it
@@ -1096,6 +1655,17 @@ pub(crate) fn park_open_order(app: &App) -> UiResult<String> {
 #[tauri::command]
 pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
     print_kitchen_ticket_on(&app)
+}
+
+#[tauri::command]
+pub fn reprint_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
+    reprint_kitchen_ticket_on(&app)
+}
+
+/// Scope 7.10 — the B2B invoice, on A4, as a file a shop can email.
+#[tauri::command]
+pub fn bill_pdf(app: State<'_, App>, order_id: String) -> UiResult<crate::reports::SavedFileView> {
+    bill_pdf_on(&app, order_id)
 }
 
 #[tauri::command]

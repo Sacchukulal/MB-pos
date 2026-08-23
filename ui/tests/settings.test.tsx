@@ -26,6 +26,29 @@ const { Settings } = await import('../src/settings/Settings');
 const { ToastProvider } = await import('../src/kit');
 
 import type { SettingsView } from '../src/ipc/generated/SettingsView';
+import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
+
+/**
+ * One line of the preview, in the shape Rust sends since P32: every position
+ * and every size in **printer dots**.
+ */
+function line(
+  text: string,
+  extra: Partial<Extract<PreviewLine, { kind: 'text' }>> = {},
+): PreviewLine {
+  return {
+    kind: 'text',
+    text,
+    indent: 0,
+    row: 24,
+    cap: 15,
+    advance: 13,
+    scale: 1,
+    bold: false,
+    segments: [{ text, width: text.length, align: 'centre' }],
+    ...extra,
+  };
+}
 
 const view: SettingsView = {
   hasShop: true,
@@ -127,12 +150,24 @@ beforeEach(() => {
         paper: '80 mm (3 inch)',
         notUsableYet: [],
         doc: {
-          columns: 48,
+          dots: 576,
+          columns: 44,
+          millimetres: 64,
+          engine: 'raster',
           notes: [],
           lines: [
-            { kind: 'text', text: 'Anna Kuteera', indent: 18, scale: 2, bold: true },
-            { kind: 'rule', glyph: '-', width: 48, indent: 0 },
-            { kind: 'text', text: 'Come back soon', indent: 17, scale: 1, bold: false },
+            line('Anna Kuteera', { cap: 26, row: 40, advance: 22, scale: 2, bold: true }),
+            {
+              kind: 'rule',
+              indent: 0,
+              width: 576,
+              row: 9,
+              thickness: 1,
+              strokes: 1,
+              gap: 0,
+              dash: null,
+            },
+            line('Come back soon'),
           ],
         },
       });
@@ -286,7 +321,7 @@ describe('the settings screen', () => {
         return Promise.resolve({
           paper: '80 mm (3 inch)',
           notUsableYet: [],
-          doc: { columns: 48, notes: [], lines: [] },
+          doc: { dots: 576, columns: 44, millimetres: 0, engine: 'raster', notes: [], lines: [] },
         });
       }
       return Promise.resolve(null);
@@ -312,9 +347,12 @@ describe('the settings screen', () => {
           paper: '80 mm (3 inch)',
           notUsableYet: ['Logo width'],
           doc: {
-            columns: 48,
+            dots: 576,
+            columns: 44,
+            millimetres: 24,
+            engine: 'raster',
             notes: [],
-            lines: [{ kind: 'text', text: 'Anna Kuteera', indent: 0, scale: 1, bold: false }],
+            lines: [line('Anna Kuteera')],
           },
         });
       }

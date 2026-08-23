@@ -362,6 +362,125 @@ impl Money {
         };
         format!("{}₹{grouped}.{paise:02}", if negative { "-" } else { "" })
     }
+
+    /// **The amount in words, Indian style** — scope 2.9, added at P32.
+    ///
+    /// `"One Thousand Two Hundred Forty Five and 50 paise only"`. Crore, lakh
+    /// and thousand, because that is what an Indian accounts department reads
+    /// and "one million two hundred" is not.
+    ///
+    /// It lives here rather than in a print template for the same reason every
+    /// other rendering of an amount does (R2, D2): a renderer that turns paise
+    /// into words is a second money path, and there is exactly one.
+    #[must_use]
+    #[allow(
+        clippy::integer_division,
+        reason = "splitting an amount into groups for display; every part is kept"
+    )]
+    pub fn in_words(self) -> String {
+        let negative = self.0 < 0;
+        let abs = self.0.unsigned_abs();
+        let rupees = abs / 100;
+        let paise = abs % 100;
+
+        let mut out = String::new();
+        if negative {
+            out.push_str("Minus ");
+        }
+        if rupees == 0 {
+            out.push_str("Zero");
+        } else {
+            out.push_str(&groups_in_words(rupees));
+        }
+        if paise > 0 {
+            out.push_str(&format!(" and {paise} paise"));
+        }
+        out.push_str(" only");
+        out
+    }
+}
+
+/// Crore, lakh, thousand, then the last three digits.
+#[allow(
+    clippy::integer_division,
+    reason = "splitting an amount into groups for display; every part is kept"
+)]
+fn groups_in_words(rupees: u64) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let crore = rupees / 10_000_000;
+    let lakh = (rupees / 100_000) % 100;
+    let thousand = (rupees / 1_000) % 100;
+    let rest = rupees % 1_000;
+
+    if crore > 0 {
+        parts.push(format!("{} Crore", groups_in_words(crest(crore))));
+    }
+    if lakh > 0 {
+        parts.push(format!("{} Lakh", under_hundred(lakh)));
+    }
+    if thousand > 0 {
+        parts.push(format!("{} Thousand", under_hundred(thousand)));
+    }
+    if rest > 0 {
+        parts.push(under_thousand(rest));
+    }
+    parts.join(" ")
+}
+
+/// A crore count is itself an amount in the same system — a hundred crore is
+/// "One Hundred Crore" and not a new word.
+const fn crest(crore: u64) -> u64 {
+    crore
+}
+
+fn under_thousand(n: u64) -> String {
+    #[allow(
+        clippy::integer_division,
+        reason = "hundreds and tens for display; every part is kept"
+    )]
+    let hundreds = n / 100;
+    let rest = n % 100;
+    let mut parts = Vec::new();
+    if hundreds > 0 {
+        parts.push(format!("{} Hundred", under_hundred(hundreds)));
+    }
+    if rest > 0 {
+        parts.push(under_hundred(rest));
+    }
+    parts.join(" ")
+}
+
+/// The tens and units, in words. `n` is always below a hundred — every caller
+/// takes it modulo 100 — so the index into these tables cannot run off the end,
+/// and the `usize` casts are of a value under 20.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "an index below 100 on a table of 20 and a table of 10; nothing here is money"
+)]
+fn under_hundred(n: u64) -> String {
+    const ONES: [&str; 20] = [
+        "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+        "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen",
+        "Nineteen",
+    ];
+    const TENS: [&str; 10] = [
+        "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety",
+    ];
+    if n < 20 {
+        return (*ONES.get(n as usize).unwrap_or(&"")).to_owned();
+    }
+    #[allow(
+        clippy::integer_division,
+        reason = "tens and units for display; every part is kept"
+    )]
+    let tens = (n / 10) as usize;
+    let unit = (n % 10) as usize;
+    let tens_word = TENS.get(tens).unwrap_or(&"");
+    if unit == 0 {
+        (*tens_word).to_owned()
+    } else {
+        format!("{tens_word} {}", ONES.get(unit).unwrap_or(&""))
+    }
 }
 
 impl fmt::Display for Money {

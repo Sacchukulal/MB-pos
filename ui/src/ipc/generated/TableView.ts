@@ -37,6 +37,11 @@ kitchenTold: boolean,
  */
 kitchenMinutes: number | null, orderId: string | null, 
 /**
+ * The bill number this order has already claimed, formatted as it will be
+ * printed. Empty until there is an order.
+ */
+billNumber: string | null, 
+/**
  * **This is the tile the cashier is looking at** — the cart is on it.
  *
  * A flag and not a [`TableState`], and that is the fix rather than a

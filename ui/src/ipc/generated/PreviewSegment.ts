@@ -10,7 +10,7 @@ export type PreviewSegment = {
  */
 text: string, 
 /**
- * How many characters wide the box is, out of the paper's columns.
+ * How many characters wide the box is.
  */
 width: number, 
 /**

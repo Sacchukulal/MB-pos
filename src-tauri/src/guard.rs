@@ -113,6 +113,16 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("list_print_jobs", Access::Public),
     // The preview of the built-in test slip needs no shop and no data.
     ("preview_test_page", Access::Public),
+    // P32 — audit D6. Looking at the bill you are about to print is part of
+    // making it, so it is the same permission as making one.
+    ("preview_order", Access::Needs(Permission::BillCreate)),
+    // P32 — the cook lost the paper. Same authority as sending it the first
+    // time, because that is what it is.
+    ("reprint_kitchen_ticket", Access::Needs(Permission::BillCreate)),
+    // Making a customer's invoice out of a bill that already exists is reading,
+    // not billing — the same authority as looking at the bill list.
+    ("bill_pdf", Access::Needs(Permission::ReportsView)),
+    ("preview_kitchen", Access::Needs(Permission::BillCreate)),
 
     // --- billing ------------------------------------------------------------
     ("current_cart", Access::Needs(Permission::BillCreate)),
@@ -127,6 +137,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),
     ("cart_add_payment", Access::Needs(Permission::BillCreate)),
     ("cart_clear_payments", Access::Needs(Permission::BillCreate)),
+    ("cart_cash_given", Access::Needs(Permission::BillCreate)),
     // Money off a bill is its OWN permission, not BillCreate: taking an order
     // and giving away the shop's margin are different levels of trust, and the
     // roles screen has had the checkbox since P11 with nothing behind it.

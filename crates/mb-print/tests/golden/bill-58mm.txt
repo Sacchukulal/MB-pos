@@ -1,54 +1,49 @@
   Anna Kuteera
-12 MG Road, Jayanagar, Bengaluru
-             560011
-         Ph: 9880012345
-     GSTIN: 29ABCDE1234F1ZW
-     FSSAI: 11223344556677
---------------------------------
-Bill No                 BIR/1207
-Date                  2026-08-03
-Type                     Dine In
-Table                          6
-Cashier                     Ravi
-Customer          Suresh Traders
-Cust GSTIN       29ZYXWV9876K1Z2
---------------------------------
+   12 MG Road, Jayanagar,
+      Bengaluru 560011
+        Ph 9880012345
+    GSTIN 29ABCDE1234F1ZW
+    FSSAI 11223344556677
+-----------------------------
+         TAX INVOICE
     TOKEN 42
---------------------------------
+BIR/1207                19:42
+2026-08-03 Dine In Table 6
+Order Suresh     Cashier Ravi
+Customer       Suresh Traders
+Cust GSTIN    29ZYXWV9876K1Z2
+-----------------------------
 Paneer Butter Masala (Half) -
 Extra Spicy [2106]
 (no onion)
-2 x 240.00                478.80
+2 x 240.00             480.00
 Water 1L [2201]
-3 x 20.00                   0.00
+3 x 20.00               60.00
 Beer 650ml
-2 x 220.00                418.00
---------------------------------
-Subtotal                  980.00
-Discount                 -106.00
-Service Charge             45.89
-Donation                    5.00
-CGST                       12.50
-SGST                       12.49
-Non-GST value             418.00
-Exempt value                5.00
-Round off                   0.31
+2 x 220.00             440.00
+-----------------------------
+Subtotal               980.00
+Discount              -106.00
+Service Charge          43.70
+Donation                 5.00
+CGST 5%                 12.50
+SGST 5%                 12.49
+Non-GST value          418.00
+Exempt value             5.00
+Round off                0.31
 
---------------------------------
-TOTAL     948.00
---------------------------------
+TOTAL      948.00
+-----------------------------
 Tax summary
-Rate   Taxable     CGST     SGST
-5%      499.70    12.50    12.49
-18%       0.00     0.00     0.00
---------------------------------
-Card                      484.00
-Sodexo                    242.00
-Credit                    242.00
-Tip                        20.00
---------------------------------
-upi://pay?pa=anna@upi&pn=Anna Ku
-teera&am=948.00&cu=INR&tn=MB1
-     Thank you, visit again
-
+Rate    Taxable   CGST   SGST
+5%       499.70  12.50  12.49
+18%        0.00   0.00   0.00
+Card                   484.00
+Sodexo                 242.00
+Credit                 242.00
+Tip                     20.00
+upi://pay?pa=anna@upi&pn=Anna
+ Kuteera&am=948.00&cu=INR&tn=
+MB1
+   Thank you, visit again
 

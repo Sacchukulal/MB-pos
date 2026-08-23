@@ -22,11 +22,6 @@ paper: string,
  */
 font: string, 
 /**
- * Whether that face has one width for every character. The preview lays a
- * proportional one out by its boxes rather than by counting spaces.
- */
-fontIsMonospace: boolean, 
-/**
  * **Settings that could not be used yet, by name.**
  *
  * The preview redraws on every keystroke, and half-typed is a normal

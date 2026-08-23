@@ -129,28 +129,83 @@ impl Glyph {
 
 /// The size of one character cell, in dots, and where its baseline sits.
 ///
-/// **The cell comes from the paper, not from the font.** `paper.dots()` divided
-/// by `paper.columns()` is 12 dots on 58 mm and 80 mm paper and 13 on 100 mm;
-/// the font is then scaled to fit that, which is what keeps the raster sink and
-/// the text sink on the same grid.
+/// # The cell comes from the FACE now, and that is P32
+///
+/// It used to come from the paper: `paper.dots()` divided by
+/// `paper.columns()` was 12 dots, the face was scaled until a capital `M` fitted
+/// inside those 12 dots, and the height a shop had asked for was never used at
+/// all. Measured on 80 mm paper, asking for 24 dots drew a **13-dot** capital
+/// (9 in Times New Roman) inside a 27-dot row — so more than half of every row
+/// was white space and the number on the settings screen meant nothing.
+///
+/// > *"the printed real page is completely different then the setting i set"*
+///
+/// So a cell is built from a **cap height** ([`Font::cell_for_cap`]): the face
+/// is scaled until a capital letter is exactly that many dots tall, and the
+/// advance is then whatever that face gives at that size. The letter is never
+/// squeezed and never stretched — the owner ruled on that:
+///
+/// > *"i dont want to damage the legth width ratio… u can take 2 lines if item
+/// > name is tooo long, then only"*
+///
+/// The consequence is that **how many characters fit on a line is a
+/// measurement, not an assumption**, and [`crate::metrics`] is what carries it
+/// to the layout so the paper and the preview cannot answer differently.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cell {
+    /// One character's advance, in dots. The face's own, at this size.
     pub width: u32,
+    /// The whole row this text occupies: ink plus leading.
     pub height: u32,
+    /// The cap height this cell was built for — what the shop asked for.
+    pub cap: u32,
+    /// Ink above the baseline, in dots. Ascenders, accents and brackets.
+    pub ascent: u32,
+    /// Ink below the baseline, in dots.
+    pub descent: u32,
     px: f32,
     baseline: f32,
 }
 
 impl Cell {
-    /// The cell for a column at scale 1 on this paper.
-    ///
-    /// Height is twice the width, which is the proportion ESC/POS Font A has
-    /// always used (12 × 24) and the proportion a receipt reads best at.
+    /// The point size this cell rasterises at. For a sink that has to draw the
+    /// same text a second way (the PDF sink measures in points).
     #[must_use]
-    pub const fn for_column(dots_per_column: u32) -> (u32, u32) {
-        (dots_per_column, dots_per_column * 2)
+    pub const fn px(&self) -> f32 {
+        self.px
+    }
+
+    /// Dots from the top of the row down to the baseline.
+    #[must_use]
+    pub const fn baseline(&self) -> f32 {
+        self.baseline
     }
 }
+
+/// **The characters that decide how tall a row has to be.**
+///
+/// A row must hold the tallest ink a receipt can print and the deepest — a
+/// bracket, the tail of a `g`, an underscore. Sizing a row from `M` alone clips
+/// them; sizing it from the face's declared ascent and descent wastes four or
+/// five dots a line on space the face reserves for glyphs no receipt contains.
+///
+/// **Accented capitals are deliberately not in it.** `Å` reaches six dots above
+/// the capital height in the built-in face, which made every row on the bill
+/// six dots taller for a letter no Indian receipt has ever printed — the whole
+/// paper saving, spent on a ring over an A. The ESC/POS code page this product
+/// selects (PC437) cannot print one either, so the two engines agree.
+///
+/// So the row is measured against exactly this string: every shape a bill, a
+/// kitchen ticket or a report actually puts on paper.
+const REFERENCE: &str = "M(){}[]|/\\jgpqy,;_QJ0123456789ABCXYZabcdfhklt%-.:*#+";
+
+/// **How much air goes under a line, as a percentage of the cap height.**
+///
+/// Twelve per cent, and never less than two dots. A receipt is dense; this is
+/// the difference between dense and cramped. It replaces `height / 8` of a
+/// nominal height that was not what got drawn.
+const LEADING_PCT: u32 = 12;
+const LEADING_MIN: u32 = 2;
 
 /// A loaded typeface, with its glyphs cached by cell size.
 ///
@@ -207,56 +262,107 @@ impl Font {
         &self.name
     }
 
-    /// The largest pixel size whose glyphs fit a `width × height` dot cell,
-    /// with the baseline placed so the line is vertically centred.
+    /// **A cell whose capital letters are exactly `cap` dots tall** — P32, and
+    /// the one way a cell is made now.
     ///
-    /// Searched rather than computed from the font's own metrics, because the
-    /// metrics describe the design and what matters here is what actually
-    /// rasterises inside twelve dots. Cached: this runs once per cell size per
-    /// boot, not once per character.
-    pub fn cell(&self, width: u32, height: u32) -> Cell {
-        if let Some(found) = lock(&self.cells).get(&(width, height)) {
+    /// # What it does
+    ///
+    /// 1. Scales the face until a rasterised `M` measures `cap` dots. Searched
+    ///    rather than computed from the face's declared metrics, because the
+    ///    metrics describe the design and what matters on a thermal head is
+    ///    what actually comes out of the rasteriser.
+    /// 2. Measures [`REFERENCE`] at that size to find the real ink above and
+    ///    below the baseline — so the row holds a bracket and the tail of a
+    ///    `g` and nothing more.
+    /// 3. Takes the advance from the face itself. **Never squeezed.**
+    ///
+    /// # What it replaces
+    ///
+    /// `cell(width, height)`, which grew the size only until `M` fitted a
+    /// 12-dot column and ignored the height entirely. That is the bug the owner
+    /// photographed: a 24-dot setting drawing a 13-dot letter in a 27-dot row.
+    ///
+    /// Cached: this runs once per size per face per boot, not once per
+    /// character.
+    pub fn cell_for_cap(&self, cap: u32) -> Cell {
+        let cap = cap.clamp(4, 200);
+        if let Some(found) = lock(&self.cells).get(&(cap, 0)) {
             return *found;
         }
+        let cell = self.build_cell(cap);
+        lock(&self.cells).insert((cap, 0), cell);
+        cell
+    }
 
-        // 'M' is the widest glyph in a monospace face's Latin range, and every
-        // glyph in it shares one advance — so fitting 'M' fits everything.
-        let mut best = Cell {
-            width,
-            height,
-            px: 4.0,
-            baseline: height as f32,
-        };
-        let mut px = 4.0_f32;
-        while px <= (height as f32) * 1.5 {
-            let metrics = self.inner.metrics('M', px);
-            let line = self
-                .inner
-                .horizontal_line_metrics(px)
-                .unwrap_or(fontdue::LineMetrics {
-                    ascent: px,
-                    descent: 0.0,
-                    line_gap: 0.0,
-                    new_line_size: px,
-                });
-            let ink_height = line.ascent - line.descent;
-            if metrics.advance_width > width as f32 || ink_height > height as f32 {
+    fn build_cell(&self, cap: u32) -> Cell {
+        // A capital is roughly 0.7 em in every Latin face, so the answer is
+        // near `cap / 0.7`. Searching outwards from there in quarter-pixel
+        // steps costs a handful of rasterisations and is exact about the thing
+        // that matters — the dot height that actually comes out.
+        let target = cap as f32;
+        let mut px = (target * 1.2).max(4.0);
+        let mut best_px = px;
+        let mut best_gap = f32::MAX;
+        let limit = (target * 3.0).max(12.0);
+        let mut probe = 4.0_f32;
+        while probe <= limit {
+            let drawn = self.inner.rasterize('M', probe).0.height as f32;
+            let gap = (drawn - target).abs();
+            // `<=` so that, among sizes that draw the same dot height, the
+            // LARGEST is chosen: a bigger point size fills its dots more
+            // solidly, which is what a thermal head wants.
+            if gap <= best_gap {
+                best_gap = gap;
+                best_px = probe;
+            }
+            if drawn > target + 2.0 {
                 break;
             }
-            // Centre what is left over, so a 24-dot cell holding a 20-dot face
-            // does not sit on the floor of its row.
-            let spare = (height as f32) - ink_height;
-            best = Cell {
-                width,
-                height,
-                px,
-                baseline: line.ascent + spare / 2.0,
-            };
-            px += 0.5;
+            probe += 0.25;
         }
+        px = best_px;
 
-        lock(&self.cells).insert((width, height), best);
-        best
+        // The row, measured against the shapes a receipt can actually print.
+        let mut ascent = 0.0_f32;
+        let mut descent = 0.0_f32;
+        for ch in REFERENCE.chars() {
+            let m = self.inner.metrics(ch, px);
+            if m.height == 0 {
+                continue;
+            }
+            let above = m.ymin as f32 + m.height as f32;
+            if above > ascent {
+                ascent = above;
+            }
+            let below = -(m.ymin as f32);
+            if below > descent {
+                descent = below;
+            }
+        }
+        let ascent = ascent.ceil().max(target) as u32;
+        let descent = descent.ceil().max(0.0) as u32;
+        let leading = (cap * LEADING_PCT / 100).max(LEADING_MIN);
+
+        // **The advance is a digit's, not `M`'s.** A bill is a column of
+        // figures before it is anything else, every face on offer draws its
+        // digits at one width (there is a test), and using the widest letter
+        // instead would leave a proportional face's numbers swimming in space.
+        let advance = self.inner.metrics('0', px).advance_width;
+        let width = if advance.is_finite() && advance >= 1.0 {
+            advance.round() as u32
+        } else {
+            cap.div_ceil(2).max(1)
+        };
+
+        Cell {
+            width: width.max(1),
+            height: ascent + descent + leading,
+            cap,
+            ascent,
+            descent,
+            px,
+            baseline: (leading as f32) / 2.0 + ascent as f32,
+        }
     }
 
     /// **How wide one character is, in dots, at this cell's size.**
@@ -297,59 +403,6 @@ impl Font {
         text.chars().map(|ch| self.advance(ch, cell)).sum()
     }
 
-    /// **A cell for an explicit height in dots**, rather than one derived from
-    /// the paper's column width.
-    ///
-    /// This is what a size in px means now. `Cell::for_column` still exists and
-    /// still describes the printer's own 12 × 24 grid; this describes what the
-    /// GRAPHICS engine draws when a shop has asked for 18 px text.
-    ///
-    /// The width it reports is the face's own 'M' advance at that size — for a
-    /// typewriter face that is every character's width, and for a proportional
-    /// one it is the widest, which is what a caller wanting a worst case
-    /// (a column that must not overflow) should reach for.
-    #[must_use]
-    pub fn cell_for_height(&self, height: u32) -> Cell {
-        // The same search `cell` does, against height alone: find the largest
-        // px whose ink fits the requested dot height.
-        let mut best = Cell {
-            width: height.div_ceil(2).max(1),
-            height,
-            px: 4.0,
-            baseline: height as f32,
-        };
-        let mut px = 4.0_f32;
-        while px <= (height as f32) * 1.5 {
-            let line = self
-                .inner
-                .horizontal_line_metrics(px)
-                .unwrap_or(fontdue::LineMetrics {
-                    ascent: px,
-                    descent: 0.0,
-                    line_gap: 0.0,
-                    new_line_size: px,
-                });
-            let ink_height = line.ascent - line.descent;
-            if ink_height > height as f32 {
-                break;
-            }
-            let spare = (height as f32) - ink_height;
-            let advance = self.inner.metrics('M', px).advance_width;
-            best = Cell {
-                width: if advance.is_finite() && advance >= 1.0 {
-                    advance.round() as u32
-                } else {
-                    height.div_ceil(2).max(1)
-                },
-                height,
-                px,
-                baseline: line.ascent + spare / 2.0,
-            };
-            px += 0.5;
-        }
-        best
-    }
-
     /// **Is every character the same width?**
     ///
     /// Measured, not declared. [`FAMILIES`] says so for the faces this build
@@ -365,7 +418,7 @@ impl Font {
         if let Some(known) = *lock(&self.monospace) {
             return known;
         }
-        let cell = self.cell_for_height(24);
+        let cell = self.cell_for_cap(15);
         let same = self.advance('i', cell) == self.advance('M', cell);
         *lock(&self.monospace) = Some(same);
         same
@@ -655,7 +708,7 @@ mod measuring {
     #[test]
     fn a_typewriter_face_measures_the_same_as_counting() {
         let font = builtin();
-        let cell = font.cell(12, 24);
+        let cell = font.cell_for_cap(15);
         let advance = font.advance('M', cell);
 
         for text in ["Masala Dosa", "1,240.00", "MMMMMMMM", "iiiiiiii"] {
@@ -682,7 +735,7 @@ mod measuring {
             return;
         };
         let font = Font::load(&bytes, "Times New Roman").expect("loads");
-        let cell = font.cell_for_height(24);
+        let cell = font.cell_for_cap(15);
 
         assert!(
             font.advance('i', cell) < font.advance('M', cell),
@@ -700,7 +753,7 @@ mod measuring {
     #[test]
     fn digits_are_the_same_width_in_every_face_on_offer() {
         let font = builtin();
-        let cell = font.cell_for_height(24);
+        let cell = font.cell_for_cap(15);
         let zero = font.advance('0', cell);
         for digit in "123456789".chars() {
             assert_eq!(font.advance(digit, cell), zero, "{digit} is out of step");
@@ -708,13 +761,13 @@ mod measuring {
     }
 
     /// A size in dots is what a px setting means, and asking for a bigger one
-    /// has to give bigger text. Guards against the search in `cell_for_height`
+    /// has to give bigger text. Guards against the search in `cell_for_cap`
     /// silently pinning to its floor.
     #[test]
     fn a_taller_cell_draws_wider_characters() {
         let font = builtin();
-        let small = font.cell_for_height(16);
-        let large = font.cell_for_height(32);
+        let small = font.cell_for_cap(10);
+        let large = font.cell_for_cap(24);
         assert!(small.height < large.height);
         assert!(
             font.advance('M', small) < font.advance('M', large),
@@ -728,7 +781,7 @@ mod measuring {
     #[test]
     fn no_character_measures_as_zero() {
         let font = builtin();
-        let cell = font.cell(12, 24);
+        let cell = font.cell_for_cap(15);
         for ch in ['\u{0}', '\u{7}', ' ', '\u{200b}', 'ಅ'] {
             assert!(font.advance(ch, cell) >= 1, "{ch:?} measured as nothing");
         }
@@ -748,8 +801,7 @@ mod tests {
     #[test]
     fn a_glyph_fits_its_cell_and_has_ink_in_it() {
         let font = Font::builtin().expect("loads");
-        let (w, h) = Cell::for_column(12);
-        let cell = font.cell(w, h);
+        let cell = font.cell_for_cap(15);
         let glyph = font.glyph('M', cell);
 
         assert!(!glyph.is_blank(), "'M' rasterised to nothing");
@@ -772,8 +824,7 @@ mod tests {
     #[test]
     fn a_space_is_blank_and_a_full_stop_is_not() {
         let font = Font::builtin().expect("loads");
-        let (w, h) = Cell::for_column(12);
-        let cell = font.cell(w, h);
+        let cell = font.cell_for_cap(15);
         assert!(font.glyph(' ', cell).is_blank());
         assert!(!font.glyph('.', cell).is_blank());
     }
@@ -781,7 +832,7 @@ mod tests {
     #[test]
     fn the_cache_returns_the_same_glyph() {
         let font = Font::builtin().expect("loads");
-        let cell = font.cell(12, 24);
+        let cell = font.cell_for_cap(15);
         let first = font.glyph('7', cell);
         let second = font.glyph('7', cell);
         assert!(
@@ -792,17 +843,15 @@ mod tests {
 
     #[test]
     fn every_thermal_cell_size_produces_a_usable_face() {
-        // 12 dots at 58 mm and 80 mm, 13 at 100 mm, and the same again doubled
-        // and trebled for scale 2 and 3.
+        // Every cap height the settings screen offers — see `catalog::SIZES`.
         let font = Font::builtin().expect("loads");
-        for dots in [12_u32, 13, 24, 26, 36, 39] {
-            let (w, h) = Cell::for_column(dots);
-            let cell = font.cell(w, h);
+        for cap in [9_u32, 11, 13, 15, 17, 19, 22, 25, 29, 35] {
+            let cell = font.cell_for_cap(cap);
             let glyph = font.glyph('8', cell);
-            assert!(!glyph.is_blank(), "'8' vanished at a {dots}-dot column");
+            assert!(!glyph.is_blank(), "'8' vanished at a {cap}-dot cap");
             assert!(
                 glyph.width <= cell.width && glyph.height <= cell.height,
-                "'8' overflows a {dots}-dot cell"
+                "'8' overflows a {cap}-dot cap"
             );
         }
     }

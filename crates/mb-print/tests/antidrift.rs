@@ -38,7 +38,7 @@ use mb_print::{pdf, text};
 fn t1_no_sink_can_drop_anything() {
     let fixture = Fixture::new();
     let ctx = fixture.context(Copy::Duplicate { number: 2 });
-    let doc = bill_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds");
+    let doc = bill_document(&common::metrics(PaperKind::Mm80), &ctx).expect("builds");
     let laid = layout(&doc).expect("lays out");
 
     let mut recorder = Recorder::new();
@@ -139,7 +139,7 @@ type Mutation = Box<dyn Fn(&mut mb_print::settings::ReceiptSettings)>;
 fn t9_every_amount_on_paper_round_trips_through_money() {
     let fixture = Fixture::new();
     let ctx = fixture.context(Copy::Original);
-    let doc = bill_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds");
+    let doc = bill_document(&common::metrics(PaperKind::Mm80), &ctx).expect("builds");
     let as_text = text::to_text(&layout(&doc).expect("lays out"));
 
     let mut checked = 0;
@@ -182,19 +182,19 @@ fn t10_a_reprint_is_marked_and_an_original_is_not() {
     let paper = Paper::new(PaperKind::Mm80);
 
     let original = text::to_text(
-        &layout(&bill_document(paper, &fixture.context(Copy::Original)).expect("builds"))
+        &layout(&bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds"))
             .expect("lays out"),
     );
     let reprint = text::to_text(
         &layout(
-            &bill_document(paper, &fixture.context(Copy::Duplicate { number: 3 })).expect("builds"),
+            &bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Duplicate { number: 3 })).expect("builds"),
         )
         .expect("lays out"),
     );
     let voided = text::to_text(
         &layout(
             &bill_document(
-                paper,
+                &common::metrics(paper.kind),
                 &fixture.context(Copy::Voided {
                     reason: "wrong table".to_owned(),
                 }),
@@ -227,11 +227,11 @@ fn a_bill_carried_to_the_table_says_it_is_not_paid() {
     let paper = Paper::new(PaperKind::Mm80);
 
     let carried = text::to_text(
-        &layout(&bill_document(paper, &fixture.context(Copy::NotPaid)).expect("builds"))
+        &layout(&bill_document(&common::metrics(paper.kind), &fixture.context(Copy::NotPaid)).expect("builds"))
             .expect("lays out"),
     );
     let original = text::to_text(
-        &layout(&bill_document(paper, &fixture.context(Copy::Original)).expect("builds"))
+        &layout(&bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds"))
             .expect("lays out"),
     );
 
@@ -261,7 +261,7 @@ fn t11_every_setting_changes_the_output() {
             settings: &settings,
             ..fixture.context(Copy::Original)
         };
-        text::to_text(&layout(&bill_document(paper, &ctx).expect("builds")).expect("lays out"))
+        text::to_text(&layout(&bill_document(&common::metrics(paper.kind), &ctx).expect("builds")).expect("lays out"))
     };
 
     let base = render_with(fixture.settings.clone());
@@ -332,7 +332,7 @@ fn toggle(
 fn t14_the_document_crosses_ipc_unchanged() {
     let fixture = Fixture::new();
     let doc = bill_document(
-        Paper::new(PaperKind::Mm80),
+        &common::metrics(PaperKind::Mm80),
         &fixture.context(Copy::Original),
     )
     .expect("builds");

@@ -569,8 +569,11 @@ pub fn print_sample_on(app: &App, printer_id: String) -> UiResult<String> {
 
     let (bill, order) = super::sample::sample_order().map_err(|e| words::from_print(&e))?;
     let store = config.store.to_print_store();
+    let table = crate::flows::first_table_label(app);
+    let time = crate::flows::clock_time(crate::flows::now());
+    let (metrics, _) = app.metrics_for(mb_print::queue::JobKind::Test, &printer);
     let document = mb_print::template::bill_document(
-        printer.paper,
+        &metrics,
         &mb_print::template::BillContext {
             bill: &bill,
             order: &order,
@@ -578,6 +581,12 @@ pub fn print_sample_on(app: &App, printer_id: String) -> UiResult<String> {
             settings: &config.receipt,
             customer: None,
             cashier: Some(who.name.as_str()),
+            // **The same values a real bill resolves** — P32. A test print
+            // that showed a table the real path could not produce is a test
+            // print that cannot find the bug it exists to find.
+            table: table.as_deref(),
+            time: Some(time.as_str()),
+            waiter: Some(who.name.as_str()),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
             // P31 — the same letterhead a real bill will carry.

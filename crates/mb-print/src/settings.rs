@@ -15,13 +15,37 @@ use serde::{Deserialize, Serialize};
 
 use crate::doc::{Pattern, Style};
 
-/// Where the logo goes. v1 had exactly these two.
+/// Where the logo goes.
+///
+/// v1 had two — nothing, or centred above the shop's name. The owner asked for
+/// the other two on 2026-08-23:
+///
+/// > *"logo placement (left right, top, if left right means the hotel name and
+/// > address will cover 70% of 3 inch or 4 inch paper, remaining 30% width for
+/// > logo, also logo correctly fit with that on ful size)"*
+///
+/// `Left` and `Right` put the picture and the letterhead in one band of rows —
+/// see [`crate::doc::Block::Band`], which had to be invented for them, because
+/// a `Document` was a flat top-to-bottom list and nothing could sit beside
+/// anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LogoPosition {
     #[default]
     None,
     Top,
+    /// The picture on the left, the shop's name and address centred in the rest.
+    Left,
+    /// The picture on the right, the same the other way round.
+    Right,
+}
+
+impl LogoPosition {
+    /// Is this one of the side-by-side placements?
+    #[must_use]
+    pub const fn is_beside(self) -> bool {
+        matches!(self, LogoPosition::Left | LogoPosition::Right)
+    }
 }
 
 /// Scope 8.2. Dynamic carries the amount, so the customer does not type it.
@@ -89,6 +113,37 @@ pub struct Show {
     pub tax_summary: bool,
     /// Scope 1.15 — "Cash 300 / UPI 200".
     pub payment_lines: bool,
+    /// **P32 — "TAX INVOICE" or "BILL OF SUPPLY" at the head of the bill.**
+    ///
+    /// A GST document has to say what it is and none of them did. Printed only
+    /// for a shop that has a GSTIN: putting "TAX INVOICE" on an unregistered
+    /// shop's bill would be a worse fault than printing nothing.
+    #[serde(default = "yes")]
+    pub title: bool,
+    /// **P32 — the time of day beside the date.** A restaurant bill without one
+    /// is not much of a record, and no bill this product printed had one.
+    #[serde(default = "yes")]
+    pub time: bool,
+    /// Scope 1.24 — how many people ate. Printed only when the order carries a
+    /// cover count, which is honestly unknown far more often than not.
+    #[serde(default = "yes")]
+    pub covers: bool,
+    /// Who took the order, as against who took the money.
+    #[serde(default = "yes")]
+    pub waiter: bool,
+    /// Scope 2.4 — the state code the supply happened in. Off by default: it
+    /// matters to a B2B customer and to nobody buying a dosa.
+    #[serde(default)]
+    pub place_of_supply: bool,
+    /// Scope 2.9 — the grand total spelled out. Off by default: two lines of
+    /// paper on every bill, wanted by an accounts department and by no walk-in.
+    #[serde(default)]
+    pub amount_in_words: bool,
+}
+
+/// Serde default for a toggle added after shops had saved settings.
+const fn yes() -> bool {
+    true
 }
 
 impl Default for Show {
@@ -103,6 +158,12 @@ impl Default for Show {
             hsn: false,
             tax_summary: true,
             payment_lines: true,
+            title: true,
+            time: true,
+            covers: true,
+            waiter: true,
+            place_of_supply: false,
+            amount_in_words: false,
         }
     }
 }
@@ -121,18 +182,38 @@ pub struct Separators {
     pub below_items: bool,
     pub below_subtotals: bool,
     pub below_grand_total: bool,
+    /// **P32 — a rule the template drew with no setting in front of it.**
+    ///
+    /// `tax_summary` ended with a bare `doc.separator`, so a shop could turn
+    /// every separator off and still get this one. A rule nobody can switch off
+    /// is the same fault as a setting nobody reads (round 2's lesson), and it
+    /// was one of the nine rules that made a quarter of the owner's bill.
+    #[serde(default)]
+    pub below_tax_summary: bool,
+    /// The same, under the payment lines.
+    #[serde(default)]
+    pub below_payments: bool,
 }
 
 impl Default for Separators {
+    /// **Four rules on a bill, not nine** — P32.
+    ///
+    /// Measured on the owner's own paper on 2026-08-23: nine rules cost 243
+    /// dots, 30 mm, **26 % of the whole bill**. A rule earns its place where a
+    /// reader's eye needs to stop — under the letterhead, around the table, and
+    /// around the total — and nowhere else. Every one of the nine is still a
+    /// setting; four of them start on.
     fn default() -> Self {
         Separators {
             below_store_header: true,
-            below_meta: true,
-            below_token: true,
+            below_meta: false,
+            below_token: false,
             below_column_names: true,
             below_items: true,
-            below_subtotals: true,
+            below_subtotals: false,
             below_grand_total: true,
+            below_tax_summary: false,
+            below_payments: false,
         }
     }
 }
@@ -150,31 +231,36 @@ pub struct Sections {
     pub token: Style,
 }
 
-/// **A shop's saved sizes carry their height in dots, explicitly.**
+/// **A shop's saved sizes carry their cap height explicitly.**
 ///
-/// `Style::new(2, true)` leaves `px` unset, meaning "two of the printer's own
-/// cells". That is right for a document built in code, and wrong for a SETTING:
-/// writing the configuration out and reading it back would turn `None` into
-/// `Some(48)` — the same size, a different value — so a shop's config file
-/// would not round-trip, and the export/import test said so the moment the px
-/// setting existed.
+/// A style built by `Style::new(2, true)` would be the same size and a
+/// different number on the wire, so writing the configuration out and reading
+/// it back would not round-trip — the export/import test said so the moment
+/// sizes became numbers.
 ///
-/// So the defaults say the number. 24 is one cell and 48 is two, which is
-/// exactly what these were before, and no shop's receipt moves.
+/// So the defaults say the number, and the number is a rung of
+/// [`Style::LADDER`] — never an arbitrary height, because a setting screen that
+/// offers ten choices must not be able to read back an eleventh.
 const fn dots(px: u16, bold: bool) -> Style {
     Style::px(px, bold, 24)
 }
 
 impl Default for Sections {
+    /// **The body is rung 4 and a heading is rung 8** — P32.
+    ///
+    /// The body was 24 nominal dots, which drew a 13-dot capital: the setting
+    /// and the paper disagreed by half. Rung 4 is a 15-dot capital, drawn
+    /// honestly, in a row that costs 21 dots against the old 27. Bigger text,
+    /// less paper, and the number on the screen is the number on the roll.
     fn default() -> Self {
         Sections {
-            store_name: dots(48, true),
-            meta: dots(24, false),
-            items: dots(24, false),
-            subtotals: dots(24, false),
-            grand_total: dots(48, true),
-            footer: dots(24, false),
-            token: dots(48, true),
+            store_name: dots(Style::HEADING, true),
+            meta: dots(Style::BODY, false),
+            items: dots(Style::BODY, false),
+            subtotals: dots(Style::BODY, false),
+            grand_total: dots(Style::HEADING, true),
+            footer: dots(Style::BODY, false),
+            token: dots(Style::HEADING, true),
         }
     }
 }
@@ -285,6 +371,9 @@ pub struct KitchenSettings {
     /// setting too, rather than a rule under nothing (the mistake
     /// `narrow_items` already documents on the bill side).
     pub show_column_names: bool,
+    /// **P32 — the ticket's own running number**, so a cook can say "KOT 14".
+    #[serde(default = "yes")]
+    pub show_kot_number: bool,
     /// v1's "2-column packing".
     pub two_column: bool,
     pub pattern: Pattern,
@@ -320,6 +409,7 @@ impl Default for KitchenSettings {
             show_table: true,
             show_time: true,
             show_column_names: false,
+            show_kot_number: true,
             two_column: false,
             pattern: Pattern::Dashed,
             separators: KitchenSeparators::default(),
@@ -327,11 +417,11 @@ impl Default for KitchenSettings {
             // hands, and a line of air between dishes is worth the paper.
             row_height: RowHeight::Relaxed,
             // The kitchen reads this across a hot room at speed, so the
-            // defaults are deliberately larger than the bill's. In dots, for
-            // the reason `dots` above gives.
-            title: dots(48, true),
-            details: dots(24, true),
-            items: dots(48, true),
+            // defaults are deliberately larger than the bill's — the food most
+            // of all. Rungs of `Style::LADDER`, for the reason `dots` gives.
+            title: dots(Style::HEADING, true),
+            details: dots(Style::BODY, true),
+            items: dots(Style::LADDER[8], true),
             // Named rather than empty: "" is not one of the choices, and the
             // settings catalogue is right to refuse a value that is not on its
             // own list.

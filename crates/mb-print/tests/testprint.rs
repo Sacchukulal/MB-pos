@@ -118,16 +118,27 @@ fn t12_nudging_moves_the_print_and_the_value_survives_a_restart() {
     // spaces, because a *centred* line re-centres inside the narrower width —
     // which is right, and which counting spaces would read as "it moved by
     // one".
-    assert!(straight.lines.iter().all(|l| l.indent == 0));
+    assert!(straight.lines.iter().all(|l| l.indent_dots == 0));
+    let moved = shifted.base_advance * 2;
     assert!(
-        shifted.lines.iter().all(|l| l.indent == 2),
-        "the offset did not move every line by the same whole number of columns"
+        shifted.lines.iter().all(|l| l.indent_dots == moved),
+        "the offset did not move every line by the same whole number of characters"
     );
 
     // Nothing was lost off the right edge.
     let printed = to_text(&shifted);
+    let across = shifted.lines.iter().filter_map(|l| match &l.content {
+        mb_print::LaidContent::Separator { width, .. } => Some(*width),
+        _ => None,
+    }).max().unwrap_or(0);
     for line in printed.lines() {
-        assert!(line.chars().count() <= PaperKind::Mm80.columns());
+        assert!(
+            line.chars().count() <= PaperKind::Mm80.columns(),
+            "{:?} is {} characters, and the rule is {} dots",
+            line,
+            line.chars().count(),
+            across
+        );
     }
     for must in ["TEST PRINT", "Alignment ruler", "Sample bill", "TOTAL"] {
         assert!(printed.contains(must), "{must} fell off the edge");

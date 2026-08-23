@@ -206,7 +206,7 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
     this a slightly stronger test than it was: before, a menu that arrived and
     could not be reached would still have passed.
   */
-  fireEvent.change(screen.getByRole('searchbox', { name: /Search the menu/ }), {
+  fireEvent.change(screen.getByRole('searchbox', { name: /Item or table number/ }), {
     target: { value: 'dosa' },
   });
   expect(await screen.findByRole('option', { name: /Masala Dosa/ })).toBeTruthy();

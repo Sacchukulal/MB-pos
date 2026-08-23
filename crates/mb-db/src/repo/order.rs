@@ -906,7 +906,16 @@ impl<'a> OrderRepo<'a> {
             order_type: encode::order_type_from_sql(&order_type)?,
             place_of_supply: encode::place_of_supply_from_sql(&row.get::<_, String>(14)?)?,
             rounding: encode::rounding_mode_from_sql(&row.get::<_, String>(15)?)?,
+            // **Recovered, not stored** — P32. Which lines were priced
+            // tax-inclusive is already on the lines, so the split a printed
+            // bill needs is a property of what was read back rather than two
+            // more columns and a migration.
+            tax_included: TaxAmounts::default(),
+            tax_added: TaxAmounts::default(),
         };
+        let bill = bill
+            .with_tax_split()
+            .map_err(|e| DbError::invariant(format!("a stored bill will not reconcile: {e}")))?;
         Ok(bill)
     }
 

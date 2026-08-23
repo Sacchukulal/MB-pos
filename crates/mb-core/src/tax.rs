@@ -136,6 +136,27 @@ impl TaxAmounts {
             igst: self.igst.add(other.igst)?,
         })
     }
+
+    /// **What is left after taking `other` out** — P32, and it exists so a
+    /// printed bill can separate the tax *added on top* from the tax *already
+    /// inside* an inclusive price.
+    ///
+    /// Without that split a bill with one inclusive line cannot both show item
+    /// amounts before tax and add up: the tax inside those prices would be
+    /// counted twice.
+    #[allow(clippy::should_implement_trait, reason = "subtraction here must be able to fail (D7)")]
+    pub fn sub(self, other: Self) -> Result<Self> {
+        Ok(TaxAmounts {
+            cgst: self.cgst.sub(other.cgst)?,
+            sgst: self.sgst.sub(other.sgst)?,
+            igst: self.igst.sub(other.igst)?,
+        })
+    }
+
+    #[must_use]
+    pub fn is_zero(self) -> bool {
+        self.cgst.is_zero() && self.sgst.is_zero() && self.igst.is_zero()
+    }
 }
 
 /// What one line contributes to the bill and to the return.

@@ -87,11 +87,6 @@
   resize: vertical;
 }
 
-.mb-import__box:focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
-  outline-offset: var(--space-1);
-}
-
 .mb-import__plan {
   display: flex;
   flex-direction: column;

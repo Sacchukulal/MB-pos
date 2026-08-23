@@ -244,6 +244,9 @@ const LINGER: Record<ToastTone, number> = {
   danger: 8_000,
 };
 
+/** How many notes may be on screen at once. The rest are older news. */
+const MOST_AT_ONCE = 3;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const next = useRef(1);
@@ -256,7 +259,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (tone: ToastTone, message: string, detail?: string) => {
       const id = next.current;
       next.current += 1;
-      setToasts((current) => [...current, { id, tone, message, detail }]);
+      setToasts((current) => {
+        // The same message again is the same message: it re-times rather than
+        // stacking. A key held down used to draw a tower of identical notes.
+        const others = current.filter((t) => t.message !== message);
+        return [...others, { id, tone, message, detail }].slice(-MOST_AT_ONCE);
+      });
       window.setTimeout(() => dismiss(id), LINGER[tone]);
     },
     [dismiss],

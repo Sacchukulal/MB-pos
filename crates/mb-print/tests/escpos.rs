@@ -27,7 +27,8 @@ use std::path::PathBuf;
 use common::Fixture;
 use mb_print::escpos::{JobOptions, encode_raster, encode_text};
 use mb_print::font::Font;
-use mb_print::layout::{Grid, layout, layout_for};
+use mb_print::layout::{layout, layout_for};
+use mb_print::metrics::Metrics;
 use mb_print::paper::{Paper, PaperKind};
 use mb_print::printer::{Capabilities, PrinterConfig, Target};
 use mb_print::raster::{RasterOptions, to_raster};
@@ -39,7 +40,7 @@ use mb_print::transport::file::FileTransport;
 #[test]
 fn t3_the_wire_is_what_it_was() {
     let fixture = Fixture::new();
-    let font = Font::builtin().expect("the shipped face loads");
+    let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
     let caps = Capabilities::default();
     let options = JobOptions::default();
 
@@ -48,21 +49,22 @@ fn t3_the_wire_is_what_it_was() {
         ("80mm", PaperKind::Mm80),
         ("100mm", PaperKind::Mm100),
     ] {
-        let doc = bill_document(Paper::new(kind), &fixture.context(Copy::Original))
+        let doc = bill_document(&common::metrics(kind), &fixture.context(Copy::Original))
             .expect("builds");
 
-        // **Each engine's own grid, which is what the queue does** (see
-        // `layout::Grid`). The printer's own font has three sizes and nothing
-        // between, so a text-engine bill is laid out in whole cells; the
-        // graphics engine draws any height and is laid out in dots. Laying both
-        // out the same way is what made this test fail the day sizes stopped
-        // being multiples — the text wire had four characters more per line
-        // than the roll can hold.
-        let for_text = layout_for(&doc, Grid::Cells).expect("lays out");
-        let for_raster = layout_for(&doc, Grid::Dots).expect("lays out");
+        // **Each engine's own metrics, which is what the queue does** (P32).
+        // The printer's own font has three sizes and nothing between; the
+        // graphics engine measures a real face. Laying both out the same way
+        // is what made this test fail the day sizes stopped being multiples —
+        // the text wire had four characters more per line than the roll holds.
+        let paper = Paper::new(kind);
+        let text_metrics = Metrics::printer_font(paper);
+        let raster_metrics = Metrics::face(paper, std::sync::Arc::clone(&font));
+        let for_text = layout_for(&doc, &text_metrics).expect("lays out");
+        let for_raster = layout_for(&doc, &raster_metrics).expect("lays out");
 
         let text_bytes = encode_text(&for_text, &caps, &options);
-        let raster = to_raster(&for_raster, &font, RasterOptions::default()).expect("rasters");
+        let raster = to_raster(&for_raster, &raster_metrics, RasterOptions::default()).expect("rasters");
         let raster_bytes = encode_raster(&raster, &caps, &options);
 
         check(&format!("wire-{name}-text"), &text_bytes);
@@ -90,7 +92,7 @@ fn the_file_transport_writes_the_bytes_and_does_not_rewind() {
 fn a_printer_with_no_qr_encoder_still_shows_the_customer_the_uri() {
     let fixture = Fixture::new();
     let doc = bill_document(
-        Paper::new(PaperKind::Mm80),
+        &common::metrics(PaperKind::Mm80),
         &fixture.context(Copy::Original),
     )
     .expect("builds");

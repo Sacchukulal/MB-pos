@@ -162,6 +162,10 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
     )
     .on_table(TableId::new("6"))
     .core;
+    // **A cover count**, so `receipt.show.covers` has something to show — a
+    // toggle that changes nothing on the sample is a toggle T1 cannot check.
+    let mut core = core;
+    core.covers = Some(4);
     let open = OpenOrder {
         core,
         token: mb_core::Claimed {
@@ -205,8 +209,14 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
 
 fn render_bill(config: &ShopConfig, bill: &mb_core::Bill, order: &mb_core::AnyOrder) -> String {
     let store = config.store.to_print_store();
-    let document = mb_print::template::bill_document(
+    // The built-in face on 80 mm — `bill_document` measures the room before it
+    // decides whether the item table is one line or two (P32).
+    let metrics = mb_print::metrics::Metrics::face(
         mb_print::paper::Paper::new(mb_print::paper::PaperKind::Mm80),
+        std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
+    );
+    let document = mb_print::template::bill_document(
+        &metrics,
         &mb_print::template::BillContext {
             bill,
             order,
@@ -214,11 +224,16 @@ fn render_bill(config: &ShopConfig, bill: &mb_core::Bill, order: &mb_core::AnyOr
             settings: &config.receipt,
             customer: None,
             cashier: Some("Ravi"),
+            table: Some("6"),
+            time: Some("19:42"),
+            waiter: Some("Suresh"),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
             // A logo has to EXIST for the logo settings to be able to do
-            // anything. Three bytes of the one-bit format D37 describes.
-            logo: Some(vec![8, 8, 0xFF]),
+            // anything — and it has to DECODE, or `logo` and `logo_width_pct`
+            // are two settings pointing at a picture the sink skips. The old
+            // `vec![8, 8, 0xFF]` was not one of ours and never drew.
+            logo: Some(mb_print::image::Monochrome::blank(32, 16).encode()),
         },
     )
     .expect("a bill document");
@@ -249,10 +264,13 @@ fn render_ticket(config: &ShopConfig) -> String {
             kind: mb_print::template::TicketKind::New,
             token: Some("42"),
             bill_number: Some("BIR/1207"),
+            kot_number: Some("14"),
             order_type: mb_core::OrderType::DineIn,
             table: Some("6"),
             time: Some("19:40"),
+            waiter: Some("Suresh"),
             station: Some("TANDOOR"),
+            reprint: false,
             lines: &lines,
             settings: &config.kitchen,
         },
@@ -935,9 +953,16 @@ fn a_size_saved_by_an_older_build_still_opens() {
         })
         .expect("the settings load, rather than falling back to standard");
 
-    // 2x was 48 dots and 3x was 72. The shop's receipt is unchanged.
-    assert_eq!(config.receipt.sections.items.size, 48, "\"Large\" stopped being large");
-    assert_eq!(config.receipt.sections.store_name.size, 72);
+    // **Rung for rung** (P32). A stored 48 was the eighth size on the old list
+    // and reads back as the eighth on the new one, so the shop's receipt keeps
+    // the size it was tuned to even though the number that expresses it moved
+    // from a nominal row height to a cap height.
+    assert_eq!(
+        config.receipt.sections.items.size,
+        mb_print::Style::LADDER[7],
+        "\"Large\" stopped being large"
+    );
+    assert_eq!(config.receipt.sections.store_name.size, mb_print::Style::LADDER[9]);
     // And the text engine still gets the multiplier its hardware understands.
     assert_eq!(config.receipt.sections.items.scale(), 2);
     assert_eq!(config.receipt.sections.store_name.scale(), 3);
@@ -982,9 +1007,10 @@ fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
         })
         .expect("the settings load rather than falling back to standard");
 
-    // 46 is nearest 48, and 28 is on the list exactly.
-    assert_eq!(config.receipt.sections.items.size, 48);
-    assert_eq!(config.receipt.sections.meta.size, 28);
+    // 46 was never on any list and snaps to the nearest rung; 28 was the
+    // fourth entry of the nominal list and reads back as the fourth rung.
+    assert!(mb_print::Style::LADDER.contains(&config.receipt.sections.items.size));
+    assert_eq!(config.receipt.sections.meta.size, mb_print::Style::LADDER[3]);
     // Whatever it snapped to must be something the screen can show back, or the
     // dropdown would open on nothing.
     for size in [config.receipt.sections.items.size, config.receipt.sections.meta.size] {
@@ -1011,14 +1037,23 @@ fn choosing_the_paper_width_relays_out_the_bill() {
     let wide = crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
         .expect("the preview");
     assert!(wide.paper.contains("3 inch"), "{}", wide.paper);
-    assert_eq!(wide.doc.columns, 48, "80 mm paper is 48 columns");
+    // **Measured, not assumed** (P32): how many characters fit is a fact about
+    // the face and the size, so the number is whatever the built-in face gives
+    // at the body size — and it is more on the wider roll, which is the whole
+    // claim this test makes.
+    let wide_columns = wide.doc.columns;
+    assert!(wide_columns >= 40, "80 mm paper fits only {wide_columns} characters");
 
     crate::settings::printers::set_paper_on(&app, 58).expect("two inch");
 
     let narrow = crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
         .expect("the preview");
     assert!(narrow.paper.contains("2 inch"), "{}", narrow.paper);
-    assert_eq!(narrow.doc.columns, 32, "58 mm paper is 32 columns");
+    assert!(
+        narrow.doc.columns < wide_columns,
+        "58 mm fits {} characters and 80 mm fits {wide_columns}",
+        narrow.doc.columns
+    );
 
     // And it is on the printer bills actually go to, so the paper a customer's
     // bill comes out on moved with it — not just the picture on the screen.

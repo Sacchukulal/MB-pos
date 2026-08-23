@@ -363,9 +363,6 @@ pub struct PreviewView {
     /// stack when the face is not installed, which is what the printer does too
     /// (`SystemFaces::load`).
     pub font: String,
-    /// Whether that face has one width for every character. The preview lays a
-    /// proportional one out by its boxes rather than by counting spaces.
-    pub font_is_monospace: bool,
     /// **Settings that could not be used yet, by name.**
     ///
     /// The preview redraws on every keystroke, and half-typed is a normal
@@ -421,12 +418,19 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
     }
 
     let (paper, paper_label) = preview_paper(app);
+    // **The preview takes the printer's own engine, face and paper** — P32.
+    //
+    // It used to lay every preview out for the graphics engine, whatever the
+    // printer was set to. Measured: on the text engine four of the ten sizes
+    // wrap differently and all of them snap to one of three heights, so a shop
+    // on that engine was being shown a bill it would never get.
+    let around = super::sample::around_for(app, paper, group.as_str());
     let doc = match Group::from_code(&group) {
-        Some(Group::Kitchen) => super::sample::kitchen_preview(&wanted, paper),
+        Some(Group::Kitchen) => super::sample::kitchen_preview(&wanted, &around),
         // Everything else previews the BILL, and on purpose: a shop changing
         // its name or its GST number wants to see where that lands on paper
         // just as much as one changing a separator.
-        _ => super::sample::bill_preview(&wanted, paper, crate::logo::stored(app)),
+        _ => super::sample::bill_preview(&wanted, &around),
     }
     .map_err(|e| words::from_print(&e))?;
 
@@ -447,7 +451,6 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
         font: family
             .filter(|f| f.file.is_some())
             .map_or_else(String::new, |f| windows_family(f.label).to_owned()),
-        font_is_monospace: family.is_none_or(|f| f.monospace),
         not_usable_yet,
     })
 }

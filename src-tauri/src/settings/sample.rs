@@ -39,7 +39,8 @@ use mb_core::{
     Settlement, StaffId, TableId, TaxRate, TaxTreatment, Timestamp,
 };
 use mb_print::error::PrintError;
-use mb_print::layout::layout;
+use mb_print::layout::layout_for;
+use mb_print::metrics::Metrics;
 use mb_print::paper::Paper;
 
 use super::{Billing, ShopConfig};
@@ -166,41 +167,166 @@ pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
     Ok((bill, AnyOrder::Settled(settled)))
 }
 
-/// **Three tiny black squares.** A logo has to exist for the logo settings to
-/// be able to do anything, and P07's one-bit format is width, height, bits.
-const SAMPLE_LOGO: &[u8] = &[8, 8, 0xFF, 0x81, 0x81, 0xFF, 0xFF, 0x81, 0x81, 0xFF];
+/// **A real one-bit picture**, for a shop that has not chosen a logo.
+///
+/// This used to be `&[8, 8, 0xFF, …]` with a comment calling it "three tiny
+/// black squares". It does not start with `MB1`, so `image::decode` refused it
+/// and the raster sink skipped it with a note: **it has never once been
+/// drawn.** A shop with no logo saw `[ logo ]` on the screen standing in for a
+/// picture that would not have printed either.
+///
+/// A 64 × 32 frame with a diagonal, encoded properly, so the logo settings can
+/// actually be seen to do something.
+fn sample_logo() -> Vec<u8> {
+    let mut image = mb_print::image::Monochrome::blank(64, 32);
+    for x in 0..64 {
+        image.set(x, 0);
+        image.set(x, 31);
+    }
+    for y in 0..32 {
+        image.set(0, y);
+        image.set(63, y);
+        image.set(y * 2, y);
+    }
+    image.encode()
+}
+
+/// **Everything a preview needs that a REAL print resolves from the shop.**
+///
+/// # Why this exists — P32
+///
+/// The sample used to pass `table: Some("6")`, `time: Some("19:40")` and
+/// `bill_number: Some("SAMPLE")` straight into the template. The real print
+/// path passed the table's **database id** and `None` for the other two. So
+/// three real faults — a bill reading
+/// `Table  tbl_outlet_default_sec_mt48cjqf_h1_`, a kitchen ticket with no
+/// token and no time — were **invisible to the preview by construction**, and
+/// they reached a real install and a photograph.
+///
+/// > A sample may differ in its DATA. It must not differ in its PATH.
+///
+/// So every value here is resolved by the caller with the same function the
+/// printer uses, and this struct is what carries them in.
+#[derive(Debug, Clone)]
+pub struct Around {
+    pub paper: Paper,
+    /// The face and the sizes the chosen printer will actually draw with.
+    pub metrics: Metrics,
+    /// `raster` or `text` — laid out for the engine the printer is set to, so a
+    /// shop on the text engine is not shown the graphics engine's bill.
+    pub engine: &'static str,
+    pub logo: Option<Vec<u8>>,
+    /// The table's own name, through `flows::table_label`.
+    pub table: Option<String>,
+    /// Through `flows::clock_time`, against a fixed moment — see [`AT`].
+    pub time: String,
+    pub waiter: Option<String>,
+    pub cashier: Option<String>,
+}
+
+impl Around {
+    /// Plain 80 mm in the built-in face, for a test that only wants a document.
+    ///
+    /// **Falls back to the printer's own metrics** rather than panicking if the
+    /// built-in face will not load: a preview is never worth stopping a counter
+    /// for, and `typefaces::SystemFaces` reports a damaged install properly at
+    /// start-up. In practice `Font::builtin` reads a constant compiled into
+    /// this binary and there is a test in `mb-print` that it loads.
+    #[must_use]
+    pub fn plain(paper: Paper) -> Around {
+        let metrics = mb_print::font::Font::builtin()
+            .map_or_else(
+                |_| Metrics::printer_font(paper),
+                |font| Metrics::face(paper, std::sync::Arc::new(font)),
+            );
+        Around {
+            paper,
+            metrics,
+            engine: "raster",
+            logo: None,
+            table: Some("6".to_owned()),
+            time: "19:40".to_owned(),
+            waiter: Some("Suresh".to_owned()),
+            cashier: Some("Ravi".to_owned()),
+        }
+    }
+}
+
+/// **Build [`Around`] the way a real print builds it.**
+///
+/// Every value comes through the same function the printer path uses:
+/// `flows::table_label` for the table, `flows::clock_time` for the time,
+/// `flows::staff_name` for the waiter, `state::printer_config_for` for the
+/// engine and the face. The only thing that differs from a real bill is which
+/// order it is.
+pub fn around_for(app: &crate::state::App, paper: Paper, group: &str) -> Around {
+    // **The same question the queue asks**, through the same function — the
+    // kitchen ticket and the bill each have their own face and their own
+    // engine, and a preview that guessed either would be a preview that lies.
+    let kind = if group == "kitchen" {
+        mb_print::queue::JobKind::Kitchen
+    } else {
+        mb_print::queue::JobKind::Bill
+    };
+    let printer = crate::flows::default_printer(app)
+        .unwrap_or_else(|_| mb_print::printer::PrinterConfig::new("prn_preview", "Preview", mb_print::printer::Target::None))
+        .with_paper(paper.kind);
+    let (metrics, engine) = app.metrics_for(kind, &printer);
+
+    // **The shop's own first table, through the real lookup.** A sample that
+    // invented `"6"` could not show a bill printing a database id, and that is
+    // exactly what reached the owner's printer.
+    let table = crate::flows::first_table_label(app);
+
+    Around {
+        paper,
+        metrics,
+        engine,
+        logo: crate::logo::stored(app),
+        table,
+        // A fixed moment, for the reason `AT` gives: two renders a second
+        // apart must differ only where a setting differs. It still goes
+        // through the formatter the paper uses.
+        time: crate::flows::clock_time(AT),
+        waiter: crate::flows::current_staff_name(app),
+        cashier: crate::flows::current_staff_name(app),
+    }
+}
 
 /// The bill, laid out with this shop's settings, ready for the screen.
-pub fn bill_preview(
-    config: &ShopConfig,
-    paper: Paper,
-    logo: Option<Vec<u8>>,
-) -> Result<PreviewDoc, PrintError> {
+pub fn bill_preview(config: &ShopConfig, around: &Around) -> Result<PreviewDoc, PrintError> {
     let (bill, order) = sample_order()?;
     let store = config.store.to_print_store();
     let document = mb_print::template::bill_document(
-        paper,
+        &around.metrics,
         &mb_print::template::BillContext {
             bill: &bill,
             order: &order,
             store: &store,
             settings: &config.receipt,
             customer: None,
-            cashier: Some("Ravi"),
+            cashier: around.cashier.as_deref(),
+            table: around.table.as_deref(),
+            time: Some(around.time.as_str()),
+            waiter: around.waiter.as_deref(),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
-            // **This shop's own logo when it has chosen one** (P31), and the
-            // three squares when it has not. The preview is what proves the
+            // **This shop's own logo when it has chosen one** (P31), and a real
+            // sample picture when it has not. The preview is what proves the
             // logo settings do anything at all, so showing a stand-in to
             // somebody who has a real one would be showing them the wrong bill.
-            logo: Some(logo.unwrap_or_else(|| SAMPLE_LOGO.to_vec())),
+            logo: Some(around.logo.clone().unwrap_or_else(sample_logo)),
         },
     )?;
-    Ok(to_preview(&layout(&document)?))
+    Ok(to_preview(
+        &layout_for(&document, &around.metrics)?,
+        &around.metrics,
+        around.engine,
+    ))
 }
 
 /// The kitchen ticket, the same way.
-pub fn kitchen_preview(config: &ShopConfig, paper: Paper) -> Result<PreviewDoc, PrintError> {
+pub fn kitchen_preview(config: &ShopConfig, around: &Around) -> Result<PreviewDoc, PrintError> {
     let lines = vec![
         mb_print::template::TicketLine {
             name: "Paneer Butter Masala (Half)".to_owned(),
@@ -216,21 +342,27 @@ pub fn kitchen_preview(config: &ShopConfig, paper: Paper) -> Result<PreviewDoc, 
         },
     ];
     let document = mb_print::template::kitchen_document(
-        paper,
+        around.paper,
         &mb_print::template::KitchenContext {
             kind: mb_print::template::TicketKind::New,
             token: Some("7"),
             bill_number: Some("SAMPLE"),
+            kot_number: Some("14"),
             order_type: OrderType::DineIn,
-            table: Some("6"),
-            // A fixed time, for the reason `AT` gives.
-            time: Some("19:40"),
+            table: around.table.as_deref(),
+            time: Some(around.time.as_str()),
+            waiter: around.waiter.as_deref(),
             station: None,
+            reprint: false,
             lines: &lines,
             settings: &config.kitchen,
         },
     )?;
-    Ok(to_preview(&layout(&document)?))
+    Ok(to_preview(
+        &layout_for(&document, &around.metrics)?,
+        &around.metrics,
+        around.engine,
+    ))
 }
 
 #[cfg(test)]
@@ -288,8 +420,9 @@ mod tests {
             let paper = Paper::new(kind);
             // A shop that has filled in nothing at all — its first day.
             let empty = ShopConfig::default();
-            assert!(bill_preview(&empty, paper, None).is_ok(), "{kind:?} empty");
-            assert!(kitchen_preview(&empty, paper).is_ok(), "{kind:?} empty");
+            let around = Around::plain(paper);
+            assert!(bill_preview(&empty, &around).is_ok(), "{kind:?} empty");
+            assert!(kitchen_preview(&empty, &around).is_ok(), "{kind:?} empty");
 
             // And one with everything turned on.
             let mut full = ShopConfig::default();
@@ -298,12 +431,12 @@ mod tests {
             full.store.is_composition = true;
             full.receipt.show.hsn = true;
             full.receipt.qr = mb_print::settings::QrMode::Dynamic;
-            full.receipt.logo = mb_print::settings::LogoPosition::Top;
+            full.receipt.logo = mb_print::settings::LogoPosition::Left;
             full.receipt.sections.store_name = mb_print::Style::new(3, true);
             full.kitchen.two_column = true;
             full.kitchen.show_column_names = true;
-            assert!(bill_preview(&full, paper, None).is_ok(), "{kind:?} full");
-            assert!(kitchen_preview(&full, paper).is_ok(), "{kind:?} full");
+            assert!(bill_preview(&full, &around).is_ok(), "{kind:?} full");
+            assert!(kitchen_preview(&full, &around).is_ok(), "{kind:?} full");
         }
     }
 
@@ -322,35 +455,39 @@ mod tests {
         config.receipt.pattern = mb_print::Pattern::Dotted;
 
         let paper = Paper::new(PaperKind::Mm80);
+        let around = Around::plain(paper);
         let (bill, order) = sample_order().expect("the sample computes");
         let store = config.store.to_print_store();
         let document = mb_print::template::bill_document(
-            paper,
+            &around.metrics,
             &mb_print::template::BillContext {
                 bill: &bill,
                 order: &order,
                 store: &store,
                 settings: &config.receipt,
                 customer: None,
-                cashier: Some("Ravi"),
+                cashier: around.cashier.as_deref(),
+                table: around.table.as_deref(),
+                time: Some(around.time.as_str()),
+                waiter: around.waiter.as_deref(),
                 copy: mb_print::template::Copy::Original,
                 einvoice: mb_print::template::EInvoice::default(),
-                logo: Some(SAMPLE_LOGO.to_vec()),
+                logo: Some(sample_logo()),
             },
         )
         .expect("builds");
-        let laid = layout(&document).expect("lays out");
+        let laid = layout_for(&document, &around.metrics).expect("lays out");
 
         // What the printer's text sink emits.
         let from_printer = laid.text_lines();
         // What the screen is handed.
-        let from_screen: Vec<String> = bill_preview(&config, paper, None)
+        let from_screen: Vec<String> = bill_preview(&config, &around)
             .expect("previews")
             .lines
             .iter()
             .filter_map(|line| match line {
                 crate::preview::PreviewLine::Text { text, indent, .. } => {
-                    Some(format!("{}{text}", " ".repeat(*indent)))
+                    Some(format!("{}{text}", " ".repeat(laid.columns_of(*indent))))
                 }
                 _ => None,
             })

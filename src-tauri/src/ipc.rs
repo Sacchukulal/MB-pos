@@ -419,6 +419,11 @@ macro_rules! commands {
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
             $crate::ipc::preview_test_page,
+            // **Audit D6, at last** — the REAL bill and the REAL kitchen ticket,
+            // before either reaches paper (P32). `bill.create`, because
+            // looking at what you are about to print is part of billing.
+            $crate::ipc::preview_order,
+            $crate::ipc::preview_kitchen,
             $crate::ipc::current_cart,
             $crate::ipc::cart_add,
             $crate::ipc::cart_set_qty,
@@ -428,6 +433,7 @@ macro_rules! commands {
             $crate::ipc::cart_set_order_type,
             $crate::ipc::cart_add_payment,
             $crate::ipc::cart_clear_payments,
+            $crate::ipc::cart_cash_given,
             $crate::ipc::open_orders,
             $crate::ipc::menu_items,
             $crate::ipc::search_items,
@@ -435,6 +441,13 @@ macro_rules! commands {
             $crate::ipc::cart_set_discount,
             $crate::ipc::cart_clear_discount,
             $crate::flows::print_kitchen_ticket,
+            // P32 — the cook lost the paper. The WHOLE order, marked as a
+            // reprint, with the ledger untouched.
+            $crate::flows::reprint_kitchen_ticket,
+            // P32 — scope 7.10, the A4 invoice a B2B customer asks for. The PDF
+            // sink has existed since P06 and nothing but the report exporter
+            // ever called it.
+            $crate::flows::bill_pdf,
             $crate::flows::complete_bill,
             $crate::flows::print_open_bill,
             // P11 — signing in, the people, the history. `guard.rs` has a test
@@ -697,16 +710,18 @@ macro_rules! commands {
 // The preview — the fourth sink's input.
 // ---------------------------------------------------------------------------
 
+// **There was a second `metrics_for` here, and it was the bug it exists to
+// prevent.** It took a font KEY, while `App::metrics_for` takes a job KIND and
+// asks `face_for` — the same question the queue asks. Two functions answering
+// "which face" is exactly how a preview and a printer come to draw different
+// documents, so there is one, on `App`.
+
 /// Lay out a sample bill and hand it to the screen.
 ///
 /// The sample is **P07's test slip** rather than a second invented one: it is
 /// already a real-looking bill with real amounts, it already carries the
 /// alignment ruler and the print offset, and it needs no shop — which means the
 /// preview works on a first run, like everything else in this session.
-///
-/// P09 will add `preview_order(order_id)` beside this, against a real bill.
-/// That is audit **D6** — *"no bill preview before printing"* — and it costs
-/// one command, because the sink already exists.
 #[tauri::command]
 pub fn preview_test_page(
     app: tauri::State<'_, App>,
@@ -716,9 +731,41 @@ pub fn preview_test_page(
         Some(id) => find_printer(&app, &id)?,
         None => PrinterConfig::new("prn_preview", "Preview", Target::None),
     };
+    let (metrics, engine) = app.metrics_for(mb_print::queue::JobKind::Test, &printer);
     let document = mb_print::testprint::test_document(&printer, None);
-    let laid = mb_print::layout::layout(&document).map_err(|e| words::from_print(&e))?;
-    Ok(crate::preview::to_preview(&laid))
+    let laid =
+        mb_print::layout::layout_for(&document, &metrics).map_err(|e| words::from_print(&e))?;
+    Ok(crate::preview::to_preview(&laid, &metrics, engine))
+}
+
+/// **The REAL bill for the REAL order, before it prints** — audit D6, and it
+/// was never built until P32.
+///
+/// > *"No bill preview before printing. You cannot see the actual bill for the
+/// > actual order before it comes out of the printer."*
+///
+/// `ipc.rs` has carried a comment since P08 saying *"P09 will add
+/// `preview_order(order_id)` beside this"*. P09 to P31 came and went; a grep
+/// for the name found the comment and nothing else. Until now the only preview
+/// in the product was of an invented sample — which is also why a bill printing
+/// a database key where the table's name goes survived to a real install.
+///
+/// It costs one command, because the sink already exists.
+#[tauri::command]
+pub fn preview_order(
+    app: tauri::State<'_, App>,
+    order_id: Option<String>,
+) -> UiResult<crate::preview::PreviewDoc> {
+    crate::flows::preview_order_on(&app, order_id)
+}
+
+/// The kitchen ticket that would print right now, for the same reason.
+#[tauri::command]
+pub fn preview_kitchen(
+    app: tauri::State<'_, App>,
+    order_id: Option<String>,
+) -> UiResult<crate::preview::PreviewDoc> {
+    crate::flows::preview_kitchen_on(&app, order_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,6 +1085,47 @@ pub fn cart_clear_payments(
         cart_view(state, &app.shop_config())
     });
     shown(&handle, view)
+}
+
+/// **The cash the customer handed over, as typed.**
+///
+/// The one box on the till that a cashier types money into. It OWNS the cash
+/// line: every commit replaces what was there, so a mistyped amount is fixed by
+/// typing it again rather than by an undo button. An empty box means no cash
+/// has been counted, and the whole balance goes down in whichever mode is lit
+/// when the bill is completed.
+///
+/// The amount arrives as TEXT and Rust parses it (R8) — the screen never turns
+/// rupees into paise.
+#[tauri::command]
+pub fn cart_cash_given(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    amount: String,
+) -> UiResult<CartView> {
+    guard::require(&app, Permission::BillCreate)?;
+    let typed = amount.trim().to_owned();
+    let cleared = app.with_cart_mut(|state| {
+        state.settlement = mb_core::Settlement::new();
+        cart_view(state, &app.shop_config())
+    })?;
+    if typed.is_empty() {
+        return shown(&handle, Ok(cleared));
+    }
+    let given = mb_core::Money::parse(&typed).map_err(|e| {
+        UiError::new(
+            "payment.cash",
+            "Type how much cash was given, like 500 or 500.00.",
+        )
+        .with_detail(e.to_string())
+    })?;
+    if !given.is_positive() {
+        return shown(&handle, Ok(cleared));
+    }
+    shown(
+        &handle,
+        cart_add_payment_on(&app, "Cash".to_owned(), given.paise(), None),
+    )
 }
 
 // ---------------------------------------------------------------------------

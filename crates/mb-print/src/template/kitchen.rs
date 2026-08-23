@@ -67,13 +67,25 @@ pub struct KitchenContext<'a> {
     pub kind: TicketKind,
     pub token: Option<&'a str>,
     pub bill_number: Option<&'a str>,
+    /// **The ticket's own running number** — P32.
+    ///
+    /// A cook could not say *"KOT 14"* because there was no such number. It is
+    /// claimed per business day like the token and the bill number, so two
+    /// tickets for one order are 14 and 15 and a kitchen can talk about them.
+    pub kot_number: Option<&'a str>,
     pub order_type: OrderType,
     pub table: Option<&'a str>,
     /// Already formatted by the caller. This crate owns no clock (D5, D19).
     pub time: Option<&'a str>,
+    /// Who called the order in. A cook with a question needs a person to ask.
+    pub waiter: Option<&'a str>,
     /// Scope 3.1 — the station this ticket is going to, when the shop routes
     /// by category.
     pub station: Option<&'a str>,
+    /// **A ticket printed again**, marked so the kitchen does not cook it
+    /// twice. The bill has had `Copy::Duplicate` since P06; the ticket that
+    /// actually causes food to be made had nothing.
+    pub reprint: bool,
     pub lines: &'a [TicketLine],
     pub settings: &'a KitchenSettings,
 }
@@ -91,14 +103,33 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     let s = ctx.settings;
     let mut doc = Document::new(paper);
 
+    // **The head, in one or two rows instead of six** — P32.
+    //
+    // A ticket is read across a hot room in a second. It used to be a centred
+    // title, a centred token, and then `Bill`, `Type`, `Table` and `Time` as
+    // four full-width label/value rows — six rows of paper before a cook saw a
+    // single dish. The title and the ticket's own number share a line; what the
+    // cook needs to place the order (table, type, time) shares another.
     if s.show_title {
         let title = match ctx.kind {
             TicketKind::New => "KITCHEN",
             TicketKind::Cancellation => "*** CANCEL ***",
         };
-        doc.text(title, s.title, Align::Centre);
+        match ctx.kot_number.filter(|_| s.show_kot_number) {
+            Some(number) => {
+                doc.row(title, format!("KOT {number}"), s.title);
+            }
+            None => {
+                doc.text(title, s.title, Align::Centre);
+            }
+        }
         if let Some(station) = ctx.station {
             doc.text(station, s.details, Align::Centre);
+        }
+        if ctx.reprint {
+            // The same weight the bill gives a duplicate, and for a bigger
+            // reason: a ticket printed twice is food cooked twice.
+            doc.text("*** REPRINT ***", s.details, Align::Centre);
         }
         if s.separators.below_title {
             doc.separator(s.pattern);
@@ -111,26 +142,49 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
             doc.separator(s.pattern);
         }
     }
+
+    // One row: what to put it on, what kind of order it is, and when it was
+    // called. Three columns rather than three rows.
+    let table = match (s.show_table, ctx.table) {
+        (true, Some(table)) => format!("Table {table}"),
+        _ => String::new(),
+    };
+    let kind = if s.show_order_type {
+        match ctx.order_type {
+            OrderType::DineIn => "Dine In",
+            OrderType::Parcel => "Parcel",
+            OrderType::SelfService => "Self Service",
+            OrderType::Delivery => "Delivery",
+        }
+    } else {
+        ""
+    };
+    let time = match (s.show_time, ctx.time) {
+        (true, Some(time)) => time,
+        _ => "",
+    };
+    if !table.is_empty() || !kind.is_empty() || !time.is_empty() {
+        doc.push(Block::Columns {
+            columns: vec![
+                Column::fill(Align::Left),
+                Column::fill(Align::Centre),
+                Column::fill(Align::Right),
+            ],
+            rows: vec![vec![table, kind.to_owned(), time.to_owned()]],
+            style: s.details,
+        });
+    }
+    // The bill number and the waiter are for a question, not for cooking, so
+    // they go on one quiet row under the rest.
+    let mut aside = Vec::new();
     if s.show_bill_number && let Some(number) = ctx.bill_number {
-        doc.row("Bill", number, s.details);
+        aside.push(format!("Bill {number}"));
     }
-    if s.show_order_type {
-        doc.row(
-            "Type",
-            match ctx.order_type {
-                OrderType::DineIn => "Dine In",
-                OrderType::Parcel => "Parcel",
-                OrderType::SelfService => "Self Service",
-                OrderType::Delivery => "Delivery",
-            },
-            s.details,
-        );
+    if let Some(waiter) = ctx.waiter {
+        aside.push(waiter.to_owned());
     }
-    if s.show_table && let Some(table) = ctx.table {
-        doc.row("Table", table, s.details);
-    }
-    if s.show_time && let Some(time) = ctx.time {
-        doc.row("Time", time, s.details);
+    if !aside.is_empty() {
+        doc.text(aside.join("   "), s.details, Align::Left);
     }
     if s.separators.below_details {
         doc.separator(s.pattern);
@@ -145,7 +199,9 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     if s.separators.below_items {
         doc.separator(s.pattern);
     }
-    doc.spacer(2);
+    // One blank row, not two: the job already feeds three lines before the
+    // blade (P32).
+    doc.spacer(1);
 
     Ok(doc)
 }
