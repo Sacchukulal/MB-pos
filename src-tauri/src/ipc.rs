@@ -62,6 +62,15 @@ pub struct MoneyView {
 /// once, and it clamps rather than wrapping: a shop with more than four
 /// billion tables has a different problem, and saturating says so honestly.
 #[must_use]
+/// A rate from whole percent, for the demo shop's fixed menu.
+///
+/// `unwrap_or` rather than `expect`: the workspace forbids a panic on the money
+/// path (D7). These are literals that cannot fail, and a nil rate on a demo
+/// item is a visibly wrong number rather than a counter that will not start.
+fn demo_rate(percent: u32) -> mb_core::TaxRate {
+    mb_core::TaxRate::from_percent(percent).unwrap_or(mb_core::TaxRate::ZERO)
+}
+
 pub fn count(n: i64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
@@ -843,8 +852,7 @@ pub fn cart_set_qty(
     })?;
     let view = app.with_cart_mut(|state| {
         state.cart.set_qty(index, parsed).map_err(|e| {
-            UiError::new("cart.qty", "That quantity could not be set.")
-                .with_detail(e.to_string())
+            UiError::new("cart.qty", "That quantity could not be set.").with_detail(e.to_string())
         })?;
         cart_view(state, &app.shop_config())
     });
@@ -949,7 +957,10 @@ pub fn cart_set_order_type(
 ) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
     let kind = order_type_from_label(&order_type).ok_or_else(|| {
-        UiError::new("cart.order_type", format!("\"{order_type}\" is not an order type."))
+        UiError::new(
+            "cart.order_type",
+            format!("\"{order_type}\" is not an order type."),
+        )
     })?;
     let view = app.with_cart_mut(|state| {
         state.order_type = kind;
@@ -973,7 +984,10 @@ pub fn cart_add_payment(
     amount_paise: i64,
     reference: Option<String>,
 ) -> UiResult<CartView> {
-    shown(&handle, cart_add_payment_on(&app, mode, amount_paise, reference))
+    shown(
+        &handle,
+        cart_add_payment_on(&app, mode, amount_paise, reference),
+    )
 }
 
 /// **P29, scope 8.3: the payment goes past a provider on its way onto the
@@ -1019,14 +1033,15 @@ pub fn cart_add_payment_on(
     // (see `PaymentModes`), and this is the same refusal moved to the front of
     // the queue so nothing outside this process is touched on the way to it.
     if !amount.is_positive() {
-        return Err(UiError::new(
-            "payment.invalid",
-            "That payment could not be taken.",
-        )
-        .with_detail(mb_core::PaymentError::NonPositiveAmount.to_string()));
+        return Err(
+            UiError::new("payment.invalid", "That payment could not be taken.")
+                .with_detail(mb_core::PaymentError::NonPositiveAmount.to_string()),
+        );
     }
 
-    let reference = reference.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
+    let reference = reference
+        .map(|r| r.trim().to_owned())
+        .filter(|r| !r.is_empty());
     let order_id = app.with_cart(|state| Ok(state.order_id.clone()))?;
 
     let answer = crate::payments::ask_about(
@@ -1173,16 +1188,16 @@ pub fn cart_set_discount_on(
             // Basis points, from text, without a float: "12.5" is 1250.
             let bp = percent_to_bp(&value)?;
             mb_core::Discount::percent_bp(bp).ok_or_else(|| {
-                UiError::new(
-                    "discount.too_much",
-                    "A discount cannot be more than 100%.",
-                )
+                UiError::new("discount.too_much", "A discount cannot be more than 100%.")
             })?
         }
         "amount" => {
             let money = mb_core::Money::parse(value.trim()).map_err(|e| {
-                UiError::new("discount.amount", "Type how much to take off, like 50 or 50.00.")
-                    .with_detail(e.to_string())
+                UiError::new(
+                    "discount.amount",
+                    "Type how much to take off, like 50 or 50.00.",
+                )
+                .with_detail(e.to_string())
             })?;
             mb_core::Discount::amount(money).ok_or_else(|| {
                 UiError::new(
@@ -1199,7 +1214,9 @@ pub fn cart_set_discount_on(
         }
     };
 
-    let reason = reason.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
+    let reason = reason
+        .map(|r| r.trim().to_owned())
+        .filter(|r| !r.is_empty());
     let mut entry = mb_core::DiscountEntry::new(discount);
     if let Some(reason) = reason {
         entry = entry.with_reason(reason);
@@ -1238,12 +1255,7 @@ pub fn cart_clear_discount_on(app: &App) -> UiResult<CartView> {
 /// was promised. Two decimal places is the resolution basis points have.
 fn percent_to_bp(typed: &str) -> UiResult<u32> {
     let typed = typed.trim();
-    let wrong = || {
-        UiError::new(
-            "discount.percent",
-            "Type the percentage, like 10 or 12.5.",
-        )
-    };
+    let wrong = || UiError::new("discount.percent", "Type the percentage, like 10 or 12.5.");
     if typed.is_empty() {
         return Err(wrong());
     }
@@ -1357,7 +1369,7 @@ pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
 #[tauri::command]
 pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
     guard::require(&app, Permission::StaffManage)?;
-    use mb_core::{CategoryId, ItemId, Money, TableId, TaxRate, TaxTreatment};
+    use mb_core::{CategoryId, ItemId, Money, TableId, TaxRate, TaxSpec};
     use mb_db::repo::floor::{DiningTable, Section};
     use mb_db::repo::menu::MenuItem;
 
@@ -1437,23 +1449,63 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                     at,
                 )?;
 
-                let menu: [(&str, &str, i64, TaxRate, TaxTreatment); 8] = [
-                    ("itm_dosa", "Masala Dosa", 12_000, TaxRate::GST_5, TaxTreatment::Exclusive),
-                    ("itm_idli", "Idli Vada", 8_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                // **One `TaxSpec` per item, not a rate and a treatment side by
+                // side** (P33). The water is MRP, so its tax is already inside
+                // the price; the beer is outside GST. Both are shapes the old
+                // pair of fields could only half express.
+                let menu: [(&str, &str, i64, TaxSpec); 8] = [
+                    (
+                        "itm_dosa",
+                        "Masala Dosa",
+                        12_000,
+                        mb_core::TaxSpec::gst(demo_rate(5)),
+                    ),
+                    (
+                        "itm_idli",
+                        "Idli Vada",
+                        8_000,
+                        mb_core::TaxSpec::gst(demo_rate(5)),
+                    ),
                     (
                         "itm_pbm",
                         "Paneer Butter Masala (Half) - Extra Spicy",
                         31_500,
-                        TaxRate::GST_5,
-                        TaxTreatment::Exclusive,
+                        mb_core::TaxSpec::gst(demo_rate(5)),
                     ),
-                    ("itm_water", "Water 1L", 2_000, TaxRate::GST_18, TaxTreatment::Inclusive),
-                    ("itm_cola", "Cola 300ml", 4_000, TaxRate::GST_18, TaxTreatment::Exclusive),
-                    ("itm_beer", "Beer 650ml", 22_000, TaxRate::ZERO, TaxTreatment::NonGst),
-                    ("itm_rice", "Curd Rice", 9_000, TaxRate::GST_5, TaxTreatment::Exclusive),
-                    ("itm_sweet", "Gulab Jamun (2 pc)", 6_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                    (
+                        "itm_water",
+                        "Water 1L",
+                        2_000,
+                        mb_core::TaxSpec::gst_inclusive(demo_rate(18)),
+                    ),
+                    (
+                        "itm_cola",
+                        "Cola 300ml",
+                        4_000,
+                        mb_core::TaxSpec::gst(demo_rate(18)),
+                    ),
+                    // The demo bar line. Seeded at a zero VAT rate, matching the
+                    // seeded liquor class — audit section 3.1, fixed in Phase 5.
+                    (
+                        "itm_beer",
+                        "Beer 650ml",
+                        22_000,
+                        mb_core::TaxSpec::liquor(TaxRate::ZERO),
+                    ),
+                    (
+                        "itm_rice",
+                        "Curd Rice",
+                        9_000,
+                        mb_core::TaxSpec::gst(demo_rate(5)),
+                    ),
+                    (
+                        "itm_sweet",
+                        "Gulab Jamun (2 pc)",
+                        6_000,
+                        mb_core::TaxSpec::gst(demo_rate(5)),
+                    ),
                 ];
-                for (index, (id, name, paise, rate, treatment)) in menu.iter().enumerate() {
+                for (index, (id, name, paise, tax)) in menu.iter().enumerate() {
                     repos.menu().save_item(
                         OUTLET,
                         &MenuItem {
@@ -1464,15 +1516,12 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                             // The demo shop points its items at the seeded
                             // classes, so a rate change on the class moves
                             // them — which is what a real shop does.
-                            tax_class_id: Some(mb_core::TaxClassId::new(
-                                match treatment {
-                                    mb_core::TaxTreatment::NonGst => "tax_liquor",
-                                    _ if rate.basis_points() == 1_800 => "tax_packaged_18",
-                                    _ => "tax_food_5",
-                                },
-                            )),
-                            tax_rate: *rate,
-                            tax_treatment: *treatment,
+                            tax_class_id: Some(mb_core::TaxClassId::new(match tax.kind {
+                                mb_core::TaxKind::OutsideGst => "tax_liquor",
+                                _ if tax.rate.basis_points() == 1_800 => "tax_packaged_18",
+                                _ => "tax_food_5",
+                            })),
+                            tax: *tax,
                             hsn: Some("2106".to_owned()),
                             cost_price: None,
                             short_code: None,
@@ -1780,7 +1829,10 @@ fn lockout_message(
     let Some(wait) = mb_auth::lockout_after(failures) else {
         return Ok(None);
     };
-    let Some(last) = repos.audit().last_failed_login(OUTLET, member.id.as_str())? else {
+    let Some(last) = repos
+        .audit()
+        .last_failed_login(OUTLET, member.id.as_str())?
+    else {
         return Ok(None);
     };
     let elapsed = crate::flows::now().millis().saturating_sub(last.millis());
@@ -1983,10 +2035,16 @@ pub fn recover_with_code_on(
     }
 
     // A new code, before the old one stops working.
-    let (fresh, fresh_hash) = mb_auth::new_recovery_code()
-        .map_err(|e| UiError::new("auth.recovery_failed", "A new recovery code could not be made.").with_detail(e.to_string()))?;
-    let hashed = mb_auth::hash_pin(&pin)
-        .map_err(|e| UiError::new("auth.pin_failed", "That PIN could not be saved.").with_detail(e.to_string()))?;
+    let (fresh, fresh_hash) = mb_auth::new_recovery_code().map_err(|e| {
+        UiError::new(
+            "auth.recovery_failed",
+            "A new recovery code could not be made.",
+        )
+        .with_detail(e.to_string())
+    })?;
+    let hashed = mb_auth::hash_pin(&pin).map_err(|e| {
+        UiError::new("auth.pin_failed", "That PIN could not be saved.").with_detail(e.to_string())
+    })?;
 
     app.with_shop(|shop| {
         shop.db
@@ -2127,7 +2185,11 @@ fn role_view(role: &RoleShape) -> RoleView {
         id: role.id.clone(),
         name: role.name.clone(),
         is_builtin: role.is_builtin,
-        permissions: role.permissions.iter().map(|p| p.code().to_owned()).collect(),
+        permissions: role
+            .permissions
+            .iter()
+            .map(|p| p.code().to_owned())
+            .collect(),
         max_discount_percent: role.percent_label(),
         max_discount: role.max_discount.map(MoneyView::from),
     }
@@ -2143,10 +2205,9 @@ pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
     let permissions = mb_auth::PermissionSet::from_codes(&role.permissions)
         .map_err(|e| UiError::new("role.permission", format!("{e}. Reload and try again.")))?;
 
-    let max_discount_bp = RoleShape::parse_percent(
-        role.max_discount_percent.as_deref().unwrap_or_default(),
-    )
-    .map_err(|e| UiError::new("role.percent", e.to_string()))?;
+    let max_discount_bp =
+        RoleShape::parse_percent(role.max_discount_percent.as_deref().unwrap_or_default())
+            .map_err(|e| UiError::new("role.percent", e.to_string()))?;
 
     let shape = RoleShape {
         id: role.id.clone(),
@@ -2232,10 +2293,7 @@ pub struct StaffEdit {
     pub status: String,
 }
 
-pub fn save_staff_member_on(
-    app: &App,
-    staff: StaffEdit,
-) -> UiResult<Vec<PersonView>> {
+pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonView>> {
     let who = guard::require(app, Permission::StaffManage)?;
     let at = crate::flows::now();
     let day = crate::flows::today(at);
@@ -2350,8 +2408,9 @@ pub fn set_staff_pin_on(
 
     let hashed = match pin.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         Some(typed) => {
-            let parsed = Pin::parse(typed)
-                .map_err(|e| UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string()))?;
+            let parsed = Pin::parse(typed).map_err(|e| {
+                UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string())
+            })?;
             Some(mb_auth::hash_pin(&parsed).map_err(|e| {
                 UiError::new("auth.pin_failed", "That PIN could not be saved.")
                     .with_detail(e.to_string())
@@ -2421,9 +2480,15 @@ pub fn set_staff_pin_on(
 
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::PIN_SET, "staff")
-                        .about(&staff_id)
-                        .with_after(serde_json::json!({ "has_pin": hashed.is_some() })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::PIN_SET,
+                        "staff",
+                    )
+                    .about(&staff_id)
+                    .with_after(serde_json::json!({ "has_pin": hashed.is_some() })),
                 )?;
                 Ok(issued)
             })
@@ -2503,8 +2568,18 @@ fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_
 /// to have about which number is the day.
 fn day_in_words(day: BusinessDay) -> String {
     const MONTHS: [&str; 12] = [
-        "January", "February", "March", "April", "May", "June", "July", "August", "September",
-        "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ];
     let (year, month, d) = day.to_ymd();
     // `month` is 1..=12 from `to_ymd`; this arrives at the right name without
@@ -2657,11 +2732,10 @@ fn readable_change(json: &str) -> String {
         let label = label.strip_suffix(" paise").unwrap_or(&label);
         // A key like `total_paise` names the unit, not the reader's business.
         let shown = if key.ends_with("_paise") {
-            field
-                .as_i64()
-                .map_or_else(|| field.to_string(), |paise| {
-                    mb_core::Money::from_paise(paise).to_plain_string()
-                })
+            field.as_i64().map_or_else(
+                || field.to_string(),
+                |paise| mb_core::Money::from_paise(paise).to_plain_string(),
+            )
         } else {
             match field {
                 serde_json::Value::String(s) => s.clone(),
@@ -2833,9 +2907,8 @@ mod change_words {
     /// they should not be reading `total_paise` and a pair of braces.
     #[test]
     fn a_change_reads_as_words_and_rupees() {
-        let said = readable_change(
-            r#"{"reason":"Billed twice","state":"voided","total_paise":39300}"#,
-        );
+        let said =
+            readable_change(r#"{"reason":"Billed twice","state":"voided","total_paise":39300}"#);
         assert_eq!(said, "Reason Billed twice, State voided, Total 393.00");
         assert!(!said.contains('{'), "{said}");
         assert!(!said.contains("paise"), "{said}");
@@ -2845,7 +2918,10 @@ mod change_words {
     fn money_is_formatted_by_rust_and_only_by_rust() {
         // D39: TypeScript never divides by a hundred, here or anywhere.
         assert_eq!(readable_change(r#"{"amount_paise":5}"#), "Amount 0.05");
-        assert_eq!(readable_change(r#"{"amount_paise":100000}"#), "Amount 1000.00");
+        assert_eq!(
+            readable_change(r#"{"amount_paise":100000}"#),
+            "Amount 1000.00"
+        );
     }
 
     #[test]

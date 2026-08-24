@@ -6,7 +6,16 @@ export type TaxClassView = { id: string, name: string,
  */
 rate: string, 
 /**
- * "Added on top", "Included in the price", "Exempt", "Outside GST".
+ * The same rate in basis points, so the editor can send it back unchanged.
+ */
+rateBp: number, 
+/**
+ * **The machine values.** The editor sends these back; it never reads the
+ * words, so rewording a label cannot change what a class taxes (P33 §5.1).
+ */
+kind: "gst" | "exempt" | "outside_gst" | "untaxed", basis: "exclusive" | "inclusive", 
+/**
+ * For a person to read in the list. Never parsed back.
  */
 treatment: string, isActive: boolean, 
 /**

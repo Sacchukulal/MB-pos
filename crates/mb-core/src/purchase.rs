@@ -153,7 +153,7 @@ pub struct Invoice {
     /// **D124 — a property of the SHOP, not of the line.** Most Indian
     /// restaurants bill at 5% under notification 11/2017 and may not claim input
     /// credit; for them the GST on a delivery is simply part of what the paneer
-    /// cost. `store_profile.is_composition` is where the answer lives.
+    /// cost. `store_profile.registration` is where the answer lives.
     pub tax_is_creditable: bool,
     /// Applied to the grand total only, exactly as D4 step 7 applies it to a
     /// bill. An invoice's own round-off is what makes the typed total match.

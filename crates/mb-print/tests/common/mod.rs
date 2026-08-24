@@ -19,11 +19,21 @@
 use mb_core::{
     AnyOrder, Bill, BillInput, BusinessDay, Cart, Charge, ChargeKind, Claimed, CustomerId,
     Discount, DiscountEntry, DraftOrder, ItemId, ItemSnapshot, Money, OpenOrder, OrderId,
-    OrderType, Payment, PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId,
-    TableId, TaxRate, TaxTreatment, Timestamp, compute_bill,
+    OrderType, Payment, PaymentMode, PlaceOfSupply, PriceBasis, Qty, Registration, RoundingMode,
+    Settlement, StaffId, TableId, TaxKind, TaxRate, TaxSpec, Timestamp, compute_bill,
 };
 use mb_print::settings::ReceiptSettings;
 use mb_print::template::{BillContext, BillCustomer, Copy, EInvoice, Store};
+
+/// A whole-percent rate.
+///
+/// P33 deleted `TaxRate::GST_5` and the rest of the named slabs — 12 % and 28 %
+/// were both abolished in September 2025, which is exactly why a rate is data a
+/// shop sets and never a constant a release ships. A fixture still needs real
+/// numbers, so it carries its own.
+pub fn pc(percent: u32) -> TaxRate {
+    TaxRate::from_percent(percent).expect("a real rate")
+}
 
 pub fn store() -> Store {
     Store {
@@ -40,7 +50,7 @@ pub fn store() -> Store {
         upi_id: Some("anna@upi".to_owned()),
         upi_merchant_name: Some("Anna Kuteera".to_owned()),
         upi_reference: Some("MB1".to_owned()),
-        is_composition: false,
+        registration: mb_core::Registration::Regular,
     }
 }
 
@@ -62,7 +72,7 @@ pub fn cart() -> Cart {
         // Long on purpose: 32-column paper has to wrap this and lose nothing.
         "Paneer Butter Masala (Half) - Extra Spicy",
         Money::from_paise(24_000),
-        TaxRate::GST_5,
+        pc(5),
     )
     .with_hsn("2106");
 
@@ -70,18 +80,29 @@ pub fn cart() -> Cart {
         ItemId::new("itm_water"),
         "Water 1L",
         Money::from_paise(2_000),
-        TaxRate::GST_18,
+        pc(18),
     )
-    .with_treatment(TaxTreatment::Inclusive)
+    .with_tax(TaxSpec::gst_inclusive(pc(18)))
     .with_hsn("2201");
 
+    // **Alcohol at a zero VAT rate, which is what the old `NonGst` meant.**
+    //
+    // P33 made this line able to carry state VAT — a real Karnataka beer is 20 %
+    // — but a rate here would change every golden file, and the printed bill is
+    // being redesigned in one deliberate pass rather than drifting. So the
+    // fixture keeps the rate at zero and goes on proving the thing it was built
+    // to prove: that a supply outside GST stays outside every GST total.
     let beer = ItemSnapshot::new(
         ItemId::new("itm_beer"),
         "Beer 650ml",
         Money::from_paise(22_000),
         TaxRate::ZERO,
     )
-    .with_treatment(TaxTreatment::NonGst);
+    .with_tax(TaxSpec {
+        kind: TaxKind::OutsideGst,
+        rate: TaxRate::ZERO,
+        basis: PriceBasis::Exclusive,
+    });
 
     cart.add(
         dosa,
@@ -110,17 +131,19 @@ pub fn cart() -> Cart {
 
 pub fn bill(cart: &Cart) -> Bill {
     let charges = [
-        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::GST_5),
+        Charge::percent(ChargeKind::Service, "Service Charge", 500, pc(5)),
         Charge::flat(
             ChargeKind::Other("Donation".to_owned()),
             "Donation",
             Money::from_paise(500),
             TaxRate::ZERO,
         )
-        .with_treatment(TaxTreatment::Exempt),
+        .with_tax(TaxSpec::exempt()),
     ];
+    // A regular taxpayer, which is what `Store::is_composition = false` and a
+    // GSTIN on the letterhead have always meant — P33 only gave the fact a name.
     compute_bill(
-        BillInput::new(cart)
+        BillInput::new(cart, Registration::Regular)
             .with_bill_discount(DiscountEntry::new(
                 Discount::percent_bp(500).expect("valid"),
             ))

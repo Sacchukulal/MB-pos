@@ -25,7 +25,7 @@
     reason = "tests: expect is the assertion"
 )]
 
-use mb_core::{ItemId, Money, TaxClassId, TaxRate, TaxTreatment};
+use mb_core::{ItemId, Money, PriceBasis, TaxClassId, TaxKind, TaxRate};
 use mb_db::{Db, DbConfig, Repos};
 
 use crate::menu::{
@@ -50,15 +50,11 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
             ("itm_dosa", "Masala dosa", 12000, Some("tax_food_5")),
             ("itm_water", "Water bottle", 2000, Some("tax_packaged_18")),
         ] {
-            let (rate, treatment) = match class {
-                Some("tax_packaged_18") => (
-                    TaxRate::from_basis_points(1800).expect("18%"),
-                    TaxTreatment::Exclusive,
-                ),
-                _ => (
-                    TaxRate::from_basis_points(500).expect("5%"),
-                    TaxTreatment::Exclusive,
-                ),
+            let tax = match class {
+                Some("tax_packaged_18") => {
+                    mb_core::TaxSpec::gst(TaxRate::from_basis_points(1800).expect("18%"))
+                }
+                _ => mb_core::TaxSpec::gst(TaxRate::from_basis_points(500).expect("5%")),
             };
             repos.menu().save_item(
                 OUTLET,
@@ -68,8 +64,7 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
                     name: name.to_owned(),
                     unit_price: Money::from_paise(paise),
                     tax_class_id: class.map(TaxClassId::new),
-                    tax_rate: rate,
-                    tax_treatment: treatment,
+                    tax,
                     hsn: None,
                     cost_price: None,
                     short_code: None,
@@ -116,6 +111,24 @@ fn rate_of(app: &App, id: &str) -> String {
         .to_owned()
 }
 
+/// The whole rate line — "5% · Tax added on top".
+fn row_rate(app: &App, id: &str) -> String {
+    menu_rows_on(app)
+        .expect("the menu")
+        .into_iter()
+        .find(|r| r.id == id)
+        .expect("that item")
+        .rate
+}
+
+fn class_of(app: &App, id: &str) -> crate::menu::TaxClassView {
+    tax_classes_on(app)
+        .expect("the classes")
+        .into_iter()
+        .find(|c| c.id == id)
+        .expect("that class")
+}
+
 /// **A rate changes, and everything on that class changes with it** — audit
 /// B10/B11: v1 had one rate for the whole shop, so this could not be got wrong
 /// and could not be got right either.
@@ -140,7 +153,8 @@ fn changing_a_class_moves_every_item_on_it_and_nothing_else() {
         "tax_food_5".to_owned(),
         "Restaurant food 12%".to_owned(),
         "12".to_owned(),
-        "exclusive".to_owned(),
+        TaxKind::Gst,
+        PriceBasis::Exclusive,
     )
     .expect("the rate changed");
     assert!(said.contains('2'), "it says how many moved: {said}");
@@ -168,11 +182,120 @@ fn an_impossible_rate_is_refused() {
         "tax_food_5".to_owned(),
         "Nonsense".to_owned(),
         "400".to_owned(),
-        "exclusive".to_owned(),
+        TaxKind::Gst,
+        PriceBasis::Exclusive,
     )
     .expect_err("400% is not a tax rate");
     assert_eq!(err.code, "menu.rate");
     assert_eq!(rate_of(&app, "itm_tea"), "5%", "and nothing moved");
+}
+
+/// **The §5.1 fault, and the one that would have failed before P33.**
+///
+/// The screen used to read the treatment back out of its own display words —
+/// `.includes('Outside')` — so rewording a label turned liquor into a
+/// GST-taxable item with nothing to catch it.
+#[test]
+fn changing_a_class_label_does_not_change_what_it_taxes() {
+    let scratch = Scratch::new("class_label");
+    let app = a_shop_with_a_menu(&scratch);
+
+    // The water's class becomes liquor: outside GST, priced tax-in, 20% VAT.
+    save_tax_class_on(
+        &app,
+        "tax_packaged_18".to_owned(),
+        "Liquor — state VAT".to_owned(),
+        "20".to_owned(),
+        TaxKind::OutsideGst,
+        PriceBasis::Inclusive,
+    )
+    .expect("a bar's class");
+    assert!(
+        row_rate(&app, "itm_water").contains("Outside GST"),
+        "the bottle is outside GST: {}",
+        row_rate(&app, "itm_water")
+    );
+
+    // What the screen holds: machine values beside the words.
+    let before = class_of(&app, "tax_packaged_18");
+    assert_eq!(before.kind, TaxKind::OutsideGst);
+    assert_eq!(before.basis, PriceBasis::Inclusive);
+    assert_eq!(before.rate_bp, 2000);
+
+    // Rename it to words that say none of that, sending back exactly what the
+    // view carried. Only the name may move.
+    save_tax_class_on(
+        &app,
+        before.id.clone(),
+        "Bar list".to_owned(),
+        before.rate.trim_end_matches('%').to_owned(),
+        before.kind,
+        before.basis,
+    )
+    .expect("renamed");
+
+    let after = class_of(&app, "tax_packaged_18");
+    assert_eq!(after.name, "Bar list");
+    assert_eq!(after.kind, TaxKind::OutsideGst, "still not GST");
+    assert_eq!(after.basis, PriceBasis::Inclusive);
+    assert_eq!(after.rate, "20%");
+    assert!(
+        row_rate(&app, "itm_water").contains("Outside GST"),
+        "and the bottle is still outside GST: {}",
+        row_rate(&app, "itm_water")
+    );
+}
+
+/// A rate on a kind that cannot carry one is refused, not silently zeroed —
+/// which is why the editor disables the box rather than hinting at it.
+#[test]
+fn an_exempt_class_cannot_be_given_a_rate() {
+    let scratch = Scratch::new("exempt_rate");
+    let app = a_shop_with_a_menu(&scratch);
+
+    let err = save_tax_class_on(
+        &app,
+        "tax_exempt".to_owned(),
+        "Exempt".to_owned(),
+        "5".to_owned(),
+        TaxKind::Exempt,
+        PriceBasis::Exclusive,
+    )
+    .expect_err("exempt at 5% is not a thing");
+    assert_eq!(err.code, "menu.rate");
+}
+
+/// An HSN code is 2, 4, 6 or 8 digits. Three is a typo, and it would otherwise
+/// print on every bill.
+#[test]
+fn an_hsn_of_three_digits_is_refused() {
+    let scratch = Scratch::new("hsn");
+    let app = a_shop_with_a_menu(&scratch);
+
+    let edit = |hsn: &str| MenuEdit {
+        id: "itm_tea".to_owned(),
+        name: "Tea".to_owned(),
+        category_id: None,
+        price: "20".to_owned(),
+        tax_class_id: Some("tax_food_5".to_owned()),
+        hsn: Some(hsn.to_owned()),
+        short_code: None,
+        cost: None,
+        is_open_price: false,
+        is_available: true,
+        course: None,
+        prep_minutes: None,
+    };
+
+    let err = save_item_on(&app, edit("996")).expect_err("three digits is not a code");
+    assert_eq!(err.code, "menu.hsn");
+    assert!(
+        save_item_on(&app, edit("21069099")).is_ok(),
+        "eight digits is"
+    );
+    assert!(save_item_on(&app, edit("  ")).is_ok(), "and blank is fine");
+    let err = save_item_on(&app, edit("9963A1")).expect_err("letters are not digits");
+    assert_eq!(err.code, "menu.hsn");
 }
 
 /// **Ten percent on one category, and the rest of the menu untouched.**

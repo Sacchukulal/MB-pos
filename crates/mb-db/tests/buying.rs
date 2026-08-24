@@ -25,6 +25,7 @@ use common::Scratch;
 use common::{OUTLET, STAFF_SQL};
 use mb_core::purchase::{Entry, Invoice};
 use mb_core::{
+    Registration,
     BusinessDay, Dimension, MaterialId, Money, Pack, Qty, RoundingMode, StaffId, Timestamp,
     UnitCost,
 };
@@ -988,15 +989,14 @@ fn t14_the_profit_statement_reconciles_and_names_the_double_count() {
 fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
     use mb_core::{
         BillInput, Cart, ItemId, ItemSnapshot, OrderType, Payment, PaymentMode, PlaceOfSupply,
-        Settlement, TaxRate, TaxTreatment, compute_bill,
+        Settlement, TaxRate, TaxSpec, compute_bill,
     };
 
     let snapshot = ItemSnapshot {
         item_id: ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),
-        tax_rate: TaxRate::GST_5,
-        tax_treatment: TaxTreatment::Exclusive,
+        tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
         hsn: None,
         category_id: None,
         station: None,
@@ -1006,7 +1006,7 @@ fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
     let mut cart = Cart::new();
     cart.add(snapshot, Qty::from_whole(qty).expect("in range"), None, vec![]).expect("adds");
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_order_type(OrderType::Parcel)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_rounding(RoundingMode::NearestRupee),

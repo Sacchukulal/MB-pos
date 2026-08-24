@@ -16,11 +16,11 @@
     reason = "tests: expect is the assertion"
 )]
 
+use mb_auth::RolePreset;
 use mb_core::{
     AnyOrder, BusinessDay, Cart, DraftOrder, ItemSnapshot, Money, OrderId, OrderType, Qty, StaffId,
     TableId, TaxRate,
 };
-use mb_auth::RolePreset;
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::{Db, DbConfig, Repos};
 
@@ -40,7 +40,12 @@ fn day() -> BusinessDay {
 }
 
 fn snapshot(id: &str, paise: i64) -> ItemSnapshot {
-    ItemSnapshot::new(mb_core::ItemId::new(id), id, Money::from_paise(paise), TaxRate::GST_5)
+    ItemSnapshot::new(
+        mb_core::ItemId::new(id),
+        id,
+        Money::from_paise(paise),
+        TaxRate::from_percent(5).expect("5%"),
+    )
 }
 
 /// A shop with a room and a menu, and nothing on the floor yet.
@@ -83,8 +88,7 @@ fn a_shop_with_a_room(scratch: &Scratch) -> App {
                     category_id: None,
                     name: name.to_owned(),
                     unit_price: Money::from_paise(paise),
-                    tax_rate: TaxRate::GST_5,
-                    tax_treatment: mb_core::TaxTreatment::Exclusive,
+                    tax: mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
                     tax_class_id: None,
                     hsn: None,
                     cost_price: None,
@@ -109,7 +113,13 @@ fn a_shop_with_a_room(scratch: &Scratch) -> App {
 
 /// Put an open order on a table, with `told` of the first line already sent to
 /// the kitchen.
-fn seat(app: &App, id: &str, table: &str, items: &[(&str, i64, i64)], told: Option<i64>) -> OrderId {
+fn seat(
+    app: &App,
+    id: &str,
+    table: &str,
+    items: &[(&str, i64, i64)],
+    told: Option<i64>,
+) -> OrderId {
     let mut cart = Cart::new();
     for (item, paise, qty) in items {
         cart.add(
@@ -195,7 +205,13 @@ fn read(app: &App, id: &OrderId) -> AnyOrder {
 fn moving_an_order_changes_the_table_and_nothing_else() {
     let scratch = Scratch::new("move");
     let app = a_shop_with_a_room(&scratch);
-    let order = seat(&app, "ord_move", "tbl_1", &[("itm_dosa", 12_000, 2)], Some(2));
+    let order = seat(
+        &app,
+        "ord_move",
+        "tbl_1",
+        &[("itm_dosa", 12_000, 2)],
+        Some(2),
+    );
 
     let before = read(&app, &order);
     let number = before.bill_number().map(|c| c.formatted.clone());
@@ -208,20 +224,36 @@ fn moving_an_order_changes_the_table_and_nothing_else() {
         Some("tbl_3"),
         "the order is at the new table",
     );
-    assert_eq!(after.bill_number().map(|c| c.formatted.clone()), number, "the number is untouched");
+    assert_eq!(
+        after.bill_number().map(|c| c.formatted.clone()),
+        number,
+        "the number is untouched"
+    );
     assert_eq!(after.core().cart, before.core().cart, "and so is the food");
-    assert_eq!(after.core().kitchen, before.core().kitchen, "and the kitchen ledger");
+    assert_eq!(
+        after.core().kitchen,
+        before.core().kitchen,
+        "and the kitchen ledger"
+    );
 
     // Table 1 is free again — the floor says so, not just the row.
     let floor = floor_on(&app).expect("the floor");
-    let one = floor.tiles.iter().find(|t| t.label == "1").expect("table 1");
+    let one = floor
+        .tiles
+        .iter()
+        .find(|t| t.label == "1")
+        .expect("table 1");
     assert!(one.order_id.is_none(), "the old table is free");
 
     // And a move onto an occupied table is refused in words.
     seat(&app, "ord_other", "tbl_2", &[("itm_tea", 2_000, 1)], None);
-    let refused = move_order_on(&app, order.as_str().to_owned(), "tbl_2".to_owned())
-        .expect_err("occupied");
-    assert!(refused.message.contains("already an order"), "{}", refused.message);
+    let refused =
+        move_order_on(&app, order.as_str().to_owned(), "tbl_2".to_owned()).expect_err("occupied");
+    assert!(
+        refused.message.contains("already an order"),
+        "{}",
+        refused.message
+    );
     assert_eq!(refused.code, "floor.table_busy");
 }
 
@@ -232,8 +264,20 @@ fn moving_an_order_changes_the_table_and_nothing_else() {
 fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
     let scratch = Scratch::new("merge");
     let app = a_shop_with_a_room(&scratch);
-    let four = seat(&app, "ord_four", "tbl_1", &[("itm_dosa", 12_000, 2)], Some(2));
-    let five = seat(&app, "ord_five", "tbl_2", &[("itm_dosa", 12_000, 1)], Some(1));
+    let four = seat(
+        &app,
+        "ord_four",
+        "tbl_1",
+        &[("itm_dosa", 12_000, 2)],
+        Some(2),
+    );
+    let five = seat(
+        &app,
+        "ord_five",
+        "tbl_2",
+        &[("itm_dosa", 12_000, 1)],
+        Some(1),
+    );
 
     merge_orders_on(&app, five.as_str().to_owned(), four.as_str().to_owned()).expect("merged");
 
@@ -255,7 +299,10 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
 
     // The absorbed order is CANCELLED with a link, not deleted (D47).
     let absorbed = read(&app, &five);
-    assert!(matches!(absorbed, AnyOrder::Cancelled(_)), "recorded, not deleted");
+    assert!(
+        matches!(absorbed, AnyOrder::Cancelled(_)),
+        "recorded, not deleted"
+    );
     assert!(absorbed.bill_number().is_some(), "and it keeps its number");
 
     let link: Option<String> = app
@@ -271,11 +318,19 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
                 .map_err(|e| crate::words::from_db(&e))
         })
         .expect("read back");
-    assert_eq!(link.as_deref(), Some(four.as_str()), "where the food went is a row");
+    assert_eq!(
+        link.as_deref(),
+        Some(four.as_str()),
+        "where the food went is a row"
+    );
 
     // Table 2 is free, table 1 is busy.
     let floor = floor_on(&app).expect("the floor");
-    let two = floor.tiles.iter().find(|t| t.label == "2").expect("table 2");
+    let two = floor
+        .tiles
+        .iter()
+        .find(|t| t.label == "2")
+        .expect("table 2");
     assert!(two.order_id.is_none());
 }
 
@@ -308,10 +363,14 @@ fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
     .expect("split");
 
     let kept = read(&app, &order);
-    assert_eq!(kept.core().cart.lines()[0].qty, Qty::from_whole(1).expect("one"));
+    assert_eq!(
+        kept.core().cart.lines()[0].qty,
+        Qty::from_whole(1).expect("one")
+    );
     let dosa = kept.core().cart.lines()[0].identity();
     assert!(
-        !kept.core()
+        !kept
+            .core()
             .kitchen
             .pending(&kept.core().cart)
             .expect("pending")
@@ -332,14 +391,24 @@ fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
         .find(|o| o.core().id != order)
         .expect("a second order");
 
-    assert_eq!(fresh.core().table.as_ref().map(TableId::as_str), Some("tbl_4"));
-    assert_eq!(fresh.core().cart.lines()[0].qty, Qty::from_whole(2).expect("two"));
+    assert_eq!(
+        fresh.core().table.as_ref().map(TableId::as_str),
+        Some("tbl_4")
+    );
+    assert_eq!(
+        fresh.core().cart.lines()[0].qty,
+        Qty::from_whole(2).expect("two")
+    );
     assert_ne!(
         fresh.bill_number().map(|c| c.formatted.clone()),
         kept.bill_number().map(|c| c.formatted.clone()),
         "two bills, two numbers",
     );
-    let pending = fresh.core().kitchen.pending(&fresh.core().cart).expect("pending");
+    let pending = fresh
+        .core()
+        .kitchen
+        .pending(&fresh.core().cart)
+        .expect("pending");
     assert_eq!(pending.len(), 1, "exactly one dosa still to cook");
     assert_eq!(pending[0].1, Qty::from_whole(1).expect("one"));
 }
@@ -363,7 +432,11 @@ fn splitting_the_whole_order_is_refused() {
         },
     )
     .expect_err("refused");
-    assert!(refused.message.contains("move the whole order"), "{}", refused.message);
+    assert!(
+        refused.message.contains("move the whole order"),
+        "{}",
+        refused.message
+    );
 }
 
 /// **T17 — sub-tables.** 6A and 6B are two orders at one table, both visible,
@@ -401,7 +474,8 @@ fn two_parties_can_share_one_table() {
 
     assert_eq!(open.len(), 2, "two parties");
     assert!(
-        open.iter().all(|o| o.core().table.as_ref().map(TableId::as_str) == Some("tbl_1")),
+        open.iter()
+            .all(|o| o.core().table.as_ref().map(TableId::as_str) == Some("tbl_1")),
         "both at the same table",
     );
     let seats: Vec<String> = open
@@ -422,8 +496,14 @@ fn the_two_timers_come_from_settings() {
     // The order was created an hour ago in fixture time, which is the past
     // relative to a real clock, so it is comfortably "late" at any threshold.
     let before = floor_on(&app).expect("the floor");
-    assert_eq!(i64::from(before.warn_minutes), crate::floor::DEFAULT_WARN_MINUTES);
-    assert_eq!(i64::from(before.late_minutes), crate::floor::DEFAULT_LATE_MINUTES);
+    assert_eq!(
+        i64::from(before.warn_minutes),
+        crate::floor::DEFAULT_WARN_MINUTES
+    );
+    assert_eq!(
+        i64::from(before.late_minutes),
+        crate::floor::DEFAULT_LATE_MINUTES
+    );
 
     let after = save_thresholds_on(&app, 5, 10).expect("saved");
     assert_eq!(after.warn_minutes, 5);
@@ -445,7 +525,12 @@ fn an_even_split_says_who_pays_the_extra_paisa() {
     app.with_cart_mut(|state| {
         state
             .cart
-            .add(snapshot("itm_dosa", 10_001), Qty::from_whole(1).expect("one"), None, Vec::new())
+            .add(
+                snapshot("itm_dosa", 10_001),
+                Qty::from_whole(1).expect("one"),
+                None,
+                Vec::new(),
+            )
             .expect("added");
         Ok(())
     })
@@ -454,7 +539,10 @@ fn an_even_split_says_who_pays_the_extra_paisa() {
     let split = even_split_on(&app, 3).expect("three ways");
     assert_eq!(split.shares.len(), 3);
     let sum: i64 = split.shares.iter().map(|s| s.paise).sum();
-    assert_eq!(sum, split.total.paise, "the shares add back to the bill exactly");
+    assert_eq!(
+        sum, split.total.paise,
+        "the shares add back to the bill exactly"
+    );
     assert!(!split.note.is_empty(), "and the remainder is said out loud");
 
     assert!(even_split_on(&app, 1).is_err(), "one way is not a split");
@@ -471,8 +559,15 @@ fn a_shop_with_no_floor_plan_still_has_a_floor() {
     let floor = floor_on(&app).expect("the floor");
     assert!(!floor.has_layout, "nothing has been placed");
     assert_eq!(floor.tiles.len(), 4, "and every table is still a tile");
-    assert!(floor.tiles.iter().any(|t| t.order_id.is_some()), "with its order on it");
-    assert!(floor.occupancy.busy.contains("1 of 4"), "{}", floor.occupancy.busy);
+    assert!(
+        floor.tiles.iter().any(|t| t.order_id.is_some()),
+        "with its order on it"
+    );
+    assert!(
+        floor.occupancy.busy.contains("1 of 4"),
+        "{}",
+        floor.occupancy.busy
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -490,7 +585,13 @@ fn a_shop_with_no_floor_plan_still_has_a_floor() {
 fn the_bill_can_go_to_the_table_without_settling_it() {
     let scratch = Scratch::new("bill_to_table");
     let app = a_shop_with_a_room(&scratch);
-    let order = seat(&app, "ord_bill", "tbl_3", &[("itm_dosa", 12_000, 2)], Some(2));
+    let order = seat(
+        &app,
+        "ord_bill",
+        "tbl_3",
+        &[("itm_dosa", 12_000, 2)],
+        Some(2),
+    );
 
     let before = read(&app, &order);
     let said = crate::flows::print_open_bill_on(&app, order.as_str().to_owned())
@@ -503,12 +604,16 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     // alone would have passed on the broken version, which is why the second
     // half of this is the one that matters.
     assert_eq!(said, "The bill for table 3 is printing.", "{said}");
-    assert!(!said.contains("tbl_"), "the toast shows a database id: {said}");
+    assert!(
+        !said.contains("tbl_"),
+        "the toast shows a database id: {said}"
+    );
 
     // 1. **Paper.** And marked, so it can never be mistaken for a paid bill.
     let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter().any(|j| j.reason.as_deref() == Some("bill to the table")),
+        jobs.iter()
+            .any(|j| j.reason.as_deref() == Some("bill to the table")),
         "nothing reached the printer: {jobs:?}"
     );
 
@@ -527,8 +632,14 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
         before.bill_number.formatted, after.bill_number.formatted,
         "printing the bill burned a bill number"
     );
-    assert_eq!(before.core.table, after.core.table, "the party was moved off its table");
-    assert_eq!(before.core.cart.lines().len(), after.core.cart.lines().len());
+    assert_eq!(
+        before.core.table, after.core.table,
+        "the party was moved off its table"
+    );
+    assert_eq!(
+        before.core.cart.lines().len(),
+        after.core.cart.lines().len()
+    );
 
     // 3. **Twice is two pieces of paper and nothing else** — a waiter who lost
     //    the first one presses it again, and that has to be free.
@@ -586,7 +697,9 @@ fn an_empty_table_is_marked_the_moment_it_is_opened() {
     // Tap table 2 and type nothing at all — the exact case in the screenshot.
     crate::ipc::open_table_on(&app, "tbl_2".to_owned()).expect("opened");
     assert!(
-        app.with_cart(|state| Ok(state.order_id.clone())).expect("cart").is_none(),
+        app.with_cart(|state| Ok(state.order_id.clone()))
+            .expect("cart")
+            .is_none(),
         "an empty table must not have an order yet, or this test is not the bug",
     );
 
@@ -596,7 +709,11 @@ fn an_empty_table_is_marked_the_moment_it_is_opened() {
         .filter(|tile| tile.selected)
         .map(|tile| tile.label.as_str())
         .collect();
-    assert_eq!(selected, ["2"], "the tapped table is the one that is marked");
+    assert_eq!(
+        selected,
+        ["2"],
+        "the tapped table is the one that is marked"
+    );
 
     // And it is still FREE. Being looked at is not a condition the table is in
     // — which is the other half of why this was not a state.
@@ -740,7 +857,11 @@ fn a_bulk_delete_takes_all_the_tables_or_none_of_them() {
     .expect("three free tables");
     let floor = floor_on(&app).expect("the floor");
     assert_eq!(
-        floor.tables.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
+        floor
+            .tables
+            .iter()
+            .map(|t| t.label.as_str())
+            .collect::<Vec<_>>(),
         ["2"],
     );
 }
@@ -752,12 +873,8 @@ fn a_bulk_hide_takes_them_off_the_floor_and_keeps_their_history() {
     let scratch = Scratch::new("bulk_hide");
     let app = a_shop_with_a_room(&scratch);
 
-    crate::floor::set_tables_active_on(
-        &app,
-        vec!["tbl_1".to_owned(), "tbl_2".to_owned()],
-        false,
-    )
-    .expect("two off the floor");
+    crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned(), "tbl_2".to_owned()], false)
+        .expect("two off the floor");
 
     let floor = floor_on(&app).expect("the floor");
     let off: Vec<&str> = floor
@@ -807,7 +924,10 @@ fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
     crate::ipc::login_on(&app, "staff_waiter".to_owned(), "1357".to_owned()).expect("Priya");
 
     let floor = floor_on(&app).expect("a waiter can still see the floor");
-    assert!(!floor.can_arrange, "a waiter was offered the arranging panel");
+    assert!(
+        !floor.can_arrange,
+        "a waiter was offered the arranging panel"
+    );
 
     // **And the panel being hidden is not what stops them.** Called directly,
     // the way a screen never would.

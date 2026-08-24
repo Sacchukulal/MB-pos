@@ -11,7 +11,7 @@
 //! engine and must never become one.
 
 use crate::money::Money;
-use crate::tax::{TaxAmounts, TaxRate, TaxTreatment};
+use crate::tax::{GstAmounts, TaxKind, TaxRate, TaxSpec};
 use serde::{Deserialize, Serialize};
 
 /// What kind of charge it is. Reports group by this; the bill prints `name`.
@@ -42,12 +42,18 @@ pub struct Charge {
     /// What prints on the bill: "Service Charge", "Packing".
     pub name: String,
     pub basis: ChargeBasis,
-    /// Its **own** rate — not the bill's, and not any line's.
-    pub tax_rate: TaxRate,
-    /// Its own treatment. There is deliberately no separate `taxable: bool`:
-    /// `Exempt` and `NonGst` already say it, and two fields meaning the same
-    /// thing is a bug waiting for the day they disagree.
-    pub tax_treatment: TaxTreatment,
+    /// Its **own** tax — not the bill's, and not any line's. A service charge
+    /// is taxed at its own rate on a bill of 5% food, and that mixed case is
+    /// the whole reason a charge carries a spec at all.
+    ///
+    /// There is deliberately no separate `taxable: bool`: `TaxKind::Exempt` and
+    /// `TaxKind::Untaxed` already say it, and two fields meaning the same thing
+    /// is a bug waiting for the day they disagree.
+    ///
+    /// **A charge is never alcohol**, so `TaxKind::OutsideGst` here is refused
+    /// by [`Charge::is_coherent`] rather than represented — one fewer state to
+    /// reason about on the money path.
+    pub tax: TaxSpec,
 }
 
 impl Charge {
@@ -58,8 +64,7 @@ impl Charge {
             kind,
             name: name.into(),
             basis: ChargeBasis::Percent(basis_points),
-            tax_rate: rate,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: TaxSpec::gst(rate),
         }
     }
 
@@ -69,15 +74,21 @@ impl Charge {
             kind,
             name: name.into(),
             basis: ChargeBasis::Flat(amount),
-            tax_rate: rate,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: TaxSpec::gst(rate),
         }
     }
 
     #[must_use]
-    pub fn with_treatment(mut self, treatment: TaxTreatment) -> Self {
-        self.tax_treatment = treatment;
+    pub fn with_tax(mut self, tax: TaxSpec) -> Self {
+        self.tax = tax;
         self
+    }
+
+    /// **A charge may not be alcohol.** Service, packing and delivery are all
+    /// supplies under GST; state excise has nothing to do with them.
+    #[must_use]
+    pub fn is_coherent(&self) -> bool {
+        self.tax.kind != TaxKind::OutsideGst && self.tax.is_coherent()
     }
 
     /// What this charge comes to, against `base`.
@@ -115,11 +126,10 @@ pub struct BillCharge {
     /// The charge itself, before its own tax.
     pub amount: Money,
     pub taxable: Money,
-    pub tax: TaxAmounts,
+    pub gst: GstAmounts,
     /// `taxable + tax`. What this charge adds to the grand total.
     pub gross_including_tax: Money,
-    pub rate: TaxRate,
-    pub treatment: TaxTreatment,
+    pub tax: TaxSpec,
 }
 
 #[cfg(test)]
@@ -132,7 +142,7 @@ mod tests {
 
     #[test]
     fn a_percentage_charge_is_taken_on_the_base_it_is_given() {
-        let service = Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::GST_18);
+        let service = Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::from_percent(18).expect("18%"));
         assert_eq!(service.compute_on(rs(1_000)), Ok(rs(50)));
         assert_eq!(service.compute_on(rs(900)), Ok(rs(45)));
         assert_eq!(service.compute_on(Money::ZERO), Ok(Money::ZERO));
@@ -141,7 +151,7 @@ mod tests {
     #[test]
     fn a_flat_charge_ignores_the_base_entirely() {
         // A ₹40 delivery fee does not shrink because the customer had 10% off.
-        let delivery = Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), TaxRate::GST_18);
+        let delivery = Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), TaxRate::from_percent(18).expect("18%"));
         assert_eq!(delivery.compute_on(rs(1_000)), Ok(rs(40)));
         assert_eq!(delivery.compute_on(rs(500)), Ok(rs(40)));
         // Even on an empty bill it still computes rather than failing — a
@@ -152,8 +162,14 @@ mod tests {
     #[test]
     fn a_charge_can_be_untaxed_without_a_second_flag() {
         let tipless = Charge::flat(ChargeKind::Other("Donation".to_owned()), "Donation", rs(10), TaxRate::ZERO)
-            .with_treatment(TaxTreatment::Exempt);
-        assert_eq!(tipless.tax_treatment, TaxTreatment::Exempt);
-        assert!(!tipless.tax_treatment.is_taxed());
+            .with_tax(TaxSpec::exempt());
+        assert_eq!(tipless.tax.kind, TaxKind::Exempt);
+        assert!(tipless.is_coherent());
+
+        // **And a charge may not be alcohol.** Service, packing and delivery are
+        // supplies under GST; state excise has nothing to say about them.
+        let impossible = Charge::flat(ChargeKind::Service, "Service", rs(10), TaxRate::ZERO)
+            .with_tax(TaxSpec::liquor(TaxRate::ZERO));
+        assert!(!impossible.is_coherent(), "a charge cannot be outside GST");
     }
 }

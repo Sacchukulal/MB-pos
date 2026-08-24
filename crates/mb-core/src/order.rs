@@ -570,7 +570,7 @@ mod tests {
     }
 
     fn item(id: &str, paise: i64) -> ItemSnapshot {
-        ItemSnapshot::new(ItemId::new(id), id, Money::from_paise(paise), TaxRate::GST_5)
+        ItemSnapshot::new(ItemId::new(id), id, Money::from_paise(paise), TaxRate::from_percent(5).expect("5%"))
     }
 
     fn draft(order_type: OrderType) -> DraftOrder {
@@ -666,7 +666,7 @@ mod tests {
             .add(item("dosa", 10_000), Qty::ONE, None, vec![])
             .expect("adds");
 
-        let bill = compute_bill(BillInput::new(&order.core.cart).with_rounding(RoundingMode::None))
+        let bill = compute_bill(BillInput::new(&order.core.cart, crate::tax::Registration::Regular).with_rounding(RoundingMode::None))
             .expect("computes");
         let mut settlement = Settlement::new();
         settlement
@@ -684,7 +684,7 @@ mod tests {
             .cart
             .add(item("dosa", 10_000), Qty::ONE, None, vec![])
             .expect("adds");
-        let bill = compute_bill(BillInput::new(&order.core.cart).with_rounding(RoundingMode::None))
+        let bill = compute_bill(BillInput::new(&order.core.cart, crate::tax::Registration::Regular).with_rounding(RoundingMode::None))
             .expect("computes");
 
         // Underpaid.

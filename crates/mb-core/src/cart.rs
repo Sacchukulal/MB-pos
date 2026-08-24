@@ -314,7 +314,7 @@ mod tests {
     use crate::tax::TaxRate;
 
     fn item(id: &str, name: &str, paise: i64) -> ItemSnapshot {
-        ItemSnapshot::new(ItemId::new(id), name, Money::from_paise(paise), TaxRate::GST_5)
+        ItemSnapshot::new(ItemId::new(id), name, Money::from_paise(paise), TaxRate::from_percent(5).expect("5%"))
     }
 
     fn modifier(id: &str) -> Modifier {

@@ -173,7 +173,8 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
         ("round off", "billing.rounding"),
         ("logo", "receipt.logo"),
         ("5 am", "day.starts_at_minutes"),
-        ("igst", "store.default_place_of_supply"),
+        ("igst", "store.state_code"),
+        ("composition", "store.registration"),
         ("pen drive", "backup.second_folder"),
         ("hsn", "receipt.show.hsn"),
         ("kot", "kitchen.show_title"),
@@ -248,7 +249,7 @@ fn a_configuration_survives_being_written_out_and_read_back() {
     config.billing.packing_charge = mb_core::Money::from_paise(1_500);
     config.billing.search_mode = crate::search::MatchMode::StartsWith;
     config.store.name = "Anna Kuteera".to_owned();
-    config.store.is_composition = true;
+    config.store.registration = "composition".to_owned();
     config.day.starts_at_minutes = 240;
 
     let file = super::to_map(&config);

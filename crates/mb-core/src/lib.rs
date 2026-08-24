@@ -118,9 +118,10 @@ pub use recipe::{
 };
 pub use time::{Timestamp, TimeError, UtcOffset};
 pub use units::{Dimension, Pack, UnitCost, UnitError, Units};
-pub use taxclass::{OrderTypeRate, TaxClass, TaxClassId, starting_classes};
+pub use taxclass::{TaxClass, TaxClassId, starting_classes};
 pub use table::{SubTable, TableError, clashes_with, printed_name, printed_seat, same_table};
 pub use transfer::{Pick, Portion, TransferError, even_shares, merge_into, take_lines};
 pub use tax::{
-    PlaceOfSupply, RateSummaryRow, TaxAmounts, TaxOutcome, TaxRate, TaxSummary, TaxTreatment,
+    GstAmounts, PlaceOfSupply, PriceBasis, RateSummaryRow, Registration, StateTax, TaxKind,
+    TaxOutcome, TaxRate, TaxSpec, TaxSummary, Vat, VatSummaryRow,
 };

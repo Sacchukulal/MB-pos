@@ -35,8 +35,8 @@
 
 use mb_core::{
     AnyOrder, Bill, BillInput, BusinessDay, Cart, Claimed, Discount, DiscountEntry, DraftOrder,
-    ItemSnapshot, ItemId, Money, OpenOrder, OrderId, OrderType, Payment, PaymentMode, Qty,
-    Settlement, StaffId, TableId, TaxRate, TaxTreatment, Timestamp,
+    ItemId, ItemSnapshot, Money, OpenOrder, OrderId, OrderType, Payment, PaymentMode, Qty,
+    Registration, Settlement, StaffId, TableId, Timestamp,
 };
 use mb_print::error::PrintError;
 use mb_print::layout::layout_for;
@@ -59,7 +59,17 @@ const AT: Timestamp = Timestamp::from_millis(1_770_000_000_000);
 /// one — `compute_bill` is D4's pipeline and this does not get a private door
 /// past it. It cannot fail in practice, and
 /// `a_preview_is_produced_for_every_paper_and_every_shop` is what says so.
-pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
+/// A rate from whole percent, for the fixed values in this file.
+///
+/// `unwrap_or` rather than `expect`: the workspace forbids a panic anywhere on
+/// the money path (D7), and these values are literals that cannot fail anyway.
+/// If one ever did, a nil rate is a visibly wrong number on a sample bill —
+/// which somebody notices — where a panic is the counter refusing to open.
+fn pc(percent: u32) -> mb_core::TaxRate {
+    mb_core::TaxRate::from_percent(percent).unwrap_or(mb_core::TaxRate::ZERO)
+}
+
+pub fn sample_order(registration: Registration) -> Result<(Bill, AnyOrder), PrintError> {
     let mut cart = Cart::new();
     cart.add(
         ItemSnapshot::new(
@@ -69,7 +79,7 @@ pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
             // that costs.
             "Paneer Butter Masala (Half) - Extra Spicy",
             Money::from_paise(24_000),
-            TaxRate::GST_5,
+            pc(5),
         )
         .with_hsn("2106"),
         Qty::from_whole(2).unwrap_or_default(),
@@ -82,9 +92,9 @@ pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
             ItemId::new("itm_sample_2"),
             "Filter Coffee",
             Money::from_paise(3_000),
-            TaxRate::GST_18,
+            pc(18),
         )
-        .with_treatment(TaxTreatment::Inclusive)
+        .with_tax(mb_core::TaxSpec::gst_inclusive(pc(18)))
         .with_hsn("2101"),
         Qty::from_whole(3).unwrap_or_default(),
         None,
@@ -98,9 +108,11 @@ pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
             ItemId::new("itm_sample_3"),
             "Beer 650ml",
             Money::from_paise(22_000),
-            TaxRate::ZERO,
+            // A real VAT rate. At zero the VAT row never drew, so a bar could
+            // not see it before printing one.
+            pc(20),
         )
-        .with_treatment(TaxTreatment::NonGst),
+        .with_tax(mb_core::TaxSpec::liquor(pc(20))),
         Qty::from_whole(1).unwrap_or_default(),
         None,
         vec![],
@@ -113,7 +125,9 @@ pub fn sample_order() -> Result<(Bill, AnyOrder), PrintError> {
     }
     .charges_for(OrderType::DineIn);
 
-    let mut input = BillInput::new(&cart)
+    // Billed as whatever this shop is. As Regular whatever the shop was, a
+    // composition preview drew "BILL OF SUPPLY" over a CGST table.
+    let mut input = BillInput::new(&cart, registration)
         .with_order_type(OrderType::DineIn)
         .with_charges(&charges);
     if let Some(five_percent) = Discount::percent_bp(500) {
@@ -234,11 +248,10 @@ impl Around {
     /// this binary and there is a test in `mb-print` that it loads.
     #[must_use]
     pub fn plain(paper: Paper) -> Around {
-        let metrics = mb_print::font::Font::builtin()
-            .map_or_else(
-                |_| Metrics::printer_font(paper),
-                |font| Metrics::face(paper, std::sync::Arc::new(font)),
-            );
+        let metrics = mb_print::font::Font::builtin().map_or_else(
+            |_| Metrics::printer_font(paper),
+            |font| Metrics::face(paper, std::sync::Arc::new(font)),
+        );
         Around {
             paper,
             metrics,
@@ -269,7 +282,13 @@ pub fn around_for(app: &crate::state::App, paper: Paper, group: &str) -> Around 
         mb_print::queue::JobKind::Bill
     };
     let printer = crate::flows::default_printer(app)
-        .unwrap_or_else(|_| mb_print::printer::PrinterConfig::new("prn_preview", "Preview", mb_print::printer::Target::None))
+        .unwrap_or_else(|_| {
+            mb_print::printer::PrinterConfig::new(
+                "prn_preview",
+                "Preview",
+                mb_print::printer::Target::None,
+            )
+        })
         .with_paper(paper.kind);
     let (metrics, engine) = app.metrics_for(kind, &printer);
 
@@ -295,7 +314,7 @@ pub fn around_for(app: &crate::state::App, paper: Paper, group: &str) -> Around 
 
 /// The bill, laid out with this shop's settings, ready for the screen.
 pub fn bill_preview(config: &ShopConfig, around: &Around) -> Result<PreviewDoc, PrintError> {
-    let (bill, order) = sample_order()?;
+    let (bill, order) = sample_order(config.store.registration())?;
     let store = config.store.to_print_store();
     let document = mb_print::template::bill_document(
         &around.metrics,
@@ -374,7 +393,7 @@ mod tests {
     /// is a lie about half the screen.
     #[test]
     fn the_sample_exercises_every_setting_that_needs_a_case() {
-        let (bill, _) = sample_order().expect("the sample computes");
+        let (bill, _) = sample_order(Registration::Regular).expect("the sample computes");
         assert!(bill.lines.len() >= 3, "one item cannot show a tax summary");
         assert!(
             bill.lines.iter().any(|l| l.snapshot.hsn.is_some()),
@@ -402,10 +421,65 @@ mod tests {
         );
     }
 
+    /// The text of the sample bill, as the screen shows it.
+    fn preview_text(config: &ShopConfig) -> String {
+        bill_preview(config, &Around::plain(Paper::new(PaperKind::Mm80)))
+            .expect("previews")
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                crate::preview::PreviewLine::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            )
+    }
+
+    /// **The preview shows the shop's own document.** The sample was billed as
+    /// Regular whatever the shop was, so a composition shop's preview drew
+    /// "BILL OF SUPPLY" over a CGST table — the illegal bill, on screen.
+    #[test]
+    fn the_preview_follows_the_shop_s_registration() {
+        let mut config = ShopConfig::default();
+        // A title needs a GSTIN: `title_of` prints none for a shop that has not
+        // said it is registered.
+        config.store.gstin = "29ABCDE1234F1Z5".to_owned();
+        config.store.registration = "composition".to_owned();
+        let text = preview_text(&config);
+        assert!(text.contains("BILL OF SUPPLY"), "{text}");
+        for word in ["CGST", "SGST", "IGST"] {
+            assert!(
+                !text.contains(word),
+                "a bill of supply preview printed {word}:
+{text}"
+            );
+        }
+
+        config.store.registration = "regular".to_owned();
+        let text = preview_text(&config);
+        assert!(text.contains("TAX INVOICE"), "{text}");
+        assert!(text.contains("CGST"), "{text}");
+    }
+
+    /// The bar's VAT reaches the paper. At a zero rate it never drew, so a bar
+    /// could not see the row before printing one.
+    #[test]
+    fn the_sample_shows_a_bar_its_vat() {
+        let text = preview_text(&ShopConfig::default());
+        assert!(
+            text.contains("VAT"),
+            "the sample beer charges no VAT:
+{text}"
+        );
+    }
+
     /// It is a sample, and it says so where it counts.
     #[test]
     fn the_sample_cannot_be_mistaken_for_a_bill() {
-        let (_, order) = sample_order().expect("the sample computes");
+        let (_, order) = sample_order(Registration::Regular).expect("the sample computes");
         assert_eq!(
             order.bill_number().map(|n| n.formatted.clone()),
             Some("SAMPLE".to_owned())
@@ -428,7 +502,7 @@ mod tests {
             let mut full = ShopConfig::default();
             full.store.name = "Anna Kuteera".to_owned();
             full.store.upi_id = "anna@upi".to_owned();
-            full.store.is_composition = true;
+            full.store.registration = "composition".to_owned();
             full.receipt.show.hsn = true;
             full.receipt.qr = mb_print::settings::QrMode::Dynamic;
             full.receipt.logo = mb_print::settings::LogoPosition::Left;
@@ -456,7 +530,7 @@ mod tests {
 
         let paper = Paper::new(PaperKind::Mm80);
         let around = Around::plain(paper);
-        let (bill, order) = sample_order().expect("the sample computes");
+        let (bill, order) = sample_order(Registration::Regular).expect("the sample computes");
         let store = config.store.to_print_store();
         let document = mb_print::template::bill_document(
             &around.metrics,

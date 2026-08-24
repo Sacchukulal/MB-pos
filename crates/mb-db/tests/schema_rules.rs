@@ -235,8 +235,8 @@ fn t19_nothing_in_the_money_path_cascades() {
              VALUES ('ord_1', 'outlet_default', 'terminal_default', 'open', 20669, 1,
                      'staff_1', 'dine_in', 'tbl_1', 1, '1', 1, '0001');
              INSERT INTO order_lines (id, order_id, seq, item_id, name, unit_price,
-                                      tax_rate_bp, tax_treatment, qty)
-             VALUES ('ln_1', 'ord_1', 0, 'itm_dosa', 'Masala Dosa', 12000, 500, 'exclusive', 2000);",
+                                      tax_rate_bp, tax_kind, tax_basis, qty)
+             VALUES ('ln_1', 'ord_1', 0, 'itm_dosa', 'Masala Dosa', 12000, 500, 'gst', 'exclusive', 2000);",
         )?;
         Ok(())
     })

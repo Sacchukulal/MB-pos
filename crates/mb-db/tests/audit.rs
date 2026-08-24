@@ -16,7 +16,8 @@ use common::Scratch;
 use common::shop::{self, OUTLET};
 use mb_auth::audit::{AuditEntry, BrokenWhy, action};
 use mb_auth::{Permission, PermissionSet, RolePreset};
-use mb_core::{BusinessDay, StaffId, Timestamp};
+use mb_core::{
+    Registration,BusinessDay, StaffId, Timestamp};
 use mb_db::repo::AuditFilter;
 use mb_db::{Db, Repos};
 
@@ -484,7 +485,7 @@ fn the_administrators_are_the_active_people_who_can_manage_staff() {
 fn a_bill_opened_by_one_person_and_settled_by_another_records_both() {
     use mb_core::{
         BillInput, Cart, ItemSnapshot, Money, OrderType, Payment, PaymentMode, PlaceOfSupply,
-        Qty, RoundingMode, Settlement, TaxRate, TaxTreatment, compute_bill,
+        Qty, RoundingMode, Settlement, TaxRate, TaxSpec, compute_bill,
     };
 
     let scratch = Scratch::new("audit_two_people");
@@ -497,8 +498,7 @@ fn a_bill_opened_by_one_person_and_settled_by_another_records_both() {
             item_id: mb_core::ItemId::new("itm_dosa"),
             name: "Masala Dosa".to_owned(),
             unit_price: Money::from_paise(12_000),
-            tax_rate: TaxRate::GST_5,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
             hsn: None,
             category_id: None,
             station: None,
@@ -512,7 +512,7 @@ fn a_bill_opened_by_one_person_and_settled_by_another_records_both() {
     .expect("added");
 
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_order_type(OrderType::Parcel)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_rounding(RoundingMode::NearestRupee),

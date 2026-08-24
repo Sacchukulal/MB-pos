@@ -32,8 +32,7 @@ fn a_shop(scratch: &Scratch) -> App {
                 category_id: None,
                 name: "Masala Dosa".to_owned(),
                 unit_price: mb_core::Money::from_paise(12_000),
-                tax_rate: mb_core::TaxRate::GST_5,
-                tax_treatment: mb_core::TaxTreatment::Exclusive,
+                tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
                 tax_class_id: None,
                 hsn: None,
                 // **D119** — P13's typed cost, deliberately wrong, so the
@@ -460,8 +459,9 @@ fn demo_stock() {
                             category_id: None,
                             name: name.to_owned(),
                             unit_price: mb_core::Money::from_paise(price),
-                            tax_rate: mb_core::TaxRate::GST_5,
-                            tax_treatment: mb_core::TaxTreatment::Exclusive,
+                            tax: mb_core::TaxSpec::gst(
+                                mb_core::TaxRate::from_percent(5).expect("5%"),
+                            ),
                             tax_class_id: None,
                             hsn: None,
                             cost_price: cost.map(mb_core::Money::from_paise),

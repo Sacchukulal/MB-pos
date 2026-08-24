@@ -567,7 +567,8 @@ pub fn print_sample_on(app: &App, printer_id: String) -> UiResult<String> {
             })
     })?;
 
-    let (bill, order) = super::sample::sample_order().map_err(|e| words::from_print(&e))?;
+    let (bill, order) = super::sample::sample_order(config.store.registration())
+        .map_err(|e| words::from_print(&e))?;
     let store = config.store.to_print_store();
     let table = crate::flows::first_table_label(app);
     let time = crate::flows::clock_time(crate::flows::now());

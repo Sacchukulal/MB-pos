@@ -15,14 +15,26 @@
 //! the same reason `payments.business_day` is denormalised.
 //!
 //! So [`TaxClassRepo::save`] rewrites every item pointing at the class, in the
-//! same transaction. **And it cannot reach a bill**: a line froze its own rate
-//! and treatment when it was added (crown jewel 4, D52), so a past bill and an
-//! order that is already open both keep the numbers they were billed at. That
+//! same transaction. **And it cannot reach a bill**: a line froze its own
+//! [`TaxSpec`](mb_core::TaxSpec) when it was added (crown jewel 4, D52), so a
+//! past bill and an order that is already open both keep what they were billed
+//! at. That
 //! is P13's T2 and T3, and it is true by construction rather than by care.
+//!
+//! # P33 — the per-order-type override is gone
+//!
+//! mb-core deleted `by_order_type`, `OrderTypeRate`, `with_override` and
+//! `for_order_type`: they were modelled, given a `tax_class_rates` table,
+//! written by this repository — and read by no caller anywhere in the product
+//! (audit §3.5). The belief behind them, that parcel is taxed differently from
+//! dine-in, is not current law either. Migration 0004 dropped the table.
+//!
+//! What a class carries instead is the whole [`TaxSpec`](mb_core::TaxSpec) —
+//! kind, rate and pricing basis, in `kind`, `rate_bp` and `basis` — so it says
+//! *"outside GST, at 20% state VAT, priced tax-in"*, the sentence a bar needs.
 
 use mb_auth::audit::action;
-use mb_core::{OrderType, TaxClass, TaxClassId, TaxRate, TaxTreatment, Timestamp};
-use mb_core::taxclass::OrderTypeRate;
+use mb_core::{TaxClass, TaxClassId, Timestamp};
 use rusqlite::Transaction;
 
 use crate::encode;
@@ -42,7 +54,7 @@ impl<'a> TaxClassRepo<'a> {
 
     pub fn list(&self, outlet: &str) -> Result<Vec<TaxClass>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT id, name, rate_bp, treatment, is_active FROM tax_classes
+            "SELECT id, name, rate_bp, kind, basis, is_active FROM tax_classes
               WHERE outlet_id = ?1 ORDER BY sort_order, name",
         )?;
         let rows = stmt.query_map([outlet], |row| {
@@ -51,48 +63,23 @@ impl<'a> TaxClassRepo<'a> {
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
             ))
         })?;
 
         let mut classes = Vec::new();
         for row in rows {
-            let (id, name, rate_bp, treatment, active) = row?;
+            let (id, name, rate_bp, kind, basis, active) = row?;
             let mut class = TaxClass::new(
-                TaxClassId::new(id.clone()),
+                TaxClassId::new(id),
                 name,
-                encode::tax_rate_from_sql(rate_bp, "tax_classes.rate_bp")?,
-                encode::tax_treatment_from_sql(&treatment)?,
+                encode::tax_spec_from_sql_parts(rate_bp, &kind, &basis, "tax_classes.rate_bp")?,
             );
             class.is_active = encode::bool_from_sql(active, "tax_classes.is_active")?;
-            class.by_order_type = self.overrides_for(&id)?;
             classes.push(class);
         }
         Ok(classes)
-    }
-
-    fn overrides_for(&self, class_id: &str) -> Result<Vec<OrderTypeRate>, DbError> {
-        let mut stmt = self.tx.prepare_cached(
-            "SELECT order_type, rate_bp, treatment FROM tax_class_rates
-              WHERE class_id = ?1 ORDER BY order_type",
-        )?;
-        let rows = stmt.query_map([class_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (order_type, rate_bp, treatment) = row?;
-            out.push(OrderTypeRate {
-                order_type: encode::order_type_from_sql(&order_type)?,
-                rate: encode::tax_rate_from_sql(rate_bp, "tax_class_rates.rate_bp")?,
-                treatment: encode::tax_treatment_from_sql(&treatment)?,
-            });
-        }
-        Ok(out)
     }
 
     pub fn find(&self, outlet: &str, id: &TaxClassId) -> Result<Option<TaxClass>, DbError> {
@@ -111,70 +98,41 @@ impl<'a> TaxClassRepo<'a> {
         at: Timestamp,
     ) -> Result<usize, DbError> {
         self.tx.execute(
-            "INSERT INTO tax_classes (id, outlet_id, name, rate_bp, treatment, is_active,
+            "INSERT INTO tax_classes (id, outlet_id, name, rate_bp, kind, basis, is_active,
                                       sort_order)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
              ON CONFLICT (id) DO UPDATE SET name      = excluded.name,
                                             rate_bp   = excluded.rate_bp,
-                                            treatment = excluded.treatment,
+                                            kind      = excluded.kind,
+                                            basis     = excluded.basis,
                                             is_active = excluded.is_active",
             rusqlite::params![
                 class.id.as_str(),
                 outlet,
                 class.name,
-                encode::tax_rate_to_sql(class.rate),
-                encode::tax_treatment_to_sql(class.treatment),
+                encode::tax_rate_to_sql(class.tax.rate),
+                encode::tax_kind_to_sql(class.tax.kind),
+                encode::price_basis_to_sql(class.tax.basis),
                 encode::bool_to_sql(class.is_active),
             ],
         )?;
 
-        // The overrides are replaced wholesale — four rows at most, and a diff
-        // is where "the box looked unticked but the row was still there" comes
-        // from (the same argument `save_role` makes).
-        self.tx
-            .execute("DELETE FROM tax_class_rates WHERE class_id = ?1", [class.id.as_str()])?;
-        for over in &class.by_order_type {
-            self.tx.execute(
-                "INSERT INTO tax_class_rates (class_id, order_type, rate_bp, treatment)
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![
-                    class.id.as_str(),
-                    encode::order_type_to_sql(over.order_type),
-                    encode::tax_rate_to_sql(over.rate),
-                    encode::tax_treatment_to_sql(over.treatment),
-                ],
-            )?;
-        }
-
         // **And the live menu follows.** Not past bills, and not the lines
         // already on an open order — those froze their own copies.
         let repriced = self.tx.execute(
-            "UPDATE items SET tax_rate_bp = ?2, tax_treatment = ?3, updated_at = ?4
+            "UPDATE items SET tax_rate_bp = ?2, tax_kind = ?3, tax_basis = ?4, updated_at = ?5
               WHERE tax_class_id = ?1",
             rusqlite::params![
                 class.id.as_str(),
-                encode::tax_rate_to_sql(class.rate),
-                encode::tax_treatment_to_sql(class.treatment),
+                encode::tax_rate_to_sql(class.tax.rate),
+                encode::tax_kind_to_sql(class.tax.kind),
+                encode::price_basis_to_sql(class.tax.basis),
                 encode::timestamp_to_sql(at),
             ],
         )?;
 
         OutboxRepo::new(self.tx).enqueue(outlet, "tax_classes", class.id.as_str(), Op::Upsert, at)?;
         Ok(repriced)
-    }
-
-    /// What a class means for one kind of order — the rule, read from storage.
-    ///
-    /// It exists here as well as on `TaxClass` because the caller usually has
-    /// an id and an order type, and making it fetch the whole class first would
-    /// be three lines at every call site.
-    pub fn resolve(
-        &self,
-        outlet: &str,
-        id: &TaxClassId,
-        kind: OrderType,
-    ) -> Result<Option<(TaxRate, TaxTreatment)>, DbError> {
-        Ok(self.find(outlet, id)?.map(|class| class.for_order_type(kind)))
     }
 
     /// How many items point at this class. **Nothing in the menu is deleted**

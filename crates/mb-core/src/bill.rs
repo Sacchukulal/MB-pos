@@ -14,7 +14,9 @@ use crate::discount::{self, DiscountEntry};
 use crate::item::{ItemSnapshot, Modifier, OrderType};
 use crate::money::{Money, MoneyError, RoundingMode};
 use crate::qty::Qty;
-use crate::tax::{self, PlaceOfSupply, TaxAmounts, TaxRate, TaxSummary, TaxTreatment};
+use crate::tax::{
+    self, GstAmounts, PlaceOfSupply, PriceBasis, Registration, StateTax, TaxSpec, TaxSummary, Vat,
+};
 use serde::{Deserialize, Serialize};
 
 /// Something that stopped a bill from being computed.
@@ -44,6 +46,13 @@ pub struct BillInput<'a> {
     /// discount the food and not the delivery.
     pub charges: &'a [Charge],
     pub place_of_supply: PlaceOfSupply,
+    /// **Who this shop is.** The gate on whether GST may be charged at all
+    /// (P33, audit §3.2). Required rather than defaulted: a default that
+    /// charges tax is the wrong way round for a safety gate.
+    pub registration: Registration,
+    /// What the state half is called here — SGST, or UTGST in a union
+    /// territory without a legislature.
+    pub state_tax: StateTax,
     pub order_type: OrderType,
     /// Scope 1.13.
     pub rounding: RoundingMode,
@@ -56,12 +65,14 @@ impl<'a> BillInput<'a> {
     /// A plain bill: no discount, no charges, same-state supply, dine-in,
     /// rounded to the nearest rupee.
     #[must_use]
-    pub fn new(cart: &'a Cart) -> Self {
+    pub fn new(cart: &'a Cart, registration: Registration) -> Self {
         BillInput {
             cart,
             bill_discount: None,
             charges: NO_CHARGES,
             place_of_supply: PlaceOfSupply::Intra,
+            registration,
+            state_tax: StateTax::Sgst,
             order_type: OrderType::DineIn,
             rounding: RoundingMode::NearestRupee,
         }
@@ -82,6 +93,12 @@ impl<'a> BillInput<'a> {
     #[must_use]
     pub fn with_place_of_supply(mut self, place: PlaceOfSupply) -> Self {
         self.place_of_supply = place;
+        self
+    }
+
+    #[must_use]
+    pub fn with_state_tax(mut self, state_tax: StateTax) -> Self {
+        self.state_tax = state_tax;
         self
     }
 
@@ -117,11 +134,13 @@ pub struct BillLine {
     pub net: Money,
     /// Step 4.
     pub taxable: Money,
-    pub tax: TaxAmounts,
+    pub gst: GstAmounts,
+    /// **State VAT — alcohol only, and never inside a GST figure.**
+    pub vat: Vat,
     /// `taxable + tax`. For an inclusive-priced line this equals `net` exactly.
     pub gross_including_tax: Money,
-    pub rate: TaxRate,
-    pub treatment: TaxTreatment,
+    /// The kind, rate and pricing basis this line was billed under, frozen.
+    pub tax: TaxSpec,
 }
 
 /// A computed bill.
@@ -143,53 +162,54 @@ pub struct Bill {
     /// (D7, D15).
     pub bill_discount_capped: bool,
     pub total_taxable: Money,
-    pub total_tax: TaxAmounts,
-    /// **The part of `total_tax` that is already inside the prices** — the
-    /// inclusive-priced lines and charges. P32.
+    pub total_gst: GstAmounts,
+    /// **State VAT collected on this bill.** Its own figure, on its own
+    /// channel, and it never enters a GST return (P33).
+    pub total_vat: Vat,
+    /// The part of the GST already inside the prices — the inclusive lines and
+    /// charges (P32).
     ///
-    /// # Why the bill carries it
-    ///
-    /// A printed bill shows item amounts **before tax**, so its column adds up
-    /// to `subtotal` — the owner ruled on that on 2026-08-23, after a real bill
-    /// printed `105.00` against an item and `100.00` as the subtotal and then
-    /// added the tax again underneath.
-    ///
-    /// For an inclusive line that would count the tax twice: its `gross` is
-    /// already tax-in, so the tax must not be added a second time below. So the
-    /// bill separates the two, `total_tax = tax_included + tax_added`, and the
-    /// template prints `tax_added` as the CGST/SGST lines and `tax_included` as
-    /// a memo. Then
-    ///
-    /// ```text
-    /// subtotal − discount + charges + tax_added + round_off = grand_total
-    /// ```
-    ///
-    /// exactly, which is requirement 7 by construction rather than by
-    /// coincidence.
-    ///
-    /// **A template may not compute this** (R2, D2) — a renderer that does
-    /// arithmetic on money is a second money path, so it is computed here once.
+    /// A printed bill shows amounts before tax, so its column sums to
+    /// `subtotal`. Adding an inclusive line's tax again below would count it
+    /// twice, so the two are kept apart and
+    /// `subtotal - discount + charges + gst_added + round_off = grand_total`
+    /// holds exactly. Computed here, never in a template (R2, D2).
     #[serde(default)]
-    pub tax_included: TaxAmounts,
+    pub gst_included: GstAmounts,
+    /// The same split for VAT. A VAT-inclusive beer would be double-counted on
+    /// the printed bill without it, exactly as an inclusive dosa was before P32.
+    #[serde(default)]
+    pub vat_included: Vat,
+    #[serde(default)]
+    pub vat_added: Vat,
     /// `total_tax` less [`Bill::tax_included`] — the tax the customer is being
     /// charged on top of the printed amounts.
     #[serde(default)]
-    pub tax_added: TaxAmounts,
+    pub gst_added: GstAmounts,
     pub non_gst_value: Money,
     pub exempt_value: Money,
+    pub untaxed_value: Money,
     /// Step 7-8. Recorded as its own figure so the printed lines always sum to
     /// the printed total.
     pub round_off: Money,
     pub grand_total: Money,
     pub order_type: OrderType,
     pub place_of_supply: PlaceOfSupply,
+    /// **Frozen with the bill**, for the same reason the place of supply is: a
+    /// shop that leaves the composition scheme next year must not have last
+    /// year's bills reprint with a different title. Crown jewel 4 applies to
+    /// the shop's own status, not only to its prices.
+    pub registration: Registration,
+    pub state_tax: StateTax,
     pub rounding: RoundingMode,
 }
 
 impl Bill {
-    /// Total tax as one figure.
+    /// Every tax on this bill as one figure. **Only for a total the customer
+    /// pays** — never for anything a GST return reads, because it folds state
+    /// VAT in beside GST.
     pub fn tax_total(&self) -> std::result::Result<Money, MoneyError> {
-        self.total_tax.total()
+        self.total_gst.total()?.add(self.total_vat.into_money())
     }
 
     /// **Fill [`Bill::tax_included`] and [`Bill::tax_added`] from the lines.**
@@ -200,9 +220,12 @@ impl Bill {
     /// migrated, and there is one rule ([`tax_split`]) that both this and
     /// [`compute_bill`] use.
     pub fn with_tax_split(mut self) -> Result<Bill> {
-        let (included, added) = tax_split(&self.lines, &self.charges, self.total_tax)?;
-        self.tax_included = included;
-        self.tax_added = added;
+        let (gst_included, gst_added) = gst_split(&self.lines, &self.charges, self.total_gst)?;
+        self.gst_included = gst_included;
+        self.gst_added = gst_added;
+        let (vat_included, vat_added) = vat_split(&self.lines, self.total_vat)?;
+        self.vat_included = vat_included;
+        self.vat_added = vat_added;
         Ok(self)
     }
 }
@@ -211,23 +234,31 @@ impl Bill {
 ///
 /// One rule, used by [`compute_bill`] and by [`Bill::with_tax_split`], because
 /// a second copy of it is a second answer to "does this bill add up".
-fn tax_split(
+fn gst_split(
     lines: &[BillLine],
     charges: &[BillCharge],
-    total: TaxAmounts,
-) -> Result<(TaxAmounts, TaxAmounts)> {
-    let mut included = TaxAmounts::default();
-    for line in lines
-        .iter()
-        .filter(|l| l.treatment == TaxTreatment::Inclusive)
-    {
-        included = included.add(line.tax)?;
+    total: GstAmounts,
+) -> Result<(GstAmounts, GstAmounts)> {
+    let mut included = GstAmounts::default();
+    for line in lines.iter().filter(|l| l.tax.basis == PriceBasis::Inclusive) {
+        included = included.add(line.gst)?;
     }
-    for charge in charges
-        .iter()
-        .filter(|c| c.treatment == TaxTreatment::Inclusive)
-    {
-        included = included.add(charge.tax)?;
+    for charge in charges.iter().filter(|c| c.tax.basis == PriceBasis::Inclusive) {
+        included = included.add(charge.gst)?;
+    }
+    let added = total.sub(included)?;
+    Ok((included, added))
+}
+
+/// The same split for state VAT.
+///
+/// **Charges are not consulted**, because a charge is never alcohol —
+/// [`Charge::is_coherent`](crate::Charge::is_coherent) refuses
+/// [`TaxKind::OutsideGst`](crate::TaxKind::OutsideGst) on one.
+fn vat_split(lines: &[BillLine], total: Vat) -> Result<(Vat, Vat)> {
+    let mut included = Vat::ZERO;
+    for line in lines.iter().filter(|l| l.tax.basis == PriceBasis::Inclusive) {
+        included = included.add(line.vat)?;
     }
     let added = total.sub(included)?;
     Ok((included, added))
@@ -296,9 +327,9 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
 
         let outcome = tax::compute_line(
             net,
-            line.snapshot.tax_rate,
-            line.snapshot.tax_treatment,
+            line.snapshot.tax,
             input.place_of_supply,
+            input.registration,
         )?;
         summary.add(outcome)?;
 
@@ -312,10 +343,10 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
             bill_discount_share: share,
             net,
             taxable: outcome.taxable,
-            tax: outcome.tax,
+            gst: outcome.gst,
+            vat: outcome.vat,
             gross_including_tax: outcome.gross,
-            rate: outcome.rate,
-            treatment: outcome.treatment,
+            tax: outcome.spec,
         });
     }
 
@@ -342,9 +373,9 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
         let amount = charge.compute_on(charge_base)?;
         let outcome = tax::compute_line(
             amount,
-            charge.tax_rate,
-            charge.tax_treatment,
+            charge.tax,
             input.place_of_supply,
+            input.registration,
         )?;
         summary.add(outcome)?;
 
@@ -354,10 +385,9 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
             basis: charge.basis,
             amount,
             taxable: outcome.taxable,
-            tax: outcome.tax,
+            gst: outcome.gst,
             gross_including_tax: outcome.gross,
-            rate: outcome.rate,
-            treatment: outcome.treatment,
+            tax: outcome.spec,
         });
     }
 
@@ -368,12 +398,14 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
     let total_discount = total_line_discount.add(total_bill_discount)?;
     let total_charges = Money::try_sum(bill_charges.iter().map(|c| c.amount))?;
     let total_taxable = summary.total_taxable()?;
-    let total_tax = summary.total_tax()?;
+    let total_gst = summary.total_gst()?;
+    let total_vat = summary.total_vat()?;
 
     // **The tax already inside the prices, kept apart from the tax added on
     // top** — P32, and see `Bill::tax_included` for why a printed bill cannot
     // add up without the split.
-    let (tax_included, tax_added) = tax_split(&computed, &bill_charges, total_tax)?;
+    let (gst_included, gst_added) = gst_split(&computed, &bill_charges, total_gst)?;
+    let (vat_included, vat_added) = vat_split(&computed, total_vat)?;
 
     // The grand total is built from the lines and charges themselves, not from
     // subtotal − discount + charges + tax. Summing what will actually be
@@ -403,6 +435,7 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
         charges: bill_charges,
         non_gst_value: summary.non_gst_value,
         exempt_value: summary.exempt_value,
+        untaxed_value: summary.untaxed_value,
         summary,
         subtotal,
         total_line_discount,
@@ -411,13 +444,18 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
         total_charges,
         bill_discount_capped,
         total_taxable,
-        total_tax,
-        tax_included,
-        tax_added,
+        total_gst,
+        total_vat,
+        gst_included,
+        gst_added,
+        vat_included,
+        vat_added,
         round_off,
         grand_total,
         order_type: input.order_type,
         place_of_supply: input.place_of_supply,
+        registration: input.registration,
+        state_tax: input.state_tax,
         rounding: input.rounding,
     })
 }
@@ -426,11 +464,23 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
 mod tests {
     use super::*;
     use crate::charge::{ChargeBasis, ChargeKind};
+    use crate::tax::{TaxKind, TaxRate};
     use crate::discount::Discount;
     use crate::ids::{ItemId, ModifierId, StaffId};
 
     const fn rs(rupees: i64) -> Money {
         Money::from_paise(rupees * 100)
+    }
+
+    /// Rates as data, not as constants in the shipping code. The owner ruled
+    /// slabs out of the source (P33), so the tests carry their own.
+    fn pc(percent: u32) -> TaxRate {
+        TaxRate::from_percent(percent).expect("a real rate")
+    }
+
+    /// A plain regular-taxpayer bill — what almost every test wants.
+    fn input(cart: &Cart) -> BillInput<'_> {
+        BillInput::new(cart, Registration::Regular)
     }
 
     fn item(id: &str, paise: i64, rate: TaxRate) -> ItemSnapshot {
@@ -460,14 +510,22 @@ mod tests {
             "the printed lines and charges do not sum to the printed total"
         );
 
-        // Note `exempt_value`: TaxSummary::total_taxable() deliberately
-        // excludes BOTH non-GST and exempt supplies, so an exempt line would
-        // vanish from this identity if it were left out.
+        // **Every bucket has to be here or the identity is a lie.**
+        // `TaxSummary::total_taxable()` deliberately counts ONLY the value that
+        // carries GST, so the three kinds that do not — liquor, exempt and
+        // untaxed — each need naming separately. P33 added `untaxed_value` and
+        // this assertion caught its absence on the first run, which is exactly
+        // what it is for.
+        //
+        // `tax_total()` folds state VAT in beside GST, and that is right HERE
+        // and nowhere else: this is the money the customer hands over. Nothing
+        // that feeds a GST return may use it.
         let from_summary = Money::try_sum([
             bill.total_taxable,
             bill.tax_total().expect("sums"),
             bill.non_gst_value,
             bill.exempt_value,
+            bill.untaxed_value,
             bill.round_off,
         ])
         .expect("sums");
@@ -475,6 +533,47 @@ mod tests {
             from_summary, bill.grand_total,
             "the tax summary does not tie to the total"
         );
+    }
+
+    /// A composition shop knows its turnover but charges nothing.
+    #[test]
+    fn a_composition_bill_has_a_taxable_value_and_no_gst() {
+        let cart = one_line(item("food", 100_000, pc(5)), Qty::ONE);
+        let bill = compute_bill(BillInput::new(&cart, Registration::Composition))
+            .expect("computes");
+
+        assert!(bill.total_gst.is_zero(), "a composition dealer may not collect GST");
+        assert_eq!(bill.total_taxable, rs(1_000), "but the turnover is known");
+        assert_eq!(bill.grand_total, rs(1_000), "the customer pays the menu price");
+    }
+
+    /// Food and beer on one bill: two taxes, two books, one total.
+    #[test]
+    fn a_bill_with_food_and_beer_keeps_the_two_taxes_apart() {
+        let mut cart = Cart::new();
+        cart.add(item("dosa", 100_000, pc(5)), Qty::ONE, None, vec![])
+            .expect("adds");
+        cart.add(
+            item("beer", 25_000, pc(20)).with_tax(TaxSpec::liquor(pc(20))),
+            Qty::ONE,
+            None,
+            vec![],
+        )
+        .expect("adds");
+
+        let bill = compute_bill(
+            BillInput::new(&cart, Registration::Regular).with_rounding(RoundingMode::None),
+        )
+        .expect("computes");
+
+        // GST saw only the food.
+        assert_eq!(bill.total_taxable, rs(1_000));
+        assert_eq!(bill.total_gst.total(), Ok(rs(50)));
+        // VAT saw only the beer, and the beer was priced tax-in.
+        assert!(!bill.total_vat.is_zero());
+        assert_eq!(bill.vat_included, bill.total_vat, "an inclusive beer adds nothing on top");
+        assert_eq!(bill.non_gst_value.add(bill.total_vat.into_money()), Ok(rs(250)));
+        assert_reconciles(&bill);
     }
 
     /// A deterministic generator, written here rather than pulled in as a
@@ -505,12 +604,16 @@ mod tests {
     fn every_generated_bill_reconciles_both_ways() {
         // T1 — the single most important test in the crate. Several thousand
         // carts, every shape a real counter produces.
-        let rates = [TaxRate::ZERO, TaxRate::GST_5, TaxRate::GST_12, TaxRate::GST_18, TaxRate::GST_28];
-        let treatments = [
-            TaxTreatment::Exclusive,
-            TaxTreatment::Inclusive,
-            TaxTreatment::Exempt,
-            TaxTreatment::NonGst,
+        let rates = [TaxRate::ZERO, pc(5), pc(12), pc(18), pc(28)];
+        // Every shape a line can take, including the two P33 added: liquor
+        // carrying real state VAT, and a genuinely untaxed line.
+        let specs = [
+            TaxSpec::gst(pc(5)),
+            TaxSpec::gst_inclusive(pc(18)),
+            TaxSpec::liquor(pc(20)),
+            TaxSpec { kind: TaxKind::OutsideGst, rate: pc(25), basis: PriceBasis::Exclusive },
+            TaxSpec::exempt(),
+            TaxSpec::untaxed(),
         ];
         let mut rng = Rng::new(0x5EED_1234_ABCD_0001);
 
@@ -521,13 +624,12 @@ mod tests {
             for line in 0..line_count {
                 let paise = 100 + i64::try_from(rng.below(500_000)).unwrap_or(100);
                 let rate = rates[usize::try_from(rng.below(5)).unwrap_or(0)];
-                let treatment = treatments[usize::try_from(rng.below(4)).unwrap_or(0)];
+                let spec = specs[usize::try_from(rng.below(6)).unwrap_or(0)];
                 // A quantity from 0.001 to ~20, so fractional weights are well
                 // represented and not just an occasional half.
                 let qty = Qty::from_thousandths(1 + i64::try_from(rng.below(20_000)).unwrap_or(0));
 
-                let snapshot = item(&format!("itm_{case}_{line}"), paise, rate)
-                    .with_treatment(treatment);
+                let snapshot = item(&format!("itm_{case}_{line}"), paise, rate).with_tax(spec);
 
                 let modifiers = if rng.below(4) == 0 {
                     vec![Modifier::new(
@@ -581,8 +683,14 @@ mod tests {
                     },
                     name: format!("Charge {slot}"),
                     basis,
-                    tax_rate: rates[usize::try_from(rng.below(5)).unwrap_or(0)],
-                    tax_treatment: treatments[usize::try_from(rng.below(4)).unwrap_or(0)],
+                    // A charge is never alcohol, so its spec is drawn from the
+                    // GST-side shapes only — see `Charge::is_coherent`.
+                    tax: [
+                        TaxSpec::gst(rates[usize::try_from(rng.below(5)).unwrap_or(0)]),
+                        TaxSpec::gst_inclusive(rates[usize::try_from(rng.below(5)).unwrap_or(0)]),
+                        TaxSpec::exempt(),
+                        TaxSpec::untaxed(),
+                    ][usize::try_from(rng.below(4)).unwrap_or(0)],
                 });
             }
 
@@ -594,7 +702,16 @@ mod tests {
                 RoundingMode::Down,
             ][usize::try_from(rng.below(4)).unwrap_or(0)];
 
-            let mut input = BillInput::new(&cart)
+            // Composition and unregistered shops go through the whole pipeline
+            // too, not just `compute_line`.
+            let registration = [
+                Registration::Regular,
+                Registration::Regular,
+                Registration::Composition,
+                Registration::Unregistered,
+            ][usize::try_from(rng.below(4)).unwrap_or(0)];
+
+            let mut input = BillInput::new(&cart, registration)
                 .with_place_of_supply(place)
                 .with_charges(&charges)
                 .with_rounding(rounding);
@@ -602,6 +719,10 @@ mod tests {
 
             let bill = compute_bill(input).expect("computes");
             assert_reconciles(&bill);
+
+            if !registration.charges_gst() {
+                assert!(bill.total_gst.is_zero(), "case {case}: GST on a {registration:?} bill");
+            }
 
             // No line may come out negative, whatever the discounts did.
             for line in &bill.lines {
@@ -628,27 +749,27 @@ mod tests {
     fn a_bill_discount_on_a_mixed_rate_bill_taxes_correctly() {
         // T2 — the audit's B10/B11 case. A 5% dish and an 18% packaged item.
         let mut cart = Cart::new();
-        cart.add(item("food", 100_000, TaxRate::GST_5), Qty::ONE, None, vec![])
+        cart.add(item("food", 100_000, pc(5)), Qty::ONE, None, vec![])
             .expect("adds");
-        cart.add(item("packaged", 100_000, TaxRate::GST_18), Qty::ONE, None, vec![])
+        cart.add(item("packaged", 100_000, pc(18)), Qty::ONE, None, vec![])
             .expect("adds");
 
-        let plain = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+        let plain = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
         let discounted = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
         )
         .expect("computes");
 
         // ₹1000 each. 5% tax = ₹50, 18% tax = ₹180.
-        assert_eq!(plain.lines[0].tax.total(), Ok(rs(50)));
-        assert_eq!(plain.lines[1].tax.total(), Ok(rs(180)));
+        assert_eq!(plain.lines[0].gst.total(), Ok(rs(50)));
+        assert_eq!(plain.lines[1].gst.total(), Ok(rs(180)));
 
         // After 10% off, each line's tax must be exactly 10% lower — because
         // the discount came off the net BEFORE tax, per rate.
-        assert_eq!(discounted.lines[0].tax.total(), Ok(rs(45)));
-        assert_eq!(discounted.lines[1].tax.total(), Ok(rs(162)));
+        assert_eq!(discounted.lines[0].gst.total(), Ok(rs(45)));
+        assert_eq!(discounted.lines[1].gst.total(), Ok(rs(162)));
         assert_eq!(discounted.lines[0].net, rs(900));
         assert_eq!(discounted.lines[1].net, rs(900));
 
@@ -679,16 +800,16 @@ mod tests {
     fn a_service_charge_carries_its_own_rate_into_the_summary() {
         // T3, and the audit's B13 — the reason charges have their own rate.
         // ₹1,000 of 5% food, with an 18% service charge on top.
-        let cart = one_line(item("food", 100_000, TaxRate::GST_5), Qty::ONE);
+        let cart = one_line(item("food", 100_000, pc(5)), Qty::ONE);
         let charges = vec![Charge::percent(
             ChargeKind::Service,
             "Service Charge",
             1_000,
-            TaxRate::GST_18,
+            pc(18),
         )];
 
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_charges(&charges)
                 .with_rounding(RoundingMode::None),
         )
@@ -696,15 +817,15 @@ mod tests {
 
         assert_eq!(bill.charges.len(), 1);
         assert_eq!(bill.charges[0].amount, rs(100), "10% of ₹1,000");
-        assert_eq!(bill.charges[0].tax.total(), Ok(rs(18)), "the charge is 18%, not 5%");
+        assert_eq!(bill.charges[0].gst.total(), Ok(rs(18)), "the charge is 18%, not 5%");
 
         // Two rate rows, and the food's 5% row is untouched by the charge.
         let rows: Vec<_> = bill.summary.rows().copied().collect();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].rate, TaxRate::GST_5);
+        assert_eq!(rows[0].rate, pc(5));
         assert_eq!(rows[0].taxable, rs(1_000));
-        assert_eq!(rows[0].tax.total(), Ok(rs(50)));
-        assert_eq!(rows[1].rate, TaxRate::GST_18);
+        assert_eq!(rows[0].gst.total(), Ok(rs(50)));
+        assert_eq!(rows[1].rate, pc(18));
         assert_eq!(rows[1].taxable, rs(100));
 
         // 1000 + 50 + 100 + 18
@@ -717,15 +838,15 @@ mod tests {
     fn the_charge_base_is_the_discounted_line_total_and_never_compounds() {
         // T4 — the ambiguous number, pinned.
         // ₹1,000 of food, 10% bill discount, then two 5% charges.
-        let cart = one_line(item("food", 100_000, TaxRate::GST_5), Qty::ONE);
+        let cart = one_line(item("food", 100_000, pc(5)), Qty::ONE);
         let charges = vec![
-            Charge::percent(ChargeKind::Service, "Service", 500, TaxRate::GST_5),
-            Charge::percent(ChargeKind::Packing, "Packing", 500, TaxRate::GST_5),
-            Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), TaxRate::GST_5),
+            Charge::percent(ChargeKind::Service, "Service", 500, pc(5)),
+            Charge::percent(ChargeKind::Packing, "Packing", 500, pc(5)),
+            Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), pc(5)),
         ];
 
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_charges(&charges)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
@@ -751,19 +872,19 @@ mod tests {
         // as a test because the alternative (food-only) is a plausible reading
         // and would silently under-charge every bar bill.
         let mut cart = Cart::new();
-        cart.add(item("curry", 50_000, TaxRate::GST_5), Qty::ONE, None, vec![])
+        cart.add(item("curry", 50_000, pc(5)), Qty::ONE, None, vec![])
             .expect("adds");
         cart.add(
-            item("beer", 50_000, TaxRate::ZERO).with_treatment(TaxTreatment::NonGst),
+            item("beer", 50_000, TaxRate::ZERO).with_tax(TaxSpec::liquor(TaxRate::ZERO)),
             Qty::ONE,
             None,
             vec![],
         )
         .expect("adds");
 
-        let charges = vec![Charge::percent(ChargeKind::Service, "Service", 1_000, TaxRate::GST_18)];
+        let charges = vec![Charge::percent(ChargeKind::Service, "Service", 1_000, pc(18))];
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_charges(&charges)
                 .with_rounding(RoundingMode::None),
         )
@@ -777,11 +898,11 @@ mod tests {
     fn a_discount_bigger_than_the_bill_cannot_go_negative_even_with_charges() {
         // T2. The naive implementation subtracts the discount from the total
         // AFTER charges and lands below zero.
-        let cart = one_line(item("dish", 30_000, TaxRate::GST_5), Qty::ONE);
-        let charges = vec![Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), TaxRate::GST_18)];
+        let cart = one_line(item("dish", 30_000, pc(5)), Qty::ONE);
+        let charges = vec![Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), pc(18))];
 
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_charges(&charges)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::amount(rs(500)).expect("valid"))),
@@ -804,11 +925,11 @@ mod tests {
         // must produce a bill, not a crash.
         let cart = Cart::new();
         let charges = vec![
-            Charge::percent(ChargeKind::Service, "Service", 1_000, TaxRate::GST_18),
-            Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), TaxRate::GST_18),
+            Charge::percent(ChargeKind::Service, "Service", 1_000, pc(18)),
+            Charge::flat(ChargeKind::Delivery, "Delivery", rs(40), pc(18)),
         ];
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_charges(&charges)
                 .with_rounding(RoundingMode::None),
         )
@@ -823,16 +944,16 @@ mod tests {
     #[test]
     fn a_percentage_and_a_flat_discount_that_should_match_do_match() {
         // T9 — to the paisa, through the whole pipeline.
-        let cart = one_line(item("dish", 100_000, TaxRate::GST_5), Qty::ONE);
+        let cart = one_line(item("dish", 100_000, pc(5)), Qty::ONE);
 
         let by_percent = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
         )
         .expect("computes");
         let by_amount = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::amount(rs(100)).expect("valid"))),
         )
@@ -847,11 +968,11 @@ mod tests {
     fn the_rounding_mode_reaches_the_bill_and_is_recorded_on_it() {
         // T5, through the pipeline rather than on a bare Money.
         let cart = one_line(
-            item("meal", 48_735, TaxRate::ZERO).with_treatment(TaxTreatment::Exempt),
+            item("meal", 48_735, TaxRate::ZERO).with_tax(TaxSpec::exempt()),
             Qty::ONE,
         );
         let total = |mode| {
-            let bill = compute_bill(BillInput::new(&cart).with_rounding(mode)).expect("computes");
+            let bill = compute_bill(input(&cart).with_rounding(mode)).expect("computes");
             assert_reconciles(&bill);
             assert_eq!(bill.rounding, mode, "the mode must be recorded on the bill");
             // The round-off is always exactly the gap it closed.
@@ -874,7 +995,7 @@ mod tests {
         // the arithmetic.
         let mut cart = Cart::new();
         let index = cart
-            .add(item("dish", 100_000, TaxRate::GST_5), Qty::ONE, None, vec![])
+            .add(item("dish", 100_000, pc(5)), Qty::ONE, None, vec![])
             .expect("adds");
         let entry = DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))
             .with_reason("regular customer")
@@ -885,7 +1006,7 @@ mod tests {
         assert_eq!(stored.reason.as_deref(), Some("regular customer"));
         assert_eq!(stored.authorised_by.as_ref().map(StaffId::as_str), Some("stf_owner"));
 
-        let bill = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None))
+        let bill = compute_bill(input(&cart).with_rounding(RoundingMode::None))
             .expect("computes");
         assert_eq!(bill.lines[0].line_discount, rs(100));
     }
@@ -894,7 +1015,7 @@ mod tests {
     fn an_empty_cart_produces_a_zero_bill_not_an_error() {
         // T8
         let cart = Cart::new();
-        let bill = compute_bill(BillInput::new(&cart)).expect("computes");
+        let bill = compute_bill(input(&cart)).expect("computes");
         assert_eq!(bill.grand_total, Money::ZERO);
         assert_eq!(bill.subtotal, Money::ZERO);
         assert_eq!(bill.round_off, Money::ZERO);
@@ -907,13 +1028,13 @@ mod tests {
     fn an_all_complimentary_bill_with_a_discount_does_not_divide_by_zero() {
         // T9
         let mut cart = Cart::new();
-        cart.add(item("free_a", 0, TaxRate::GST_5), Qty::ONE, None, vec![])
+        cart.add(item("free_a", 0, pc(5)), Qty::ONE, None, vec![])
             .expect("adds");
-        cart.add(item("free_b", 0, TaxRate::GST_18), Qty::ONE, None, vec![])
+        cart.add(item("free_b", 0, pc(18)), Qty::ONE, None, vec![])
             .expect("adds");
 
         let bill = compute_bill(
-            BillInput::new(&cart).with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
+            input(&cart).with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
         )
         .expect("computes");
 
@@ -926,14 +1047,14 @@ mod tests {
     fn a_bar_bill_keeps_alcohol_out_of_the_gst_return() {
         // T10 — the master plan's requirement 2, and what v1 could not do.
         let mut cart = Cart::new();
-        cart.add(item("beer", 30_000, TaxRate::ZERO).with_treatment(TaxTreatment::NonGst), Qty::ONE, None, vec![])
+        cart.add(item("beer", 30_000, TaxRate::ZERO).with_tax(TaxSpec::liquor(TaxRate::ZERO)), Qty::ONE, None, vec![])
             .expect("adds");
-        cart.add(item("curry", 20_000, TaxRate::GST_5), Qty::ONE, None, vec![])
+        cart.add(item("curry", 20_000, pc(5)), Qty::ONE, None, vec![])
             .expect("adds");
-        cart.add(item("bread", 5_000, TaxRate::ZERO).with_treatment(TaxTreatment::Exempt), Qty::ONE, None, vec![])
+        cart.add(item("bread", 5_000, TaxRate::ZERO).with_tax(TaxSpec::exempt()), Qty::ONE, None, vec![])
             .expect("adds");
 
-        let bill = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+        let bill = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
 
         assert_eq!(bill.non_gst_value, rs(300));
         assert_eq!(bill.exempt_value, rs(50));
@@ -950,10 +1071,10 @@ mod tests {
         // T11 — proved end to end, not just inside tax.rs.
         for paise in [10_500_i64, 9_999, 1, 33_333, 100] {
             let cart = one_line(
-                item("incl", paise, TaxRate::GST_5).with_treatment(TaxTreatment::Inclusive),
+                item("incl", paise, pc(5)).with_tax(TaxSpec::gst_inclusive(pc(5))),
                 Qty::ONE,
             );
-            let bill = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+            let bill = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
             assert_eq!(
                 bill.lines[0].gross_including_tax,
                 Money::from_paise(paise),
@@ -964,11 +1085,11 @@ mod tests {
 
         // Still true after a discount takes part of it away.
         let cart = one_line(
-            item("incl", 10_500, TaxRate::GST_5).with_treatment(TaxTreatment::Inclusive),
+            item("incl", 10_500, pc(5)).with_tax(TaxSpec::gst_inclusive(pc(5))),
             Qty::ONE,
         );
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
         )
@@ -981,9 +1102,9 @@ mod tests {
     #[test]
     fn a_capped_bill_discount_reaches_the_bill() {
         // T12 — the flag, not just the amount.
-        let cart = one_line(item("dish", 30_000, TaxRate::GST_5), Qty::ONE);
+        let cart = one_line(item("dish", 30_000, pc(5)), Qty::ONE);
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::amount(rs(500)).expect("valid"))),
         )
@@ -1000,19 +1121,19 @@ mod tests {
         // T13
         let mut cart = Cart::new();
         cart.add(
-            item("pizza", 20_000, TaxRate::GST_5),
+            item("pizza", 20_000, pc(5)),
             Qty::from_whole(2).expect("in range"),
             None,
             vec![Modifier::new(ModifierId::new("mod_cheese"), "Extra Cheese", rs(30))],
         )
         .expect("adds");
 
-        let bill = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+        let bill = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
         // (₹200 + ₹30) × 2 = ₹460, taxed at the line's 5%, not at some rate of
         // the modifier's own.
         assert_eq!(bill.lines[0].gross, rs(460));
-        assert_eq!(bill.lines[0].rate, TaxRate::GST_5);
-        assert_eq!(bill.lines[0].tax.total(), Ok(rs(23)));
+        assert_eq!(bill.lines[0].tax.rate, pc(5));
+        assert_eq!(bill.lines[0].gst.total(), Ok(rs(23)));
         assert_reconciles(&bill);
     }
 
@@ -1021,26 +1142,26 @@ mod tests {
         // T13, second half.
         let mut cart = Cart::new();
         cart.add(
-            item("burger", 15_000, TaxRate::GST_5),
+            item("burger", 15_000, pc(5)),
             Qty::ONE,
             None,
             vec![Modifier::new(ModifierId::new("mod_nocheese"), "No Cheese", rs(-10))],
         )
         .expect("adds");
-        let bill = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+        let bill = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
         assert_eq!(bill.lines[0].gross, rs(140));
 
         // A delta below the item's own price is refused, not clamped to zero.
         let mut cart = Cart::new();
         cart.add(
-            item("burger", 15_000, TaxRate::GST_5),
+            item("burger", 15_000, pc(5)),
             Qty::ONE,
             None,
             vec![Modifier::new(ModifierId::new("mod_absurd"), "Absurd", rs(-200))],
         )
         .expect("adds");
         assert!(matches!(
-            compute_bill(BillInput::new(&cart)),
+            compute_bill(input(&cart)),
             Err(BillError::NegativeLinePrice { index: 0, .. })
         ));
     }
@@ -1048,8 +1169,8 @@ mod tests {
     #[test]
     fn fractional_quantities_reach_the_bill_exactly() {
         // T6, through the pipeline.
-        let cart = one_line(item("mutton", 24_000, TaxRate::GST_5), Qty::from_thousandths(500));
-        let bill = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+        let cart = one_line(item("mutton", 24_000, pc(5)), Qty::from_thousandths(500));
+        let bill = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
         assert_eq!(bill.lines[0].gross, rs(120));
         assert_eq!(bill.lines[0].qty.to_string(), "0.5");
         assert_reconciles(&bill);
@@ -1058,14 +1179,14 @@ mod tests {
     #[test]
     fn round_off_reaches_the_rupee_and_is_recorded_separately() {
         // T16 — the audit's B8: v1 printed ₹487.35.
-        let cart = one_line(item("meal", 48_735, TaxRate::ZERO).with_treatment(TaxTreatment::Exempt), Qty::ONE);
+        let cart = one_line(item("meal", 48_735, TaxRate::ZERO).with_tax(TaxSpec::exempt()), Qty::ONE);
 
-        let rounded = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::NearestRupee)).expect("computes");
+        let rounded = compute_bill(input(&cart).with_rounding(RoundingMode::NearestRupee)).expect("computes");
         assert_eq!(rounded.round_off, Money::from_paise(-35));
         assert_eq!(rounded.grand_total, rs(487));
         assert_reconciles(&rounded);
 
-        let unrounded = compute_bill(BillInput::new(&cart).with_rounding(RoundingMode::None)).expect("computes");
+        let unrounded = compute_bill(input(&cart).with_rounding(RoundingMode::None)).expect("computes");
         assert_eq!(unrounded.round_off, Money::ZERO);
         assert_eq!(unrounded.grand_total, Money::from_paise(48_735));
         assert_reconciles(&unrounded);
@@ -1074,16 +1195,16 @@ mod tests {
     #[test]
     fn an_absurd_quantity_is_an_error_not_a_wrapped_total() {
         // T15 — nothing panics, the error travels out of compute_bill.
-        let cart = one_line(item("dish", 100_000, TaxRate::GST_5), Qty::from_thousandths(i64::MAX));
-        assert!(matches!(compute_bill(BillInput::new(&cart)), Err(BillError::Money(_))));
+        let cart = one_line(item("dish", 100_000, pc(5)), Qty::from_thousandths(i64::MAX));
+        assert!(matches!(compute_bill(input(&cart)), Err(BillError::Money(_))));
     }
 
     #[test]
     fn the_order_type_and_place_of_supply_reach_the_bill() {
         // Scope 1.5 — carried, not yet acted on.
-        let cart = one_line(item("dish", 10_000, TaxRate::GST_5), Qty::ONE);
+        let cart = one_line(item("dish", 10_000, pc(5)), Qty::ONE);
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_order_type(OrderType::Delivery)
                 .with_place_of_supply(PlaceOfSupply::Inter),
         )
@@ -1091,8 +1212,8 @@ mod tests {
         assert_eq!(bill.order_type, OrderType::Delivery);
         assert_eq!(bill.place_of_supply, PlaceOfSupply::Inter);
         // Inter-state: the whole tax is IGST.
-        assert_eq!(bill.total_tax.cgst, Money::ZERO);
-        assert_eq!(bill.total_tax.igst, rs(5));
+        assert_eq!(bill.total_gst.central, Money::ZERO);
+        assert_eq!(bill.total_gst.integrated, rs(5));
     }
 
     #[test]
@@ -1101,7 +1222,7 @@ mod tests {
         // steps 2 and 3). ₹1000 line, ₹100 off, then 10% of ₹900 = ₹90.
         let mut cart = Cart::new();
         let index = cart
-            .add(item("dish", 100_000, TaxRate::GST_5), Qty::ONE, None, vec![])
+            .add(item("dish", 100_000, pc(5)), Qty::ONE, None, vec![])
             .expect("adds");
         cart.set_line_discount(
             index,
@@ -1110,7 +1231,7 @@ mod tests {
         .expect("sets");
 
         let bill = compute_bill(
-            BillInput::new(&cart)
+            input(&cart)
                 .with_rounding(RoundingMode::None)
                 .with_bill_discount(DiscountEntry::new(Discount::percent_bp(1_000).expect("valid"))),
         )

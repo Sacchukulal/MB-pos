@@ -54,20 +54,25 @@ const RUNS: u32 = 200;
 /// budget B4 uses for `compute_bill`, so the two numbers are about the same
 /// bill.
 fn big_fixture() -> Fixture {
-    use mb_core::{Cart, ItemSnapshot, Money, TaxRate, TaxTreatment};
+    use mb_core::{Cart, ItemSnapshot, Money, PriceBasis, TaxKind, TaxRate, TaxSpec};
 
     let mut cart = Cart::new();
     for n in 0..40_i64 {
-        let treatment = match n % 4 {
-            0 => TaxTreatment::Exclusive,
-            1 => TaxTreatment::Inclusive,
-            2 => TaxTreatment::Exempt,
-            _ => TaxTreatment::NonGst,
-        };
         let rate = match n % 3 {
-            0 => TaxRate::GST_5,
-            1 => TaxRate::GST_12,
-            _ => TaxRate::GST_18,
+            0 => common::pc(5),
+            1 => common::pc(12),
+            _ => common::pc(18),
+        };
+        // The four shapes a line can take, which is what the old four-valued
+        // `TaxTreatment` used to enumerate. P33 split it into a legal kind and a
+        // pricing basis, so the four are spelled out here rather than named by
+        // one enum — and a line outside GST now carries a real VAT rate, which
+        // the old model had nowhere to put.
+        let tax = match n % 4 {
+            0 => TaxSpec::gst(rate),
+            1 => TaxSpec::gst_inclusive(rate),
+            2 => TaxSpec::exempt(),
+            _ => TaxSpec { kind: TaxKind::OutsideGst, rate: TaxRate::ZERO, basis: PriceBasis::Exclusive },
         };
         let snapshot = ItemSnapshot::new(
             ItemId::new(format!("itm_{n:03}")),
@@ -75,7 +80,7 @@ fn big_fixture() -> Fixture {
             Money::from_paise(12_000 + n * 137),
             rate,
         )
-        .with_treatment(treatment)
+        .with_tax(tax)
         .with_hsn("2106");
         cart.add(
             snapshot,

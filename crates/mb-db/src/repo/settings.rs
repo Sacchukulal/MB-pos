@@ -97,17 +97,14 @@ pub struct StoreProfile {
     pub upi_merchant_name: Option<String>,
     /// Audit Part 3's third UPI field, added at P17.
     pub upi_reference: Option<String>,
-    pub is_composition: bool,
-    /// `intra` or `inter`. **The default only** — each bill stores its own,
-    /// because a B2B customer in another state changes it for that bill alone
-    /// (scope 2.4).
+    /// `unregistered`, `composition` or `regular`. P33 replaced
+    /// `is_composition`, which could not tell a shop below the threshold from a
+    /// regular one — and only a regular taxpayer may put GST on a bill.
     ///
     /// Text rather than an enum for the reason `Printer::role` gives: the enum
     /// belongs to mb-core, a second copy here would be two lists to keep in
     /// step, and the schema's CHECK is what stops a typo reaching the disk.
-    ///
-    /// **The column has existed since P04 and nothing read it until P17.**
-    pub default_place_of_supply: String,
+    pub registration: String,
 }
 
 /// Scope 7.11 lives on this: `offset_x_mm` / `offset_y_mm`.
@@ -202,9 +199,9 @@ impl<'a> SettingsRepo<'a> {
     ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO store_profile (outlet_id, name, address, phone, gstin, fssai, state_code,
-                                        upi_id, upi_merchant_name, upi_reference, is_composition,
-                                        default_place_of_supply, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                                        upi_id, upi_merchant_name, upi_reference, registration,
+                                        updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT (outlet_id) DO UPDATE SET name              = excluded.name,
                                                    address           = excluded.address,
                                                    phone             = excluded.phone,
@@ -214,9 +211,7 @@ impl<'a> SettingsRepo<'a> {
                                                    upi_id            = excluded.upi_id,
                                                    upi_merchant_name = excluded.upi_merchant_name,
                                                    upi_reference     = excluded.upi_reference,
-                                                   is_composition    = excluded.is_composition,
-                                                   default_place_of_supply
-                                                       = excluded.default_place_of_supply,
+                                                   registration      = excluded.registration,
                                                    updated_at        = excluded.updated_at",
             rusqlite::params![
                 outlet,
@@ -229,8 +224,7 @@ impl<'a> SettingsRepo<'a> {
                 profile.upi_id,
                 profile.upi_merchant_name,
                 profile.upi_reference,
-                encode::bool_to_sql(profile.is_composition),
-                profile.default_place_of_supply,
+                profile.registration,
                 encode::timestamp_to_sql(at),
             ],
         )?;
@@ -240,7 +234,7 @@ impl<'a> SettingsRepo<'a> {
     pub fn store_profile(&self, outlet: &str) -> Result<Option<StoreProfile>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT name, address, phone, gstin, fssai, state_code, upi_id, upi_merchant_name,
-                    upi_reference, is_composition, default_place_of_supply
+                    upi_reference, registration
                FROM store_profile WHERE outlet_id = ?1",
         )?;
         let mut rows = stmt.query([outlet])?;
@@ -257,8 +251,7 @@ impl<'a> SettingsRepo<'a> {
             upi_id: row.get(6)?,
             upi_merchant_name: row.get(7)?,
             upi_reference: row.get(8)?,
-            is_composition: encode::bool_from_sql(row.get(9)?, "store_profile.is_composition")?,
-            default_place_of_supply: row.get(10)?,
+            registration: row.get(9)?,
         }))
     }
 

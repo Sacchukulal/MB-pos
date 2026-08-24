@@ -65,7 +65,7 @@ pub enum DbError {
 
     /// A stored value is not what its column promised.
     ///
-    /// D7: nothing in the money path may be silently lossy. A `tax_treatment`
+    /// D7: nothing in the money path may be silently lossy. A `tax_basis`
     /// column holding `"exclusiv"` is a wrong bill, not a default.
     #[error("the value `{value}` stored in {column} is not one this program knows")]
     BadValue { column: &'static str, value: String },

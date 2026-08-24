@@ -429,7 +429,7 @@ mod tests {
     fn a_split_bill_adds_back_to_the_original_rate_by_rate() {
         use crate::bill::{BillInput, compute_bill};
         use crate::discount::{Discount, DiscountEntry};
-        use crate::tax::TaxTreatment;
+        use crate::tax::TaxSpec;
 
         // Two dosas at 5% and a bottle of water at 18% — the mixed-rate case,
         // because a single-rate split would prove nothing about the summary.
@@ -437,8 +437,8 @@ mod tests {
         cart.add(snapshot("dosa", 12_000), Qty::from_whole(2).expect("qty"), None, Vec::new())
             .expect("added");
         let mut water = snapshot("water", 4_000);
-        water.tax_rate = TaxRate::from_basis_points(1_800).expect("18%");
-        water.tax_treatment = TaxTreatment::Exclusive;
+        water.tax = TaxSpec::gst(TaxRate::from_basis_points(1_800).expect("18%"));
+        
         cart.add(water, Qty::from_whole(3).expect("qty"), None, Vec::new()).expect("added");
 
         // ₹100 off the bill. A fixed amount, which is the case that has to be
@@ -448,7 +448,7 @@ mod tests {
             bill_discount: Some(DiscountEntry::new(
                 Discount::amount(off).expect("a discount"),
             )),
-            ..BillInput::new(&cart)
+            ..BillInput::new(&cart, crate::tax::Registration::Regular)
         })
         .expect("the original bill");
 
@@ -464,7 +464,7 @@ mod tests {
         // by. Computing each half with NO discount is how you find it without
         // duplicating the pipeline.
         let bare = |portion: &Portion| {
-            compute_bill(BillInput::new(&portion.cart)).expect("a bare bill")
+            compute_bill(BillInput::new(&portion.cart, crate::tax::Registration::Regular)).expect("a bare bill")
         };
         let nets = [bare(&origin).subtotal, bare(&moved).subtotal];
         let shares = split_bill_discount(off, &nets).expect("shares");
@@ -479,7 +479,7 @@ mod tests {
                 bill_discount: Some(DiscountEntry::new(
                     Discount::amount(share).expect("a discount"),
                 )),
-                ..BillInput::new(&portion.cart)
+                ..BillInput::new(&portion.cart, crate::tax::Registration::Regular)
             })
             .expect("a half bill")
         };
@@ -494,7 +494,7 @@ mod tests {
                     .rows()
                     .find(|r| r.rate == row.rate)
                     .map_or((Money::ZERO, Money::ZERO), |r| {
-                        (r.taxable, r.tax.total().expect("tax"))
+                        (r.taxable, r.gst.total().expect("tax"))
                     })
             };
             let (taxable_a, tax_a) = of(&first);
@@ -507,7 +507,7 @@ mod tests {
             );
             assert_eq!(
                 tax_a.add(tax_b).expect("sum"),
-                row.tax.total().expect("tax"),
+                row.gst.total().expect("tax"),
                 "tax at {}",
                 row.rate.label(),
             );

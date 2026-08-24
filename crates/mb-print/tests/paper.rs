@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use mb_core::{
     AnyOrder, BillInput, BusinessDay, Cart, Claimed, DraftOrder, ItemId, ItemSnapshot, Money,
-    OpenOrder, OrderId, OrderType, Payment, PaymentMode, Qty, Settlement, StaffId, TableId,
-    TaxRate, Timestamp, compute_bill,
+    OpenOrder, OrderId, OrderType, Payment, PaymentMode, Qty, Registration, Settlement, StaffId,
+    TableId, Timestamp, compute_bill,
 };
 use mb_print::doc::{Align, Document, Pattern, Style};
 use mb_print::font::Font;
@@ -51,15 +51,17 @@ fn one_dosa() -> (mb_core::Bill, AnyOrder) {
             ItemId::new("itm"),
             "MASALA DOSE",
             Money::from_paise(10_000),
-            TaxRate::GST_5,
+            common::pc(5),
         ),
         Qty::from_whole(1).expect("qty"),
         None,
         vec![],
     )
     .expect("adds");
-    let bill = compute_bill(BillInput::new(&cart).with_order_type(OrderType::DineIn))
-        .expect("a bill");
+    let bill = compute_bill(
+        BillInput::new(&cart, Registration::Regular).with_order_type(OrderType::DineIn),
+    )
+    .expect("a bill");
     let day = BusinessDay::of(AT, mb_core::DayRule::DEFAULT, mb_core::UtcOffset::INDIA);
     let core = DraftOrder::new(
         OrderId::new("ord"),
@@ -317,10 +319,10 @@ fn the_amount_column_adds_up_to_the_subtotal() {
     );
 }
 
-/// The same claim on a bill that mixes every treatment there is — an exclusive
-/// line, an inclusive one, a non-GST one, a discount and two charges.
+/// The same claim on a bill that mixes every kind of line there is — an
+/// exclusive one, an inclusive one, one outside GST, a discount and two charges.
 ///
-/// This is the case that makes the split on `Bill::tax_added` necessary: an
+/// This is the case that makes the split on `Bill::gst_added` necessary: an
 /// inclusive line's price already contains its tax, so adding that tax again
 /// under the subtotal would count it twice.
 #[test]
@@ -346,7 +348,7 @@ fn a_mixed_bill_still_adds_up() {
         running = running.add(charge.amount).expect("a charge");
     }
     running = running
-        .add(bill.tax_added.total().expect("tax"))
+        .add(bill.gst_added.total().expect("tax"))
         .expect("tax");
     running = running.add(bill.round_off).expect("round off");
     assert_eq!(
@@ -357,14 +359,23 @@ fn a_mixed_bill_still_adds_up() {
 
 /// Requirement 7, as an equation on the model itself: the two halves of the tax
 /// always make the whole.
+///
+/// P33 gave state VAT the same split, on its own channel, so the claim is made
+/// twice — once per channel. Folding them into one sum would be the very thing
+/// [`mb_core::Vat`] exists to prevent: a GST figure with a beer inside it.
 #[test]
 fn the_tax_split_is_exhaustive() {
     let fixture = common::Fixture::new();
     let bill = &fixture.bill;
     assert_eq!(
-        bill.tax_included.add(bill.tax_added).expect("adds"),
-        bill.total_tax,
-        "some tax is in neither half"
+        bill.gst_included.add(bill.gst_added).expect("adds"),
+        bill.total_gst,
+        "some GST is in neither half"
+    );
+    assert_eq!(
+        bill.vat_included.add(bill.vat_added).expect("adds"),
+        bill.total_vat,
+        "some VAT is in neither half"
     );
 }
 

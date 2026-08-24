@@ -14,7 +14,12 @@
 //! | `ItemId`, `OrderId`, … | TEXT | the string the newtype holds |
 //! | `bool` | INTEGER | 0 or 1, NOT NULL, with a `CHECK (col IN (0,1))` |
 //! | `Option<T>` | nullable | NULL is "absent" and nothing else |
-//! | [`TaxTreatment`] | TEXT | `exclusive` \| `inclusive` \| `exempt` \| `non_gst` |
+//! | [`TaxKind`] | TEXT | `gst` \| `exempt` \| `outside_gst` \| `untaxed` |
+//! | [`PriceBasis`] | TEXT | `exclusive` \| `inclusive` |
+//! | [`TaxSpec`] | 2 TEXT + INTEGER | the two above, plus `rate_bp` |
+//! | [`Vat`](mb_core::Vat) | INTEGER | paise, in its own `vat` column. Never in a GST one. |
+//! | [`Registration`] | TEXT | `unregistered` \| `composition` \| `regular` |
+//! | [`StateTax`] | TEXT | `sgst` \| `utgst` |
 //! | [`PlaceOfSupply`] | TEXT | `intra` \| `inter` |
 //! | [`OrderType`] | TEXT | `dine_in` \| `parcel` \| `self_service` \| `delivery` |
 //! | [`RoundingMode`] | TEXT | `none` \| `nearest_rupee` \| `up` \| `down` |
@@ -45,9 +50,9 @@
 //!
 //! # THE P04 / P05 SEAM
 //!
-//! **P04 owns the VALUE mapping** — how a `Money` becomes an `i64` and how a
-//! `'non_gst'` becomes a `TaxTreatment`. Free functions, one value in, one
-//! value out.
+//! **P04 owns the VALUE mapping** — how a `Money` becomes an `i64` and how an
+//! `'outside_gst'` becomes a `TaxKind`. Free functions, one value in, one value
+//! out.
 //!
 //! **P05 owns the ROW mapping** — `find_order`, `list_open_orders`,
 //! `save_settled_order`. If you find yourself writing one of those here, stop:
@@ -55,7 +60,7 @@
 
 use mb_core::{
     BusinessDay, ChargeBasis, ChargeKind, Discount, Money, OrderType, PaymentMode, PlaceOfSupply,
-    Qty, RoundingMode, TaxRate, TaxTreatment, Timestamp,
+    PriceBasis, Qty, Registration, RoundingMode, StateTax, TaxKind, TaxRate, TaxSpec, Timestamp,
 };
 
 use crate::error::DbError;
@@ -159,7 +164,7 @@ pub fn bool_from_sql(v: i64, column: &'static str) -> Result<bool, DbError> {
 // ---------------------------------------------------------------------------
 // Plain enums. Tag text, matching serde's `rename_all = "snake_case"` so the
 // database, the JSON that P08 sends to the screen and the cloud all spell a
-// treatment the same way.
+// tax kind the same way.
 // ---------------------------------------------------------------------------
 
 // Each pair is written out rather than generated. The `_to_sql` direction is
@@ -169,28 +174,112 @@ pub fn bool_from_sql(v: i64, column: &'static str) -> Result<bool, DbError> {
 // hid which string went with which variant, which is the one thing a reader of
 // this module comes here to see.
 
-/// The tag text stored in a `tax_treatment` column.
+/// `tax_kind` / `kind`: what the supply is, in law.
 #[must_use]
-pub fn tax_treatment_to_sql(v: TaxTreatment) -> &'static str {
-    match v {
-        TaxTreatment::Exclusive => "exclusive",
-        TaxTreatment::Inclusive => "inclusive",
-        TaxTreatment::Exempt => "exempt",
-        TaxTreatment::NonGst => "non_gst",
+pub fn tax_kind_to_sql(kind: TaxKind) -> &'static str {
+    match kind {
+        TaxKind::Gst => "gst",
+        TaxKind::Exempt => "exempt",
+        TaxKind::OutsideGst => "outside_gst",
+        TaxKind::Untaxed => "untaxed",
     }
 }
 
-/// Reads a `tax_treatment` column. An unknown tag is an error, never a
-/// default — a bill taxed as `Exclusive` because somebody typed `exclusiv` is
-/// a wrong bill, and D7 says nothing in the money path may be silently lossy.
-pub fn tax_treatment_from_sql(text: &str) -> Result<TaxTreatment, DbError> {
+/// An unknown tag is an error, never a default: a line taxed as GST because
+/// somebody typed `gts` is a wrong bill (D7).
+pub fn tax_kind_from_sql(text: &str) -> Result<TaxKind, DbError> {
     match text {
-        "exclusive" => Ok(TaxTreatment::Exclusive),
-        "inclusive" => Ok(TaxTreatment::Inclusive),
-        "exempt" => Ok(TaxTreatment::Exempt),
-        "non_gst" => Ok(TaxTreatment::NonGst),
+        "gst" => Ok(TaxKind::Gst),
+        "exempt" => Ok(TaxKind::Exempt),
+        "outside_gst" => Ok(TaxKind::OutsideGst),
+        "untaxed" => Ok(TaxKind::Untaxed),
         other => Err(DbError::BadValue {
-            column: "tax_treatment",
+            column: "tax_kind",
+            value: other.to_owned(),
+        }),
+    }
+}
+
+/// `tax_basis` / `basis`: is the tax already inside the price?
+#[must_use]
+pub fn price_basis_to_sql(basis: PriceBasis) -> &'static str {
+    match basis {
+        PriceBasis::Exclusive => "exclusive",
+        PriceBasis::Inclusive => "inclusive",
+    }
+}
+
+pub fn price_basis_from_sql(text: &str) -> Result<PriceBasis, DbError> {
+    match text {
+        "exclusive" => Ok(PriceBasis::Exclusive),
+        "inclusive" => Ok(PriceBasis::Inclusive),
+        other => Err(DbError::BadValue {
+            column: "tax_basis",
+            value: other.to_owned(),
+        }),
+    }
+}
+
+/// The whole spec, from the three columns that hold it.
+///
+/// Every reader in this crate wants a [`TaxSpec`] and holds a rate beside the
+/// two tags, so composing them lives here once rather than as the same four
+/// lines in five repositories. `rate_column` names the rate column for the
+/// error message, the way [`tax_rate_from_sql`] wants it.
+pub fn tax_spec_from_sql_parts(
+    rate_bp: i64,
+    kind_text: &str,
+    basis_text: &str,
+    rate_column: &'static str,
+) -> Result<TaxSpec, DbError> {
+    Ok(TaxSpec {
+        kind: tax_kind_from_sql(kind_text)?,
+        rate: tax_rate_from_sql(rate_bp, rate_column)?,
+        basis: price_basis_from_sql(basis_text)?,
+    })
+}
+
+/// The tag text stored in a `registration` column.
+///
+/// Frozen onto each bill as well as held on the shop: leaving the composition
+/// scheme must not change what last year's bills reprint as.
+#[must_use]
+pub fn registration_to_sql(v: Registration) -> &'static str {
+    match v {
+        Registration::Unregistered => "unregistered",
+        Registration::Composition => "composition",
+        Registration::Regular => "regular",
+    }
+}
+
+pub fn registration_from_sql(text: &str) -> Result<Registration, DbError> {
+    match text {
+        "unregistered" => Ok(Registration::Unregistered),
+        "composition" => Ok(Registration::Composition),
+        "regular" => Ok(Registration::Regular),
+        other => Err(DbError::BadValue {
+            column: "registration",
+            value: other.to_owned(),
+        }),
+    }
+}
+
+/// The tag text stored in a `state_tax` column — what the state half of an
+/// intra-state supply is called. Audit 3.10: a Chandigarh shop prints UTGST.
+#[must_use]
+pub fn state_tax_to_sql(v: StateTax) -> &'static str {
+    match v {
+        StateTax::Sgst => "sgst",
+        StateTax::Utgst => "utgst",
+    }
+}
+
+pub fn state_tax_from_sql(text: &str) -> Result<StateTax, DbError> {
+    match text {
+        "sgst" => Ok(StateTax::Sgst),
+        "utgst" => Ok(StateTax::Utgst),
+        other => Err(DbError::BadValue {
+            column: "state_tax",
             value: other.to_owned(),
         }),
     }
@@ -493,7 +582,7 @@ mod tests {
             business_day_from_sql(business_day_to_sql(day), "orders.business_day").expect("in range"),
             day
         );
-        let rate = TaxRate::GST_18;
+        let rate = TaxRate::from_percent(18).expect("18%");
         assert_eq!(
             tax_rate_from_sql(tax_rate_to_sql(rate), "items.tax_rate_bp").expect("in range"),
             rate
@@ -518,13 +607,29 @@ mod tests {
 
     #[test]
     fn tags_round_trip_and_a_typo_is_an_error() {
-        for t in [
-            TaxTreatment::Exclusive,
-            TaxTreatment::Inclusive,
-            TaxTreatment::Exempt,
-            TaxTreatment::NonGst,
+        for kind in [
+            TaxKind::Gst,
+            TaxKind::Exempt,
+            TaxKind::OutsideGst,
+            TaxKind::Untaxed,
         ] {
-            assert_eq!(tax_treatment_from_sql(tax_treatment_to_sql(t)).expect("known"), t);
+            assert_eq!(tax_kind_from_sql(tax_kind_to_sql(kind)).expect("known"), kind);
+        }
+        for basis in [PriceBasis::Exclusive, PriceBasis::Inclusive] {
+            assert_eq!(
+                price_basis_from_sql(price_basis_to_sql(basis)).expect("known"),
+                basis
+            );
+        }
+        for r in [
+            Registration::Unregistered,
+            Registration::Composition,
+            Registration::Regular,
+        ] {
+            assert_eq!(registration_from_sql(registration_to_sql(r)).expect("known"), r);
+        }
+        for s in [StateTax::Sgst, StateTax::Utgst] {
+            assert_eq!(state_tax_from_sql(state_tax_to_sql(s)).expect("known"), s);
         }
         for o in [
             OrderType::DineIn,
@@ -546,18 +651,53 @@ mod tests {
             assert_eq!(place_of_supply_from_sql(place_of_supply_to_sql(p)).expect("known"), p);
         }
         // BACKEND-G7 wearing a schema hat: a typo is an error, not a default.
-        assert!(tax_treatment_from_sql("exclusiv").is_err());
+        assert!(price_basis_from_sql("exclusiv").is_err());
+        assert!(tax_kind_from_sql("non_gst").is_err());
         assert!(order_type_from_sql("dinein").is_err());
+    }
+
+    /// **Every kind x basis pair survives now** — which is the whole of P33
+    /// Phase 2. The Phase 1 shim projected 4x2 onto four strings and lost the
+    /// basis of a liquor line, `Untaxed` as its own category, and the VAT.
+    #[test]
+    fn every_kind_and_basis_pair_round_trips_through_its_own_columns() {
+        for kind in [
+            TaxKind::Gst,
+            TaxKind::Exempt,
+            TaxKind::OutsideGst,
+            TaxKind::Untaxed,
+        ] {
+            for basis in [PriceBasis::Exclusive, PriceBasis::Inclusive] {
+                let spec = tax_spec_from_sql_parts(
+                    2_000,
+                    tax_kind_to_sql(kind),
+                    price_basis_to_sql(basis),
+                    "tax_classes.rate_bp",
+                )
+                .expect("known");
+                assert_eq!(spec.kind, kind);
+                assert_eq!(spec.basis, basis);
+                assert_eq!(spec.rate, TaxRate::from_percent(20).expect("20%"));
+            }
+        }
+        // The bar's sentence, in full: outside GST, 20% state VAT, priced tax-in.
+        let beer = tax_spec_from_sql_parts(2_000, "outside_gst", "inclusive", "items.tax_rate_bp")
+            .expect("known");
+        assert_eq!(beer, TaxSpec::liquor(TaxRate::from_percent(20).expect("20%")));
     }
 
     #[test]
     fn tag_text_matches_what_serde_writes() {
         // The column, the JSON P08 sends to the screen and the cloud must all
-        // spell a treatment the same way, or somebody writes a translation
-        // layer later and gets one variant wrong.
-        let json = serde_json::to_string(&TaxTreatment::NonGst).expect("serialises");
-        assert_eq!(json, "\"non_gst\"");
-        assert_eq!(tax_treatment_to_sql(TaxTreatment::NonGst), "non_gst");
+        // spell a tag the same way, or somebody writes a translation layer
+        // later and gets one variant wrong.
+        let json = serde_json::to_string(&TaxKind::OutsideGst).expect("serialises");
+        assert_eq!(json, "\"outside_gst\"");
+        assert_eq!(tax_kind_to_sql(TaxKind::OutsideGst), "outside_gst");
+
+        let json = serde_json::to_string(&Registration::Composition).expect("serialises");
+        assert_eq!(json, "\"composition\"");
+        assert_eq!(registration_to_sql(Registration::Composition), "composition");
 
         let json = serde_json::to_string(&OrderType::SelfService).expect("serialises");
         assert_eq!(json, "\"self_service\"");

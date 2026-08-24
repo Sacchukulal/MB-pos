@@ -23,9 +23,10 @@ use common::Scratch;
 use common::shop::{self, OUTLET, TERMINAL};
 use mb_core::recipe::{Recipe, RecipeLine, RecipeOwner};
 use mb_core::{
+    Registration,
     BillInput, BusinessDay, Cart, Dimension, ItemId, ItemSnapshot, MaterialId, Money, ModifierId,
     OrderId, OrderType, Payment, PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement,
-    StaffId, TaxRate, TaxTreatment, Timestamp, UnitCost, compute_bill,
+    StaffId, TaxRate, TaxSpec, Timestamp, UnitCost, compute_bill,
 };
 use mb_db::repo::stock::{Material, Movement, MovementKind};
 use mb_db::{Db, Repos};
@@ -90,8 +91,7 @@ fn dosa() -> ItemSnapshot {
         item_id: ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),
-        tax_rate: TaxRate::GST_5,
-        tax_treatment: TaxTreatment::Exclusive,
+        tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
         hsn: None,
         category_id: None,
         station: None,
@@ -113,7 +113,7 @@ fn settle_one(
         .expect("adds");
 
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_order_type(OrderType::Parcel)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_rounding(RoundingMode::NearestRupee),
@@ -495,7 +495,7 @@ fn t6_nothing_in_the_stock_book_can_refuse_a_bill() {
         ItemId::new("itm_water"),
         "Water",
         Money::from_paise(2_000),
-        TaxRate::GST_18,
+        TaxRate::from_percent(18).expect("18%"),
     );
     let three = settle_one(&db, "ord_t6_3", water, 2, vec![]);
     assert!(three.bill.grand_total.is_positive(), "the bill did not settle");
@@ -603,9 +603,9 @@ fn t8_variants_and_modifiers_deduct_their_own_amounts() {
             "INSERT INTO item_variants (id, item_id, name, unit_price, sort_order, is_active)
              VALUES ('itm_dosa_half', 'itm_dosa', 'Half', 7000, 0, 1);
              INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
-                                tax_treatment, created_at, updated_at)
+                                tax_kind, tax_basis, created_at, updated_at)
              VALUES ('itm_dosa_half', 'outlet_default', 'cat_food', 'Masala Dosa (Half)',
-                     7000, 500, 'exclusive', 0, 0);
+                     7000, 500, 'gst', 'exclusive', 0, 0);
              INSERT INTO modifier_groups (id, outlet_id, name, min_select, sort_order)
              VALUES ('grp_extras', 'outlet_default', 'Extras', 0, 0);
              INSERT INTO modifiers (id, group_id, name, price_delta, sort_order, is_active)

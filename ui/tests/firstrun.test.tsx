@@ -21,6 +21,33 @@ vi.mock('../src/ipc/call', () => ({
 const { FirstRun } = await import('../src/setup/FirstRun');
 
 import type { FirstRunView } from '../src/ipc/generated/FirstRunView';
+import type { TaxClassView } from '../src/ipc/generated/TaxClassView';
+
+/** What this shop actually has — not the four slabs the wizard used to hardcode. */
+const shopsClasses: TaxClassView[] = [
+  {
+    id: 'tax_food_5',
+    name: 'Restaurant food 5%',
+    rate: '5%',
+    rateBp: 500,
+    kind: 'gst',
+    basis: 'exclusive',
+    treatment: 'Tax added on top',
+    isActive: true,
+    itemsUsing: 0n,
+  },
+  {
+    id: 'tax_liquor',
+    name: 'Liquor — state VAT',
+    rate: '20%',
+    rateBp: 2000,
+    kind: 'outside_gst',
+    basis: 'inclusive',
+    treatment: 'Outside GST',
+    isActive: true,
+    itemsUsing: 0n,
+  },
+];
 
 const fresh: FirstRunView = {
   needed: true,
@@ -51,6 +78,8 @@ function wire(over: Partial<FirstRunView> = {}) {
         return Promise.resolve({ signedIn: true });
       case 'save_menu_item':
         return Promise.resolve([]);
+      case 'menu_tax_classes':
+        return Promise.resolve(shopsClasses);
       default:
         return Promise.resolve(null);
     }
@@ -200,6 +229,33 @@ it('offers one way out of the optional step, and says it is optional', async () 
   expect(screen.queryByRole('button', { name: 'I will do this later' })).toBeNull();
   fireEvent.click(out);
   expect(done).toHaveBeenCalled();
+});
+
+/**
+ * **The wizard offers the shop's own classes** — P33 §5.6.
+ *
+ * It used to hardcode four slab ids, one of them a 12% class abolished in
+ * September 2025 and gone from the database since migration 0004 — so the first
+ * item a new shop typed could point at a class that does not exist.
+ */
+it('offers the shop own tax classes, not a hardcoded slab list', async () => {
+  wire({ hasShop: true, hasDetails: true, hasPin: true });
+  render(<FirstRun onDone={vi.fn()} />);
+
+  const tax = (await screen.findByLabelText('Tax')) as HTMLSelectElement;
+  await waitFor(() => expect(tax.options.length).toBe(2));
+  expect([...tax.options].map((o) => o.value)).toEqual(['tax_food_5', 'tax_liquor']);
+  expect([...tax.options].some((o) => o.value === 'tax_packaged_12')).toBe(false);
+
+  fireEvent.change(screen.getByLabelText('Item'), { target: { value: 'Beer' } });
+  fireEvent.change(screen.getByLabelText('Price'), { target: { value: '180' } });
+  fireEvent.change(tax, { target: { value: 'tax_liquor' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+  await waitFor(() => {
+    const sent = call.mock.calls.find((c) => c[0] === 'save_menu_item');
+    expect((sent?.[1] as { edit: { taxClassId: string } }).edit.taxClassId).toBe('tax_liquor');
+  });
 });
 
 /**

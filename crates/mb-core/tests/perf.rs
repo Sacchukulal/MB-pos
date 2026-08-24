@@ -35,7 +35,8 @@
 
 use mb_core::{
     Cart, Charge, ChargeKind, Discount, DiscountEntry, ItemId, ItemSnapshot, Modifier, ModifierId,
-    Money, PlaceOfSupply, Qty, RoundingMode, TaxRate, TaxTreatment, bill::BillInput, compute_bill,
+    Money, PlaceOfSupply, Qty, Registration, RoundingMode, TaxRate, TaxSpec, bill::BillInput,
+    compute_bill,
 };
 use std::time::Instant;
 
@@ -47,14 +48,18 @@ const CEILING_NANOS: u128 = 1_000_000;
 /// and discounts scattered through it. Deliberately worse than a real bill —
 /// a 50-line order is a large party, and most bills are under ten.
 fn busy_cart() -> Cart {
-    let rates = [TaxRate::GST_5, TaxRate::GST_12, TaxRate::GST_18, TaxRate::GST_28];
-    let treatments = [
-        TaxTreatment::Exclusive,
-        TaxTreatment::Inclusive,
-        TaxTreatment::Exempt,
-        TaxTreatment::NonGst,
+    let pc = |percent: u32| TaxRate::from_percent(percent).expect("a real rate");
+    let rates = [pc(5), pc(12), pc(18), pc(28)];
+    // Every shape a line can take, so the budget is measured against the worst
+    // realistic bill. P33 added the last two: liquor carrying state VAT, and a
+    // genuinely untaxed line.
+    let specs = [
+        TaxSpec::gst(pc(5)),
+        TaxSpec::gst_inclusive(pc(18)),
+        TaxSpec::liquor(pc(20)),
+        TaxSpec::exempt(),
+        TaxSpec::untaxed(),
     ];
-
     let mut cart = Cart::new();
     for i in 0..50_usize {
         let snapshot = ItemSnapshot::new(
@@ -63,7 +68,7 @@ fn busy_cart() -> Cart {
             Money::from_paise(4_500 + i64::try_from(i).unwrap_or(0) * 137),
             rates[i % rates.len()],
         )
-        .with_treatment(treatments[i % treatments.len()])
+        .with_tax(specs[i % specs.len()])
         .with_hsn("996331");
 
         let modifiers = if i % 5 == 0 {
@@ -100,10 +105,11 @@ fn busy_cart() -> Cart {
 /// charges"). Until P02 there were no charges, so the P01 figure measured less
 /// than the budget claimed.
 fn charges() -> Vec<Charge> {
+    let pc = |percent: u32| TaxRate::from_percent(percent).expect("a real rate");
     vec![
-        Charge::percent(ChargeKind::Service, "Service Charge", 1_000, TaxRate::GST_18),
-        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(2_000), TaxRate::GST_5),
-        Charge::flat(ChargeKind::Delivery, "Delivery", Money::from_paise(4_000), TaxRate::GST_18),
+        Charge::percent(ChargeKind::Service, "Service Charge", 1_000, pc(18)),
+        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(2_000), pc(5)),
+        Charge::flat(ChargeKind::Delivery, "Delivery", Money::from_paise(4_000), pc(18)),
     ]
 }
 
@@ -114,7 +120,7 @@ fn compute_bill_stays_within_budget_b4() {
     let charges = charges();
 
     let input = || {
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_charges(&charges)
             .with_rounding(RoundingMode::NearestRupee)

@@ -331,11 +331,11 @@ fn t8_the_printed_tax_summary_sums_to_the_bills_tax() {
     }
 
     assert_eq!(
-        cgst, fixture.bill.total_tax.cgst,
+        cgst, fixture.bill.total_gst.central,
         "the printed CGST rows do not sum to the bill's CGST"
     );
     assert_eq!(
-        sgst, fixture.bill.total_tax.sgst,
+        sgst, fixture.bill.total_gst.state,
         "the printed SGST rows do not sum to the bill's SGST"
     );
 

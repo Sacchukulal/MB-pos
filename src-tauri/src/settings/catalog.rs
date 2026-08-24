@@ -145,24 +145,54 @@ const NOT_CHOSEN: &str = "";
 
 /// P29. What the number inside a scale's label means.
 const LABEL_VALUES: &[Choice] = &[
-    Choice { value: "quantity", label: "Weight or quantity" },
-    Choice { value: "price", label: "Price" },
+    Choice {
+        value: "quantity",
+        label: "Weight or quantity",
+    },
+    Choice {
+        value: "price",
+        label: "Price",
+    },
 ];
 
 /// P29. **"Show me what it is sending" is a tool, not a fallback** — it is how
 /// a dealer sets up a scale nobody here has ever seen.
 const SCALE_PROTOCOLS: &[Choice] = &[
-    Choice { value: "status_then_weight", label: "Status, then the weight (commonest)" },
-    Choice { value: "weight_only", label: "Just the weight" },
-    Choice { value: "raw", label: "Show me what it is sending" },
+    Choice {
+        value: "status_then_weight",
+        label: "Status, then the weight (commonest)",
+    },
+    Choice {
+        value: "weight_only",
+        label: "Just the weight",
+    },
+    Choice {
+        value: "raw",
+        label: "Show me what it is sending",
+    },
 ];
 
 const PATTERNS: &[Choice] = &[
-    Choice { value: "dashed", label: "Dashed  - - -" },
-    Choice { value: "dotted", label: "Dotted  . . ." },
-    Choice { value: "solid", label: "Solid  ___" },
-    Choice { value: "bold", label: "Bold  ===" },
-    Choice { value: "double", label: "Double line" },
+    Choice {
+        value: "dashed",
+        label: "Dashed  - - -",
+    },
+    Choice {
+        value: "dotted",
+        label: "Dotted  . . .",
+    },
+    Choice {
+        value: "solid",
+        label: "Solid  ___",
+    },
+    Choice {
+        value: "bold",
+        label: "Bold  ===",
+    },
+    Choice {
+        value: "double",
+        label: "Double line",
+    },
 ];
 
 // **The FONTS list came back at P31, and D71 is why it took this long.**
@@ -182,9 +212,18 @@ const PATTERNS: &[Choice] = &[
 // stands again and so should the deletion. See FONTS below.
 
 const ROW_HEIGHTS: &[Choice] = &[
-    Choice { value: "compact", label: "Compact — least paper" },
-    Choice { value: "standard", label: "Standard" },
-    Choice { value: "relaxed", label: "Relaxed — easiest to read" },
+    Choice {
+        value: "compact",
+        label: "Compact — least paper",
+    },
+    Choice {
+        value: "standard",
+        label: "Standard",
+    },
+    Choice {
+        value: "relaxed",
+        label: "Relaxed — easiest to read",
+    },
 ];
 
 /// **Ten sizes, numbered 1 to 10.**
@@ -237,16 +276,46 @@ const ROW_HEIGHTS: &[Choice] = &[
 /// The values mirror `mb_print::doc::Style::LADDER`, which is the authority the
 /// printer resolves against; the test below fails the build if they disagree.
 pub(super) const SIZES: &[Choice] = &[
-    Choice { value: "9", label: "1" },
-    Choice { value: "11", label: "2" },
-    Choice { value: "13", label: "3" },
-    Choice { value: "15", label: "4" },
-    Choice { value: "17", label: "5" },
-    Choice { value: "19", label: "6" },
-    Choice { value: "22", label: "7" },
-    Choice { value: "26", label: "8" },
-    Choice { value: "33", label: "9" },
-    Choice { value: "41", label: "10" },
+    Choice {
+        value: "9",
+        label: "1",
+    },
+    Choice {
+        value: "11",
+        label: "2",
+    },
+    Choice {
+        value: "13",
+        label: "3",
+    },
+    Choice {
+        value: "15",
+        label: "4",
+    },
+    Choice {
+        value: "17",
+        label: "5",
+    },
+    Choice {
+        value: "19",
+        label: "6",
+    },
+    Choice {
+        value: "22",
+        label: "7",
+    },
+    Choice {
+        value: "26",
+        label: "8",
+    },
+    Choice {
+        value: "33",
+        label: "9",
+    },
+    Choice {
+        value: "41",
+        label: "10",
+    },
 ];
 
 /// **The typefaces** — the owner's *"5-6 choices"*.
@@ -257,75 +326,195 @@ pub(super) const SIZES: &[Choice] = &[
 /// test below that fails the build if the two ever disagree, which is the part
 /// that matters.
 pub(super) const FONTS: &[Choice] = &[
-    Choice { value: "builtin", label: "Magic Bill's own (IBM Plex Mono)" },
-    Choice { value: "consolas", label: "Consolas" },
-    Choice { value: "consolas_bold", label: "Consolas Bold — darker on faint paper" },
-    Choice { value: "courier", label: "Courier New" },
-    Choice { value: "lucida", label: "Lucida Console" },
-    Choice { value: "cascadia", label: "Cascadia Mono" },
+    Choice {
+        value: "builtin",
+        label: "Magic Bill's own (IBM Plex Mono)",
+    },
+    Choice {
+        value: "consolas",
+        label: "Consolas",
+    },
+    Choice {
+        value: "consolas_bold",
+        label: "Consolas Bold — darker on faint paper",
+    },
+    Choice {
+        value: "courier",
+        label: "Courier New",
+    },
+    Choice {
+        value: "lucida",
+        label: "Lucida Console",
+    },
+    Choice {
+        value: "cascadia",
+        label: "Cascadia Mono",
+    },
     // The proportional faces, 2026-08-17. The owner asked for the v1 list back
     // — *"i want some fonts like it was in previous mb pos app… Times New
     // Roman etc"* — and `mb_print::font::FAMILIES` explains what had to change
     // in the layout to make them honest rather than merely offered.
-    Choice { value: "times", label: "Times New Roman — a printed-book look" },
-    Choice { value: "georgia", label: "Georgia — heavier serif, clear on faint paper" },
-    Choice { value: "arial", label: "Arial" },
-    Choice { value: "calibri", label: "Calibri — rounder, a little smaller" },
-    Choice { value: "verdana", label: "Verdana — widest, easiest to read small" },
+    Choice {
+        value: "times",
+        label: "Times New Roman — a printed-book look",
+    },
+    Choice {
+        value: "georgia",
+        label: "Georgia — heavier serif, clear on faint paper",
+    },
+    Choice {
+        value: "arial",
+        label: "Arial",
+    },
+    Choice {
+        value: "calibri",
+        label: "Calibri — rounder, a little smaller",
+    },
+    Choice {
+        value: "verdana",
+        label: "Verdana — widest, easiest to read small",
+    },
 ];
 
 const LOGO_POSITIONS: &[Choice] = &[
-    Choice { value: "none", label: "Do not print the logo" },
-    Choice { value: "top", label: "Above the shop name" },
+    Choice {
+        value: "none",
+        label: "Do not print the logo",
+    },
+    Choice {
+        value: "top",
+        label: "Above the shop name",
+    },
     // P32, the owner's ask of 2026-08-23. The picture takes `logo_width_pct`
     // of the paper on its side and the shop's name, address and numbers are
     // centred in the rest.
-    Choice { value: "left", label: "Beside the shop name, on the left" },
-    Choice { value: "right", label: "Beside the shop name, on the right" },
+    Choice {
+        value: "left",
+        label: "Beside the shop name, on the left",
+    },
+    Choice {
+        value: "right",
+        label: "Beside the shop name, on the right",
+    },
 ];
 
 const QR_MODES: &[Choice] = &[
-    Choice { value: "none", label: "No QR code" },
-    Choice { value: "static", label: "Static — the customer types the amount" },
-    Choice { value: "dynamic", label: "Dynamic — the amount is in the code" },
+    Choice {
+        value: "none",
+        label: "No QR code",
+    },
+    Choice {
+        value: "static",
+        label: "Static — the customer types the amount",
+    },
+    Choice {
+        value: "dynamic",
+        label: "Dynamic — the amount is in the code",
+    },
 ];
 
 const MATCH_MODES: &[Choice] = &[
-    Choice { value: "starts_with", label: "Starts with what I type" },
-    Choice { value: "contains", label: "Contains what I type" },
+    Choice {
+        value: "starts_with",
+        label: "Starts with what I type",
+    },
+    Choice {
+        value: "contains",
+        label: "Contains what I type",
+    },
 ];
 
 const ROUNDING: &[Choice] = &[
-    Choice { value: "none", label: "Print the paise" },
-    Choice { value: "nearest_rupee", label: "To the nearest rupee" },
-    Choice { value: "up", label: "Always up" },
-    Choice { value: "down", label: "Always down" },
+    Choice {
+        value: "none",
+        label: "Print the paise",
+    },
+    Choice {
+        value: "nearest_rupee",
+        label: "To the nearest rupee",
+    },
+    Choice {
+        value: "up",
+        label: "Always up",
+    },
+    Choice {
+        value: "down",
+        label: "Always down",
+    },
 ];
 
 const ORDER_TYPES: &[Choice] = &[
-    Choice { value: "dine_in", label: "Dine in" },
-    Choice { value: "parcel", label: "Parcel" },
-    Choice { value: "self_service", label: "Self service" },
-    Choice { value: "delivery", label: "Delivery" },
+    Choice {
+        value: "dine_in",
+        label: "Dine in",
+    },
+    Choice {
+        value: "parcel",
+        label: "Parcel",
+    },
+    Choice {
+        value: "self_service",
+        label: "Self service",
+    },
+    Choice {
+        value: "delivery",
+        label: "Delivery",
+    },
 ];
 
-const PLACES_OF_SUPPLY: &[Choice] = &[
-    Choice { value: "intra", label: "In my own state — CGST and SGST" },
-    Choice { value: "inter", label: "Another state — IGST" },
+/// What kind of taxpayer the shop is. The values are `mb_core::Registration`'s
+/// own serde names, which are also the schema's CHECK.
+const REGISTRATIONS: &[Choice] = &[
+    Choice {
+        value: "unregistered",
+        label: "Not registered",
+    },
+    Choice {
+        value: "composition",
+        label: "Composition scheme",
+    },
+    Choice {
+        value: "regular",
+        label: "Regular GST",
+    },
 ];
 
 const LANGUAGES: &[Choice] = &[
-    Choice { value: "en", label: "English" },
-    Choice { value: "hi", label: "Hindi — not installed yet (P23)" },
-    Choice { value: "kn", label: "Kannada — not installed yet (P23)" },
+    Choice {
+        value: "en",
+        label: "English",
+    },
+    Choice {
+        value: "hi",
+        label: "Hindi — not installed yet (P23)",
+    },
+    Choice {
+        value: "kn",
+        label: "Kannada — not installed yet (P23)",
+    },
 ];
 
 const GST_RATES: &[Choice] = &[
-    Choice { value: "0", label: "No GST" },
-    Choice { value: "500", label: "5%" },
-    Choice { value: "1200", label: "12%" },
-    Choice { value: "1800", label: "18%" },
-    Choice { value: "2800", label: "28%" },
+    Choice {
+        value: "0",
+        label: "No GST",
+    },
+    Choice {
+        value: "500",
+        label: "5%",
+    },
+    Choice {
+        value: "1200",
+        label: "12%",
+    },
+    Choice {
+        value: "1800",
+        label: "18%",
+    },
+    Choice {
+        value: "2800",
+        label: "28%",
+    },
 ];
 
 /// The GST state codes, which are also the first two characters of every GSTIN.
@@ -333,45 +522,168 @@ const GST_RATES: &[Choice] = &[
 /// The list is here rather than in a data file because it is a legal constant:
 /// it changes when a state is created, which has happened twice in fifty years.
 const STATES: &[Choice] = &[
-    Choice { value: NOT_CHOSEN, label: "Not chosen yet" },
-    Choice { value: "01", label: "Jammu and Kashmir" },
-    Choice { value: "02", label: "Himachal Pradesh" },
-    Choice { value: "03", label: "Punjab" },
-    Choice { value: "04", label: "Chandigarh" },
-    Choice { value: "05", label: "Uttarakhand" },
-    Choice { value: "06", label: "Haryana" },
-    Choice { value: "07", label: "Delhi" },
-    Choice { value: "08", label: "Rajasthan" },
-    Choice { value: "09", label: "Uttar Pradesh" },
-    Choice { value: "10", label: "Bihar" },
-    Choice { value: "11", label: "Sikkim" },
-    Choice { value: "12", label: "Arunachal Pradesh" },
-    Choice { value: "13", label: "Nagaland" },
-    Choice { value: "14", label: "Manipur" },
-    Choice { value: "15", label: "Mizoram" },
-    Choice { value: "16", label: "Tripura" },
-    Choice { value: "17", label: "Meghalaya" },
-    Choice { value: "18", label: "Assam" },
-    Choice { value: "19", label: "West Bengal" },
-    Choice { value: "20", label: "Jharkhand" },
-    Choice { value: "21", label: "Odisha" },
-    Choice { value: "22", label: "Chhattisgarh" },
-    Choice { value: "23", label: "Madhya Pradesh" },
-    Choice { value: "24", label: "Gujarat" },
-    Choice { value: "26", label: "Dadra and Nagar Haveli and Daman and Diu" },
-    Choice { value: "27", label: "Maharashtra" },
-    Choice { value: "29", label: "Karnataka" },
-    Choice { value: "30", label: "Goa" },
-    Choice { value: "31", label: "Lakshadweep" },
-    Choice { value: "32", label: "Kerala" },
-    Choice { value: "33", label: "Tamil Nadu" },
-    Choice { value: "34", label: "Puducherry" },
-    Choice { value: "35", label: "Andaman and Nicobar Islands" },
-    Choice { value: "36", label: "Telangana" },
-    Choice { value: "37", label: "Andhra Pradesh" },
-    Choice { value: "38", label: "Ladakh" },
-    Choice { value: "97", label: "Other territory" },
+    Choice {
+        value: NOT_CHOSEN,
+        label: "Not chosen yet",
+    },
+    Choice {
+        value: "01",
+        label: "Jammu and Kashmir",
+    },
+    Choice {
+        value: "02",
+        label: "Himachal Pradesh",
+    },
+    Choice {
+        value: "03",
+        label: "Punjab",
+    },
+    Choice {
+        value: "04",
+        label: "Chandigarh",
+    },
+    Choice {
+        value: "05",
+        label: "Uttarakhand",
+    },
+    Choice {
+        value: "06",
+        label: "Haryana",
+    },
+    Choice {
+        value: "07",
+        label: "Delhi",
+    },
+    Choice {
+        value: "08",
+        label: "Rajasthan",
+    },
+    Choice {
+        value: "09",
+        label: "Uttar Pradesh",
+    },
+    Choice {
+        value: "10",
+        label: "Bihar",
+    },
+    Choice {
+        value: "11",
+        label: "Sikkim",
+    },
+    Choice {
+        value: "12",
+        label: "Arunachal Pradesh",
+    },
+    Choice {
+        value: "13",
+        label: "Nagaland",
+    },
+    Choice {
+        value: "14",
+        label: "Manipur",
+    },
+    Choice {
+        value: "15",
+        label: "Mizoram",
+    },
+    Choice {
+        value: "16",
+        label: "Tripura",
+    },
+    Choice {
+        value: "17",
+        label: "Meghalaya",
+    },
+    Choice {
+        value: "18",
+        label: "Assam",
+    },
+    Choice {
+        value: "19",
+        label: "West Bengal",
+    },
+    Choice {
+        value: "20",
+        label: "Jharkhand",
+    },
+    Choice {
+        value: "21",
+        label: "Odisha",
+    },
+    Choice {
+        value: "22",
+        label: "Chhattisgarh",
+    },
+    Choice {
+        value: "23",
+        label: "Madhya Pradesh",
+    },
+    Choice {
+        value: "24",
+        label: "Gujarat",
+    },
+    Choice {
+        value: "26",
+        label: "Dadra and Nagar Haveli and Daman and Diu",
+    },
+    Choice {
+        value: "27",
+        label: "Maharashtra",
+    },
+    Choice {
+        value: "29",
+        label: "Karnataka",
+    },
+    Choice {
+        value: "30",
+        label: "Goa",
+    },
+    Choice {
+        value: "31",
+        label: "Lakshadweep",
+    },
+    Choice {
+        value: "32",
+        label: "Kerala",
+    },
+    Choice {
+        value: "33",
+        label: "Tamil Nadu",
+    },
+    Choice {
+        value: "34",
+        label: "Puducherry",
+    },
+    Choice {
+        value: "35",
+        label: "Andaman and Nicobar Islands",
+    },
+    Choice {
+        value: "36",
+        label: "Telangana",
+    },
+    Choice {
+        value: "37",
+        label: "Andhra Pradesh",
+    },
+    Choice {
+        value: "38",
+        label: "Ladakh",
+    },
+    Choice {
+        value: "97",
+        label: "Other territory",
+    },
 ];
+
+/// The state's name for its GST code — "29" is Karnataka. Empty is not a code.
+#[must_use]
+pub fn state_label(code: &str) -> Option<&'static str> {
+    if code.is_empty() {
+        return None;
+    }
+    STATES.iter().find(|s| s.value == code).map(|s| s.label)
+}
 
 // ---------------------------------------------------------------------------
 // The macros. One line per setting, and the shape of that line is the same for
@@ -696,315 +1008,929 @@ fn rate_from(text: &str) -> Option<u32> {
 
 pub const CATALOG: &[Entry] = &[
     // --- your shop (audit Part 3, "Store Information" and "UPI Payment") ----
-    words!("store.name", Store, Store, "Shop name",
-        "Printed at the top of every bill.", ["hotel", "restaurant", "title"], 60, Free, store.name),
-    words!("store.address", Store, Store, "Address",
+    words!(
+        "store.name",
+        Store,
+        Store,
+        "Shop name",
+        "Printed at the top of every bill.",
+        ["hotel", "restaurant", "title"],
+        60,
+        Free,
+        store.name
+    ),
+    words!(
+        "store.address",
+        Store,
+        Store,
+        "Address",
         "Printed under the name. Long addresses wrap onto a second line.",
-        ["location", "street"], 200, Free, store.address),
-    words!("store.phone", Store, Store, "Phone number",
+        ["location", "street"],
+        200,
+        Free,
+        store.address
+    ),
+    words!(
+        "store.phone",
+        Store,
+        Store,
+        "Phone number",
         "Ten digits. Printed on the bill so a customer can call about an order.",
-        ["mobile", "contact", "telephone"], 10, Phone, store.phone),
+        ["mobile", "contact", "telephone"],
+        10,
+        Phone,
+        store.phone
+    ),
     // **Neither of these is checked any more** — the owner, 2026-08-16. The
     // length is generous rather than exact for the same reason: it is a string
     // off a certificate, and the certificate is right.
-    words!("store.gstin", Store, Store, "GST number",
+    words!(
+        "store.gstin",
+        Store,
+        Store,
+        "GST number",
         "Printed on the bill if you turn that on. Type it exactly as it is on \
          your certificate — nothing here checks it or changes it.",
-        ["gst", "gstin", "tax number"], 32, Gstin, store.gstin),
-    words!("store.fssai", Store, Store, "FSSAI licence number",
+        ["gst", "gstin", "tax number"],
+        32,
+        Gstin,
+        store.gstin
+    ),
+    words!(
+        "store.fssai",
+        Store,
+        Store,
+        "FSSAI licence number",
         "Printed on the bill if you turn that on. Type it exactly as it is on \
          your certificate.",
-        ["food licence", "fssai"], 32, Fssai, store.fssai),
-    pick_text!("store.state_code", Store, Store, "State",
+        ["food licence", "fssai"],
+        32,
+        Fssai,
+        store.fssai
+    ),
+    pick_text!(
+        "store.state_code",
+        Store,
+        Store,
+        "State",
         "Which state you are in. This decides whether a bill charges CGST and \
          SGST or IGST.",
-        ["state", "karnataka", "igst", "cgst"], STATES, store.state_code),
-    words!("store.upi_id", Store, Store, "UPI id",
+        ["state", "karnataka", "igst", "cgst"],
+        STATES,
+        store.state_code
+    ),
+    words!(
+        "store.upi_id",
+        Store,
+        Store,
+        "UPI id",
         "Where the QR code on the bill sends money. Looks like name@bank.",
-        ["upi", "qr", "gpay", "phonepe", "payment"], 60, UpiId, store.upi_id),
-    words!("store.upi_merchant_name", Store, Store, "UPI name",
+        ["upi", "qr", "gpay", "phonepe", "payment"],
+        60,
+        UpiId,
+        store.upi_id
+    ),
+    words!(
+        "store.upi_merchant_name",
+        Store,
+        Store,
+        "UPI name",
         "The name the customer sees in their payment app. Your shop name is used \
          if this is blank.",
-        ["upi", "merchant", "payee"], 40, Free, store.upi_merchant_name),
-    words!("store.upi_reference", Store, Store, "UPI reference",
+        ["upi", "merchant", "payee"],
+        40,
+        Free,
+        store.upi_merchant_name
+    ),
+    words!(
+        "store.upi_reference",
+        Store,
+        Store,
+        "UPI reference",
         "Carried inside the QR code so your bank statement says which counter a \
          payment came from.",
-        ["upi", "reference", "note", "statement"], 40, Free, store.upi_reference),
-
+        ["upi", "reference", "note", "statement"],
+        40,
+        Free,
+        store.upi_reference
+    ),
     // --- tax ---------------------------------------------------------------
-    // is_composition and the place of supply are STORED on the profile and
-    // BELONG on the tax screen. That is why group and storage are two things.
-    flag!("store.is_composition", Tax, Store, "I am under the composition scheme",
-        "A composition dealer may not collect GST. The bill prints a declaration \
-         saying so instead of a tax breakdown.",
-        ["composition", "scheme", "small dealer"], store.is_composition),
-    pick_text!("store.default_place_of_supply", Tax, Store, "Where you usually supply",
-        "In your own state a bill charges CGST and SGST; outside it, IGST. A \
-         single bill can still be changed.",
-        ["igst", "cgst", "sgst", "inter state", "place of supply"],
-        PLACES_OF_SUPPLY, store.default_place_of_supply),
-    words!("tax.default_class_id", Tax, Row, "Tax rate for a new item",
-        "Which tax class the Menu screen offers first when you add an item.",
-        ["default", "rate", "class", "new item"], 40, Free, tax.default_class_id),
-    flag!("tax.prices_include_tax", Tax, Row, "Menu prices already include tax",
-        "On: a 100 rupee dosa is 100 rupees on the bill and the tax is worked \
-         back out of it. Off: tax is added on top.",
-        ["inclusive", "exclusive", "included", "on top"], tax.prices_include_tax),
-
+    // The registration is STORED on the profile and BELONGS on the tax screen.
+    // That is why group and storage are two things.
+    pick_text!(
+        "store.registration",
+        Tax,
+        Store,
+        "Your GST registration",
+        "It decides whether a bill may show GST at all, and what the bill is called.",
+        [
+            "gst",
+            "composition",
+            "registration",
+            "unregistered",
+            "regular",
+            "scheme",
+            "small dealer"
+        ],
+        REGISTRATIONS,
+        store.registration
+    ),
     // --- the bill (audit Part 3, "Bill Settings" — every row) --------------
     // Part 3's "Font" row IS here now — `receipt.font`, a few lines below.
     // It was deleted at P17 (D71) because there was one embedded face and the
     // choice changed nothing; P31 gave the queue a face per job and the
     // choice something to change. See the note above FONTS.
-    pick!("receipt.pattern", Receipt, Row, "Separator line",
+    pick!(
+        "receipt.pattern",
+        Receipt,
+        Row,
+        "Separator line",
         "What the dividing lines on the bill look like.",
-        ["line", "divider", "dashes", "dotted"], PATTERNS, pattern_to, pattern_from,
-        receipt.pattern),
-    pick!("receipt.row_height", Receipt, Row, "Row height",
+        ["line", "divider", "dashes", "dotted"],
+        PATTERNS,
+        pattern_to,
+        pattern_from,
+        receipt.pattern
+    ),
+    pick!(
+        "receipt.row_height",
+        Receipt,
+        Row,
+        "Row height",
         "How much air there is between items and around the total.",
-        ["spacing", "compact", "relaxed", "air", "paper"], ROW_HEIGHTS,
-        row_height_to, row_height_from, receipt.row_height),
-
-    flag!("receipt.show.token", Receipt, Row, "Print the token number",
-        "The big number the customer waits for.", ["token", "number"], receipt.show.token),
-    flag!("receipt.show.gstin", Receipt, Row, "Print your GST number",
-        "In the header, under the address.", ["gst", "gstin"], receipt.show.gstin),
-    flag!("receipt.show.fssai", Receipt, Row, "Print your FSSAI number",
-        "In the header.", ["fssai", "food licence"], receipt.show.fssai),
-    flag!("receipt.show.address", Receipt, Row, "Print your address",
-        "In the header, under the shop name.", ["address"], receipt.show.address),
-    flag!("receipt.show.phone", Receipt, Row, "Print your phone number",
-        "In the header.", ["phone", "mobile"], receipt.show.phone),
-    flag!("receipt.show.cashier", Receipt, Row, "Print who billed it",
-        "The name of whoever was signed in.", ["cashier", "staff", "who"],
-        receipt.show.cashier),
-    flag!("receipt.show.hsn", Receipt, Row, "Print the HSN code",
+        ["spacing", "compact", "relaxed", "air", "paper"],
+        ROW_HEIGHTS,
+        row_height_to,
+        row_height_from,
+        receipt.row_height
+    ),
+    flag!(
+        "receipt.show.token",
+        Receipt,
+        Row,
+        "Print the token number",
+        "The big number the customer waits for.",
+        ["token", "number"],
+        receipt.show.token
+    ),
+    flag!(
+        "receipt.show.gstin",
+        Receipt,
+        Row,
+        "Print your GST number",
+        "In the header, under the address.",
+        ["gst", "gstin"],
+        receipt.show.gstin
+    ),
+    flag!(
+        "receipt.show.fssai",
+        Receipt,
+        Row,
+        "Print your FSSAI number",
+        "In the header.",
+        ["fssai", "food licence"],
+        receipt.show.fssai
+    ),
+    flag!(
+        "receipt.show.address",
+        Receipt,
+        Row,
+        "Print your address",
+        "In the header, under the shop name.",
+        ["address"],
+        receipt.show.address
+    ),
+    flag!(
+        "receipt.show.phone",
+        Receipt,
+        Row,
+        "Print your phone number",
+        "In the header.",
+        ["phone", "mobile"],
+        receipt.show.phone
+    ),
+    flag!(
+        "receipt.show.cashier",
+        Receipt,
+        Row,
+        "Print who billed it",
+        "The name of whoever was signed in.",
+        ["cashier", "staff", "who"],
+        receipt.show.cashier
+    ),
+    flag!(
+        "receipt.show.hsn",
+        Receipt,
+        Row,
+        "Print the HSN code",
         "Needed above the turnover threshold. It costs six characters of a \
-         narrow bill.", ["hsn", "sac", "code"], receipt.show.hsn),
-    flag!("receipt.show.tax_summary", Receipt, Row, "Print the rate-wise tax summary",
+         narrow bill.",
+        ["hsn", "sac", "code"],
+        receipt.show.hsn
+    ),
+    flag!(
+        "receipt.show.tax_summary",
+        Receipt,
+        Row,
+        "Print the rate-wise tax summary",
         "The block a chartered accountant looks at first. Turning it off makes \
          a bill harder to file from.",
-        ["gst", "summary", "cgst", "sgst", "rate wise"], receipt.show.tax_summary),
-    flag!("receipt.show.payment_lines", Receipt, Row, "Print how it was paid",
+        ["gst", "summary", "cgst", "sgst", "rate wise"],
+        receipt.show.tax_summary
+    ),
+    flag!(
+        "receipt.show.payment_lines",
+        Receipt,
+        Row,
+        "Print how it was paid",
         "\"Cash 300 / UPI 200\" under the total.",
-        ["payment", "split", "cash", "card"], receipt.show.payment_lines),
-
+        ["payment", "split", "cash", "card"],
+        receipt.show.payment_lines
+    ),
     // --- P32, 2026-08-23. Five things a real bill needs and none of them had.
-    flag!("receipt.show.title", Receipt, Row, "Print \"TAX INVOICE\"",
+    flag!(
+        "receipt.show.title",
+        Receipt,
+        Row,
+        "Print \"TAX INVOICE\"",
         "A GST document has to say what it is. A composition dealer gets \
          \"BILL OF SUPPLY\"; a shop with no GST number gets neither.",
         ["tax invoice", "title", "heading", "gst", "bill of supply"],
-        receipt.show.title),
-    flag!("receipt.show.time", Receipt, Row, "Print the time",
+        receipt.show.title
+    ),
+    flag!(
+        "receipt.show.time",
+        Receipt,
+        Row,
+        "Print the time",
         "Beside the date. A restaurant bill without a time is not much of a \
-         record.", ["time", "clock", "hour"], receipt.show.time),
-    flag!("receipt.show.covers", Receipt, Row, "Print how many people",
-        "Only when the order says. Most do not.", ["covers", "persons", "pax", "guests"],
-        receipt.show.covers),
-    flag!("receipt.show.waiter", Receipt, Row, "Print who took the order",
-        "As well as who took the money.", ["waiter", "steward", "server", "staff"],
-        receipt.show.waiter),
-    flag!("receipt.show.place_of_supply", Receipt, Row, "Print the place of supply",
+         record.",
+        ["time", "clock", "hour"],
+        receipt.show.time
+    ),
+    flag!(
+        "receipt.show.covers",
+        Receipt,
+        Row,
+        "Print how many people",
+        "Only when the order says. Most do not.",
+        ["covers", "persons", "pax", "guests"],
+        receipt.show.covers
+    ),
+    flag!(
+        "receipt.show.waiter",
+        Receipt,
+        Row,
+        "Print who took the order",
+        "As well as who took the money.",
+        ["waiter", "steward", "server", "staff"],
+        receipt.show.waiter
+    ),
+    flag!(
+        "receipt.show.place_of_supply",
+        Receipt,
+        Row,
+        "Print the place of supply",
         "The state code. A B2B customer's accounts department asks for it.",
-        ["place of supply", "state", "gst"], receipt.show.place_of_supply),
-    flag!("receipt.show.amount_in_words", Receipt, Row, "Print the total in words",
+        ["place of supply", "state", "gst"],
+        receipt.show.place_of_supply
+    ),
+    flag!(
+        "receipt.show.amount_in_words",
+        Receipt,
+        Row,
+        "Print the total in words",
         "\"Rupees One Thousand Two Hundred only\" under the total. Two more \
          lines of paper on every bill.",
-        ["words", "rupees", "amount in words"], receipt.show.amount_in_words),
-
-    flag!("receipt.separators.below_store_header", Receipt, Row, "Line under the shop header",
-        "", ["separator", "line", "header"], receipt.separators.below_store_header),
-    flag!("receipt.separators.below_meta", Receipt, Row, "Line under the bill details",
-        "", ["separator", "line", "details"], receipt.separators.below_meta),
-    flag!("receipt.separators.below_token", Receipt, Row, "Line under the token",
-        "", ["separator", "line", "token"], receipt.separators.below_token),
-    flag!("receipt.separators.below_column_names", Receipt, Row, "Line under the column names",
-        "", ["separator", "line", "columns"], receipt.separators.below_column_names),
-    flag!("receipt.separators.below_items", Receipt, Row, "Line under the items",
-        "", ["separator", "line", "items"], receipt.separators.below_items),
-    flag!("receipt.separators.below_subtotals", Receipt, Row, "Line above the total",
-        "", ["separator", "line", "subtotal"], receipt.separators.below_subtotals),
-    flag!("receipt.separators.below_grand_total", Receipt, Row, "Line under the total",
-        "", ["separator", "line", "total"], receipt.separators.below_grand_total),
+        ["words", "rupees", "amount in words"],
+        receipt.show.amount_in_words
+    ),
+    flag!(
+        "receipt.separators.below_store_header",
+        Receipt,
+        Row,
+        "Line under the shop header",
+        "",
+        ["separator", "line", "header"],
+        receipt.separators.below_store_header
+    ),
+    flag!(
+        "receipt.separators.below_meta",
+        Receipt,
+        Row,
+        "Line under the bill details",
+        "",
+        ["separator", "line", "details"],
+        receipt.separators.below_meta
+    ),
+    flag!(
+        "receipt.separators.below_token",
+        Receipt,
+        Row,
+        "Line under the token",
+        "",
+        ["separator", "line", "token"],
+        receipt.separators.below_token
+    ),
+    flag!(
+        "receipt.separators.below_column_names",
+        Receipt,
+        Row,
+        "Line under the column names",
+        "",
+        ["separator", "line", "columns"],
+        receipt.separators.below_column_names
+    ),
+    flag!(
+        "receipt.separators.below_items",
+        Receipt,
+        Row,
+        "Line under the items",
+        "",
+        ["separator", "line", "items"],
+        receipt.separators.below_items
+    ),
+    flag!(
+        "receipt.separators.below_subtotals",
+        Receipt,
+        Row,
+        "Line above the total",
+        "",
+        ["separator", "line", "subtotal"],
+        receipt.separators.below_subtotals
+    ),
+    flag!(
+        "receipt.separators.below_grand_total",
+        Receipt,
+        Row,
+        "Line under the total",
+        "",
+        ["separator", "line", "total"],
+        receipt.separators.below_grand_total
+    ),
     // **P32 — two rules the template drew with no setting in front of them.**
     // A rule nobody can switch off is the same fault as a setting nobody reads.
-    flag!("receipt.separators.below_tax_summary", Receipt, Row, "Line under the tax summary",
-        "", ["separator", "line", "tax", "summary"],
-        receipt.separators.below_tax_summary),
-    flag!("receipt.separators.below_payments", Receipt, Row, "Line under the payment lines",
-        "", ["separator", "line", "payment"], receipt.separators.below_payments),
-
+    flag!(
+        "receipt.separators.below_tax_summary",
+        Receipt,
+        Row,
+        "Line under the tax summary",
+        "",
+        ["separator", "line", "tax", "summary"],
+        receipt.separators.below_tax_summary
+    ),
+    flag!(
+        "receipt.separators.below_payments",
+        Receipt,
+        Row,
+        "Line under the payment lines",
+        "",
+        ["separator", "line", "payment"],
+        receipt.separators.below_payments
+    ),
     // P31, the owner's fourth item. First among the look settings, because it
     // is a decision about the whole piece of paper rather than about one line.
-    pick_text!("receipt.font", Receipt, Row, "Bill typeface",
+    pick_text!(
+        "receipt.font",
+        Receipt,
+        Row,
+        "Bill typeface",
         "The face your bills print in. All of these come with Windows — if one \
          is missing from this computer, Magic Bill quietly uses its own.",
         ["font", "typeface", "face", "typography", "letters", "print"],
-        FONTS, receipt.font),
-
-    size!("receipt.sections.store_name.scale", Receipt, "Shop name size",
-        "", ["size", "big", "header", "name"], receipt.sections.store_name),
-    flag!("receipt.sections.store_name.bold", Receipt, Row, "Shop name in bold",
-        "", ["bold", "header", "name"], receipt.sections.store_name.bold),
-    size!("receipt.sections.meta.scale", Receipt, "Bill details size",
-        "", ["size", "details", "address"], receipt.sections.meta),
-    flag!("receipt.sections.meta.bold", Receipt, Row, "Bill details in bold",
-        "", ["bold", "details"], receipt.sections.meta.bold),
-    size!("receipt.sections.items.scale", Receipt, "Item list size",
-        "", ["size", "items"], receipt.sections.items),
-    flag!("receipt.sections.items.bold", Receipt, Row, "Item list in bold",
-        "", ["bold", "items"], receipt.sections.items.bold),
-    size!("receipt.sections.subtotals.scale", Receipt, "Subtotal and GST size",
-        "", ["size", "subtotal", "gst"], receipt.sections.subtotals),
-    flag!("receipt.sections.subtotals.bold", Receipt, Row, "Subtotal and GST in bold",
-        "", ["bold", "subtotal"], receipt.sections.subtotals.bold),
-    size!("receipt.sections.grand_total.scale", Receipt, "Total size",
-        "", ["size", "total", "grand"], receipt.sections.grand_total),
-    flag!("receipt.sections.grand_total.bold", Receipt, Row, "Total in bold",
-        "", ["bold", "total"], receipt.sections.grand_total.bold),
-    size!("receipt.sections.footer.scale", Receipt, "Footer size",
-        "", ["size", "footer", "thank you"], receipt.sections.footer),
-    flag!("receipt.sections.footer.bold", Receipt, Row, "Footer in bold",
-        "", ["bold", "footer"], receipt.sections.footer.bold),
-    size!("receipt.sections.token.scale", Receipt, "Token size",
+        FONTS,
+        receipt.font
+    ),
+    size!(
+        "receipt.sections.store_name.scale",
+        Receipt,
+        "Shop name size",
+        "",
+        ["size", "big", "header", "name"],
+        receipt.sections.store_name
+    ),
+    flag!(
+        "receipt.sections.store_name.bold",
+        Receipt,
+        Row,
+        "Shop name in bold",
+        "",
+        ["bold", "header", "name"],
+        receipt.sections.store_name.bold
+    ),
+    size!(
+        "receipt.sections.meta.scale",
+        Receipt,
+        "Bill details size",
+        "",
+        ["size", "details", "address"],
+        receipt.sections.meta
+    ),
+    flag!(
+        "receipt.sections.meta.bold",
+        Receipt,
+        Row,
+        "Bill details in bold",
+        "",
+        ["bold", "details"],
+        receipt.sections.meta.bold
+    ),
+    size!(
+        "receipt.sections.items.scale",
+        Receipt,
+        "Item list size",
+        "",
+        ["size", "items"],
+        receipt.sections.items
+    ),
+    flag!(
+        "receipt.sections.items.bold",
+        Receipt,
+        Row,
+        "Item list in bold",
+        "",
+        ["bold", "items"],
+        receipt.sections.items.bold
+    ),
+    size!(
+        "receipt.sections.subtotals.scale",
+        Receipt,
+        "Subtotal and GST size",
+        "",
+        ["size", "subtotal", "gst"],
+        receipt.sections.subtotals
+    ),
+    flag!(
+        "receipt.sections.subtotals.bold",
+        Receipt,
+        Row,
+        "Subtotal and GST in bold",
+        "",
+        ["bold", "subtotal"],
+        receipt.sections.subtotals.bold
+    ),
+    size!(
+        "receipt.sections.grand_total.scale",
+        Receipt,
+        "Total size",
+        "",
+        ["size", "total", "grand"],
+        receipt.sections.grand_total
+    ),
+    flag!(
+        "receipt.sections.grand_total.bold",
+        Receipt,
+        Row,
+        "Total in bold",
+        "",
+        ["bold", "total"],
+        receipt.sections.grand_total.bold
+    ),
+    size!(
+        "receipt.sections.footer.scale",
+        Receipt,
+        "Footer size",
+        "",
+        ["size", "footer", "thank you"],
+        receipt.sections.footer
+    ),
+    flag!(
+        "receipt.sections.footer.bold",
+        Receipt,
+        Row,
+        "Footer in bold",
+        "",
+        ["bold", "footer"],
+        receipt.sections.footer.bold
+    ),
+    size!(
+        "receipt.sections.token.scale",
+        Receipt,
+        "Token size",
         "The customer reads this one across a room.",
-        ["size", "token", "big"], receipt.sections.token),
-    flag!("receipt.sections.token.bold", Receipt, Row, "Token in bold",
-        "", ["bold", "token"], receipt.sections.token.bold),
-
-    pick!("receipt.logo", Receipt, Row, "Logo",
+        ["size", "token", "big"],
+        receipt.sections.token
+    ),
+    flag!(
+        "receipt.sections.token.bold",
+        Receipt,
+        Row,
+        "Token in bold",
+        "",
+        ["bold", "token"],
+        receipt.sections.token.bold
+    ),
+    pick!(
+        "receipt.logo",
+        Receipt,
+        Row,
+        "Logo",
         "Where your logo prints, if you have uploaded one.",
-        ["logo", "image", "picture", "brand"], LOGO_POSITIONS, logo_to, logo_from,
-        receipt.logo),
+        ["logo", "image", "picture", "brand"],
+        LOGO_POSITIONS,
+        logo_to,
+        logo_from,
+        receipt.logo
+    ),
     number!("receipt.logo_width_pct", Receipt, Row, "Logo width",
         "As a percentage of the paper width.", ["logo", "size", "width"],
         10..=100 "%", u8, receipt.logo_width_pct),
-    pick!("receipt.qr", Receipt, Row, "UPI QR code",
+    pick!(
+        "receipt.qr",
+        Receipt,
+        Row,
+        "UPI QR code",
         "Dynamic carries the amount, so the customer does not type it.",
-        ["qr", "upi", "scan", "payment"], QR_MODES, qr_to, qr_from, receipt.qr),
+        ["qr", "upi", "scan", "payment"],
+        QR_MODES,
+        qr_to,
+        qr_from,
+        receipt.qr
+    ),
     number!("receipt.qr_width_pct", Receipt, Row, "QR code width",
         "As a percentage of the paper width. Too small and a phone cannot read it.",
         ["qr", "size", "width"], 10..=100 "%", u8, receipt.qr_width_pct),
-    words!("receipt.footer", Receipt, Row, "Footer message",
-        "The last line of the bill.", ["thank you", "footer", "message", "bottom"],
-        120, Free, receipt.footer),
-    words!("receipt.composition_note", Receipt, Row, "Composition declaration",
+    words!(
+        "receipt.footer",
+        Receipt,
+        Row,
+        "Footer message",
+        "The last line of the bill.",
+        ["thank you", "footer", "message", "bottom"],
+        120,
+        Free,
+        receipt.footer
+    ),
+    words!(
+        "receipt.composition_note",
+        Receipt,
+        Row,
+        "Composition declaration",
         "Printed instead of a tax breakdown when you are under the composition \
-         scheme.", ["composition", "declaration", "note"], 160, Free,
-        receipt.composition_note),
-
+         scheme.",
+        ["composition", "declaration", "note"],
+        160,
+        Free,
+        receipt.composition_note
+    ),
     // --- the kitchen ticket (audit Part 3, "KOT visibility" / "KOT sections")
-    flag!("kitchen.show_title", Kitchen, Row, "Print the word KITCHEN",
-        "", ["kot", "title", "heading"], kitchen.show_title),
-    flag!("kitchen.show_token", Kitchen, Row, "Print the token number",
-        "", ["kot", "token"], kitchen.show_token),
-    flag!("kitchen.show_bill_number", Kitchen, Row, "Print the bill number",
-        "", ["kot", "bill number"], kitchen.show_bill_number),
-    flag!("kitchen.show_order_type", Kitchen, Row, "Print the order type",
-        "Dine in, parcel, delivery.", ["kot", "type", "parcel"],
-        kitchen.show_order_type),
-    flag!("kitchen.show_table", Kitchen, Row, "Print the table",
-        "", ["kot", "table"], kitchen.show_table),
-    flag!("kitchen.show_time", Kitchen, Row, "Print the time",
-        "", ["kot", "time", "clock"], kitchen.show_time),
+    flag!(
+        "kitchen.show_title",
+        Kitchen,
+        Row,
+        "Print the word KITCHEN",
+        "",
+        ["kot", "title", "heading"],
+        kitchen.show_title
+    ),
+    flag!(
+        "kitchen.show_token",
+        Kitchen,
+        Row,
+        "Print the token number",
+        "",
+        ["kot", "token"],
+        kitchen.show_token
+    ),
+    flag!(
+        "kitchen.show_bill_number",
+        Kitchen,
+        Row,
+        "Print the bill number",
+        "",
+        ["kot", "bill number"],
+        kitchen.show_bill_number
+    ),
+    flag!(
+        "kitchen.show_order_type",
+        Kitchen,
+        Row,
+        "Print the order type",
+        "Dine in, parcel, delivery.",
+        ["kot", "type", "parcel"],
+        kitchen.show_order_type
+    ),
+    flag!(
+        "kitchen.show_table",
+        Kitchen,
+        Row,
+        "Print the table",
+        "",
+        ["kot", "table"],
+        kitchen.show_table
+    ),
+    flag!(
+        "kitchen.show_time",
+        Kitchen,
+        Row,
+        "Print the time",
+        "",
+        ["kot", "time", "clock"],
+        kitchen.show_time
+    ),
     // P32 — a cook could not say "KOT 14", because there was no such number.
-    flag!("kitchen.show_kot_number", Kitchen, Row, "Print the ticket number",
-        "Its own running number, so the kitchen and the counter can talk about \n         one ticket.", ["kot", "number", "ticket"], kitchen.show_kot_number),
-    flag!("kitchen.show_column_names", Kitchen, Row, "Print column names",
-        "A \"Qty  Item\" heading above the food.", ["kot", "columns", "heading"],
-        kitchen.show_column_names),
-    flag!("kitchen.two_column", Kitchen, Row, "Two dishes per line",
+    flag!(
+        "kitchen.show_kot_number",
+        Kitchen,
+        Row,
+        "Print the ticket number",
+        "Its own running number, so the kitchen and the counter can talk about \n         one ticket.",
+        ["kot", "number", "ticket"],
+        kitchen.show_kot_number
+    ),
+    flag!(
+        "kitchen.show_column_names",
+        Kitchen,
+        Row,
+        "Print column names",
+        "A \"Qty  Item\" heading above the food.",
+        ["kot", "columns", "heading"],
+        kitchen.show_column_names
+    ),
+    flag!(
+        "kitchen.two_column",
+        Kitchen,
+        Row,
+        "Two dishes per line",
         "Half the paper, harder to read. Notes are packed onto the dish's own \
-         line.", ["kot", "two column", "packing", "short", "paper"],
-        kitchen.two_column),
-    pick!("kitchen.pattern", Kitchen, Row, "Separator line",
-        "", ["kot", "line", "divider"], PATTERNS, pattern_to, pattern_from,
-        kitchen.pattern),
-    pick!("kitchen.row_height", Kitchen, Row, "Row height",
+         line.",
+        ["kot", "two column", "packing", "short", "paper"],
+        kitchen.two_column
+    ),
+    pick!(
+        "kitchen.pattern",
+        Kitchen,
+        Row,
+        "Separator line",
+        "",
+        ["kot", "line", "divider"],
+        PATTERNS,
+        pattern_to,
+        pattern_from,
+        kitchen.pattern
+    ),
+    pick!(
+        "kitchen.row_height",
+        Kitchen,
+        Row,
+        "Row height",
         "How much air there is between dishes. The kitchen reads this at speed.",
-        ["kot", "spacing", "compact", "relaxed"], ROW_HEIGHTS, row_height_to,
-        row_height_from, kitchen.row_height),
-    flag!("kitchen.separators.below_title", Kitchen, Row, "Line under the title",
-        "", ["kot", "separator", "title"], kitchen.separators.below_title),
-    flag!("kitchen.separators.below_token", Kitchen, Row, "Line under the token",
-        "", ["kot", "separator", "token"], kitchen.separators.below_token),
-    flag!("kitchen.separators.below_details", Kitchen, Row, "Line under the details",
-        "", ["kot", "separator", "details"], kitchen.separators.below_details),
-    flag!("kitchen.separators.below_column_names", Kitchen, Row, "Line under the column names",
-        "", ["kot", "separator", "columns"], kitchen.separators.below_column_names),
-    flag!("kitchen.separators.below_items", Kitchen, Row, "Line under the food",
-        "", ["kot", "separator", "items"], kitchen.separators.below_items),
+        ["kot", "spacing", "compact", "relaxed"],
+        ROW_HEIGHTS,
+        row_height_to,
+        row_height_from,
+        kitchen.row_height
+    ),
+    flag!(
+        "kitchen.separators.below_title",
+        Kitchen,
+        Row,
+        "Line under the title",
+        "",
+        ["kot", "separator", "title"],
+        kitchen.separators.below_title
+    ),
+    flag!(
+        "kitchen.separators.below_token",
+        Kitchen,
+        Row,
+        "Line under the token",
+        "",
+        ["kot", "separator", "token"],
+        kitchen.separators.below_token
+    ),
+    flag!(
+        "kitchen.separators.below_details",
+        Kitchen,
+        Row,
+        "Line under the details",
+        "",
+        ["kot", "separator", "details"],
+        kitchen.separators.below_details
+    ),
+    flag!(
+        "kitchen.separators.below_column_names",
+        Kitchen,
+        Row,
+        "Line under the column names",
+        "",
+        ["kot", "separator", "columns"],
+        kitchen.separators.below_column_names
+    ),
+    flag!(
+        "kitchen.separators.below_items",
+        Kitchen,
+        Row,
+        "Line under the food",
+        "",
+        ["kot", "separator", "items"],
+        kitchen.separators.below_items
+    ),
     // Its own face, separate from the bill's, because the owner asked for both
     // — and because they are read differently: a ticket across a hot room at
     // speed, a bill at arm's length.
-    pick_text!("kitchen.font", Kitchen, Row, "Kitchen ticket typeface",
+    pick_text!(
+        "kitchen.font",
+        Kitchen,
+        Row,
+        "Kitchen ticket typeface",
         "The face your kitchen tickets print in. It does not have to be the \
          same as the bill's.",
-        ["font", "typeface", "face", "kot", "kitchen", "letters", "print"],
-        FONTS, kitchen.font),
-
-    size!("kitchen.title.scale", Kitchen, "Title size",
-        "", ["kot", "size", "title"], kitchen.title),
-    flag!("kitchen.title.bold", Kitchen, Row, "Title in bold",
-        "", ["kot", "bold", "title"], kitchen.title.bold),
-    size!("kitchen.details.scale", Kitchen, "Details size",
-        "", ["kot", "size", "details"], kitchen.details),
-    flag!("kitchen.details.bold", Kitchen, Row, "Details in bold",
-        "", ["kot", "bold", "details"], kitchen.details.bold),
-    size!("kitchen.items.scale", Kitchen, "Food size",
-        "The kitchen reads this across a hot room.", ["kot", "size", "items"],
-        kitchen.items),
-    flag!("kitchen.items.bold", Kitchen, Row, "Food in bold",
-        "", ["kot", "bold", "items"], kitchen.items.bold),
-
+        [
+            "font", "typeface", "face", "kot", "kitchen", "letters", "print"
+        ],
+        FONTS,
+        kitchen.font
+    ),
+    size!(
+        "kitchen.title.scale",
+        Kitchen,
+        "Title size",
+        "",
+        ["kot", "size", "title"],
+        kitchen.title
+    ),
+    flag!(
+        "kitchen.title.bold",
+        Kitchen,
+        Row,
+        "Title in bold",
+        "",
+        ["kot", "bold", "title"],
+        kitchen.title.bold
+    ),
+    size!(
+        "kitchen.details.scale",
+        Kitchen,
+        "Details size",
+        "",
+        ["kot", "size", "details"],
+        kitchen.details
+    ),
+    flag!(
+        "kitchen.details.bold",
+        Kitchen,
+        Row,
+        "Details in bold",
+        "",
+        ["kot", "bold", "details"],
+        kitchen.details.bold
+    ),
+    size!(
+        "kitchen.items.scale",
+        Kitchen,
+        "Food size",
+        "The kitchen reads this across a hot room.",
+        ["kot", "size", "items"],
+        kitchen.items
+    ),
+    flag!(
+        "kitchen.items.bold",
+        Kitchen,
+        Row,
+        "Food in bold",
+        "",
+        ["kot", "bold", "items"],
+        kitchen.items.bold
+    ),
     // --- billing behaviour --------------------------------------------------
-    pick!("billing.search_mode", Billing, Row, "How the item search matches",
+    pick!(
+        "billing.search_mode",
+        Billing,
+        Row,
+        "How the item search matches",
         "A short menu wants \"starts with\"; a long one wants \"contains\".",
-        ["search", "find", "starts with", "contains"], MATCH_MODES, match_to,
-        match_from, billing.search_mode),
-    pick!("billing.rounding", Billing, Row, "Round off the total",
+        ["search", "find", "starts with", "contains"],
+        MATCH_MODES,
+        match_to,
+        match_from,
+        billing.search_mode
+    ),
+    pick!(
+        "billing.rounding",
+        Billing,
+        Row,
+        "Round off the total",
         "What happens to the paise on the grand total.",
-        ["round", "roundoff", "round off", "paise"], ROUNDING, rounding_to,
-        rounding_from, billing.rounding),
-    flag!("billing.lock_order_type", Billing, Row, "Always start on one order type",
+        ["round", "roundoff", "round off", "paise"],
+        ROUNDING,
+        rounding_to,
+        rounding_from,
+        billing.rounding
+    ),
+    flag!(
+        "billing.lock_order_type",
+        Billing,
+        Row,
+        "Always start on one order type",
         "For a counter that only does parcels, or only dine-in.",
-        ["order type", "lock", "parcel", "default"], billing.lock_order_type),
-    pick!("billing.locked_order_type", Billing, Row, "Which order type",
-        "Used when the order type is locked.", ["order type", "parcel", "dine in"],
-        ORDER_TYPES, order_type_to, order_type_from, billing.locked_order_type),
+        ["order type", "lock", "parcel", "default"],
+        billing.lock_order_type
+    ),
+    pick!(
+        "billing.locked_order_type",
+        Billing,
+        Row,
+        "Which order type",
+        "Used when the order type is locked.",
+        ["order type", "parcel", "dine in"],
+        ORDER_TYPES,
+        order_type_to,
+        order_type_from,
+        billing.locked_order_type
+    ),
     number!("billing.idle_lock_minutes", Billing, Row, "Lock the counter after",
         "Minutes of nobody touching it. 0 never locks by itself.",
         ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
         billing.idle_lock_minutes),
-    flag!("billing.confirm_before_kitchen", Billing, Row, "Ask before printing a kitchen ticket",
-        "", ["confirm", "kot", "ask"], billing.confirm_before_kitchen),
-    flag!("billing.confirm_before_bill", Billing, Row, "Ask before printing a bill",
-        "", ["confirm", "bill", "ask"], billing.confirm_before_bill),
-    flag!("billing.kitchen_ticket_off", Billing, Row, "This shop has no kitchen ticket",
+    flag!(
+        "billing.confirm_before_kitchen",
+        Billing,
+        Row,
+        "Ask before printing a kitchen ticket",
+        "",
+        ["confirm", "kot", "ask"],
+        billing.confirm_before_kitchen
+    ),
+    flag!(
+        "billing.confirm_before_bill",
+        Billing,
+        Row,
+        "Ask before printing a bill",
+        "",
+        ["confirm", "bill", "ask"],
+        billing.confirm_before_bill
+    ),
+    flag!(
+        "billing.kitchen_ticket_off",
+        Billing,
+        Row,
+        "This shop has no kitchen ticket",
         "For a counter where the food is already made.",
-        ["kot", "disable", "off", "no kitchen"], billing.kitchen_ticket_off),
+        ["kot", "disable", "off", "no kitchen"],
+        billing.kitchen_ticket_off
+    ),
     number!("billing.service_charge_bp", Billing, Row, "Service charge",
         "In hundredths of a percent, so 500 is 5%. 0 means you do not charge it. \
          Added to dine-in bills only.",
         ["service", "charge", "percent", "tip"], 0..=2500 "hundredths of a percent",
         u32, billing.service_charge_bp),
-    pick!("billing.service_charge_tax_bp", Billing, Row, "GST on the service charge",
+    pick!(
+        "billing.service_charge_tax_bp",
+        Billing,
+        Row,
+        "GST on the service charge",
         "A service charge is usually taxed at 18% even on a bill of 5% food.",
-        ["service", "gst", "tax"], GST_RATES, rate_to, rate_from,
-        billing.service_charge_tax_bp),
-    cash!("billing.packing_charge", Billing, Row, "Packing charge",
+        ["service", "gst", "tax"],
+        GST_RATES,
+        rate_to,
+        rate_from,
+        billing.service_charge_tax_bp
+    ),
+    cash!(
+        "billing.packing_charge",
+        Billing,
+        Row,
+        "Packing charge",
         "Added to parcel and self-service bills. Zero means you do not charge it.",
-        ["packing", "parcel", "box", "charge"], 0..=100_000, billing.packing_charge),
-    pick!("billing.packing_charge_tax_bp", Billing, Row, "GST on the packing charge",
-        "", ["packing", "gst", "tax"], GST_RATES, rate_to, rate_from,
-        billing.packing_charge_tax_bp),
-    cash!("billing.delivery_charge", Billing, Row, "Delivery charge",
+        ["packing", "parcel", "box", "charge"],
+        0..=100_000,
+        billing.packing_charge
+    ),
+    pick!(
+        "billing.packing_charge_tax_bp",
+        Billing,
+        Row,
+        "GST on the packing charge",
+        "",
+        ["packing", "gst", "tax"],
+        GST_RATES,
+        rate_to,
+        rate_from,
+        billing.packing_charge_tax_bp
+    ),
+    cash!(
+        "billing.delivery_charge",
+        Billing,
+        Row,
+        "Delivery charge",
         "Added to delivery bills. Zero means you do not charge it.",
-        ["delivery", "charge", "rider"], 0..=100_000, billing.delivery_charge),
-    pick!("billing.delivery_charge_tax_bp", Billing, Row, "GST on the delivery charge",
-        "", ["delivery", "gst", "tax"], GST_RATES, rate_to, rate_from,
-        billing.delivery_charge_tax_bp),
-
+        ["delivery", "charge", "rider"],
+        0..=100_000,
+        billing.delivery_charge
+    ),
+    pick!(
+        "billing.delivery_charge_tax_bp",
+        Billing,
+        Row,
+        "GST on the delivery charge",
+        "",
+        ["delivery", "gst", "tax"],
+        GST_RATES,
+        rate_to,
+        rate_from,
+        billing.delivery_charge_tax_bp
+    ),
     // --- the day ------------------------------------------------------------
     number!("day.starts_at_minutes", Day, Row, "Your day starts at",
         "Minutes past midnight. 300 is 5 in the morning, which means a bill \
@@ -1018,35 +1944,79 @@ pub const CATALOG: &[Entry] = &[
     // P26, scope 4.8. The sibling of the drawer's threshold below, and worded
     // the same way on purpose: a shop that has learnt what one means has
     // learnt what the other means.
-    cash!("stock.count_reason_above", Stock, Row, "Ask why if a counted item is out by more than",
+    cash!(
+        "stock.count_reason_above",
+        Stock,
+        Row,
+        "Ask why if a counted item is out by more than",
         "When a stock count finds a material short or over by more than this in \
          value, it asks for a reason before it can be approved. Zero asks every \
          time.",
         ["count", "variance", "short", "reason", "stock"],
-        0..=1_000_000, stock.count_reason_above),
-
-    cash!("day.variance_reason_above", Day, Row, "Ask for a reason if the drawer is out by more than",
+        0..=1_000_000,
+        stock.count_reason_above
+    ),
+    cash!(
+        "day.variance_reason_above",
+        Day,
+        Row,
+        "Ask for a reason if the drawer is out by more than",
         "When the counted cash differs from the expected cash by more than \
          this, closing the day asks why. Zero asks every time.",
-        ["variance", "short", "over", "reason", "difference", "drawer"],
-        0..=1_000_000, day.variance_reason_above),
-    flag!("day.carry_float", Day, Row, "Leave a float in the drawer overnight",
+        [
+            "variance",
+            "short",
+            "over",
+            "reason",
+            "difference",
+            "drawer"
+        ],
+        0..=1_000_000,
+        day.variance_reason_above
+    ),
+    flag!(
+        "day.carry_float",
+        Day,
+        Row,
+        "Leave a float in the drawer overnight",
         "Tomorrow starts with the amount below already counted, instead of an \
          empty drawer.",
-        ["float", "opening", "carry", "tomorrow", "change"], day.carry_float),
-    cash!("day.float_amount", Day, Row, "How much to leave",
+        ["float", "opening", "carry", "tomorrow", "change"],
+        day.carry_float
+    ),
+    cash!(
+        "day.float_amount",
+        Day,
+        Row,
+        "How much to leave",
         "Only used when the float is carried forward.",
         ["float", "opening", "how much", "change", "tomorrow"],
-        0..=10_000_000, day.float_amount),
-
+        0..=10_000_000,
+        day.float_amount
+    ),
     // --- backup -------------------------------------------------------------
-    words!("backup.folder", Backup, Row, "Backup folder",
+    words!(
+        "backup.folder",
+        Backup,
+        Row,
+        "Backup folder",
         "Where backups are written. Blank uses the folder beside your database.",
-        ["backup", "folder", "where", "copy"], 260, Folder, backup.folder),
-    words!("backup.second_folder", Backup, Row, "Second backup folder",
+        ["backup", "folder", "where", "copy"],
+        260,
+        Folder,
+        backup.folder
+    ),
+    words!(
+        "backup.second_folder",
+        Backup,
+        Row,
+        "Second backup folder",
         "A pen drive or a network share. One copy on one disk is not a backup.",
-        ["backup", "second", "pen drive", "usb", "network"], 260, Folder,
-        backup.second_folder),
+        ["backup", "second", "pen drive", "usb", "network"],
+        260,
+        Folder,
+        backup.second_folder
+    ),
     number!("backup.every_hours", Backup, Row, "Back up every",
         "Hours. 0 means only when you press the button.",
         ["backup", "schedule", "automatic", "how often"], 0..=168 "hours", u32,
@@ -1061,30 +2031,51 @@ pub const CATALOG: &[Entry] = &[
     // the words a shopkeeper would use, because a switch whose meaning has to
     // be guessed is not consent. **The report is written on this computer
     // either way** (D95) — this is only about sending it.
-    flag!("backup.send_crash_reports", Backup, Row, "Tell us if the counter stops unexpectedly",
+    flag!(
+        "backup.send_crash_reports",
+        Backup,
+        Row,
+        "Tell us if the counter stops unexpectedly",
         "Sends us what went wrong — the version, what the counter was doing, and \
          nothing else. Never your bills, your customers or your licence key. \
          A record is kept on this computer whichever way you set this, so you \
          can always send it yourself with Copy diagnostics.",
-        ["crash", "report", "telemetry", "send", "error", "diagnostics", "privacy"],
-        backup.send_crash_reports),
-
+        [
+            "crash",
+            "report",
+            "telemetry",
+            "send",
+            "error",
+            "diagnostics",
+            "privacy"
+        ],
+        backup.send_crash_reports
+    ),
     // --- how it looks (scope 13.11, 13.12) ----------------------------------
     // The THEME and the TEXT SIZE are deliberately NOT here. They live in
     // `AppConfig`, on the machine: they are applied before the first paint and
     // they have to work when the database will not open. A shop's LANGUAGE is
     // the shop's — it is on the receipt — so it is a setting like any other.
-    pick_text!("appearance.language", Appearance, Row, "Language",
+    pick_text!(
+        "appearance.language",
+        Appearance,
+        Row,
+        "Language",
         "English is the only one installed today. Hindi and Kannada need a \
          second typeface and a text shaper, which is P23.",
-        ["language", "hindi", "kannada", "english", "bhasha"], LANGUAGES,
-        appearance.language),
-
-    flag!("receipt.bill_barcode", Receipt, Row, "Print the bill number as a barcode",
+        ["language", "hindi", "kannada", "english", "bhasha"],
+        LANGUAGES,
+        appearance.language
+    ),
+    flag!(
+        "receipt.bill_barcode",
+        Receipt,
+        Row,
+        "Print the bill number as a barcode",
         "Adds a barcode to the foot of every bill, so a scanner can bring that          bill back onto the screen. Leave it off if you have no scanner — it          is two more lines of paper on every bill.",
         ["barcode", "scan", "scanner", "recall", "bill"],
-        receipt.bill_barcode),
-
+        receipt.bill_barcode
+    ),
     // -----------------------------------------------------------------------
     // P29 — the things a counter is plugged into (scope 7.6–7.9).
     //
@@ -1113,13 +2104,19 @@ pub const CATALOG: &[Entry] = &[
          barcode in a shop is 8 characters.",
         ["scanner", "barcode", "length", "short"],
         1..=40 "characters", u32, devices.scan_min_length),
-
-    words!("devices.label_prefix", Devices, Row, "Scale labels start with",
+    words!(
+        "devices.label_prefix",
+        Devices,
+        Row,
+        "Scale labels start with",
         "The leading digits on the labels your weighing scale prints — often \
          21 or 22. Leave it empty unless your scale prints labels with the \
          weight inside the barcode.",
         ["scale", "label", "weight", "barcode", "prefix", "embedded"],
-        4, Free, devices.label_prefix),
+        4,
+        Free,
+        devices.label_prefix
+    ),
     number!("devices.label_item_from", Devices, Row, "The item code starts at digit",
         "Counting from zero. Your scale's manual, or the dealer, will say.",
         ["scale", "label", "item", "position"],
@@ -1136,56 +2133,98 @@ pub const CATALOG: &[Entry] = &[
         "How long the number inside the label is.",
         ["scale", "label", "weight", "price", "length"],
         1..=12 "digits", u32, devices.label_value_len),
-    pick_text!("devices.label_value_is", Devices, Row, "That number is a",
+    pick_text!(
+        "devices.label_value_is",
+        Devices,
+        Row,
+        "That number is a",
         "Some scales print the weight inside the barcode and some print the \
          price. **The shop's own price still bills**: a printed price is \
          compared against it, not trusted over it.",
         ["scale", "label", "weight", "price"],
-        LABEL_VALUES, devices.label_value_is),
+        LABEL_VALUES,
+        devices.label_value_is
+    ),
     number!("devices.label_value_decimals", Devices, Row, "With this many decimal places",
         "450 grams printed as 00450 with 3 decimal places is 0.450 kg. ₹12.50 \
          printed as 01250 with 2 is twelve rupees fifty.",
         ["scale", "label", "decimal", "weight", "price"],
         0..=4 "places", u32, devices.label_value_decimals),
-
-    words!("devices.scale_port", Devices, Row, "The scale is on",
+    words!(
+        "devices.scale_port",
+        Devices,
+        Row,
+        "The scale is on",
         "The COM port your weighing scale is plugged into — COM3, COM4. Leave \
          it empty if you have no scale, which is most shops.",
         ["scale", "weight", "com", "serial", "port"],
-        16, Free, devices.scale_port),
+        16,
+        Free,
+        devices.scale_port
+    ),
     number!("devices.scale_baud", Devices, Row, "The scale runs at this speed",
         "The scale's baud rate. 9600 is right for nearly every counter scale \
          sold in India.",
         ["scale", "baud", "speed", "serial"],
         300..=115200 "baud", u32, devices.scale_baud),
-    pick_text!("devices.scale_protocol", Devices, Row, "The scale talks like this",
+    pick_text!(
+        "devices.scale_protocol",
+        Devices,
+        Row,
+        "The scale talks like this",
         "Every brand differs. If neither shape works, choose \"Show me what it \
          is sending\" — the device screen then prints the raw bytes, which is \
          how an unknown scale gets set up without waiting for us.",
         ["scale", "protocol", "raw", "format"],
-        SCALE_PROTOCOLS, devices.scale_protocol),
-
-    flag!("devices.display_on", Devices, Row, "Show the customer their bill",
+        SCALE_PROTOCOLS,
+        devices.scale_protocol
+    ),
+    flag!(
+        "devices.display_on",
+        Devices,
+        Row,
+        "Show the customer their bill",
         "A second screen the customer can see, with the bill as it is typed \
          and the total at the end. It never takes the keyboard away from the \
          billing screen.",
         ["customer", "display", "second screen", "pole", "monitor"],
-        devices.display_on),
-    words!("devices.display_port", Devices, Row, "The pole display is on",
+        devices.display_on
+    ),
+    words!(
+        "devices.display_port",
+        Devices,
+        Row,
+        "The pole display is on",
         "A serial pole display's COM port. Leave it empty to use a second \
          monitor instead, which is what most shops have.",
         ["customer", "display", "pole", "com", "serial", "port"],
-        16, Free, devices.display_port),
-    words!("devices.display_idle", Devices, Row, "The display says this when idle",
+        16,
+        Free,
+        devices.display_port
+    ),
+    words!(
+        "devices.display_idle",
+        Devices,
+        Row,
+        "The display says this when idle",
         "What the customer sees between bills. Empty shows the shop's name.",
         ["customer", "display", "idle", "welcome"],
-        40, Free, devices.display_idle),
-
-    words!("devices.label_printer", Devices, Row, "Parcel labels print on",
+        40,
+        Free,
+        devices.display_idle
+    ),
+    words!(
+        "devices.label_printer",
+        Devices,
+        Row,
+        "Parcel labels print on",
         "The printer id parcel labels go to. Leave it empty if you do not \
          print labels — the button is then not offered at all.",
         ["label", "parcel", "sticker", "printer"],
-        40, Free, devices.label_printer),
+        40,
+        Free,
+        devices.label_printer
+    ),
 ];
 
 /// The entry for a key, or `None` if this build has never heard of it.

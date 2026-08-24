@@ -26,8 +26,8 @@
 use std::sync::Mutex;
 
 use mb_core::{
-    AnyOrder, Bill, BillInput, Cart, DiscountEntry, ItemSnapshot, Money, OrderType,
-    Settlement, TaxTreatment, Timestamp, compute_bill,
+    AnyOrder, Bill, BillInput, Cart, DiscountEntry, ItemSnapshot, Money, OrderType, Settlement,
+    Timestamp, compute_bill,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -39,7 +39,6 @@ use crate::words::{UiError, UiResult};
 // (`floor::WARN_KEY` / `floor::LATE_KEY`), read in Rust and passed in, because
 // a dosa counter turns a table in eight minutes and a fine-dining room in
 // ninety — one number is wrong for both.
-
 
 // ---------------------------------------------------------------------------
 // The cart, as the process holds it.
@@ -118,19 +117,19 @@ impl CartState {
     /// not be one:** D4 fixes the order of operations, and a bill that was
     /// patched rather than recomputed is a bill nobody can reason about.
     ///
-    /// **P17 put the shop's own answers in here.** The round-off mode, the
-    /// place of supply and the default service / packing / delivery charges
-    /// were all constants written at this line: every shop rounded to the
-    /// nearest rupee, every shop supplied within its own state, and scope 1.14
-    /// was an engine with no caller.
+    /// **P17 put the shop's own answers in here.** The round-off mode and the
+    /// default service / packing / delivery charges were constants written at
+    /// this line: every shop rounded to the nearest rupee, and scope 1.14 was
+    /// an engine with no caller.
     pub fn bill(&self, config: &crate::settings::ShopConfig) -> UiResult<Bill> {
         // Built here rather than stored, because a charge belongs to the ORDER
         // TYPE and that can change while the cart is open — switching a table
         // to a parcel must drop the service charge and add the packing one.
         let charges = config.billing.charges_for(self.order_type);
-        let mut input = BillInput::new(&self.cart)
+        // No place of supply: restaurant service is always intra-state (IGST
+        // Act s.12(4)), which is `PlaceOfSupply`'s default.
+        let mut input = BillInput::new(&self.cart, registration_of(config))
             .with_order_type(self.order_type)
-            .with_place_of_supply(config.store.place_of_supply())
             .with_rounding(config.billing.rounding)
             .with_charges(&charges);
         if let Some(discount) = self.bill_discount.clone() {
@@ -407,10 +406,7 @@ pub struct MenuItemView {
 // ---------------------------------------------------------------------------
 
 /// The whole cart region, from the cart and its freshly computed bill.
-pub fn cart_view(
-    state: &CartState,
-    config: &crate::settings::ShopConfig,
-) -> UiResult<CartView> {
+pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiResult<CartView> {
     let bill = state.bill(config)?;
     let lines = state
         .cart
@@ -423,7 +419,7 @@ pub fn cart_view(
             name: line.snapshot.name.clone(),
             note: line.note.clone(),
             qty: line.qty.to_string(),
-            rate_label: rate_label(billed.rate, billed.treatment),
+            rate_label: rate_label(billed.tax),
             unit_price: line.snapshot.unit_price.into(),
             gross: billed.gross.into(),
             discount: billed
@@ -490,10 +486,10 @@ fn bill_view(bill: &Bill) -> UiResult<BillView> {
         .map(|row| TaxRowView {
             rate_label: row.rate.label(),
             taxable: row.taxable.into(),
-            cgst: row.tax.cgst.into(),
-            sgst: row.tax.sgst.into(),
-            igst: row.tax.igst.into(),
-            is_interstate: row.tax.igst.paise() > 0,
+            cgst: row.gst.central.into(),
+            sgst: row.gst.state.into(),
+            igst: row.gst.integrated.into(),
+            is_interstate: row.gst.integrated.paise() > 0,
         })
         .collect();
 
@@ -509,7 +505,7 @@ fn bill_view(bill: &Bill) -> UiResult<BillView> {
             .map(|charge| ChargeView {
                 name: charge.name.clone(),
                 amount: charge.gross_including_tax.into(),
-                rate_label: rate_label(charge.rate, charge.treatment),
+                rate_label: rate_label(charge.tax),
             })
             .collect(),
         tax_rows,
@@ -521,14 +517,37 @@ fn bill_view(bill: &Bill) -> UiResult<BillView> {
     })
 }
 
-/// What a rate is called on screen. A **label**, never a number to compute
-/// with — R8, and the treatments do not have a percentage at all.
-fn rate_label(rate: mb_core::TaxRate, treatment: TaxTreatment) -> String {
-    match treatment {
-        TaxTreatment::NonGst => "Non-GST".to_owned(),
-        TaxTreatment::Exempt => "Exempt".to_owned(),
-        TaxTreatment::Inclusive => format!("{} incl.", rate.label()),
-        TaxTreatment::Exclusive => rate.label(),
+/// **Who this shop is, for the tax pipeline.** The single place the stored
+/// setting becomes [`mb_core::Registration`].
+pub fn registration_of(config: &crate::settings::ShopConfig) -> mb_core::Registration {
+    config.store.registration()
+}
+
+/// What a line's tax is called on screen. A **label**, never a number to
+/// compute with — R8.
+///
+/// It takes the whole [`mb_core::TaxSpec`] rather than a rate and a treatment,
+/// because P33 split those into two independent questions: what KIND of supply
+/// this is, and whether the price already contains the tax. The old
+/// four-armed match could not express "outside GST, at 20% state VAT" at all,
+/// which is exactly the hole that let a bar undercharge every drink.
+fn rate_label(tax: mb_core::TaxSpec) -> String {
+    match tax.kind {
+        // A liquor line with no rate reads as it always did. One with a rate
+        // says so — and only P33 made that state reachable.
+        mb_core::TaxKind::OutsideGst => {
+            if tax.rate.is_zero() {
+                "Non-GST".to_owned()
+            } else {
+                format!("VAT {}", tax.rate.label())
+            }
+        }
+        mb_core::TaxKind::Exempt => "Exempt".to_owned(),
+        mb_core::TaxKind::Untaxed => "No tax".to_owned(),
+        mb_core::TaxKind::Gst => match tax.basis {
+            mb_core::PriceBasis::Inclusive => format!("{} incl.", tax.rate.label()),
+            mb_core::PriceBasis::Exclusive => tax.rate.label(),
+        },
     }
 }
 
@@ -624,8 +643,8 @@ pub fn floor_view(
     } = room;
     // Split out once. A screen with no cart marks nothing, and every comparison
     // below is against `None`, which nothing matches.
-    let (loaded_order, loaded_table) = cart_is_on
-        .map_or((None, None), |cart| (cart.order, cart.table));
+    let (loaded_order, loaded_table) =
+        cart_is_on.map_or((None, None), |cart| (cart.order, cart.table));
     let mut out = Vec::with_capacity(tables.len() + open.len());
 
     for table in tables.iter().filter(|t| t.is_active) {
@@ -695,7 +714,16 @@ pub fn floor_view(
         let selected = loaded_order == Some(order.core().id.as_str());
         out.push(tile_for(
             order,
-            Seat { label, section: None, seats: 0, selected, now, warn_after, late_after, config },
+            Seat {
+                label,
+                section: None,
+                seats: 0,
+                selected,
+                now,
+                warn_after,
+                late_after,
+                config,
+            },
         ));
     }
 
@@ -720,10 +748,21 @@ struct Seat<'a> {
 }
 
 fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
-    let Seat { label, section, seats, selected, now, warn_after, late_after, config } = seat;
+    let Seat {
+        label,
+        section,
+        seats,
+        selected,
+        now,
+        warn_after,
+        late_after,
+        config,
+    } = seat;
     let core = order.core();
     let id = core.id.as_str().to_owned();
-    let minutes = (now.millis() - core.created_at.millis()).div_euclid(60_000).max(0);
+    let minutes = (now.millis() - core.created_at.millis())
+        .div_euclid(60_000)
+        .max(0);
 
     TableView {
         // **Being selected no longer costs the table its state.** This match
@@ -739,7 +778,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         selected,
         total: running_total(order, config),
         minutes: Some(crate::ipc::count(minutes)),
-                // The delta ledger (crown jewel 2) answers "is there anything the
+        // The delta ledger (crown jewel 2) answers "is there anything the
         // kitchen has not been told?". An error reading it is not a reason to
         // claim the kitchen is up to date, so it reads as "not told".
         kitchen_told: core
@@ -752,10 +791,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         kitchen_minutes: None,
         order_id: Some(id.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
-        id: core
-            .table
-            .as_ref()
-            .map_or(id, |t| t.as_str().to_owned()),
+        id: core.table.as_ref().map_or(id, |t| t.as_str().to_owned()),
         label,
         section,
         seats: crate::ipc::count(seats),
@@ -779,9 +815,8 @@ pub(crate) fn running_total(
     let core = order.core();
     let charges = config.billing.charges_for(core.order_type);
     compute_bill(
-        BillInput::new(&core.cart)
+        BillInput::new(&core.cart, registration_of(config))
             .with_order_type(core.order_type)
-            .with_place_of_supply(config.store.place_of_supply())
             .with_rounding(config.billing.rounding)
             .with_charges(&charges),
     )
@@ -795,7 +830,7 @@ pub fn menu_view(item: &mb_db::repo::menu::MenuItem) -> MenuItemView {
         id: item.id.as_str().to_owned(),
         name: item.name.clone(),
         price: item.unit_price.into(),
-        rate_label: rate_label(item.tax_rate, item.tax_treatment),
+        rate_label: rate_label(item.tax),
         category: item.category_id.as_ref().map(|c| c.as_str().to_owned()),
     }
 }
@@ -806,13 +841,16 @@ pub fn menu_view(item: &mb_db::repo::menu::MenuItem) -> MenuItemView {
 /// change when you change a price."* The snapshot is taken here, at the moment
 /// of adding, and never looked up again.
 pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
+    // **The whole tax question moves across in one piece** (P33). It used to be
+    // a rate here and a treatment on the next line, which is how a liquor
+    // line lost its state VAT rate on the way to the cart.
     let mut snapshot = ItemSnapshot::new(
         item.id.clone(),
         item.name.clone(),
         item.unit_price,
-        item.tax_rate,
+        item.tax.rate,
     )
-    .with_treatment(item.tax_treatment);
+    .with_tax(item.tax);
     if let Some(hsn) = item.hsn.clone() {
         snapshot = snapshot.with_hsn(hsn);
     }
@@ -833,7 +871,6 @@ pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
 
 /// The cart, held for the life of the process.
 pub type Cart_ = Mutex<CartState>;
-
 
 // ---------------------------------------------------------------------------
 // Turning a cart into an order (P10).
@@ -869,7 +906,11 @@ impl CartState {
     /// the only thing that builds an order that reaches the disk.
     pub fn to_core_for_printing(&self) -> mb_core::OrderCore {
         mb_core::OrderCore {
-            id: mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| "unsaved".to_owned())),
+            id: mb_core::OrderId::new(
+                self.order_id
+                    .clone()
+                    .unwrap_or_else(|| "unsaved".to_owned()),
+            ),
             business_day: mb_core::BusinessDay::from_days_since_epoch(0),
             created_at: Timestamp::from_millis(0),
             order_type: self.order_type,
@@ -896,7 +937,8 @@ impl CartState {
         by: mb_core::StaffId,
         till: &str,
     ) -> UiResult<mb_core::DraftOrder> {
-        let day = mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
+        let day =
+            mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
         let id = mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| {
             // **The terminal used to be the whole of the uniqueness**, on the
             // reasoning that D13 makes ids text because two terminals collide
@@ -927,7 +969,9 @@ impl CartState {
 /// The ledger travels with the order, so this is right after a merge, after a
 /// restart, and on a second terminal. A screen-held delta would be wrong on all
 /// three.
-pub fn pending_for_kitchen(state: &CartState) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
+pub fn pending_for_kitchen(
+    state: &CartState,
+) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
     state.cart_pending()
 }
 
@@ -948,9 +992,8 @@ mod tests {
     use super::*;
     use mb_core::{ItemId, Qty, TaxRate};
 
-    fn item(id: &str, name: &str, paise: i64, rate: TaxRate, treatment: TaxTreatment) -> ItemSnapshot {
-        ItemSnapshot::new(ItemId::new(id), name, Money::from_paise(paise), rate)
-            .with_treatment(treatment)
+    fn item(id: &str, name: &str, paise: i64, tax: mb_core::TaxSpec) -> ItemSnapshot {
+        ItemSnapshot::new(ItemId::new(id), name, Money::from_paise(paise), tax.rate).with_tax(tax)
     }
 
     fn one() -> Qty {
@@ -965,8 +1008,16 @@ mod tests {
     #[test]
     fn adding_the_same_item_twice_merges_into_one_line() {
         let mut state = CartState::default();
-        let dosa = item("itm_dosa", "Masala Dosa", 12_000, TaxRate::GST_5, TaxTreatment::Exclusive);
-        state.cart.add(dosa.clone(), one(), None, vec![]).expect("add");
+        let dosa = item(
+            "itm_dosa",
+            "Masala Dosa",
+            12_000,
+            mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+        );
+        state
+            .cart
+            .add(dosa.clone(), one(), None, vec![])
+            .expect("add");
         state.cart.add(dosa, one(), None, vec![]).expect("add");
 
         let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
@@ -979,13 +1030,27 @@ mod tests {
     #[test]
     fn a_different_note_is_a_different_line() {
         let mut state = CartState::default();
-        let dosa = item("itm_dosa", "Masala Dosa", 12_000, TaxRate::GST_5, TaxTreatment::Exclusive);
-        state.cart.add(dosa.clone(), one(), None, vec![]).expect("add");
+        let dosa = item(
+            "itm_dosa",
+            "Masala Dosa",
+            12_000,
+            mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+        );
+        state
+            .cart
+            .add(dosa.clone(), one(), None, vec![])
+            .expect("add");
         state
             .cart
             .add(dosa, one(), Some("no onion".to_owned()), vec![])
             .expect("add");
-        assert_eq!(cart_view(&state, &crate::settings::ShopConfig::default()).expect("view").lines.len(), 2);
+        assert_eq!(
+            cart_view(&state, &crate::settings::ShopConfig::default())
+                .expect("view")
+                .lines
+                .len(),
+            2
+        );
     }
 
     /// **T5 — the totals block never collapses** (audit B10 and B11).
@@ -999,7 +1064,12 @@ mod tests {
         state
             .cart
             .add(
-                item("itm_dosa", "Masala Dosa", 12_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                item(
+                    "itm_dosa",
+                    "Masala Dosa",
+                    12_000,
+                    mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+                ),
                 one(),
                 None,
                 vec![],
@@ -1008,7 +1078,12 @@ mod tests {
         state
             .cart
             .add(
-                item("itm_cola", "Cola", 4_000, TaxRate::GST_18, TaxTreatment::Exclusive),
+                item(
+                    "itm_cola",
+                    "Cola",
+                    4_000,
+                    mb_core::TaxSpec::gst(TaxRate::from_percent(18).expect("18%")),
+                ),
                 one(),
                 None,
                 vec![],
@@ -1017,7 +1092,12 @@ mod tests {
         state
             .cart
             .add(
-                item("itm_beer", "Beer", 22_000, TaxRate::ZERO, TaxTreatment::NonGst),
+                item(
+                    "itm_beer",
+                    "Beer",
+                    22_000,
+                    mb_core::TaxSpec::liquor(mb_core::TaxRate::ZERO),
+                ),
                 one(),
                 None,
                 vec![],
@@ -1025,7 +1105,11 @@ mod tests {
             .expect("add");
 
         let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
-        assert_eq!(view.bill.tax_rows.len(), 2, "two rates means two rows, always");
+        assert_eq!(
+            view.bill.tax_rows.len(),
+            2,
+            "two rates means two rows, always"
+        );
         assert!(view.bill.tax_rows.iter().any(|r| r.rate_label == "5%"));
         assert!(view.bill.tax_rows.iter().any(|r| r.rate_label == "18%"));
 
@@ -1046,20 +1130,33 @@ mod tests {
         state
             .cart
             .add(
-                item("itm_pbm", "Paneer Butter Masala", 31_500, TaxRate::GST_5, TaxTreatment::Exclusive),
+                item(
+                    "itm_pbm",
+                    "Paneer Butter Masala",
+                    31_500,
+                    mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+                ),
                 one(),
                 None,
                 vec![],
             )
             .expect("add");
 
-        let bill = state.bill(&crate::settings::ShopConfig::default()).expect("bill");
+        let bill = state
+            .bill(&crate::settings::ShopConfig::default())
+            .expect("bill");
         let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
 
         assert_eq!(view.bill.grand_total.paise, bill.grand_total.paise());
-        assert_eq!(view.bill.grand_total.text, bill.grand_total.to_plain_string());
+        assert_eq!(
+            view.bill.grand_total.text,
+            bill.grand_total.to_plain_string()
+        );
         assert_eq!(view.bill.subtotal.paise, bill.subtotal.paise());
-        assert_eq!(view.lines[0].amount.paise, bill.lines[0].gross_including_tax.paise());
+        assert_eq!(
+            view.lines[0].amount.paise,
+            bill.lines[0].gross_including_tax.paise()
+        );
     }
 
     /// **Balance is what is LEFT, not what the bill asks for.**
@@ -1078,7 +1175,12 @@ mod tests {
         state
             .cart
             .add(
-                item("itm_dosa", "Masala Dosa", 10_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                item(
+                    "itm_dosa",
+                    "Masala Dosa",
+                    10_000,
+                    mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+                ),
                 one(),
                 None,
                 vec![],
@@ -1086,9 +1188,18 @@ mod tests {
             .expect("add");
 
         // 100.00 @ 5% exclusive = 105.00.
-        let total = state.bill(&crate::settings::ShopConfig::default()).expect("bill").grand_total;
+        let total = state
+            .bill(&crate::settings::ShopConfig::default())
+            .expect("bill")
+            .grand_total;
         assert_eq!(total.paise(), 10_500);
-        assert_eq!(cart_view(&state, &crate::settings::ShopConfig::default()).expect("view").balance.paise, 10_500);
+        assert_eq!(
+            cart_view(&state, &crate::settings::ShopConfig::default())
+                .expect("view")
+                .balance
+                .paise,
+            10_500
+        );
 
         // Part of it: still owed, and the panel must say how much.
         state
@@ -1124,23 +1235,43 @@ mod tests {
         state
             .cart
             .add(
-                item("itm_sweet", "Kaju Katli", 90_000, TaxRate::GST_5, TaxTreatment::Exclusive),
+                item(
+                    "itm_sweet",
+                    "Kaju Katli",
+                    90_000,
+                    mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+                ),
                 Qty::parse("0.5").expect("half a kilo"),
                 None,
                 vec![],
             )
             .expect("add");
-        assert_eq!(cart_view(&state, &crate::settings::ShopConfig::default()).expect("view").lines[0].qty, "0.5");
+        assert_eq!(
+            cart_view(&state, &crate::settings::ShopConfig::default())
+                .expect("view")
+                .lines[0]
+                .qty,
+            "0.5"
+        );
     }
 
     /// A rate is a **label**, and the treatments do not have a percentage at
     /// all — which is why nothing on the screen tries to compute with one.
     #[test]
     fn a_rate_is_a_label_not_a_number() {
-        assert_eq!(rate_label(TaxRate::GST_5, TaxTreatment::Exclusive), "5%");
-        assert_eq!(rate_label(TaxRate::GST_18, TaxTreatment::Inclusive), "18% incl.");
-        assert_eq!(rate_label(TaxRate::ZERO, TaxTreatment::NonGst), "Non-GST");
-        assert_eq!(rate_label(TaxRate::ZERO, TaxTreatment::Exempt), "Exempt");
+        let pc = |n: u32| TaxRate::from_percent(n).expect("a real rate");
+        assert_eq!(rate_label(mb_core::TaxSpec::gst(pc(5))), "5%");
+        assert_eq!(
+            rate_label(mb_core::TaxSpec::gst_inclusive(pc(18))),
+            "18% incl."
+        );
+        assert_eq!(
+            rate_label(mb_core::TaxSpec::liquor(TaxRate::ZERO)),
+            "Non-GST"
+        );
+        assert_eq!(rate_label(mb_core::TaxSpec::exempt()), "Exempt");
+        // **The state P33 made reachable**: liquor that actually carries a rate.
+        assert_eq!(rate_label(mb_core::TaxSpec::liquor(pc(20))), "VAT 20%");
     }
 
     /// The order type survives a round trip through the label, because the

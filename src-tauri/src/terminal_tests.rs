@@ -53,8 +53,7 @@ fn seed_menu(db: &Db) {
                 category_id: None,
                 name: "Masala Dosa".to_owned(),
                 unit_price: Money::from_paise(12_000),
-                tax_rate: mb_core::TaxRate::GST_5,
-                tax_treatment: mb_core::TaxTreatment::Exclusive,
+                tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
                 tax_class_id: None,
                 hsn: None,
                 cost_price: None,
@@ -175,8 +174,11 @@ fn settle_where_it_stands(app: &App, order_id: &str, staff: &StaffId) {
                 else {
                     panic!("that order is not open");
                 };
-                let bill = mb_core::compute_bill(mb_core::BillInput::new(&open.core.cart))
-                    .map_err(|e: mb_core::BillError| mb_db::DbError::invariant(e.to_string()))?;
+                let bill = mb_core::compute_bill(mb_core::BillInput::new(
+                    &open.core.cart,
+                    mb_core::Registration::Regular,
+                ))
+                .map_err(|e: mb_core::BillError| mb_db::DbError::invariant(e.to_string()))?;
                 let mut settlement = mb_core::Settlement::default();
                 settlement
                     .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("cash"))

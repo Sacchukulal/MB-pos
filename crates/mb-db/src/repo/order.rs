@@ -29,9 +29,9 @@
 
 use mb_core::{
     AnyOrder, Bill, BillCharge, BillLine, CancelledOrder, Cart, CategoryId, Claimed, DiscountEntry,
-    DraftOrder, ItemId, ItemSnapshot, KitchenLedger, LineIdentity, Modifier, ModifierId, Money,
-    OpenOrder, OrderCore, OrderId, Payment, SettledOrder, Settlement, StaffId, TableId, TaxAmounts,
-    TaxOutcome, TaxSummary, TaxTreatment, VoidedOrder,
+    DraftOrder, GstAmounts, ItemId, ItemSnapshot, KitchenLedger, LineIdentity, Modifier, ModifierId,
+    Money, OpenOrder, OrderCore, OrderId, Payment, SettledOrder, Settlement, StaffId, TableId,
+    TaxOutcome, TaxSpec, TaxSummary, Vat, VoidedOrder,
 };
 use rusqlite::{OptionalExtension as _, Transaction};
 
@@ -368,12 +368,12 @@ impl<'a> OrderRepo<'a> {
 
             self.tx.execute(
                 "INSERT INTO order_lines (id, order_id, seq, item_id, name, unit_price,
-                                          tax_rate_bp, tax_treatment, hsn, category_id, qty, note,
-                                          course, prep_minutes,
+                                          tax_rate_bp, tax_kind, tax_basis, hsn, category_id, qty,
+                                          note, course, prep_minutes,
                                           discount_kind, discount_value, discount_reason,
                                           discount_by, was_discount_capped)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, 0)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?19, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                         ?16, ?17, ?18, 0)",
                 rusqlite::params![
                     line_id,
                     order_id,
@@ -387,8 +387,8 @@ impl<'a> OrderRepo<'a> {
                     Some(line.snapshot.item_id.as_str()).filter(|id| !id.is_empty()),
                     line.snapshot.name,
                     encode::money_to_sql(line.snapshot.unit_price),
-                    encode::tax_rate_to_sql(line.snapshot.tax_rate),
-                    encode::tax_treatment_to_sql(line.snapshot.tax_treatment),
+                    encode::tax_rate_to_sql(line.snapshot.tax.rate),
+                    encode::tax_kind_to_sql(line.snapshot.tax.kind),
                     line.snapshot.hsn,
                     line.snapshot.category_id.as_ref().map(CategoryId::as_str),
                     encode::qty_to_sql(line.qty),
@@ -400,6 +400,7 @@ impl<'a> OrderRepo<'a> {
                     value,
                     discount.and_then(|d| d.reason.clone()),
                     discount.and_then(|d| d.authorised_by.as_ref().map(|s| s.as_str().to_owned())),
+                    encode::price_basis_to_sql(line.snapshot.tax.basis),
                 ],
             )?;
 
@@ -451,15 +452,22 @@ impl<'a> OrderRepo<'a> {
         Ok(())
     }
 
+    /// Shred a computed bill into its four tables.
+    ///
+    /// **The state VAT channel is stored, not dropped** (P33 Phase 2). So are
+    /// the registration and the state-tax name, frozen with the bill for the
+    /// same reason the place of supply already is: leaving the composition
+    /// scheme must not change what last year's bills reprint as.
     fn save_bill(&self, order_id: &str, bill: &Bill, core: &OrderCore) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO bills (order_id, subtotal, total_line_discount, total_bill_discount,
                                 total_discount, total_charges, was_bill_discount_capped,
                                 total_taxable, total_cgst, total_sgst, total_igst,
                                 non_gst_value, exempt_value, round_off, grand_total,
-                                place_of_supply, rounding_mode, computed_at)
+                                place_of_supply, rounding_mode, computed_at,
+                                total_vat, untaxed_value, registration, state_tax)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18)",
+                     ?18, ?19, ?20, ?21, ?22)",
             rusqlite::params![
                 order_id,
                 encode::money_to_sql(bill.subtotal),
@@ -469,9 +477,9 @@ impl<'a> OrderRepo<'a> {
                 encode::money_to_sql(bill.total_charges),
                 encode::bool_to_sql(bill.bill_discount_capped),
                 encode::money_to_sql(bill.total_taxable),
-                encode::money_to_sql(bill.total_tax.cgst),
-                encode::money_to_sql(bill.total_tax.sgst),
-                encode::money_to_sql(bill.total_tax.igst),
+                encode::money_to_sql(bill.total_gst.central),
+                encode::money_to_sql(bill.total_gst.state),
+                encode::money_to_sql(bill.total_gst.integrated),
                 encode::money_to_sql(bill.non_gst_value),
                 encode::money_to_sql(bill.exempt_value),
                 encode::money_to_sql(bill.round_off),
@@ -479,15 +487,19 @@ impl<'a> OrderRepo<'a> {
                 encode::place_of_supply_to_sql(bill.place_of_supply),
                 encode::rounding_mode_to_sql(bill.rounding),
                 encode::timestamp_to_sql(core.created_at),
+                encode::money_to_sql(bill.total_vat.into_money()),
+                encode::money_to_sql(bill.untaxed_value),
+                encode::registration_to_sql(bill.registration),
+                encode::state_tax_to_sql(bill.state_tax),
             ],
         )?;
 
         for (seq, line) in bill.lines.iter().enumerate() {
             self.tx.execute(
                 "INSERT INTO bill_lines (order_line_id, order_id, gross, line_discount,
-                                         bill_discount_share, net, taxable, cgst, sgst, igst,
-                                         gross_including_tax, rate_bp, treatment)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                         bill_discount_share, net, taxable, cgst, sgst, igst, vat,
+                                         gross_including_tax, rate_bp, tax_kind, tax_basis)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?14, ?11, ?12, ?13, ?15)",
                 rusqlite::params![
                     line_id(order_id, seq),
                     order_id,
@@ -496,12 +508,14 @@ impl<'a> OrderRepo<'a> {
                     encode::money_to_sql(line.bill_discount_share),
                     encode::money_to_sql(line.net),
                     encode::money_to_sql(line.taxable),
-                    encode::money_to_sql(line.tax.cgst),
-                    encode::money_to_sql(line.tax.sgst),
-                    encode::money_to_sql(line.tax.igst),
+                    encode::money_to_sql(line.gst.central),
+                    encode::money_to_sql(line.gst.state),
+                    encode::money_to_sql(line.gst.integrated),
                     encode::money_to_sql(line.gross_including_tax),
-                    encode::tax_rate_to_sql(line.rate),
-                    encode::tax_treatment_to_sql(line.treatment),
+                    encode::tax_rate_to_sql(line.tax.rate),
+                    encode::tax_kind_to_sql(line.tax.kind),
+                    encode::money_to_sql(line.vat.into_money()),
+                    encode::price_basis_to_sql(line.tax.basis),
                 ],
             )?;
         }
@@ -511,8 +525,8 @@ impl<'a> OrderRepo<'a> {
             self.tx.execute(
                 "INSERT INTO bill_charges (id, order_id, seq, kind, name, basis, basis_value,
                                            amount, taxable, cgst, sgst, igst, gross_including_tax,
-                                           rate_bp, treatment)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                                           rate_bp, tax_kind, tax_basis)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 rusqlite::params![
                     format!("{order_id}_chg_{seq}"),
                     order_id,
@@ -523,12 +537,13 @@ impl<'a> OrderRepo<'a> {
                     basis_value,
                     encode::money_to_sql(charge.amount),
                     encode::money_to_sql(charge.taxable),
-                    encode::money_to_sql(charge.tax.cgst),
-                    encode::money_to_sql(charge.tax.sgst),
-                    encode::money_to_sql(charge.tax.igst),
+                    encode::money_to_sql(charge.gst.central),
+                    encode::money_to_sql(charge.gst.state),
+                    encode::money_to_sql(charge.gst.integrated),
                     encode::money_to_sql(charge.gross_including_tax),
-                    encode::tax_rate_to_sql(charge.rate),
-                    encode::tax_treatment_to_sql(charge.treatment),
+                    encode::tax_rate_to_sql(charge.tax.rate),
+                    encode::tax_kind_to_sql(charge.tax.kind),
+                    encode::price_basis_to_sql(charge.tax.basis),
                 ],
             )?;
         }
@@ -541,9 +556,9 @@ impl<'a> OrderRepo<'a> {
                     order_id,
                     encode::tax_rate_to_sql(row.rate),
                     encode::money_to_sql(row.taxable),
-                    encode::money_to_sql(row.tax.cgst),
-                    encode::money_to_sql(row.tax.sgst),
-                    encode::money_to_sql(row.tax.igst),
+                    encode::money_to_sql(row.gst.central),
+                    encode::money_to_sql(row.gst.state),
+                    encode::money_to_sql(row.gst.integrated),
                 ],
             )?;
         }
@@ -670,7 +685,12 @@ impl<'a> OrderRepo<'a> {
                 encode::money_from_sql(line.unit_price),
                 encode::tax_rate_from_sql(line.tax_rate_bp, "order_lines.tax_rate_bp")?,
             )
-            .with_treatment(encode::tax_treatment_from_sql(&line.tax_treatment)?);
+            .with_tax(encode::tax_spec_from_sql_parts(
+                line.tax_rate_bp,
+                &line.tax_kind,
+                &line.tax_basis,
+                "order_lines.tax_rate_bp",
+            )?);
             if let Some(hsn) = &line.hsn {
                 snapshot = snapshot.with_hsn(hsn.clone());
             }
@@ -724,9 +744,9 @@ impl<'a> OrderRepo<'a> {
 
     fn read_line_rows(&self, order_id: &str) -> Result<Vec<LineRow>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT id, seq, item_id, name, unit_price, tax_rate_bp, tax_treatment, hsn,
+            "SELECT id, seq, item_id, name, unit_price, tax_rate_bp, tax_kind, hsn,
                     category_id, qty, note, course, prep_minutes,
-                    discount_kind, discount_value, discount_reason, discount_by
+                    discount_kind, discount_value, discount_reason, discount_by, tax_basis
                FROM order_lines WHERE order_id = ?1 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
@@ -737,7 +757,8 @@ impl<'a> OrderRepo<'a> {
                 name: row.get(3)?,
                 unit_price: row.get(4)?,
                 tax_rate_bp: row.get(5)?,
-                tax_treatment: row.get(6)?,
+                tax_kind: row.get(6)?,
+                tax_basis: row.get(17)?,
                 hsn: row.get(7)?,
                 category_id: row.get(8)?,
                 qty: row.get(9)?,
@@ -860,7 +881,8 @@ impl<'a> OrderRepo<'a> {
             "SELECT subtotal, total_line_discount, total_bill_discount, total_discount,
                     total_charges, was_bill_discount_capped, total_taxable, total_cgst,
                     total_sgst, total_igst, non_gst_value, exempt_value, round_off, grand_total,
-                    place_of_supply, rounding_mode
+                    place_of_supply, rounding_mode,
+                    total_vat, untaxed_value, registration, state_tax
                FROM bills WHERE order_id = ?1",
         )?;
         let mut rows = stmt.query([order_id])?;
@@ -883,6 +905,7 @@ impl<'a> OrderRepo<'a> {
                 order_id,
                 encode::money_from_sql(row.get(10)?),
                 encode::money_from_sql(row.get(11)?),
+                encode::money_from_sql(row.get(17)?),
             )?,
             subtotal: encode::money_from_sql(row.get(0)?),
             total_line_discount: encode::money_from_sql(row.get(1)?),
@@ -894,13 +917,15 @@ impl<'a> OrderRepo<'a> {
                 "bills.was_bill_discount_capped",
             )?,
             total_taxable: encode::money_from_sql(row.get(6)?),
-            total_tax: TaxAmounts {
-                cgst: encode::money_from_sql(row.get(7)?),
-                sgst: encode::money_from_sql(row.get(8)?),
-                igst: encode::money_from_sql(row.get(9)?),
+            total_gst: GstAmounts {
+                central: encode::money_from_sql(row.get(7)?),
+                state: encode::money_from_sql(row.get(8)?),
+                integrated: encode::money_from_sql(row.get(9)?),
             },
+            total_vat: Vat::new(encode::money_from_sql(row.get(16)?)),
             non_gst_value: encode::money_from_sql(row.get(10)?),
             exempt_value: encode::money_from_sql(row.get(11)?),
+            untaxed_value: encode::money_from_sql(row.get(17)?),
             round_off: encode::money_from_sql(row.get(12)?),
             grand_total: encode::money_from_sql(row.get(13)?),
             order_type: encode::order_type_from_sql(&order_type)?,
@@ -910,8 +935,13 @@ impl<'a> OrderRepo<'a> {
             // tax-inclusive is already on the lines, so the split a printed
             // bill needs is a property of what was read back rather than two
             // more columns and a migration.
-            tax_included: TaxAmounts::default(),
-            tax_added: TaxAmounts::default(),
+            gst_included: GstAmounts::default(),
+            gst_added: GstAmounts::default(),
+            vat_included: Vat::ZERO,
+            vat_added: Vat::ZERO,
+            // Frozen with the bill: what the shop was when it issued this one.
+            registration: encode::registration_from_sql(&row.get::<_, String>(18)?)?,
+            state_tax: encode::state_tax_from_sql(&row.get::<_, String>(19)?)?,
         };
         let bill = bill
             .with_tax_split()
@@ -926,7 +956,8 @@ impl<'a> OrderRepo<'a> {
         let cart = self.read_cart(order_id)?;
         let mut stmt = self.tx.prepare_cached(
             "SELECT bl.gross, bl.line_discount, bl.bill_discount_share, bl.net, bl.taxable,
-                    bl.cgst, bl.sgst, bl.igst, bl.gross_including_tax, bl.rate_bp, bl.treatment
+                    bl.cgst, bl.sgst, bl.igst, bl.gross_including_tax, bl.rate_bp, bl.tax_kind,
+                    bl.vat, bl.tax_basis
                FROM bill_lines bl
                JOIN order_lines ol ON ol.id = bl.order_line_id
               WHERE bl.order_id = ?1
@@ -945,6 +976,8 @@ impl<'a> OrderRepo<'a> {
                 row.get::<_, i64>(8)?,
                 row.get::<_, i64>(9)?,
                 row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
             ))
         })?;
 
@@ -966,14 +999,19 @@ impl<'a> OrderRepo<'a> {
                 bill_discount_share: encode::money_from_sql(row.2),
                 net: encode::money_from_sql(row.3),
                 taxable: encode::money_from_sql(row.4),
-                tax: TaxAmounts {
-                    cgst: encode::money_from_sql(row.5),
-                    sgst: encode::money_from_sql(row.6),
-                    igst: encode::money_from_sql(row.7),
+                gst: GstAmounts {
+                    central: encode::money_from_sql(row.5),
+                    state: encode::money_from_sql(row.6),
+                    integrated: encode::money_from_sql(row.7),
                 },
+                vat: Vat::new(encode::money_from_sql(row.11)),
                 gross_including_tax: encode::money_from_sql(row.8),
-                rate: encode::tax_rate_from_sql(row.9, "bill_lines.rate_bp")?,
-                treatment: encode::tax_treatment_from_sql(&row.10)?,
+                tax: encode::tax_spec_from_sql_parts(
+                    row.9,
+                    &row.10,
+                    &row.12,
+                    "bill_lines.rate_bp",
+                )?,
             });
         }
         Ok(out)
@@ -982,7 +1020,7 @@ impl<'a> OrderRepo<'a> {
     fn read_bill_charges(&self, order_id: &str) -> Result<Vec<BillCharge>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT kind, name, basis, basis_value, amount, taxable, cgst, sgst, igst,
-                    gross_including_tax, rate_bp, treatment
+                    gross_including_tax, rate_bp, tax_kind, tax_basis
                FROM bill_charges WHERE order_id = ?1 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
@@ -999,6 +1037,7 @@ impl<'a> OrderRepo<'a> {
                 row.get::<_, i64>(9)?,
                 row.get::<_, i64>(10)?,
                 row.get::<_, String>(11)?,
+                row.get::<_, String>(12)?,
             ))
         })?;
 
@@ -1011,14 +1050,18 @@ impl<'a> OrderRepo<'a> {
                 basis: encode::charge_basis_from_sql(&row.2, row.3)?,
                 amount: encode::money_from_sql(row.4),
                 taxable: encode::money_from_sql(row.5),
-                tax: TaxAmounts {
-                    cgst: encode::money_from_sql(row.6),
-                    sgst: encode::money_from_sql(row.7),
-                    igst: encode::money_from_sql(row.8),
+                gst: GstAmounts {
+                    central: encode::money_from_sql(row.6),
+                    state: encode::money_from_sql(row.7),
+                    integrated: encode::money_from_sql(row.8),
                 },
                 gross_including_tax: encode::money_from_sql(row.9),
-                rate: encode::tax_rate_from_sql(row.10, "bill_charges.rate_bp")?,
-                treatment: encode::tax_treatment_from_sql(&row.11)?,
+                tax: encode::tax_spec_from_sql_parts(
+                    row.10,
+                    &row.11,
+                    &row.12,
+                    "bill_charges.rate_bp",
+                )?,
             });
         }
         Ok(out)
@@ -1026,17 +1069,16 @@ impl<'a> OrderRepo<'a> {
 
     /// Replays [`TaxSummary`].
     ///
-    /// `TaxSummary::add` routes `NonGst` and `Exempt` into their own public
-    /// totals and everything else into a rate row, so the rate rows are
-    /// replayed as `Exclusive` outcomes — the treatment only decides *which
-    /// bucket*, and these are already in the taxed bucket — and the two totals
-    /// are set directly from the bill header. Rows come back in ascending rate
-    /// order, which is the order `add` would have built them in.
+    /// `bill_tax_rows` holds the GST book. The VAT book is **recovered from the
+    /// lines** — each liquor line stores its own rate and `vat`, so a second
+    /// table for the same figures would be a second answer — and the three
+    /// value totals are set from the bill header.
     fn read_summary(
         &self,
         order_id: &str,
         non_gst: Money,
         exempt: Money,
+        untaxed: Money,
     ) -> Result<TaxSummary, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT rate_bp, taxable, cgst, sgst, igst FROM bill_tax_rows
@@ -1056,28 +1098,68 @@ impl<'a> OrderRepo<'a> {
         for row in rows {
             let (rate_bp, taxable, cgst, sgst, igst) = row?;
             let taxable = encode::money_from_sql(taxable);
-            let tax = TaxAmounts {
-                cgst: encode::money_from_sql(cgst),
-                sgst: encode::money_from_sql(sgst),
-                igst: encode::money_from_sql(igst),
+            let gst = GstAmounts {
+                central: encode::money_from_sql(cgst),
+                state: encode::money_from_sql(sgst),
+                integrated: encode::money_from_sql(igst),
             };
             let gross = taxable
-                .add(tax.total().map_err(|e| {
+                .add(gst.total().map_err(|e| {
                     DbError::invariant(format!("order {order_id} tax row: {e}"))
                 })?)
                 .map_err(|e| DbError::invariant(format!("order {order_id} tax row: {e}")))?;
             summary
                 .add(TaxOutcome {
                     taxable,
-                    tax,
+                    gst,
+                    vat: Vat::ZERO,
                     gross,
-                    rate: encode::tax_rate_from_sql(rate_bp, "bill_tax_rows.rate_bp")?,
-                    treatment: TaxTreatment::Exclusive,
+                    // These rows are the GST summary, so the kind is GST by
+                    // construction — liquor never reaches this table.
+                    spec: TaxSpec::gst(encode::tax_rate_from_sql(
+                        rate_bp,
+                        "bill_tax_rows.rate_bp",
+                    )?),
                 })
                 .map_err(|e| DbError::invariant(format!("order {order_id} tax summary: {e}")))?;
         }
+
+        // The VAT book, rebuilt from the liquor lines.
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT rate_bp, taxable, vat FROM bill_lines
+              WHERE order_id = ?1 AND tax_kind = 'outside_gst' ORDER BY rate_bp",
+        )?;
+        let rows = stmt.query_map([order_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (rate_bp, taxable, vat) = row?;
+            let taxable = encode::money_from_sql(taxable);
+            let vat = Vat::new(encode::money_from_sql(vat));
+            let gross = taxable
+                .add(vat.into_money())
+                .map_err(|e| DbError::invariant(format!("order {order_id} vat row: {e}")))?;
+            summary
+                .add(TaxOutcome {
+                    taxable,
+                    gst: GstAmounts::default(),
+                    vat,
+                    gross,
+                    spec: TaxSpec::liquor(encode::tax_rate_from_sql(
+                        rate_bp,
+                        "bill_lines.rate_bp",
+                    )?),
+                })
+                .map_err(|e| DbError::invariant(format!("order {order_id} vat summary: {e}")))?;
+        }
+
         summary.non_gst_value = non_gst;
         summary.exempt_value = exempt;
+        summary.untaxed_value = untaxed;
         Ok(summary)
     }
 }
@@ -1150,7 +1232,8 @@ struct LineRow {
     name: String,
     unit_price: i64,
     tax_rate_bp: i64,
-    tax_treatment: String,
+    tax_kind: String,
+    tax_basis: String,
     hsn: Option<String>,
     category_id: Option<String>,
     qty: i64,

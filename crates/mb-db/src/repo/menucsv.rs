@@ -27,7 +27,7 @@
 //! G7's *"an item name containing a comma will break the columns of that row"*.
 //! A second one here would be a second set of those four bugs.
 
-use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxRate, TaxTreatment, Timestamp};
+use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxSpec, Timestamp};
 use rusqlite::Transaction;
 
 use crate::error::DbError;
@@ -260,11 +260,13 @@ impl<'a> MenuCsvRepo<'a> {
                 None => None,
             };
 
-            let (rate, treatment) = match class {
-                Some(class) => (class.rate, class.treatment),
-                None => found.map_or((TaxRate::ZERO, TaxTreatment::Exclusive), |i| {
-                    (i.tax_rate, i.tax_treatment)
-                }),
+            // The class named in the CSV wins; failing that the item keeps the
+            // tax it already had; failing that it is plain GST at nil, which is
+            // what `TaxSpec::default()` is and the same answer the old
+            // `(TaxRate::ZERO, Exclusive)` pair gave.
+            let tax = match class {
+                Some(class) => class.tax,
+                None => found.map_or_else(TaxSpec::default, |i| i.tax),
             };
 
             // A category by name, and an unknown one is refused rather than
@@ -303,8 +305,7 @@ impl<'a> MenuCsvRepo<'a> {
                 name,
                 unit_price: price,
                 tax_class_id: class.map(|c| c.id.clone()),
-                tax_rate: rate,
-                tax_treatment: treatment,
+                tax,
                 hsn: cell(index_of("hsn")).or_else(|| found.and_then(|i| i.hsn.clone())),
                 cost_price: cost,
                 short_code: cell(index_of("short_code"))

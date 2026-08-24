@@ -107,7 +107,7 @@ fn rank(name: &str, needle: &str, mode: MatchMode) -> Option<Rank> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mb_core::{ItemId, Money, TaxRate, TaxTreatment};
+    use mb_core::{ItemId, Money, TaxRate};
     use mb_db::repo::menu::MenuItem;
 
     fn item(name: &str) -> MenuItem {
@@ -118,8 +118,7 @@ mod tests {
             category_id: None,
             name: name.to_owned(),
             unit_price: Money::from_paise(12_000),
-            tax_rate: TaxRate::GST_5,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
             hsn: None,
             cost_price: None,
             short_code: None,

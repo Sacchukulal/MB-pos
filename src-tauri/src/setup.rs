@@ -309,8 +309,9 @@ mod tests {
                     category_id: None,
                     name: "Masala Dosa".to_owned(),
                     unit_price: mb_core::Money::from_paise(8_000),
-                    tax_rate: mb_core::TaxRate::GST_5,
-                    tax_treatment: mb_core::TaxTreatment::Inclusive,
+                    tax: mb_core::TaxSpec::gst_inclusive(
+                        mb_core::TaxRate::from_percent(5).expect("5%"),
+                    ),
                     tax_class_id: None,
                     hsn: None,
                     cost_price: None,

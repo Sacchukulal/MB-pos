@@ -66,6 +66,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0003_kot_numbers",
         sql: include_str!("migrations/0003_kot_numbers.sql"),
     },
+    // P33 — the tax rework. `treatment` becomes `kind` + `basis`, liquor gets a
+    // VAT column, and the shop gets a three-way registration. Tables are
+    // rebuilt because SQLite cannot alter a CHECK.
+    Migration {
+        version: 4,
+        name: "0004_tax_rework",
+        sql: include_str!("migrations/0004_tax_rework.sql"),
+    },
 ];
 
 /// The highest version this build understands. A file above it is refused —
@@ -173,7 +181,7 @@ pub fn apply_all(conn: &mut Connection) -> Result<Applied, DbError> {
             applied.already.push(migration.version);
             continue;
         }
-        run_one(conn, migration)?;
+        run_one_with_fks_off(conn, migration)?;
         applied.ran.push(migration.version);
     }
     Ok(applied)
@@ -201,6 +209,34 @@ fn read_ledger(conn: &Connection) -> Result<Vec<(u32, String, String)>, DbError>
         out.push((version, name, sum));
     }
     Ok(out)
+}
+
+/// Run one migration with foreign keys suspended, then check them.
+///
+/// Rebuilding a table means dropping and renaming it, which foreign keys will
+/// refuse or cascade. `PRAGMA foreign_keys` is a no-op inside a transaction, so
+/// it has to be switched here, outside the one `run_one` opens.
+///
+/// `foreign_key_check` afterwards is the safety net: a rebuild that left an
+/// orphan fails the migration instead of shipping a broken database.
+fn run_one_with_fks_off(conn: &mut Connection, migration: &Migration) -> Result<(), DbError> {
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let outcome = run_one(conn, migration);
+    let checked = outcome.and_then(|()| {
+        let broken: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
+            .unwrap_or(0);
+        if broken == 0 {
+            Ok(())
+        } else {
+            Err(DbError::invariant(format!(
+                "migration {} left {broken} broken foreign key row(s)",
+                migration.name
+            )))
+        }
+    });
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    checked
 }
 
 fn run_one(conn: &mut Connection, migration: &Migration) -> Result<(), DbError> {

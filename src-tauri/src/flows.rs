@@ -937,9 +937,8 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
     let config = app.shop_config();
     let charges = config.billing.charges_for(open.core.order_type);
     let bill = mb_core::compute_bill(
-        mb_core::BillInput::new(&open.core.cart)
+        mb_core::BillInput::new(&open.core.cart, crate::billing::registration_of(&config))
             .with_order_type(open.core.order_type)
-            .with_place_of_supply(config.store.place_of_supply())
             .with_rounding(config.billing.rounding)
             .with_charges(&charges),
     )
@@ -1400,9 +1399,8 @@ fn bill_of(
     let _ = app;
     let core = order.core();
     let charges = config.billing.charges_for(core.order_type);
-    let input = mb_core::BillInput::new(&core.cart)
+    let input = mb_core::BillInput::new(&core.cart, crate::billing::registration_of(config))
         .with_order_type(core.order_type)
-        .with_place_of_supply(config.store.place_of_supply())
         .with_rounding(config.billing.rounding)
         .with_charges(&charges);
     mb_core::compute_bill(input).map_err(|e| {

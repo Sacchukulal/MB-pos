@@ -115,7 +115,6 @@ pub const COUNTED: &[&str] = &[
     "supplier_payments",
     "suppliers",
     "sync_outbox",
-    "tax_class_rates",
     "tax_classes",
     "terminals",
     "waitlist",

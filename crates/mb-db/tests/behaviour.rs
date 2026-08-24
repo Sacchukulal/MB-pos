@@ -23,16 +23,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::Scratch;
 use mb_core::{
+    Registration,
     Bill, BillInput, Cart, Charge, ChargeKind, CustomerId, Discount, DiscountEntry, ItemId,
     ItemSnapshot, LineIdentity, ModifierId, Money, OrderType, Payment, PaymentMode, PlaceOfSupply,
-    Qty, RoundingMode, Settlement, TaxRate, TaxTreatment, compute_bill,
+    Qty, RoundingMode, Settlement, TaxRate, TaxSpec, compute_bill,
 };
 use mb_db::numbering::{self, CounterKind};
 use mb_db::encode;
 use rusqlite::Transaction;
 
 /// `gross, line_discount, bill_discount_share, net, taxable, cgst, sgst, igst,`
-/// `gross_including_tax, rate_bp, treatment` — D4's pipeline, in its own order.
+/// `gross_including_tax, rate_bp, tax_kind` — D4's pipeline, in its own order.
 type BillLineRow = (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, String);
 
 /// `mode, customer_id, mode_label, amount, tip, settles_credit` — the tag, both
@@ -422,7 +423,7 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
         let mut stmt = conn.prepare(
             "SELECT bl.gross, bl.line_discount, bl.bill_discount_share, bl.net,
                     bl.taxable, bl.cgst, bl.sgst, bl.igst, bl.gross_including_tax,
-                    bl.rate_bp, bl.treatment
+                    bl.rate_bp, bl.tax_kind
                FROM bill_lines bl
                JOIN order_lines ol ON ol.id = bl.order_line_id
               WHERE bl.order_id = 'ord_1'
@@ -443,18 +444,15 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
             assert_eq!(encode::money_from_sql(row.2), line.bill_discount_share);
             assert_eq!(encode::money_from_sql(row.3), line.net);
             assert_eq!(encode::money_from_sql(row.4), line.taxable);
-            assert_eq!(encode::money_from_sql(row.5), line.tax.cgst);
-            assert_eq!(encode::money_from_sql(row.6), line.tax.sgst);
-            assert_eq!(encode::money_from_sql(row.7), line.tax.igst);
+            assert_eq!(encode::money_from_sql(row.5), line.gst.central);
+            assert_eq!(encode::money_from_sql(row.6), line.gst.state);
+            assert_eq!(encode::money_from_sql(row.7), line.gst.integrated);
             assert_eq!(encode::money_from_sql(row.8), line.gross_including_tax);
             assert_eq!(
                 encode::tax_rate_from_sql(row.9, "bill_lines.rate_bp").expect("in range"),
-                line.rate
+                line.tax.rate
             );
-            assert_eq!(
-                encode::tax_treatment_from_sql(&row.10).expect("known"),
-                line.treatment
-            );
+            assert_eq!(encode::tax_kind_from_sql(&row.10).expect("known"), line.tax.kind);
         }
 
         // Both charge bases.
@@ -774,6 +772,131 @@ fn every_table_is_counted_or_named_as_not() {
     .expect("read the schema");
 }
 
+/// **P33 Phase 2: a bar's bill survives the disk.**
+///
+/// A beer at 20% state VAT, priced tax-in, settled through the real save path
+/// and read back. Before migration 0004 the rupees charged as VAT had no column
+/// to go in and came back as `Vat::ZERO`, and an inclusive liquor line read back
+/// as exclusive. Both are asserted here, on the line, on the bill total and in
+/// the VAT summary, because a bar bill that reprints wrong is an excise problem.
+#[test]
+fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
+    let scratch = Scratch::new("vat_round_trip");
+    let db = scratch.open();
+    let day = mb_core::BusinessDay::from_ymd(2026, 8, 3);
+    let at = mb_core::Timestamp::from_millis(1_770_000_000_000);
+    let vat_rate = TaxRate::from_percent(20).expect("20%");
+
+    db.transaction(|tx| {
+        tx.execute_batch(common::STAFF_SQL)?;
+        tx.execute_batch(common::FLOOR_SQL)?;
+        tx.execute_batch(common::MENU_SQL).map_err(Into::into)
+    })
+    .expect("seed the shop");
+
+    let mut cart = Cart::new();
+    cart.add(
+        ItemSnapshot::new(
+            ItemId::new("itm_beer"),
+            "Beer",
+            Money::from_paise(24_000),
+            vat_rate,
+        )
+        .with_tax(TaxSpec::liquor(vat_rate)),
+        Qty::from_whole(2).expect("qty"),
+        None,
+        vec![],
+    )
+    .expect("add");
+    // A dosa beside it, so the two books are kept apart rather than merged.
+    cart.add(
+        ItemSnapshot::new(
+            ItemId::new("itm_dosa"),
+            "Masala Dosa",
+            Money::from_paise(12_000),
+            TaxRate::from_percent(5).expect("5%"),
+        ),
+        Qty::from_whole(1).expect("qty"),
+        None,
+        vec![],
+    )
+    .expect("add");
+
+    let bill = compute_bill(
+        BillInput::new(&cart, Registration::Regular)
+            .with_order_type(OrderType::DineIn)
+            .with_place_of_supply(PlaceOfSupply::Intra)
+            .with_rounding(RoundingMode::NearestRupee),
+    )
+    .expect("compute");
+    assert!(!bill.total_vat.is_zero(), "the fixture charges no VAT to lose");
+
+    let mut settlement = Settlement::new();
+    settlement
+        .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("payment"))
+        .expect("add");
+
+    let mut draft = mb_core::DraftOrder::new(
+        mb_core::OrderId::new("ord_bar"),
+        day,
+        at,
+        OrderType::DineIn,
+        mb_core::StaffId::new("staff_1"),
+    );
+    draft.core.cart = cart;
+    draft.core.table = Some(mb_core::TableId::new("tbl_1"));
+
+    let till = mb_db::Till::new(common::OUTLET, common::TERMINAL);
+    let open = mb_db::open_draft(&db, till, draft).expect("opened");
+    mb_db::settle(
+        &db,
+        till,
+        open,
+        bill.clone(),
+        settlement,
+        at,
+        mb_core::StaffId::new("staff_1"),
+    )
+    .expect("settled");
+
+    let found = db
+        .transaction(|tx| {
+            mb_db::Repos::new(tx)
+                .orders()
+                .find(&mb_core::OrderId::new("ord_bar"))
+        })
+        .expect("read")
+        .expect("the order is there");
+    let mb_core::AnyOrder::Settled(settled) = found else {
+        panic!("a settled order came back in another state");
+    };
+    let stored = &settled.bill;
+
+    let beer = stored.lines.first().expect("the beer line");
+    assert_eq!(beer.vat, bill.lines[0].vat, "the VAT rupees did not survive");
+    assert!(!beer.vat.is_zero());
+    assert_eq!(beer.tax.kind, mb_core::TaxKind::OutsideGst);
+    assert_eq!(beer.tax.basis, mb_core::PriceBasis::Inclusive);
+    assert_eq!(beer.tax.rate, vat_rate);
+    assert!(beer.gst.is_zero(), "a liquor line was given GST");
+
+    assert_eq!(stored.total_vat, bill.total_vat);
+    assert_eq!(stored.vat_included, bill.vat_included, "the tax-in split moved");
+    assert_eq!(stored.total_gst, bill.total_gst, "the GST book moved with it");
+    assert_eq!(stored.registration, Registration::Regular);
+    assert_eq!(stored.state_tax, bill.state_tax);
+
+    // The two books, still two books.
+    let vat_rows: Vec<_> = stored.summary.vat_rows().collect();
+    assert_eq!(vat_rows.len(), 1, "the VAT summary did not come back");
+    assert_eq!(vat_rows[0].rate, vat_rate);
+    assert_eq!(vat_rows[0].vat, bill.total_vat);
+    assert!(
+        stored.summary.rows().all(|r| r.rate != vat_rate),
+        "the state VAT rate turned up in the GST summary"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures.
 //
@@ -787,13 +910,13 @@ fn every_table_is_counted_or_named_as_not() {
 fn build_a_real_bill() -> (Bill, Settlement) {
     let mut cart = Cart::new();
 
-    let dosa = ItemSnapshot::new(ItemId::new("itm_dosa"), "Masala Dosa", Money::from_paise(12_000), TaxRate::GST_5)
+    let dosa = ItemSnapshot::new(ItemId::new("itm_dosa"), "Masala Dosa", Money::from_paise(12_000), TaxRate::from_percent(5).expect("5%"))
         .with_hsn("2106");
-    let water = ItemSnapshot::new(ItemId::new("itm_water"), "Water", Money::from_paise(2_000), TaxRate::GST_18)
-        .with_treatment(TaxTreatment::Inclusive)
+    let water = ItemSnapshot::new(ItemId::new("itm_water"), "Water", Money::from_paise(2_000), TaxRate::from_percent(18).expect("18%"))
+        .with_tax(TaxSpec::gst_inclusive(TaxRate::from_percent(18).expect("18%")))
         .with_hsn("2201");
     let beer = ItemSnapshot::new(ItemId::new("itm_beer"), "Beer", Money::from_paise(22_000), TaxRate::ZERO)
-        .with_treatment(TaxTreatment::NonGst);
+        .with_tax(TaxSpec::liquor(TaxRate::ZERO));
 
     cart.add(dosa, Qty::from_whole(2).expect("qty"), Some("extra crispy".to_owned()), vec![])
         .expect("add");
@@ -813,12 +936,12 @@ fn build_a_real_bill() -> (Bill, Settlement) {
     .expect("line discount");
 
     let charges = [
-        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::GST_5),
-        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(1_500), TaxRate::GST_18),
+        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::from_percent(5).expect("5%")),
+        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(1_500), TaxRate::from_percent(18).expect("18%")),
     ];
 
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_bill_discount(DiscountEntry::new(
                 Discount::percent_bp(500).expect("valid"),
             ))
@@ -894,9 +1017,10 @@ fn write_settled_order(
                             bill_discount_kind, bill_discount_value,
                             total_taxable, total_cgst, total_sgst, total_igst,
                             non_gst_value, exempt_value, round_off, grand_total,
-                            place_of_supply, rounding_mode, computed_at)
+                            place_of_supply, rounding_mode, computed_at,
+                            total_vat, untaxed_value, registration, state_tax)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'percent', 500, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                 ?16, ?17, ?18)",
+                 ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         rusqlite::params![
             order_id,
             encode::money_to_sql(bill.subtotal),
@@ -906,9 +1030,9 @@ fn write_settled_order(
             encode::money_to_sql(bill.total_charges),
             encode::bool_to_sql(bill.bill_discount_capped),
             encode::money_to_sql(bill.total_taxable),
-            encode::money_to_sql(bill.total_tax.cgst),
-            encode::money_to_sql(bill.total_tax.sgst),
-            encode::money_to_sql(bill.total_tax.igst),
+            encode::money_to_sql(bill.total_gst.central),
+            encode::money_to_sql(bill.total_gst.state),
+            encode::money_to_sql(bill.total_gst.integrated),
             encode::money_to_sql(bill.non_gst_value),
             encode::money_to_sql(bill.exempt_value),
             encode::money_to_sql(bill.round_off),
@@ -916,6 +1040,10 @@ fn write_settled_order(
             encode::place_of_supply_to_sql(bill.place_of_supply),
             encode::rounding_mode_to_sql(bill.rounding),
             encode::timestamp_to_sql(mb_core::Timestamp::from_millis(1_770_000_000_000)),
+            encode::money_to_sql(bill.total_vat.into_money()),
+            encode::money_to_sql(bill.untaxed_value),
+            encode::registration_to_sql(bill.registration),
+            encode::state_tax_to_sql(bill.state_tax),
         ],
     )?;
 
@@ -924,8 +1052,8 @@ fn write_settled_order(
         let seq = i64::try_from(seq).unwrap_or(i64::MAX);
         tx.execute(
             "INSERT INTO order_lines (id, order_id, seq, item_id, name, unit_price, tax_rate_bp,
-                                      tax_treatment, hsn, qty, note, was_discount_capped)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
+                                      tax_kind, tax_basis, hsn, qty, note, was_discount_capped)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?12, ?9, ?10, ?11, 0)",
             rusqlite::params![
                 line_id,
                 order_id,
@@ -933,18 +1061,19 @@ fn write_settled_order(
                 line.snapshot.item_id.as_str(),
                 line.snapshot.name,
                 encode::money_to_sql(line.snapshot.unit_price),
-                encode::tax_rate_to_sql(line.snapshot.tax_rate),
-                encode::tax_treatment_to_sql(line.snapshot.tax_treatment),
+                encode::tax_rate_to_sql(line.snapshot.tax.rate),
+                encode::tax_kind_to_sql(line.snapshot.tax.kind),
                 line.snapshot.hsn,
                 encode::qty_to_sql(line.qty),
                 line.note,
+                encode::price_basis_to_sql(line.snapshot.tax.basis),
             ],
         )?;
         tx.execute(
             "INSERT INTO bill_lines (order_line_id, order_id, gross, line_discount,
                                      bill_discount_share, net, taxable, cgst, sgst, igst,
-                                     gross_including_tax, rate_bp, treatment)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                     gross_including_tax, rate_bp, tax_kind, vat, tax_basis)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             rusqlite::params![
                 line_id,
                 order_id,
@@ -953,12 +1082,14 @@ fn write_settled_order(
                 encode::money_to_sql(line.bill_discount_share),
                 encode::money_to_sql(line.net),
                 encode::money_to_sql(line.taxable),
-                encode::money_to_sql(line.tax.cgst),
-                encode::money_to_sql(line.tax.sgst),
-                encode::money_to_sql(line.tax.igst),
+                encode::money_to_sql(line.gst.central),
+                encode::money_to_sql(line.gst.state),
+                encode::money_to_sql(line.gst.integrated),
                 encode::money_to_sql(line.gross_including_tax),
-                encode::tax_rate_to_sql(line.rate),
-                encode::tax_treatment_to_sql(line.treatment),
+                encode::tax_rate_to_sql(line.tax.rate),
+                encode::tax_kind_to_sql(line.tax.kind),
+                encode::money_to_sql(line.vat.into_money()),
+                encode::price_basis_to_sql(line.tax.basis),
             ],
         )?;
     }
@@ -968,8 +1099,8 @@ fn write_settled_order(
         tx.execute(
             "INSERT INTO bill_charges (id, order_id, seq, kind, name, basis, basis_value, amount,
                                        taxable, cgst, sgst, igst, gross_including_tax, rate_bp,
-                                       treatment)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                                       tax_kind, tax_basis)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             rusqlite::params![
                 format!("{order_id}_chg_{seq}"),
                 order_id,
@@ -980,12 +1111,13 @@ fn write_settled_order(
                 basis_value,
                 encode::money_to_sql(charge.amount),
                 encode::money_to_sql(charge.taxable),
-                encode::money_to_sql(charge.tax.cgst),
-                encode::money_to_sql(charge.tax.sgst),
-                encode::money_to_sql(charge.tax.igst),
+                encode::money_to_sql(charge.gst.central),
+                encode::money_to_sql(charge.gst.state),
+                encode::money_to_sql(charge.gst.integrated),
                 encode::money_to_sql(charge.gross_including_tax),
-                encode::tax_rate_to_sql(charge.rate),
-                encode::tax_treatment_to_sql(charge.treatment),
+                encode::tax_rate_to_sql(charge.tax.rate),
+                encode::tax_kind_to_sql(charge.tax.kind),
+                encode::price_basis_to_sql(charge.tax.basis),
             ],
         )?;
     }
@@ -998,9 +1130,9 @@ fn write_settled_order(
                 order_id,
                 encode::tax_rate_to_sql(row.rate),
                 encode::money_to_sql(row.taxable),
-                encode::money_to_sql(row.tax.cgst),
-                encode::money_to_sql(row.tax.sgst),
-                encode::money_to_sql(row.tax.igst),
+                encode::money_to_sql(row.gst.central),
+                encode::money_to_sql(row.gst.state),
+                encode::money_to_sql(row.gst.integrated),
             ],
         )?;
     }

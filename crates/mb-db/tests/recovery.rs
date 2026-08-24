@@ -274,8 +274,8 @@ fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
         conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("pragma");
         conn.execute(
             "INSERT INTO order_lines (id, order_id, seq, name, unit_price, tax_rate_bp,
-                                      tax_treatment, qty, was_discount_capped)
-             VALUES ('orphan', 'no_such_order', 99, 'Ghost', 100, 0, 'exempt', 1000, 0)",
+                                      tax_kind, tax_basis, qty, was_discount_capped)
+             VALUES ('orphan', 'no_such_order', 99, 'Ghost', 100, 0, 'exempt', 'exclusive', 1000, 0)",
             [],
         )
         .expect("insert an orphan");
@@ -503,7 +503,7 @@ fn t7_a_backup_during_active_billing_is_consistent() {
                             ItemId::new("itm_dosa"),
                             "Masala Dosa",
                             Money::from_paise(12_000),
-                            mb_core::TaxRate::GST_5,
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
                         ),
                         mb_core::Qty::from_whole(2).expect("qty"),
                         None,
@@ -653,8 +653,7 @@ fn shop_item() -> mb_db::repo::menu::MenuItem {
         name: String::new(),
         unit_price: Money::from_paise(10_000),
         tax_class_id: None,
-        tax_rate: mb_core::TaxRate::GST_5,
-        tax_treatment: mb_core::TaxTreatment::Exclusive,
+        tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
         hsn: None,
         cost_price: None,
         short_code: None,

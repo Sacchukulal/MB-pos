@@ -397,15 +397,18 @@ function TaxClasses({
 }) {
   const [editing, setEditing] = useState<TaxClassView | null>(null);
   const [rate, setRate] = useState('');
-  // **The name is editable too, and it has to be.**
-  //
-  // The seeded names carry their rate — "Restaurant food 5%" — because that is
-  // how an owner recognises one in a list. So a dialog that changed only the
-  // rate left the shop with a class called "Restaurant food 5%" that charges
-  // 12%, which is worse than either. Found by changing a rate and reading the
-  // tile afterwards.
+  // **The name is editable too, and it has to be.** The seeded names carry
+  // their rate — "Restaurant food 5%" — so changing only the rate leaves a
+  // class called 5% that charges 12%.
   const [name, setName] = useState('');
+  // The machine values, straight from Rust and straight back (P33 §5.1). No
+  // screen reads the words to work out what a class is.
+  const [kind, setKind] = useState<TaxClassView['kind']>('gst');
+  const [basis, setBasis] = useState<TaxClassView['basis']>('exclusive');
   const toast = useToast();
+
+  // Exempt and no-tax have no rate at all, so the box is shut rather than hinted at.
+  const rateless = kind === 'exempt' || kind === 'untaxed';
 
   return (
     <div className="mb-menu__classes">
@@ -429,6 +432,8 @@ function TaxClasses({
                 setEditing(klass);
                 setRate(klass.rate.replace('%', ''));
                 setName(klass.name);
+                setKind(klass.kind);
+                setBasis(klass.basis);
               }}
             >
               Edit
@@ -451,11 +456,38 @@ function TaxClasses({
             onChange={(event) => setName(event.target.value)}
           />
           <Input
-            label="Rate"
-            hint="Per cent. Liquor and exempt items stay at 0."
-            value={rate}
+            label={kind === 'outside_gst' ? 'State VAT %' : 'Rate'}
+            hint={
+              kind === 'outside_gst'
+                ? 'Your state VAT on liquor. Not GST, and it never goes in a GST return.'
+                : 'Per cent. 5, 18, 2.5.'
+            }
+            value={rateless ? '0' : rate}
+            disabled={rateless}
             autoFocus
             onChange={(event) => setRate(event.target.value.replace(/[^0-9.]/g, ''))}
+          />
+          <Select
+            label="Kind"
+            hint="What it is in the law. Liquor is outside GST and carries state VAT instead."
+            value={kind}
+            onChange={(event) => setKind(event.target.value as TaxClassView['kind'])}
+            options={[
+              { value: 'gst', label: 'GST' },
+              { value: 'exempt', label: 'Exempt' },
+              { value: 'outside_gst', label: 'Outside GST (VAT)' },
+              { value: 'untaxed', label: 'No tax' },
+            ]}
+          />
+          <Select
+            label="Price basis"
+            hint="Whether the price you type already contains the tax. Bar menus usually do."
+            value={basis}
+            onChange={(event) => setBasis(event.target.value as TaxClassView['basis'])}
+            options={[
+              { value: 'exclusive', label: 'Tax added on top' },
+              { value: 'inclusive', label: 'Tax already in the price' },
+            ]}
           />
           <div className="mb-row mb-row--end">
             <Button variant="quiet" onClick={() => setEditing(null)}>
@@ -467,17 +499,9 @@ function TaxClasses({
                 call('save_tax_class', {
                   id: editing.id,
                   name,
-                  rate,
-                  // The treatment is not editable here: changing a class from
-                  // "tax added on top" to "outside GST" is a different act from
-                  // changing its rate, and P17's settings screen owns it.
-                  treatment: editing.treatment.includes('Outside')
-                    ? 'non_gst'
-                    : editing.treatment.includes('Exempt')
-                      ? 'exempt'
-                      : editing.treatment.includes('included')
-                        ? 'inclusive'
-                        : 'exclusive',
+                  rate: rateless ? '0' : rate,
+                  kind,
+                  basis,
                 })
                   .then(async (said) => {
                     setEditing(null);
@@ -487,7 +511,7 @@ function TaxClasses({
                   .catch(onFailed);
               }}
             >
-              Save the rate
+              Save
             </Button>
           </div>
         </Modal>
@@ -593,7 +617,7 @@ function EditItem({
       />
       <Input
         label="HSN / SAC"
-        hint="Printed on the bill. Not needed for liquor or a shop below the threshold."
+        hint="Printed on the bill. 2, 4, 6 or 8 digits, or leave it blank."
         value={hsn}
         onChange={(e) => setHsn(e.target.value)}
       />

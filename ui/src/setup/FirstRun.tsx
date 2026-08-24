@@ -33,6 +33,7 @@ import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput,
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
+import type { TaxClassView } from '../ipc/generated/TaxClassView';
 
 import './firstrun.css';
 
@@ -103,8 +104,10 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   // The first few items, so the till is not empty when it opens.
   const [itemName, setItemName] = useState('');
   const [itemPrice, setItemPrice] = useState('');
-  const [itemClass, setItemClass] = useState('tax_food_5');
+  const [itemClass, setItemClass] = useState('');
   const [added, setAdded] = useState<string[]>([]);
+  // **The shop's own classes, not a fourth copy of the slab list** (P33 §5.6).
+  const [classes, setClasses] = useState<readonly TaxClassView[]>([]);
 
   /**
    * Where the shop's data will go. Empty means "the usual place", which is
@@ -135,6 +138,18 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       })
       .catch(complain);
   }, [complain]);
+
+  // The tax classes are read when the items step opens — there is a shop and a
+  // signed-in owner by then. If it fails, an item can still be added with none.
+  useEffect(() => {
+    if (step !== 'menu') return;
+    call('menu_tax_classes')
+      .then((list) => {
+        setClasses(list);
+        setItemClass((was) => (was === '' && list[0] ? list[0].id : was));
+      })
+      .catch(() => undefined);
+  }, [step]);
 
   if (!view) return <div className="mb-firstrun" />;
 
@@ -280,9 +295,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         categoryId: null,
         price: itemPrice.trim(),
         // **A tax CLASS, not a rate** (P13): one place decides what 5% means,
-        // so changing the rate later changes every item on it. These four are
-        // the ones migration 0001 seeds.
-        taxClassId: itemClass,
+        // so changing the rate later changes every item on it.
+        taxClassId: itemClass === '' ? null : itemClass,
         hsn: null,
         shortCode: null,
         cost: null,
@@ -598,12 +612,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 label="Tax"
                 value={itemClass}
                 onChange={(e) => setItemClass(e.target.value)}
-                options={[
-                  { value: 'tax_food_5', label: 'Restaurant food 5%' },
-                  { value: 'tax_packaged_12', label: 'Packaged 12%' },
-                  { value: 'tax_packaged_18', label: 'Packaged 18%' },
-                  { value: 'tax_liquor', label: 'Liquor — outside GST' },
-                ]}
+                options={
+                  classes.length === 0
+                    ? [{ value: '', label: 'No tax class' }]
+                    : classes.map((c) => ({ value: c.id, label: `${c.name} — ${c.rate}` }))
+                }
               />
               <Button disabled={busy} onClick={addItem}>
                 Add

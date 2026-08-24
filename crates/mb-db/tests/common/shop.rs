@@ -17,9 +17,10 @@ use mb_auth::{PermissionSet, RolePreset};
 
 use super::Scratch;
 use mb_core::{
+    Registration,
     AnyOrder, BillInput, BusinessDay, Cart, CategoryId, Charge, ChargeKind, CustomerId, Discount,
     DiscountEntry, DraftOrder, ItemId, Money, OrderId, OrderType, Payment, PaymentMode,
-    PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TableId, TaxRate, TaxTreatment,
+    PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TableId, TaxRate, TaxSpec,
     Timestamp, compute_bill,
 };
 use mb_db::repo::floor::{DiningTable, Section};
@@ -174,8 +175,7 @@ fn seed_masters(db: &Db) {
                 upi_id: Some("anna@upi".to_owned()),
                 upi_merchant_name: Some("Anna Kuteera".to_owned()),
                 upi_reference: Some("MB1".to_owned()),
-                is_composition: false,
-                default_place_of_supply: "intra".to_owned(),
+                registration: "regular".to_owned(),
             },
             at(0),
         )?;
@@ -235,8 +235,7 @@ fn menu() -> Vec<MenuItem> {
             name: "Masala Dosa".to_owned(),
             unit_price: Money::from_paise(12_000),
             tax_class_id: Some(mb_core::TaxClassId::new("tax_food_5")),
-            tax_rate: TaxRate::GST_5,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
             hsn: Some("2106".to_owned()),
             cost_price: Some(Money::from_paise(4_000)),
             short_code: Some("MD".to_owned()),
@@ -253,13 +252,12 @@ fn menu() -> Vec<MenuItem> {
             unit_price: Money::from_paise(2_000),
             // **No class, deliberately.** This is an inclusive-priced one-off,
             // and the seeded "Packaged goods 18%" is exclusive — an item
-            // pointing at a class must carry that class's treatment (D56), so
+            // pointing at a class must carry that class's tax spec (D56), so
             // giving it one here would be a fixture describing a shop that
             // cannot exist. Found by a CSV round trip, which resolves the
             // class and quite correctly overwrote the disagreement.
             tax_class_id: None,
-            tax_rate: TaxRate::GST_18,
-            tax_treatment: TaxTreatment::Inclusive,
+            tax: TaxSpec::gst_inclusive(TaxRate::from_percent(18).expect("18%")),
             hsn: Some("2201".to_owned()),
             cost_price: None,
             short_code: None,
@@ -275,8 +273,7 @@ fn menu() -> Vec<MenuItem> {
             name: "Beer".to_owned(),
             unit_price: Money::from_paise(22_000),
             tax_class_id: Some(mb_core::TaxClassId::new("tax_liquor")),
-            tax_rate: TaxRate::ZERO,
-            tax_treatment: TaxTreatment::NonGst,
+            tax: TaxSpec::liquor(TaxRate::ZERO),
             hsn: None,
             cost_price: Some(Money::from_paise(14_000)),
             short_code: Some("BR".to_owned()),
@@ -292,8 +289,7 @@ fn menu() -> Vec<MenuItem> {
             name: "Mysore Pak (by weight)".to_owned(),
             unit_price: Money::from_paise(60_000),
             tax_class_id: Some(mb_core::TaxClassId::new("tax_food_5")),
-            tax_rate: TaxRate::GST_5,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
             hsn: Some("1704".to_owned()),
             cost_price: None,
             short_code: None,
@@ -474,17 +470,17 @@ fn cart_for(n: i64) -> Cart {
 
 fn bill_for(cart: &Cart) -> mb_core::Bill {
     let charges = [
-        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::GST_5),
+        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::from_percent(5).expect("5%")),
         Charge::flat(
             ChargeKind::Other("Donation".to_owned()),
             "Donation",
             Money::from_paise(500),
             TaxRate::ZERO,
         )
-        .with_treatment(TaxTreatment::Exempt),
+        .with_tax(TaxSpec::exempt()),
     ];
     compute_bill(
-        BillInput::new(cart)
+        BillInput::new(cart, Registration::Regular)
             .with_bill_discount(DiscountEntry::new(
                 Discount::percent_bp(500).expect("valid"),
             ))

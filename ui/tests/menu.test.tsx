@@ -22,11 +22,14 @@ vi.mock('../src/ipc/call', () => ({
 }));
 
 const { Combos, Composition, ModifierGroups } = await import('../src/menu/Composition');
+const { Menu } = await import('../src/menu/Menu');
+const { ToastProvider } = await import('../src/kit');
 
 import type { ComboView } from '../src/ipc/generated/ComboView';
 import type { ItemComposition } from '../src/ipc/generated/ItemComposition';
 import type { MenuRowView } from '../src/ipc/generated/MenuRowView';
 import type { MoneyView } from '../src/ipc/generated/MoneyView';
+import type { TaxClassView } from '../src/ipc/generated/TaxClassView';
 
 function money(paise: number, text: string): MoneyView {
   return { paise: BigInt(paise), text };
@@ -202,5 +205,79 @@ describe('a combo (scope 6.3)', () => {
     const combo = (sent?.[1] as { combo: { price: string; parts: [string, string][] } }).combo;
     expect(combo.price).toBe('199');
     expect(combo.parts).toEqual([['itm_dosa', '0.5']]);
+  });
+});
+
+/**
+ * **The tax class editor** — P33 §5.1, the round trip that used to go through
+ * prose. The screen read its own display words back (`.includes('Outside')`) to
+ * decide what to save, so rewording a label made liquor GST-taxable.
+ */
+describe('the tax class editor', () => {
+  const liquor: TaxClassView = {
+    id: 'tax_liquor',
+    name: 'Liquor — state VAT',
+    rate: '20%',
+    rateBp: 2000,
+    kind: 'outside_gst',
+    basis: 'inclusive',
+    treatment: 'Outside GST',
+    isActive: true,
+    itemsUsing: 4n,
+  };
+
+  function wire() {
+    call.mockImplementation((name: string) => {
+      switch (name) {
+        case 'menu_tax_classes':
+          return Promise.resolve([liquor]);
+        case 'save_tax_class':
+          return Promise.resolve('Saved.');
+        default:
+          return Promise.resolve([]);
+      }
+    });
+  }
+
+  const open = async () => {
+    wire();
+    render(
+      <ToastProvider>
+        <Menu />
+      </ToastProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+  };
+
+  it('sends the machine values back, never the words on the tile', async () => {
+    await open();
+
+    // Outside GST asks for a VAT rate by name, because it is not GST.
+    expect(screen.getByLabelText('State VAT %')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bar list' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(call).toHaveBeenCalledWith('save_tax_class', {
+      id: 'tax_liquor',
+      name: 'Bar list',
+      rate: '20',
+      kind: 'outside_gst',
+      basis: 'inclusive',
+    });
+  });
+
+  it('shuts the rate box on a kind that cannot carry one', async () => {
+    await open();
+
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'exempt' } });
+    const box = screen.getByLabelText('Rate') as HTMLInputElement;
+    expect(box.disabled, 'exempt has no rate to type').toBe(true);
+    expect(box.value).toBe('0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(call).toHaveBeenCalledWith(
+      'save_tax_class',
+      expect.objectContaining({ kind: 'exempt', rate: '0' }),
+    );
   });
 });

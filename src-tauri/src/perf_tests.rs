@@ -71,8 +71,9 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
                                 format!("Item {n} with masala")
                             },
                             unit_price: mb_core::Money::from_paise(10_000),
-                            tax_rate: mb_core::TaxRate::GST_5,
-                            tax_treatment: mb_core::TaxTreatment::Exclusive,
+                            tax: mb_core::TaxSpec::gst(
+                                mb_core::TaxRate::from_percent(5).expect("5%"),
+                            ),
                             tax_class_id: None,
                             hsn: None,
                             cost_price: None,

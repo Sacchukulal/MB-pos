@@ -14,7 +14,7 @@
 )]
 
 use mb_core::kitchen_delivery::ACK_SECONDS;
-use mb_core::{CategoryId, ItemId, Money, TaxRate, TaxTreatment};
+use mb_core::{CategoryId, ItemId, Money, TaxRate};
 use mb_db::repo::menu::{Category, MenuItem};
 use mb_db::{Db, DbConfig, Repos};
 
@@ -96,8 +96,7 @@ fn seed(app: &App) {
                             category_id: Some(CategoryId::new(category)),
                             name: name.to_owned(),
                             unit_price: Money::from_paise(9_000),
-                            tax_rate: TaxRate::GST_5,
-                            tax_treatment: TaxTreatment::Exclusive,
+                            tax: mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
                             tax_class_id: None,
                             hsn: None,
                             cost_price: None,

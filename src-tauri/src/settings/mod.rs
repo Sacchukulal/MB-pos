@@ -73,8 +73,8 @@ pub mod sample;
 pub mod value;
 
 use mb_core::{Money, Timestamp};
-use mb_db::error::DbError;
 use mb_db::Repos;
+use mb_db::error::DbError;
 use mb_print::settings::{KitchenSettings, ReceiptSettings};
 use serde::{Deserialize, Serialize};
 
@@ -152,10 +152,10 @@ pub struct Store {
     pub upi_id: String,
     pub upi_merchant_name: String,
     pub upi_reference: String,
-    /// Scope 2.10. A tax fact with a printing consequence.
-    pub is_composition: bool,
-    /// `intra` or `inter` — the default only; each bill stores its own.
-    pub default_place_of_supply: String,
+    /// `unregistered`, `composition` or `regular` — the gate on the whole tax
+    /// pipeline. Text rather than the enum for the reason `Printer::role` gives:
+    /// mb-core owns the list and the schema's CHECK keeps a typo off the disk.
+    pub registration: String,
 }
 
 impl Default for Store {
@@ -170,8 +170,7 @@ impl Default for Store {
             upi_id: String::new(),
             upi_merchant_name: String::new(),
             upi_reference: String::new(),
-            is_composition: false,
-            default_place_of_supply: "intra".to_owned(),
+            registration: "regular".to_owned(),
         }
     }
 }
@@ -197,8 +196,7 @@ impl Store {
             upi_id: some(&self.upi_id),
             upi_merchant_name: some(&self.upi_merchant_name),
             upi_reference: some(&self.upi_reference),
-            is_composition: self.is_composition,
-            default_place_of_supply: self.default_place_of_supply.clone(),
+            registration: self.registration.clone(),
         }
     }
 
@@ -214,8 +212,7 @@ impl Store {
             upi_id: profile.upi_id.clone().unwrap_or_default(),
             upi_merchant_name: profile.upi_merchant_name.clone().unwrap_or_default(),
             upi_reference: profile.upi_reference.clone().unwrap_or_default(),
-            is_composition: profile.is_composition,
-            default_place_of_supply: profile.default_place_of_supply.clone(),
+            registration: profile.registration.clone(),
         }
     }
 
@@ -233,18 +230,25 @@ impl Store {
             upi_id: profile.upi_id,
             upi_merchant_name: profile.upi_merchant_name,
             upi_reference: profile.upi_reference,
-            is_composition: profile.is_composition,
+            registration: self.registration(),
         }
     }
 
-    /// Scope 2.4 — which pair of taxes this shop charges by default.
+    /// What kind of taxpayer this shop is — the gate on the tax pipeline.
     #[must_use]
-    pub fn place_of_supply(&self) -> mb_core::PlaceOfSupply {
-        if self.default_place_of_supply == "inter" {
-            mb_core::PlaceOfSupply::Inter
-        } else {
-            mb_core::PlaceOfSupply::Intra
-        }
+    pub fn registration(&self) -> mb_core::Registration {
+        registration_from(&self.registration)
+    }
+}
+
+/// The stored text as the rule. Unknown text reads as regular, which is what a
+/// column that was never filled in has always meant.
+#[must_use]
+pub fn registration_from(text: &str) -> mb_core::Registration {
+    match text {
+        "unregistered" => mb_core::Registration::Unregistered,
+        "composition" => mb_core::Registration::Composition,
+        _ => mb_core::Registration::Regular,
     }
 }
 
@@ -416,17 +420,6 @@ impl Default for Appearance {
     }
 }
 
-/// What a new menu item and a new bill assume about tax.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct Tax {
-    /// A `tax_classes.id` from P13, or empty for "ask me". Free text rather
-    /// than a choice because the list is the shop's own data.
-    pub default_class_id: String,
-    /// Scope 2.11 — whether a price typed into the menu already contains tax.
-    pub prices_include_tax: bool,
-}
-
 /// Where backups go and how many are kept (13.1, and audit A1 is why).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -475,7 +468,6 @@ pub struct ShopConfig {
     pub kitchen: KitchenSettings,
     pub billing: Billing,
     pub day: Day,
-    pub tax: Tax,
     /// P26. One setting, and D72's test walks every leaf of this JSON both ways
     /// — so a field here with no catalogue entry fails the build, and so does a
     /// catalogue entry with no field.
@@ -671,10 +663,16 @@ pub fn load(repos: &Repos<'_>, outlet: &str) -> Result<ShopConfig, DbError> {
         // A limit that tightened in a later build must fail loudly on the old
         // value rather than printing it.
         entry.kind.check(&stored).map_err(|e| {
-            DbError::invariant(format!("the setting \"{}\" is wrong: {}", entry.key, e.message))
+            DbError::invariant(format!(
+                "the setting \"{}\" is wrong: {}",
+                entry.key, e.message
+            ))
         })?;
         (entry.write)(&mut config, &stored).map_err(|e| {
-            DbError::invariant(format!("the setting \"{}\" is wrong: {}", entry.key, e.message))
+            DbError::invariant(format!(
+                "the setting \"{}\" is wrong: {}",
+                entry.key, e.message
+            ))
         })?;
     }
 
@@ -948,12 +946,14 @@ pub fn plan_import(
             continue;
         };
         if let Err(e) = entry.kind.check(&value) {
-            plan.problems.push(format!("\"{}\": {}", entry.label, e.message));
+            plan.problems
+                .push(format!("\"{}\": {}", entry.label, e.message));
             continue;
         }
         let before = (entry.read)(&wanted);
         if let Err(e) = (entry.write)(&mut wanted, &value) {
-            plan.problems.push(format!("\"{}\": {}", entry.label, e.message));
+            plan.problems
+                .push(format!("\"{}\": {}", entry.label, e.message));
             continue;
         }
         if before != value {

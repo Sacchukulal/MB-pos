@@ -20,11 +20,11 @@
 //!   three-column rows now, and they carry the **time** as well.
 //! * **The item Amount column is the amount before tax**, so the column adds up
 //!   to the subtotal exactly. The owner ruled on it. See [`totals`] for what
-//!   that costs on a bill with inclusive prices, and how `Bill::tax_added`
+//!   that costs on a bill with inclusive prices, and how `Bill::gst_added`
 //!   pays it.
 //! * **A title.** A GST document has to say what it is, and none of them did.
 
-use mb_core::{AnyOrder, Bill, OrderType, PlaceOfSupply, TaxTreatment};
+use mb_core::{AnyOrder, Bill, OrderType, PlaceOfSupply, PriceBasis};
 use serde::{Deserialize, Serialize};
 
 use crate::doc::{Align, BandLine, Block, Column, Document, Style};
@@ -83,7 +83,7 @@ pub struct Store {
     /// Audit Part 3's third UPI field. It rides in the payload as `tn`, so the
     /// shop's bank statement says which counter a payment came from.
     pub upi_reference: Option<String>,
-    pub is_composition: bool,
+    pub registration: mb_core::Registration,
 }
 
 /// The customer, when there is one. Scope 2.6 — a B2B bill carries their GSTIN.
@@ -301,11 +301,7 @@ fn title_of(ctx: &BillContext<'_>) -> Option<&'static str> {
     if !ctx.settings.show.title || ctx.store.gstin.is_none() {
         return None;
     }
-    Some(if ctx.store.is_composition {
-        "BILL OF SUPPLY"
-    } else {
-        "TAX INVOICE"
-    })
+    ctx.store.registration.document_title()
 }
 
 /// **The narrowest paper that can hold three columns of meta.**
@@ -673,14 +669,20 @@ fn narrow_items(doc: &mut Document, ctx: &BillContext<'_>) {
 /// **The totals, and they reconcile exactly.**
 ///
 /// ```text
-/// subtotal − discount + charges + tax_added + round_off = grand_total
+/// subtotal − discount + charges + gst_added + round_off = grand_total
 /// ```
 ///
-/// `tax_added` rather than `total_tax` is what makes it true on a bill that
+/// `gst_added` rather than `total_gst` is what makes it true on a bill that
 /// mixes inclusive and exclusive prices: the tax already inside an inclusive
 /// price is in the Amount column, so adding it again below would count it
-/// twice. `Bill::tax_included` carries that part, printed as a memo, and
+/// twice. `Bill::gst_included` carries that part, printed as a memo, and
 /// `mb_core` computes both — this file does no arithmetic (R2, D2).
+///
+/// **P33 gave the bill a second tax channel and this function does not print
+/// it yet.** State VAT on alcohol now has its own `Bill::total_vat`, kept apart
+/// from GST so a return can never file a beer as a supply. Adding a VAT row
+/// here is a change to every piece of paper the product produces, so it belongs
+/// to the one deliberate redesign pass (phase 6) rather than to a type port.
 fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
     let s = ctx.settings;
     let b = ctx.bill;
@@ -709,22 +711,33 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
     }
 
     let label = rate_label(b);
-    if !b.tax_added.cgst.is_zero() {
-        doc.row(format!("CGST{label}"), b.tax_added.cgst.to_plain_string(), style);
+    if !b.gst_added.central.is_zero() {
+        doc.row(format!("CGST{label}"), b.gst_added.central.to_plain_string(), style);
     }
-    if !b.tax_added.sgst.is_zero() {
-        doc.row(format!("SGST{label}"), b.tax_added.sgst.to_plain_string(), style);
+    if !b.gst_added.state.is_zero() {
+        doc.row(format!("{}{label}", b.state_tax.label()), b.gst_added.state.to_plain_string(), style);
     }
-    if !b.tax_added.igst.is_zero() {
-        doc.row("IGST", b.tax_added.igst.to_plain_string(), style);
+    if !b.gst_added.integrated.is_zero() {
+        doc.row("IGST", b.gst_added.integrated.to_plain_string(), style);
+    }
+    // State VAT on liquor. Its own row, never inside a GST figure.
+    if !b.vat_added.is_zero() {
+        doc.row(vat_label(b), b.vat_added.into_money().to_plain_string(), style);
     }
     // The other half of the split: tax the customer has already paid inside the
     // prices above. A memo, not an addition — it is why the total still works.
-    if !b.tax_included.is_zero()
-        && let Ok(included) = b.tax_included.total()
+    if !b.gst_included.is_zero()
+        && let Ok(included) = b.gst_included.total()
     {
         doc.text(
             format!("  (includes tax {})", included.to_plain_string()),
+            style,
+            Align::Left,
+        );
+    }
+    if !b.vat_included.is_zero() {
+        doc.text(
+            format!("  (includes VAT {})", b.vat_included.into_money().to_plain_string()),
             style,
             Align::Left,
         );
@@ -769,8 +782,23 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
         );
     }
 
-    if ctx.store.is_composition && !s.composition_note.is_empty() {
-        doc.text(&s.composition_note, s.sections.meta, Align::Centre);
+    // A bill of supply without the declaration is not one. Blank falls back.
+    if ctx.store.registration == mb_core::Registration::Composition {
+        let note = if s.composition_note.is_empty() {
+            "Composition taxable person, not eligible to collect tax on supplies"
+        } else {
+            &s.composition_note
+        };
+        doc.text(note, s.sections.meta, Align::Centre);
+    }
+}
+
+/// `"VAT 20%"` when the liquor on this bill is all at one rate, else `"VAT"`.
+fn vat_label(b: &Bill) -> String {
+    let mut rows = b.summary.vat_rows();
+    match (rows.next(), rows.next()) {
+        (Some(only), None) => format!("VAT {}", only.rate.label()),
+        _ => "VAT".to_owned(),
     }
 }
 
@@ -781,7 +809,7 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
 /// customer reading `CGST 2.5%  2.50` can. On a mixed bill the rate belongs in
 /// the summary block and not on the total, so this says nothing there.
 fn rate_label(bill: &Bill) -> String {
-    let mut rates = bill.summary.rows().filter(|r| !r.tax.is_zero());
+    let mut rates = bill.summary.rows().filter(|r| !r.gst.is_zero());
     match (rates.next(), rates.next()) {
         (Some(row), None) => format!(" {}", row.rate.label()),
         _ => String::new(),
@@ -805,7 +833,8 @@ fn more_than_one_rate(bill: &Bill) -> bool {
 /// `show.tax_summary` still turns it off entirely.
 fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
     let b = ctx.bill;
-    if b.summary.rows().next().is_none() {
+    // A shop that may not collect GST prints no GST table, zeroes included.
+    if b.summary.rows().next().is_none() || !b.registration.charges_gst() {
         return;
     }
     let s = ctx.settings;
@@ -836,14 +865,14 @@ fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
             row.rate.label(),
             row.taxable.to_plain_string(),
             if inter {
-                row.tax.igst.to_plain_string()
+                row.gst.integrated.to_plain_string()
             } else {
-                row.tax.cgst.to_plain_string()
+                row.gst.central.to_plain_string()
             },
             if inter {
                 String::new()
             } else {
-                row.tax.sgst.to_plain_string()
+                row.gst.state.to_plain_string()
             },
         ]);
     }
@@ -961,8 +990,13 @@ fn footer(doc: &mut Document, ctx: &BillContext<'_>) {
 /// Whether a line's price already contains its tax — used by nothing here, and
 /// kept as the one place the question is spelled out for a reader wondering why
 /// [`amount_of`] does not have to ask it. `Bill::subtotal` is the sum of
-/// `gross`, whatever the treatment, so the column adds up either way.
-const _: fn(TaxTreatment) -> bool = TaxTreatment::is_taxed;
+/// `gross`, whatever the pricing basis, so the column adds up either way.
+///
+/// P33 split the old four-valued `TaxTreatment` into two questions, and it is
+/// [`PriceBasis`] — *is the tax already inside the price?* — that this note was
+/// ever about. The other half, what kind of supply a line is in law, has nothing
+/// to do with what goes in the Amount column.
+const _: fn(PriceBasis) -> bool = PriceBasis::is_inclusive;
 
 // **`Copy` deliberately has no `Default`.** clippy offered to derive one and it
 // is wrong to accept: a default would mean a caller could print a bill without

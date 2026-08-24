@@ -44,7 +44,8 @@ pub(crate) struct Scratch {
 impl Scratch {
     pub(crate) fn new(label: &str) -> Scratch {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("mb-signin-{label}-{}-{n}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("mb-signin-{label}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch directory");
         Scratch { dir }
     }
@@ -106,8 +107,8 @@ fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
 
     // 2. The owner adds themselves and gives themselves a PIN.
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    let recovery = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
-        .expect("pin set");
+    let recovery =
+        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin set");
     let recovery = recovery.expect("the first PIN issues a recovery code");
     assert_eq!(recovery.len(), 11, "ten characters and a dash: {recovery}");
 
@@ -158,8 +159,7 @@ fn the_lockout_is_real_and_outlives_the_process() {
     {
         let app = a_shop(&scratch);
         hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
-            .expect("pin set");
+        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin set");
 
         for attempt in 1..=5 {
             let refused = login_on(&app, "staff_owner".to_owned(), "1111".to_owned())
@@ -174,7 +174,11 @@ fn the_lockout_is_real_and_outlives_the_process() {
         let refused = login_on(&app, "staff_owner".to_owned(), "2468".to_owned())
             .expect_err("the lockout let somebody straight in");
         assert_eq!(refused.code, "auth.locked_out");
-        assert!(refused.message.contains("Try again in"), "{}", refused.message);
+        assert!(
+            refused.message.contains("Try again in"),
+            "{}",
+            refused.message
+        );
         // And it says nothing about how many attempts are left.
         assert!(
             !refused.message.to_lowercase().contains("attempt"),
@@ -299,7 +303,11 @@ fn the_recovery_list_holds_a_manager_who_has_no_pin() {
     let state = lock_state_on(&app).expect("state");
     assert_eq!(state.people.len(), 2);
     assert_eq!(
-        state.recoverable.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        state
+            .recoverable
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect::<Vec<_>>(),
         ["staff_owner"],
         "a cashier is not somebody the recovery code may touch"
     );
@@ -313,12 +321,20 @@ fn the_recovery_list_holds_a_manager_who_has_no_pin() {
         "the cashier still has one, so this shop still locks"
     );
     assert_eq!(
-        state.people.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        state
+            .people
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect::<Vec<_>>(),
         ["staff_cashier"],
         "the owner cannot sign in, which is right"
     );
     assert_eq!(
-        state.recoverable.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        state
+            .recoverable
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect::<Vec<_>>(),
         ["staff_owner"],
         "and the recovery code has nobody to help — this is the lockout"
     );
@@ -478,7 +494,8 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
         .into_iter()
         .find(|r| r.id == RolePreset::Owner.id())
         .expect("the Owner role");
-    role.permissions.retain(|p| p != Permission::StaffManage.code());
+    role.permissions
+        .retain(|p| p != Permission::StaffManage.code());
     assert!(
         save_role_on(&app, role).is_err(),
         "the Owner role was stripped of staff.manage with nobody else holding it"
@@ -563,8 +580,8 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
             .any(|p| p.id == "staff_cashier"),
         "scope 9.15: a staff member is never deleted"
     );
-    let history = audit_trail_on(&app, Some("staff_cashier".to_owned()), None, None)
-        .expect("her history");
+    let history =
+        audit_trail_on(&app, Some("staff_cashier".to_owned()), None, None).expect("her history");
     assert!(!history.entries.is_empty(), "her history went with her");
 }
 
@@ -695,8 +712,8 @@ fn the_stand_in_user_holds_no_permissions_on_disk() {
 #[test]
 fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
     use mb_core::{
-        BillInput, Cart, ItemSnapshot, Money, OrderType, Payment, PaymentMode, PlaceOfSupply,
-        Qty, RoundingMode, Settlement, TaxRate, TaxTreatment, compute_bill,
+        BillInput, Cart, ItemSnapshot, Money, OrderType, Payment, PaymentMode, PlaceOfSupply, Qty,
+        RoundingMode, Settlement, TaxRate, compute_bill,
     };
 
     let scratch = Scratch::new("real_bill");
@@ -716,8 +733,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax_rate: mb_core::TaxRate::GST_5,
-                        tax_treatment: mb_core::TaxTreatment::Exclusive,
+                        tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
                         tax_class_id: None,
                         hsn: None,
                         cost_price: None,
@@ -741,8 +757,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
             item_id: mb_core::ItemId::new("itm_tea"),
             name: "Masala Tea".to_owned(),
             unit_price: Money::from_paise(2_500),
-            tax_rate: TaxRate::GST_5,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
             hsn: None,
             category_id: None,
             station: None,
@@ -756,7 +771,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
     .expect("added");
 
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, mb_core::Registration::Regular)
             .with_order_type(OrderType::Parcel)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_rounding(RoundingMode::NearestRupee),
@@ -802,7 +817,8 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
 
     let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter().any(|j| j.reason.as_deref() == Some("bill 0001")),
+        jobs.iter()
+            .any(|j| j.reason.as_deref() == Some("bill 0001")),
         "the bill did not reach the queue: {jobs:?}"
     );
 }
@@ -830,8 +846,7 @@ fn a_trading_shop(scratch: &Scratch) -> App {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax_rate: mb_core::TaxRate::GST_5,
-                        tax_treatment: mb_core::TaxTreatment::Exclusive,
+                        tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
                         tax_class_id: None,
                         hsn: None,
                         cost_price: None,
@@ -915,8 +930,8 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
         .expect_err("a void with no reason was allowed");
     assert_eq!(refused.code, "void.refused");
 
-    let after_void = void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None)
-        .expect("voided");
+    let after_void =
+        void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
 
     // T2: it keeps its number and STAYS IN THE LIST.
     let voided = after_void
@@ -935,7 +950,10 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     );
     assert_eq!(after.bills, 2, "a voided bill left the count");
     assert_eq!(after.voided_bills, 1);
-    assert_eq!(after.gross.paise, before.gross.paise, "a void edited the past");
+    assert_eq!(
+        after.gross.paise, before.gross.paise,
+        "a void edited the past"
+    );
     assert_eq!(
         after.net.paise,
         after.gross.paise - after.voids.paise,
@@ -949,8 +967,20 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
         .iter()
         .find(|e| e.what == "Voided a bill")
         .expect("the void is not in the history");
-    assert!(entry.before.as_deref().unwrap_or_default().contains("settled"));
-    assert!(entry.after.as_deref().unwrap_or_default().contains("Billed twice"));
+    assert!(
+        entry
+            .before
+            .as_deref()
+            .unwrap_or_default()
+            .contains("settled")
+    );
+    assert!(
+        entry
+            .after
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Billed twice")
+    );
 
     // And a bill cannot be voided twice.
     let again = void_bill_on(&app, target, "Again".to_owned(), None, None)
@@ -1068,7 +1098,12 @@ fn money_goes_back_only_after_a_void() {
         "Billed twice".to_owned(),
     )
     .expect_err("more went back than came in");
-    assert!(refused.detail.unwrap_or_default().contains("left to give back"));
+    assert!(
+        refused
+            .detail
+            .unwrap_or_default()
+            .contains("left to give back")
+    );
 
     let after = refund_on(
         &app,
@@ -1079,7 +1114,10 @@ fn money_goes_back_only_after_a_void() {
     )
     .expect("the refund was refused");
 
-    let row = after.iter().find(|b| b.order_id == target).expect("the bill");
+    let row = after
+        .iter()
+        .find(|b| b.order_id == target)
+        .expect("the bill");
     assert_eq!(row.refunded.as_ref().map(|m| m.paise), Some(total));
 
     let totals = day_totals_on(&app).expect("totals");
@@ -1103,12 +1141,15 @@ fn a_reprint_says_which_copy_it_is() {
     let said = reprint_bill_on(&app, target.clone(), "Customer asked for a copy".to_owned())
         .expect("reprinted");
     assert!(said.contains("Copy 2"), "{said}");
-    let said = reprint_bill_on(&app, target.clone(), "Printer jammed".to_owned())
-        .expect("reprinted");
+    let said =
+        reprint_bill_on(&app, target.clone(), "Printer jammed".to_owned()).expect("reprinted");
     assert!(said.contains("Copy 3"), "{said}");
 
     let bills = list_bills_on(&app).expect("bills");
-    let row = bills.iter().find(|b| b.order_id == target).expect("the bill");
+    let row = bills
+        .iter()
+        .find(|b| b.order_id == target)
+        .expect("the bill");
     assert_eq!(row.reprints, 2, "the copies were not counted");
 
     let jobs = app.print_queue_snapshot();
@@ -1124,7 +1165,8 @@ fn a_reprint_says_which_copy_it_is() {
         .expect("a voided bill could not be reprinted");
     let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter().any(|j| j.reason.as_deref() == Some("voided copy")),
+        jobs.iter()
+            .any(|j| j.reason.as_deref() == Some("voided copy")),
         "the voided copy printed as an ordinary duplicate: {jobs:?}"
     );
 }
@@ -1201,8 +1243,7 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
 
     let busy = crate::ipc::open_orders_on(&app).expect("floor");
     assert!(
-        busy.iter()
-            .any(|t| t.id == "tbl_7" && t.order_id.is_some()),
+        busy.iter().any(|t| t.id == "tbl_7" && t.order_id.is_some()),
         "the table is not busy after the kitchen was told: {busy:?}"
     );
 
@@ -1218,7 +1259,8 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
     // And the kitchen was told to stop.
     let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter().any(|j| j.reason.as_deref() == Some("cancellation")),
+        jobs.iter()
+            .any(|j| j.reason.as_deref() == Some("cancellation")),
         "the kitchen was never told to stop: {jobs:?}"
     );
 }
@@ -1239,8 +1281,15 @@ fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
 
     // T4: exactly one slip, and it is a cancellation.
     let jobs = app.print_queue_snapshot();
-    assert_eq!(jobs.len(), before + 1, "expected exactly one cancellation slip");
-    assert!(jobs.iter().any(|j| j.reason.as_deref() == Some("cancellation")));
+    assert_eq!(
+        jobs.len(),
+        before + 1,
+        "expected exactly one cancellation slip"
+    );
+    assert!(
+        jobs.iter()
+            .any(|j| j.reason.as_deref() == Some("cancellation"))
+    );
 
     // T5: nothing comes back. There is nothing pending and nothing over-told,
     // so a second ticket has nothing to say.

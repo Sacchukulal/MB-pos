@@ -77,10 +77,9 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
                     category_id: None,
                     name: (*item_name).to_owned(),
                     unit_price: Money::from_paise(rupees * 100),
-                    tax_rate: rate.map_or(mb_core::TaxRate::ZERO, |bp| {
+                    tax: mb_core::TaxSpec::gst(rate.map_or(mb_core::TaxRate::ZERO, |bp| {
                         mb_core::TaxRate::from_basis_points(bp).unwrap_or(mb_core::TaxRate::ZERO)
-                    }),
-                    tax_treatment: mb_core::TaxTreatment::Exclusive,
+                    })),
                     tax_class_id: None,
                     hsn: Some("2106".to_owned()),
                     cost_price: None,

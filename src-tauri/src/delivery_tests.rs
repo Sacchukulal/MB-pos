@@ -48,8 +48,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
                 category_id: None,
                 name: "Masala Dosa".to_owned(),
                 unit_price: Money::from_paise(12_000),
-                tax_rate: mb_core::TaxRate::GST_5,
-                tax_treatment: mb_core::TaxTreatment::Exclusive,
+                tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
                 tax_class_id: None,
                 hsn: None,
                 cost_price: None,
@@ -203,7 +202,7 @@ fn a_delivery_is_taxed_on_its_own_rate_and_the_cod_cash_reconciles_against_the_h
         .expect("a delivery charge on a delivery bill");
     assert_eq!(charge.amount, Money::from_paise(4_000));
     assert_eq!(
-        charge.rate.basis_points(),
+        charge.tax.rate.basis_points(),
         500,
         "the delivery charge carries its OWN tax rate, not the food's"
     );

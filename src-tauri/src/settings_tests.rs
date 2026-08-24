@@ -46,9 +46,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 fn something_else(entry: &Entry, config: &ShopConfig) -> Value {
     match ((entry.read)(config), entry.kind) {
         (Value::Bool(b), _) => Value::Bool(!b),
-        (Value::Int(n), Kind::Int { min, max, .. }) => {
-            Value::Int(if n == min { max } else { min })
-        }
+        (Value::Int(n), Kind::Int { min, max, .. }) => Value::Int(if n == min { max } else { min }),
         (Value::Int(n), _) => Value::Int(n + 1),
         (Value::Money(m), Kind::Money { max_paise, .. }) => {
             if m.paise() == 0 {
@@ -86,7 +84,7 @@ fn a_shop_with_everything() -> ShopConfig {
     config.store.upi_id = "anna@upi".to_owned();
     config.store.upi_merchant_name = "Anna Kuteera".to_owned();
     config.store.upi_reference = "MB1".to_owned();
-    config.store.is_composition = true;
+    config.store.registration = "composition".to_owned();
     config.receipt.show.hsn = true;
     config.receipt.qr = mb_print::settings::QrMode::Dynamic;
     config.receipt.logo = mb_print::settings::LogoPosition::Top;
@@ -104,8 +102,7 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
     use mb_core::{
         AnyOrder, BusinessDay, Cart, Discount, DiscountEntry, DraftOrder, ItemSnapshot, Money,
         OpenOrder, OrderId, OrderType, Payment, PaymentMode, Qty, Settlement, StaffId, TableId,
-        TaxRate,
-        TaxTreatment, Timestamp,
+        TaxRate, Timestamp,
     };
 
     let mut cart = Cart::new();
@@ -114,7 +111,7 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
             mb_core::ItemId::new("itm_paneer"),
             "Paneer Butter Masala (Half) - Extra Spicy",
             Money::from_paise(24_000),
-            TaxRate::GST_5,
+            TaxRate::from_percent(5).expect("5%"),
         )
         .with_hsn("2106"),
         Qty::from_whole(2).expect("qty"),
@@ -129,7 +126,7 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
             Money::from_paise(22_000),
             TaxRate::ZERO,
         )
-        .with_treatment(TaxTreatment::NonGst)
+        .with_tax(mb_core::TaxSpec::liquor(TaxRate::ZERO))
         .with_hsn("2203"),
         Qty::from_whole(2).expect("qty"),
         None,
@@ -144,7 +141,7 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
     .charges_for(OrderType::DineIn);
 
     let bill = mb_core::compute_bill(
-        mb_core::BillInput::new(&cart)
+        mb_core::BillInput::new(&cart, mb_core::Registration::Regular)
             .with_charges(&charges)
             .with_bill_discount(DiscountEntry::new(
                 Discount::percent_bp(500).expect("a discount"),
@@ -189,7 +186,9 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
         .add(
             Payment::new(
                 PaymentMode::Upi,
-                bill.grand_total.sub(Money::from_paise(20_000)).expect("upi"),
+                bill.grand_total
+                    .sub(Money::from_paise(20_000))
+                    .expect("upi"),
             )
             .expect("upi"),
         )
@@ -240,7 +239,10 @@ fn render_bill(config: &ShopConfig, bill: &mb_core::Bill, order: &mb_core::AnyOr
     // **The laid-out lines, not the text.** `to_text` drops the style, so
     // comparing text would let "Total in bold" pass as a setting that changes
     // nothing — which is exactly the class of bug T1 exists to catch.
-    format!("{:?}", mb_print::layout::layout(&document).expect("lays out"))
+    format!(
+        "{:?}",
+        mb_print::layout::layout(&document).expect("lays out")
+    )
 }
 
 fn render_ticket(config: &ShopConfig) -> String {
@@ -276,7 +278,10 @@ fn render_ticket(config: &ShopConfig) -> String {
         },
     )
     .expect("a ticket");
-    format!("{:?}", mb_print::layout::layout(&document).expect("lays out"))
+    format!(
+        "{:?}",
+        mb_print::layout::layout(&document).expect("lays out")
+    )
 }
 
 /// **T1.** Drive every receipt and kitchen setting to a different value and
@@ -489,7 +494,7 @@ fn a_configuration_survives_the_database_being_emptied() {
     new.day.starts_at_minutes = 240;
     new.store.name = "Anna Kuteera".to_owned();
     new.store.state_code = "29".to_owned();
-    new.store.is_composition = true;
+    new.store.registration = "composition".to_owned();
     save(&app, &old, &new);
 
     let exported = crate::settings::to_map(&app.shop_config());
@@ -550,7 +555,10 @@ fn a_setting_stored_as_the_wrong_type_is_an_error_that_names_it() {
         })
         .expect_err("a text logo width was accepted");
     assert!(
-        error.detail.unwrap_or_default().contains("receipt.logo_width_pct")
+        error
+            .detail
+            .unwrap_or_default()
+            .contains("receipt.logo_width_pct")
             || error.message.contains("receipt.logo_width_pct"),
         "the failure must name the setting so somebody can fix it"
     );
@@ -659,7 +667,10 @@ fn the_printed_bill_uses_the_shops_own_settings() {
 
     let (bill, order) = a_representative_bill();
     let paper = render_bill(&config, &bill, &order);
-    assert!(paper.contains("Come back soon"), "the footer never reached the paper");
+    assert!(
+        paper.contains("Come back soon"),
+        "the footer never reached the paper"
+    );
     assert!(paper.contains("Anna Kuteera"));
 }
 
@@ -718,9 +729,11 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
     // What `App::print` would stamp on each kind of paper. A bill and a ticket
     // must not get the same answer, or the second setting is decoration.
     let day = crate::flows::today(crate::flows::now());
-    let doc = || mb_print::doc::Document::new(mb_print::paper::Paper::new(
-        mb_print::paper::PaperKind::Mm80,
-    ));
+    let doc = || {
+        mb_print::doc::Document::new(mb_print::paper::Paper::new(
+            mb_print::paper::PaperKind::Mm80,
+        ))
+    };
     let bill = mb_print::queue::Job::new(mb_print::queue::JobKind::Bill, "p", doc(), day);
     let ticket = mb_print::queue::Job::new(mb_print::queue::JobKind::Kitchen, "p", doc(), day);
 
@@ -798,7 +811,11 @@ fn adding_a_real_printer_takes_the_default_off_the_stand_in() {
 
     // The state every shop is in on its first day.
     let before = printers_on(&app).expect("the printers");
-    assert_eq!(before.printers.len(), 1, "the stand-in should be the only row");
+    assert_eq!(
+        before.printers.len(),
+        1,
+        "the stand-in should be the only row"
+    );
     assert!(before.printers[0].is_stand_in);
     assert!(before.printers[0].is_default, "and it holds the default");
 
@@ -892,9 +909,20 @@ fn a_shop_already_printing_nothing_fixes_itself_on_the_way_up() {
         "the shop opened still printing to the stand-in"
     );
     let view = printers_on(&app).expect("the printers");
-    assert!(view.printers.iter().find(|p| p.name == "TVS").expect("tvs").is_default);
     assert!(
-        !view.printers.iter().find(|p| p.is_stand_in).expect("stand-in").is_default,
+        view.printers
+            .iter()
+            .find(|p| p.name == "TVS")
+            .expect("tvs")
+            .is_default
+    );
+    assert!(
+        !view
+            .printers
+            .iter()
+            .find(|p| p.is_stand_in)
+            .expect("stand-in")
+            .is_default,
         "two printers claim the default"
     );
 }
@@ -912,7 +940,10 @@ fn a_brand_new_shop_keeps_its_stand_in() {
     let view = printers_on(&app).expect("the printers");
     assert_eq!(view.printers.len(), 1);
     assert!(view.printers[0].is_stand_in);
-    assert!(view.printers[0].is_default, "a new shop has no default at all");
+    assert!(
+        view.printers[0].is_default,
+        "a new shop has no default at all"
+    );
 }
 
 /// **A size an older build wrote still opens** — 2026-08-17.
@@ -936,10 +967,20 @@ fn a_size_saved_by_an_older_build_still_opens() {
         shop.db
             .transaction(|tx| {
                 let settings = Repos::new(tx).settings();
-                settings.set(OUTLET, "receipt.sections.items.scale", &"2".to_owned(),
-                    crate::flows::now(), None)?;
-                settings.set(OUTLET, "receipt.sections.store_name.scale", &"3".to_owned(),
-                    crate::flows::now(), None)
+                settings.set(
+                    OUTLET,
+                    "receipt.sections.items.scale",
+                    &"2".to_owned(),
+                    crate::flows::now(),
+                    None,
+                )?;
+                settings.set(
+                    OUTLET,
+                    "receipt.sections.store_name.scale",
+                    &"3".to_owned(),
+                    crate::flows::now(),
+                    None,
+                )
             })
             .map_err(|e| crate::words::from_db(&e))
     })
@@ -962,7 +1003,10 @@ fn a_size_saved_by_an_older_build_still_opens() {
         mb_print::Style::LADDER[7],
         "\"Large\" stopped being large"
     );
-    assert_eq!(config.receipt.sections.store_name.size, mb_print::Style::LADDER[9]);
+    assert_eq!(
+        config.receipt.sections.store_name.size,
+        mb_print::Style::LADDER[9]
+    );
     // And the text engine still gets the multiplier its hardware understands.
     assert_eq!(config.receipt.sections.items.scale(), 2);
     assert_eq!(config.receipt.sections.store_name.scale(), 3);
@@ -990,10 +1034,20 @@ fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
         shop.db
             .transaction(|tx| {
                 let settings = Repos::new(tx).settings();
-                settings.set(OUTLET, "receipt.sections.items.scale", &"46".to_owned(),
-                    crate::flows::now(), None)?;
-                settings.set(OUTLET, "receipt.sections.meta.scale", &"28".to_owned(),
-                    crate::flows::now(), None)
+                settings.set(
+                    OUTLET,
+                    "receipt.sections.items.scale",
+                    &"46".to_owned(),
+                    crate::flows::now(),
+                    None,
+                )?;
+                settings.set(
+                    OUTLET,
+                    "receipt.sections.meta.scale",
+                    &"28".to_owned(),
+                    crate::flows::now(),
+                    None,
+                )
             })
             .map_err(|e| crate::words::from_db(&e))
     })
@@ -1010,11 +1064,20 @@ fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
     // 46 was never on any list and snaps to the nearest rung; 28 was the
     // fourth entry of the nominal list and reads back as the fourth rung.
     assert!(mb_print::Style::LADDER.contains(&config.receipt.sections.items.size));
-    assert_eq!(config.receipt.sections.meta.size, mb_print::Style::LADDER[3]);
+    assert_eq!(
+        config.receipt.sections.meta.size,
+        mb_print::Style::LADDER[3]
+    );
     // Whatever it snapped to must be something the screen can show back, or the
     // dropdown would open on nothing.
-    for size in [config.receipt.sections.items.size, config.receipt.sections.meta.size] {
-        assert!(crate::settings::is_a_size(size), "{size} is not on the list");
+    for size in [
+        config.receipt.sections.items.size,
+        config.receipt.sections.meta.size,
+    ] {
+        assert!(
+            crate::settings::is_a_size(size),
+            "{size} is not on the list"
+        );
     }
 }
 
@@ -1042,7 +1105,10 @@ fn choosing_the_paper_width_relays_out_the_bill() {
     // at the body size — and it is more on the wider roll, which is the whole
     // claim this test makes.
     let wide_columns = wide.doc.columns;
-    assert!(wide_columns >= 40, "80 mm paper fits only {wide_columns} characters");
+    assert!(
+        wide_columns >= 40,
+        "80 mm paper fits only {wide_columns} characters"
+    );
 
     crate::settings::printers::set_paper_on(&app, 58).expect("two inch");
 
@@ -1058,7 +1124,10 @@ fn choosing_the_paper_width_relays_out_the_bill() {
     // And it is on the printer bills actually go to, so the paper a customer's
     // bill comes out on moved with it — not just the picture on the screen.
     assert_eq!(
-        crate::flows::default_printer(&app).expect("a printer").paper.kind,
+        crate::flows::default_printer(&app)
+            .expect("a printer")
+            .paper
+            .kind,
         mb_print::paper::PaperKind::Mm58
     );
 
@@ -1085,11 +1154,19 @@ fn a_second_printer_does_not_steal_the_default() {
     let app = a_shop(&scratch, "printers");
 
     save_printer_on(&app, a_printer("Counter", "EPSON TM-T82", "both")).expect("saves");
-    let after = save_printer_on(&app, a_printer("Kitchen", "TVSE RP3200 Lite", "kitchen"))
-        .expect("saves");
+    let after =
+        save_printer_on(&app, a_printer("Kitchen", "TVSE RP3200 Lite", "kitchen")).expect("saves");
 
-    let counter = after.printers.iter().find(|p| p.name == "Counter").expect("counter");
-    let kitchen = after.printers.iter().find(|p| p.name == "Kitchen").expect("kitchen");
+    let counter = after
+        .printers
+        .iter()
+        .find(|p| p.name == "Counter")
+        .expect("counter");
+    let kitchen = after
+        .printers
+        .iter()
+        .find(|p| p.name == "Kitchen")
+        .expect("kitchen");
     assert!(counter.is_default, "the second printer stole the bills");
     assert!(!kitchen.is_default);
 }
@@ -1102,9 +1179,15 @@ fn choosing_where_bills_print_moves_them_there() {
     let app = a_shop(&scratch, "printers");
 
     save_printer_on(&app, a_printer("Counter", "EPSON TM-T82", "both")).expect("saves");
-    let view = save_printer_on(&app, a_printer("Back office", "HP LaserJet", "both"))
-        .expect("saves");
-    let back = view.printers.iter().find(|p| p.name == "Back office").expect("it").id.clone();
+    let view =
+        save_printer_on(&app, a_printer("Back office", "HP LaserJet", "both")).expect("saves");
+    let back = view
+        .printers
+        .iter()
+        .find(|p| p.name == "Back office")
+        .expect("it")
+        .id
+        .clone();
 
     let after = set_default_printer_on(&app, back.clone()).expect("chooses");
     assert_eq!(
@@ -1112,7 +1195,14 @@ fn choosing_where_bills_print_moves_them_there() {
         1,
         "choosing one did not clear the other"
     );
-    assert!(after.printers.iter().find(|p| p.id == back).expect("it").is_default);
+    assert!(
+        after
+            .printers
+            .iter()
+            .find(|p| p.id == back)
+            .expect("it")
+            .is_default
+    );
     assert_eq!(
         crate::flows::default_printer(&app).expect("a printer").name,
         "Back office"

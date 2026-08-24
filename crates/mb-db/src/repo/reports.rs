@@ -144,11 +144,15 @@ pub struct Bucket {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaxBucket {
     pub rate_bp: i64,
-    pub treatment: String,
+    /// `gst`, `exempt`, `outside_gst` or `untaxed` — a rate means a different
+    /// thing in each, so the bucket carries the kind rather than the rate alone.
+    pub tax_kind: String,
     pub taxable: Money,
     pub cgst: Money,
     pub sgst: Money,
     pub igst: Money,
+    /// State VAT. Only ever non-zero on an `outside_gst` bucket.
+    pub vat: Money,
 }
 
 /// One HSN code, for the summary a GSTR-1 wants.
@@ -370,16 +374,17 @@ impl<'a> ReportsRepo<'a> {
     /// figures `compute_bill` produced — never recomputed here.
     pub fn tax_by_rate(&self, outlet: &str, period: Period) -> Result<Vec<TaxBucket>, DbError> {
         let mut stmt = self.tx.prepare(
-            "SELECT bl.rate_bp, bl.treatment,
+            "SELECT bl.rate_bp, bl.tax_kind,
                     COALESCE(SUM(bl.taxable), 0),
                     COALESCE(SUM(bl.cgst), 0),
                     COALESCE(SUM(bl.sgst), 0),
-                    COALESCE(SUM(bl.igst), 0)
+                    COALESCE(SUM(bl.igst), 0),
+                    COALESCE(SUM(bl.vat), 0)
                FROM orders o
                JOIN bill_lines bl ON bl.order_id = o.id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                 AND o.state = 'settled'
-           GROUP BY bl.rate_bp, bl.treatment
+           GROUP BY bl.rate_bp, bl.tax_kind
            ORDER BY bl.rate_bp",
         )?;
         let rows = stmt.query_map(
@@ -391,11 +396,12 @@ impl<'a> ReportsRepo<'a> {
             |row| {
                 Ok(TaxBucket {
                     rate_bp: row.get(0)?,
-                    treatment: row.get(1)?,
+                    tax_kind: row.get(1)?,
                     taxable: encode::money_from_sql(row.get(2)?),
                     cgst: encode::money_from_sql(row.get(3)?),
                     sgst: encode::money_from_sql(row.get(4)?),
                     igst: encode::money_from_sql(row.get(5)?),
+                    vat: encode::money_from_sql(row.get(6)?),
                 })
             },
         )?;

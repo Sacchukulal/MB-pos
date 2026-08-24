@@ -31,38 +31,90 @@
 // this after the screens exist, remove this line and fix what it hides.**
 #![allow(dead_code, reason = "P08's Rust half landed before its React half")]
 
+/// P30. **A whole trading day, and everything has to reconcile** — where two
+/// figures are computed by different code, they are asserted equal.
+#[cfg(test)]
+mod acceptance_tests;
 mod billing;
 /// P26. Suppliers, the paper, the supplier ledger and purchase orders — and
 /// **one rupee, one row** (D120).
 mod buying;
+/// P26 drives the buying commands in sequence: a delivery moves four ledgers
+/// at once, and the count has to survive a delivery arriving in the middle of
+/// it (D127).
+#[cfg(test)]
+mod buying_tests;
+mod config;
+mod corrections;
 /// P26. The physical stock count, which freezes the book and posts a delta
 /// rather than setting the balance (D127).
 mod counting;
-mod config;
-mod corrections;
+/// P22. A crash writes a report whether or not anybody agreed to send it
+/// (D95) — audit E8.
+mod crash;
 mod credit;
+/// P15's credit account is a sequence too: bill a regular, take money back,
+/// and the statement has to add up at every step.
+#[cfg(test)]
+mod credit_tests;
 /// P18. **Closing the day** — requirement 9 of the ten, and audit B15: the
 /// expected cash, the counted cash, the difference in words, and the lock.
 mod dayclose;
-mod floor;
-mod employment;
+/// P18's day close is a sequence a shop performs every night, and the lock it
+/// produces has to be real — so it is driven with the real commands.
+#[cfg(test)]
+mod dayclose_tests;
 /// P29. **Orders that leave on a bike**, and the cash a rider is carrying.
 mod delivery;
-/// P29. **Did the money actually arrive?** — the payment provider seam, the
-/// attempts ledger and the unconfirmed list.
-mod payments;
+/// P29 driven end to end: a rider's evening, and the cash that comes back.
+#[cfg(test)]
+mod delivery_tests;
+/// P29: T1 and T2 — every device absent, and every device present but not
+/// answering. The sale completes either way.
+#[cfg(test)]
+mod device_tests;
 /// P29. **The things a counter is plugged into** — and not one of them may
 /// ever stop a bill.
 mod devices;
+/// P22. The button that turns a phone call into a fix, and the manifest a
+/// person sees before it exists (D94) — audit E7.
+mod diagnostics;
+mod employment;
+/// P27.5. **A whole shop, so the look can be designed against a real screen.**
+/// Not a test of anything — a seeder, ignored by the suite (D55).
+/// P28 driven end to end: a payroll month with an advance, and the two things
+/// that must be refused (approving twice, correcting your own hours).
+#[cfg(test)]
+mod employment_tests;
+/// P16's cash position is the figure P18 leans on, so the sequence that
+/// produces it is driven with the real commands.
+#[cfg(test)]
+mod expense_tests;
+mod expenses;
 /// P30.5. **The first five minutes** — and the command that was missing:
 /// nothing in this product could create a shop.
 mod firstrun;
-mod expenses;
+mod floor;
+/// P14 moves an order between tables, merges two and splits one. Every one of
+/// those is a sequence on the money path that moves the kitchen ledger with it.
+#[cfg(test)]
+mod floor_tests;
+mod flows;
 /// P27. **Bills travelling between tills** â a settled bill is a FACT, and
 /// facts are copied rather than reconciled (D136).
 mod forwarding;
-mod flows;
 mod guard;
+/// P22. "Is this counter healthy?", with a fix on every unhealthy row (D100).
+mod health;
+/// P22's T7 and T8: break each thing in turn and read the bundle back out of
+/// a real zip.
+#[cfg(test)]
+mod health_tests;
+/// P30. The hygiene rules as tests — every allow says why, nothing unwraps on
+/// a user path, no deferred note is left in the tree, no secret is committed,
+/// and no source file is unreachable.
+#[cfg(test)]
+mod hygiene_tests;
 /// P25. **The stock book** — materials, recipes, wastage, the buy list and
 /// food cost. Every unit conversion and every sentence is made here, because a
 /// screen that divided a quantity by a pack size would be a second answer to
@@ -73,25 +125,6 @@ mod inventory;
 #[cfg(test)]
 mod inventory_tests;
 mod ipc;
-/// P31. **The shop's logo** — the half D37 left for a later session and no
-/// session took: picking a file, keeping the dots, and handing them to the
-/// bill. Also the folder picker, because they are the same missing thing.
-mod logo;
-/// P19. **The counter as a server** — D9: the phone talks to the till over the
-/// shop's own WiFi, and the cloud is never the road an order travels.
-mod lan;
-/// P21. **The licence** — one entitlement, decided in one place, and a gate
-/// that structurally cannot reach billing (D86).
-mod licensing;
-/// P21's T1 and T10. Five bills in five states of the licence, and every gated
-/// command called directly rather than hidden.
-#[cfg(test)]
-mod licence_tests;
-mod logging;
-mod menu;
-/// **Where a new row's id comes from** — one place, since 2026-08-22.
-mod newid;
-mod preview;
 /// P24. **The kitchen display** — a screen on the kitchen wall instead of a
 /// paper ticket, and the paper fallback that means the kitchen never goes
 /// blind.
@@ -100,126 +133,93 @@ mod kitchen;
 /// cancellation that cannot be waved away.
 #[cfg(test)]
 mod kitchen_tests;
-/// P22. **A secret cannot be in the log**, and this is the half a script
-/// enforces (D93). Audit E7 asks a shopkeeper to email us that file.
-mod redact;
-/// P22. A crash writes a report whether or not anybody agreed to send it
-/// (D95) — audit E8.
-mod crash;
-/// P22. The button that turns a phone call into a fix, and the manifest a
-/// person sees before it exists (D94) — audit E7.
-mod diagnostics;
-/// P22. "Is this counter healthy?", with a fix on every unhealthy row (D100).
-mod health;
-/// P22. **A shop must be able to go back** — audit E9, I1 and ANDROID-G2/G4.
-mod updates;
-/// P22. Setting a shop up — a checklist that READS the shop rather than a
-/// wizard that remembers a position (D102), and never in front of the till.
-mod setup;
+/// P19. **The counter as a server** — D9: the phone talks to the till over the
+/// shop's own WiFi, and the cloud is never the road an order travels.
+mod lan;
+/// P21's T1 and T10. Five bills in five states of the licence, and every gated
+/// command called directly rather than hidden.
+#[cfg(test)]
+mod licence_tests;
+/// P21. **The licence** — one entitlement, decided in one place, and a gate
+/// that structurally cannot reach billing (D86).
+mod licensing;
 /// P22's T5: drive everything that touches a secret, then read the log back.
 #[cfg(test)]
 mod log_tests;
-/// P22's T7 and T8: break each thing in turn and read the bundle back out of
-/// a real zip.
+mod logging;
+/// P31. **The shop's logo** — the half D37 left for a later session and no
+/// session took: picking a file, keeping the dots, and handing them to the
+/// bill. Also the folder picker, because they are the same missing thing.
+mod logo;
 #[cfg(test)]
-mod health_tests;
+mod look_demo;
+mod menu;
+/// P13's flows are sequences too — set a rate, watch every item on it move;
+/// export, edit a cell, import back. Same reasoning as `signin_tests`.
+#[cfg(test)]
+mod menu_tests;
+/// **Where a new row's id comes from** — one place, since 2026-08-22.
+mod newid;
+/// P20 drives the intent applier against a real database: the counter is the
+/// authority, so a test that stubs the counter is testing nothing.
+#[cfg(test)]
+mod order_tests;
 mod orders;
-mod push;
-/// P18. **One shape for every report**, so one screen renders all of them and
-/// adding a report never touches a `.tsx` file.
-mod reports;
-mod search;
-mod session;
-/// P26, scope 10.13. Sharing a summary through the operating system, with the
-/// limit printed on the screen (D134). It does not need a channel; it needs an
-/// honest one.
-mod share;
-/// P17. **The one table that knows what a setting is**, and the load / save /
-/// reset / export / import that fall out of it.
-mod settings;
-/// P11's flows are sequences, and a sequence that can only be checked by
-/// clicking is a sequence that gets checked once. See the file's own note.
+/// P29 driven end to end: the unconfirmed list, a declined card, and the three
+/// places a tip must never appear.
 #[cfg(test)]
-mod signin_tests;
+mod payment_tests;
+/// P29. **Did the money actually arrive?** — the payment provider seam, the
+/// attempts ledger and the unconfirmed list.
+mod payments;
 /// B2 and B7 — the two of P10's five budgets that can be measured without a
 /// screen. B1, B3 and B8 are re-assigned to P22; see the file, and
 /// PERFORMANCE.md §4.
 #[cfg(test)]
 mod perf_tests;
-/// P16's cash position is the figure P18 leans on, so the sequence that
-/// produces it is driven with the real commands.
-#[cfg(test)]
-mod expense_tests;
-/// P15's credit account is a sequence too: bill a regular, take money back,
-/// and the statement has to add up at every step.
-#[cfg(test)]
-mod credit_tests;
-/// P14 moves an order between tables, merges two and splits one. Every one of
-/// those is a sequence on the money path that moves the kitchen ledger with it.
-#[cfg(test)]
-mod floor_tests;
-/// P13's flows are sequences too — set a rate, watch every item on it move;
-/// export, edit a cell, import back. Same reasoning as `signin_tests`.
-#[cfg(test)]
-mod menu_tests;
+mod preview;
+mod push;
+/// P22. **A secret cannot be in the log**, and this is the half a script
+/// enforces (D93). Audit E7 asks a shopkeeper to email us that file.
+mod redact;
+/// P18. **One shape for every report**, so one screen renders all of them and
+/// adding a report never touches a `.tsx` file.
+mod reports;
+mod search;
+mod session;
+/// P17. **The one table that knows what a setting is**, and the load / save /
+/// reset / export / import that fall out of it.
+mod settings;
 /// P17's T1 renders the paper twice for every setting on it, and its storage
 /// tests need a real `settings` table to count rows in.
 #[cfg(test)]
 mod settings_tests;
-/// P18's day close is a sequence a shop performs every night, and the lock it
-/// produces has to be real — so it is driven with the real commands.
+/// P22. Setting a shop up — a checklist that READS the shop rather than a
+/// wizard that remembers a position (D102), and never in front of the till.
+mod setup;
+/// P26, scope 10.13. Sharing a summary through the operating system, with the
+/// limit printed on the screen (D134). It does not need a channel; it needs an
+/// honest one.
+mod share;
+/// P11's flows are sequences, and a sequence that can only be checked by
+/// clicking is a sequence that gets checked once. See the file's own note.
 #[cfg(test)]
-mod dayclose_tests;
-/// P26 drives the buying commands in sequence: a delivery moves four ledgers
-/// at once, and the count has to survive a delivery arriving in the middle of
-/// it (D127).
-#[cfg(test)]
-mod buying_tests;
-/// P20 drives the intent applier against a real database: the counter is the
-/// authority, so a test that stubs the counter is testing nothing.
-#[cfg(test)]
-mod order_tests;
-/// P27.5. **A whole shop, so the look can be designed against a real screen.**
-/// Not a test of anything — a seeder, ignored by the suite (D55).
-/// P28 driven end to end: a payroll month with an advance, and the two things
-/// that must be refused (approving twice, correcting your own hours).
-#[cfg(test)]
-mod employment_tests;
-/// P29 driven end to end: a rider's evening, and the cash that comes back.
-#[cfg(test)]
-mod delivery_tests;
-/// P29 driven end to end: the unconfirmed list, a declined card, and the three
-/// places a tip must never appear.
-#[cfg(test)]
-mod payment_tests;
-/// P29: T1 and T2 — every device absent, and every device present but not
-/// answering. The sale completes either way.
-#[cfg(test)]
-mod device_tests;
-/// P30. The hygiene rules as tests — every allow says why, nothing unwraps on
-/// a user path, no deferred note is left in the tree, no secret is committed,
-/// and no source file is unreachable.
-#[cfg(test)]
-mod hygiene_tests;
-/// P30. **A whole trading day, and everything has to reconcile** — where two
-/// figures are computed by different code, they are asserted equal.
-#[cfg(test)]
-mod acceptance_tests;
-#[cfg(test)]
-mod look_demo;
+mod signin_tests;
 mod startup;
 mod state;
-/// P31. **Which typeface a bill and a kitchen ticket print in** — the file
-/// system and the log half of `mb_print::font::Typefaces`.
-mod typefaces;
-/// P27. **The tills** â who this machine is, who the master is, and the
-/// series it issues under (D135, D139).
-mod terminals;
 /// P27's eleven. Two tills with two databases, hammered concurrently, split for
 /// half an hour and healed — because what is only provable here is what happens
 /// to a shop's MONEY when two machines write bills at once.
 #[cfg(test)]
 mod terminal_tests;
+/// P27. **The tills** â who this machine is, who the master is, and the
+/// series it issues under (D135, D139).
+mod terminals;
+/// P31. **Which typeface a bill and a kitchen ticket print in** — the file
+/// system and the log half of `mb_print::font::Typefaces`.
+mod typefaces;
+/// P22. **A shop must be able to go back** — audit E9, I1 and ANDROID-G2/G4.
+mod updates;
 mod window;
 mod words;
 

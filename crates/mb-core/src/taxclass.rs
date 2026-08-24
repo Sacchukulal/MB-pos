@@ -5,20 +5,15 @@
 //! > anything as outside GST. *"It could not bill a bar, an AC/non-AC outlet or
 //! > anyone selling packaged goods."*
 //!
-//! P00 built the engine — [`TaxRate`], [`TaxTreatment`] and the rate-wise
-//! summary. What was missing was a way for an **owner** to reach it: nobody
-//! sets up four hundred items by choosing basis points each time. They pick
-//! *"Restaurant food 5%"* once and put it on a category.
+//! P00 built the engine — [`TaxRate`], [`TaxSpec`] and the rate-wise summary.
+//! What was missing was a way for an **owner** to reach it: nobody sets up four
+//! hundred items by choosing basis points each time. They pick *"Restaurant food
+//! 5%"* once and put it on a category.
 //!
-//! # Why a class lives here and never reaches a bill
+//! # Why a class never reaches a bill
 //!
-//! [`TaxClass::for_order_type`] is a **rule** — some states tax the same dish
-//! differently to take away — and rules live in mb-core, not in SQL and not in
-//! React (R8, D1).
-//!
-//! But the class itself is never on a bill. What reaches a bill is
-//! [`ItemSnapshot`](crate::item::ItemSnapshot), carrying the **resolved** rate
-//! and treatment, frozen at the moment the line was added:
+//! What reaches a bill is [`ItemSnapshot`](crate::item::ItemSnapshot), carrying
+//! the **resolved** [`TaxSpec`], frozen at the moment the line was added:
 //!
 //! > Crown jewel 4: *"frozen item snapshots on every order; old bills never
 //! > change when you change a price."*
@@ -26,12 +21,26 @@
 //! So editing a class cannot rewrite history — and, the subtler case, cannot
 //! change the lines already on an order that is still open. Both are true by
 //! construction rather than by care, and P13's T2 and T3 keep them that way.
+//!
+//! # P33 — what changed here
+//!
+//! **The per-order-type rate override is gone.** `by_order_type`,
+//! `OrderTypeRate`, `with_override` and `for_order_type` were modelled here,
+//! given a database table, written by the repository — and **read by no caller
+//! anywhere in the product** (audit §3.5). The belief that justified them, that
+//! *"some states tax the same dish differently to take away"*, is not current
+//! law either: parcel from a restaurant is restaurant service at the same rate
+//! as dine-in. A rule that cannot fire, resting on a fact that is not true, is
+//! deleted rather than wired up.
+//!
+//! **A class now carries a [`TaxSpec`]**, so it can say the thing the old model
+//! could not: *outside GST, at 20% state VAT, priced tax-in*. That sentence is
+//! what a bar needs and what the old four-valued treatment could not express.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::ItemId;
-use crate::item::OrderType;
-use crate::tax::{TaxRate, TaxTreatment};
+use crate::tax::{TaxKind, TaxRate, TaxSpec};
 
 /// Identifies a tax class. Text, like every other id (D13).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -49,119 +58,81 @@ impl TaxClassId {
     }
 }
 
-/// A named rate and treatment, with the overrides a state's rules need.
+/// A named tax, as an owner edits it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaxClass {
     pub id: TaxClassId,
     /// What an owner picks from a list: "Restaurant food 5%".
     pub name: String,
-    pub rate: TaxRate,
-    pub treatment: TaxTreatment,
-    /// **Scope 6.8's half that belongs to the menu.** Some states tax the same
-    /// dish differently to take away, so this is the RATE by order type; P13b
-    /// owns the PRICE by order type, and reads this rather than duplicating it.
-    ///
-    /// A `Vec` rather than a map: it is never more than four entries, it has to
-    /// round-trip through an internally-tagged enum, and **D20** says nothing
-    /// reachable from an order may serialise with a non-string map key.
-    pub by_order_type: Vec<OrderTypeRate>,
+    /// The kind, the rate and the pricing basis, together.
+    pub tax: TaxSpec,
     /// Retired rather than deleted — old bills point at this id, and a class an
     /// item still uses cannot go.
     pub is_active: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OrderTypeRate {
-    pub order_type: OrderType,
-    pub rate: TaxRate,
-    pub treatment: TaxTreatment,
-}
-
 impl TaxClass {
     #[must_use]
-    pub fn new(
-        id: TaxClassId,
-        name: impl Into<String>,
-        rate: TaxRate,
-        treatment: TaxTreatment,
-    ) -> Self {
+    pub fn new(id: TaxClassId, name: impl Into<String>, tax: TaxSpec) -> Self {
         TaxClass {
             id,
             name: name.into(),
-            rate,
-            treatment,
-            by_order_type: Vec::new(),
+            tax,
             is_active: true,
         }
     }
 
+    /// **A class that says two contradictory things is refused, not rounded
+    /// off.** An exempt class carrying 5% has had two different answers typed
+    /// into it, and the owner is the only one who knows which to keep (D7, D15).
     #[must_use]
-    pub fn with_override(
-        mut self,
-        order_type: OrderType,
-        rate: TaxRate,
-        treatment: TaxTreatment,
-    ) -> Self {
-        self.by_order_type.retain(|o| o.order_type != order_type);
-        self.by_order_type.push(OrderTypeRate {
-            order_type,
-            rate,
-            treatment,
-        });
-        self
+    pub fn is_coherent(&self) -> bool {
+        self.tax.is_coherent()
     }
 
-    /// **The rule.** What this class means for this kind of order.
+    /// Is this the vocabulary for alcohol? Asked by the settings screen, because
+    /// a composition dealer may not sell it at all.
     #[must_use]
-    pub fn for_order_type(&self, kind: OrderType) -> (TaxRate, TaxTreatment) {
-        self.by_order_type
-            .iter()
-            .find(|o| o.order_type == kind)
-            .map_or((self.rate, self.treatment), |o| (o.rate, o.treatment))
+    pub fn is_alcohol(&self) -> bool {
+        self.tax.kind == TaxKind::OutsideGst
     }
 }
 
 /// The five a new shop starts with.
 ///
-/// Seeded, like the permissions (P11) and the correction reasons (P12) before
-/// them: a starting point a shop can add to, not a list in the source that a
-/// support call has to change.
+/// A starting point a shop adds to, not a list a support call has to change.
+/// Migration 0004 seeds the same five, so the two must agree.
 ///
-/// **"Liquor — outside GST" is the one that matters commercially.** State
-/// excise is not GST at all, and v1 having no way to say so is why a bar could
-/// not use it.
+/// The 12% slab was abolished on 22 September 2025 and is not seeded. Liquor
+/// carries a state VAT rate the shop sets; 0 means "not told yet".
 #[must_use]
 pub fn starting_classes() -> Vec<TaxClass> {
+    let pc = |percent: u32| TaxRate::from_percent(percent).unwrap_or(TaxRate::ZERO);
     vec![
         TaxClass::new(
             TaxClassId::new("tax_food_5"),
             "Restaurant food 5%",
-            TaxRate::GST_5,
-            TaxTreatment::Exclusive,
+            TaxSpec::gst(pc(5)),
         ),
         TaxClass::new(
-            TaxClassId::new("tax_packaged_12"),
-            "Packaged goods 12%",
-            TaxRate::GST_12,
-            TaxTreatment::Exclusive,
+            TaxClassId::new("tax_goods_5"),
+            "Packaged goods 5%",
+            TaxSpec::gst(pc(5)),
         ),
         TaxClass::new(
             TaxClassId::new("tax_packaged_18"),
             "Packaged goods 18%",
-            TaxRate::GST_18,
-            TaxTreatment::Exclusive,
+            TaxSpec::gst(pc(18)),
         ),
         TaxClass::new(
             TaxClassId::new("tax_liquor"),
-            "Liquor — outside GST",
-            TaxRate::ZERO,
-            TaxTreatment::NonGst,
+            "Liquor — state VAT",
+            TaxSpec::liquor(TaxRate::ZERO),
         ),
         TaxClass::new(
             TaxClassId::new("tax_exempt"),
             "Exempt",
-            TaxRate::ZERO,
-            TaxTreatment::Exempt,
+            TaxSpec::exempt(),
         ),
     ]
 }
@@ -183,72 +154,31 @@ pub struct MenuEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tax::PriceBasis;
+
+    fn pc(percent: u32) -> TaxRate {
+        TaxRate::from_percent(percent).expect("a real rate")
+    }
 
     #[test]
-    fn a_class_answers_with_its_own_rate_by_default() {
+    fn a_class_carries_one_answer_about_tax() {
         let food = TaxClass::new(
             TaxClassId::new("tax_food_5"),
             "Restaurant food 5%",
-            TaxRate::GST_5,
-            TaxTreatment::Exclusive,
+            TaxSpec::gst(pc(5)),
         );
-        for kind in [
-            OrderType::DineIn,
-            OrderType::Parcel,
-            OrderType::SelfService,
-            OrderType::Delivery,
-        ] {
-            assert_eq!(
-                food.for_order_type(kind),
-                (TaxRate::GST_5, TaxTreatment::Exclusive)
-            );
-        }
+        assert_eq!(food.tax.kind, TaxKind::Gst);
+        assert_eq!(food.tax.rate, pc(5));
+        assert_eq!(food.tax.basis, PriceBasis::Exclusive);
+        assert!(food.is_coherent());
+        assert!(!food.is_alcohol());
     }
 
-    #[test]
-    fn an_override_applies_to_its_own_order_type_and_no_other() {
-        // The real case: some states tax the same dish differently to take
-        // away, which is scope 6.8's tax half.
-        let food = TaxClass::new(
-            TaxClassId::new("tax_food_5"),
-            "Restaurant food 5%",
-            TaxRate::GST_5,
-            TaxTreatment::Exclusive,
-        )
-        .with_override(OrderType::Parcel, TaxRate::GST_18, TaxTreatment::Exclusive);
-
-        assert_eq!(
-            food.for_order_type(OrderType::Parcel),
-            (TaxRate::GST_18, TaxTreatment::Exclusive)
-        );
-        assert_eq!(
-            food.for_order_type(OrderType::DineIn),
-            (TaxRate::GST_5, TaxTreatment::Exclusive)
-        );
-    }
-
-    #[test]
-    fn setting_an_override_twice_replaces_it() {
-        let class = TaxClass::new(
-            TaxClassId::new("t"),
-            "T",
-            TaxRate::GST_5,
-            TaxTreatment::Exclusive,
-        )
-        .with_override(OrderType::Parcel, TaxRate::GST_12, TaxTreatment::Exclusive)
-        .with_override(OrderType::Parcel, TaxRate::GST_18, TaxTreatment::Exclusive);
-
-        assert_eq!(class.by_order_type.len(), 1, "the override was duplicated");
-        assert_eq!(
-            class.for_order_type(OrderType::Parcel).0,
-            TaxRate::GST_18
-        );
-    }
-
+    /// **The commercial test.** A shop starts able to describe food, packaged
+    /// goods, something outside GST entirely, and a nil-rated supply. v1 could
+    /// express exactly one of these.
     #[test]
     fn a_shop_starts_with_enough_to_bill_a_bar() {
-        // The commercial test: food, packaged goods and something outside GST
-        // entirely. v1 could express exactly one of these.
         let classes = starting_classes();
         assert_eq!(classes.len(), 5);
 
@@ -256,30 +186,70 @@ mod tests {
             .iter()
             .find(|c| c.id == TaxClassId::new("tax_liquor"))
             .expect("a shop must be able to sell liquor");
-        assert_eq!(liquor.treatment, TaxTreatment::NonGst);
+        assert!(liquor.is_alcohol());
+        assert_eq!(liquor.tax.kind, TaxKind::OutsideGst);
+        assert_eq!(liquor.tax.basis, PriceBasis::Inclusive, "a bar quotes the price paid");
+        assert_eq!(liquor.tax.kind, TaxKind::OutsideGst);
 
         let exempt = classes
             .iter()
-            .find(|c| c.treatment == TaxTreatment::Exempt)
+            .find(|c| c.tax.kind == TaxKind::Exempt)
             .expect("exempt exists");
-        // Exempt and non-GST are DIFFERENT things and a return treats them
+        // Exempt and outside-GST are DIFFERENT things and a return treats them
         // differently: exempt is a nil-rated supply, liquor is not a supply
         // under GST at all.
-        assert_ne!(exempt.treatment, liquor.treatment);
+        assert_ne!(exempt.tax.kind, liquor.tax.kind);
+    }
 
-        let rates: Vec<u32> = classes.iter().map(|c| c.rate.basis_points()).collect();
-        assert!(rates.contains(&500) && rates.contains(&1_200) && rates.contains(&1_800));
+    /// No abolished slab is seeded. 12% and 28% ended on 22 September 2025.
+    #[test]
+    fn no_seeded_class_uses_an_abolished_slab() {
+        for class in starting_classes() {
+            let bp = class.tax.rate.basis_points();
+            assert!(bp != 1_200 && bp != 2_800, "{} seeds {bp}bp", class.name);
+        }
+    }
+
+    /// Every seed must make sense on its own terms — no rate on a kind that
+    /// cannot carry one.
+    #[test]
+    fn every_seeded_class_is_coherent() {
+        for class in starting_classes() {
+            assert!(class.is_coherent(), "{} contradicts itself", class.name);
+        }
+    }
+
+    /// Liquor is seeded with no rate: VAT is set by the state, so the shop
+    /// must say. The name has to make that obvious.
+    #[test]
+    fn the_liquor_seed_asks_the_shop_for_its_vat_rate() {
+        let liquor = starting_classes()
+            .into_iter()
+            .find(|c| c.is_alcohol())
+            .expect("liquor exists");
+        assert!(liquor.tax.rate.is_zero());
+        assert!(liquor.name.contains("VAT"), "{}", liquor.name);
+    }
+
+    #[test]
+    fn a_class_that_contradicts_itself_is_not_coherent() {
+        let wrong = TaxClass::new(
+            TaxClassId::new("tax_bad"),
+            "Exempt but five per cent",
+            TaxSpec { kind: TaxKind::Exempt, rate: pc(5), basis: PriceBasis::Exclusive },
+        );
+        assert!(!wrong.is_coherent());
     }
 
     #[test]
     fn a_class_round_trips_through_serde() {
         // D20: nothing reachable from an order may serialise with a non-string
-        // map key, which is why the overrides are a Vec.
-        let class = starting_classes()
-            .into_iter()
-            .next()
-            .expect("at least one")
-            .with_override(OrderType::Delivery, TaxRate::GST_18, TaxTreatment::Inclusive);
+        // map key.
+        let class = TaxClass::new(
+            TaxClassId::new("tax_liquor"),
+            "Liquor — state VAT",
+            TaxSpec::liquor(pc(20)),
+        );
         let json = serde_json::to_string(&class).expect("serialises");
         let back: TaxClass = serde_json::from_str(&json).expect("round trips");
         assert_eq!(back, class);

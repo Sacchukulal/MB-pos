@@ -314,7 +314,9 @@ pub fn buying_on(app: &App, supplier: Option<String>) -> UiResult<BuyingView> {
     let day = today(at);
     let from = BusinessDay::from_days_since_epoch(day.days_since_epoch() - 30);
 
-    let claims = !app.shop_config().store.is_composition;
+    // Only a regular taxpayer can take the credit back.
+    let registration = app.shop_config().store.registration();
+    let claims = registration.charges_gst();
 
     app.with_shop(|shop| {
         shop.db
@@ -408,14 +410,22 @@ pub fn buying_on(app: &App, supplier: Option<String>) -> UiResult<BuyingView> {
                     overdue: MoneyView::from(overdue),
                     bought: MoneyView::from(bought),
                     claims_input_tax: claims,
-                    tax_note: if claims {
-                        "GST on what you buy can be claimed back, so it is not part of your \
-                         food cost."
-                            .to_owned()
-                    } else {
-                        "You bill under the 5% scheme, so purchase GST is a cost and not a \
-                         credit. It is already inside your food cost."
-                            .to_owned()
+                    tax_note: match registration {
+                        mb_core::Registration::Regular => {
+                            "GST on what you buy can be claimed back, so it is not part of \
+                             your food cost."
+                                .to_owned()
+                        }
+                        mb_core::Registration::Composition => {
+                            "You bill under the 5% scheme, so purchase GST is a cost and not \
+                             a credit. It is already inside your food cost."
+                                .to_owned()
+                        }
+                        mb_core::Registration::Unregistered => {
+                            "You are not registered for GST, so purchase GST is a cost and \
+                             not a credit. It is already inside your food cost."
+                                .to_owned()
+                        }
                     },
                     attention,
                     may_manage_suppliers: who.must(Permission::SuppliersManage).is_ok(),
@@ -607,7 +617,8 @@ pub fn save_purchase_on(app: &App, edit: PurchaseEdit) -> UiResult<BuyingView> {
     crate::licensing::gate(app, Feature::Inventory)?;
     let at = now();
     let day = today(at);
-    let claims = !app.shop_config().store.is_composition;
+    // Only a regular taxpayer can take the credit back.
+    let claims = app.shop_config().store.registration().charges_gst();
 
     if edit.supplier_id.trim().is_empty() {
         return Err(UiError::new("purchase.supplier", "Say who this came from."));

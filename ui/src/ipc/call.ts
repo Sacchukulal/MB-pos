@@ -330,8 +330,16 @@ export interface Commands {
     args: { id: string; name: string; isActive: boolean };
     returns: CategoryView[];
   };
+  // The kind and the basis are the machine values Rust sent, never words read
+  // back off the screen (P33 §5.1).
   save_tax_class: {
-    args: { id: string; name: string; rate: string; treatment: string };
+    args: {
+      id: string;
+      name: string;
+      rate: string;
+      kind: TaxClassView['kind'];
+      basis: TaxClassView['basis'];
+    };
     returns: string;
   };
   change_menu_prices: {

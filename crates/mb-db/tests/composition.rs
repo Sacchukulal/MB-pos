@@ -403,7 +403,7 @@ fn the_import_does_what_the_dry_run_said() {
         .find(|i| i.name == "Filter Coffee")
         .expect("the new item is not there");
     assert_eq!(coffee.unit_price, Money::from_paise(3_000));
-    assert_eq!(coffee.tax_rate, mb_core::TaxRate::GST_5);
+    assert_eq!(coffee.tax.rate, mb_core::TaxRate::from_percent(5).expect("5%"));
 
     // The dosa was UPDATED, not duplicated.
     let dosas: Vec<_> = items.iter().filter(|i| i.name == "Masala Dosa").collect();

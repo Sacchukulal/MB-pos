@@ -24,8 +24,9 @@ mod common;
 use common::Scratch;
 use common::shop::{self, OUTLET, TERMINAL};
 use mb_core::{
+    Registration,
     BillInput, BusinessDay, Cart, DayRule, ItemSnapshot, Money, OrderId, OrderType, Payment,
-    PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TaxRate, TaxTreatment,
+    PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TaxRate, TaxSpec,
     Timestamp, UtcOffset, compute_bill,
 };
 use mb_db::repo::reports::{Period, SalesBy};
@@ -40,8 +41,7 @@ fn dosa() -> ItemSnapshot {
         item_id: mb_core::ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),
-        tax_rate: TaxRate::GST_5,
-        tax_treatment: TaxTreatment::Exclusive,
+        tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
         hsn: Some("2106".to_owned()),
         category_id: None,
         station: None,
@@ -57,8 +57,7 @@ fn water() -> ItemSnapshot {
         item_id: mb_core::ItemId::new("itm_water"),
         name: "Water".to_owned(),
         unit_price: Money::from_paise(2_000),
-        tax_rate: TaxRate::ZERO,
-        tax_treatment: TaxTreatment::NonGst,
+        tax: TaxSpec::liquor(TaxRate::ZERO),
         hsn: Some("2201".to_owned()),
         category_id: None,
         station: None,
@@ -92,7 +91,7 @@ fn settle_on(
     }
 
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_order_type(OrderType::Parcel)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_rounding(RoundingMode::NearestRupee),
@@ -245,8 +244,8 @@ fn the_rate_wise_tax_report_equals_what_the_bills_printed() {
             n,
             1,
         );
-        printed_cgst = printed_cgst.add(order.bill.total_tax.cgst).expect("in range");
-        printed_sgst = printed_sgst.add(order.bill.total_tax.sgst).expect("in range");
+        printed_cgst = printed_cgst.add(order.bill.total_gst.central).expect("in range");
+        printed_sgst = printed_sgst.add(order.bill.total_gst.state).expect("in range");
         for row in order.bill.summary.rows() {
             printed_taxable = printed_taxable.add(row.taxable).expect("in range");
         }
@@ -270,8 +269,13 @@ fn the_rate_wise_tax_report_equals_what_the_bills_printed() {
 
         // The non-GST line is reported and is NOT inside a GST total — scope
         // 2.3, and the line that makes this product usable by a bar.
-        let non_gst = rates.iter().find(|r| r.treatment == "non_gst");
+        let non_gst = rates.iter().find(|r| r.tax_kind == "outside_gst");
         assert!(non_gst.is_some(), "the non-GST line is missing from the tax report");
+        // And VAT never lands in a GST bucket.
+        assert!(
+            rates.iter().all(|r| r.tax_kind == "outside_gst" || r.vat.is_zero()),
+            "VAT leaked into a GST bucket"
+        );
         assert!(
             non_gst.is_some_and(|r| r.cgst.is_zero() && r.sgst.is_zero()),
             "a non-GST line was given GST"

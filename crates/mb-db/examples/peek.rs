@@ -61,8 +61,7 @@ fn main() {
             // P17. The two places a setting is kept, and reading them back is
             // the only proof that the settings screen did anything — the
             // screen saying "Saved" is the thing being tested.
-            "SELECT name, phone, gstin, fssai, state_code, upi_id, upi_reference,
-                    is_composition, default_place_of_supply
+            "SELECT name, phone, gstin, fssai, state_code, upi_id, upi_reference, registration
                FROM store_profile",
             "SELECT key, value, value_type, updated_by FROM settings ORDER BY key",
             "SELECT kind, terminal_id, prefix, pad_width, reset_daily, start, last_issued

@@ -19,7 +19,8 @@
 
 use mb_auth::Permission;
 use mb_core::{BusinessDay, Money};
-use mb_db::repo::reports::{Period, SalesBy};
+use mb_db::repo::reports::{Period, SalesBy, TaxBucket};
+use mb_db::repo::settings::StoreProfile;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -96,6 +97,8 @@ pub enum Kind {
     Sales(SalesBy),
     TaxByRate,
     TaxByHsn,
+    /// The GST offline tool's B2CS sheet — counter sales, rate-wise.
+    Gstr1B2cs,
     Control,
     MenuEngineering,
     StoppedSelling,
@@ -149,45 +152,166 @@ pub enum SpeedBy {
 
 /// **The list, and it is the screen.**
 pub const CATALOGUE: &[Entry] = &[
-    Entry { id: "sales_day", title: "Sales by day", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Day) },
-    Entry { id: "sales_hour", title: "Sales by hour — your peak", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Hour) },
-    Entry { id: "sales_type", title: "Sales by order type", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::OrderType) },
-    Entry { id: "sales_mode", title: "Sales by payment mode", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::PaymentMode) },
-    Entry { id: "sales_cashier", title: "Sales by cashier", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Cashier) },
-    Entry { id: "sales_section", title: "Sales by section", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Section) },
+    Entry {
+        id: "sales_day",
+        title: "Sales by day",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Day),
+    },
+    Entry {
+        id: "sales_hour",
+        title: "Sales by hour — your peak",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Hour),
+    },
+    Entry {
+        id: "sales_type",
+        title: "Sales by order type",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::OrderType),
+    },
+    Entry {
+        id: "sales_mode",
+        title: "Sales by payment mode",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::PaymentMode),
+    },
+    Entry {
+        id: "sales_cashier",
+        title: "Sales by cashier",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Cashier),
+    },
+    Entry {
+        id: "sales_section",
+        title: "Sales by section",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Section),
+    },
     // P27, scope 11.1. One entry and one column, which is the whole of "a
     // terminal dimension" â the catalogue is data (P18) and no .tsx changes.
-    Entry { id: "sales_terminal", title: "Sales by till", group: "Sales", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Terminal) },
-    Entry { id: "items", title: "Item sales", group: "Items", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Item) },
-    Entry { id: "categories", title: "Category sales", group: "Items", needs: Permission::ReportsView, kind: Kind::Sales(SalesBy::Category) },
-    Entry { id: "stopped", title: "Items that stopped selling", group: "Items", needs: Permission::ReportsView, kind: Kind::StoppedSelling },
+    Entry {
+        id: "sales_terminal",
+        title: "Sales by till",
+        group: "Sales",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Terminal),
+    },
+    Entry {
+        id: "items",
+        title: "Item sales",
+        group: "Items",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Item),
+    },
+    Entry {
+        id: "categories",
+        title: "Category sales",
+        group: "Items",
+        needs: Permission::ReportsView,
+        kind: Kind::Sales(SalesBy::Category),
+    },
+    Entry {
+        id: "stopped",
+        title: "Items that stopped selling",
+        group: "Items",
+        needs: Permission::ReportsView,
+        kind: Kind::StoppedSelling,
+    },
     // Cost and margin are behind `reports.view` too, but the MENU screen keeps
     // cost behind the same permission (P13) — so this is consistent rather
     // than a new rule.
-    Entry { id: "margin", title: "Menu engineering — volume against margin", group: "Items", needs: Permission::ReportsView, kind: Kind::MenuEngineering },
-    Entry { id: "tax_rate", title: "Tax, rate-wise", group: "Tax", needs: Permission::ReportsView, kind: Kind::TaxByRate },
-    Entry { id: "tax_hsn", title: "Tax, HSN-wise", group: "Tax", needs: Permission::ReportsView, kind: Kind::TaxByHsn },
+    Entry {
+        id: "margin",
+        title: "Menu engineering — volume against margin",
+        group: "Items",
+        needs: Permission::ReportsView,
+        kind: Kind::MenuEngineering,
+    },
+    Entry {
+        id: "tax_rate",
+        title: "Tax, rate-wise",
+        group: "Tax",
+        needs: Permission::ReportsView,
+        kind: Kind::TaxByRate,
+    },
+    Entry {
+        id: "tax_hsn",
+        title: "Tax, HSN-wise",
+        group: "Tax",
+        needs: Permission::ReportsView,
+        kind: Kind::TaxByHsn,
+    },
+    Entry {
+        id: "gstr1_b2cs",
+        title: "GSTR-1 (B2CS) — for the GST offline tool",
+        group: "Tax",
+        needs: Permission::ReportsView,
+        kind: Kind::Gstr1B2cs,
+    },
     // **Beside the other two, and that is not cosmetic.** The report list
     // groups by consecutive runs of `group`, so an entry added at the end with
     // an existing group name draws a SECOND heading with the same word on it.
     // Found by looking at the list.
-    Entry { id: "input_credit", title: "Input tax credit on purchases", group: "Tax", needs: Permission::ReportsView, kind: Kind::InputCredit },
-    Entry { id: "control", title: "Voids, discounts, refunds and reprints", group: "Control", needs: Permission::AuditView, kind: Kind::Control },
+    Entry {
+        id: "input_credit",
+        title: "Input tax credit on purchases",
+        group: "Tax",
+        needs: Permission::ReportsView,
+        kind: Kind::InputCredit,
+    },
+    Entry {
+        id: "control",
+        title: "Voids, discounts, refunds and reprints",
+        group: "Control",
+        needs: Permission::AuditView,
+        kind: Kind::Control,
+    },
     // **P29, and it sits in Control on purpose.** A tip is not revenue, so it
     // does not belong under Sales — putting it there is exactly the confusion
     // this report exists to prevent. It is money that passed through the shop
     // for somebody else, which is the same kind of thing as a void: something
     // an owner watches rather than something the shop earned.
-    Entry { id: "tips", title: "Tips, and who took them", group: "Control", needs: Permission::ReportsView, kind: Kind::Tips },
+    Entry {
+        id: "tips",
+        title: "Tips, and who took them",
+        group: "Control",
+        needs: Permission::ReportsView,
+        kind: Kind::Tips,
+    },
     // **P30 — scope 9.8, the half P28 left.** It sits in Control beside the
     // voids, because a drawer that keeps coming up short on one person's
     // shift is exactly the kind of thing this group exists to surface.
-    Entry { id: "handover", title: "Shift handovers — every drawer counted", group: "Control", needs: Permission::DayClose, kind: Kind::Handover },
+    Entry {
+        id: "handover",
+        title: "Shift handovers — every drawer counted",
+        group: "Control",
+        needs: Permission::DayClose,
+        kind: Kind::Handover,
+    },
     // **Scope 3.7, and it is the first real measure of kitchen speed this
     // owner has ever had.** Two rows and no new screen: adding a report is a
     // line here plus a function in mb-db, which is P18's whole shape.
-    Entry { id: "kitchen_station", title: "Kitchen speed, by station", group: "Kitchen", needs: Permission::ReportsView, kind: Kind::KitchenSpeed(SpeedBy::Station) },
-    Entry { id: "kitchen_hour", title: "Kitchen speed, by hour", group: "Kitchen", needs: Permission::ReportsView, kind: Kind::KitchenSpeed(SpeedBy::Hour) },
+    Entry {
+        id: "kitchen_station",
+        title: "Kitchen speed, by station",
+        group: "Kitchen",
+        needs: Permission::ReportsView,
+        kind: Kind::KitchenSpeed(SpeedBy::Station),
+    },
+    Entry {
+        id: "kitchen_hour",
+        title: "Kitchen speed, by hour",
+        group: "Kitchen",
+        needs: Permission::ReportsView,
+        kind: Kind::KitchenSpeed(SpeedBy::Hour),
+    },
     // **P26 — nine reports and not one `.tsx` file changed.** That is P18's
     // whole shape: a report is a line here plus a function in mb-db.
     //
@@ -195,15 +319,57 @@ pub const CATALOGUE: &[Entry] = &[
     // already decided that reading the stock book is not reading the day's
     // cash — a chef who may see the buy list is not thereby someone who may see
     // the takings. The profit statement is the exception and says why.
-    Entry { id: "buying_supplier", title: "What you bought, by supplier", group: "Buying", needs: Permission::PurchasesManage, kind: Kind::Buying(BuyingBy::Supplier) },
-    Entry { id: "buying_material", title: "What you bought, by material", group: "Buying", needs: Permission::InventoryView, kind: Kind::Buying(BuyingBy::Material) },
-    Entry { id: "price_trend", title: "Price trend — what is going up", group: "Buying", needs: Permission::InventoryView, kind: Kind::PriceTrend },
-    Entry { id: "supplier_outstanding", title: "Who you owe", group: "Buying", needs: Permission::PurchasesManage, kind: Kind::SupplierOutstanding },
-    Entry { id: "stock_value", title: "Stock on hand, at cost", group: "Stock", needs: Permission::InventoryView, kind: Kind::StockValuation },
-    Entry { id: "count_variance", title: "Stock counts — what keeps going missing", group: "Stock", needs: Permission::InventoryView, kind: Kind::CountVariance },
+    Entry {
+        id: "buying_supplier",
+        title: "What you bought, by supplier",
+        group: "Buying",
+        needs: Permission::PurchasesManage,
+        kind: Kind::Buying(BuyingBy::Supplier),
+    },
+    Entry {
+        id: "buying_material",
+        title: "What you bought, by material",
+        group: "Buying",
+        needs: Permission::InventoryView,
+        kind: Kind::Buying(BuyingBy::Material),
+    },
+    Entry {
+        id: "price_trend",
+        title: "Price trend — what is going up",
+        group: "Buying",
+        needs: Permission::InventoryView,
+        kind: Kind::PriceTrend,
+    },
+    Entry {
+        id: "supplier_outstanding",
+        title: "Who you owe",
+        group: "Buying",
+        needs: Permission::PurchasesManage,
+        kind: Kind::SupplierOutstanding,
+    },
+    Entry {
+        id: "stock_value",
+        title: "Stock on hand, at cost",
+        group: "Stock",
+        needs: Permission::InventoryView,
+        kind: Kind::StockValuation,
+    },
+    Entry {
+        id: "count_variance",
+        title: "Stock counts — what keeps going missing",
+        group: "Stock",
+        needs: Permission::InventoryView,
+        kind: Kind::CountVariance,
+    },
     // **The one that makes the word "profit" mean something** (audit B14). It
     // is behind `reports.view` because it puts the day's takings on a screen.
-    Entry { id: "profit", title: "Profit — sales, food cost and running costs", group: "Money", needs: Permission::ReportsView, kind: Kind::Profit },
+    Entry {
+        id: "profit",
+        title: "Profit — sales, food cost and running costs",
+        group: "Money",
+        needs: Permission::ReportsView,
+        kind: Kind::Profit,
+    },
 ];
 
 #[must_use]
@@ -343,8 +509,10 @@ fn compare(now: Money, before: Money, previous: Period) -> CompareView {
         None
     } else {
         Some(
-            (now.paise().saturating_sub(before.paise()).saturating_mul(100))
-                .saturating_div(before.paise().abs().max(1)),
+            (now.paise()
+                .saturating_sub(before.paise())
+                .saturating_mul(100))
+            .saturating_div(before.paise().abs().max(1)),
         )
     };
     // "the day before" reads better than "the 1 days before" — which is what
@@ -419,10 +587,7 @@ fn build(
         Kind::Sales(by) => {
             let buckets = reports.sales_by(OUTLET, period, by)?;
             let wants_qty = matches!(by, SalesBy::Item | SalesBy::Category);
-            let mut columns = vec![
-                column(label_for(by), false),
-                column("Bills", true),
-            ];
+            let mut columns = vec![column(label_for(by), false), column("Bills", true)];
             if wants_qty {
                 columns.push(column("Quantity", true));
             }
@@ -476,7 +641,12 @@ fn build(
                 .iter()
                 .try_fold(Money::ZERO, |sum, b| sum.add(b.gross))
                 .unwrap_or(Money::ZERO);
-            (columns, rows, Some(totals), Some(compare(gross, before, previous)))
+            (
+                columns,
+                rows,
+                Some(totals),
+                Some(compare(gross, before, previous)),
+            )
         }
 
         Kind::TaxByRate => {
@@ -487,6 +657,7 @@ fn build(
                 column("CGST", true),
                 column("SGST", true),
                 column("IGST", true),
+                column("VAT", true),
             ];
             let mut taxable = Money::ZERO;
             let rows = buckets
@@ -494,11 +665,12 @@ fn build(
                 .map(|b| {
                     taxable = taxable.add(b.taxable).unwrap_or(taxable);
                     vec![
-                        rate_words(b.rate_bp, &b.treatment),
+                        rate_words(b.rate_bp, &b.tax_kind),
                         b.taxable.to_plain_string(),
                         b.cgst.to_plain_string(),
                         b.sgst.to_plain_string(),
                         b.igst.to_plain_string(),
+                        b.vat.to_plain_string(),
                     ]
                 })
                 .collect();
@@ -520,6 +692,30 @@ fn build(
                 ]),
                 None,
             )
+        }
+
+        // The offline tool's own columns, in its own order. Import it as is.
+        Kind::Gstr1B2cs => {
+            let profile = repos.settings().store_profile(OUTLET)?;
+            let buckets = reports.tax_by_rate(OUTLET, period)?;
+            let (rows, taxable, said) = b2cs(&buckets, profile.as_ref());
+            notes.extend(said);
+            let columns = vec![
+                column("Type", false),
+                column("Place Of Supply", false),
+                column("Rate", true),
+                column("Applicable % of Tax Rate", true),
+                column("Taxable Value", true),
+                column("Cess Amount", true),
+                column("E-Commerce GSTIN", false),
+            ];
+            // **No totals row.** `csv_of` writes it into the file, and the
+            // offline tool reads it as a malformed eighth invoice. The figure
+            // goes in a note instead, which the export does not carry.
+            if !rows.is_empty() {
+                notes.push(format!("Total taxable value: {}", taxable.to_plain_string()));
+            }
+            (columns, rows, None, None)
         }
 
         Kind::TaxByHsn => {
@@ -734,13 +930,18 @@ fn build(
             // time, and a new report is exactly where that comes back.
             let kitchen = repos.kitchen();
             let speed = match by {
-                SpeedBy::Station => {
-                    kitchen.speed_by_station(OUTLET, period.from, period.to)?
-                }
+                SpeedBy::Station => kitchen.speed_by_station(OUTLET, period.from, period.to)?,
                 SpeedBy::Hour => kitchen.speed_by_hour(OUTLET, period.from, period.to)?,
             };
             let columns = vec![
-                column(if by == SpeedBy::Station { "Station" } else { "Hour" }, false),
+                column(
+                    if by == SpeedBy::Station {
+                        "Station"
+                    } else {
+                        "Hour"
+                    },
+                    false,
+                ),
                 column("Tickets", true),
                 column("Average", true),
                 column("Slowest", true),
@@ -786,7 +987,14 @@ fn build(
                 BuyingBy::Material => buying.by_material(OUTLET, period.from, period.to)?,
             };
             let mut columns = vec![
-                column(if by == BuyingBy::Supplier { "Supplier" } else { "Material" }, false),
+                column(
+                    if by == BuyingBy::Supplier {
+                        "Supplier"
+                    } else {
+                        "Material"
+                    },
+                    false,
+                ),
                 column("Deliveries", true),
             ];
             if by == BuyingBy::Material {
@@ -811,8 +1019,7 @@ fn build(
             let rows = list
                 .iter()
                 .map(|row| {
-                    let mut cells =
-                        vec![row.label.clone(), row.count.to_string()];
+                    let mut cells = vec![row.label.clone(), row.count.to_string()];
                     if by == BuyingBy::Material {
                         cells.push(match row.qty {
                             Some(qty) => materials
@@ -881,8 +1088,11 @@ fn build(
 
         // **D124 — and the sentence IS the report for most shops.**
         Kind::InputCredit => {
-            let claims = !app_is_composition(repos)?;
-            let rows_in = repos.buying().input_credit(OUTLET, period.from, period.to)?;
+            // Only a regular taxpayer can take the credit back.
+            let claims = app_registration(repos)?.charges_gst();
+            let rows_in = repos
+                .buying()
+                .input_credit(OUTLET, period.from, period.to)?;
             let columns = vec![
                 column("Rate", false),
                 column("Invoices", true),
@@ -890,8 +1100,9 @@ fn build(
                 column("GST paid", true),
             ];
             if claims {
-                let claimable =
-                    repos.buying().creditable_total(OUTLET, period.from, period.to)?;
+                let claimable = repos
+                    .buying()
+                    .creditable_total(OUTLET, period.from, period.to)?;
                 notes.push(format!(
                     "You can claim {} of this back. Set it against the GST you collected \
                      on sales (Tax, rate-wise).",
@@ -1020,7 +1231,9 @@ fn build(
         }
 
         Kind::CountVariance => {
-            let history = repos.counts().variance_history(OUTLET, period.from, period.to)?;
+            let history = repos
+                .counts()
+                .variance_history(OUTLET, period.from, period.to)?;
             let columns = vec![
                 column("Material", false),
                 column("Counts", true),
@@ -1070,15 +1283,30 @@ fn build(
             // seven equal facts. A column an owner checks by adding it up has
             // to add up on the page. Found by looking at it.
             let mut rows = vec![
-                vec!["Sales, less the GST on them".to_owned(), profit.net_sales.to_plain_string()],
-                vec!["less what the food cost".to_owned(), profit.food_used.neg().to_plain_string()],
-                vec!["less wastage".to_owned(), profit.wastage.neg().to_plain_string()],
+                vec![
+                    "Sales, less the GST on them".to_owned(),
+                    profit.net_sales.to_plain_string(),
+                ],
+                vec![
+                    "less what the food cost".to_owned(),
+                    profit.food_used.neg().to_plain_string(),
+                ],
+                vec![
+                    "less wastage".to_owned(),
+                    profit.wastage.neg().to_plain_string(),
+                ],
                 vec![
                     "less what a count found missing".to_owned(),
                     profit.shrinkage.neg().to_plain_string(),
                 ],
-                vec!["Gross margin".to_owned(), profit.gross_margin.to_plain_string()],
-                vec!["less running costs".to_owned(), profit.running_costs.neg().to_plain_string()],
+                vec![
+                    "Gross margin".to_owned(),
+                    profit.gross_margin.to_plain_string(),
+                ],
+                vec![
+                    "less running costs".to_owned(),
+                    profit.running_costs.neg().to_plain_string(),
+                ],
                 vec!["What is left".to_owned(), profit.left.to_plain_string()],
             ];
             if let Some(bp) = profit.margin_bp() {
@@ -1165,10 +1393,112 @@ fn change_words(bp: Option<i64>) -> String {
     }
 }
 
+/// **The B2CS rows, the taxable total, and what had to be said.**
+///
+/// A restaurant's supply is always intra-state (IGST Act s.12(4)), so the place
+/// of supply is the shop's own state on every row.
+#[allow(
+    clippy::integer_division,
+    reason = "basis points to whole percent; GST has no fractional-percent rate"
+)]
+/// `500` → `"5"`, `250` → `"2.5"`. `TaxRate` already formats a rate correctly;
+/// the offline tool just does not want the per-cent sign.
+fn rate_percent(bp: i64) -> String {
+    u32::try_from(bp)
+        .ok()
+        .and_then(mb_core::TaxRate::from_basis_points)
+        .map_or_else(String::new, |r| r.label().trim_end_matches('%').to_owned())
+}
+
+fn b2cs(
+    buckets: &[TaxBucket],
+    profile: Option<&StoreProfile>,
+) -> (Vec<Vec<String>>, Money, Vec<String>) {
+    let mut notes = Vec::new();
+    let registration = profile.map_or(mb_core::Registration::Regular, |p| {
+        crate::settings::registration_from(&p.registration)
+    });
+    // Only a regular taxpayer files a GSTR-1. An empty table with a plain
+    // sentence is the right answer for the other two.
+    if !registration.charges_gst() {
+        notes.push(
+            if matches!(registration, mb_core::Registration::Composition) {
+                "You are under the composition scheme, so you file CMP-08 every \
+                 quarter — not GSTR-1. There is nothing to put in this table."
+            } else {
+                "You have no GST registration, so you file no GST return. There \
+                 is nothing to put in this table."
+            }
+            .to_owned(),
+        );
+        return (Vec::new(), Money::ZERO, notes);
+    }
+
+    let code = profile.and_then(|p| p.state_code.as_deref()).unwrap_or("");
+    let place = crate::settings::catalog::state_label(code)
+        .map_or_else(String::new, |name| format!("{code}-{name}"));
+    if place.is_empty() {
+        notes.push(
+            "Your state is not set, so the Place Of Supply column is empty and \
+             the offline tool will reject the file. Set it in Settings → Shop."
+                .to_owned(),
+        );
+    }
+    if profile.is_none_or(|p| p.gstin.as_deref().unwrap_or("").trim().is_empty()) {
+        notes.push(
+            "Your GSTIN is empty. The offline tool needs it before it will take \
+             this file. Set it in Settings → Shop."
+                .to_owned(),
+        );
+    }
+
+    let mut taxable = Money::ZERO;
+    let rows = buckets
+        .iter()
+        .filter(|b| b.tax_kind == "gst" && b.rate_bp > 0)
+        .map(|b| {
+            taxable = taxable.add(b.taxable).unwrap_or(taxable);
+            vec![
+                "OE".to_owned(),
+                place.clone(),
+                // The rate as the tool wants it: a bare number, 2.5 included.
+                // Integer division printed 2.5% as "2".
+                rate_percent(b.rate_bp),
+                String::new(),
+                b.taxable.to_plain_string(),
+                "0".to_owned(),
+                String::new(),
+            ]
+        })
+        .collect();
+
+    notes.push(
+        "Liquor is outside GST and is not in this table — it goes in your state \
+         VAT return."
+            .to_owned(),
+    );
+    if buckets.iter().any(|b| {
+        matches!(b.tax_kind.as_str(), "exempt" | "untaxed")
+            || (b.tax_kind == "gst" && b.rate_bp == 0)
+    }) {
+        notes.push(
+            "Sales with no GST on them — exempt and nil-rated — are not in this \
+             table either. B2CS is only for taxed sales."
+                .to_owned(),
+        );
+    }
+    (rows, taxable, notes)
+}
+
 /// **D124 — a property of the shop.** Read here rather than passed in, because
 /// `build` has the transaction and the store profile is one row.
-fn app_is_composition(repos: &mb_db::Repos<'_>) -> Result<bool, mb_db::DbError> {
-    Ok(repos.settings().store_profile(OUTLET)?.is_some_and(|p| p.is_composition))
+fn app_registration(repos: &mb_db::Repos<'_>) -> Result<mb_core::Registration, mb_db::DbError> {
+    Ok(repos
+        .settings()
+        .store_profile(OUTLET)?
+        .map_or(mb_core::Registration::Regular, |p| {
+            crate::settings::registration_from(&p.registration)
+        }))
 }
 
 const fn label_for(by: SalesBy) -> &'static str {
@@ -1191,9 +1521,9 @@ const fn label_for(by: SalesBy) -> &'static str {
     reason = "basis points to whole percent; 1800 bp IS 18% and the remainder \
               is meaningless — GST has no fractional-percent rate"
 )]
-fn rate_words(rate_bp: i64, treatment: &str) -> String {
-    match treatment {
-        "non_gst" => "Outside GST (liquor)".to_owned(),
+fn rate_words(rate_bp: i64, tax_kind: &str) -> String {
+    match tax_kind {
+        "outside_gst" => "Outside GST (liquor)".to_owned(),
         "exempt" => "Exempt".to_owned(),
         _ => format!("{}%", rate_bp / 100),
     }
@@ -1238,7 +1568,10 @@ pub fn list_on(app: &App) -> UiResult<ReportListView> {
 #[must_use]
 pub fn csv_of(report: &ReportView) -> String {
     let mut out = String::new();
-    mb_db::export::write_row(&mut out, report.columns.iter().map(|c| Some(c.header.as_str())));
+    mb_db::export::write_row(
+        &mut out,
+        report.columns.iter().map(|c| Some(c.header.as_str())),
+    );
     for row in &report.rows {
         mb_db::export::write_row(&mut out, row.iter().map(|cell| Some(cell.as_str())));
     }
@@ -1390,7 +1723,13 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
     {
         let old: Vec<_> = owing
             .iter()
-            .filter(|c| c.oldest.split(' ').next().and_then(|n| n.parse::<i64>().ok()).is_some_and(|d| d > 30))
+            .filter(|c| {
+                c.oldest
+                    .split(' ')
+                    .next()
+                    .and_then(|n| n.parse::<i64>().ok())
+                    .is_some_and(|d| d > 30)
+            })
             .collect();
         if !old.is_empty() {
             attention.push(needs_you(
@@ -1465,7 +1804,11 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
                         .try_fold(Money::ZERO, |acc, b| acc.add(b.gross))
                         .unwrap_or(Money::ZERO))
                 };
-                Ok(compare(sum(period)?, sum(period.previous())?, period.previous()))
+                Ok(compare(
+                    sum(period)?,
+                    sum(period.previous())?,
+                    period.previous(),
+                ))
             })
             .map_err(|e| words::from_db(&e))
     })?;
@@ -1697,11 +2040,7 @@ pub fn report_list(app: tauri::State<'_, App>) -> UiResult<ReportListView> {
 }
 
 #[tauri::command]
-pub fn report(
-    app: tauri::State<'_, App>,
-    id: String,
-    period: PeriodArg,
-) -> UiResult<ReportView> {
+pub fn report(app: tauri::State<'_, App>, id: String, period: PeriodArg) -> UiResult<ReportView> {
     report_on(&app, id, period)
 }
 
@@ -1768,7 +2107,9 @@ mod tests {
             SalesBy::Category,
         ] {
             assert!(
-                CATALOGUE.iter().any(|e| matches!(e.kind, Kind::Sales(b) if b == by)),
+                CATALOGUE
+                    .iter()
+                    .any(|e| matches!(e.kind, Kind::Sales(b) if b == by)),
                 "{by:?} is not on the report list"
             );
         }
@@ -1803,7 +2144,11 @@ mod tests {
         // Nothing before: a percentage of zero is not a number, and saying
         // "up infinity%" is worse than saying what happened.
         let fresh = compare(Money::from_paise(5_000), Money::ZERO, previous);
-        assert!(fresh.summary.contains("Nothing at all"), "{}", fresh.summary);
+        assert!(
+            fresh.summary.contains("Nothing at all"),
+            "{}",
+            fresh.summary
+        );
     }
 
     /// **Found by looking at it.** The dashboard read "Nothing at all in the 1
@@ -1824,13 +2169,71 @@ mod tests {
         assert!(!up.summary.contains("1 days"), "{}", up.summary);
     }
 
+    /// **B2CS is the taxable-supply table**, so liquor must never reach it —
+    /// its VAT is a state return, not GSTR-1.
+    #[test]
+    fn b2cs_takes_only_taxed_gst_and_a_composition_shop_gets_none() {
+        let bucket = |rate_bp, kind: &str, paise| TaxBucket {
+            rate_bp,
+            tax_kind: kind.to_owned(),
+            taxable: Money::from_paise(paise),
+            cgst: Money::ZERO,
+            sgst: Money::ZERO,
+            igst: Money::ZERO,
+            vat: Money::ZERO,
+        };
+        let shop = |registration: &str| StoreProfile {
+            name: "Shop".to_owned(),
+            address: String::new(),
+            phone: None,
+            gstin: Some("29ABCDE1234F1Z5".to_owned()),
+            fssai: None,
+            state_code: Some("29".to_owned()),
+            upi_id: None,
+            upi_merchant_name: None,
+            upi_reference: None,
+            registration: registration.to_owned(),
+        };
+        let buckets = [
+            // A half-percent rate, because integer division printed it as "2".
+            bucket(250, "gst", 40_000),
+            bucket(500, "gst", 100_000),
+            // Liquor, at the state VAT rate it really carries.
+            bucket(2000, "outside_gst", 250_000),
+        ];
+
+        let (rows, taxable, _) = b2cs(&buckets, Some(&shop("regular")));
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(
+            rows[0],
+            vec!["OE", "29-Karnataka", "2.5", "", "400.00", "0", ""]
+        );
+        assert_eq!(
+            rows[1],
+            vec!["OE", "29-Karnataka", "5", "", "1000.00", "0", ""]
+        );
+        assert_eq!(taxable, Money::from_paise(140_000));
+        // The liquor never reaches the sheet — neither its word nor its figure.
+        let cells = rows.concat().join(" ").to_lowercase();
+        assert!(
+            !cells.contains("liquor") && !cells.contains("2500"),
+            "{cells}"
+        );
+
+        let (none, _, notes) = b2cs(&buckets, Some(&shop("composition")));
+        assert!(none.is_empty());
+        assert!(notes.iter().any(|n| n.contains("CMP-08")), "{notes:?}");
+    }
+
     /// **T4 — audit G7, made impossible.** The one writer escapes it.
     #[test]
     fn a_comma_in_an_item_name_does_not_break_its_row() {
         let mut out = String::new();
         mb_db::export::write_row(
             &mut out,
-            ["Biryani, \"Half\"", "2", "240.00"].iter().map(|c| Some(*c)),
+            ["Biryani, \"Half\"", "2", "240.00"]
+                .iter()
+                .map(|c| Some(*c)),
         );
         // Quoted, with the inner quotes doubled — RFC 4180, and Excel.
         assert_eq!(out, "\"Biryani, \"\"Half\"\"\",2,240.00\r\n");

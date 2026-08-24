@@ -37,18 +37,20 @@
     reason = "a demo seeder: expect is the assertion, and the shop is a long list"
 )]
 
-use mb_core::{
-    AnyOrder, Cart, DraftOrder, ItemSnapshot, ItemId, Money, OrderId, OrderType, Qty, StaffId,
-    TableId, TaxRate, TaxTreatment, Timestamp,
-};
 use mb_core::businessday::BusinessDay;
+use mb_core::{
+    AnyOrder, Cart, DraftOrder, ItemId, ItemSnapshot, Money, OrderId, OrderType, Qty, StaffId,
+    TableId, TaxRate, Timestamp,
+};
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::repo::menu::{Category, MenuItem};
 use mb_db::{Db, DbConfig, Repos};
 
 use crate::credit::{CustomerEdit, put_on_account_on, save_customer_on};
-use crate::inventory::{MaterialEdit, MovementEdit, PackEdit, record_movement_on, save_material_on};
 use crate::expenses::{ExpenseEdit, save_expense_on, save_movement_on};
+use crate::inventory::{
+    MaterialEdit, MovementEdit, PackEdit, record_movement_on, save_material_on,
+};
 use crate::state::{App, OUTLET};
 
 /// The menu. Name, price in rupees, tax rate, and the category it sits in.
@@ -82,7 +84,13 @@ const MENU: &[(&str, &str, i64, u8, &str)] = &[
     ("itm_curry_palak", "Palak Paneer", 230, 5, "cat_rice"),
     // Tandoor
     ("itm_paneer_tikka", "Paneer Tikka", 280, 5, "cat_tandoor"),
-    ("itm_mushroom_tikka", "Mushroom Tikka", 260, 5, "cat_tandoor"),
+    (
+        "itm_mushroom_tikka",
+        "Mushroom Tikka",
+        260,
+        5,
+        "cat_tandoor",
+    ),
     ("itm_veg_seekh", "Veg Seekh Kebab", 240, 5, "cat_tandoor"),
     ("itm_gobi_65", "Gobi 65", 190, 5, "cat_tandoor"),
     // Chinese
@@ -103,7 +111,13 @@ const MENU: &[(&str, &str, i64, u8, &str)] = &[
     ("itm_badam_milk", "Badam Milk", 60, 5, "cat_drinks"),
     ("itm_lassi", "Sweet Lassi", 90, 12, "cat_drinks"),
     ("itm_buttermilk", "Masala Buttermilk", 45, 12, "cat_drinks"),
-    ("itm_soft_drink", "Soft Drink (bottle)", 40, 18, "cat_drinks"),
+    (
+        "itm_soft_drink",
+        "Soft Drink (bottle)",
+        40,
+        18,
+        "cat_drinks",
+    ),
     ("itm_water", "Mineral Water 1L", 20, 18, "cat_drinks"),
     // Desserts
     ("itm_gulab", "Gulab Jamun (2 pcs)", 70, 5, "cat_sweet"),
@@ -134,23 +148,118 @@ const CATEGORIES: &[(&str, &str, Option<&str>)] = &[
 /// A named alias rather than the tuple inline — clippy is right that four
 /// levels of tuple is unreadable, and naming it is also the only place the
 /// meaning of each position is written down.
-type BusyTable = (&'static str, i64, &'static [(&'static str, i64)], Option<i64>);
+type BusyTable = (
+    &'static str,
+    i64,
+    &'static [(&'static str, i64)],
+    Option<i64>,
+);
 
 const BUSY: &[BusyTable] = &[
-    ("tbl_H2", 6, &[("itm_dosa_masala", 2), ("itm_filter_coffee", 2)], Some(2)),
-    ("tbl_H5", 11, &[("itm_meals", 4), ("itm_buttermilk", 4)], Some(4)),
-    ("tbl_H7", 14, &[("itm_idli_sambar", 2), ("itm_vada", 1), ("itm_tea", 3)], Some(2)),
-    ("tbl_H11", 18, &[("itm_paneer_tikka", 1), ("itm_naan_garlic", 4), ("itm_curry_dal", 1)], None),
-    ("tbl_H14", 22, &[("itm_noodles", 2), ("itm_manchurian", 1), ("itm_soft_drink", 3)], Some(2)),
-    ("tbl_H18", 9, &[("itm_dosa_ghee", 1), ("itm_badam_milk", 1)], Some(1)),
-    ("tbl_T1", 27, &[("itm_curry_pbm", 1), ("itm_naan", 6), ("itm_jeera_rice", 2)], Some(1)),
-    ("tbl_T4", 33, &[("itm_veg_pulao", 2), ("itm_curry_palak", 1), ("itm_lassi", 2)], Some(2)),
-    ("tbl_T8", 16, &[("itm_gobi_65", 1), ("itm_chilli_paneer", 1), ("itm_water", 2)], Some(1)),
-    ("tbl_A2", 41, &[("itm_curry_kadai", 1), ("itm_kulcha", 3), ("itm_curd_rice", 2)], Some(1)),
-    ("tbl_A5", 12, &[("itm_fried_rice", 2), ("itm_manchurian", 1)], Some(2)),
-    ("tbl_A7", 52, &[("itm_meals", 2), ("itm_gulab", 2), ("itm_filter_coffee", 2)], Some(2)),
-    ("tbl_F1", 63, &[("itm_bisibele", 3), ("itm_rasmalai", 3), ("itm_tea", 3)], Some(3)),
-    ("tbl_F4", 8, &[("itm_poori", 2), ("itm_upma", 1), ("itm_tea", 2)], None),
+    (
+        "tbl_H2",
+        6,
+        &[("itm_dosa_masala", 2), ("itm_filter_coffee", 2)],
+        Some(2),
+    ),
+    (
+        "tbl_H5",
+        11,
+        &[("itm_meals", 4), ("itm_buttermilk", 4)],
+        Some(4),
+    ),
+    (
+        "tbl_H7",
+        14,
+        &[("itm_idli_sambar", 2), ("itm_vada", 1), ("itm_tea", 3)],
+        Some(2),
+    ),
+    (
+        "tbl_H11",
+        18,
+        &[
+            ("itm_paneer_tikka", 1),
+            ("itm_naan_garlic", 4),
+            ("itm_curry_dal", 1),
+        ],
+        None,
+    ),
+    (
+        "tbl_H14",
+        22,
+        &[
+            ("itm_noodles", 2),
+            ("itm_manchurian", 1),
+            ("itm_soft_drink", 3),
+        ],
+        Some(2),
+    ),
+    (
+        "tbl_H18",
+        9,
+        &[("itm_dosa_ghee", 1), ("itm_badam_milk", 1)],
+        Some(1),
+    ),
+    (
+        "tbl_T1",
+        27,
+        &[("itm_curry_pbm", 1), ("itm_naan", 6), ("itm_jeera_rice", 2)],
+        Some(1),
+    ),
+    (
+        "tbl_T4",
+        33,
+        &[
+            ("itm_veg_pulao", 2),
+            ("itm_curry_palak", 1),
+            ("itm_lassi", 2),
+        ],
+        Some(2),
+    ),
+    (
+        "tbl_T8",
+        16,
+        &[
+            ("itm_gobi_65", 1),
+            ("itm_chilli_paneer", 1),
+            ("itm_water", 2),
+        ],
+        Some(1),
+    ),
+    (
+        "tbl_A2",
+        41,
+        &[
+            ("itm_curry_kadai", 1),
+            ("itm_kulcha", 3),
+            ("itm_curd_rice", 2),
+        ],
+        Some(1),
+    ),
+    (
+        "tbl_A5",
+        12,
+        &[("itm_fried_rice", 2), ("itm_manchurian", 1)],
+        Some(2),
+    ),
+    (
+        "tbl_A7",
+        52,
+        &[("itm_meals", 2), ("itm_gulab", 2), ("itm_filter_coffee", 2)],
+        Some(2),
+    ),
+    (
+        "tbl_F1",
+        63,
+        &[("itm_bisibele", 3), ("itm_rasmalai", 3), ("itm_tea", 3)],
+        Some(3),
+    ),
+    (
+        "tbl_F4",
+        8,
+        &[("itm_poori", 2), ("itm_upma", 1), ("itm_tea", 2)],
+        None,
+    ),
 ];
 
 /// The bills already settled today, so reports and the day close have a day
@@ -158,9 +267,24 @@ const BUSY: &[BusyTable] = &[
 /// P29. Somebody to deliver to. The address lives on the customer, so a
 /// regular is typed once and found by phone afterwards.
 const DELIVERY_CUSTOMERS: &[(&str, &str, &str, &str)] = &[
-    ("cus_meera", "Meera", "98400 11223", "14/3 Kamaraj Street, second gate, blue door"),
-    ("cus_arun", "Arun", "98450 66112", "Flat 3B, Srinivasa Apartments, behind the temple"),
-    ("cus_farida", "Farida", "94440 88221", "22 Mount Road, above the medical shop"),
+    (
+        "cus_meera",
+        "Meera",
+        "98400 11223",
+        "14/3 Kamaraj Street, second gate, blue door",
+    ),
+    (
+        "cus_arun",
+        "Arun",
+        "98450 66112",
+        "Flat 3B, Srinivasa Apartments, behind the temple",
+    ),
+    (
+        "cus_farida",
+        "Farida",
+        "94440 88221",
+        "22 Mount Road, above the medical shop",
+    ),
 ];
 
 /// P29. Five deliveries at five different points of an evening — and the two
@@ -172,7 +296,13 @@ const DELIVERIES: &[(&str, i64, &str, &str, &str)] = &[
     ("itm_curry_pbm", 1, "cus_arun", "delivered", ""),
     ("itm_noodles", 2, "cus_farida", "assigned", ""),
     ("itm_dosa_masala", 3, "cus_meera", "out", ""),
-    ("itm_meals", 1, "cus_arun", "failed", "Nobody was home, phone switched off"),
+    (
+        "itm_meals",
+        1,
+        "cus_arun",
+        "failed",
+        "Nobody was home, phone switched off",
+    ),
 ];
 
 const SETTLED: &[(&str, i64, &str)] = &[
@@ -224,7 +354,10 @@ fn demo_look() {
     for suffix in ["", "-wal", "-shm"] {
         let path = std::path::PathBuf::from(format!("{}{suffix}", db_path.display()));
         if path.exists() && std::fs::remove_file(&path).is_err() {
-            panic!("{} is still open — close the app before seeding", path.display());
+            panic!(
+                "{} is still open — close the app before seeding",
+                path.display()
+            );
         }
     }
 
@@ -247,7 +380,11 @@ fn demo_look() {
         env!("CARGO_PKG_VERSION"),
     );
     licensing
-        .start_trial("+91 90000 00000", crate::flows::now(), std::time::Duration::from_secs(5))
+        .start_trial(
+            "+91 90000 00000",
+            crate::flows::now(),
+            std::time::Duration::from_secs(5),
+        )
         .expect("the stub starts a trial");
     app.use_licensing(licensing);
 
@@ -263,20 +400,33 @@ fn demo_look() {
     seed_delivery(&app);
     seed_unconfirmed(&app);
 
-    std::fs::write(mb_db::locate::config_path(&home), db_path.display().to_string())
-        .expect("the location file");
+    std::fs::write(
+        mb_db::locate::config_path(&home),
+        db_path.display().to_string(),
+    )
+    .expect("the location file");
 
     println!("demo ready: {}", db_path.display());
-    println!("  {} menu items in {} categories", MENU.len(), CATEGORIES.len());
+    println!(
+        "  {} menu items in {} categories",
+        MENU.len(),
+        CATEGORIES.len()
+    );
     println!("  46 tables, {} of them busy", BUSY.len());
     println!("  {settled} bills settled today");
     println!("  6 credit customers, 8 expenses");
     println!("  {} materials on the shelf", MATERIALS.len());
     println!("  {} people, plus one who left", PEOPLE.len());
-    println!("  {} deliveries, 2 riders, 1 short handback", DELIVERIES.len());
+    println!(
+        "  {} deliveries, 2 riders, 1 short handback",
+        DELIVERIES.len()
+    );
     println!("  1 UPI payment nobody has confirmed");
     println!();
-    println!("now: $env:APPDATA=\"{}\"; cargo run -p magic-bill", root.display());
+    println!(
+        "now: $env:APPDATA=\"{}\"; cargo run -p magic-bill",
+        root.display()
+    );
 }
 
 /// The shop's own name on its own bill. A design judged against "SAMPLE" in the
@@ -339,8 +489,7 @@ fn seed_menu(app: &App) {
                             category_id: Some(mb_core::CategoryId::new(*category)),
                             name: (*name).to_owned(),
                             unit_price: Money::from_paise(rupees * 100),
-                            tax_rate: rate_of(*rate),
-                            tax_treatment: TaxTreatment::Inclusive,
+                            tax: mb_core::TaxSpec::gst_inclusive(rate_of(*rate)),
                             tax_class_id: None,
                             hsn: None,
                             // A cost on the food, so the food-cost and profit
@@ -366,9 +515,9 @@ fn seed_menu(app: &App) {
 
 fn rate_of(percent: u8) -> TaxRate {
     match percent {
-        12 => TaxRate::GST_12,
-        18 => TaxRate::GST_18,
-        _ => TaxRate::GST_5,
+        12 => TaxRate::from_percent(12).expect("12%"),
+        18 => TaxRate::from_percent(18).expect("18%"),
+        _ => TaxRate::from_percent(5).expect("5%"),
     }
 }
 
@@ -546,9 +695,17 @@ fn seed_open_orders(app: &App) {
     // are invisible in a floor plan and the reason the grid has a "No table"
     // group at all (UI_GUIDELINES §4).
     for (n, (kind, minutes_ago, items)) in [
-        (OrderType::Parcel, 4_i64, &[("itm_dosa_masala", 2_i64), ("itm_vada", 2)][..]),
+        (
+            OrderType::Parcel,
+            4_i64,
+            &[("itm_dosa_masala", 2_i64), ("itm_vada", 2)][..],
+        ),
         (OrderType::Parcel, 9, &[("itm_meals", 3)][..]),
-        (OrderType::SelfService, 2, &[("itm_filter_coffee", 2), ("itm_gulab", 2)][..]),
+        (
+            OrderType::SelfService,
+            2,
+            &[("itm_filter_coffee", 2), ("itm_gulab", 2)][..],
+        ),
     ]
     .iter()
     .enumerate()
@@ -556,7 +713,9 @@ fn seed_open_orders(app: &App) {
         let at = Timestamp::from_millis(now.millis() - minutes_ago * 60_000);
         let mut cart = Cart::new();
         for (item, qty) in items.iter() {
-            let Some(price) = price_of(item) else { continue };
+            let Some(price) = price_of(item) else {
+                continue;
+            };
             cart.add(
                 ItemSnapshot::new(ItemId::new(*item), name_of(item), price, rate_for(item)),
                 Qty::from_whole(*qty).expect("qty"),
@@ -613,15 +772,23 @@ fn save_open(app: &App, draft: DraftOrder) {
 }
 
 fn price_of(id: &str) -> Option<Money> {
-    MENU.iter().find(|(i, ..)| *i == id).map(|(_, _, r, ..)| Money::from_paise(r * 100))
+    MENU.iter()
+        .find(|(i, ..)| *i == id)
+        .map(|(_, _, r, ..)| Money::from_paise(r * 100))
 }
 
 fn name_of(id: &str) -> &'static str {
-    MENU.iter().find(|(i, ..)| *i == id).map_or("Item", |(_, n, ..)| *n)
+    MENU.iter()
+        .find(|(i, ..)| *i == id)
+        .map_or("Item", |(_, n, ..)| *n)
 }
 
 fn rate_for(id: &str) -> TaxRate {
-    MENU.iter().find(|(i, ..)| *i == id).map_or(TaxRate::GST_5, |(.., r, _)| rate_of(*r))
+    MENU.iter()
+        .find(|(i, ..)| *i == id)
+        .map_or(TaxRate::from_percent(5).expect("5%"), |(.., r, _)| {
+            rate_of(*r)
+        })
 }
 
 /// Six credit customers, one of them over the limit — because "over the limit"
@@ -631,7 +798,12 @@ fn seed_credit(app: &App) {
     for (id, name, phone, limit) in [
         ("cus_ramesh", "Ramesh Kumar", "9845012345", "5000"),
         ("cus_lakshmi", "Lakshmi Stores", "9886054321", "10000"),
-        ("cus_infosys", "Infotech Park Canteen", "9900011122", "25000"),
+        (
+            "cus_infosys",
+            "Infotech Park Canteen",
+            "9900011122",
+            "25000",
+        ),
         ("cus_suresh", "Suresh (Auto stand)", "9741023456", "2000"),
         ("cus_meena", "Meena Aunty", "9448099887", ""),
         ("cus_arvind", "Arvind Textiles", "9535066778", "8000"),
@@ -692,14 +864,63 @@ fn seed_expenses(app: &App) {
     .expect("the opening float");
 
     for (id, what, amount, mode, who, gst) in [
-        ("exp_veg", "Vegetables — morning market", "2450", "cash", "Vegetable market", ""),
+        (
+            "exp_veg",
+            "Vegetables — morning market",
+            "2450",
+            "cash",
+            "Vegetable market",
+            "",
+        ),
         ("exp_milk", "Milk and curd", "1180", "cash", "Milk van", ""),
-        ("exp_gas", "Gas cylinder refill", "1850", "upi", "Bharat Gas", "5"),
-        ("exp_rent", "Shop rent — August", "45000", "bank", "Landlord", ""),
-        ("exp_power", "Electricity bill", "8640", "bank", "BESCOM", ""),
-        ("exp_wages", "Casual staff — evening", "1200", "cash", "Ravi", ""),
-        ("exp_packing", "Parcel boxes and covers", "2200", "upi", "Sri Packaging", "18"),
-        ("exp_repair", "Mixer repair", "650", "cash", "Kumar Electricals", ""),
+        (
+            "exp_gas",
+            "Gas cylinder refill",
+            "1850",
+            "upi",
+            "Bharat Gas",
+            "5",
+        ),
+        (
+            "exp_rent",
+            "Shop rent — August",
+            "45000",
+            "bank",
+            "Landlord",
+            "",
+        ),
+        (
+            "exp_power",
+            "Electricity bill",
+            "8640",
+            "bank",
+            "BESCOM",
+            "",
+        ),
+        (
+            "exp_wages",
+            "Casual staff — evening",
+            "1200",
+            "cash",
+            "Ravi",
+            "",
+        ),
+        (
+            "exp_packing",
+            "Parcel boxes and covers",
+            "2200",
+            "upi",
+            "Sri Packaging",
+            "18",
+        ),
+        (
+            "exp_repair",
+            "Mixer repair",
+            "650",
+            "cash",
+            "Kumar Electricals",
+            "",
+        ),
     ] {
         save_expense_on(
             app,
@@ -739,24 +960,160 @@ type Material = (
 );
 
 const MATERIALS: &[Material] = &[
-    ("mat_rice", "Sona Masoori Rice", "weight", Some(("bag", "25", "kg")), "Metro", "2", "1450"),
-    ("mat_atta", "Wheat Atta", "weight", Some(("bag", "10", "kg")), "Metro", "2", "420"),
-    ("mat_paneer", "Paneer", "weight", None, "The milk van", "3", "340"),
-    ("mat_milk", "Milk", "volume", Some(("crate", "12", "l")), "The milk van", "1", "660"),
-    ("mat_curd", "Curd", "weight", None, "The milk van", "5", "70"),
-    ("mat_oil", "Sunflower Oil", "volume", Some(("tin", "15", "l")), "Metro", "1", "2250"),
+    (
+        "mat_rice",
+        "Sona Masoori Rice",
+        "weight",
+        Some(("bag", "25", "kg")),
+        "Metro",
+        "2",
+        "1450",
+    ),
+    (
+        "mat_atta",
+        "Wheat Atta",
+        "weight",
+        Some(("bag", "10", "kg")),
+        "Metro",
+        "2",
+        "420",
+    ),
+    (
+        "mat_paneer",
+        "Paneer",
+        "weight",
+        None,
+        "The milk van",
+        "3",
+        "340",
+    ),
+    (
+        "mat_milk",
+        "Milk",
+        "volume",
+        Some(("crate", "12", "l")),
+        "The milk van",
+        "1",
+        "660",
+    ),
+    (
+        "mat_curd",
+        "Curd",
+        "weight",
+        None,
+        "The milk van",
+        "5",
+        "70",
+    ),
+    (
+        "mat_oil",
+        "Sunflower Oil",
+        "volume",
+        Some(("tin", "15", "l")),
+        "Metro",
+        "1",
+        "2250",
+    ),
     ("mat_ghee", "Ghee", "weight", None, "Metro", "2", "620"),
-    ("mat_onion", "Onion", "weight", Some(("sack", "50", "kg")), "Vegetable market", "1", "1400"),
-    ("mat_tomato", "Tomato", "weight", None, "Vegetable market", "10", "38"),
-    ("mat_potato", "Potato", "weight", Some(("sack", "50", "kg")), "Vegetable market", "1", "1150"),
-    ("mat_gobi", "Cauliflower", "count", None, "Vegetable market", "10", "35"),
-    ("mat_capsicum", "Capsicum", "weight", None, "Vegetable market", "3", "80"),
-    ("mat_maida", "Maida", "weight", Some(("bag", "25", "kg")), "Metro", "1", "1180"),
-    ("mat_sugar", "Sugar", "weight", Some(("bag", "25", "kg")), "Metro", "1", "1080"),
-    ("mat_coffee", "Coffee Powder", "weight", None, "Coffee Works", "2", "540"),
-    ("mat_tea", "Tea Powder", "weight", None, "Coffee Works", "2", "480"),
-    ("mat_dal", "Toor Dal", "weight", Some(("bag", "30", "kg")), "Metro", "1", "4200"),
-    ("mat_gaspacket", "LPG (commercial)", "count", None, "Bharat Gas", "1", "1850"),
+    (
+        "mat_onion",
+        "Onion",
+        "weight",
+        Some(("sack", "50", "kg")),
+        "Vegetable market",
+        "1",
+        "1400",
+    ),
+    (
+        "mat_tomato",
+        "Tomato",
+        "weight",
+        None,
+        "Vegetable market",
+        "10",
+        "38",
+    ),
+    (
+        "mat_potato",
+        "Potato",
+        "weight",
+        Some(("sack", "50", "kg")),
+        "Vegetable market",
+        "1",
+        "1150",
+    ),
+    (
+        "mat_gobi",
+        "Cauliflower",
+        "count",
+        None,
+        "Vegetable market",
+        "10",
+        "35",
+    ),
+    (
+        "mat_capsicum",
+        "Capsicum",
+        "weight",
+        None,
+        "Vegetable market",
+        "3",
+        "80",
+    ),
+    (
+        "mat_maida",
+        "Maida",
+        "weight",
+        Some(("bag", "25", "kg")),
+        "Metro",
+        "1",
+        "1180",
+    ),
+    (
+        "mat_sugar",
+        "Sugar",
+        "weight",
+        Some(("bag", "25", "kg")),
+        "Metro",
+        "1",
+        "1080",
+    ),
+    (
+        "mat_coffee",
+        "Coffee Powder",
+        "weight",
+        None,
+        "Coffee Works",
+        "2",
+        "540",
+    ),
+    (
+        "mat_tea",
+        "Tea Powder",
+        "weight",
+        None,
+        "Coffee Works",
+        "2",
+        "480",
+    ),
+    (
+        "mat_dal",
+        "Toor Dal",
+        "weight",
+        Some(("bag", "30", "kg")),
+        "Metro",
+        "1",
+        "4200",
+    ),
+    (
+        "mat_gaspacket",
+        "LPG (commercial)",
+        "count",
+        None,
+        "Bharat Gas",
+        "1",
+        "1850",
+    ),
 ];
 
 /// What is actually on the shelf right now, in the material's own unit — with
@@ -802,10 +1159,8 @@ fn seed_shelf(app: &App) {
                 buy_from: (*buy_from).to_owned(),
                 reorder_level: (*reorder).to_owned(),
                 reorder_qty: (*reorder).to_owned(),
-                reorder_unit: pack.map_or_else(
-                    || base_unit(dimension).to_owned(),
-                    |(n, _, _)| n.to_owned(),
-                ),
+                reorder_unit: pack
+                    .map_or_else(|| base_unit(dimension).to_owned(), |(n, _, _)| n.to_owned()),
                 is_perishable: matches!(*id, "mat_paneer" | "mat_curd" | "mat_milk"),
                 shelf_life_days: match *id {
                     "mat_paneer" => Some(3),
@@ -881,21 +1236,30 @@ fn demo_printer() {
     let Some(root) = std::env::var_os("MB_DEMO").map(std::path::PathBuf::from) else {
         panic!("set MB_DEMO to the demo's APPDATA folder");
     };
-    let Some(windows_name) = std::env::var_os("MB_PRINTER").map(|s| s.to_string_lossy().into_owned())
+    let Some(windows_name) =
+        std::env::var_os("MB_PRINTER").map(|s| s.to_string_lossy().into_owned())
     else {
         panic!("set MB_PRINTER to the Windows printer name, e.g. \"TVSE RP3200 Lite\"");
     };
 
     let home = root.join("MagicBill");
     let db_path = home.join("magicbill.db");
-    assert!(db_path.exists(), "seed the shop first: {}", db_path.display());
+    assert!(
+        db_path.exists(),
+        "seed the shop first: {}",
+        db_path.display()
+    );
 
     let db = Db::open(&DbConfig::new(db_path.clone())).expect("open");
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, db_path);
 
     let before = crate::settings::printers::printers_on(&app).expect("the printers");
-    let existing = before.printers.first().map(|p| p.id.clone()).unwrap_or_default();
+    let existing = before
+        .printers
+        .first()
+        .map(|p| p.id.clone())
+        .unwrap_or_default();
 
     let view = crate::settings::printers::save_printer_on(
         &app,
@@ -920,7 +1284,10 @@ fn demo_printer() {
     .expect("the printer");
 
     for printer in &view.printers {
-        println!("  {} — {} — {}", printer.name, printer.connection, printer.role);
+        println!(
+            "  {} — {} — {}",
+            printer.name, printer.connection, printer.role
+        );
     }
     println!();
     println!("Now open the app against this folder and press Settings → Printers →");
@@ -936,11 +1303,46 @@ fn demo_printer() {
 /// what that looks like.
 const PEOPLE: &[(&str, &str, &str, &str, &str, i64)] = &[
     // id, name, designation, department, basis, amount in rupees
-    ("staff_meena", "Meena", "Manager", "Counter", "monthly", 28_000),
-    ("staff_ravi", "Ravi", "Head cook", "Kitchen", "monthly", 24_000),
-    ("staff_shashi", "Shashi", "Cook", "Kitchen", "monthly", 18_000),
-    ("staff_iqbal", "Iqbal", "Tandoor", "Kitchen", "monthly", 20_000),
-    ("staff_deepa", "Deepa", "Cashier", "Counter", "monthly", 16_000),
+    (
+        "staff_meena",
+        "Meena",
+        "Manager",
+        "Counter",
+        "monthly",
+        28_000,
+    ),
+    (
+        "staff_ravi",
+        "Ravi",
+        "Head cook",
+        "Kitchen",
+        "monthly",
+        24_000,
+    ),
+    (
+        "staff_shashi",
+        "Shashi",
+        "Cook",
+        "Kitchen",
+        "monthly",
+        18_000,
+    ),
+    (
+        "staff_iqbal",
+        "Iqbal",
+        "Tandoor",
+        "Kitchen",
+        "monthly",
+        20_000,
+    ),
+    (
+        "staff_deepa",
+        "Deepa",
+        "Cashier",
+        "Counter",
+        "monthly",
+        16_000,
+    ),
     ("staff_kumar", "Kumar", "Waiter", "Service", "daily", 650),
     ("staff_arun", "Arun", "Waiter", "Service", "daily", 650),
     ("staff_sita", "Sita", "Helper", "Kitchen", "daily", 500),
@@ -964,11 +1366,13 @@ fn seed_people(app: &App) {
                 id: (*id).to_owned(),
                 name: (*name).to_owned(),
                 code: Some(name.chars().take(2).collect()),
-                role_id: Some(match *department {
-                    "Counter" => "role_manager",
-                    _ => "role_waiter",
-                }
-                .to_owned()),
+                role_id: Some(
+                    match *department {
+                        "Counter" => "role_manager",
+                        _ => "role_waiter",
+                    }
+                    .to_owned(),
+                ),
                 status: "active".to_owned(),
             },
         )
@@ -1109,8 +1513,12 @@ fn seed_people(app: &App) {
         app,
         "staff_deepa".to_owned(),
         "lv_casual".to_owned(),
-        ymd(BusinessDay::from_days_since_epoch(today.days_since_epoch() - 3)),
-        ymd(BusinessDay::from_days_since_epoch(today.days_since_epoch() - 3)),
+        ymd(BusinessDay::from_days_since_epoch(
+            today.days_since_epoch() - 3,
+        )),
+        ymd(BusinessDay::from_days_since_epoch(
+            today.days_since_epoch() - 3,
+        )),
         2,
         "Family function".to_owned(),
     )
@@ -1199,8 +1607,8 @@ fn seed_delivery(app: &App) {
         let settle = !matches!(*state, "out" | "failed");
         if settle {
             app.with_cart_mut(|s| {
-                let payment = mb_core::Payment::new(mb_core::PaymentMode::Cash, total)
-                    .expect("a payment");
+                let payment =
+                    mb_core::Payment::new(mb_core::PaymentMode::Cash, total).expect("a payment");
                 s.settlement.add(payment).map_err(|e| {
                     crate::words::UiError::new("bill.pay", "That payment could not be taken.")
                         .with_detail(e.to_string())
@@ -1225,7 +1633,11 @@ fn seed_delivery(app: &App) {
             .order_id
             .clone();
 
-        let rider = if n % 2 == 0 { "staff_kumar" } else { "staff_ravi" };
+        let rider = if n % 2 == 0 {
+            "staff_kumar"
+        } else {
+            "staff_ravi"
+        };
         // Walk the state machine, because it refuses a jump — which is the
         // point of it, and a seeder that could skip a step would be seeding a
         // state the product cannot reach.

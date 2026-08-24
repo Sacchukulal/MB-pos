@@ -326,8 +326,8 @@ fn seed_a_shop(db: &Db) {
         for n in 0..300 {
             tx.execute(
                 "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
-                                    tax_treatment, hsn, short_code, created_at, updated_at)
-                 VALUES (?1, 'outlet_default', 'cat_food', ?2, ?3, 500, 'exclusive', '2106', ?4, 0, 0)",
+                                    tax_kind, tax_basis, hsn, short_code, created_at, updated_at)
+                 VALUES (?1, 'outlet_default', 'cat_food', ?2, ?3, 500, 'gst', 'exclusive', '2106', ?4, 0, 0)",
                 rusqlite::params![
                     format!("itm_{n:04}"),
                     format!("Menu Item Number {n}"),
@@ -417,8 +417,8 @@ fn write_bill_rows(
 
         tx.execute(
             "INSERT INTO order_lines (id, order_id, seq, item_id, name, unit_price, tax_rate_bp,
-                                      tax_treatment, hsn, qty, note, was_discount_capped)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 500, 'exclusive', '2106', ?7, ?8, 0)",
+                                      tax_kind, tax_basis, hsn, qty, note, was_discount_capped)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 500, 'gst', 'exclusive', '2106', ?7, ?8, 0)",
             rusqlite::params![
                 line_id,
                 order_id,
@@ -433,8 +433,8 @@ fn write_bill_rows(
         tx.execute(
             "INSERT INTO bill_lines (order_line_id, order_id, gross, line_discount,
                                      bill_discount_share, net, taxable, cgst, sgst, igst,
-                                     gross_including_tax, rate_bp, treatment)
-             VALUES (?1, ?2, ?3, 0, 0, ?3, ?4, ?5, ?5, 0, ?6, 500, 'exclusive')",
+                                     gross_including_tax, rate_bp, tax_kind, tax_basis)
+             VALUES (?1, ?2, ?3, 0, 0, ?3, ?4, ?5, ?5, 0, ?6, 500, 'gst', 'exclusive')",
             rusqlite::params![
                 line_id,
                 order_id,
@@ -469,7 +469,7 @@ fn write_bill_rows(
     )?;
 
     // Two rate rows, as a mixed-rate shop really has.
-    for rate in [TaxRate::GST_5, TaxRate::GST_18] {
+    for rate in [TaxRate::from_percent(5).expect("5%"), TaxRate::from_percent(18).expect("18%")] {
         tx.execute(
             "INSERT INTO bill_tax_rows (order_id, rate_bp, taxable, cgst, sgst, igst)
              VALUES (?1, ?2, ?3, ?4, ?4, 0)",

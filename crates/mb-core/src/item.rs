@@ -3,7 +3,7 @@
 
 use crate::ids::{CategoryId, ItemId, ModifierId};
 use crate::money::Money;
-use crate::tax::{TaxRate, TaxTreatment};
+use crate::tax::{PriceBasis, TaxKind, TaxRate, TaxSpec};
 use serde::{Deserialize, Serialize};
 
 /// How the order is being served.
@@ -59,8 +59,10 @@ pub struct ItemSnapshot {
     pub item_id: ItemId,
     pub name: String,
     pub unit_price: Money,
-    pub tax_rate: TaxRate,
-    pub tax_treatment: TaxTreatment,
+    /// **The whole tax question, frozen** — kind, rate and pricing basis.
+    /// P33 replaced a rate plus a four-valued treatment, which could not say
+    /// "outside GST at 20% VAT" at all.
+    pub tax: TaxSpec,
     /// The HSN/SAC code printed on the bill (scope 2.5). Optional because
     /// alcohol under `NonGst` has none, and a shop below the turnover threshold
     /// is not required to print one.
@@ -93,8 +95,7 @@ impl ItemSnapshot {
             item_id,
             name: name.into(),
             unit_price,
-            tax_rate,
-            tax_treatment: TaxTreatment::Exclusive,
+            tax: TaxSpec { kind: TaxKind::Gst, rate: tax_rate, basis: PriceBasis::Exclusive },
             hsn: None,
             category_id: None,
             // The shop's one screen, no course, no target — which is the
@@ -107,9 +108,16 @@ impl ItemSnapshot {
     }
 
     #[must_use]
-    pub fn with_treatment(mut self, treatment: TaxTreatment) -> Self {
-        self.tax_treatment = treatment;
+    /// The whole tax question at once — the way a menu item hands it over.
+    pub fn with_tax(mut self, tax: TaxSpec) -> Self {
+        self.tax = tax;
         self
+    }
+
+    /// Is the price on this line already tax-in?
+    #[must_use]
+    pub fn is_inclusive(&self) -> bool {
+        self.tax.basis.is_inclusive()
     }
 
     #[must_use]
@@ -158,7 +166,7 @@ mod tests {
             ItemId::new("itm_biryani"),
             "Chicken Biryani",
             Money::from_paise(24_000),
-            TaxRate::GST_5,
+            TaxRate::from_percent(5).expect("5%"),
         );
 
         // The shop raises the price and renames the dish tomorrow.
@@ -166,7 +174,7 @@ mod tests {
             ItemId::new("itm_biryani"),
             "Chicken Biryani (Special)",
             Money::from_paise(28_000),
-            TaxRate::GST_5,
+            TaxRate::from_percent(5).expect("5%"),
         );
 
         assert_eq!(sold_at.unit_price, Money::from_paise(24_000));

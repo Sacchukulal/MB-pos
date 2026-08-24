@@ -16,7 +16,7 @@
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
-use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxRate, TaxTreatment};
+use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxRate};
 use mb_db::repo::menu::{Category, MenuItem};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -24,9 +24,9 @@ use ts_rs::TS;
 use crate::flows::{now, today};
 use crate::guard;
 use crate::ipc::MoneyView;
+use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
-use crate::log_info;
 
 // ---------------------------------------------------------------------------
 // What the menu screen sees.
@@ -40,7 +40,15 @@ pub struct TaxClassView {
     pub name: String,
     /// Preformatted — "5%", "12.5%". R8: TypeScript divides nothing, ever.
     pub rate: String,
-    /// "Added on top", "Included in the price", "Exempt", "Outside GST".
+    /// The same rate in basis points, so the editor can send it back unchanged.
+    pub rate_bp: u32,
+    /// **The machine values.** The editor sends these back; it never reads the
+    /// words, so rewording a label cannot change what a class taxes (P33 §5.1).
+    #[ts(type = "\"gst\" | \"exempt\" | \"outside_gst\" | \"untaxed\"")]
+    pub kind: mb_core::TaxKind,
+    #[ts(type = "\"exclusive\" | \"inclusive\"")]
+    pub basis: mb_core::PriceBasis,
+    /// For a person to read in the list. Never parsed back.
     pub treatment: String,
     pub is_active: bool,
     /// How many items would move if this class changed. The screen says it out
@@ -132,8 +140,11 @@ pub fn tax_classes_on(app: &App) -> UiResult<Vec<TaxClassView>> {
                     out.push(TaxClassView {
                         id: class.id.as_str().to_owned(),
                         name: class.name.clone(),
-                        rate: class.rate.label(),
-                        treatment: treatment_words(class.treatment).to_owned(),
+                        rate: class.tax.rate.label(),
+                        rate_bp: class.tax.rate.basis_points(),
+                        kind: class.tax.kind,
+                        basis: class.tax.basis,
+                        treatment: tax_words(class.tax).to_owned(),
                         is_active: class.is_active,
                         items_using,
                     });
@@ -144,13 +155,19 @@ pub fn tax_classes_on(app: &App) -> UiResult<Vec<TaxClassView>> {
     })
 }
 
-/// The treatment, in words a shopkeeper uses — UI_GUIDELINES §6.
-const fn treatment_words(treatment: TaxTreatment) -> &'static str {
-    match treatment {
-        TaxTreatment::Exclusive => "Tax added on top",
-        TaxTreatment::Inclusive => "Tax included in the price",
-        TaxTreatment::Exempt => "Exempt",
-        TaxTreatment::NonGst => "Outside GST",
+/// The tax, in words a shopkeeper reads — UI_GUIDELINES §6.
+///
+/// **Display only.** The kind and the basis cross the wire as themselves, so
+/// rewording these is safe (P33 §5.1).
+const fn tax_words(tax: mb_core::TaxSpec) -> &'static str {
+    match tax.kind {
+        mb_core::TaxKind::Exempt => "Exempt",
+        mb_core::TaxKind::OutsideGst => "Outside GST",
+        mb_core::TaxKind::Untaxed => "No tax",
+        mb_core::TaxKind::Gst => match tax.basis {
+            mb_core::PriceBasis::Exclusive => "Tax added on top",
+            mb_core::PriceBasis::Inclusive => "Tax included in the price",
+        },
     }
 }
 
@@ -209,11 +226,7 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
                         category_id: item.category_id.as_ref().map(|c| c.as_str().to_owned()),
                         price: MoneyView::from(item.unit_price),
                         tax_class_id: item.tax_class_id.as_ref().map(|c| c.as_str().to_owned()),
-                        rate: format!(
-                            "{} · {}",
-                            item.tax_rate.label(),
-                            treatment_words(item.tax_treatment)
-                        ),
+                        rate: format!("{} · {}", item.tax.rate.label(), tax_words(item.tax)),
                         hsn: item.hsn.clone(),
                         short_code: item.short_code.clone(),
                         margin: cost.and_then(|cost| margin_label(item.unit_price, cost)),
@@ -268,8 +281,14 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
     if edit.name.trim().is_empty() {
         return Err(UiError::new("menu.name", "An item needs a name."));
     }
+    check_hsn(edit.hsn.as_deref())?;
     let price = parse_money(&edit.price, "price")?;
-    let cost = match edit.cost.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+    let cost = match edit
+        .cost
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    {
         Some(text) => Some(parse_money(text, "cost")?),
         None => None,
     };
@@ -283,22 +302,21 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                 // The class, resolved. An item with no class keeps whatever it
                 // had — an imported one-off is a real thing and must not be
                 // silently moved to 5%.
-                let (rate, treatment) = match &edit.tax_class_id {
+                let tax = match &edit.tax_class_id {
                     Some(id) => {
                         let class = repos
                             .tax_classes()
                             .find(OUTLET, &TaxClassId::new(id.clone()))?
                             .ok_or_else(|| {
-                                mb_db::DbError::invariant(
-                                    "that tax class is not one this shop has",
-                                )
+                                mb_db::DbError::invariant("that tax class is not one this shop has")
                             })?;
-                        (class.rate, class.treatment)
+                        class.tax
                     }
-                    None => before.as_ref().map_or(
-                        (TaxRate::ZERO, TaxTreatment::Exclusive),
-                        |b| (b.tax_rate, b.tax_treatment),
-                    ),
+                    // No class chosen: keep what the item already had, or start
+                    // it as ordinary GST at nil rate.
+                    None => before
+                        .as_ref()
+                        .map_or(mb_core::TaxSpec::gst(TaxRate::ZERO), |b| b.tax),
                 };
 
                 let item = MenuItem {
@@ -307,8 +325,7 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                     name: edit.name.trim().to_owned(),
                     unit_price: price,
                     tax_class_id: edit.tax_class_id.clone().map(TaxClassId::new),
-                    tax_rate: rate,
-                    tax_treatment: treatment,
+                    tax,
                     hsn: edit.hsn.clone().filter(|h| !h.trim().is_empty()),
                     cost_price: cost,
                     short_code: edit.short_code.clone().filter(|s| !s.trim().is_empty()),
@@ -369,6 +386,21 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
     menu_rows_on(app)
 }
 
+/// An HSN or SAC code is 2, 4, 6 or 8 digits — or nothing at all. Checked here
+/// rather than on the bill, where a wrong one is already printed.
+fn check_hsn(hsn: Option<&str>) -> UiResult<()> {
+    let Some(code) = hsn.map(str::trim).filter(|h| !h.is_empty()) else {
+        return Ok(());
+    };
+    if matches!(code.len(), 2 | 4 | 6 | 8) && code.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(());
+    }
+    Err(UiError::new(
+        "menu.hsn",
+        "An HSN or SAC code is 2, 4, 6 or 8 digits, or blank.",
+    ))
+}
+
 /// **Never the cost price.** The audit trail is read by anybody with
 /// `audit.view`, and what the shop pays for a dosa is a narrower secret than
 /// what it charges.
@@ -376,7 +408,7 @@ fn item_json(item: &MenuItem) -> serde_json::Value {
     serde_json::json!({
         "name": item.name,
         "price_paise": item.unit_price.paise(),
-        "rate": item.tax_rate.label(),
+        "rate": item.tax.rate.label(),
         "hsn": item.hsn,
         "is_available": item.is_available,
     })
@@ -431,7 +463,10 @@ pub fn save_category_on(
     let at = now();
 
     if name.trim().is_empty() {
-        return Err(UiError::new("menu.category_name", "A category needs a name."));
+        return Err(UiError::new(
+            "menu.category_name",
+            "A category needs a name.",
+        ));
     }
 
     app.with_shop(|shop| {
@@ -486,12 +521,16 @@ pub fn save_category_on(
 }
 
 /// Save a tax class, and say how many items moved with it.
+///
+/// **The kind and the basis arrive as themselves**, not as words to be sniffed:
+/// a label is for reading (P33 §5.1).
 pub fn save_tax_class_on(
     app: &App,
     id: String,
     name: String,
     rate: String,
-    treatment: String,
+    kind: mb_core::TaxKind,
+    basis: mb_core::PriceBasis,
 ) -> UiResult<String> {
     let who = guard::require(app, Permission::SettingsTax)?;
     let at = now();
@@ -502,18 +541,18 @@ pub fn save_tax_class_on(
         .unwrap_or(0);
     let rate = TaxRate::from_basis_points(bp)
         .ok_or_else(|| UiError::new("menu.rate", "A tax rate is between 0% and 100%."))?;
-    let treatment = match treatment.as_str() {
-        "exclusive" => TaxTreatment::Exclusive,
-        "inclusive" => TaxTreatment::Inclusive,
-        "exempt" => TaxTreatment::Exempt,
-        "non_gst" => TaxTreatment::NonGst,
-        other => {
-            return Err(UiError::new(
-                "menu.treatment",
-                format!("\"{other}\" is not a way tax can work."),
-            ));
-        }
-    };
+    // Outside GST carries a STATE VAT rate, and the rate typed on this screen
+    // is that rate. Before P33 it could only ever be zero, which is why a bar
+    // undercharged every drink.
+    let tax = mb_core::TaxSpec { kind, rate, basis };
+
+    // The rate is free entry, so "exempt at 5%" is typeable and refused here.
+    if !tax.is_coherent() {
+        return Err(UiError::new(
+            "menu.rate",
+            "Exempt and no-tax classes have no rate. Set it to 0, or change the kind.",
+        ));
+    }
 
     let moved = app.with_shop(|shop| {
         shop.db
@@ -521,12 +560,11 @@ pub fn save_tax_class_on(
                 let repos = mb_db::Repos::new(tx);
                 let class_id = TaxClassId::new(id.clone());
                 let before = repos.tax_classes().find(OUTLET, &class_id)?;
-                let mut class = before.clone().unwrap_or_else(|| {
-                    mb_core::TaxClass::new(class_id.clone(), name.clone(), rate, treatment)
-                });
+                let mut class = before
+                    .clone()
+                    .unwrap_or_else(|| mb_core::TaxClass::new(class_id.clone(), name.clone(), tax));
                 class.name = name.trim().to_owned();
-                class.rate = rate;
-                class.treatment = treatment;
+                class.tax = tax;
 
                 let moved = repos.tax_classes().save(OUTLET, &class, at)?;
                 repos.audit().append(
@@ -540,10 +578,11 @@ pub fn save_tax_class_on(
                     )
                     .about(id.clone())
                     .changed(
-                        before.as_ref().map_or(serde_json::Value::Null, |b| {
-                            serde_json::json!({ "name": b.name, "rate": b.rate.label() })
-                        }),
-                        serde_json::json!({ "name": class.name, "rate": class.rate.label() }),
+                        before.as_ref().map_or(
+                            serde_json::Value::Null,
+                            |b| serde_json::json!({ "name": b.name, "rate": b.tax.rate.label() }),
+                        ),
+                        serde_json::json!({ "name": class.name, "rate": class.tax.rate.label() }),
                     ),
                 )?;
                 Ok(moved)
@@ -692,9 +731,10 @@ pub fn save_tax_class(
     id: String,
     name: String,
     rate: String,
-    treatment: String,
+    kind: mb_core::TaxKind,
+    basis: mb_core::PriceBasis,
 ) -> UiResult<String> {
-    save_tax_class_on(&app, id, name, rate, treatment)
+    save_tax_class_on(&app, id, name, rate, kind, basis)
 }
 
 #[tauri::command]
@@ -1143,7 +1183,10 @@ pub fn save_group_on(app: &App, group: GroupEdit) -> UiResult<Vec<ModifierGroupV
 /// charge for it. Blank means free, because most choices are.
 fn parse_delta(text: &str) -> UiResult<Money> {
     let text = text.trim();
-    let (negative, rest) = match text.strip_prefix('-').or_else(|| text.strip_prefix('\u{2212}')) {
+    let (negative, rest) = match text
+        .strip_prefix('-')
+        .or_else(|| text.strip_prefix('\u{2212}'))
+    {
         Some(rest) => (true, rest.trim()),
         None => (false, text),
     };
@@ -1170,7 +1213,9 @@ pub fn attach_group_on(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 if attach {
-                    repos.composition().attach_group(OUTLET, &id, &group_id, 0, at)
+                    repos
+                        .composition()
+                        .attach_group(OUTLET, &id, &group_id, 0, at)
                 } else {
                     repos.composition().detach_group(OUTLET, &id, &group_id, at)
                 }
@@ -1285,7 +1330,7 @@ pub fn list_combos_on(app: &App) -> UiResult<Vec<ComboView>> {
                                             .map_or(Money::ZERO, |s| s.share),
                                     ),
                                     rate: item
-                                        .map_or_else(|| "—".to_owned(), |i| i.tax_rate.label()),
+                                        .map_or_else(|| "—".to_owned(), |i| i.tax.rate.label()),
                                 }
                             })
                             .collect(),

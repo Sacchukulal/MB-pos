@@ -15,8 +15,9 @@ mod common;
 use common::Scratch;
 use common::shop::{self, OUTLET, TERMINAL};
 use mb_core::{
+    Registration,
     AnyOrder, BillInput, BusinessDay, Cart, ItemSnapshot, Money, OrderId, OrderType, Payment,
-    PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TaxRate, TaxTreatment,
+    PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TaxRate, TaxSpec,
     Timestamp, compute_bill,
 };
 use mb_db::repo::corrections::{Reason, Refund};
@@ -35,8 +36,7 @@ fn tea() -> ItemSnapshot {
         item_id: mb_core::ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),
-        tax_rate: TaxRate::GST_5,
-        tax_treatment: TaxTreatment::Exclusive,
+        tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
         hsn: None,
         category_id: None,
         station: None,
@@ -57,7 +57,7 @@ fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
     .expect("adds");
 
     let bill = compute_bill(
-        BillInput::new(&cart)
+        BillInput::new(&cart, Registration::Regular)
             .with_order_type(OrderType::Parcel)
             .with_place_of_supply(PlaceOfSupply::Intra)
             .with_rounding(RoundingMode::NearestRupee),
@@ -435,7 +435,7 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
 /// (crown jewel 4).
 #[test]
 fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
-    use mb_core::{TaxClassId, TaxRate, TaxTreatment};
+    use mb_core::{TaxClassId, TaxRate};
 
     let scratch = Scratch::new("taxclass");
     let db = scratch.open();
@@ -449,10 +449,10 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
                 .menu()
                 .find_item(&mb_core::ItemId::new("itm_dosa"))?
                 .expect("the dosa")
-                .tax_rate)
+                .tax.rate)
         })
         .expect("read");
-    assert_eq!(before_rate, TaxRate::GST_5);
+    assert_eq!(before_rate, TaxRate::from_percent(5).expect("5%"));
 
     // What the settled bill says today.
     let billed_rates: Vec<i64> = db
@@ -474,7 +474,7 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
                 .tax_classes()
                 .find(OUTLET, &TaxClassId::new("tax_food_5"))?
                 .expect("the class");
-            class.rate = TaxRate::GST_18;
+            class.tax.rate = TaxRate::from_percent(18).expect("18%");
             class.name = "Restaurant food 18%".to_owned();
             repos.tax_classes().save(OUTLET, &class, at(9))
         })
@@ -489,10 +489,10 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
                 .menu()
                 .find_item(&mb_core::ItemId::new("itm_dosa"))?
                 .expect("the dosa")
-                .tax_rate)
+                .tax.rate)
         })
         .expect("read");
-    assert_eq!(after_rate, TaxRate::GST_18, "the live menu did not follow");
+    assert_eq!(after_rate, TaxRate::from_percent(18).expect("18%"), "the live menu did not follow");
 
     // **And the bill did not.**
     let still: Vec<i64> = db
@@ -516,14 +516,19 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
                 .menu()
                 .find_item(&mb_core::ItemId::new("itm_beer"))?
                 .expect("the beer")
-                .tax_treatment)
+                .tax.kind)
         })
         .expect("read");
-    assert_eq!(orphan, TaxTreatment::NonGst, "the beer moved with the food");
+    assert_eq!(orphan, mb_core::TaxKind::OutsideGst, "the beer moved with the food");
 }
 
-/// The five seeded classes are the same five `mb-core` ships, and the liquor
-/// one is what lets a bar bill at all.
+/// Every class `mb-core` ships is seeded and live, and the liquor one is what
+/// lets a bar bill at all.
+///
+/// **The database holds one class mb-core does not ship**: `tax_packaged_12`.
+/// The 12% slab was abolished on 22 September 2025, so migration 0004
+/// deactivates it rather than deleting a row an existing shop's items may still
+/// point at. So the two lists are compared class by class, not by length.
 #[test]
 fn the_seeded_classes_match_the_ones_mb_core_ships() {
     let scratch = Scratch::new("taxclass_seed");
@@ -532,66 +537,41 @@ fn the_seeded_classes_match_the_ones_mb_core_ships() {
     let stored = db
         .transaction(|tx| Repos::new(tx).tax_classes().list(OUTLET))
         .expect("classes");
-    let shipped = mb_core::starting_classes();
 
-    assert_eq!(stored.len(), shipped.len());
-    for expected in &shipped {
+    for expected in &mb_core::starting_classes() {
         let found = stored
             .iter()
             .find(|c| c.id == expected.id)
             .unwrap_or_else(|| panic!("{} is not seeded", expected.name));
-        assert_eq!(found.rate, expected.rate, "{}", expected.name);
-        assert_eq!(found.treatment, expected.treatment, "{}", expected.name);
+        assert_eq!(found.tax, expected.tax, "{}", expected.name);
         assert_eq!(found.name, expected.name);
+        assert!(found.is_active, "{} is seeded switched off", expected.name);
     }
 
-    // The commercial one.
+    // The retired slab: still there, so nothing points at a missing row, and
+    // off, so it is not offered to anybody setting up a menu today.
+    let retired = stored
+        .iter()
+        .find(|c| c.id.as_str() == "tax_packaged_12")
+        .expect("the abolished 12% slab is retired, not deleted");
+    assert!(!retired.is_active, "the abolished 12% slab is still on offer");
+    assert_eq!(stored.len(), mb_core::starting_classes().len() + 1);
+
+    // The commercial one: outside GST, priced tax-in, with a rate the shop sets.
     let liquor = stored
         .iter()
-        .find(|c| c.treatment == mb_core::TaxTreatment::NonGst)
+        .find(|c| c.is_alcohol())
         .expect("a shop must be able to sell liquor");
-    assert!(liquor.name.contains("outside GST"), "{}", liquor.name);
+    assert_eq!(liquor.name, "Liquor — state VAT");
+    assert_eq!(liquor.tax.basis, mb_core::PriceBasis::Inclusive);
 }
 
-/// Scope 6.8's tax half: some states tax the same dish differently to take
-/// away, and the override survives the round trip.
-#[test]
-fn a_per_order_type_rate_round_trips() {
-    use mb_core::{OrderType, TaxClassId, TaxRate, TaxTreatment};
-
-    let scratch = Scratch::new("taxclass_override");
-    let db = scratch.open();
-
-    db.transaction(|tx| {
-        let repos = Repos::new(tx);
-        let class = repos
-            .tax_classes()
-            .find(OUTLET, &TaxClassId::new("tax_food_5"))?
-            .expect("the class")
-            .with_override(OrderType::Parcel, TaxRate::GST_18, TaxTreatment::Exclusive);
-        repos.tax_classes().save(OUTLET, &class, at(1))?;
-        Ok(())
-    })
-    .expect("saved");
-
-    let (dine_in, parcel) = db
-        .transaction(|tx| {
-            let repos = Repos::new(tx);
-            Ok((
-                repos.tax_classes().resolve(
-                    OUTLET,
-                    &TaxClassId::new("tax_food_5"),
-                    OrderType::DineIn,
-                )?,
-                repos.tax_classes().resolve(
-                    OUTLET,
-                    &TaxClassId::new("tax_food_5"),
-                    OrderType::Parcel,
-                )?,
-            ))
-        })
-        .expect("resolved");
-
-    assert_eq!(dine_in, Some((TaxRate::GST_5, TaxTreatment::Exclusive)));
-    assert_eq!(parcel, Some((TaxRate::GST_18, TaxTreatment::Exclusive)));
-}
+// **The per-order-type rate override test is GONE, with the feature.**
+//
+// P33, audit §3.5. `TaxClass::with_override`, `for_order_type` and
+// `TaxClassRepo::resolve` were modelled, stored in `tax_class_rates`, written
+// by the repository — and read by no caller anywhere in the product. The
+// belief that justified them, that "some states tax the same dish differently
+// to take away", is not current law either: parcel from a restaurant is
+// restaurant service at the same rate as dine-in. A rule that cannot fire,
+// resting on a fact that is not true, was deleted rather than wired up.
