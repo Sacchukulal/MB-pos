@@ -14,7 +14,17 @@
   gap: var(--space-3);
   min-height: 0;
   height: 100%;
-  overflow-y: auto;
+  /* The PAGE does not scroll: the panel and the list each scroll on their own,
+     the same way the floor works. A page that scrolls as a whole would take
+     the search box away with it. */
+  overflow: hidden;
+}
+
+/* The customer form, inside the folding panel. */
+.mb-credit__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 /* The ageing line, which is the thing an owner reads before anything else. */

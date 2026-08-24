@@ -9,7 +9,6 @@
   gap: var(--gap-group);
   min-height: 0;
   height: 100%;
-  overflow-y: auto;
 }
 
 /* A badge hugs its word. Inside a Stack (which stretches its children) it was
@@ -50,5 +49,5 @@
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   max-height: var(--raw-output-height);
-  overflow-y: auto;
+  overflow-y: auto; /* mb-layout-allow: a <pre> capped at a height, showing raw printer output */
 }

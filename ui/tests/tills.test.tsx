@@ -119,7 +119,9 @@ describe('the tills screen', () => {
     show(QUIET);
 
     fireEvent.click((await screen.findAllByText('Change'))[0]!);
-    const prefix = screen.getByLabelText(/in front of its bill numbers/);
+    // An exact label: the field's info tip is labelled "About What goes in
+    // front of its bill numbers", so a loose regex now matches both.
+    const prefix = screen.getByLabelText('What goes in front of its bill numbers');
     fireEvent.change(prefix, { target: { value: 'C/' } });
     fireEvent.click(screen.getByText('Save'));
 

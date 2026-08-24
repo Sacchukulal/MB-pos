@@ -58,12 +58,30 @@
   background: var(--surface-2);
 }
 
+/* Quiet is for a LIST of choices — a category rail, a report rail — where a
+   border round every line would be a cage. */
 .mb-button--quiet {
   background: transparent;
   color: var(--text-muted);
 }
 .mb-button--quiet:hover:not(:disabled) {
   background: var(--surface-2);
+  color: var(--text);
+}
+
+/* **An action standing beside other actions gets an edge**, wherever it is.
+   Quiet is the most-used variant in the product, and in a row of actions it
+   reads as a disabled label: "Edit" had a border, "Sizes & choices" and "Sold
+   out" next to it did not. One rule rather than a decision per screen. */
+.mb-table td .mb-button--quiet,
+.mb-toolbar .mb-button--quiet,
+.mb-pagehead__actions .mb-button--quiet,
+.mb-panel__actions .mb-button--quiet,
+.mb-section .mb-button--quiet,
+.mb-modal__actions .mb-button--quiet,
+.mb-sidefold__foot .mb-button--quiet {
+  /* A softer edge than `secondary`'s, so a row still reads Edit first. */
+  border-color: var(--border);
   color: var(--text);
 }
 
@@ -153,6 +171,12 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   color: var(--text-muted);
+}
+
+.mb-field__labelrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .mb-field__hint {
@@ -313,7 +337,7 @@
   justify-content: center;
   padding: var(--space-5);
   background: var(--overlay);
-  z-index: 100;
+  z-index: var(--layer-modal);
 }
 
 .mb-modal {
@@ -398,7 +422,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  z-index: 200;
+  z-index: var(--layer-toast);
 }
 
 .mb-toast {
@@ -518,6 +542,24 @@
   font-weight: var(--weight-bold);
 }
 
+/* Actions go right, the same side as a page header's. */
+.mb-section__action {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* The section's name stays put while its content scrolls: ninety settings
+   later you could not tell which section you were in. */
+.mb-section--sticky {
+  position: sticky;
+  top: 0;
+  z-index: var(--layer-sticky);
+  background: var(--surface);
+}
+
 /* --- InfoTip: the explanation you ask for -------------------------------- */
 
 /* The owner, 2026-08-22: *"you are adding these explaination texts everywhere
@@ -582,7 +624,7 @@
      floating over the middle of the screen. */
   position-visibility: anchors-visible;
   margin: var(--space-1) 0;
-  z-index: var(--z-tip);
+  z-index: var(--layer-tip);
   width: max-content;
   max-width: var(--tip-width);
   padding: var(--space-2) var(--space-3);
@@ -661,8 +703,19 @@
 
 /* --- Table -------------------------------------------------------------- */
 
+/* A squeezed table scrolls sideways here rather than wrapping its cells to one
+   word per line. `flex: 0 0 auto` because `overflow-x` also makes this a
+   vertical scroll box, and in a flex column that collapses it to no height —
+   which is why the menu list vanished when the side panel opened. */
+.mb-table__wrap {
+  flex: 0 0 auto;
+  overflow-x: auto;
+  min-width: 0;
+}
+
 .mb-table {
   width: 100%;
+  min-width: var(--table-min);
   border-collapse: collapse;
   font-size: var(--text-sm);
 }
@@ -676,9 +729,20 @@
   white-space: nowrap;
 }
 
+/* A cell stays on one line. Wrapping a short phrase like "5% · Tax added on
+   top" into a narrow column gives three lines of nothing; if the whole table
+   will not fit, `.mb-table__wrap` scrolls instead. */
 .mb-table td {
   padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--border);
+  white-space: nowrap;
+}
+
+/* The name is the one thing worth wrapping — it is the only cell that can be
+   arbitrarily long. */
+.mb-table td:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* **A column header is a LABEL, not a figure.**

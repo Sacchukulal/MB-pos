@@ -29,6 +29,7 @@ import {
   EmptyState,
   Icon,
   Locked,
+  Scroller,
   SectionHeader,
   Spinner,
   Table,
@@ -160,7 +161,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   return (
     <div className="mb-reports">
-      <nav className="mb-reports__rail" aria-label="Reports">
+      <Scroller inset className="mb-reports__rail">
         {/* At the top and on their own: one is the question an owner opens
             this screen to ask, the other is the thing a shop does every single
             night. Neither is a report. */}
@@ -208,7 +209,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             ))}
           </div>
         ))}
-      </nav>
+      </Scroller>
 
       <div className="mb-reports__body">
         {chosen === TODAY ? (
@@ -302,7 +303,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
               </div>
             ) : null}
 
-            <div className="mb-reports__sheet">
+            <Scroller className="mb-reports__sheet">
               <Table
                 columns={columns}
                 rows={lines}
@@ -318,7 +319,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
                   />
                 }
               />
-            </div>
+            </Scroller>
 
             {report.notes.map((note) => (
               <p className="mb-reports__note" key={note}>

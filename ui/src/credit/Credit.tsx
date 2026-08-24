@@ -3,12 +3,21 @@
  *
  * The owner renamed this from "khata" on 2026-08-08.
  *
- * # The default view is the one an owner opens
+ * # One list, and everybody is on it
  *
- * Not an alphabetical customer list. A shop opens this screen to answer one
- * question — *who owes me money, and for how long* — so that is what it shows
- * first, oldest debt at the top. The alphabetical list is one click away and
- * nobody clicks it.
+ * It used to open on "who owes me" with "Everybody" as a second tab. The owner,
+ * 2026-08-24: *"when i add a credit customer, it seemed like it disappeared but
+ * the thing was it was in everybody section."* Of course it did — a customer
+ * added today owes nothing today, so the view the screen opened on was the one
+ * view that could not contain them. **A list you can be missing from is a list
+ * that loses people.** One list now, with Owes and Oldest as columns.
+ *
+ * # The customer form is a panel, not a dialog
+ *
+ * Adding and editing are the same six boxes, so they are the same form, in the
+ * side panel — the kit's `SideFold`, the same shape the floor arranges a room
+ * with. The screen's own title went with the dialog: the rail already says
+ * Credit (owner, same day).
  *
  * # Nothing here is arithmetic
  *
@@ -25,18 +34,18 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  Foot,
   freshId,
-  Icon,
   Input,
   Modal,
   MoneyInput,
   Page,
-  PageHeader,
   Panel,
   PhoneInput,
   SearchField,
   SectionHeader,
   Select,
+  SideFold,
   Table,
   Toolbar,
   useToast,
@@ -50,9 +59,17 @@ import './credit.css';
 
 export function Credit() {
   const [rows, setRows] = useState<readonly CustomerView[]>([]);
-  const [everybody, setEverybody] = useState(false);
   const [find, setFind] = useState('');
   const [open, setOpen] = useState<AccountView | null>(null);
+  /**
+   * **The customer in the side panel** — the one being added or edited, and
+   * `null` when the panel is folded away.
+   *
+   * One piece of state for both, because it is one form. The owner,
+   * 2026-08-24: *"i want add customer panel in the side (foldable)"* — and a
+   * screen with a side panel for adding and a dialog for editing would be the
+   * same form drawn twice.
+   */
   const [editing, setEditing] = useState<CustomerView | null>(null);
   const toast = useToast();
 
@@ -63,9 +80,20 @@ export function Credit() {
     [toast],
   );
 
+  /**
+   * **One list, everybody on it** — the owner, 2026-08-24: *"when i add a
+   * credit customer, it seemed like it disappeared but the thing was it was in
+   * everybody section… there is no need for that two sections there. just list
+   * all of them."*
+   *
+   * The screen used to open on "who owes me", so a customer you had just added
+   * — who owes nothing yet — was added into a view that by definition could not
+   * show them. Two views of one list is what made adding one look like losing
+   * one. The Owes and Oldest columns still say who owes what.
+   */
   const load = useCallback(() => {
-    call(everybody ? 'customers' : 'who_owes').then(setRows).catch(report);
-  }, [everybody, report]);
+    call('customers').then(setRows).catch(report);
+  }, [report]);
 
   useEffect(load, [load]);
 
@@ -79,7 +107,7 @@ export function Credit() {
 
   const columns: Column<CustomerView>[] = [
     { key: 'name', header: 'Customer', render: (c) => c.name },
-    { key: 'phone', header: 'Phone', render: (c) => c.phone ?? '—' },
+    { key: 'phone', header: 'Phone', optional: true, render: (c) => c.phone },
     {
       key: 'balance',
       header: 'Owes',
@@ -139,53 +167,13 @@ export function Credit() {
     });
 
   return (
-    <Page className="mb-credit">
-      {/*
-        **A title, an action, and a filter — and each in its own place** (P27.5).
-
-        Before this the screen opened with one row holding a search box, two
-        view buttons and "Add a customer", all `Button`s, two of them filled
-        accent. So the thing that CHANGES THE SHOP (adding a customer) and the
-        thing that changes what you are LOOKING AT (who owes me / everybody)
-        were the same shape, the same colour, and eight pixels apart. The
-        screen also had no title at all.
-      */}
-      <PageHeader
-        title="Credit"
-        subtitle="Who owes this shop money, and how long they have owed it."
-        count={shown.length}
-        actions={
-          <Button variant="primary" onClick={addCustomer}>
-            <Icon name="plus" size="sm" />
-            Add a customer
-          </Button>
-        }
-      />
-
-      <Toolbar
-        end={
-          <div className="mb-tabs" role="tablist" aria-label="Which customers">
-            <button
-              type="button"
-              role="tab"
-              className="mb-tab"
-              aria-selected={!everybody}
-              onClick={() => setEverybody(false)}
-            >
-              Who owes me
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className="mb-tab"
-              aria-selected={everybody}
-              onClick={() => setEverybody(true)}
-            >
-              Everybody
-            </button>
-          </div>
-        }
-      >
+    <Page className="mb-credit" scroll={false}>
+      {/* **The rail already says Credit** (owner, 2026-08-24: *"there is credit
+          wrtten again at top with 0 beside it why it is there… no need for
+          those all it look s repeated and cluttered"*), so this screen opens
+          with the two things you do on it: find somebody, and add somebody.
+          The search sits where the button was; the button is the panel's. */}
+      <Toolbar>
         <div className="mb-credit__find">
           <SearchField
             value={find}
@@ -195,20 +183,40 @@ export function Credit() {
         </div>
       </Toolbar>
 
-      {shown.length === 0 ? (
-        <EmptyState
-          title={everybody ? 'No customers yet' : 'Nobody owes you anything'}
-          body={
-            everybody
-              ? 'Add a regular, and their bills can go on the account.'
-              : 'That is the good state. Switch to Everybody to see the whole list.'
-          }
-        />
-      ) : (
-        <Panel flush>
-          <Table rows={[...shown]} columns={columns} rowKey={(c) => c.id} />
-        </Panel>
-      )}
+      <SideFold
+        label={editing && editing.name !== '' ? editing.name : 'Add a customer'}
+        open={editing !== null}
+        onOpen={addCustomer}
+        onFold={() => setEditing(null)}
+        panel={
+          editing ? (
+            <EditCustomer
+              // A different customer is a different form — remounted, so the
+              // boxes are not left holding the last one's name.
+              key={editing.id}
+              customer={editing}
+              onClose={() => setEditing(null)}
+              onSaved={(fresh) => {
+                setRows(fresh);
+                setEditing(null);
+                load();
+              }}
+              onFailed={report}
+            />
+          ) : null
+        }
+      >
+        {shown.length === 0 ? (
+          <EmptyState
+            title="No customers yet"
+            body="Add a regular, and their bills can go on the account."
+          />
+        ) : (
+          <Panel flush>
+            <Table rows={[...shown]} columns={columns} rowKey={(c) => c.id} />
+          </Panel>
+        )}
+      </SideFold>
 
       {open ? (
         <Account
@@ -218,19 +226,6 @@ export function Credit() {
             load();
           }}
           onChanged={setOpen}
-          onFailed={report}
-        />
-      ) : null}
-
-      {editing ? (
-        <EditCustomer
-          customer={editing}
-          onClose={() => setEditing(null)}
-          onSaved={(fresh) => {
-            setRows(fresh);
-            setEditing(null);
-            load();
-          }}
           onFailed={report}
         />
       ) : null}
@@ -321,7 +316,7 @@ function Account({
         </Button>
       </div>
 
-      <h3 className="mb-credit__heading">The account</h3>
+      <SectionHeader title="The account" />
       {account.movements.length === 0 ? (
         <EmptyState title="Nothing yet" body="Bills on the account and repayments both appear here." />
       ) : (
@@ -438,7 +433,8 @@ function EditCustomer({
   const [active, setActive] = useState(customer.isActive);
 
   return (
-    <Modal open title={customer.name === '' ? 'Add a customer' : customer.name} onClose={onClose}>
+    <div className="mb-credit__form">
+      {/* No heading here — the panel draws it, from the same `label`. */}
       <Input label="Name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
       <PhoneInput
         label="Phone"
@@ -459,7 +455,7 @@ function EditCustomer({
         checked={active}
         onChange={(e) => setActive(e.target.checked)}
       />
-      <div className="mb-row mb-row--end">
+      <Foot>
         <Button variant="quiet" onClick={onClose}>
           Cancel
         </Button>
@@ -483,8 +479,8 @@ function EditCustomer({
         >
           Save
         </Button>
-      </div>
-    </Modal>
+      </Foot>
+    </div>
   );
 }
 

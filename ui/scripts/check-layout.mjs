@@ -139,6 +139,51 @@ const CHECKS = [
     fix: 'Add it to kit/Icon.tsx and use <Icon name="…" />.',
   },
   {
+    /**
+     * A screen that scrolls itself puts the bar INSIDE its content, so the
+     * table ends 12px short of the header above it. `Scroller` reaches back
+     * through the page margin instead, once, for every screen.
+     */
+    what: 'a screen deciding for itself how it scrolls',
+    re: /^\s*overflow(-y)?\s*:\s*(auto|scroll)\s*;/,
+    only: 'css',
+    fix: 'Use <Scroller> from the kit (add `inset` if it is not at the page edge).',
+  },
+  {
+    /** `SectionHeader` is the shape; five screens had their own. */
+    what: 'a hand-rolled section heading',
+    re: /<h[23] className="mb-[a-z]+__(heading|title|sectiontitle)"/,
+    only: 'tsx',
+    fix: 'Use <SectionHeader> from the kit.',
+  },
+  {
+    /** One place turns a count into words. "3 item(s)" is not English. */
+    what: 'a developer plural',
+    re: /\b[a-z]+\(s\)/,
+    only: 'tsx',
+    fix: "Use plural(n, 'item') from the kit.",
+  },
+  {
+    /** The layer contract in tokens.css says what is above what. */
+    what: 'a raw z-index',
+    // The lookahead swallows the space itself: `:\s*(?!var\()` backtracks to
+    // zero spaces and then "does not start with var(" is trivially true.
+    re: /^\s*z-index\s*:(?!\s*var\()/,
+    only: 'css',
+    fix: 'Use a --layer-* token. See THE LAYER CONTRACT in tokens.css.',
+  },
+  {
+    /**
+     * Setting either of these switches Chromium to the OS scrollbar and
+     * silently drops every ::-webkit-scrollbar rule — stepper arrows, square
+     * thumb, Windows grey on a dark page.
+     */
+    what: 'a scrollbar property that kills the themed scrollbar',
+    re: /^\s*scrollbar-(width|color)\s*:/,
+    only: 'css',
+    fix: 'Delete it. The scrollbar is themed with ::-webkit-scrollbar in tokens.css.',
+  },
+  {
     // The owner, 2026-08-23, on the search box and the selected table:
     // *"basically border itself colour changes, another border shouldn't
     // appear around it."* A positive outline-offset is that second border —
@@ -160,6 +205,42 @@ const CHECKS = [
   },
 ];
 
+/**
+ * **The explanation under a heading.** The one the owner has rejected four
+ * times: *"those horrible sub texts you add everyehre."*
+ *
+ * A paragraph on its own is content — a wizard step, a dialog's question, the
+ * lock screen's instructions — and those are fine. What is not fine is a
+ * heading with a grey sentence printed under it explaining what the heading
+ * means, on a screen somebody uses two hundred times a week. `note` on
+ * PageHeader, SectionHeader, Panel and Modal turns that sentence into a tip
+ * you can ask for.
+ *
+ * Line-based checks cannot see a pair, so this one reads the file.
+ */
+const EXPLAINING = {
+  heading: /<(PageHeader|SectionHeader|h[1-3])[\s>]/,
+  paragraph: /<(p|span) className="mb-(muted|[a-z]+__(note|sub|hint|blurb|lede))"\s*>/,
+  /** How many lines after the heading still count as "under" it. */
+  within: 6,
+};
+
+function explainingUnderHeadings(lines) {
+  const found = [];
+  let sinceHeading = Infinity;
+  lines.forEach((line, index) => {
+    if (EXPLAINING.heading.test(line)) sinceHeading = 0;
+    else sinceHeading += 1;
+    // A `{` means the words change with the data — a live message, not an
+    // explanation of the screen.
+    if (sinceHeading <= EXPLAINING.within && !line.includes('{')) {
+      const hit = EXPLAINING.paragraph.exec(line);
+      if (hit) found.push({ line: index + 1, text: hit[0] });
+    }
+  });
+  return found;
+}
+
 /** Lines saying `mb-layout-allow: <why>` exempt themselves, and are counted. */
 const ESCAPE = 'mb-layout-allow:';
 
@@ -171,11 +252,15 @@ const ESCAPE = 'mb-layout-allow:';
  */
 function stripComments(text) {
   const block = new RegExp('/\\*[\\s\\S]*?\\*/', 'g');
-  const lineComment = new RegExp('^\\s*//.*$', 'gm');
+  // `[ \t]`, NOT `\s`: `\s` matches a newline, so `^\s*//` starting on a blank
+  // line swallowed the line break and merged two `//` lines into one. Every
+  // reported line number after the first pair of them was wrong.
+  const lineComment = new RegExp('^[ \\t]*//.*$', 'gm');
   const jsxComment = new RegExp('\\{/\\*[\\s\\S]*?\\*/\\}', 'g');
+  const blank = (found) => found.replace(new RegExp('[^\\n]', 'g'), ' ');
   return text
-    .replace(block, (found) => found.replace(new RegExp('[^\\n]', 'g'), ' '))
-    .replace(jsxComment, (found) => found.replace(new RegExp('[^\\n]', 'g'), ' '))
+    .replace(block, blank)
+    .replace(jsxComment, blank)
     .replace(lineComment, '');
 }
 
@@ -212,6 +297,25 @@ for (const file of walk(ROOT)) {
   const source = readFileSync(file, 'utf8');
   const raw = source.split(/\r?\n/);
   const lines = stripComments(source).split(/\r?\n/);
+
+  if (kind === 'tsx' && !isKit) {
+    for (const hit of explainingUnderHeadings(lines)) {
+      // The line above too: JSX has no trailing comment, so the escape for a
+      // `<p>` has to sit on its own line over it.
+      const marked = [raw[hit.line - 1], raw[hit.line - 2]].some((l) =>
+        (l ?? '').includes(ESCAPE),
+      );
+      if (marked) { escapes += 1; continue; }
+      problems.push({
+        file: path,
+        line: hit.line,
+        what: 'an explanation printed under a heading',
+        text: hit.text,
+        fix: 'Pass it as `note` on the heading — it becomes an InfoTip you can ask for.',
+      });
+    }
+  }
+
   lines.forEach((line, index) => {
     if ((raw[index] ?? '').includes(ESCAPE)) {
       escapes += 1;

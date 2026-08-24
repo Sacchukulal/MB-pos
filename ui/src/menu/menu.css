@@ -27,7 +27,6 @@
   flex-direction: column;
   gap: var(--space-1);
   min-height: 0;
-  overflow-y: auto;
 }
 
 /* The item pane scrolls; the search row above it does not, because looking for
@@ -37,14 +36,6 @@
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
-  overflow-y: auto;
-}
-
-.mb-menu__heading {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  color: var(--text);
 }
 
 .mb-menu__classes {
@@ -109,21 +100,6 @@
 
 /* --- What an item is made of (scope 6.1-6.3) ----------------------------- */
 
-.mb-comp__heading {
-  margin: var(--space-4) 0 0;
-  font-size: var(--text-md);
-  font-weight: var(--weight-bold);
-  color: var(--text);
-}
-
-/* The sentence under a heading that says what the thing is FOR. A group of
-   choices is not self-explanatory the first time somebody meets one. */
-.mb-comp__note {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
 .mb-comp__list {
   display: flex;
   flex-direction: column;
@@ -176,9 +152,12 @@
 
 /* The two columns, under the page header. They used to BE the screen, which is
    why the Menu had no title — there was nowhere to put one. */
+/* The rail gives way first. `minmax(0, …)` rather than a fixed width, because
+   the side panel takes 18rem when it opens: with a fixed rail the table
+   absorbed the whole loss and "Tax added on top" came out five lines tall. */
 .mb-menu__body {
   display: grid;
-  grid-template-columns: var(--menu-categories-width) minmax(0, 1fr);
+  grid-template-columns: minmax(0, var(--menu-categories-width)) minmax(0, 1fr);
   gap: var(--gap-group);
   flex: 1;
   min-height: 0;
@@ -275,4 +254,13 @@
    how a list of six groups stops fitting on the screen. */
 .mb-groups__row .mb-row {
   flex: 0 0 auto;
+}
+
+/* **The item form, in the folding side panel** (owner, 2026-08-24). The panel
+   itself — its width, its border, the fold button — is the kit's `SideFold`;
+   this is only how the fields stack inside it. */
+.mb-menu__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }

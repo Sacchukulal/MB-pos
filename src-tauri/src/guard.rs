@@ -241,7 +241,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
 
     // --- customers and what they owe (P15) --------------------------------
     // The owner renamed this from "khata" on 2026-08-08.
-    ("who_owes", Access::Needs(Permission::CustomersManage)),
     ("customers", Access::Needs(Permission::CustomersManage)),
     ("customer_account", Access::Needs(Permission::CustomersManage)),
     ("save_customer", Access::Needs(Permission::CustomersManage)),

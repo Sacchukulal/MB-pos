@@ -26,6 +26,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { Scroller } from '../kit';
 import { subscribe } from '../ipc/call';
 
 import './display.css';
@@ -65,7 +66,7 @@ export function Display() {
         <p className="mb-display__welcome">Welcome</p>
       ) : (
         <>
-          <div className="mb-display__lines">
+          <Scroller inset className="mb-display__lines">
             {lines.map((line, index) => (
               <div className="mb-display__line" key={`${line.name}-${index}`}>
                 <span className="mb-display__what">{line.name}</span>
@@ -73,7 +74,7 @@ export function Display() {
                 <span className="mb-display__amount">{line.amount}</span>
               </div>
             ))}
-          </div>
+          </Scroller>
           <div className="mb-display__total">
             <span>Total</span>
             <span className="mb-display__grand">{total}</span>

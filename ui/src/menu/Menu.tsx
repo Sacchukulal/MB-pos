@@ -30,15 +30,20 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  Foot,
   freshId,
   Icon,
   Input,
   Modal,
   MoneyInput,
   Page,
-  PageHeader,
+  plural,
+  Scroller,
   SearchField,
+  SectionHeader,
   Select,
+  SideFold,
+  Toolbar,
   Table,
   useToast,
   type Column,
@@ -103,8 +108,24 @@ export function Menu() {
   const showsMargin = rows.some((row) => row.margin !== null);
 
   const columns: Column<MenuRowView>[] = [
-    { key: 'name', header: 'Item', render: (r) => r.name },
-    { key: 'code', header: 'Code', render: (r) => r.shortCode ?? '—' },
+    {
+      key: 'name',
+      header: 'Item',
+      // Sold out sits on the item, not in a column of its own — that column was
+      // a green "Yes" on all twelve rows and 90px wide.
+      render: (r) =>
+        r.isAvailable ? (
+          r.name
+        ) : (
+          <span className="mb-row mb-row--gap-inline">
+            {r.name}
+            <Badge tone="warn">Sold out</Badge>
+          </span>
+        ),
+    },
+    // `optional`: a shop with no short codes and no HSN numbers is not given
+    // two columns of em-dashes. The table drops them and draws the dash.
+    { key: 'code', header: 'Code', optional: true, render: (r) => r.shortCode },
     {
       key: 'price',
       header: 'Price',
@@ -113,29 +134,19 @@ export function Menu() {
     },
     // The whole point of this session, on every row.
     { key: 'tax', header: 'Tax', render: (r) => r.rate },
-    { key: 'hsn', header: 'HSN', render: (r) => r.hsn ?? '—' },
+    { key: 'hsn', header: 'HSN', optional: true, render: (r) => r.hsn },
     ...(showsMargin
       ? [
           {
             key: 'margin',
             header: 'Margin',
             numeric: true,
-            render: (r: MenuRowView) => (
-              <span className="mb-mono">{r.margin ?? '—'}</span>
-            ),
+            optional: true,
+            render: (r: MenuRowView) =>
+              r.margin === null ? null : <span className="mb-mono">{r.margin}</span>,
           },
         ]
       : []),
-    {
-      key: 'available',
-      header: 'On the menu',
-      render: (r) =>
-        r.isAvailable ? (
-          <Badge tone="ok">Yes</Badge>
-        ) : (
-          <Badge tone="warn">Sold out</Badge>
-        ),
-    },
     {
       key: 'do',
       header: '',
@@ -196,11 +207,8 @@ export function Menu() {
 
   return (
     <Page className="mb-menu">
-      <PageHeader
-        title="Menu"
-        subtitle="What this shop sells, what it costs, and which tax class each thing is in."
-        count={rows.length}
-        actions={
+      <Toolbar
+        end={
           <>
             {/* First, because it is what a shop does before it has items:
                 decide what the categories are. It was not possible at all
@@ -238,14 +246,46 @@ export function Menu() {
               <Icon name="download" size="sm" />
               Export
             </Button>
-            <Button variant="primary" onClick={addItem}>
-              <Icon name="plus" size="sm" />
-              Add an item
-            </Button>
           </>
         }
-      />
+      >
+        <div className="mb-menu__find">
+          <SearchField
+            value={find}
+            placeholder="Find an item"
+            onChange={(event) => setFind(event.target.value)}
+          />
+        </div>
+      </Toolbar>
 
+      {/* Adding an item is a panel, not a dialog that comes back: it stays open
+          and empties itself after each item, keeping the category and the tax
+          class, so a menu is typed in a run. */}
+      <SideFold
+        label={editing && editing.name !== '' ? editing.name : 'Add an item'}
+        open={editing !== null}
+        onOpen={addItem}
+        onFold={() => setEditing(null)}
+        panel={
+          editing ? (
+            <EditItem
+              // A different item is a different form. While ADDING, the id
+              // changes inside the form, so it is not remounted between items.
+              key={editing.id}
+              row={editing}
+              categories={categories}
+              classes={classes}
+              onClose={() => setEditing(null)}
+              onSaved={(saved) => {
+                setRows(saved);
+                void load();
+              }}
+              onCategoriesChanged={setCategories}
+              onFailed={report}
+            />
+          ) : null
+        }
+      >
       <div
         className={[
           'mb-menu__body',
@@ -259,7 +299,7 @@ export function Menu() {
           quarter of the screen taken by one solid accent button reading
           "Everything (2)", offering a choice between one thing. */}
       {categories.length > 0 ? (
-        <aside className="mb-menu__categories">
+        <Scroller inset className="mb-menu__categories">
           <Button
             variant={chosen === null ? 'primary' : 'quiet'}
             wide
@@ -283,18 +323,10 @@ export function Menu() {
             <Icon name="settings" size="sm" />
             Edit categories
           </Button>
-        </aside>
+        </Scroller>
       ) : null}
 
-      <section className="mb-menu__items">
-        <div className="mb-menu__find">
-          <SearchField
-            value={find}
-            placeholder="Find an item"
-            onChange={(event) => setFind(event.target.value)}
-          />
-        </div>
-
+      <Scroller className="mb-menu__items">
         {shown.length === 0 ? (
           <EmptyState
             title={rows.length === 0 ? 'No items yet' : 'Nothing matches'}
@@ -311,8 +343,9 @@ export function Menu() {
         <TaxClasses classes={classes} onChanged={load} onFailed={report} />
         <ModifierGroups onFailed={report} />
         <Combos rows={rows} onFailed={report} />
-      </section>
+      </Scroller>
       </div>
+      </SideFold>
 
       {groupsOpen ? (
         <Groups
@@ -336,22 +369,6 @@ export function Menu() {
             setMadeOf(null);
             void load();
           }}
-          onFailed={report}
-        />
-      ) : null}
-
-      {editing ? (
-        <EditItem
-          row={editing}
-          categories={categories}
-          classes={classes}
-          onClose={() => setEditing(null)}
-          onSaved={(saved) => {
-            setRows(saved);
-            setEditing(null);
-            void load();
-          }}
-          onCategoriesChanged={setCategories}
           onFailed={report}
         />
       ) : null}
@@ -412,18 +429,17 @@ function TaxClasses({
 
   return (
     <div className="mb-menu__classes">
-      <h2 className="mb-menu__heading">Tax classes</h2>
-      <p className="mb-muted">
-        A class is your name for a rate. Change one and every item on it
-        follows — bills already printed never move.
-      </p>
+      <SectionHeader
+        title="Tax classes"
+        note="A class is your name for a rate. Change one and every item on it follows — bills already printed never move."
+      />
       <div className="mb-menu__classlist">
         {classes.map((klass) => (
           <div key={klass.id} className="mb-menu__class">
             <div className="mb-stack">
               <strong>{klass.name}</strong>
               <span className="mb-muted">
-                {klass.rate} · {klass.treatment} · {klass.itemsUsing} item(s)
+                {klass.rate} · {klass.treatment} · {plural(klass.itemsUsing, 'item')}
               </span>
             </div>
             <Button
@@ -447,7 +463,7 @@ function TaxClasses({
           <p className="mb-muted">
             {editing.itemsUsing === 0n
               ? 'Nothing uses this yet.'
-              : `${editing.itemsUsing} item(s) will change with it.`}
+              : `${plural(editing.itemsUsing, 'item')} will change with it.`}
           </p>
           <Input
             label="Name"
@@ -520,6 +536,20 @@ function TaxClasses({
   );
 }
 
+/**
+ * **One item's form, in the side panel** — and the thing that makes typing a
+ * whole menu bearable.
+ *
+ * The owner, 2026-08-24: *"If the user has to add many items, he has to click
+ * add buton and it pops up many times, it is tedious."* So while it is ADDING,
+ * saving does not close it: it takes a new id, empties the boxes that belong to
+ * one dish (name, price, code, HSN, cost) and keeps the ones that belong to a
+ * RUN of them (category, tax class, course, minutes, the two ticks). Enter
+ * saves, so a menu goes in as name, price, Enter, name, price, Enter.
+ *
+ * Editing an existing item closes when it is saved, because there is nothing to
+ * type next.
+ */
 function EditItem({
   row,
   categories,
@@ -533,11 +563,20 @@ function EditItem({
   categories: readonly CategoryView[];
   classes: readonly TaxClassView[];
   onClose: () => void;
+  /** The fresh list. **It does not close the panel** — see above. */
   onSaved: (rows: readonly MenuRowView[]) => void;
   /** The whole new list, straight from Rust — see `AddCategory`. */
   onCategoriesChanged: (fresh: readonly CategoryView[]) => void;
   onFailed: (cause: unknown) => void;
 }) {
+  /** True for the whole life of this form: it was opened by the + button. */
+  const adding = row.name === '';
+  /**
+   * The id being saved to. It changes after each add, which is what makes the
+   * next Save a new item rather than an edit of the one just made.
+   */
+  const [id, setId] = useState(row.id);
+  const toast = useToast();
   const [name, setName] = useState(row.name);
   // The price arrives preformatted from Rust and goes back as text; TypeScript
   // never turns it into a number (R8, D39).
@@ -556,7 +595,7 @@ function EditItem({
   const save = () => {
     call('save_menu_item', {
       edit: {
-        id: row.id,
+        id,
         name,
         categoryId: categoryId === '' ? null : categoryId,
         price,
@@ -570,13 +609,45 @@ function EditItem({
         prepMinutes: prepMinutes.trim() === '' ? null : prepMinutes.trim(),
       },
     })
-      .then(onSaved)
+      .then((saved) => {
+        onSaved(saved);
+        if (!adding) {
+          onClose();
+          return;
+        }
+        // **Ready for the next one.** What belongs to this dish is cleared;
+        // what belongs to the run it is part of stays.
+        toast.show('ok', `${name} added. Type the next one.`);
+        setId(freshId('itm'));
+        setName('');
+        setPrice('');
+        setShortCode('');
+        setHsn('');
+        setCost('');
+      })
       .catch(onFailed);
   };
 
   return (
-    <Modal open title={row.name === '' ? 'Add an item' : row.name} onClose={onClose} wide>
-      <Input label="Name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
+    <div
+      className="mb-menu__form"
+      // Enter is how a run of items is typed — see the note on this component.
+      // Not a `<form>`: a form in a webview navigates on submit, and there is
+      // nowhere to navigate to.
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && name.trim() !== '') save();
+      }}
+    >
+      {/* No heading here — the panel draws it, from the same `label`. */}
+      {/* Keyed on the id, so it empties AND takes the cursor back after each
+          item added — the autofocus runs again on the new box. */}
+      <Input
+        key={id}
+        label="Name"
+        value={name}
+        autoFocus
+        onChange={(e) => setName(e.target.value)}
+      />
       <MoneyInput
         label="Price"
         hint="What the customer pays, before tax is added — unless the class says tax is included."
@@ -661,15 +732,15 @@ function EditItem({
         checked={available}
         onChange={(e) => setAvailable(e.target.checked)}
       />
-      <div className="mb-row mb-row--end">
+      <Foot>
         <Button variant="quiet" onClick={onClose}>
-          Cancel
+          {adding ? 'Done' : 'Cancel'}
         </Button>
-        <Button variant="primary" onClick={save}>
-          Save
+        <Button variant="primary" onClick={save} disabled={name.trim() === ''}>
+          {adding ? 'Add it' : 'Save'}
         </Button>
-      </div>
-    </Modal>
+      </Foot>
+    </div>
   );
 }
 

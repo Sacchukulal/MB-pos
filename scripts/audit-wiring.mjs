@@ -28,8 +28,7 @@
  *
  * # Dispatched names count as called
  *
- * `Credit.tsx` calls `call(everybody ? 'customers' : 'who_owes')`, `Reports.tsx`
- * dispatches over `'report_csv' | 'report_pdf'`, and `Network.tsx` over four
+ * `Reports.tsx` dispatches over `'report_csv' | 'report_pdf'`, and `Network.tsx` over four
  * pairing commands. Those are wired, and a naive grep says they are not — so a
  * quoted name anywhere in a screen file counts. That is deliberately loose:
  * this exists to find the command with NO mention at all, and a false alarm

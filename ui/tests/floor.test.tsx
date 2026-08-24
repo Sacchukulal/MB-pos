@@ -34,6 +34,14 @@ function show() {
   );
 }
 
+/**
+ * **Open the arranging panel.** It is folded to a button on any shop that
+ * already has tables — the owner, 2026-08-24.
+ */
+function unfold() {
+  fireEvent.click(screen.getByRole('button', { name: 'Rooms and tables' }));
+}
+
 import type { FloorView } from '../src/ipc/generated/FloorView';
 import type { TableRowView } from '../src/ipc/generated/TableRowView';
 import type { TableView } from '../src/ipc/generated/TableView';
@@ -106,7 +114,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('tells all FIVE states apart without colour', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     for (const state of ['free', 'occupied', 'waiting', 'late']) {
       expect(
@@ -116,18 +124,10 @@ describe('the floor (scope 14.1–14.3)', () => {
     }
   });
 
-  it('shows the occupancy line as sentences Rust wrote', async () => {
-    call.mockResolvedValue(floor());
-    show();
-    // Not "3", "4", "7" for the screen to assemble — R8 applies to words too.
-    expect(await screen.findByText('3 of 4 tables busy')).toBeTruthy();
-    expect(screen.getByText('38 min at table')).toBeTruthy();
-  });
-
   it('draws the section grid when no table has been placed', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     // The fallback is not a degraded mode: every table is still a tile.
     expect(container.querySelector('.mb-plan')).toBeNull();
@@ -142,7 +142,7 @@ describe('the floor (scope 14.1–14.3)', () => {
       }),
     );
     const { container } = show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     const plan = container.querySelector('.mb-plan');
     expect(plan).toBeTruthy();
@@ -155,7 +155,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('filters to the tables that need somebody', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     fireEvent.click(screen.getByText('Needs attention'));
     // Waiting and late, and neither the free table nor the one five minutes in.
@@ -170,7 +170,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('sends the order and the table the screen actually showed', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     // Table 2 is busy; tick it and move its order to table 1, which the view
     // says is free.
@@ -200,7 +200,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('offers no order actions for a free table', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     fireEvent.click(screen.getByLabelText(/^Table 1\b/));
     // It ticks, like any other table — free tables are the ones you delete.
@@ -225,13 +225,28 @@ describe('the floor (scope 14.1–14.3)', () => {
  * > to delete them."*
  */
 describe('arranging the room (2026-08-22)', () => {
-  it('puts the panel on the screen and no dialog behind a button', async () => {
+  /**
+   * **Folded on a shop that already has tables** — the owner, 2026-08-24:
+   * *"make it so that i can Fold the Add rooms side panel, so that there will
+   * only be a small button for add room and when clicked, it will unfold that
+   * ui."* A room is arranged once and looked at every day.
+   */
+  it('folds the panel to a button, and unfolds it when pressed', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
-    expect(screen.getByRole('complementary', { name: 'Arrange the room' })).toBeTruthy();
+    expect(screen.queryByRole('complementary', { name: 'Rooms and tables' })).toBeNull();
+
+    unfold();
+    expect(screen.getByRole('complementary', { name: 'Rooms and tables' })).toBeTruthy();
+    // Still no dialog — the panel is the screen's, not a popup's.
     expect(screen.queryByRole('button', { name: 'Set up the room' })).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close Rooms and tables' }),
+    );
+    expect(screen.queryByRole('complementary', { name: 'Rooms and tables' })).toBeNull();
   });
 
   it('hides the panel from somebody who may not arrange the room', async () => {
@@ -239,9 +254,9 @@ describe('arranging the room (2026-08-22)', () => {
     // FloorView::can_arrange is that same question asked once.
     call.mockResolvedValue(floor({ canArrange: false }));
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
-    expect(screen.queryByRole('complementary', { name: 'Arrange the room' })).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Rooms and tables' })).toBeNull();
     // And a press does what it always did on a screen you cannot arrange.
     fireEvent.click(screen.getByLabelText(/^Table 2\b/));
     expect(await screen.findByText(/Move this order/)).toBeTruthy();
@@ -250,7 +265,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('ticks one at a time, and all of them at once', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     fireEvent.click(screen.getByLabelText(/^Table 1\b/));
     expect(await screen.findByText('1 ticked')).toBeTruthy();
@@ -277,7 +292,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('deletes everything ticked in ONE command', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     fireEvent.click(screen.getByLabelText(/^Table 1\b/));
     fireEvent.click(screen.getByLabelText(/^Table 2\b/));
@@ -299,8 +314,9 @@ describe('arranging the room (2026-08-22)', () => {
   it('adds a run of tables from the panel', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
+    unfold();
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '8' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add them' }));
@@ -320,8 +336,9 @@ describe('arranging the room (2026-08-22)', () => {
   it('keeps the timer explanation in a tip rather than on the screen', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
+    unfold();
     expect(screen.getByText('Timers')).toBeTruthy();
     const bubbles = [...container.querySelectorAll('.mb-tip__bubble[role="tooltip"]')];
     expect(bubbles.length, 'nothing on this screen offers a tip').toBeGreaterThan(0);
@@ -349,7 +366,7 @@ describe('empty is not a lecture (P30.5)', () => {
   it('hides the room picker until there is more than one room', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
     expect(screen.queryByRole('group', { name: 'Which room' })).toBeNull();
 
     cleanup();
@@ -362,9 +379,66 @@ describe('empty is not a lecture (P30.5)', () => {
       }),
     );
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
     expect(screen.getByRole('group', { name: 'Which room' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'AC room' })).toBeTruthy();
+  });
+
+  /**
+   * **The floor is drawn room by room** — the owner, 2026-08-24: *"the tables
+   * there are not according to Room/section, why is that? fix it. that tick all
+   * should be tick section or room whatever."*
+   *
+   * `list_tables` orders by sort order then label, so two rooms came out
+   * interleaved in one long run of squares with nothing between them.
+   */
+  it('groups the tables under their room, and ticks one room at a time', async () => {
+    call.mockResolvedValue(
+      floor({
+        sections: [
+          { id: 'sec_hall', name: 'Hall', sortOrder: 0, isActive: true, tableCount: 2 },
+          { id: 'sec_ac', name: 'AC room', sortOrder: 1, isActive: true, tableCount: 2 },
+        ],
+        tiles: [
+          tile({ id: 'tbl_1', label: '1' }),
+          tile({ id: 'tbl_3', label: '3', section: 'AC room' }),
+          tile({ id: 'tbl_2', label: '2' }),
+          tile({ id: 'tbl_4', label: '4', section: 'AC room' }),
+        ],
+        tables: [
+          row({ id: 'tbl_1', label: '1' }),
+          row({ id: 'tbl_2', label: '2' }),
+          row({ id: 'tbl_3', label: '3', sectionId: 'sec_ac' }),
+          row({ id: 'tbl_4', label: '4', sectionId: 'sec_ac' }),
+        ],
+      }),
+    );
+    const { container } = show();
+    await screen.findAllByText('4 seats');
+
+    // A heading each, in the order the shop put its rooms in.
+    expect(
+      [...container.querySelectorAll('.mb-floor__roomname')].map((n) => n.textContent),
+    ).toEqual(['Hall', 'AC room']);
+    // And the tables under the room they belong to, not interleaved.
+    expect(
+      [...container.querySelectorAll('.mb-floor__roomgroup')].map((group) =>
+        [...group.querySelectorAll('.mb-tile__label')].map((n) => n.textContent),
+      ),
+    ).toEqual([
+      ['1', '2'],
+      ['3', '4'],
+    ]);
+
+    // **The tick-all belongs to a room**, so it ticks that room and no other.
+    fireEvent.click(screen.getByLabelText('Tick all 2 in AC room'));
+    expect(await screen.findByText('2 ticked')).toBeTruthy();
+    const bar = screen.getByRole('group', { name: 'What to do with the ticked tables' });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete them' }));
+    expect(call.mock.calls.find((c) => c[0] === 'delete_dining_tables')?.[1]).toEqual({
+      tableIds: ['tbl_3', 'tbl_4'],
+    });
   });
 
   it('tells a shop with no tables what to do, not to try another section', async () => {
@@ -376,7 +450,7 @@ describe('empty is not a lecture (P30.5)', () => {
     // It used to say "Set up the room" twice — a toolbar button and an empty
     // state — and both opened the same dialog. The panel is on the screen, so
     // the empty state points at it.
-    expect(screen.getByRole('complementary', { name: 'Arrange the room' })).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Rooms and tables' })).toBeTruthy();
     expect(screen.getByText(/Add a room and a run of tables on the left/)).toBeTruthy();
   });
 
@@ -402,7 +476,7 @@ describe('empty is not a lecture (P30.5)', () => {
   it('offers the same print-the-bill mark the billing screen has', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('3 of 4 tables busy');
+    await screen.findByText('4 seats');
 
     // Table 2 is busy, so it can be printed. Table 1 is free, so it cannot —
     // a print button whose only possible outcome is an error message is worse

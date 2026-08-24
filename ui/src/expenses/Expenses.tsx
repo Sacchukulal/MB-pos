@@ -145,7 +145,6 @@ export function Expenses() {
     <Page className="mb-expenses">
       <PageHeader
         title="Spends"
-        subtitle="What left the shop as money today, and what is in the drawer."
         count={view.rows.length}
         actions={
           <Button variant="secondary" onClick={() => setDrawer(true)}>

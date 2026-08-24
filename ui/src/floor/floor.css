@@ -34,61 +34,52 @@
    the screen with four phrases run together inside it, which gave a quiet piece
    of information the visual weight of a warning. Now the numbers are separated
    by rules rather than by a box, so the eye can count them. */
-.mb-floor__numbers {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-field) var(--gap-group);
-  padding: var(--space-2) 0;
-  border-bottom: var(--border-width) solid var(--border);
-  font-size: var(--type-caption);
-  color: var(--text-muted);
-}
-
-.mb-floor__numbers > span:not(:last-child) {
-  padding-right: var(--gap-group);
-  border-right: var(--border-width) solid var(--border);
-}
 
 /* A figure inside the sentence reads as a figure. */
-.mb-floor__numbers > span {
-  font-variant-numeric: tabular-nums;
-}
 
 /* --- The two halves of the screen --------------------------------------- */
 
-/* **The arranging panel, then the room.** The owner, 2026-08-22: *"have a
-   adding tables section in one side (at the starting side of the screen) and
-   then have space for adding sections and tables."*
+/* The two halves of this screen are the kit's `SideFold` now — the panel, the
+   fold button and the folded button all live in `layout.css`, because the
+   credit screen adds a customer with exactly the same shape. `.mb-floor__body`
+   and `.mb-floor__room` are gone with the markup that used them. */
 
-   A grid rather than flex so the panel's width is stated once and the room
-   takes whatever is left — a flex panel with a min-width fights its own
-   contents every time a room name is long. `minmax(0, 1fr)` on the room is
-   what lets its inner grid scroll instead of pushing the panel off screen. */
-.mb-floor__body {
-  display: grid;
-  grid-template-columns: var(--arrange-width) minmax(0, 1fr);
-  gap: var(--gap-group);
+/* --- The room, room by room --------------------------------------------- */
+
+/* **One scroller for the whole floor**, not one per room: a room that scrolls
+   inside its own box hides tables behind a bar nobody looks for. */
+.mb-floor__rooms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
   min-height: 0;
-  flex: 1;
 }
 
-/* A shop whose cashier may not arrange the room gets no panel at all, and the
-   room takes the whole width. */
-.mb-floor__body:has(> .mb-floor__room:only-child) {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.mb-floor__room {
+.mb-floor__roomgroup {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-height: 0;
-  min-width: 0;
 }
 
-.mb-floor__pickall {
-  flex: 0 0 auto;
+/* The room's name and its own tick-all, on one line above its tables. */
+.mb-floor__roomhead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mb-floor__roomname {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Inside a group the tiles do not scroll — the column above them does. */
+.mb-floor__roomgroup .mb-floor__grid {
+  overflow: visible;
 }
 
 /* --- Arrange: sections, a run of tables, the timers ---------------------- */
@@ -99,12 +90,8 @@
   gap: var(--space-2);
   min-width: 0;
   min-height: 0;
-  padding-right: var(--gap-field);
-  border-right: var(--border-width) solid var(--border);
   /* Down only. Anything that would scroll sideways here is a field that has
      not been told it may shrink — see the pair below. */
-  overflow-x: hidden;
-  overflow-y: auto;
 }
 
 /* A name and the button that adds it, on one line. */
@@ -228,7 +215,6 @@
   grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
   gap: var(--space-2);
   min-height: 0;
-  overflow-y: auto;
 }
 
 /* The plan itself. A grid of squares, because "two tables in the same place"
@@ -239,7 +225,7 @@
   grid-template-columns: repeat(var(--plan-cells), minmax(0, 1fr));
   gap: var(--space-1);
   min-height: 0;
-  overflow: auto;
+  overflow: auto; /* mb-layout-allow: the plan is the one thing that scrolls SIDEWAYS too (§1) */
 }
 
 .mb-plan__cell {

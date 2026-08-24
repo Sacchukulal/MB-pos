@@ -12,7 +12,7 @@
  *    reason a mixed-rate combo can be sold at all.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const call = vi.fn();
@@ -278,6 +278,113 @@ describe('the tax class editor', () => {
     expect(call).toHaveBeenCalledWith(
       'save_tax_class',
       expect.objectContaining({ kind: 'exempt', rate: '0' }),
+    );
+  });
+});
+
+/**
+ * **Typing a menu is a run, not a dialog reopened per dish** — the owner,
+ * 2026-08-24: *"If the user has to add many items, he has to click add buton
+ * and it pops up many times, it is tedious."*
+ */
+describe('adding items (2026-08-24)', () => {
+  const classes: TaxClassView[] = [
+    {
+      id: 'tax_food_5',
+      name: 'Food 5%',
+      rate: '5%',
+      rateBp: 500,
+      kind: 'gst',
+      basis: 'exclusive',
+      treatment: 'Tax added on top',
+      isActive: true,
+      itemsUsing: 1n,
+    },
+  ];
+
+  function open() {
+    call.mockImplementation((name: string) => {
+      switch (name) {
+        case 'menu_tax_classes':
+          return Promise.resolve(classes);
+        case 'menu_rows':
+          return Promise.resolve([]);
+        case 'save_menu_item':
+          return Promise.resolve([]);
+        default:
+          return Promise.resolve([]);
+      }
+    });
+    return render(
+      <ToastProvider>
+        <Menu />
+      </ToastProvider>,
+    );
+  }
+
+  it('keeps the panel open and empties it after each item', async () => {
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add an item' }));
+    expect(screen.getByRole('complementary', { name: 'Add an item' })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Idli' } });
+    fireEvent.change(screen.getByLabelText('Price'), { target: { value: '40' } });
+    // Enter saves, which is how a menu is typed: name, price, Enter.
+    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(
+        call.mock.calls.filter(([name]) => name === 'save_menu_item'),
+      ).toHaveLength(1),
+    );
+    const first = call.mock.calls.find(([name]) => name === 'save_menu_item')!;
+    expect((first[1] as { edit: { name: string } }).edit.name).toBe('Idli');
+
+    // Still open, and empty, ready for the next one.
+    expect(screen.getByRole('complementary', { name: 'Add an item' })).toBeTruthy();
+    await waitFor(() =>
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(''),
+    );
+    expect((screen.getByLabelText('Price') as HTMLInputElement).value).toBe('');
+
+    // And the second item is a NEW item, not an edit of the first.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Vada' } });
+    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(
+        call.mock.calls.filter(([name]) => name === 'save_menu_item'),
+      ).toHaveLength(2),
+    );
+    const saves = call.mock.calls.filter(([name]) => name === 'save_menu_item');
+    const ids = saves.map(([, args]) => (args as { edit: { id: string } }).edit.id);
+    expect(ids[0], 'the second item overwrote the first').not.toBe(ids[1]);
+  });
+
+  it('closes when an existing item is saved, because there is nothing to type next', async () => {
+    call.mockImplementation((name: string) => {
+      switch (name) {
+        case 'menu_tax_classes':
+          return Promise.resolve(classes);
+        case 'menu_rows':
+          return Promise.resolve([dosa]);
+        default:
+          return Promise.resolve([]);
+      }
+    });
+    render(
+      <ToastProvider>
+        <Menu />
+      </ToastProvider>,
+    );
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]!);
+    // Editing names the panel after what is in it; adding names it "Add an item".
+    const panel = screen.getByRole('complementary', { name: dosa.name });
+    // Scoped: the tax class block below the list has a Save of its own.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('complementary', { name: dosa.name })).toBeNull(),
     );
   });
 });

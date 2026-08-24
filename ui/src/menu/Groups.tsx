@@ -31,7 +31,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, freshId, Icon, Input, Modal, Select } from '../kit';
+import { Badge, Button, freshId, Icon, Input, Modal, plural, Select } from '../kit';
 import { call } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { PrintersView } from '../ipc/generated/PrintersView';
@@ -153,7 +153,7 @@ export function Groups({
                       <span className="mb-muted">
                         {category.itemCount === 0n
                           ? 'nothing in it yet'
-                          : `${category.itemCount} item(s)`}
+                          : plural(category.itemCount, 'item')}
                       </span>
                       {category.isActive ? null : <Badge tone="warn">Off the menu</Badge>}
                     </>

@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Card, ConfirmDialog, SectionHeader, Spinner, useToast } from '../kit';
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Scroller, SectionHeader, Spinner, useToast } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { DeviceRowView } from '../ipc/generated/DeviceRowView';
 import type { NetworkView } from '../ipc/generated/NetworkView';
@@ -85,7 +85,7 @@ export function Network() {
   if (!view) return <Spinner label="Looking at the network" />;
 
   return (
-    <div className="mb-network">
+    <Scroller className="mb-network">
       <SectionHeader
         title="Phones"
         note="Waiters take orders on a phone, over this shop's own WiFi."
@@ -190,11 +190,13 @@ export function Network() {
       ) : null}
 
       <Card>
-        <h3 className="mb-network__title">Phones on this counter</h3>
+        <SectionHeader title="Phones on this counter" />
         {view.devices.length === 0 ? (
-          <p className="mb-network__note">
-            No phones yet. Press "Add a phone" and scan the code with the Magic Bill app.
-          </p>
+          <EmptyState
+            small
+            title="No phones yet"
+            body='Press "Add a phone" and scan the code with the Magic Bill app.'
+          />
         ) : (
           view.devices.map((device) => (
             <div className="mb-network__device" key={device.id}>
@@ -238,6 +240,6 @@ export function Network() {
         }}
         onCancel={() => setRemoving(null)}
       />
-    </div>
+    </Scroller>
   );
 }

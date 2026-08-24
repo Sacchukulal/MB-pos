@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 
-import { Button, Input, Keypad } from '../kit';
+import { Button, Input, Keypad, Scroller } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import {
@@ -248,7 +248,7 @@ function Who({
           onChange={(event) => onType(event.target.value)}
         />
       ) : null}
-      <div className="mb-lock__people">
+      <Scroller inset className="mb-lock__people">
         {shown.length === 0 ? (
           /* **Two different emptinesses, and they were saying the same thing**
              — P30.5. Typing a name that matches nobody used to answer "Nobody
@@ -276,7 +276,7 @@ function Who({
             </Button>
           ))
         )}
-      </div>
+      </Scroller>
     </>
   );
 }
@@ -362,6 +362,7 @@ function Recover({
     return (
       <>
         <h1 className="mb-lock__title">Forgotten PIN</h1>
+        {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
         <p className="mb-muted">
           Type the recovery code from the slip that printed when this shop was
           set up. It can only set a PIN for somebody who manages staff, and
@@ -385,6 +386,7 @@ function Recover({
     return (
       <>
         <h1 className="mb-lock__title">Whose PIN?</h1>
+        {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
         <p className="mb-muted">
           {/* Only the people Rust will accept. Offering the whole staff list
               meant the refusal arrived after the code had been spent. */}
@@ -422,6 +424,7 @@ function Recover({
       <h1 className="mb-lock__title">
         {step === 'pin' ? 'A new PIN' : 'The same PIN again'}
       </h1>
+      {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
       <p className="mb-muted">
         {step === 'pin'
           ? `${person?.name ?? 'This person'} will sign in with these ${PIN_DIGITS} digits.`
@@ -444,6 +447,7 @@ function Recovered({ code, onDone }: { code: string; onDone: () => void }) {
   return (
     <>
       <h1 className="mb-lock__title">Write this down</h1>
+      {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
       <p className="mb-muted">
         This is the shop&rsquo;s new recovery code. The old one no longer works,
         and this one is shown here once and printed. Keep the slip somewhere

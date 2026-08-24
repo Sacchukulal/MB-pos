@@ -27,7 +27,6 @@ import {
   Checkbox,
   EmptyState,
   freshId,
-  InfoTip,
   Input,
   Modal,
   MoneyInput,
@@ -249,30 +248,29 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
 
   return (
     <section className="mb-menu__classes">
-      <div className="mb-row">
-        <h2 className="mb-menu__heading">Choices</h2>
-        <InfoTip label="About choices">
-          Made once, offered on as many items as you like — open an item&rsquo;s
-          sizes and choices to tick it on.
-        </InfoTip>
-        <Button
-          small
-          variant="quiet"
-          onClick={() =>
-            setEditing({
-              id: freshId('grp'),
-              name: '',
-              minSelect: 0,
-              maxSelect: 1,
-              rule: '',
-              modifiers: [],
-              attached: false,
-            })
-          }
-        >
-          Add a group
-        </Button>
-      </div>
+      <SectionHeader
+        title="Choices"
+        note="Made once, offered on as many items as you like — open an item's sizes and choices to tick it on."
+        action={
+          <Button
+            small
+            variant="quiet"
+            onClick={() =>
+              setEditing({
+                id: freshId('grp'),
+                name: '',
+                minSelect: 0,
+                maxSelect: 1,
+                rule: '',
+                modifiers: [],
+                attached: false,
+              })
+            }
+          >
+            Add a group
+          </Button>
+        }
+      />
 
       {groups.length === 0 ? (
         <EmptyState
@@ -500,32 +498,28 @@ export function Combos({
 
   return (
     <section className="mb-menu__classes">
-      <div className="mb-row">
-        <h2 className="mb-menu__heading">Combos</h2>
-        {/* A real rule and not a reassurance, so it is kept — just asked for
-            rather than given. */}
-        <InfoTip label="About combos">
-          The combo price is shared across what is in it, in proportion to what
-          each part sells for on its own — so a meal that mixes a 5% dish with
-          an 18% bottle still adds up correctly on the rate summary.
-        </InfoTip>
-        <Button
-          small
-          variant="quiet"
-          onClick={() =>
-            setEditing({
-              id: freshId('cmb'),
-              name: '',
-              price: { paise: 0n, text: '' },
-              isActive: true,
-              parts: [],
-              separately: { paise: 0n, text: '' },
-            })
-          }
-        >
-          Add a combo
-        </Button>
-      </div>
+      <SectionHeader
+        title="Combos"
+        note="The combo price is shared across what is in it, in proportion to what each part sells for on its own — so a meal that mixes a 5% dish with an 18% bottle still adds up correctly on the rate summary."
+        action={
+          <Button
+            small
+            variant="quiet"
+            onClick={() =>
+              setEditing({
+                id: freshId('cmb'),
+                name: '',
+                price: { paise: 0n, text: '' },
+                isActive: true,
+                parts: [],
+                separately: { paise: 0n, text: '' },
+              })
+            }
+          >
+            Add a combo
+          </Button>
+        }
+      />
 
       {combos.length === 0 ? (
         <EmptyState
@@ -592,7 +586,7 @@ function EditCombo({
         onChange={setPrice}
       />
 
-      <h3 className="mb-comp__heading">What is in it</h3>
+      <SectionHeader title="What is in it" />
       {parts.map(([itemId, qty], index) => (
         <div key={`${itemId}-${index}`} className="mb-comp__choice">
           <Select

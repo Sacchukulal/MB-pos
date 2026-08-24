@@ -273,7 +273,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                             0 => "No cover count".to_owned(),
                             n => format!("{n} seated"),
                         },
-                        turns: format!("{} turn(s) today", numbers.turns),
+                        turns: format!("{} today", words::count(numbers.turns, "turn", "turns")),
                         average: numbers
                             .average_minutes
                             .map_or_else(|| "—".to_owned(), |m| format!("{m} min at table")),

@@ -33,20 +33,42 @@
   min-height: 0;
 }
 
-/* The header stays; the body under it scrolls. A page title that scrolls away
-   from the table it names is a table with no name. */
-.mb-page--scroll {
+/* --- Scrolling: the one place that decides how ---------------------------
+   Down only. Anything that would scroll sideways is a child that has not been
+   told it may shrink.
+
+   `scrollbar-gutter: stable` reserves the bar's width whether or not it is
+   showing, so content does not shift when a list grows past the window. The
+   header and toolbar below step back by the same width, and that is what makes
+   a scrolling table end on the same line as the buttons above it — it used to
+   stop 12px short of them, on every screen.                                  */
+
+.mb-page--scroll,
+.mb-scroll {
   overflow-y: auto;
   overflow-x: hidden;
+  min-height: 0;
+  min-width: 0;
+  scrollbar-gutter: stable;
+}
+
+/* A scroller inside something else — a rail, a side panel, a dialog body. It
+   has no page edge to line up with, so it gives the width back. */
+.mb-scroll--inset {
+  scrollbar-gutter: auto;
 }
 
 /* --- Page header --------------------------------------------------------- */
 
+/* The `padding-right` is the scrollbar's width: the body under this reserves a
+   gutter for it, so without the same step back the header's buttons sit 12px
+   further right than the table they sit over. */
 .mb-pagehead {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--gap-group);
+  padding-right: var(--scrollbar);
   flex-shrink: 0;
 }
 
@@ -102,11 +124,13 @@
 
 /* --- Toolbar ------------------------------------------------------------- */
 
+/* Same gutter as the page header — see the note there. */
 .mb-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--gap-group);
+  padding-right: var(--scrollbar);
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -272,6 +296,26 @@
   gap: var(--gap-section);
 }
 
+/* --- Foot: the Save that never scrolls away ------------------------------
+   Sticky rather than a slot on each container, so one rule pins it in a side
+   panel, a dialog body and a settings pane alike. The bleed is what stops the
+   content showing through the padding beside it as it scrolls under.        */
+
+.mb-foot {
+  position: sticky;
+  bottom: calc(-1 * var(--gap-group));
+  z-index: var(--layer-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--gap-field);
+  margin: auto calc(-1 * var(--gap-group)) calc(-1 * var(--gap-group));
+  padding: var(--gap-field) var(--gap-group);
+  background: var(--surface);
+  border-top: var(--border-width) solid var(--border);
+}
+
 /* --- Notice: a machine state, in a sentence ------------------------------ */
 
 .mb-notice {
@@ -376,4 +420,107 @@
 .mb-icon--lg {
   width: var(--icon-lg);
   height: var(--icon-lg);
+}
+
+/* --- The side panel ------------------------------------------------------ */
+
+/* A column beside the screen. Folded, the column is just the strip that
+   opens it. */
+.mb-sidefold {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--gap-field);
+  min-height: 0;
+  flex: 1;
+}
+
+.mb-sidefold--open {
+  grid-template-columns: var(--arrange-width) minmax(0, 1fr);
+  gap: var(--gap-group);
+}
+
+.mb-sidefold--none {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mb-sidefold__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  min-width: 0;
+}
+
+.mb-sidefold__panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--level-raised);
+}
+
+.mb-sidefold__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-inline);
+  padding: var(--gap-field) var(--gap-field) var(--gap-field) var(--gap-group);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.mb-sidefold__title {
+  margin: 0;
+  font-size: var(--type-section);
+  font-weight: var(--type-section-weight);
+  line-height: var(--line-tight);
+}
+
+/* Small right pad: the scrollbar sits inside it, so a big one leaves a gap
+   between the fields and the bar. */
+.mb-sidefold__body {
+  flex: 1;
+  padding: var(--gap-group) var(--space-1) var(--gap-group) var(--gap-group);
+}
+
+/* The way in when folded: a small button at the top of the column the panel
+   opens into. */
+.mb-sidefold__strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  width: var(--target-min);
+  height: var(--target-min);
+  padding: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.mb-sidefold__strip:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+.mb-sidefold__fold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  background: none;
+  color: var(--text-faint);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mb-sidefold__fold:hover {
+  color: var(--accent);
+  background: var(--surface-2);
 }

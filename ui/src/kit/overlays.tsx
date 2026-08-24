@@ -30,8 +30,9 @@ import {
 } from 'react';
 
 import { isUiError } from '../ipc/call';
+import { cx } from './cx';
 import { Button } from './controls';
-import { InfoTip } from './display';
+import { InfoTip } from './InfoTip';
 import { Icon } from './Icon';
 
 export interface ModalProps {
@@ -120,7 +121,7 @@ export function Modal({
     >
       <div
         ref={panel}
-        className={['mb-modal', wide ? 'mb-modal--wide' : ''].filter(Boolean).join(' ')}
+        className={cx('mb-modal', wide && 'mb-modal--wide')}
         role="dialog"
         aria-modal="true"
         aria-label={title}

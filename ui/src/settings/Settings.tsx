@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Button,
   Card,
+  cx,
   Checkbox,
   ConfirmDialog,
   EmptyState,
@@ -32,7 +33,10 @@ import {
   MoneyInput,
   NumberInput,
   PhoneInput,
+  plural,
   SaveBar,
+  Scroller,
+  SectionHeader,
   SearchField,
   Select,
   Spinner,
@@ -114,6 +118,22 @@ const SHOWS_PAPER = new Set(['store', 'receipt', 'kitchen']);
 /** The edits a person has made and not yet saved, by key. */
 type Edits = Record<string, string>;
 
+/**
+ * Put one value into the edits.
+ *
+ * **A box put back to what is saved is not a change.** Ticking a box and
+ * unticking it, or typing a letter and deleting it, used to leave the key
+ * behind and the save bar up with nothing to save. Both doors on to this
+ * screen — the fields and "put back to standard" — come through here, so
+ * neither can forget.
+ */
+function withEdit(edits: Edits, key: string, value: string, saved: string | undefined): Edits {
+  const next = { ...edits };
+  if (value === saved) delete next[key];
+  else next[key] = value;
+  return next;
+}
+
 export function Settings() {
   const [view, setView] = useState<SettingsView | null>(null);
   const [group, setGroup] = useState<string>('store');
@@ -148,6 +168,19 @@ export function Settings() {
   }, [toast]);
 
   const dirty = Object.keys(edits).length > 0;
+
+  /** What is saved for a key right now — what an edit is measured against. */
+  const savedValue = useCallback(
+    (key: string) => view?.groups.flatMap((g) => g.settings).find((s) => s.key === key)?.value,
+    [view],
+  );
+
+  const onChange = useCallback(
+    (key: string, value: string) => {
+      setEdits((was) => withEdit(was, key, value, savedValue(key)));
+    },
+    [savedValue],
+  );
 
   // **Search is Rust's** — the synonym list is part of the rule (T9). Debounced
   // by the box rather than by a timer: no screen in this product owns a clock.
@@ -244,15 +277,15 @@ export function Settings() {
       const defaults = await call('settings_defaults_for', { group: active.code });
       // **Shown as unsaved edits, not written.** A reset a person cannot look
       // at and cancel is a reset that happens by accident.
-      const wanted: Edits = { ...edits };
+      let wanted: Edits = { ...edits };
       let moved = 0;
       for (const setting of defaults) {
         const current = active.settings.find((s) => s.key === setting.key);
         const now = edits[setting.key] ?? current?.value ?? '';
-        if (now !== setting.value) {
-          wanted[setting.key] = setting.value;
-          moved += 1;
-        }
+        if (now !== setting.value) moved += 1;
+        // Standard may be what is already saved — then this drops the edit
+        // rather than adding one that saves nothing.
+        wanted = withEdit(wanted, setting.key, setting.value, current?.value);
       }
       setEdits(wanted);
       toast.show(
@@ -321,7 +354,7 @@ export function Settings() {
             taller than the column, so the block sat below the fold and nobody
             would ever have found it — found by looking, after the tenth
             section was added. */}
-        <div className="mb-settings__sections">
+        <Scroller inset className="mb-settings__sections">
           {groups.map((section) => (
             <button
               key={section.code}
@@ -338,7 +371,7 @@ export function Settings() {
               )}
             </button>
           ))}
-        </div>
+        </Scroller>
 
         {/* **The whole configuration, out and in.** A dealer setting up a
             second shop copies one file instead of retyping ninety settings —
@@ -423,13 +456,8 @@ export function Settings() {
           by looking: the body kept the previous section's scroll position, so
           clicking "Your shop" after scrolling through the bill landed halfway
           down the shop's form with its heading off screen. */}
-      <div
-        className={[
-          'mb-settings__body',
-          showsPaper ? 'mb-settings__body--paper' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
+      <Scroller
+        className={cx('mb-settings__body', showsPaper && 'mb-settings__body--paper')}
         ref={body}
       >
         {matches ? (
@@ -437,7 +465,7 @@ export function Settings() {
             view={view}
             matches={matches}
             edits={edits}
-            onChange={(key, value) => setEdits({ ...edits, [key]: value })}
+            onChange={onChange}
             onClear={() => onSearch('')}
           />
         ) : active ? (
@@ -472,7 +500,7 @@ export function Settings() {
               <Section
                 section={active}
                 edits={edits}
-                onChange={(key, value) => setEdits({ ...edits, [key]: value })}
+                onChange={onChange}
                 onReset={onResetSection}
               />
             ) : null}
@@ -486,7 +514,7 @@ export function Settings() {
         )}
 
         {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
-      </div>
+      </Scroller>
 
       {/* **Its own row, spanning both columns**, and this was a bug found by
           looking: the screen is a two-column grid, so the save bar landed in
@@ -584,7 +612,7 @@ export function Settings() {
           </ul>
           {importing?.plan.unknown.length ? (
             <p className="mb-field__hint">
-              {importing.plan.unknown.length} setting(s) in that file are from a newer
+              {plural(importing.plan.unknown.length, 'setting')} in that file are from a newer
               Magic Bill and will be left out.
             </p>
           ) : null}
@@ -607,14 +635,17 @@ function Section({
 }) {
   return (
     <Card>
-      <div className="mb-settings__head">
-        <h2 className="mb-settings__title">{section.label}</h2>
-        {section.canEdit ? (
-          <Button small variant="quiet" onClick={onReset}>
-            Put this section back to standard
-          </Button>
-        ) : null}
-      </div>
+      <SectionHeader
+        title={section.label}
+        sticky
+        action={
+          section.canEdit ? (
+            <Button small variant="quiet" onClick={onReset}>
+              Put this section back to standard
+            </Button>
+          ) : null
+        }
+      />
       {/* **Sub-headings, and they were missing until somebody looked.** The
           bill is thirty-nine settings; one flat grid meant scrolling past
           twenty checkboxes to reach "Total size" with nothing to steer by.
@@ -677,12 +708,11 @@ function PaperWidth({
 
   return (
     <Card>
-      <div className="mb-settings__head">
-        <h2 className="mb-settings__title">Paper</h2>
-        <span className="mb-field__hint">
-          The roll your bills print on. Everything below is laid out to fit it.
-        </span>
-      </div>
+      <SectionHeader
+        title="Paper"
+        sticky
+        note="The roll your bills print on. Everything below is laid out to fit it."
+      />
       <div className="mb-settings__fields">
         <Select
           label="Paper width"
@@ -813,14 +843,15 @@ function Found({
 
   return (
     <Card>
-      <div className="mb-settings__head">
-        <h2 className="mb-settings__title">
-          {found.length} setting{found.length === 1 ? '' : 's'} found
-        </h2>
-        <Button small variant="quiet" onClick={onClear}>
-          Clear
-        </Button>
-      </div>
+      <SectionHeader
+        title={`${plural(found.length, 'setting')} found`}
+        sticky
+        action={
+          <Button small variant="quiet" onClick={onClear}>
+            Clear
+          </Button>
+        }
+      />
       <div className="mb-settings__fields">
         {found.map(({ group, setting }) => (
           <div key={setting.key} className="mb-settings__hit">
@@ -866,6 +897,7 @@ function Field({
         return (
           <Checkbox
             label={setting.label}
+            hint={hint}
             checked={value === '1'}
             disabled={disabled}
             onChange={(event) => onChange(event.currentTarget.checked ? '1' : '0')}
@@ -942,10 +974,6 @@ function Field({
         .join(' ')}
     >
       {body}
-      {/* A tick has its label inside the control, so its help needs a home. */}
-      {setting.control === 'tick' && hint ? (
-        <span className="mb-field__hint">{hint}</span>
-      ) : null}
       {changed ? (
         <span className="mb-settings__mark" aria-label="changed and not saved">
           not saved

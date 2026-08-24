@@ -219,6 +219,20 @@ describe('the settings screen', () => {
     );
   });
 
+  /** A box put back where it started is not a change, so there is nothing to save. */
+  it('drops the save bar when a setting is typed back to what is saved', async () => {
+    draw();
+    const name = await screen.findByLabelText('Shop name');
+
+    fireEvent.change(name, { target: { value: 'Anna Kuteera Veg' } });
+    expect(screen.getByText(/1 setting changed and not saved/)).toBeTruthy();
+
+    fireEvent.change(name, { target: { value: 'Anna Kuteera' } });
+    expect(screen.queryByText(/changed and not saved/)).toBeNull();
+    expect(screen.queryByText('not saved')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+  });
+
   /** **T8**, and all three ways out of it. */
   it('asks before leaving a section with unsaved changes', async () => {
     draw();
@@ -275,7 +289,8 @@ describe('the settings screen', () => {
     await waitFor(() => expect(call).toHaveBeenCalledWith('search_settings', { text: 'logo' }));
     // The hit, and the section it came from — a result that does not say where
     // it lives answers the question once and not next time.
-    expect(await screen.findByLabelText(/Logo width/)).toBeTruthy();
+    // Exact: the field's info tip is labelled "About Logo width".
+    expect(await screen.findByLabelText('Logo width')).toBeTruthy();
     // "The bill" twice: once in the section list, once above the hit saying
     // where it lives. The second one is the point.
     expect(screen.getAllByText('The bill')).toHaveLength(2);

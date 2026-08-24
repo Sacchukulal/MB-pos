@@ -21,7 +21,20 @@ import './kit.css';
  * does not set its own margins — see `layout.tsx` for why, and
  * `scripts/check-layout.mjs` for what happens if it tries.
  */
-export { Fields, Notice, Page, PageHeader, Panel, Row, Sections, Stack, Toolbar } from './layout';
+export {
+  Fields,
+  Foot,
+  Notice,
+  Page,
+  PageHeader,
+  Panel,
+  Row,
+  Scroller,
+  Sections,
+  SideFold,
+  Stack,
+  Toolbar,
+} from './layout';
 
 /**
  * **Where a new row's id comes from** (2026-08-22). A screen never reads the
@@ -71,7 +84,6 @@ export {
   Card,
   DateRangePicker,
   EmptyState,
-  InfoTip,
   Locked,
   Money,
   Numeric,
@@ -83,3 +95,10 @@ export {
   Tabs,
 } from './display';
 export type { BadgeTone, Column } from './display';
+export { InfoTip } from './InfoTip';
+
+/** Join class names, dropping the falsy ones. */
+export { cx } from './cx';
+
+/** '3 items', never '3 item(s)'. */
+export { plural } from './words';

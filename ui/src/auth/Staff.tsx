@@ -64,7 +64,6 @@ export function Staff() {
     <Page className="mb-screen">
       <PageHeader
         title="Staff"
-        subtitle="Who works here, what they are paid, when they worked and when they were away."
       />
       <Tabs
         tabs={[

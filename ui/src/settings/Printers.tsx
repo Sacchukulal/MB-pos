@@ -112,12 +112,15 @@ export function Printers() {
 
   return (
     <div className="mb-printers">
-      <div className="mb-settings__head">
-        <h2 className="mb-settings__title">Printers</h2>
-        <Button variant="primary" small onClick={() => setEditing(blank())}>
-          Add a printer
-        </Button>
-      </div>
+      <SectionHeader
+        title="Printers"
+        sticky
+        action={
+          <Button variant="primary" small onClick={() => setEditing(blank())}>
+            Add a printer
+          </Button>
+        }
+      />
 
       {view.printers.length === 0 ? (
         <EmptyState

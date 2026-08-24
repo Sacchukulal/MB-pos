@@ -62,8 +62,11 @@ import {
   Icon,
   Input,
   Modal,
+  plural,
+  Scroller,
   SectionHeader,
   Select,
+  SideFold,
   Toolbar,
   useReport,
   useToast,
@@ -73,6 +76,7 @@ import { call } from '../ipc/call';
    copy — see the note where it was. */
 import { Tile } from '../billing/TableGrid';
 import type { FloorView } from '../ipc/generated/FloorView';
+import type { SectionView } from '../ipc/generated/SectionView';
 import type { TableRowView } from '../ipc/generated/TableRowView';
 import type { TableView } from '../ipc/generated/TableView';
 
@@ -96,6 +100,19 @@ export function Floor() {
    */
   const [picked, setPicked] = useState<readonly string[]>([]);
   const [confirming, setConfirming] = useState<'delete' | 'hide' | null>(null);
+  /**
+   * **Is the arranging panel unfolded?**
+   *
+   * The owner, 2026-08-24: *"make it so that i can Fold the Add rooms side
+   * panel, so that there will only be a small button for add room."* A room is
+   * arranged once and looked at every day, so the panel is the exception and
+   * the room is the screen.
+   *
+   * `null` means "nobody has said" — and then it is open only on a shop with
+   * no tables, where the panel IS the next thing to do (it is what the empty
+   * state points at). One piece of state, no effect, no stored preference.
+   */
+  const [arrangeOpen, setArrangeOpen] = useState<boolean | null>(null);
   /** The one table the bin on a tile is about — see the note on `Tile`. */
   const [deletingOne, setDeletingOne] = useState<TableRowView | null>(null);
   const toast = useToast();
@@ -205,7 +222,21 @@ export function Floor() {
   const pickable = floor.canArrange;
   /** Only what is on screen and is a table — the bar acts on what you can see. */
   const ticked = picked.filter((id) => shown.some((t) => t.id === id) && isATable(id));
-  const tickable = shown.filter((t) => isATable(t.id));
+  /** **The room is drawn room by room** — see `roomsOf`. */
+  const rooms = roomsOf(floor.sections, shown);
+
+  /** What a tile can do, written once for the plan and for every room's grid. */
+  const onTile = {
+    picked,
+    onPress: (tile: TableView) =>
+      pickable && isATable(tile.id) ? toggle(tile.id) : setMoving(tile),
+    onEdit: (tile: TableView) => setEditing(rowFor(tile.id)),
+    onDelete: (tile: TableView) => setDeletingOne(rowFor(tile.id)),
+    canTick: (tile: TableView) => pickable && isATable(tile.id),
+    onPrintBill: printTheBill,
+  };
+  /** Open on a shop with no tables, folded once there are some. */
+  const arranging = arrangeOpen ?? floor.tables.length === 0;
 
   /**
    * **What the ticked tables are about to have done to them.**
@@ -229,10 +260,10 @@ export function Floor() {
         toast.show(
           'ok',
           what === 'delete'
-            ? `${how} table(s) deleted.`
+            ? `${plural(how, 'table')} deleted.`
             : what === 'hide'
-              ? `${how} table(s) taken off the floor.`
-              : `${how} table(s) put back.`,
+              ? `${plural(how, 'table')} taken off the floor.`
+              : `${plural(how, 'table')} put back.`,
         );
       })
       .catch((cause) => {
@@ -263,6 +294,7 @@ export function Floor() {
       */}
       <Toolbar
         end={
+          <>
           <div className="mb-tabs" role="tablist" aria-label="Which tables">
             {(['all', 'busy', 'attention'] as const).map((which) => (
               <button
@@ -277,6 +309,7 @@ export function Floor() {
               </button>
             ))}
           </div>
+          </>
         }
       >
         {/* **No rooms, no room picker** (P30.5). A shop with no sections got a
@@ -301,90 +334,90 @@ export function Floor() {
         ) : null}
       </Toolbar>
 
-      {/* Scope 14.3, and it is the line an owner glances at. */}
-      <div className="mb-floor__numbers">
-        <span>{floor.occupancy.busy}</span>
-        <span>{floor.occupancy.covers}</span>
-        <span>{floor.occupancy.turns}</span>
-        <span>{floor.occupancy.average}</span>
-      </div>
-
-      <div className="mb-floor__body">
-        {/* **The starting side of the screen** (owner, 2026-08-22). Hidden
-            entirely from somebody who may not arrange the room — a panel of
-            controls that can only answer "you do not have permission" is worse
-            than no panel. `guard::require` is still the control; see
-            `FloorView::can_arrange`. */}
-        {pickable ? (
-          <Arrange floor={floor} onChanged={arrived} onFailed={report} />
+      {/* Hidden entirely from somebody who may not arrange the room: a panel
+          of controls that can only answer "you do not have permission" is worse
+          than no panel. `guard::require` is still the control. */}
+      <SideFold
+        label="Rooms and tables"
+        open={arranging}
+        onOpen={() => setArrangeOpen(true)}
+        onFold={() => setArrangeOpen(false)}
+        allowed={pickable}
+        panel={<Arrange floor={floor} onChanged={arrived} onFailed={report} />}
+      >
+        {/* Only when there is something ticked. A bar that is always there is
+            furniture; a bar that appears is an answer to what you just did. */}
+        {pickable && ticked.length > 0 ? (
+          <Picked
+            floor={floor}
+            ticked={ticked}
+            onEdit={setEditing}
+            onOrder={setMoving}
+            onClear={() => setPicked([])}
+            onDelete={() => setConfirming('delete')}
+            onHide={() => setConfirming('hide')}
+            onShow={() => act('show')}
+            onPrint={printTheBill}
+          />
         ) : null}
 
-        <div className="mb-floor__room">
-          {/* Only when there is something ticked. A bar that is always there is
-              furniture; a bar that appears is an answer to what you just did. */}
-          {pickable && ticked.length > 0 ? (
-            <Picked
-              floor={floor}
-              ticked={ticked}
-              onEdit={setEditing}
-              onOrder={setMoving}
-              onClear={() => setPicked([])}
-              onDelete={() => setConfirming('delete')}
-              onHide={() => setConfirming('hide')}
-              onShow={() => act('show')}
-              onPrint={printTheBill}
-            />
-          ) : null}
-
-          {pickable && tickable.length > 0 ? (
-            <div className="mb-floor__pickall">
-              <Checkbox
-                label={
-                  ticked.length === tickable.length
-                    ? `All ${tickable.length} ticked`
-                    : `Tick all ${tickable.length}`
-                }
-                checked={ticked.length === tickable.length && tickable.length > 0}
-                onChange={(event) =>
-                  setPicked(event.target.checked ? tickable.map((t) => t.id) : [])
-                }
-              />
-            </div>
-          ) : null}
-
-          {floor.hasLayout ? (
-            <Plan
-              floor={floor}
-              tiles={shown}
-              picked={picked}
-              pickable={pickable}
-              onFailed={report}
-              onChanged={arrived}
-              onPress={(tile) =>
-                pickable && isATable(tile.id) ? toggle(tile.id) : setMoving(tile)
-              }
-              onEdit={(tile) => setEditing(rowFor(tile.id))}
-              onDelete={(tile) => setDeletingOne(rowFor(tile.id))}
-              canTick={(tile) => pickable && isATable(tile.id)}
-              onPrintBill={printTheBill}
-            />
-          ) : (
-            <Grid
-              tiles={shown}
-              picked={picked}
-              onPress={(tile) =>
-                pickable && isATable(tile.id) ? toggle(tile.id) : setMoving(tile)
-              }
-              onEdit={(tile) => setEditing(rowFor(tile.id))}
-              onDelete={(tile) => setDeletingOne(rowFor(tile.id))}
-              canTick={(tile) => pickable && isATable(tile.id)}
-              onPrintBill={printTheBill}
-              none={floor.tables.length === 0}
-              canArrange={floor.canArrange}
-            />
-          )}
-        </div>
-      </div>
+        {floor.hasLayout ? (
+          <Plan floor={floor} tiles={shown} pickable={pickable} onFailed={report} onChanged={arrived} {...onTile} />
+        ) : shown.length === 0 ? (
+          // Nothing to draw, so nothing to group — `Grid` owns both of the
+          // empty things this screen can be.
+          <Grid
+            tiles={shown}
+            {...onTile}
+            none={floor.tables.length === 0}
+            canArrange={floor.canArrange}
+          />
+        ) : (
+          <Scroller className="mb-floor__rooms">
+            {rooms.map((room) => {
+              const mine = room.tiles.filter((t) => isATable(t.id));
+              const on = mine.filter((t) => picked.includes(t.id));
+              const named = room.name === '' ? '' : ` in ${room.name}`;
+              return (
+                <section key={room.name} className="mb-floor__roomgroup">
+                  <div className="mb-floor__roomhead">
+                    {/* One room, one heading — but a shop with no rooms at
+                        all should not be told its tables are in "No room". */}
+                    {rooms.length > 1 || room.name !== '' ? (
+                      <h3 className="mb-floor__roomname">
+                        {room.name === '' ? 'No room' : room.name}
+                      </h3>
+                    ) : null}
+                    {pickable && mine.length > 0 ? (
+                      <Checkbox
+                        label={
+                          on.length === mine.length
+                            ? `All ${mine.length}${named} ticked`
+                            : `Tick all ${mine.length}${named}`
+                        }
+                        checked={on.length === mine.length}
+                        onChange={(event) =>
+                          setPicked((was) => {
+                            // Only this room's ticks change; another room's
+                            // stay, so the bar can act on both at once.
+                            const others = was.filter(
+                              (id) => !mine.some((t) => t.id === id),
+                            );
+                            return event.target.checked
+                              ? [...others, ...mine.map((t) => t.id)]
+                              : others;
+                          })
+                        }
+                      />
+                    ) : null}
+                  </div>
+                  <Grid tiles={room.tiles} {...onTile} canArrange={floor.canArrange} />
+                </section>
+              );
+            })}
+          </Scroller>
+        )}
+      </SideFold>
 
       {editing ? (
         <EditTable
@@ -423,7 +456,7 @@ export function Floor() {
           title={`Delete ${deletingOne.printed}?`}
           body={
             Number(deletingOne.history) > 0
-              ? `This table has ${Number(deletingOne.history)} order(s) against it, so it cannot be deleted — take it off the floor instead and it keeps its history.`
+              ? `This table has ${plural(Number(deletingOne.history), 'order')} against it, so it cannot be deleted — take it off the floor instead and it keeps its history.`
               : 'It has no orders against it, so it can go for good.'
           }
           confirmLabel={Number(deletingOne.history) > 0 ? 'Take it off the floor' : 'Delete it'}
@@ -459,8 +492,8 @@ export function Floor() {
           open
           title={
             confirming === 'delete'
-              ? `Delete ${ticked.length} table(s)?`
-              : `Take ${ticked.length} table(s) off the floor?`
+              ? `Delete ${plural(ticked.length, 'table')}?`
+              : `Take ${plural(ticked.length, 'table')} off the floor?`
           }
           body={
             confirming === 'delete'
@@ -475,6 +508,31 @@ export function Floor() {
       ) : null}
     </div>
   );
+}
+
+/**
+ * **The tiles, split by room, in the shop's own room order.**
+ *
+ * The owner, 2026-08-24: *"the tables there are not according to Room/section,
+ * why is that?"* They were right: `list_tables` orders by sort order then
+ * label, which on a shop with two rooms interleaves them — and "All" then drew
+ * twelve squares in one run with nothing saying where AC stopped and HALL
+ * began. A room is how a shop thinks about its floor, so it is how the floor is
+ * drawn.
+ *
+ * Rooms first, in the order the shop put them in; tables in no room last, and
+ * that is where a parcel or self-service order lands too (§4 — it is a tile
+ * with an order and no table). A room with nothing in it is not drawn.
+ */
+function roomsOf(
+  sections: readonly SectionView[],
+  tiles: readonly TableView[],
+): { name: string; tiles: TableView[] }[] {
+  // `tile.section` is a name taken from this same list (see `floor_view`), so
+  // every tile lands in exactly one of these buckets.
+  return [...sections.map((s) => s.name), '']
+    .map((name) => ({ name, tiles: tiles.filter((t) => (t.section ?? '') === name) }))
+    .filter((room) => room.tiles.length > 0);
 }
 
 /**
@@ -524,7 +582,7 @@ function Arrange({
   };
 
   return (
-    <aside className="mb-arrange" aria-label="Arrange the room">
+    <Scroller inset className="mb-arrange">
       <SectionHeader
         title="Rooms"
         note="A room is what a table prints under — AC 1, Garden 4. A shop with one dining area does not need any."
@@ -618,7 +676,7 @@ function Arrange({
           Save
         </Button>
       </div>
-    </aside>
+    </Scroller>
   );
 }
 

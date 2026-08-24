@@ -23,6 +23,9 @@ import {
   type SelectHTMLAttributes,
 } from 'react';
 
+import { cx } from './cx';
+import { InfoTip } from './InfoTip';
+
 type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -37,15 +40,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     { variant = 'secondary', small, wide, icon, children, className, ...rest },
     ref,
   ) {
-    const classes = [
+    const classes = cx(
       'mb-button',
       `mb-button--${variant}`,
-      small ? 'mb-button--small' : '',
-      wide ? 'mb-button--wide' : '',
-      className ?? '',
-    ]
-      .filter(Boolean)
-      .join(' ');
+      small && 'mb-button--small',
+      wide && 'mb-button--wide',
+      className,
+    );
     return (
       <button ref={ref} type="button" className={classes} {...rest}>
         {icon}
@@ -67,19 +68,38 @@ interface FieldShellProps {
  *
  * Audit F10 is about confirmation dialogs, but the same disease shows up in
  * fields: five screens each inventing where the error text goes. It goes here.
+ *
+ * # The hint is **asked for**, not given
+ *
+ * It used to be a grey sentence under every box. The owner, 2026-08-24: *"as i
+ * said many times, i dont like you adding those sub lines below all those
+ * feilds."* So it is an `InfoTip` beside the label — the same ruling
+ * `SectionHeader`, `Panel` and `Modal` already follow for their notes, applied
+ * to the last place a paragraph could still be printed at somebody.
+ *
+ * **One change rather than ninety.** Every screen that already passes a hint
+ * gets the hover behaviour without being touched, and no screen has anywhere
+ * left to put an explanation on the page.
+ *
+ * An error still prints. A hint is something you may want; a thing you typed
+ * wrongly is something you must be told.
  */
 function FieldShell({ label, hint, error, children }: FieldShellProps) {
   const id = useId();
   const invalid = Boolean(error);
   return (
     <div className="mb-field">
-      {label ? (
-        <label className="mb-field__label" htmlFor={id}>
-          {label}
-        </label>
+      {label || hint ? (
+        <div className="mb-field__labelrow">
+          {label ? (
+            <label className="mb-field__label" htmlFor={id}>
+              {label}
+            </label>
+          ) : null}
+          {hint ? <InfoTip label={label ? `About ${label}` : undefined}>{hint}</InfoTip> : null}
+        </div>
       ) : null}
       {children(id, invalid)}
-      {hint && !error ? <span className="mb-field__hint">{hint}</span> : null}
       {error ? (
         <span className="mb-field__error" role="alert">
           {/* The icon is the form half of the signal (§2 rule 2). */}
@@ -125,13 +145,7 @@ export function Input({ label, hint, error, className, prefix, ...rest }: InputP
              whoever is standing at the counter next. Nothing here is a form
              anybody fills in twice, so there is nothing to save. */
           autoComplete="off"
-          className={[
-            'mb-input',
-            invalid ? 'mb-input--invalid' : '',
-            className ?? '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
+          className={cx('mb-input', invalid && 'mb-input--invalid', className)}
       aria-invalid={invalid || undefined}
       {...rest}
     />
@@ -177,7 +191,7 @@ export function NumberInput({ className, ...rest }: InputProps) {
     <Input
       inputMode="decimal"
       autoComplete="off"
-      className={['mb-input--number', className ?? ''].filter(Boolean).join(' ')}
+      className={cx('mb-input--number', className)}
       {...rest}
     />
   );
@@ -271,7 +285,7 @@ export function MoneyInput({
       autoComplete="off"
       value={value}
       onChange={(event) => onChange(onlyAmount(event.target.value))}
-      className={['mb-input--money', className ?? ''].filter(Boolean).join(' ')}
+      className={cx('mb-input--money', className)}
       prefix="₹"
       {...rest}
     />
@@ -328,7 +342,7 @@ export function PhoneInput({
       maxLength={PHONE_DIGITS}
       value={value}
       onChange={(event) => onChange(onlyPhone(event.target.value))}
-      className={['mb-input--phone', className ?? ''].filter(Boolean).join(' ')}
+      className={cx('mb-input--phone', className)}
       prefix="+91"
       {...rest}
     />
@@ -356,7 +370,7 @@ export function Select({
       {(id, invalid) => (
         <select
           id={id}
-          className={['mb-input', className ?? ''].filter(Boolean).join(' ')}
+          className={cx('mb-input', className)}
           aria-invalid={invalid || undefined}
           {...rest}
         >
@@ -374,18 +388,29 @@ export function Select({
 export interface CheckboxProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
   label: string;
+  /** Asked for, like every other hint — a tip beside the box, never under it. */
+  hint?: string;
 }
 
-export function Checkbox({ label, ...rest }: CheckboxProps) {
-  return (
+export function Checkbox({ label, hint, ...rest }: CheckboxProps) {
+  const box = (
     <label className="mb-checkbox">
       <input type="checkbox" {...rest} />
       <span>{label}</span>
     </label>
   );
+  // The tip sits OUTSIDE the `<label>`: a button inside one toggles the box.
+  return hint ? (
+    <div className="mb-field__labelrow">
+      {box}
+      <InfoTip label={`About ${label}`}>{hint}</InfoTip>
+    </div>
+  ) : (
+    box
+  );
 }
 
-export function Radio({ label, ...rest }: CheckboxProps) {
+export function Radio({ label, hint: _hint, ...rest }: CheckboxProps) {
   return (
     <label className="mb-radio">
       <input type="radio" {...rest} />

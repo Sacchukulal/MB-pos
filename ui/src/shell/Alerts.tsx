@@ -37,7 +37,7 @@
  * P31 builds the channel it adds a case, not a screen.
  */
 
-import { Button, Icon, type IconName } from '../kit';
+import { Button, Icon, SectionHeader, type IconName } from '../kit';
 
 /** One thing the shop should know about. */
 export interface Alert {
@@ -87,17 +87,19 @@ export function AlertsPanel({
         onClick={onClose}
       />
       <section className="mb-alerts" aria-label="Alerts">
-        <header className="mb-alerts__head">
-          <h2 className="mb-alerts__title">Alerts</h2>
-          <button
-            type="button"
-            className="mb-topbar__button"
-            onClick={onClose}
-            aria-label="Close the alerts"
-          >
-            <Icon name="close" size="sm" />
-          </button>
-        </header>
+        <SectionHeader
+          title="Alerts"
+          action={
+            <button
+              type="button"
+              className="mb-topbar__button"
+              onClick={onClose}
+              aria-label="Close the alerts"
+            >
+              <Icon name="close" size="sm" />
+            </button>
+          }
+        />
 
         {alerts.length === 0 ? (
           <p className="mb-alerts__quiet">

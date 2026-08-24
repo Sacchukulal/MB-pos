@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Card, Notice, SectionHeader, Spinner, useToast } from '../kit';
+import { Button, Card, Notice, plural, SectionHeader, Spinner, useToast } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
 import type { UpdateState } from '../ipc/generated/UpdateState';
 
@@ -74,7 +74,7 @@ export function Updates() {
         <dd>
           {view.daysOnThisVersion === 0
             ? 'today'
-            : `${view.daysOnThisVersion} day(s) ago`}
+            : `${plural(view.daysOnThisVersion, 'day')} ago`}
         </dd>
       </dl>
 

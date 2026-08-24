@@ -166,8 +166,8 @@ export function Bills() {
     <Page className="mb-screen">
       <PageHeader
         title="Bills"
-        subtitle="Every bill settled today — and where a wrong one is voided or reprinted."
         count={bills.length}
+        note="A voided bill keeps its number and stays on this list. A gap in the bill book is evidence; a missing bill is a question nobody can answer."
       />
 
       {totals ? (
@@ -191,11 +191,6 @@ export function Bills() {
           <Table rows={bills} columns={columns} rowKey={(b) => b.orderId} />
         </Panel>
       )}
-
-      <p className="mb-muted">
-        A voided bill keeps its number and stays on this list. A gap in the bill
-        book is evidence; a missing bill is a question nobody can answer.
-      </p>
 
       {pending ? (
         <Correction

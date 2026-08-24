@@ -38,6 +38,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { cx } from './cx';
 
 export type IconName =
   // The screens.
@@ -442,7 +443,7 @@ export interface IconProps {
 export function Icon({ name, size = 'md', label, className }: IconProps) {
   return (
     <svg
-      className={['mb-icon', `mb-icon--${size}`, className].filter(Boolean).join(' ')}
+      className={cx('mb-icon', `mb-icon--${size}`, className)}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

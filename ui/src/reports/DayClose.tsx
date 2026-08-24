@@ -29,6 +29,7 @@ import {
   Icon,
   Input,
   Modal,
+  Scroller,
   SectionHeader,
   Spinner,
   useToast,
@@ -103,7 +104,7 @@ export function DayClose() {
   if (!view) return <Spinner label="Adding up the day" />;
 
   return (
-    <div className="mb-dayclose">
+    <Scroller className="mb-dayclose">
       <SectionHeader
         title="Close the day"
         note={view.daySays}
@@ -140,14 +141,14 @@ export function DayClose() {
 
       <div className="mb-dayclose__columns">
         <Card>
-          <h3 className="mb-dayclose__title">The day</h3>
+          <SectionHeader title="The day" />
           {view.takings.map((row) => (
             <div className="mb-dayclose__line" key={row.label}>
               <span>{row.label}</span>
               <span className="mb-numeric">{row.amount.text}</span>
             </div>
           ))}
-          <h3 className="mb-dayclose__title">The drawer</h3>
+          <SectionHeader title="The drawer" />
           {view.drawer.map((row) => (
             <div className="mb-dayclose__line" key={row.label}>
               <span>{row.label}</span>
@@ -161,7 +162,7 @@ export function DayClose() {
         </Card>
 
         <Card>
-          <h3 className="mb-dayclose__title">Count the drawer</h3>
+          <SectionHeader title="Count the drawer" />
           <div className="mb-dayclose__grid">
             {view.denominations.map((row) => (
               <div className="mb-dayclose__note" key={row.value}>
@@ -214,7 +215,7 @@ export function DayClose() {
           standing in front of is a list nobody clears. */}
       {unconfirmed.length > 0 ? (
         <Card className="mb-dayclose__unconfirmed">
-          <h3 className="mb-dayclose__title">Not confirmed yet</h3>
+          <SectionHeader title="Not confirmed yet" />
           <p className="mb-dayclose__closed">{waiting}</p>
           {unconfirmed.map((row) => (
             <div className="mb-dayclose__line" key={`${row.orderId}-${row.seq}`}>
@@ -323,7 +324,7 @@ export function DayClose() {
           onChange={(event) => setReopenReason(event.target.value)}
         />
       </Modal>
-    </div>
+    </Scroller>
   );
 }
 

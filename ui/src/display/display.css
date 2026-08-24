@@ -35,7 +35,6 @@
 .mb-display__lines {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--gap-field);

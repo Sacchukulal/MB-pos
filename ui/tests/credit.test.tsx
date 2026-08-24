@@ -87,16 +87,48 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('who owes me money (scope 5.1)', () => {
-  it('opens on the people who owe, not on everybody', async () => {
+  /**
+   * **One list, and everybody is on it** — the owner, 2026-08-24: *"when i add
+   * a credit customer, it seemed like it disappeared but the thing was it was
+   * in everybody section."*
+   *
+   * The screen used to open on "who owes me", and a customer added a minute ago
+   * owes nothing — so adding one looked exactly like losing one.
+   */
+  it('asks for everybody, and has no second view to lose a customer in', async () => {
     call.mockResolvedValue([customer({ id: 'cus_rekha', name: 'Rekha' })]);
     show();
     await screen.findByText('Rekha');
 
-    // The FIRST question asked of Rust is the one the screen exists for.
-    expect(call.mock.calls[0]?.[0]).toBe('who_owes');
+    expect(call.mock.calls[0]?.[0]).toBe('customers');
+    expect(call.mock.calls.some((c) => c[0] === 'who_owes')).toBe(false);
+    expect(screen.queryByText('Everybody')).toBeNull();
+    expect(screen.queryByText('Who owes me')).toBeNull();
+  });
 
-    fireEvent.click(screen.getByText('Everybody'));
-    expect(call.mock.calls.some((c) => c[0] === 'customers')).toBe(true);
+  /**
+   * **The customer form is the side panel** — the owner, same day: *"i want add
+   * customer panel in the side (foldable)"*, and the screen's own "Credit 0"
+   * title and sub-line went with the dialog.
+   */
+  it('adds and edits in one folding side panel, not a dialog', async () => {
+    call.mockResolvedValue([customer({ id: 'cus_rekha', name: 'Rekha' })]);
+    show();
+    await screen.findByText('Rekha');
+
+    // Folded: one button, and no repeated screen title.
+    expect(screen.queryByRole('complementary', { name: 'Add a customer' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Credit' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add a customer' }));
+    const panel = screen.getByRole('complementary', { name: 'Add a customer' });
+    expect(panel).toBeTruthy();
+    expect(screen.getByLabelText('Name')).toBeTruthy();
+
+    // Edit opens the SAME panel, holding that customer.
+    fireEvent.click(screen.getByRole('button', { name: 'Close Add a customer' }));
+    fireEvent.click(screen.getByText('Edit'));
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Rekha');
   });
 
   it('shows how long it has been owed, which is the number an owner acts on', async () => {

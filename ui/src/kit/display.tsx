@@ -12,11 +12,12 @@
  * legible.
  */
 
-import { useId, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import type { MoneyView } from '../ipc/generated/MoneyView';
+import { cx } from './cx';
 import { Button } from './controls';
-import { Icon } from './Icon';
+import { InfoTip } from './InfoTip';
 
 export function Card({
   children,
@@ -26,53 +27,12 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={['mb-card', className ?? ''].filter(Boolean).join(' ')}>
+    <div className={cx('mb-card', className)}>
       {children}
     </div>
   );
 }
 
-/**
- * **The explanation you can ask for, instead of the one you are given.**
- *
- * The owner, 2026-08-22: *"you are adding these explaination texts everywhere
- * in the app, it is not needed, it makes the app look cluttered and
- * unprofessional… make it a kind of popup text, when hovered on the section
- * heading… (in a small popup, which is common in many apps, its like info
- * text)"*
- *
- * And the reason, which is the part worth keeping: *"you keep forgetting that
- * i am the developer… I will sell this app to customers (restaurant owners)."*
- * The paragraphs were written to explain the product to the person building it.
- * A shopkeeper who has used the till for a week is reading them for the two
- * hundredth time.
- *
- * # No JavaScript in it
- *
- * `:hover` and `:focus-within` do the showing, so there is no open/closed state
- * to get stuck, nothing to clean up on unmount, and no way for two of these to
- * be open at once. The button is a real `<button>` so a keyboard reaches it,
- * and `aria-describedby` ties the bubble to it for a screen reader — which is
- * how this stays as accessible as the paragraph it replaces.
- */
-export function InfoTip({ children, label }: { children: ReactNode; label?: string }) {
-  const id = useId();
-  return (
-    <span className="mb-tip">
-      <button
-        type="button"
-        className="mb-tip__ask"
-        aria-label={label ?? 'What is this?'}
-        aria-describedby={id}
-      >
-        <Icon name="info" size="sm" />
-      </button>
-      <span className="mb-tip__bubble" id={id} role="tooltip">
-        {children}
-      </span>
-    </span>
-  );
-}
 
 /**
  * A heading for a block within a screen.
@@ -86,16 +46,19 @@ export function SectionHeader({
   title,
   note,
   action,
+  sticky = false,
 }: {
   title: string;
   note?: ReactNode;
   action?: ReactNode;
+  /** Stays put while the section under it scrolls. */
+  sticky?: boolean;
 }) {
   return (
-    <div className="mb-section">
+    <div className={cx('mb-section', sticky && 'mb-section--sticky')}>
       <h3 className="mb-section__title">{title}</h3>
       {note ? <InfoTip label={`About ${title}`}>{note}</InfoTip> : null}
-      {action}
+      {action ? <div className="mb-section__action">{action}</div> : null}
     </div>
   );
 }
@@ -182,7 +145,22 @@ export interface Column<Row> {
   header: string;
   /** Right-aligned and tabular. Money and counts, always. */
   numeric?: boolean;
+  /**
+   * **The column disappears when no row has one.**
+   *
+   * A shop with no short codes and no HSN numbers was given two columns of
+   * twelve em-dashes, taking a fifth of the table's width to say nothing,
+   * while the item names squeezed. Return `null` for a row that has no value
+   * and the table draws the dash — so the placeholder has one author instead
+   * of a `?? '—'` in thirty render functions.
+   */
+  optional?: boolean;
   render: (row: Row) => ReactNode;
+}
+
+/** What `optional` counts as nothing. */
+function blank(cell: ReactNode): boolean {
+  return cell === null || cell === undefined || cell === '' || cell === false;
 }
 
 export function Table<Row>({
@@ -207,11 +185,26 @@ export function Table<Row>({
   footer?: readonly ReactNode[];
 }) {
   if (rows.length === 0 && empty) return <>{empty}</>;
+
+  // Render once, here: an `optional` column has to be looked at to know
+  // whether it survives, and calling `render` twice for that would be a second
+  // pass over every row.
+  const cells = rows.map((row) => columns.map((column) => column.render(row)));
+  const shown = columns.filter(
+    (column, index) =>
+      !column.optional || cells.some((cellsOfRow) => !blank(cellsOfRow[index])),
+  );
+  const keep = columns.map((column) => shown.includes(column));
+
   return (
+    // The wrapper is what stops a squeezed table shredding: below the floor
+    // width it scrolls sideways in its own box instead of wrapping a cell to
+    // one word per line. The page itself still never scrolls sideways (§1).
+    <div className="mb-table__wrap">
     <table className="mb-table">
       <thead>
         <tr>
-          {columns.map((column) => (
+          {shown.map((column) => (
             <th
               key={column.key}
               className={column.numeric ? 'mb-numeric' : undefined}
@@ -222,34 +215,41 @@ export function Table<Row>({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
+        {rows.map((row, rowIndex) => (
           <tr key={rowKey(row)}>
-            {columns.map((column) => (
-              <td
-                key={column.key}
-                className={column.numeric ? 'mb-numeric' : undefined}
-              >
-                {column.render(row)}
-              </td>
-            ))}
+            {columns.map((column, index) => {
+              if (!keep[index]) return null;
+              const cell = cells[rowIndex]?.[index];
+              return (
+                <td
+                  key={column.key}
+                  className={column.numeric ? 'mb-numeric' : undefined}
+                >
+                  {column.optional && blank(cell) ? '—' : cell}
+                </td>
+              );
+            })}
           </tr>
         ))}
       </tbody>
       {footer ? (
         <tfoot>
           <tr>
-            {columns.map((column, index) => (
-              <td
-                key={column.key}
-                className={column.numeric ? 'mb-numeric' : undefined}
-              >
-                {footer[index] ?? null}
-              </td>
-            ))}
+            {columns.map((column, index) =>
+              !keep[index] ? null : (
+                <td
+                  key={column.key}
+                  className={column.numeric ? 'mb-numeric' : undefined}
+                >
+                  {footer[index] ?? null}
+                </td>
+              ),
+            )}
           </tr>
         </tfoot>
       ) : null}
     </table>
+    </div>
   );
 }
 
@@ -308,7 +308,7 @@ export function EmptyState({
   small?: boolean;
 }) {
   return (
-    <div className={['mb-empty', small ? 'mb-empty--small' : ''].filter(Boolean).join(' ')}>
+    <div className={cx('mb-empty', small && 'mb-empty--small')}>
       <span className="mb-empty__title">{title}</span>
       {body ? <span>{body}</span> : null}
       {action}

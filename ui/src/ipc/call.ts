@@ -432,7 +432,6 @@ export interface Commands {
   // The balance is never sent as a number to add up: every one of these
   // returns money already formatted and ageing already bucketed, because a
   // screen that divides by thirty has a second answer.
-  who_owes: { args: void; returns: CustomerView[] };
   customers: { args: void; returns: CustomerView[] };
   customer_account: { args: { customerId: string }; returns: AccountView };
   /** A duplicate phone comes back as an error carrying the existing id. */

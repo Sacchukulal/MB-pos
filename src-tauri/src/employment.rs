@@ -577,7 +577,7 @@ pub fn attendance_on(
                 }
 
                 let says = if missed.is_empty() {
-                    format!("{} shift(s)", shifts.len())
+                    words::count(i64::try_from(shifts.len()).unwrap_or(i64::MAX), "shift", "shifts")
                 } else {
                     format!(
                         "{} shifts, and {} nobody clocked out of — those hours cannot be \

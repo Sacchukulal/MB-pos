@@ -94,6 +94,12 @@
   /** The page's own margin. Set by `Page` and by nothing else, ever. */
   --page-pad-x: var(--space-6);
   --page-pad-y: var(--space-3);
+  /**
+   * How wide the scrollbar is. Two places need to agree on it: the bar itself
+   * (::-webkit-scrollbar, below) and the gutter a page header steps back by so
+   * it lines up with the scrolling body under it.
+   */
+  --scrollbar: var(--space-3);
 
   /* -----------------------------------------------------------------------
      THE TYPE CONTRACT — the same argument as spacing.
@@ -323,7 +329,7 @@
   --alerts-width: 26rem;
   /* The Floor screen's arranging panel. Wide enough for two fields side by
      side (From and To) and no wider — the room is what the screen is for. */
-  --arrange-width: 18rem;
+  --arrange-width: var(--find-width);
   /* An info tip holds a sentence or two. Wider and it stops being a tip and
      becomes the paragraph it replaced. */
   --tip-width: 20rem;
@@ -387,14 +393,29 @@
   --menu-categories-width: 14rem;
   --class-min: 18rem;
   --import-box-height: 12rem;
+  /** How narrow a table may get before it scrolls sideways instead of wrapping. */
+  --table-min: 34rem;
 
-  /* Stacking. The kit's overlays were 100 (the modal) and 200 (toasts); the
-     lock is above both, because a toast that floated over a locked screen
-     would be information leaking past the lock. */
-  --z-lock: 300;
-  /* An info tip sits above the panel it explains and below everything that
-     covers the screen — it is part of the page, not an overlay over it. */
-  --z-tip: 50;
+  /* -----------------------------------------------------------------------
+     THE LAYER CONTRACT. Same argument as spacing and type: a screen names a
+     JOB, never a number. Raw 1, 40, 50, 100 and 200 were scattered across five
+     files and nothing said which was meant to be above which.
+     ----------------------------------------------------------------------- */
+
+  /** A sticky header or a rail inside a page. */
+  --layer-sticky: 10;
+  /** A side panel lying over the page's own content. */
+  --layer-panel: 20;
+  /** The top bar, which everything on the page passes under. */
+  --layer-chrome: 40;
+  /** An info tip: part of the page, above the panel it explains. */
+  --layer-tip: 50;
+  /** A dialog and the sheet it dims. */
+  --layer-modal: 100;
+  /** A toast, over the dialog that raised it. */
+  --layer-toast: 200;
+  /** The lock. Above everything — a toast over a locked screen leaks. */
+  --layer-lock: 300;
 
   --focus-ring-width: 2px;
   /* **A ring sits ON the edge, never around it** — the owner, 2026-08-23:
@@ -638,21 +659,15 @@ textarea {
      follows whatever corner the box already has, which is the right one. */
 }
 
-/* **The scrollbars** — P27.5, and they are not a detail.
-   WebView2 draws the Windows default: a wide grey trough with a square thumb
-   and stepper arrows. On a dark theme it stays light grey, so every scrolling
-   region on the billing screen had a pale stripe down its edge that belonged
-   to a different application. There are three of them visible at once on a
-   busy bill. Themed here rather than per-screen, because a scrollbar is a
-   colour and every colour in this product lives in this file (D21). */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
+/* **The scrollbars.** Themed here, not per-screen: a scrollbar is a colour.
 
+   Do NOT add `scrollbar-width` or `scrollbar-color` here. Setting either one
+   switches Chromium to the OS scrollbar and silently ignores every
+   `::-webkit-scrollbar` rule below — square thumb, stepper arrows, Windows
+   grey on a dark page. That is what shipped for nineteen sessions. */
 *::-webkit-scrollbar {
-  width: var(--space-3);
-  height: var(--space-3);
+  width: var(--scrollbar);
+  height: var(--scrollbar);
 }
 
 *::-webkit-scrollbar-track {

@@ -686,10 +686,11 @@ pub fn put_on_account_on(
 
 // --- the seats -------------------------------------------------------------
 
-#[tauri::command]
-pub fn who_owes(app: tauri::State<'_, App>) -> UiResult<Vec<CustomerView>> {
-    who_owes_on(&app)
-}
+// `who_owes` was a command here until 2026-08-24. The credit screen had two
+// views — who owes me, and everybody — and the owner found the hole in that:
+// *"when i add a credit customer, it seemed like it disappeared but the thing
+// was it was in everybody section."* One list now, so this had no caller.
+// `who_owes_on` stays, because the reports screen's alerts ask it.
 
 #[tauri::command]
 pub fn customers(app: tauri::State<'_, App>) -> UiResult<Vec<CustomerView>> {

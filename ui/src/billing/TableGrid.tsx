@@ -48,7 +48,7 @@
 
 import { useMemo } from 'react';
 
-import { EmptyState, Icon } from '../kit';
+import { EmptyState, Icon, Scroller } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 
 /* **The tile brings its own styling.** `Tile` is imported by the Floor screen
@@ -141,7 +141,7 @@ export function TableGrid({
       {sections.map(([name, group]) => (
         <div className="mb-floor__section" key={name || 'no-table'}>
           <span className="mb-floor__heading">{name || 'No table'}</span>
-          <div className="mb-floor__grid">
+          <Scroller className="mb-floor__grid">
             {group.map((table) => (
               <Tile
                 key={table.id}
@@ -151,7 +151,7 @@ export function TableGrid({
                 onPrintBill={() => onPrintBill(table)}
               />
             ))}
-          </div>
+          </Scroller>
         </div>
       ))}
     </div>

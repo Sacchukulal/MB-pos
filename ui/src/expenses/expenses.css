@@ -11,7 +11,6 @@
   gap: var(--space-3);
   min-height: 0;
   height: 100%;
-  overflow-y: auto;
 }
 
 /* Quick add. The whole point of the screen: two fields and Enter, because a

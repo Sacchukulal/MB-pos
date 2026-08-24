@@ -101,7 +101,6 @@ export function Devices() {
     <Page className="mb-devices">
       <PageHeader
         title="Devices"
-        subtitle="What is plugged into this counter, and what it is saying."
         count={view.devices.filter((d) => d.setUp).length}
         actions={
           <Button variant="secondary" onClick={load}>

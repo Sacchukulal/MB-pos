@@ -78,7 +78,6 @@
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
-  overflow-y: auto;
 }
 
 .mb-billing__cart {
@@ -147,7 +146,6 @@
   flex-direction: column;
   gap: var(--space-1);
   min-height: 0;
-  overflow-y: auto;
 }
 
 /* One order, one line: where it is, its bill number, how long, how much. */
@@ -646,7 +644,6 @@
    * a very short window loses is seeing the lines, not the number the cashier
    * reads out.
    */
-  overflow-y: auto;
 }
 
 @media (min-height: 700px) { /* mb-tokens-allow: media queries cannot use var() */
@@ -788,7 +785,6 @@
   flex-direction: column;
   gap: var(--space-1);
   min-height: 0;
-  overflow-y: auto;
 }
 
 .mb-totals__row {
@@ -1007,7 +1003,7 @@
 
 .mb-suggestions {
   position: absolute;
-  z-index: 50;
+  z-index: var(--layer-panel);
   width: 100%;
   max-height: var(--suggestions-height);
   margin: var(--space-1) 0 0;
@@ -1017,7 +1013,7 @@
   border: var(--border-width) solid var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
-  overflow-y: auto;
+  overflow-y: auto; /* mb-layout-allow: a <ul role=listbox> that pops over the box — not a page region */
 }
 
 .mb-suggestion {

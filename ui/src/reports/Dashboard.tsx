@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { Badge, Card, Icon, Spinner, StatCard } from '../kit';
+import { Badge, Card, Icon, Scroller, SectionHeader, Spinner, StatCard } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { AttentionView } from '../ipc/generated/AttentionView';
 import type { DashboardView } from '../ipc/generated/DashboardView';
@@ -39,8 +39,8 @@ export function Dashboard() {
   if (!view) return <Spinner label="Adding up today" />;
 
   return (
-    <div className="mb-dash">
-      <h2 className="mb-dash__title">{view.title}</h2>
+    <Scroller className="mb-dash">
+      <SectionHeader title={view.title} />
 
       <div className="mb-dash__stats">
         {view.stats.map((stat) => (
@@ -80,7 +80,7 @@ export function Dashboard() {
         </p>
       ) : null}
 
-      <h3 className="mb-dash__heading">What needs you</h3>
+      <SectionHeader title="What needs you" />
       {view.attention.length === 0 ? (
         // **Empty is the good case and it says so.** A blank panel reads as
         // broken; this reads as "nothing is wrong", which is the news.
@@ -103,6 +103,6 @@ export function Dashboard() {
           ))}
         </div>
       )}
-    </div>
+    </Scroller>
   );
 }

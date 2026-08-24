@@ -16,7 +16,6 @@
      bottom of the panel goes under the edge of the window. */
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   padding: var(--space-5);
   background: var(--surface-sunk);
 }

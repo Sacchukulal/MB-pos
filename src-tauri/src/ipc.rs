@@ -515,7 +515,6 @@ macro_rules! commands {
             $crate::floor::split_order,
             $crate::floor::even_split,
             $crate::floor::set_covers,
-            $crate::credit::who_owes,
             $crate::credit::customers,
             $crate::credit::customer_account,
             $crate::credit::save_customer,

@@ -267,7 +267,6 @@ export function Delivery() {
     <Page className="mb-delivery">
       <PageHeader
         title="Delivery"
-        subtitle="Where the food is, and where the money is."
         count={view.deliveries.length}
       />
 

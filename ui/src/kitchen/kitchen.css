@@ -103,7 +103,6 @@
   grid-template-columns: repeat(auto-fill, minmax(var(--kds-card-min), 1fr));
   gap: var(--space-3);
   align-content: start;
-  overflow-y: auto;
   min-height: 0;
 }
 

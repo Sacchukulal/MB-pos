@@ -28,10 +28,11 @@
  * primitive in this file — never a one-off in that screen.
  */
 
-import type { ReactNode } from 'react';
+import { forwardRef, type ReactNode } from 'react';
 
+import { cx } from './cx';
 import { Icon, type IconName } from './Icon';
-import { InfoTip } from './display';
+import { InfoTip } from './InfoTip';
 
 /**
  * The page. **Owns the page margin and nothing else owns it.**
@@ -51,15 +52,36 @@ export function Page({
   className?: string;
 }) {
   return (
-    <div
-      className={['mb-page', scroll ? 'mb-page--scroll' : '', className]
-        .filter(Boolean)
-        .join(' ')}
-    >
+    <div className={cx('mb-page', scroll && 'mb-page--scroll', className)}>
       {children}
     </div>
   );
 }
+
+/**
+ * An area that scrolls. **The only thing in the product that scrolls.**
+ *
+ * A screen keeps its own layout on this element — pass it as `className`, the
+ * same way `Page` takes one — and gets the scrolling from here.
+ *
+ * The bar sits in the page margin rather than inside the content, so a table
+ * in a scroller still lines up with the header above it. Every screen used to
+ * write its own `overflow-y: auto`, which put the bar inside and left the
+ * content 12px short of everything else on the page.
+ *
+ * `inset` is for a scroller that is not at the page's right edge — a side
+ * panel, a rail, a dialog body — where there is no page margin to reach into.
+ */
+export const Scroller = forwardRef<
+  HTMLDivElement,
+  { children: ReactNode; inset?: boolean; className?: string }
+>(function Scroller({ children, inset = false, className }, ref) {
+  return (
+    <div ref={ref} className={cx('mb-scroll', inset && 'mb-scroll--inset', className)}>
+      {children}
+    </div>
+  );
+});
 
 /**
  * The one page header in the product.
@@ -71,11 +93,19 @@ export function Page({
 export function PageHeader({
   title,
   subtitle,
+  note,
   count,
   actions,
 }: {
   title: string;
+  /**
+   * **A live FACT about what is on screen, never an explanation of the
+   * screen** — Stock's "4 items low, 1 out". If it is the same sentence every
+   * time the screen opens, it is an explanation: put it in `note`.
+   */
   subtitle?: string;
+  /** What the screen is for, as a tip you can ask for. Never a paragraph. */
+  note?: ReactNode;
   count?: number | string;
   actions?: ReactNode;
 }) {
@@ -87,6 +117,7 @@ export function PageHeader({
           {count === undefined ? null : (
             <span className="mb-pagehead__count">{count}</span>
           )}
+          {note ? <InfoTip label={`About ${title}`}>{note}</InfoTip> : null}
         </div>
         {subtitle ? <p className="mb-pagehead__sub">{subtitle}</p> : null}
       </div>
@@ -119,6 +150,89 @@ export function Toolbar({
       {end ? <div className="mb-toolbar__end">{end}</div> : null}
     </div>
   );
+}
+
+/**
+ * A panel down the side that folds away to a small button.
+ *
+ * The button that opens it and the chevron that closes it are in the same
+ * place — the top of the column the panel opens into.
+ *
+ * `allowed={false}` hides it entirely. Rust's guard is the real control.
+ */
+export function SideFold({
+  open,
+  label,
+  onOpen,
+  onFold,
+  panel,
+  children,
+  allowed = true,
+}: {
+  open: boolean;
+  /** What the panel is, and its heading. */
+  label: string;
+  onOpen: () => void;
+  onFold: () => void;
+  /** What is inside the panel. Only rendered while it is open. */
+  panel: ReactNode;
+  children: ReactNode;
+  allowed?: boolean;
+}) {
+  const showing = allowed && open;
+  return (
+    <div
+      className={cx(
+        'mb-sidefold',
+        showing && 'mb-sidefold--open',
+        !allowed && 'mb-sidefold--none',
+      )}
+    >
+      {!allowed ? null : showing ? (
+        <aside className="mb-sidefold__panel" aria-label={label}>
+          <div className="mb-sidefold__head">
+            <h2 className="mb-sidefold__title">{label}</h2>
+            <button
+              type="button"
+              className="mb-sidefold__fold"
+              title={`Close ${label}`}
+              aria-label={`Close ${label}`}
+              aria-expanded
+              onClick={onFold}
+            >
+              <Icon name="chevron-left" size="sm" />
+            </button>
+          </div>
+          <Scroller inset className="mb-sidefold__body">
+            {panel}
+          </Scroller>
+        </aside>
+      ) : (
+        <button
+          type="button"
+          className="mb-sidefold__strip"
+          title={label}
+          aria-label={label}
+          aria-expanded={false}
+          onClick={onOpen}
+        >
+          <Icon name="plus" size="sm" />
+        </button>
+      )}
+      <div className="mb-sidefold__main">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The way out and the Save, at the foot of something that scrolls.
+ *
+ * Pinned, so it is never below the fold — which is where Save sat in the item
+ * panel and in any dialog that filled the window. Put it last inside a `Fields`
+ * or a `Stack`; it takes the slack above it and sticks to the bottom edge.
+ */
+export function Foot({ children }: { children: ReactNode }) {
+  return <div className="mb-foot">{children}</div>;
 }
 
 /**
@@ -155,9 +269,7 @@ export function Panel({
 }) {
   return (
     <section
-      className={['mb-panel', flush ? 'mb-panel--flush' : '', className]
-        .filter(Boolean)
-        .join(' ')}
+      className={cx('mb-panel', flush && 'mb-panel--flush', className)}
     >
       {title || actions ? (
         <div className="mb-panel__head">
@@ -191,7 +303,7 @@ export function Fields({
   columns?: boolean;
 }) {
   return (
-    <div className={['mb-fields', columns ? 'mb-fields--columns' : ''].filter(Boolean).join(' ')}>
+    <div className={cx('mb-fields', columns && 'mb-fields--columns')}>
       {children}
     </div>
   );
@@ -212,14 +324,12 @@ export function Row({
 }) {
   return (
     <div
-      className={[
+      className={cx(
         'mb-row',
         `mb-row--gap-${gap}`,
-        end ? 'mb-row--end' : '',
-        wrap ? 'mb-row--wrap' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+        end && 'mb-row--end',
+        wrap && 'mb-row--wrap',
+      )}
     >
       {children}
     </div>
@@ -237,7 +347,7 @@ export function Stack({
   className?: string;
 }) {
   return (
-    <div className={['mb-stack', `mb-stack--gap-${gap}`, className].filter(Boolean).join(' ')}>
+    <div className={cx('mb-stack', `mb-stack--gap-${gap}`, className)}>
       {children}
     </div>
   );
@@ -279,13 +389,7 @@ export function Notice({
     tone === 'danger' || tone === 'warn' ? 'warning' : tone === 'ok' ? 'check' : 'info';
   return (
     <div
-      className={[
-        'mb-notice',
-        `mb-notice--${tone}`,
-        standing ? 'mb-notice--standing' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      className={cx('mb-notice', `mb-notice--${tone}`, standing && 'mb-notice--standing')}
       role="status"
     >
       <Icon name={icon ?? fallback} size="sm" className="mb-notice__icon" />

@@ -29,7 +29,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput, Select } from '../kit';
+import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput, Scroller, Select } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
@@ -324,7 +324,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="mb-firstrun">
+    <Scroller inset className="mb-firstrun">
       <div className="mb-firstrun__panel">
         {/* Where you are, and how much is left. Four dots, not a percentage:
             a percentage on a five-step form is a number nobody believes. */}
@@ -356,6 +356,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         {step === 'shop' ? (
           <section className="mb-firstrun__body">
             <h1 className="mb-firstrun__title">Welcome to Magic Bill</h1>
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">
               Two minutes and your counter is ready. Nothing here goes to the
               internet — your shop&rsquo;s data stays on this computer.
@@ -442,6 +443,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         {step === 'details' ? (
           <section className="mb-firstrun__body">
             <h1 className="mb-firstrun__title">Your shop</h1>
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">
               This goes at the top of every bill you print. A bill without it is
               not one a customer can claim.
@@ -488,6 +490,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         {step === 'pin' ? (
           <section className="mb-firstrun__body">
             <h1 className="mb-firstrun__title">Who is in charge</h1>
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">
               Until somebody has a PIN, anybody who walks behind the counter can
               open your reports and change your prices. This is you — you can
@@ -539,6 +542,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 never put on a printer — see `ipc::print_the_recovery_slip`. It
                 is said here because this is the screen where somebody decides
                 whether they need a pen. */}
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">
               If the PIN is ever forgotten, this code is the only way back into
               your shop. It is not shown again. It is printing on your printer
@@ -575,6 +579,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         {step === 'menu' ? (
           <section className="mb-firstrun__body">
             <h1 className="mb-firstrun__title">What you sell</h1>
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">
               Add two or three now so you can print a real bill and see it. The
               rest can wait — the Menu screen imports a whole list.
@@ -646,6 +651,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
           </section>
         ) : null}
       </div>
-    </div>
+    </Scroller>
   );
 }

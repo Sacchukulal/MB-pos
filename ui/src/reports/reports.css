@@ -26,7 +26,6 @@
   gap: var(--space-4);
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .mb-reports__group {
@@ -122,7 +121,6 @@
 .mb-reports__sheet {
   min-width: 0;
   min-height: 0;
-  overflow: auto;
 }
 
 
@@ -149,7 +147,6 @@
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
-  overflow-y: auto;
 }
 
 .mb-dayclose__columns {
@@ -267,7 +264,6 @@
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
-  overflow-y: auto;
 }
 
 .mb-dash__title {
@@ -359,7 +355,7 @@
      by the siblings around it. Found by looking at it. */
   flex: 0 0 auto;
   max-height: var(--raw-output-height);
-  overflow-y: auto;
+  overflow-y: auto; /* mb-layout-allow: a <Card> capped at a height, not a page region */
 }
 
 .mb-dayclose__unconfirmed .mb-dayclose__line {

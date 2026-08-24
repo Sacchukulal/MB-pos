@@ -30,6 +30,7 @@ import {
   MoneyInput,
   onlyAmount,
   Page,
+  Scroller,
   SearchField,
   Spinner,
   useAction,
@@ -869,7 +870,7 @@ export function Billing() {
       <div
         className={processing ? 'mb-billing__body mb-billing__body--queue' : 'mb-billing__body'}
       >
-        <div className="mb-billing__floor">
+        <Scroller inset className="mb-billing__floor">
 
           {/* **The set-up list is not on this screen any more** — P30.6.
               D102 put it beside the till and was right that it must never be
@@ -940,11 +941,11 @@ export function Billing() {
               counter actually uses. `menu` is still loaded here because the
               search needs it and because `tables.length === 0 && menu.length
               === 0` is how this screen knows a shop is brand new. */}
-        </div>
+        </Scroller>
 
         {processing ? (
           <div className="mb-queuepanel" id={processingId}>
-            <div className="mb-queuepanel__list">
+            <Scroller inset className="mb-queuepanel__list">
               {openOrders.length === 0 ? (
                 <EmptyState small title="Nothing being cooked" body="Sent orders show here." />
               ) : null}
@@ -966,7 +967,7 @@ export function Billing() {
                   </span>
                 </button>
               ))}
-            </div>
+            </Scroller>
           </div>
         ) : null}
 
@@ -1017,7 +1018,7 @@ export function Billing() {
             </div>
           ) : null}
 
-          <div className="mb-cart__lines">
+          <Scroller inset className="mb-cart__lines">
             {cart && cart.lines.length > 0 ? (
               cart.lines.map((line) => (
                 <div className="mb-cartline" key={line.index}>
@@ -1098,7 +1099,7 @@ export function Billing() {
                 body="Press an item to add it."
               />
             )}
-          </div>
+          </Scroller>
 
           <div className="mb-payment">
             <PaymentModes

@@ -101,7 +101,6 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     <Page className="mb-health">
       <PageHeader
         title="Health"
-        subtitle="Everything worth knowing about this counter."
         actions={
           <Button variant="secondary" onClick={load}>
             <Icon name="refresh" size="sm" />

@@ -77,11 +77,23 @@ describe('Input', () => {
     expect(screen.getByLabelText('GSTIN')).toHaveAttribute('aria-invalid', 'true');
   });
 
-  it('shows the hint only while there is no error', () => {
-    const { rerender } = render(<Input label="Phone" hint="Ten digits." />);
-    expect(screen.getByText('Ten digits.')).toBeInTheDocument();
+  /**
+   * **A hint is asked for, an error is told to you** — the owner, 2026-08-24:
+   * *"i dont like you adding those sub lines below all those feilds."*
+   */
+  it('puts the hint in a tip beside the label, not a line under the box', () => {
+    const { container, rerender } = render(<Input label="Phone" hint="Ten digits." />);
+
+    // In a tip's bubble, reached by its own button — not printed under the box.
+    expect(container.querySelector('.mb-field__hint')).toBeNull();
+    const bubble = container.querySelector('.mb-tip__bubble[role="tooltip"]');
+    expect(bubble?.textContent).toBe('Ten digits.');
+    expect(screen.getByRole('button', { name: 'About Phone' })).toBeTruthy();
+
+    // An error still prints, and the hint is still one hover away.
     rerender(<Input label="Phone" hint="Ten digits." error="Too short." />);
-    expect(screen.queryByText('Ten digits.')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Too short.');
+    expect(container.querySelector('.mb-tip__bubble')?.textContent).toBe('Ten digits.');
   });
 });
 
@@ -143,7 +155,9 @@ describe('ConfirmDialog', () => {
     // stylesheet, so the rule is checked in the stylesheet itself — the same
     // trick `contrast.test.ts` uses, and for the same reason.
     const css = readFileSync('src/kit/kit.css', 'utf8');
-    const rule = css.slice(css.indexOf('.mb-modal__actions'));
+    // The rule where it is DEFINED — `\n.x {` — not the first place the class
+    // is mentioned, which can be a descendant selector further up the file.
+    const rule = css.slice(css.indexOf('\n.mb-modal__actions {'));
     expect(rule.slice(0, rule.indexOf('}'))).toContain('flex-wrap: wrap');
 
     // And every one of the three does its own thing.

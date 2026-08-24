@@ -106,7 +106,6 @@ export function Account() {
     <Page className="mb-account">
       <PageHeader
         title="Account"
-        subtitle="Your plan, this computer, and how to move your licence."
       />
 
       {/* The state of things, in one card. */}

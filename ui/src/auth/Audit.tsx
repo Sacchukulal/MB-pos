@@ -95,7 +95,6 @@ export function Audit() {
     <Page className="mb-screen">
       <PageHeader
         title="History"
-        subtitle="Everything anybody did on this counter, and when."
       />
 
       {view?.tampered ? (

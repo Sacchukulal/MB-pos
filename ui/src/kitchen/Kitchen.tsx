@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, useReport } from '../kit';
+import { Button, Scroller, useReport } from '../kit';
 import { call, inApp } from '../ipc/call';
 import type { KitchenTicket } from '../ipc/generated/KitchenTicket';
 import type { KitchenView } from '../ipc/generated/KitchenView';
@@ -169,7 +169,7 @@ export function Kitchen() {
       {view.tickets.length === 0 ? (
         <p className="mb-kds__empty">Nothing waiting. The kitchen is clear.</p>
       ) : (
-        <div className="mb-kds__grid">
+        <Scroller className="mb-kds__grid">
           {view.tickets.map((ticket, index) => (
             <Card
               key={ticket.id}
@@ -180,7 +180,7 @@ export function Kitchen() {
               onBumpLine={(key) => act(call('kitchen_bump_line', { id: ticket.id, key }))}
             />
           ))}
-        </div>
+        </Scroller>
       )}
     </div>
   );
