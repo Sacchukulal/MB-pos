@@ -27,6 +27,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Icon,
+  Money,
   MoneyInput,
   onlyAmount,
   Page,
@@ -959,8 +960,14 @@ export function Billing() {
                   aria-pressed={order.selected}
                   onClick={() => openTable(order)}
                 >
-                  <span className="mb-queueline__where">{order.label}</span>
-                  <span className="mb-queueline__amount">{order.total?.text ?? ''}</span>
+                  {/* A real table says so; parcel and self service already
+                      name themselves. */}
+                  <span className="mb-queueline__where">
+                    {order.section === null ? order.label : `Table ${order.label}`}
+                  </span>
+                  <span className="mb-queueline__amount">
+                    {order.total ? <Money value={order.total} symbol /> : ''}
+                  </span>
                   <span className="mb-queueline__no">{order.billNumber ?? '—'}</span>
                   <span className="mb-queueline__when">
                     {order.minutes === null ? '' : `${order.minutes}m`}

@@ -46,9 +46,9 @@
  * around whatever the tile already is. See `TableView::selected`.
  */
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
-import { EmptyState, Icon, Scroller } from '../kit';
+import { cx, EmptyState, Icon, Scroller } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 
 /* **The tile brings its own styling.** `Tile` is imported by the Floor screen
@@ -197,13 +197,15 @@ export function Tile({
   onOpen,
   onPrintBill,
   picked,
+  onTick,
   onEdit,
   onDelete,
 }: {
   table: TableView;
   /** The floor's dense step past `DENSE_ABOVE` tables. Off unless asked for. */
   dense?: boolean;
-  onOpen: () => void;
+  /** What pressing the tile does. Without it the face is not a button. */
+  onOpen?: () => void;
   /**
    * Carry the bill to this table.
    *
@@ -227,6 +229,8 @@ export function Tile({
    * cost round 6 (`TableState::Loaded`, which hid `Late`). Never merge them.
    */
   picked?: boolean;
+  /** Tick or untick. The circle top-left; without it there is no circle. */
+  onTick?: () => void;
   /** The pencil, on hover. Only where the caller can actually edit. */
   onEdit?: () => void;
   /** The bin, on hover. Rust still decides whether it may go. */
@@ -250,17 +254,13 @@ export function Tile({
     .join(' ');
   return (
     <div className={classes}>
-      <button
-        type="button"
-        className="mb-tile__face"
-        onClick={onOpen}
-        aria-label={describe(table, picked)}
-        // Only where pressing it means "tick this", which is the Floor screen.
-        // On the billing grid a press opens the table and this would be a
-        // toggle that never toggles.
-        aria-pressed={picked === undefined ? undefined : picked}
-      >
-        <span className="mb-tile__label">{table.label}</span>
+      <Face onOpen={onOpen} label={describe(table, picked)}>
+        {/* Table numbers are short; "Parcel" and "Self service" are not. */}
+        <span
+          className={cx('mb-tile__label', table.label.length > 3 && 'mb-tile__label--long')}
+        >
+          {table.label}
+        </span>
 
         {table.total ? (
           <span className="mb-tile__amount">{table.total.text}</span>
@@ -305,7 +305,22 @@ export function Tile({
             {formatMinutes(table.minutes)}
           </span>
         ) : null}
-      </button>
+      </Face>
+
+      {/* The tick, top left: an empty circle on hover, filled once ticked. */}
+      {onTick ? (
+        <button
+          type="button"
+          className="mb-tile__tick"
+          onClick={onTick}
+          role="checkbox"
+          aria-checked={picked === true}
+          title={`Tick table ${table.label}`}
+          // The whole description: this is the only thing on the tile a
+          // keyboard or a screen reader presses.
+          aria-label={describe(table, picked)}
+        />
+      ) : null}
 
       {/* **The corner, and only what this caller actually offers.**
 
@@ -360,6 +375,24 @@ export function Tile({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The tile's own surface. A button when it does something, a box when not. */
+function Face({
+  onOpen,
+  label,
+  children,
+}: {
+  onOpen?: () => void;
+  label: string;
+  children: ReactNode;
+}) {
+  if (!onOpen) return <div className="mb-tile__face">{children}</div>;
+  return (
+    <button type="button" className="mb-tile__face" onClick={onOpen} aria-label={label}>
+      {children}
+    </button>
   );
 }
 

@@ -387,16 +387,19 @@ export function Select({
 
 export interface CheckboxProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
-  label: string;
+  /** Leave it out where something beside the box already names it. */
+  label?: string;
   /** Asked for, like every other hint — a tip beside the box, never under it. */
   hint?: string;
 }
 
 export function Checkbox({ label, hint, ...rest }: CheckboxProps) {
+  // No label means the box stands on its own — the caller names it with
+  // `aria-label`, because something beside it already says what it is.
   const box = (
     <label className="mb-checkbox">
       <input type="checkbox" {...rest} />
-      <span>{label}</span>
+      {label ? <span>{label}</span> : null}
     </label>
   );
   // The tip sits OUTSIDE the `<label>`: a button inside one toggles the box.

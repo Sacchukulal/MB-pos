@@ -154,7 +154,7 @@
   grid-template-columns: 1fr auto;
   align-items: baseline;
   gap: 0 var(--gap-inline);
-  padding: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   background: transparent;
   color: var(--text);
   border: var(--border-width) solid var(--border);
@@ -307,10 +307,12 @@
       all. The stripe is an inset shadow now, so the outline stays a single
       even rectangle the whole way round and the state signal sits INSIDE it.  */
 
+/* A fixed height, not a minimum: a busy tile carries an amount and a timer a
+   free one does not, and with `min-height` every tile was a different size. */
 .mb-tile {
   position: relative;
   display: flex;
-  min-height: var(--tile-height);
+  height: var(--tile-height);
   background: var(--surface);
   color: var(--text);
   border: var(--border-width-thick) solid var(--border-strong);
@@ -339,7 +341,7 @@
 }
 
 .mb-floor--dense .mb-tile {
-  min-height: var(--tile-height-dense);
+  height: var(--tile-height-dense);
 }
 
 .mb-floor--dense .mb-tile__face {
@@ -415,10 +417,26 @@
    `--text-lg` inside a 4.5rem box — which is the owner's *"boxes are big
    inside letters are now very small"* in one line. It is the largest type on
    the floor now, which is what makes a tile readable across a room. */
+/* Nothing on the face shrinks — the tile height is fixed, and flex was
+   squashing the label to nothing to make room. */
+.mb-tile__face > * {
+  flex: none;
+}
+
 .mb-tile__label {
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
+  /* One line always. "Self service" wrapped to two and made that tile taller
+     than the rest. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A word, not a table number — it needs the smaller size to fit on one line. */
+.mb-tile__label--long {
+  font-size: var(--text-md);
 }
 
 /* The dense step is past 24 tables, where the number has to give some of that
@@ -441,8 +459,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-7);
-  height: var(--space-7);
+  width: var(--tile-button);
+  height: var(--tile-button);
   padding: 0;
   background: transparent;
   color: var(--text-muted);
@@ -475,9 +493,7 @@
   bottom: var(--space-1);
   display: flex;
   gap: var(--space-1);
-  /* A backdrop, because the tile is 4.5rem tall and these sit over the seat
-     count. Without it the two overlap into something unreadable, which is what
-     the first version looked like when it was driven. */
+  /* A backdrop: these sit over the tile's own text. */
   padding: var(--space-1);
   background: var(--surface);
   border-radius: var(--radius-sm);
@@ -487,7 +503,9 @@
 }
 
 .mb-tile:hover .mb-tile__tools,
-.mb-tile:focus-within .mb-tile__tools {
+.mb-tile:focus-within .mb-tile__tools,
+.mb-tile:hover .mb-tile__tick,
+.mb-tile:focus-within .mb-tile__tick {
   opacity: 1;
 }
 
@@ -501,8 +519,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-6);
-  height: var(--space-6);
+  width: var(--tile-button);
+  height: var(--tile-button);
   padding: 0;
   background: var(--surface);
   color: var(--text-muted);
@@ -541,15 +559,31 @@
 /* The tick, so "ticked" is a shape and not only a colour (§2 rule 2). Drawn
    with CSS rather than an element, because the tile's markup belongs to
    `TableGrid.tsx` and one screen's selection is not a reason to grow it. */
-.mb-tile--picked::after {
-  content: '';
+.mb-tile__tick {
   position: absolute;
   top: var(--space-1);
   left: var(--space-1);
   width: var(--space-3);
   height: var(--space-3);
-  border-radius: var(--radius-sm);
+  padding: 0;
+  background: var(--surface);
+  border: var(--border-width-thick) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  /* Hidden until the tile is hovered — see the reveal rule below. */
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease);
+}
+
+.mb-tile__tick:hover {
+  border-color: var(--accent);
+}
+
+/* Ticked: filled, and it stays visible after the pointer leaves. */
+.mb-tile--picked .mb-tile__tick {
+  opacity: 1;
   background: var(--accent);
+  border-color: var(--accent);
   box-shadow: inset 0 0 0 var(--border-width-thick) var(--accent-ink);
 }
 
@@ -572,7 +606,9 @@
 .mb-tile__meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
   gap: 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-muted);
@@ -597,6 +633,9 @@
    is here with the rest of the tile. */
 .mb-tile__food {
   color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

@@ -229,7 +229,8 @@ export function Floor() {
   const onTile = {
     picked,
     onPress: (tile: TableView) =>
-      pickable && isATable(tile.id) ? toggle(tile.id) : setMoving(tile),
+      pickable && isATable(tile.id) ? undefined : setMoving(tile),
+    onTick: (tile: TableView) => toggle(tile.id),
     onEdit: (tile: TableView) => setEditing(rowFor(tile.id)),
     onDelete: (tile: TableView) => setDeletingOne(rowFor(tile.id)),
     canTick: (tile: TableView) => pickable && isATable(tile.id),
@@ -381,16 +382,11 @@ export function Floor() {
               return (
                 <section key={room.name} className="mb-floor__roomgroup">
                   <div className="mb-floor__roomhead">
-                    {/* One room, one heading — but a shop with no rooms at
-                        all should not be told its tables are in "No room". */}
-                    {rooms.length > 1 || room.name !== '' ? (
-                      <h3 className="mb-floor__roomname">
-                        {room.name === '' ? 'No room' : room.name}
-                      </h3>
-                    ) : null}
+                    {/* The box first, then the room's name — the name is the
+                        label, so the box needs no words of its own. */}
                     {pickable && mine.length > 0 ? (
                       <Checkbox
-                        label={
+                        aria-label={
                           on.length === mine.length
                             ? `All ${mine.length}${named} ticked`
                             : `Tick all ${mine.length}${named}`
@@ -409,6 +405,13 @@ export function Floor() {
                           })
                         }
                       />
+                    ) : null}
+                    {/* A shop with no rooms at all is not told its tables are
+                        in "No room". */}
+                    {rooms.length > 1 || room.name !== '' ? (
+                      <h3 className="mb-floor__roomname">
+                        {room.name === '' ? 'No room' : room.name}
+                      </h3>
                     ) : null}
                   </div>
                   <Grid tiles={room.tiles} {...onTile} canArrange={floor.canArrange} />
@@ -770,6 +773,7 @@ function Grid({
   tiles,
   picked,
   onPress,
+  onTick,
   onEdit,
   onDelete,
   canTick,
@@ -780,6 +784,7 @@ function Grid({
   tiles: readonly TableView[];
   picked: readonly string[];
   onPress: (tile: TableView) => void;
+  onTick: (tile: TableView) => void;
   onEdit: (tile: TableView) => void;
   onDelete: (tile: TableView) => void;
   /** A parcel order is a tile with no table behind it — nothing to tick. */
@@ -814,7 +819,8 @@ function Grid({
           key={tile.id}
           table={tile}
           picked={canTick(tile) ? picked.includes(tile.id) : undefined}
-          onOpen={() => onPress(tile)}
+          onOpen={canTick(tile) ? undefined : () => onPress(tile)}
+          onTick={canTick(tile) ? () => onTick(tile) : undefined}
           onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
           onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
           onPrintBill={() => onPrintBill(tile)}
@@ -839,6 +845,7 @@ function Plan({
   onFailed,
   onChanged,
   onPress,
+  onTick,
   onEdit,
   onDelete,
   canTick,
@@ -851,6 +858,7 @@ function Plan({
   onFailed: (cause: unknown) => void;
   onChanged: (floor: FloorView) => void;
   onPress: (tile: TableView) => void;
+  onTick: (tile: TableView) => void;
   onEdit: (tile: TableView) => void;
   onDelete: (tile: TableView) => void;
   canTick: (tile: TableView) => boolean;
@@ -887,7 +895,8 @@ function Plan({
               <Tile
                 table={tile}
                 picked={canTick(tile) ? picked.includes(tile.id) : undefined}
-                onOpen={() => onPress(tile)}
+                onOpen={canTick(tile) ? undefined : () => onPress(tile)}
+                onTick={canTick(tile) ? () => onTick(tile) : undefined}
                 onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
                 onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
                 onPrintBill={() => onPrintBill(tile)}

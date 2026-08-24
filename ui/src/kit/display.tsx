@@ -71,9 +71,17 @@ export function SectionHeader({
  * produced — and renders the string. R8, and D2: JavaScript has no integers,
  * so a rupee that TypeScript touched is a rupee that might be wrong.
  */
-export function Money({ value }: { value: MoneyView }) {
+export function Money({
+  value,
+  symbol = false,
+}: {
+  value: MoneyView;
+  /** Show the ₹ beside the figure. For a figure standing on its own. */
+  symbol?: boolean;
+}) {
   return (
     <span className="mb-numeric" data-paise={value.paise}>
+      {symbol ? '₹' : ''}
       {value.text}
     </span>
   );

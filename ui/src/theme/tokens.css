@@ -91,9 +91,10 @@
   --gap-group: var(--space-5);
   /** Between two sections of a page. */
   --gap-section: var(--space-6);
-  /** The page's own margin. Set by `Page` and by nothing else, ever. */
-  --page-pad-x: var(--space-6);
-  --page-pad-y: var(--space-3);
+  /** The page's own margin — the same on all four sides. Nothing else sets it. */
+  --page-pad: var(--space-3);
+  --page-pad-x: var(--page-pad);
+  --page-pad-y: var(--page-pad);
   /**
    * How wide the scrollbar is. Two places need to agree on it: the bar itself
    * (::-webkit-scrollbar, below) and the gutter a page header steps back by so
@@ -282,8 +283,10 @@
   --billbar-lock-size: 1.5rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
-  --tile-height: 4.5rem;
-  --tile-height-dense: 3.25rem;
+  --tile-height: 6.5rem;
+  --tile-height-dense: 3.75rem;
+  /** Print, edit, delete — the small buttons that sit on a tile. */
+  --tile-button: 1.5rem;
   --suggestions-height: 22rem;
   /* The floor plan (P14, scope 14.1). Sixteen squares each way is enough for a
      60-table room at four squares a table, and small enough that the whole
