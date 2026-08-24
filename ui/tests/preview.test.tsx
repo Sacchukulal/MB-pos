@@ -23,6 +23,8 @@
  * are Rust's.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { render, screen, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -307,5 +309,72 @@ describe('the receipt preview is a sink, not a renderer', () => {
     // The text starts where the logo's 30 % ends, which is the owner's ruling.
     const box = container.querySelector('.mb-receipt__box');
     expect(box?.getAttribute('style')).toContain('--at: 173');
+  });
+});
+
+/**
+ * **The paper is white and the ink is black, whatever the theme is** — the
+ * owner, 2026-08-24: *"print preview should always be in white no matter the
+ * theme. that is the only exception in no hardcoding rule."*
+ *
+ * A picture of a thermal roll is not a surface of the app. The roll is white
+ * and the printer only makes black, so a bill drawn in the dark theme's
+ * colours is a picture of something no printer can produce.
+ *
+ * This reads the stylesheet, the same way `contrast.test.ts` reads the tokens,
+ * because the rule is about which TOKEN was used and jsdom does not resolve a
+ * custom property to a colour. `--print-paper` and `--print-ink` are defined
+ * once on `:root` and never inside a theme block — which is the other half of
+ * the promise, and `theme.test.tsx` guards the general form of it.
+ */
+describe('the preview draws on paper, not on the theme', () => {
+  const CSS = readFileSync('src/preview/receipt.css', 'utf8');
+
+  /** One rule's body, by selector. */
+  function ruleFor(selector: string): string {
+    const at = CSS.indexOf(`${selector} {`);
+    expect(at, `${selector} is not in receipt.css any more`).toBeGreaterThan(-1);
+    return CSS.slice(at, CSS.indexOf('}', at));
+  }
+
+  it('paints the roll with the print tokens and not the surface ones', () => {
+    const paper = ruleFor('.mb-receipt__paper');
+    expect(paper).toContain('background: var(--print-paper)');
+    expect(paper).toContain('color: var(--print-ink)');
+    // The two that would follow the theme, and did.
+    expect(paper).not.toContain('var(--surface)');
+    expect(paper).not.toContain('color: var(--text)');
+  });
+
+  /**
+   * Nothing drawn ON the paper may take a themed colour either — a QR in
+   * `--text` is a QR that goes white-on-white the moment the app is dark.
+   * Everything on the roll draws in `currentColor`, which the rule above
+   * pins, or names a print token itself.
+   */
+  it('leaves no themed colour anywhere on the roll', () => {
+    for (const selector of [
+      '.mb-receipt__nologo',
+      '.mb-receipt__qr',
+      '.mb-receipt__code',
+    ]) {
+      const body = ruleFor(selector);
+      // Only what PAINTS. `font-size: var(--text-sm)` is a size and the text
+      // scale still applies to a preview — the rule is about colour.
+      expect(body, `${selector} follows the theme`).not.toMatch(
+        /(?:^|[\s;])(?:color|background(?:-color)?)\s*:\s*[^;]*var\(--(?:surface|text)[-)]/,
+      );
+    }
+  });
+
+  /** They are tokens, and they live where every value lives (D21). */
+  it('defines the two print colours once, outside every theme block', () => {
+    const tokens = readFileSync('src/theme/tokens.css', 'utf8');
+    for (const name of ['--print-paper', '--print-ink']) {
+      expect(
+        tokens.split(`${name}:`).length - 1,
+        `${name} is defined more than once, so a theme can move it`,
+      ).toBe(1);
+    }
   });
 });

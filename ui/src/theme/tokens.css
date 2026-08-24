@@ -349,6 +349,12 @@
      stops ninety settings becoming a mile of scrolling. */
   --settings-rail: 15rem;
   --settings-field: 20rem;
+  /* A tick box is a line of words, so it packs tighter than a field you type
+     in. 15rem holds "Print the payment lines" and its info tip. */
+  --settings-tick: 15rem;
+  /* What is left beside the bill sample is about 34rem, which is one 20rem
+     column and a lot of nothing. Two of these fit. */
+  --settings-field-tight: 16rem;
   /* Wide enough that a 48-column receipt FITS: 48 characters of --text-sm mono
      is about 25rem, plus the paper's own padding and border. 26rem was not,
      and the bill came out with "SAMPL", "Dine I" and "478.8" cut off — which
@@ -370,17 +376,21 @@
      a real fingerprint makes a 33-module code, and 8px ran it off the bottom
      of the panel — which is a code the camera sees half of. */
   --qr-dot: 6px;
-  /* **The two values in this file that a theme must NOT change.** A QR is read
-     by a camera, not by a person: it needs real black on real white, and a
-     dark-mode QR is a QR that does not scan. They are tokens anyway, because
-     D21 says every value lives here — including the ones with a reason not to
-     move. */
-  --qr-ink: #000000;
-  --qr-paper: #ffffff;
-  /* P31. The logo preview is the third: it is a picture of the roll, drawn one
-     canvas pixel per printed dot, and it reuses the QR pair for the same
-     reason — a thermal roll is white when the app is dark. This is how wide
-     that picture may get on screen before it stops growing. */
+  /* **The two values in this file that a theme must NOT change** — the owner,
+     2026-08-24: *"print preview should always be in white no matter the theme.
+     that is the only exception in no hardcoding rule."*
+
+     A picture of paper is not a surface of the app. A thermal roll is white
+     and the printer only makes black, so a bill drawn in the dark theme's
+     colours is a picture of something that cannot come out of a printer — and
+     a QR is worse, because a camera reads it and a dark-mode QR does not scan.
+
+     They are still tokens, because D21 says every value lives in this file —
+     including the ones with a reason never to move. Three things use them: the
+     UPI QR, the logo preview, and the bill and kitchen-ticket previews. */
+  --print-ink: #000000;
+  --print-paper: #ffffff;
+  /* How wide the logo preview may get on screen before it stops growing. */
   --logo-preview-width: 18rem;
 
   /* The lock screen and the people screens (P11). The card is narrow on

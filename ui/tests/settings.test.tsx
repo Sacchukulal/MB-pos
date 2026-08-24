@@ -26,6 +26,7 @@ const { Settings } = await import('../src/settings/Settings');
 const { ToastProvider } = await import('../src/kit');
 
 import type { SettingsView } from '../src/ipc/generated/SettingsView';
+import type { SettingView } from '../src/ipc/generated/SettingView';
 import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
 
 /**
@@ -50,6 +51,39 @@ function line(
   };
 }
 
+/**
+ * One setting, with the boring parts filled in.
+ *
+ * The catalogue has fifteen fields per entry and a test cares about three of
+ * them; writing all fifteen out ninety times is how a fixture stops being
+ * readable. `row` and `short` default to empty, which is what most settings
+ * are — a line of their own.
+ */
+function setting(
+  key: string,
+  label: string,
+  control: string,
+  value: string,
+  extra: Partial<SettingView> = {},
+): SettingView {
+  return {
+    key,
+    topic: 'A topic',
+    row: '',
+    short: '',
+    label,
+    help: '',
+    control,
+    value,
+    choices: [],
+    min: null,
+    max: null,
+    unit: '',
+    maxLen: 0,
+    ...extra,
+  };
+}
+
 const view: SettingsView = {
   hasShop: true,
   trouble: null,
@@ -59,35 +93,19 @@ const view: SettingsView = {
       label: 'Your shop',
       canEdit: true,
       settings: [
-        {
-          key: 'store.name',
+        setting('store.name', 'Shop name', 'words', 'Anna Kuteera', {
           topic: 'Your shop',
-          label: 'Shop name',
           help: 'Printed at the top of every bill.',
-          control: 'words',
-          value: 'Anna Kuteera',
-          choices: [],
-          min: null,
-          max: null,
-          unit: '',
           maxLen: 60,
-        },
-        {
-          key: 'store.state_code',
+        }),
+        setting('store.state_code', 'State', 'choice', '29', {
           topic: 'Your shop',
-          label: 'State',
           help: 'Which state you are in.',
-          control: 'choice',
-          value: '29',
           choices: [
             { value: '29', label: 'Karnataka' },
             { value: '32', label: 'Kerala' },
           ],
-          min: null,
-          max: null,
-          unit: '',
-          maxLen: 0,
-        },
+        }),
       ],
     },
     {
@@ -95,32 +113,46 @@ const view: SettingsView = {
       label: 'The bill',
       canEdit: false,
       settings: [
-        {
-          key: 'receipt.show.token',
+        setting('receipt.show.token', 'Print the token number', 'tick', '1', {
           topic: 'What goes on the bill',
-          label: 'Print the token number',
           help: 'The big number the customer waits for.',
-          control: 'tick',
-          value: '1',
-          choices: [],
-          min: null,
-          max: null,
-          unit: '',
-          maxLen: 0,
-        },
-        {
-          key: 'receipt.logo_width_pct',
+        }),
+        setting('receipt.logo_width_pct', 'Logo width', 'number', '40', {
           topic: 'Your logo',
-          label: 'Logo width',
           help: 'As a percentage of the paper width.',
-          control: 'number',
-          value: '40',
-          choices: [],
           min: 10,
           max: 100,
-          unit: '%',
-          maxLen: 0,
-        },
+        }),
+      ],
+    },
+    /**
+     * **The section that designs a piece of paper**, and the one the paper
+     * tests use. It is editable, which the bill above deliberately is not, and
+     * it carries the size-and-bold pair that Rust says is one line.
+     */
+    {
+      code: 'kitchen',
+      label: 'The kitchen ticket',
+      canEdit: true,
+      settings: [
+        setting('kitchen.footer', 'Ticket footer', 'words', 'Cook it hot', {
+          topic: 'The last words',
+          maxLen: 40,
+        }),
+        setting('kitchen.title.scale', 'Title size', 'choice', '15', {
+          topic: 'Typeface and sizes',
+          row: 'Title',
+          short: 'Size',
+          choices: [
+            { value: '15', label: '4' },
+            { value: '26', label: '8' },
+          ],
+        }),
+        setting('kitchen.title.bold', 'Title in bold', 'tick', '1', {
+          topic: 'Typeface and sizes',
+          row: 'Title',
+          short: 'Bold',
+        }),
       ],
     },
   ],
@@ -305,6 +337,8 @@ describe('the settings screen', () => {
   it('draws the sample paper and redraws it as a setting is typed', async () => {
     draw();
     await screen.findByLabelText('Shop name');
+    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
     // **Which paper it DREW on**, said above the paper itself. Matched by the
     // whole sentence rather than by "80 mm": the paper-width picker added on
@@ -313,34 +347,72 @@ describe('the settings screen', () => {
     expect(screen.getByText('Sample · 80 mm (3 inch)')).toBeTruthy();
 
     call.mockClear();
-    fireEvent.change(screen.getByLabelText('Shop name'), {
-      target: { value: 'Anna Kuteera Veg' },
+    fireEvent.change(screen.getByLabelText('Ticket footer'), {
+      target: { value: 'Cook it fast' },
     });
 
     await waitFor(() =>
       expect(call).toHaveBeenCalledWith('preview_settings', {
-        group: 'store',
-        edits: [{ key: 'store.name', value: 'Anna Kuteera Veg' }],
+        group: 'kitchen',
+        edits: [{ key: 'kitchen.footer', value: 'Cook it fast' }],
       }),
     );
   });
 
+  /**
+   * **The shop's own details are not a piece of paper** — the owner,
+   * 2026-08-24: *"why there is paper width and bill preview in your shop
+   * section?"*
+   *
+   * The roll width is a printer's setting and the sample is the bill
+   * designer's; neither belongs on the form where somebody types an address.
+   * This is the test that keeps them off it.
+   */
+  it('shows no paper and no roll width on the shop section', async () => {
+    draw();
+    await screen.findByLabelText('Shop name');
+
+    expect(screen.queryByLabelText('Paper width')).toBeNull();
+    expect(screen.queryByLabelText('Preview of what prints')).toBeNull();
+    expect(call).not.toHaveBeenCalledWith('preview_settings', expect.anything());
+
+    // And it is on the section that DOES design a piece of paper.
+    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+    expect(await screen.findByLabelText('Paper width')).toBeTruthy();
+    expect(screen.getByLabelText('Preview of what prints')).toBeTruthy();
+  });
+
+  /**
+   * **A size and its bold tick are one decision, so they are one line** — the
+   * owner, 2026-08-24: *"font size and bold in one line."*
+   *
+   * Which settings share a line is Rust's (`catalog::ROWS`), so this proves
+   * the screen obeys it: the line is named once, each control wears the short
+   * word, and the full name is still the accessible one — a screen reader and
+   * a search both still find "Title in bold".
+   */
+  it('draws a size and its bold tick on one named line', async () => {
+    draw();
+    await screen.findByLabelText('Shop name');
+    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+
+    // Named once, by the name Rust gave the line.
+    const line = (await screen.findByText('Title')).closest('.mb-settings__line');
+    expect(line).toBeTruthy();
+
+    // Both controls are on it, and both still answer to their full name.
+    expect(line!.contains(screen.getByLabelText('Title size'))).toBe(true);
+    expect(line!.contains(screen.getByLabelText('Title in bold'))).toBe(true);
+    // The short words are what a person reads, not "Title size" again.
+    expect(line!.textContent).toContain('Bold');
+    expect(line!.textContent).not.toContain('Title size');
+
+    // And editing either one marks the LINE, not a box inside it.
+    fireEvent.click(screen.getByLabelText('Title in bold'));
+    expect(line!.textContent).toContain('not saved');
+  });
+
   it('asks for the KITCHEN sample on the kitchen section', async () => {
-    const withKitchen: SettingsView = {
-      ...view,
-      groups: [...view.groups, { ...view.groups[1]!, code: 'kitchen', label: 'The kitchen ticket' }],
-    };
-    call.mockImplementation((name: string) => {
-      if (name === 'settings_all') return Promise.resolve(withKitchen);
-      if (name === 'preview_settings') {
-        return Promise.resolve({
-          paper: '80 mm (3 inch)',
-          notUsableYet: [],
-          doc: { dots: 576, columns: 44, millimetres: 0, engine: 'raster', notes: [], lines: [] },
-        });
-      }
-      return Promise.resolve(null);
-    });
     draw();
     await screen.findByLabelText('Shop name');
     fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
@@ -374,6 +446,9 @@ describe('the settings screen', () => {
       return Promise.resolve(null);
     });
     draw();
+    await screen.findByLabelText('Shop name');
+    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+
     // The paper is still drawn...
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
     // ...and the box that could not be used is named.

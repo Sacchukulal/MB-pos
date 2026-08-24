@@ -28,6 +28,7 @@ import {
   Checkbox,
   ConfirmDialog,
   EmptyState,
+  InfoTip,
   Input,
   Modal,
   MoneyInput,
@@ -109,11 +110,15 @@ const EXTRA_SECTIONS = [
 /**
  * Which sections show the paper beside them.
  *
- * The bill and the kitchen ticket obviously; **the shop's details too**,
- * because the name, the address, the GST number and the UPI id all print, and
- * "where does that land?" is the same question there as it is for a separator.
+ * **The two that design a piece of paper, and no others.** The shop's details
+ * used to be here on the argument that the name and the GST number print — but
+ * the owner, 2026-08-24: *"why there is paper width and bill preview in your
+ * shop section?"* They are right. Nothing on that form is a decision about the
+ * paper: it is the shop's own facts, and typing an address is not tuning a
+ * receipt. The roll width sitting there was worse — a printer setting on a
+ * screen that has no printer on it.
  */
-const SHOWS_PAPER = new Set(['store', 'receipt', 'kitchen']);
+const SHOWS_PAPER = new Set(['receipt', 'kitchen']);
 
 /** The edits a person has made and not yet saved, by key. */
 type Edits = Record<string, string>;
@@ -452,69 +457,74 @@ export function Settings() {
         </div>
       </nav>
 
-      {/* **Back to the top when the section changes**, and this was a bug found
-          by looking: the body kept the previous section's scroll position, so
-          clicking "Your shop" after scrolling through the bill landed halfway
-          down the shop's form with its heading off screen. */}
-      <Scroller
-        className={cx('mb-settings__body', showsPaper && 'mb-settings__body--paper')}
-        ref={body}
-      >
-        {matches ? (
-          <Found
-            view={view}
-            matches={matches}
-            edits={edits}
-            onChange={onChange}
-            onClear={() => onSearch('')}
-          />
-        ) : active ? (
-          <div className="mb-stack">
-            {/* **The paper, at the top, before anything else on this screen.**
-
-                The owner, 2026-08-17: *"the paper size selection in top, it
-                should 2 inch 3 inch 4 inch."* It was only in Printers, and
-                they are right that it belongs here too: paper width is the one
-                setting that changes what every OTHER setting on this screen
-                does. A shop heading that fits on 80 mm is capped on 58; the
-                item table goes two-line on a roll with no room for four
-                columns. Tuning a receipt against the wrong width is tuning the
-                wrong receipt — and the preview to the right redraws on it.
-
-                Not a `Field`: it is not one of the catalogue's scalars. Paper
-                lives on the PRINTER (a shop can have an 80 mm bill printer and
-                a 58 mm kitchen printer), so this sets it on the printer bills
-                go to — the same one the preview draws. */}
-            {SHOWS_PAPER.has(active.code) ? (
-              <PaperWidth
-                paper={paper}
-                onChanged={() => {
-                  // Nudge the preview to re-ask. It keys off `edits`, and the
-                  // paper is not an edit — so without this the settings on
-                  // screen would be right and the paper beside them stale.
-                  setEdits((was) => ({ ...was }));
-                }}
-              />
-            ) : null}
-            {active.settings.length > 0 ? (
-              <Section
-                section={active}
+      {/* **Two columns, two scrollbars** — the owner, 2026-08-24: the old
+          screen had *"separate scrollbar for preview"* and this one did not.
+          One scroller held both, so a long bill pushed the settings down with
+          it and reaching the footer settings scrolled the paper away. They are
+          independent panes now: the settings scroll, the paper scrolls, and
+          neither moves the other. */}
+      <div className={cx('mb-settings__panes', showsPaper && 'mb-settings__panes--paper')}>
+        {/* **Back to the top when the section changes**, and this was a bug
+            found by looking: the body kept the previous section's scroll
+            position, so clicking "Your shop" after scrolling through the bill
+            landed halfway down the shop's form with its heading off screen. */}
+          <Scroller className="mb-settings__body" ref={body}>
+            {matches ? (
+              <Found
+                view={view}
+                matches={matches}
                 edits={edits}
                 onChange={onChange}
-                onReset={onResetSection}
+                onClear={() => onSearch('')}
               />
-            ) : null}
-            {OWN_SCREEN[active.code]?.()}
-          </div>
-        ) : (
-          <EmptyState
-            title="Nothing here for you"
-            body="You do not have permission to change any of this shop's settings."
-          />
-        )}
+            ) : active ? (
+              <div className="mb-stack">
+                {/* **The paper, at the top, before anything else on this screen.**
 
-        {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
-      </Scroller>
+                    The owner, 2026-08-17: *"the paper size selection in top, it
+                    should 2 inch 3 inch 4 inch."* It was only in Printers, and
+                    they are right that it belongs here too: paper width is the one
+                    setting that changes what every OTHER setting on this screen
+                    does. A shop heading that fits on 80 mm is capped on 58; the
+                    item table goes two-line on a roll with no room for four
+                    columns. Tuning a receipt against the wrong width is tuning the
+                    wrong receipt — and the preview to the right redraws on it.
+
+                    Not a `Field`: it is not one of the catalogue's scalars. Paper
+                    lives on the PRINTER (a shop can have an 80 mm bill printer and
+                    a 58 mm kitchen printer), so this sets it on the printer bills
+                    go to — the same one the preview draws. */}
+                {SHOWS_PAPER.has(active.code) ? (
+                  <PaperWidth
+                    paper={paper}
+                    onChanged={() => {
+                      // Nudge the preview to re-ask. It keys off `edits`, and the
+                      // paper is not an edit — so without this the settings on
+                      // screen would be right and the paper beside them stale.
+                      setEdits((was) => ({ ...was }));
+                    }}
+                  />
+                ) : null}
+                {active.settings.length > 0 ? (
+                  <Section
+                    section={active}
+                    edits={edits}
+                    onChange={onChange}
+                    onReset={onResetSection}
+                  />
+                ) : null}
+                {OWN_SCREEN[active.code]?.()}
+              </div>
+            ) : (
+              <EmptyState
+                title="Nothing here for you"
+                body="You do not have permission to change any of this shop's settings."
+              />
+            )}
+          </Scroller>
+
+          {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
+        </div>
 
       {/* **Its own row, spanning both columns**, and this was a bug found by
           looking: the screen is a two-column grid, so the save bar landed in
@@ -658,17 +668,34 @@ function Section({
           {topic === section.label ? null : (
             <h3 className="mb-settings__subtitle">{topic}</h3>
           )}
-          <div className="mb-settings__fields">
-            {settings.map((setting) => (
-              <Field
-                key={setting.key}
-                setting={setting}
-                value={edits[setting.key] ?? setting.value}
-                changed={edits[setting.key] !== undefined}
-                disabled={!section.canEdit}
-                onChange={(value) => onChange(setting.key, value)}
-              />
-            ))}
+          {/* **A run of tick boxes packs tighter than a run of boxes to type
+              in.** The one grid gave every setting a whole text-field column,
+              so seventeen ticks on the bill drew as a sparse two-column table
+              with a lot of nothing in it — the owner's "horrible to look at",
+              2026-08-24. A checkbox is a line of words, so it gets a column
+              the width of a line of words. */}
+          <div className={cx('mb-settings__fields', allTicks(settings) && 'mb-settings__fields--ticks')}>
+            {linesOf(settings).map((line) =>
+              line.row === '' ? (
+                <Field
+                  key={line.settings[0]!.key}
+                  setting={line.settings[0]!}
+                  value={edits[line.settings[0]!.key] ?? line.settings[0]!.value}
+                  changed={edits[line.settings[0]!.key] !== undefined}
+                  disabled={!section.canEdit}
+                  onChange={(value) => onChange(line.settings[0]!.key, value)}
+                />
+              ) : (
+                <Line
+                  key={line.row}
+                  row={line.row}
+                  settings={line.settings}
+                  edits={edits}
+                  disabled={!section.canEdit}
+                  onChange={onChange}
+                />
+              ),
+            )}
           </div>
         </section>
       ))}
@@ -767,25 +794,29 @@ function Paper({
         </span>
       </div>
 
-      {preview ? (
-        <>
-          {/* In the face the paper will be, and — for a proportional one —
-              laid out by the layout's own boxes. 2026-08-17. */}
-          <Receipt
-            doc={preview.doc}
-            font={preview.font}
-          />
-          {/* Half-typed is a normal state, and saying which box is not usable
-              yet beats blanking the paper or shouting on every keystroke. */}
-          {preview.notUsableYet.length > 0 ? (
-            <p className="mb-settings__papernote">
-              Not used yet: {preview.notUsableYet.join(', ')}.
-            </p>
-          ) : null}
-        </>
-      ) : (
-        <Spinner label="Drawing the sample" />
-      )}
+      {/* **The roll's own scrollbar.** A four-page bill scrolls here and
+          nowhere else — the settings beside it do not move. */}
+      <Scroller inset className="mb-settings__paperroll">
+        {preview ? (
+          <>
+            {/* In the face the paper will be, and — for a proportional one —
+                laid out by the layout's own boxes. 2026-08-17. */}
+            <Receipt
+              doc={preview.doc}
+              font={preview.font}
+            />
+            {/* Half-typed is a normal state, and saying which box is not usable
+                yet beats blanking the paper or shouting on every keystroke. */}
+            {preview.notUsableYet.length > 0 ? (
+              <p className="mb-settings__papernote">
+                Not used yet: {preview.notUsableYet.join(', ')}.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <Spinner label="Drawing the sample" />
+        )}
+      </Scroller>
     </aside>
   );
 }
@@ -805,6 +836,87 @@ function topicsOf(section: GroupView): { topic: string; settings: SettingView[] 
     else runs.push({ topic: setting.topic, settings: [setting] });
   }
   return runs;
+}
+
+/**
+ * A topic's settings, in the lines they share.
+ *
+ * Same shape as `topicsOf` one level down, and the same rule: **Rust says
+ * which settings are one line** (`catalog::ROWS`), this only walks the runs.
+ * A setting with no line of its own gets one to itself.
+ */
+function linesOf(settings: SettingView[]): { row: string; settings: SettingView[] }[] {
+  const lines: { row: string; settings: SettingView[] }[] = [];
+  for (const setting of settings) {
+    const last = lines[lines.length - 1];
+    if (setting.row !== '' && last && last.row === setting.row) last.settings.push(setting);
+    else lines.push({ row: setting.row, settings: [setting] });
+  }
+  return lines;
+}
+
+/** Whether a run is nothing but tick boxes — see the note where it is used. */
+function allTicks(settings: SettingView[]): boolean {
+  return settings.every((setting) => setting.control === 'tick');
+}
+
+/**
+ * **Settings that are one decision, on one line.**
+ *
+ * The owner, 2026-08-24, on the screen this replaced: *"just a single font
+ * selector for bill, font size and bold in one line."* A size and its bold
+ * tick were two boxes in two cells of a two-column grid, so "Total size" and
+ * "Total in bold" could sit in different columns on different rows — seven
+ * pairs on the bill, torn apart fourteen ways.
+ *
+ * The line is named once, and each control wears the short word Rust gave it.
+ * The full label is still on the control for a screen reader, because "Size"
+ * on its own means nothing when you cannot see the heading beside it.
+ */
+function Line({
+  row,
+  settings,
+  edits,
+  disabled,
+  onChange,
+}: {
+  row: string;
+  settings: SettingView[];
+  edits: Edits;
+  disabled: boolean;
+  onChange: (key: string, value: string) => void;
+}) {
+  const changed = settings.some((setting) => edits[setting.key] !== undefined);
+  // The controls lose their own labels here, and the tip goes with a label —
+  // so the line keeps it. First one that has anything to say: a size and a
+  // bold tick are one decision, so they cannot need two explanations.
+  const hint = settings.find((setting) => setting.help !== '')?.help;
+  return (
+    <div className={cx('mb-settings__line', changed && 'mb-settings__field--changed')}>
+      <span className="mb-settings__linename">
+        {row}
+        {hint ? <InfoTip label={`About ${row}`}>{hint}</InfoTip> : null}
+      </span>
+      <div className="mb-settings__linecontrols">
+        {settings.map((setting) => (
+          <Field
+            key={setting.key}
+            setting={setting}
+            value={edits[setting.key] ?? setting.value}
+            changed={false}
+            disabled={disabled}
+            inLine
+            onChange={(value) => onChange(setting.key, value)}
+          />
+        ))}
+      </div>
+      {changed ? (
+        <span className="mb-settings__mark" aria-label="changed and not saved">
+          not saved
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /** What a search found, across every section, with the section named. */
@@ -882,21 +994,29 @@ function Field({
   value,
   changed,
   disabled,
+  inLine = false,
   onChange,
 }: {
   setting: SettingView;
   value: string;
   changed: boolean;
   disabled: boolean;
+  /** Drawn inside a shared line, which already carries the name. See `Line`. */
+  inLine?: boolean;
   onChange: (value: string) => void;
 }) {
   const hint = setting.help === '' ? undefined : setting.help;
+  // On a shared line the heading beside it says "Total"; the control says
+  // "Size". The full name stays as the accessible one — a screen reader gets
+  // "Total size", the same words a search matched.
+  const shown = inLine ? setting.short : setting.label;
   const body = (() => {
     switch (setting.control) {
       case 'tick':
         return (
           <Checkbox
-            label={setting.label}
+            label={shown}
+            aria-label={setting.label}
             hint={hint}
             checked={value === '1'}
             disabled={disabled}
@@ -906,8 +1026,9 @@ function Field({
       case 'choice':
         return (
           <Select
-            label={setting.label}
-            hint={hint}
+            label={inLine ? undefined : setting.label}
+            aria-label={setting.label}
+            hint={inLine ? undefined : hint}
             value={value}
             disabled={disabled}
             options={setting.choices}

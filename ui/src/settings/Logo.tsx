@@ -145,7 +145,7 @@ export function Logo() {
             // **White behind it first.** A PNG with a transparent background
             // arrives as transparent black, which thresholds to solid ink —
             // a logo that comes out as a filled rectangle. Found by trying one.
-            // The same value as `--qr-paper`, and for the same reason that
+            // The same value as `--print-paper`, and for the same reason that
             // token exists: a thermal roll is white when the app is dark, and
             // thresholding against the theme's surface would change what
             // PRINTS when somebody toggles the lights. It cannot read the

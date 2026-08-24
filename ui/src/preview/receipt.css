@@ -46,8 +46,19 @@
   width: var(--receipt-paper);
   margin: 0;
   padding: calc(var(--dot) * 16) 0;
-  background: var(--surface);
-  color: var(--text);
+  /* **White paper and black ink, in both themes** — the owner, 2026-08-24:
+     *"print preview should always be in white no matter the theme. that is the
+     only exception in no hardcoding rule."*
+
+     This is a picture of a thermal roll, not a surface of the app. The roll is
+     white and the printer only makes black, so drawn in the dark theme's
+     colours it is a picture of something no printer can produce — and the one
+     job of this panel is showing what will come out. Every rule, every QR and
+     every barcode below draws in `currentColor`, so setting these two here is
+     the whole of it. See `--print-paper` in tokens.css: they are still tokens,
+     they are simply the two a theme may not move. */
+  background: var(--print-paper);
+  color: var(--print-ink);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
@@ -147,7 +158,8 @@
 .mb-receipt__nologo {
   position: absolute;
   left: calc(var(--at, 0) * var(--dot));
-  color: var(--text-muted);
+  /* On the paper, so it takes the paper's ink. */
+  color: var(--print-ink);
   font-size: var(--text-sm);
 }
 
@@ -171,7 +183,7 @@
       transparent calc(var(--dot) * 4),
       transparent calc(var(--dot) * 10)
     );
-  color: var(--text);
+  color: var(--print-ink);
 }
 
 .mb-receipt__barcode {
@@ -191,7 +203,7 @@
 .mb-receipt__code {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  background: var(--surface);
+  background: var(--print-paper);
   padding: 0 var(--space-1);
 }
 

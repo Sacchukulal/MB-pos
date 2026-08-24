@@ -2293,6 +2293,60 @@ pub fn topic_for(entry: &Entry) -> &'static str {
         .map_or_else(|| entry.group.label(), |(_, heading)| *heading)
 }
 
+/// **Two settings that belong on one line**, by key prefix.
+///
+/// A size and its bold tick are one decision — "how does the shop name
+/// print?" — and the screen drew them as two boxes in two grid cells, so
+/// "Total size" and "Total in bold" could land in different columns and
+/// different rows. The bill has seven such pairs and the kitchen ticket three:
+/// twenty boxes where there are ten decisions.
+///
+/// A prefix table for the same reason `TOPICS` is one — the keys already say
+/// it. Everything under `receipt.sections.grand_total.` is the total.
+const ROWS: &[(&str, &str)] = &[
+    // The typeface is one line for the same reason the sizes are: it belongs to
+    // the table of "how this prints", and it is what the owner asked for first
+    // — *"just a single font selector for bill"*.
+    ("receipt.font", "Bill typeface"),
+    ("kitchen.font", "Ticket typeface"),
+    ("receipt.sections.store_name.", "Shop name"),
+    ("receipt.sections.meta.", "Bill details"),
+    ("receipt.sections.items.", "Item list"),
+    ("receipt.sections.subtotals.", "Subtotal and GST"),
+    ("receipt.sections.grand_total.", "Total"),
+    ("receipt.sections.footer.", "Footer"),
+    ("receipt.sections.token.", "Token"),
+    ("kitchen.title.", "Title"),
+    ("kitchen.details.", "Ticket details"),
+    ("kitchen.items.", "Item list"),
+];
+
+/// The line a setting shares, or `""` when it stands on its own.
+#[must_use]
+pub fn row_for(entry: &Entry) -> &'static str {
+    ROWS.iter()
+        .filter(|(prefix, _)| entry.key.starts_with(prefix))
+        // Longest wins, the same rule `topic_for` uses — so a short prefix
+        // added later cannot quietly swallow a longer one already here.
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map_or("", |(_, line)| *line)
+}
+
+/// **The word this control wears inside a shared line.**
+///
+/// The entry's own label stays what it is — "Total in bold" is what a search
+/// finds and what a screen reader says. On a line already headed "Total",
+/// repeating the word is noise, so the last part of the key names the control
+/// and nothing else does.
+#[must_use]
+pub fn short_for(entry: &Entry) -> &'static str {
+    match entry.key.rsplit('.').next() {
+        Some("scale") => "Size",
+        Some("bold") => "Bold",
+        _ => "",
+    }
+}
+
 /// **The GSTIN's state code must be the shop's own state.**
 ///
 /// Checked here rather than in `value.rs` because only here are both halves

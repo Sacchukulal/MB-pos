@@ -78,6 +78,13 @@ pub struct SettingView {
     /// The sub-heading this setting sits under. The screen draws it when it
     /// changes, which is what turns thirty-nine settings into five short lists.
     pub topic: String,
+    /// **The line this setting shares with the next**, or empty when it has a
+    /// line of its own. A size and its bold tick are one decision, so they are
+    /// one line — see `catalog::ROWS`.
+    pub row: String,
+    /// The word this control wears *inside* a shared line. `label` is still
+    /// its full name, and still what a search and a screen reader get.
+    pub short: String,
     pub label: String,
     pub help: String,
     /// `tick`, `number`, `amount`, `phone`, `words` or `choice` — what control
@@ -272,6 +279,8 @@ fn view_of(app: &App, config: &ShopConfig, allowed: &[Permission]) -> SettingsVi
                 .map(|entry| SettingView {
                     key: entry.key.to_owned(),
                     topic: catalog::topic_for(entry).to_owned(),
+                    row: catalog::row_for(entry).to_owned(),
+                    short: catalog::short_for(entry).to_owned(),
                     label: entry.label.to_owned(),
                     help: entry.help.to_owned(),
                     control: control_for(entry.kind).to_owned(),

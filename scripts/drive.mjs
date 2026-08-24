@@ -147,8 +147,21 @@ async function main() {
     const src = fs.readFileSync(a, 'utf8');
     const r = await evaluate(`(async () => { ${src} })()`);
     console.log(typeof r.value === 'string' ? r.value : JSON.stringify(r.value ?? r, null, 2));
+  } else if (verb === 'shot') {
+    // **It can see now.** The note above said a screenshot was a separate
+    // thing needing GetWindowRect and CopyFromScreen — it is not: WebView2 is
+    // Chromium, and Chromium screenshots itself. The look has been the thing
+    // sent back twice from a real install, so the one tool that drives the
+    // real window should be able to look at it.
+    const fs = await import('node:fs');
+    const cdp = await connect();
+    const r = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    cdp.close();
+    if (!r.result?.data) throw new Error('no image: ' + JSON.stringify(r));
+    fs.writeFileSync(a || 'shot.png', Buffer.from(r.result.data, 'base64'));
+    console.log(a || 'shot.png');
   } else {
-    console.log('verbs: eval invoke text html click file');
+    console.log('verbs: eval invoke text html click file shot');
   }
 }
 

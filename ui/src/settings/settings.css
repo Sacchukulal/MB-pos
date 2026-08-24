@@ -139,11 +139,73 @@
   align-items: start;
 }
 
+/* A run of nothing but tick boxes. A checkbox is a line of words, not a box to
+   type in, so it does not need a text field's column — seventeen of them in
+   the text-field grid drew a sparse table with holes in it. */
+.mb-settings__fields--ticks {
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-tick), 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+
+/* **The paper takes 28rem of the screen, so the settings beside it get a
+   tighter column** — found by looking at it, 2026-08-24.
+
+   `--settings-field` is 20rem, and what is left after the sample is about
+   34rem: too narrow for two of those columns, so the grid fell back to ONE
+   and drew a 34rem-wide dropdown with the word "Standard" in it. That is
+   most of what the owner meant by horrible. Two columns fit at 16rem, and
+   nothing in these sections is a GSTIN. */
+.mb-settings__panes--paper .mb-settings__fields {
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field-tight), 1fr));
+}
+
 .mb-settings__field {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
+}
+
+/* --- Settings that are one decision, on one line ------------------------- */
+
+/* The size and its bold tick, named once and set together. See `Line` in
+   Settings.tsx for why they were two cells of a grid and should not have
+   been. The name takes the room that is left so the controls line up down the
+   column whatever the name is called. */
+.mb-settings__line {
+  /* **The whole width, whatever the grid is doing.** Seven of these read as a
+     table — the sizes in one column, the ticks in another — and cut into two
+     grid columns they read as fourteen loose controls again. */
+  grid-column: 1 / -1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: var(--target-min);
+}
+
+.mb-settings__linename {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+/* **No width here on purpose.** A native `<select>` sizes itself to its widest
+   option, which is exactly right in both directions: a size box holding "1" to
+   "10" comes out narrow, and the typeface box holding "Magic Bill's own (IBM
+   Plex Mono)" comes out wide enough to read. A fixed width got the first right
+   and truncated the second. */
+.mb-settings__linecontrols {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
   min-width: 0;
 }
 
@@ -186,26 +248,32 @@
 
 /* --- The paper, beside the settings that change it (audit D1) ------------- */
 
-/* Two columns when there is paper to show: the settings, then the sample. The
-   sample column is fixed at the width of a 48-column receipt in the mono face,
-   so the paper is the size the paper is and never stretches. */
-.mb-settings__body--paper {
+/* The settings and the sample, side by side — **and each scrolls on its own**.
+
+   One scroller used to hold both, with the paper stuck to the top of it. So a
+   long bill made the whole pane tall, reaching the footer settings scrolled
+   the paper off the screen, and there was one scrollbar for two things. The
+   owner asked for the old screen's "separate scrollbar for preview" and this
+   is it: two panes, each `overflow` in its own right, neither moving the
+   other. */
+.mb-settings__panes {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--settings-paper);
-  gap: var(--space-5);
-  align-items: start;
+  min-width: 0;
+  min-height: 0;
 }
 
-/* It stays put while the settings scroll — the whole point is watching a
-   change land, and a preview you have to scroll back to is a preview nobody
-   looks at. */
+.mb-settings__panes--paper {
+  grid-template-columns: minmax(0, 1fr) var(--settings-paper);
+  gap: var(--space-5);
+}
+
 .mb-settings__paper {
-  position: sticky;
-  top: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* The heading stays; only the roll under it scrolls. */
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-2);
   min-width: 0;
+  min-height: 0;
   padding: var(--space-3);
   background: var(--surface-2);
   border: var(--border-width) solid var(--border);
@@ -229,6 +297,13 @@
   margin: 0;
   font-size: var(--text-xs);
   color: var(--text-faint);
+}
+
+/* The roll itself, and the one thing on this screen with its own scrollbar. */
+.mb-settings__paperroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 /* The paper beside the settings has less room than the gallery does, so it
@@ -527,7 +602,7 @@
   /* The quiet zone. A QR with no margin around it is a QR half the phones in
      a restaurant will not see. */
   padding: var(--space-3);
-  background: var(--qr-paper);
+  background: var(--print-paper);
   border-radius: var(--radius-sm);
 }
 
@@ -545,9 +620,9 @@
 
 /* **The one thing on this screen that does not follow the theme**, and the
    tokens say so: a QR is not decoration, and a themed one is a QR that stops
-   scanning in dark mode. See `--qr-ink` in tokens.css. */
+   scanning in dark mode. See `--print-ink` in tokens.css. */
 .mb-network__dot--on {
-  background: var(--qr-ink);
+  background: var(--print-ink);
 }
 
 .mb-network__code {
@@ -667,7 +742,7 @@
    whole reason the canvas exists is that it is exactly what will print. */
 .mb-logo__paper {
   padding: var(--space-3);
-  background: var(--qr-paper);
+  background: var(--print-paper);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-sm);
 }
