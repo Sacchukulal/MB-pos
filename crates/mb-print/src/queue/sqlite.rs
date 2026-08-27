@@ -1,20 +1,4 @@
-//! The durable store — **and the one module in this crate that touches a row.**
-//!
-//! # Decision D32, narrowly
-//!
-//! P06 wrote in the crate documentation that this crate does not touch the
-//! database, and it was right about everything it was describing: the layout,
-//! the templates and the sinks still take structs and return bytes, and they
-//! always will.
-//!
-//! A print queue is different, and audit D4 is why: *"a failed print is only a
-//! red message on screen. Nothing remembers it."* A queue that cannot survive a
-//! power cut is not a queue, it is a list. So mb-print depends on mb-db —
-//! downhill, mb-core then mb-db then mb-print, nothing upside down — and the
-//! dependency is confined to this file.
-//!
-//! mb-db's half of it knows nothing about printing: `payload` is TEXT and its
-//! repository neither reads nor validates it.
+//! The durable store — and the one module in this crate that touches a row.
 
 use std::sync::Arc;
 
@@ -50,10 +34,7 @@ fn read(e: DbError) -> StoreError {
 
 impl JobStore for SqliteStore {
     fn save(&self, job: &StoredJob) -> Result<(), StoreError> {
-        // One transaction, one commit, one fsync — and it is inside budget B6's
-        // 50 ms, which is measured with this store and a real file rather than
-        // with the memory one, because on the reference machine's 5400 rpm disk
-        // the fsync *is* the measurement.
+        // One transaction, one commit, one fsync.
         self.db
             .transaction(|tx| {
                 Repos::new(tx).print_jobs().save(
@@ -136,10 +117,6 @@ fn from_row(row: &mb_db::repo::PrintJobRow) -> StoredJob {
 }
 
 /// Wall-clock milliseconds.
-///
-/// The queue reads the clock for `updated_at` and for nothing else. D5's rule —
-/// a business day is stamped once by whoever created the thing — is obeyed by
-/// carrying `business_day` on the job from the moment it was made.
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

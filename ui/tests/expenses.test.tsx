@@ -1,14 +1,4 @@
-/**
- * **The expenses screen** — scope 10.6.
- *
- * Rust proves the arithmetic (`expense_tests.rs`); this proves the screen's
- * two claims:
- *
- * 1. **quick add is two fields and Enter**, because a cashier records a ₹40
- *    milk purchase mid-service or does not record it at all — and not
- *    recording it is exactly how v1's owner got an inflated profit every day;
- * 2. the cash position is shown as Rust's sentence, not assembled here.
- */
+/** The expenses screen — scope 10.6. */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -82,8 +72,6 @@ const view: ExpensesView = {
     cashExpenses: money(40_000, '400.00'),
     payouts: money(30_000, '300.00'),
     bankDrops: money(100_000, '1,000.00'),
-    // **P26, D120** — a purchase paid at the door writes no expense row, so the
-    // drawer reads the supplier payment itself.
     suppliersPaid: money(0, '0.00'),
     expected: money(42_600, '426.00'),
     says: '2,000.00 float + 126.00 cash sales + 0.00 top-ups − 400.00 expenses − 300.00 payouts − 1,000.00 to the bank − 0.00 to suppliers',
@@ -137,8 +125,7 @@ describe('recording what goes out (scope 10.6)', () => {
     show();
     await screen.findByText('Mandi run');
 
-    // Two buttons say "Record it" — quick add and the reminder. The first is
-    // quick add.
+    // Two buttons say "Record it" — quick add and the reminder.
     fireEvent.click(screen.getAllByText('Record it')[0] as HTMLElement);
     expect(call.mock.calls.some((c) => c[0] === 'save_expense')).toBe(false);
   });
@@ -148,7 +135,7 @@ describe('recording what goes out (scope 10.6)', () => {
     expect(await screen.findByText('18% · 180.00')).toBeTruthy();
   });
 
-  /** Cash carries a badge as well as a word — §2 rule 2. */
+  /** Cash carries a badge as well as a word. */
   it('marks what came out of the drawer', async () => {
     const { container } = show();
     await screen.findByText('Mandi run');

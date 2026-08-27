@@ -1,13 +1,5 @@
-//! The migration engine: T1, T2, T3, T20, T21.
-//!
-//! v1's whole ledger was `schema_version(version INTEGER PRIMARY KEY)`, read
-//! with `COALESCE(MAX(version), 1)`. No checksum, no name, no time — and
-//! `MAX`, so a migration skipped in the middle was invisible forever. These
-//! tests are the difference.
-
-// The clippy.toml exemption reaches `#[test]` functions only, and the helpers
-// at the bottom of this file are plain functions. In a test `expect` IS the
-// assertion (see clippy.toml, added at P01).
+// The clippy.toml exemption reaches `#[test]` functions only, and the helpers at the bottom of
+// this file are plain functions.
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -21,20 +13,13 @@ use mb_db::{DbError, MIGRATIONS, checksum, migrate};
 use rusqlite::Connection;
 use rusqlite::types::Value;
 
-/// **Every version this build ships, in order.**
-///
-/// These assertions used to be `vec![1]` written out by hand, which is a test
-/// that fails on the day somebody adds a migration — and adding a migration is
-/// the one thing this file exists to make safe. Three of them broke when
-/// `0002_recovery_slip` arrived, all of them saying nothing worse than "there
-/// are two now". Derived from `MIGRATIONS` instead, so the next one costs
-/// nothing here and a genuine gap or reorder still fails loudly below.
+/// Every version this build ships, in order.
 fn every_version() -> Vec<u32> {
     MIGRATIONS.iter().map(|m| m.version).collect()
 }
 
-/// T1. A fresh database runs every migration, in order, and records one row
-/// each — not a high-water mark.
+/// A fresh database runs every migration, in order, and records one row each — not a high-water
+/// mark.
 #[test]
 fn t1_fresh_database_runs_every_migration_and_records_each_one() {
     let scratch = Scratch::new("t1");
@@ -52,7 +37,11 @@ fn t1_fresh_database_runs_every_migration_and_records_each_one() {
         .collect::<Result<_, _>>()
         .expect("rows");
 
-    assert_eq!(rows.len(), MIGRATIONS.len(), "one row per migration, not a MAX()");
+    assert_eq!(
+        rows.len(),
+        MIGRATIONS.len(),
+        "one row per migration, not a MAX()"
+    );
     for (i, (version, name, sum, at)) in rows.iter().enumerate() {
         let expected = &MIGRATIONS[i];
         assert_eq!(*version, i64::from(expected.version));
@@ -67,7 +56,7 @@ fn t1_fresh_database_runs_every_migration_and_records_each_one() {
     }
 }
 
-/// T2. Running the migrations again does nothing at all.
+/// Running the migrations again does nothing at all.
 #[test]
 fn t2_running_migrations_twice_is_a_no_op() {
     let scratch = Scratch::new("t2");
@@ -83,10 +72,8 @@ fn t2_running_migrations_twice_is_a_no_op() {
     assert_eq!(before, ledger(&conn), "the ledger must be untouched");
 }
 
-/// T3. Editing a migration that has already run is refused — and the refusal
-/// leaves the database exactly as it was.
-///
-/// A refusal that half-migrated would be worse than the tamper it caught.
+/// Editing a migration that has already run is refused — and the refusal leaves the database
+/// exactly as it was.
 #[test]
 fn t3_edited_history_is_refused_and_nothing_is_touched() {
     let scratch = Scratch::new("t3");
@@ -96,9 +83,9 @@ fn t3_edited_history_is_refused_and_nothing_is_touched() {
     // Put a row in, so we can prove the refusal did not disturb the shop.
     conn.execute_batch(common::STAFF_SQL).expect("seed staff");
 
-    // Simulate the edit by rewriting the recorded checksum: the effect is
-    // identical to someone changing one character of 0001_initial.sql after it
-    // shipped, and it does not require writing to the source tree from a test.
+    // Simulate the edit by rewriting the recorded checksum: the effect is identical to someone
+    // changing one character of 0001_initial.sql after it shipped, and it does not require
+    // writing to the source tree from a test.
     conn.execute(
         "UPDATE schema_version SET checksum = 'deadbeefdeadbeef' WHERE version = 1",
         [],
@@ -117,13 +104,13 @@ fn t3_edited_history_is_refused_and_nothing_is_touched() {
     let staff: i64 = conn
         .query_row("SELECT count(*) FROM staff", [], |r| r.get(0))
         .expect("count");
-    assert_eq!(staff, 1, "the refusal must not have touched the shop's rows");
+    assert_eq!(
+        staff, 1,
+        "the refusal must not have touched the shop's rows"
+    );
 }
 
-/// T20. A migration that fails part way leaves the previous version in place.
-///
-/// SQLite runs DDL inside a transaction. This test proves we are actually using
-/// that, rather than trusting it.
+/// A migration that fails part way leaves the previous version in place.
 #[test]
 fn t20_a_failed_migration_leaves_the_previous_version() {
     let scratch = Scratch::new("t20");
@@ -138,25 +125,27 @@ fn t20_a_failed_migration_leaves_the_previous_version() {
               THIS IS NOT SQL;",
     };
 
-    // Drive the engine's own path rather than a hand-rolled one, so the test
-    // exercises the transaction the real code uses.
+    // Drive the engine's own path rather than a hand-rolled one, so the test exercises the
+    // transaction the real code uses.
     let result = run_single(&mut conn, &bad);
     assert!(result.is_err(), "a broken migration must fail");
 
     let tables = mb_db::schema::tables(&conn).expect("tables");
-    assert!(!tables.contains(&"half_a".to_owned()), "half_a must have rolled back");
-    assert!(!tables.contains(&"half_b".to_owned()), "half_b must have rolled back");
+    assert!(
+        !tables.contains(&"half_a".to_owned()),
+        "half_a must have rolled back"
+    );
+    assert!(
+        !tables.contains(&"half_b".to_owned()),
+        "half_b must have rolled back"
+    );
 
     let versions: Vec<i64> = ledger(&conn).into_iter().map(|(v, _)| v).collect();
     let expected: Vec<i64> = every_version().into_iter().map(i64::from).collect();
     assert_eq!(versions, expected, "the ledger must not have gained a row");
 }
 
-/// T21. A file written by a newer build is refused rather than used.
-///
-/// A staged rollout (scope 13.5) creates this on purpose: one shop updates, the
-/// second terminal has not. The old build must stop, not write rows the new
-/// schema will not understand.
+/// A file written by a newer build is refused rather than used.
 #[test]
 fn t21_a_newer_database_is_refused() {
     let scratch = Scratch::new("t21");
@@ -180,13 +169,7 @@ fn t21_a_newer_database_is_refused() {
     }
 }
 
-/// **0004 landed: the tax rework is in the schema, and nothing broke on the
-/// way.**
-///
-/// Six tables were rebuilt to split `treatment` into `kind` + `basis`, which in
-/// SQLite means dropping and recreating them with the foreign keys off. That is
-/// exactly the manoeuvre that leaves dangling rows behind if an insert is wrong,
-/// so `foreign_key_check` is the assertion that matters most here.
+/// 0004 landed: the tax rework is in the schema, and nothing broke on the way.
 #[test]
 fn the_tax_rework_columns_are_there_and_nothing_dangles() {
     let scratch = Scratch::new("tax_rework");
@@ -247,8 +230,7 @@ fn the_tax_rework_columns_are_there_and_nothing_dangles() {
         "tax_class_rates is still here"
     );
 
-    // Six tables were dropped and rebuilt with the foreign keys off. Nothing
-    // may point at a row that went with them.
+    // Six tables were dropped and rebuilt with the foreign keys off.
     let dangling: Vec<String> = conn
         .prepare("PRAGMA foreign_key_check")
         .expect("prepare")
@@ -256,17 +238,13 @@ fn the_tax_rework_columns_are_there_and_nothing_dangles() {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("rows");
-    assert!(dangling.is_empty(), "these tables have dangling rows: {dangling:?}");
+    assert!(
+        dangling.is_empty(),
+        "these tables have dangling rows: {dangling:?}"
+    );
 }
 
-/// **0004 with rows already in the database.**
-///
-/// The test above runs the rework on an empty file, so it proves the columns
-/// exist and nothing more. Here migrations 1-3 build the pre-rework schema,
-/// old-format rows go in, and the real engine runs 0004 alone. Five of the six
-/// rebuilds are a bare `INSERT ... SELECT` with no column list, so every value
-/// is read back — a column-order slip would put an HSN in a price and nothing
-/// else would catch it.
+/// 0004 with rows already in the database.
 #[test]
 fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     // Money that is distinct in every column, so a swapped pair is visible.
@@ -357,14 +335,26 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     conn.execute_batch(OLD_ROWS).expect("seed old-format rows");
 
     let applied = migrate::apply_all(&mut conn).expect("0004 runs");
-    assert_eq!(applied.ran, vec![4], "only the rework should have been left to do");
+    assert_eq!(
+        applied.ran,
+        vec![4],
+        "only the rework should have been left to do"
+    );
 
     // tax_classes: treatment splits into kind + basis, the rest is untouched.
     for (id, kind, basis, rate_bp, name, is_active, sort_order) in [
         ("tc_excl", "gst", "exclusive", 500, "Old exclusive", 1, 41),
         ("tc_incl", "gst", "inclusive", 1800, "Old inclusive", 0, 42),
         ("tc_exempt", "exempt", "exclusive", 250, "Old exempt", 1, 43),
-        ("tc_nongst", "outside_gst", "exclusive", 1400, "Old non-GST", 0, 44),
+        (
+            "tc_nongst",
+            "outside_gst",
+            "exclusive",
+            1400,
+            "Old non-GST",
+            0,
+            44,
+        ),
     ] {
         check(
             &conn,
@@ -484,8 +474,8 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
         ],
     );
 
-    // The deliberate difference: bill_charges has no 'outside_gst' in its new
-    // CHECK, so an old non_gst charge lands on 'exempt' instead.
+    // The deliberate difference: bill_charges has no 'outside_gst' in its new CHECK, so an old
+    // non_gst charge lands on 'exempt' instead.
     check(
         &conn,
         "bill_charges",
@@ -563,9 +553,14 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
         ],
     );
 
-    // The reseed at the bottom of 0004. `itm_incl` points at the 12% class, so
-    // it must be left alone rather than retired.
-    check(&conn, "tax_classes", "tax_packaged_12", &[("is_active", num(1))]);
+    // The reseed at the bottom of 0004. `itm_incl` points at the 12% class, so it must be left
+    // alone rather than retired.
+    check(
+        &conn,
+        "tax_classes",
+        "tax_packaged_12",
+        &[("is_active", num(1))],
+    );
     check(
         &conn,
         "tax_classes",
@@ -598,7 +593,10 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("rows");
-    assert!(dangling.is_empty(), "these tables have dangling rows: {dangling:?}");
+    assert!(
+        dangling.is_empty(),
+        "these tables have dangling rows: {dangling:?}"
+    );
 }
 
 fn txt(s: &str) -> Value {
@@ -609,14 +607,16 @@ fn num(n: i64) -> Value {
     Value::Integer(n)
 }
 
-/// Every named column of one row, compared as a raw SQLite value so NULL and 0
-/// cannot be confused.
+/// Every named column of one row, compared as a raw SQLite value so NULL and 0 cannot be
+/// confused.
 fn check_where(conn: &Connection, table: &str, whr: &str, wanted: &[(&str, Value)]) {
     for (column, want) in wanted {
         let got: Value = conn
-            .query_row(&format!("SELECT {column} FROM {table} WHERE {whr}"), [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                &format!("SELECT {column} FROM {table} WHERE {whr}"),
+                [],
+                |r| r.get(0),
+            )
             .expect("read one cell");
         assert_eq!(&got, want, "{table}.{column} where {whr}");
     }
@@ -626,16 +626,16 @@ fn check(conn: &Connection, table: &str, id: &str, wanted: &[(&str, Value)]) {
     check_where(conn, table, &format!("id = '{id}'"), wanted);
 }
 
-/// The engine applies its own list, so a one-off migration needs the same
-/// transaction discipline spelled out here. Kept identical in shape to
-/// `migrate::run_one`, which is private on purpose.
+/// The engine applies its own list, so a one-off migration needs the same transaction
+/// discipline spelled out here.
 fn run_single(conn: &mut Connection, m: &mb_db::Migration) -> Result<(), DbError> {
     let tx = conn.transaction()?;
-    tx.execute_batch(m.sql).map_err(|source| DbError::Migration {
-        version: m.version,
-        name: m.name,
-        source,
-    })?;
+    tx.execute_batch(m.sql)
+        .map_err(|source| DbError::Migration {
+            version: m.version,
+            name: m.name,
+            source,
+        })?;
     tx.execute(
         "INSERT INTO schema_version (version, name, checksum, applied_at, run_ms)
          VALUES (?1, ?2, ?3, ?4, ?5)",

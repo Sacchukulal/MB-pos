@@ -1,28 +1,4 @@
-//! **The button that turns a phone call into a fix** — audit E7's second half.
-//!
-//! > *"Fix: a rolling log file on disk, and a 'Send diagnostics' button that
-//! > zips the last few days of logs."*
-//!
-//! # D94 — a person sees the manifest before the zip exists
-//!
-//! [`plan`] builds the list — every file, its size, and what it is — and the
-//! screen shows it. Only then does [`write`] produce anything. A support bundle
-//! assembled silently is a support bundle nobody can be asked to consent to,
-//! and this one leaves the shop by email.
-//!
-//! The screen also states what is deliberately **not** in it, in one sentence,
-//! because "what did I just send you" is a fair question and the answer should
-//! not require reading a zip.
-//!
-//! # It is scanned before it is written
-//!
-//! [`crate::redact::scan`] runs over every text member. A licence key that
-//! reached a log would otherwise reach a support inbox, and audit E10 records
-//! that v1 nearly leaked a secret into a report folder already. If the scanner
-//! finds something, **the bundle is still written** — with the offending lines
-//! replaced — because refusing to produce a bundle leaves the shopkeeper with
-//! a broken counter and no way to ask for help. The screen says what was
-//! removed.
+//! The button that turns a phone call into a fix.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -40,10 +16,10 @@ use crate::words::{self, UiError, UiResult};
 pub struct BundleItem {
     /// The name it will have inside the zip.
     pub name: String,
-    /// What it is, in the shop's words — "the last seven days of the counter's
-    /// own log", not "logs".
+    /// What it is, in the shop's words — "the last seven days of the counter's own log", not
+    /// "logs".
     pub what: String,
-    /// Already formatted: "12 KB". R8.
+    /// Already formatted: "12 KB".
     pub size: String,
 }
 
@@ -54,32 +30,23 @@ pub struct BundlePlanView {
     pub items: Vec<BundleItem>,
     /// The whole thing, formatted.
     pub total: String,
-    /// **What is deliberately not in it.** One sentence, shown beside the list.
+    /// What is deliberately not in it.
     pub excludes: String,
-    /// Where it will be written, so nobody has to hunt for it (D76).
+    /// Where it will be written, so nobody has to hunt for it.
     pub folder: String,
 }
 
-/// Bytes as a person reads them. Not a general-purpose formatter: a diagnostics
-/// bundle is between a few KB and a few MB and nothing else needs to be right.
-/// **`words::bytes` is the one size formatter** — see its note, and the
-/// health panel that disagreed with this one.
+/// Bytes as a person reads them.
 fn size(bytes: u64) -> String {
     crate::words::bytes(bytes)
 }
 
-/// **The sentence that answers "what did I just send you?"**
+/// The sentence that answers "what did I just send you?".
 const EXCLUDES: &str = "It does not contain your licence key, anybody's PIN, or \
 any customer's phone number. It does not contain your shop's database — only a \
 summary of it.";
 
 /// What the bundle would contain, without producing it.
-///
-/// # Errors
-///
-/// Only if the person may not (`backup.run` — the same permission that may
-/// replace the whole database, because this is the other end of a support
-/// conversation).
 pub fn plan_on(app: &App) -> UiResult<BundlePlanView> {
     crate::guard::require(app, mb_auth::Permission::BackupRun)?;
 
@@ -147,38 +114,35 @@ pub fn plan_on(app: &App) -> UiResult<BundlePlanView> {
     })
 }
 
-/// Seven, not fourteen. The log keeps a fortnight so a support call can go back
-/// that far on request; the bundle carries a week so it still attaches to an
-/// email. Asking for more is a second, deliberate act.
+/// Seven, not fourteen. The log keeps a fortnight so a support call can go back that far on
+/// request; the bundle carries a week so it still attaches to an email.
 const SEVEN_DAYS: usize = 7;
 
-/// `Documents\Magic Bill diagnostics\` — D76: an export lands where a person
-/// can find it, not in `%APPDATA%`.
+/// `Documents\Magic Bill diagnostics\`.
 fn folder() -> PathBuf {
     crate::reports::documents_folder("Magic Bill diagnostics")
 }
 
-/// **Write it.** Returns where it went, so the toast can say so (D76).
-///
-/// # Errors
-///
-/// If the folder cannot be written.
+/// Write it. Returns where it went, so the toast can say so.
 pub fn write_on(app: &App) -> UiResult<String> {
     crate::guard::require(app, mb_auth::Permission::BackupRun)?;
     let dir = folder();
     std::fs::create_dir_all(&dir).map_err(|e| words::from_io("write the diagnostics", &e))?;
 
-    let name = format!("magic-bill-diagnostics-{}.zip", crate::flows::today(crate::flows::now()));
+    let name = format!(
+        "magic-bill-diagnostics-{}.zip",
+        crate::flows::today(crate::flows::now())
+    );
     let path = dir.join(&name);
-    let file = std::fs::File::create(&path).map_err(|e| words::from_io("write the diagnostics", &e))?;
+    let file =
+        std::fs::File::create(&path).map_err(|e| words::from_io("write the diagnostics", &e))?;
     let mut zip = zip::ZipWriter::new(file);
     let options: zip::write::FileOptions<'_, ()> =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let mut removed = 0_usize;
     let mut put = |zip: &mut zip::ZipWriter<std::fs::File>, name: &str, text: &str| {
-        // **Scanned on the way in.** See the module note: a finding does not
-        // stop the bundle, it censors the line.
+        // Scanned on the way in.
         let (clean, taken) = censor(text);
         removed += taken;
         let _ = zip.start_file(name, options);
@@ -206,9 +170,13 @@ pub fn write_on(app: &App) -> UiResult<String> {
         }
     }
 
-    zip.finish()
-        .map_err(|e| UiError::new("diagnostics.write", "The diagnostics file could not be finished.")
-            .with_detail(e.to_string()))?;
+    zip.finish().map_err(|e| {
+        UiError::new(
+            "diagnostics.write",
+            "The diagnostics file could not be finished.",
+        )
+        .with_detail(e.to_string())
+    })?;
 
     if removed > 0 {
         crate::log_warn!(
@@ -241,9 +209,7 @@ fn censor(text: &str) -> (String, usize) {
     (out, bad.len())
 }
 
-// ---------------------------------------------------------------------------
 // The three text members.
-// ---------------------------------------------------------------------------
 
 fn about(app: &App) -> String {
     let entitlement = app.entitlement();
@@ -295,8 +261,7 @@ fn database_text(app: &App) -> String {
         let version = shop
             .db
             .transaction(|tx| {
-                let mut statement =
-                    tx.prepare("SELECT MAX(version) FROM schema_migrations")?;
+                let mut statement = tx.prepare("SELECT MAX(version) FROM schema_migrations")?;
                 let v: i64 = statement.query_row([], |row| row.get(0))?;
                 Ok(v.to_string())
             })
@@ -316,9 +281,7 @@ fn database_text(app: &App) -> String {
     })
 }
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn diagnostics_plan(app: tauri::State<'_, App>) -> UiResult<BundlePlanView> {
@@ -342,11 +305,7 @@ mod tests {
         assert!(size(5 * 1024 * 1024).starts_with('5'));
     }
 
-    /// **A finding censors a line and does not stop the bundle.**
-    ///
-    /// The alternative is a shopkeeper with a broken counter, a bundle that
-    /// refuses to be produced, and no way to ask for help — which is a worse
-    /// outcome than a censored line.
+    /// A finding censors a line and does not stop the bundle.
     #[test]
     fn a_secret_in_the_log_is_removed_and_the_bundle_still_happens() {
         let text = "line one is fine\n\
@@ -370,8 +329,8 @@ mod tests {
         assert_eq!(clean.trim_end(), text.trim_end());
     }
 
-    /// The sentence that answers "what did I just send you" has to name the
-    /// three things people actually worry about.
+    /// The sentence that answers "what did I just send you" has to name the three things people
+    /// actually worry about.
     #[test]
     fn the_excludes_sentence_names_what_people_worry_about() {
         for worry in ["licence key", "PIN", "phone number"] {

@@ -1,19 +1,14 @@
-/*
- * The first five minutes — P30.5. Every value is a token.
- *
- * This is the only screen in the product that is deliberately NARROW. A form
- * stretched across 1366 pixels reads as a wall; a column somebody's eye can
- * follow reads as a conversation, and this is the one screen where the person
- * in front of it has never seen the product before.
- */
+/* The first five minutes. */
 
 .mb-firstrun {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Not `height: 100%` — this sits under the title bar in `.mb-shell`'s
-     column, so a hundred per cent of the shell is one bar too tall and the
-     bottom of the panel goes under the edge of the window. */
+  /*
+   * Not `height: 100%` — this sits under the title bar in `.mb-shell`'s column, so a hundred
+   * per cent of the shell is one bar too tall and the bottom of the panel goes under the edge
+   * of the window.
+   */
   flex: 1;
   min-height: 0;
   padding: var(--space-5);
@@ -33,7 +28,7 @@
   box-shadow: var(--shadow-pop);
 }
 
-/* --- Where you are ------------------------------------------------------- */
+/* Where you are. */
 
 .mb-firstrun__steps {
   display: flex;
@@ -67,8 +62,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The step you are on is the only one with the accent on it. A row of four
-   accent circles tells somebody nothing about where they are. */
+/* The step you are on is the only one with the accent on it. */
 .mb-firstrun__step--now {
   color: var(--text);
   font-weight: var(--weight-medium);
@@ -91,7 +85,7 @@
   white-space: nowrap;
 }
 
-/* --- The step itself ----------------------------------------------------- */
+/* The step itself. */
 
 .mb-firstrun__body {
   display: flex;
@@ -119,8 +113,10 @@
   gap: var(--gap-field);
 }
 
-/* The item row on the last step: three fields and a button, on one line,
-   because adding five things should be five keystrokes and an Enter. */
+/*
+ * The item row on the last step: three fields and a button, on one line, because adding five
+ * things should be five keystrokes and an Enter.
+ */
 .mb-firstrun__row {
   display: flex;
   align-items: flex-end;
@@ -149,9 +145,7 @@
   gap: var(--space-2);
 }
 
-/* The recovery code itself, on a page with nothing else to look at. Big,
-   spaced and monospaced, because somebody is copying it onto paper by hand and
-   a 0 must not read as an O. */
+/* The recovery code itself, on a page with nothing else to look at. */
 .mb-firstrun__code {
   margin: 0;
   padding: var(--space-4);
@@ -165,7 +159,7 @@
   user-select: all;
 }
 
-/* --- Where the data goes ------------------------------------------------- */
+/* Where the data goes. */
 
 .mb-firstrun__where,
 .mb-firstrun__found {
@@ -188,7 +182,7 @@
   word-break: break-all;
 }
 
-/* --- The way forward ----------------------------------------------------- */
+/* The way forward. */
 
 .mb-firstrun__actions {
   display: flex;

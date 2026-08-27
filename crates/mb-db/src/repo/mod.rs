@@ -1,21 +1,4 @@
-//! The repositories: the **only** way anything above this crate touches a row.
-//!
-//! Each one takes and returns mb-core domain types, never raw rows. Every
-//! coercion — integer to `bool`, paise to [`Money`](mb_core::Money), tag to
-//! enum — happens here and nowhere else, through [`crate::encode`].
-//!
-//! v1 had roughly sixty inline coercions scattered across screen files, which
-//! is why nobody could answer "what exactly happens when a bill is settled?"
-//! without reading four files at once (audit E3). A screen that writes SQL is a
-//! screen that has to be found again at P30.
-//!
-//! # The transaction belongs to the caller
-//!
-//! [`Repos`] borrows a [`Transaction`]; it never owns a connection. Only the
-//! caller knows whether this is one step of a settle or a standalone edit, and
-//! a repository that opened its own transaction would make
-//! [`crate::settle`] — which must be exactly one commit and therefore exactly
-//! one fsync (D23, budget B5) — impossible to write.
+//! The repositories: the only way anything above this crate touches a row.
 //!
 //! ```ignore
 //! db.transaction(|tx| {
@@ -28,20 +11,18 @@
 use rusqlite::Transaction;
 
 pub mod audit;
-/// P26. Suppliers, the paper, the supplier ledger and purchase orders —
-/// **one rupee, one row** (D120).
+/// Suppliers, the paper, the supplier ledger and purchase orders — one rupee, one row.
 pub mod buying;
 pub mod composition;
-/// P26. The physical stock count, which **freezes the book and posts a delta**
-/// (D127).
-pub mod counts;
 pub mod corrections;
+/// The physical stock count, which freezes the book and posts a delta.
+pub mod counts;
 pub mod delivery;
 pub mod devices;
-pub mod kitchen;
 pub mod employment;
 pub mod events;
 pub mod floor;
+pub mod kitchen;
 pub mod menu;
 pub mod menucsv;
 pub mod money;
@@ -50,28 +31,25 @@ pub mod outbox;
 pub mod payments;
 pub mod people;
 pub mod print_jobs;
-/// P18. Every report, and every one of them groups by the STORED business day
-/// (D5) — which is audit B1, the bill that appeared on two different days on
-/// two different screens.
+/// Every report, and every one of them groups by the STORED business day.
 pub mod reports;
 pub mod settings;
-/// P25. Materials, recipes and the append-only stock ledger — and the one
-/// function in this crate that is deliberately incapable of refusing a bill
-/// (D112).
+/// Materials, recipes and the append-only stock ledger — and the one function in this crate
+/// that is deliberately incapable of refusing a bill.
 pub mod stock;
-/// P27. The tills â **every terminal has its own series** (D135), and moving
-/// the master is a decision a person makes (D139).
-pub mod terminals;
 pub mod taxclass;
+/// The tills â every terminal has its own series, and moving the master is a decision a
+/// person makes.
+pub mod terminals;
 
 pub use audit::{AuditFilter, AuditRepo};
 pub use buying::{
     Attachment, BuyingRepo, OrderLine, OrderState, Outstanding, Purchase, PurchaseKind,
     PurchaseLine, PurchaseOrder, Supplier, SupplierAdjustment, SupplierMaterial, SupplierPayment,
 };
-pub use counts::{CountLine, CountRepo, CountState, StockCount, Written};
 pub use composition::{Combo, ComboPart, CompositionRepo, Modifier, ModifierGroup, Variant};
 pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
+pub use counts::{CountLine, CountRepo, CountState, StockCount, Written};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
 pub use menucsv::{ImportPlan, MenuCsvRepo};
@@ -119,9 +97,6 @@ impl<'a> Repos<'a> {
         PeopleRepo::new(self.tx)
     }
 
-    /// The audit trail (P11). Like the print spool it raises **no outbox row**,
-    /// and unlike the print spool that is not about size — it is D16: nothing
-    /// on the phone reads it, so nothing pays to send it.
     #[must_use]
     pub fn audit(&self) -> AuditRepo<'a> {
         AuditRepo::new(self.tx)
@@ -132,19 +107,14 @@ impl<'a> Repos<'a> {
         MoneyRepo::new(self.tx)
     }
 
-    /// **The employment side** (P28): shifts, attendance, leave, salary and
-    /// payroll.
-    ///
-    /// `people()` above is the IDENTITY side — who this is and what they may
-    /// do — and the two are deliberately separate, because a shift supervisor
-    /// reads one of them and the owner reads the other.
+    /// The employment side: shifts, attendance, leave, salary and payroll.
     #[must_use]
     pub fn employment(&self) -> employment::EmploymentRepo<'a> {
         employment::EmploymentRepo::new(self.tx)
     }
 
-    /// **Orders that leave on a bike** (P29), and the cash a rider is
-    /// carrying — which is the half of delivery where money actually goes.
+    /// Orders that leave on a bike, and the cash a rider is carrying — which is the half of
+    /// delivery where money actually goes.
     #[must_use]
     pub fn delivery(&self) -> delivery::DeliveryRepo<'a> {
         delivery::DeliveryRepo::new(self.tx)
@@ -160,104 +130,93 @@ impl<'a> Repos<'a> {
         OutboxRepo::new(self.tx)
     }
 
-    /// The menu in and out of a spreadsheet (P13) — a shop with 400 items
-    /// will not type them in.
+    /// The menu in and out of a spreadsheet — a shop with 400 items will not type them in.
     #[must_use]
     pub fn menu_csv(&self) -> MenuCsvRepo<'a> {
         MenuCsvRepo::new(self.tx)
     }
 
-    /// Variants, modifiers and combos (P13) — the three ways one menu row
-    /// becomes several things a customer can order.
+    /// Variants, modifiers and combos — the three ways one menu row becomes several things a
+    /// customer can order.
     #[must_use]
     pub fn composition(&self) -> CompositionRepo<'a> {
         CompositionRepo::new(self.tx)
     }
 
-    /// The shop's tax classes (P13) — and the one operation that matters:
-    /// editing a class rewrites the live menu and cannot reach a bill.
+    /// The shop's tax classes — and the one operation that matters: editing a class rewrites
+    /// the live menu and cannot reach a bill.
     #[must_use]
     pub fn tax_classes(&self) -> TaxClassRepo<'a> {
         TaxClassRepo::new(self.tx)
     }
 
-    /// Reprints, refunds, reasons and the day reconciliation (P12).
+    /// Reprints, refunds, reasons and the day reconciliation.
     #[must_use]
     pub fn corrections(&self) -> CorrectionsRepo<'a> {
         CorrectionsRepo::new(self.tx)
     }
 
-    /// P29 — what a payment provider said, and every payment nobody has
-    /// confirmed. **Not the payments themselves**: those are written inside
-    /// the settle, by `orders()`, and that does not change.
+    /// What a payment provider said, and every payment nobody has confirmed.
     #[must_use]
     pub fn payments(&self) -> payments::PaymentsRepo<'a> {
         payments::PaymentsRepo::new(self.tx)
     }
 
-    /// P19 devices — the phones this counter serves.
     #[must_use]
     pub fn devices(&self) -> devices::DevicesRepo<'a> {
         devices::DevicesRepo::new(self.tx)
     }
 
-    /// P24 — what the kitchen was told, and what became of it.
+    /// What the kitchen was told, and what became of it.
     #[must_use]
     pub fn kitchen(&self) -> kitchen::KitchenRepo<'a> {
         kitchen::KitchenRepo::new(self.tx)
     }
 
-    /// P25 — materials, recipes and the stock ledger. **The one repository
-    /// whose main function cannot refuse a bill** (D112).
+    /// Materials, recipes and the stock ledger.
     #[must_use]
     pub fn stock(&self) -> StockRepo<'a> {
         StockRepo::new(self.tx)
     }
 
-    /// P26 — suppliers, the paper and what the shop owes. **Writes the shelf,
-    /// the paper and the ledger in one transaction, and no `expenses` row**
-    /// (D120).
+    /// Suppliers, the paper and what the shop owes.
     #[must_use]
     pub fn buying(&self) -> BuyingRepo<'a> {
         BuyingRepo::new(self.tx)
     }
 
-    /// P26 — the physical stock count (D127).
+    /// The physical stock count.
     #[must_use]
     pub fn counts(&self) -> CountRepo<'a> {
         CountRepo::new(self.tx)
     }
 
-    /// P27 — the tills. **The billing path never asks this repository for a
-    /// number** (D135): a counter row is claimed inside the settle transaction,
-    /// exactly as it has been since P05.
+    /// The tills.
     #[must_use]
     pub fn terminals(&self) -> TerminalRepo<'a> {
         TerminalRepo::new(self.tx)
     }
 
-    /// Every report (P18), grouped by the stored business day.
+    /// Every report, grouped by the stored business day.
     #[must_use]
     pub fn reports(&self) -> crate::repo::reports::ReportsRepo<'a> {
         crate::repo::reports::ReportsRepo::new(self.tx)
     }
 
-    /// What happened to an order and when (P14) — the first writer of
-    /// `order_events`, which P04 modelled and nothing had used.
+    /// What happened to an order and when.
     #[must_use]
     pub fn events(&self) -> crate::repo::events::EventsRepo<'a> {
         crate::repo::events::EventsRepo::new(self.tx)
     }
 
-    /// The print spool (P07). The one repository that deliberately does **not**
-    /// enqueue an outbox row — see its module documentation.
+    /// The print spool.
     #[must_use]
     pub fn print_jobs(&self) -> PrintJobRepo<'a> {
         PrintJobRepo::new(self.tx)
     }
 
-    /// Escape hatch for the perf harness and for `settle`, which needs the same
-    /// transaction to claim a number through [`crate::numbering`].
+    /// Escape hatch for the perf harness and for `settle`, which needs the same transaction to
+    /// claim a number through `crate::numbering`.
     #[must_use]
     pub fn tx(&self) -> &'a Transaction<'a> {
         self.tx

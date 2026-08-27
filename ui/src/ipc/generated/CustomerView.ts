@@ -3,7 +3,6 @@ import type { MoneyView } from "./MoneyView";
 
 export type CustomerView = { id: string, name: string, phone: string | null, gstin: string | null, address: string | null, creditLimit: MoneyView | null, isActive: boolean, balance: MoneyView, 
 /**
- * "74 days" or "—". Preformatted, because a screen that does date
- * arithmetic is a screen with a second answer.
+ * "74 days" or "—".
  */
 oldest: string, };

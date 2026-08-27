@@ -5,8 +5,8 @@
  */
 export type UnitView = { name: string, 
 /**
- * Thousandths of the base unit, as a string the screen never does
- * arithmetic on — it round-trips back when the shop saves.
+ * Thousandths of the base unit, as a string the screen never does arithmetic on — it
+ * round-trips back when the shop saves.
  */
 basePerUnit: string, 
 /**

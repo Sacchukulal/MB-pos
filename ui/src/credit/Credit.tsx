@@ -1,31 +1,4 @@
-/**
- * **Who owes me money** — scope 5.1, 5.2, 5.3, 5.4.
- *
- * The owner renamed this from "khata" on 2026-08-08.
- *
- * # One list, and everybody is on it
- *
- * It used to open on "who owes me" with "Everybody" as a second tab. The owner,
- * 2026-08-24: *"when i add a credit customer, it seemed like it disappeared but
- * the thing was it was in everybody section."* Of course it did — a customer
- * added today owes nothing today, so the view the screen opened on was the one
- * view that could not contain them. **A list you can be missing from is a list
- * that loses people.** One list now, with Owes and Oldest as columns.
- *
- * # The customer form is a panel, not a dialog
- *
- * Adding and editing are the same six boxes, so they are the same form, in the
- * side panel — the kit's `SideFold`, the same shape the floor arranges a room
- * with. The screen's own title went with the dialog: the rail already says
- * Credit (owner, same day).
- *
- * # Nothing here is arithmetic
- *
- * The balance, the ageing buckets, the running column in the statement and the
- * "74 days" are all computed in Rust and arrive formatted (R8, D39). A screen
- * that divides by thirty is a screen with a second answer to what a customer
- * owes.
- */
+/** Who owes me money. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -62,13 +35,8 @@ export function Credit() {
   const [find, setFind] = useState('');
   const [open, setOpen] = useState<AccountView | null>(null);
   /**
-   * **The customer in the side panel** — the one being added or edited, and
-   * `null` when the panel is folded away.
-   *
-   * One piece of state for both, because it is one form. The owner,
-   * 2026-08-24: *"i want add customer panel in the side (foldable)"* — and a
-   * screen with a side panel for adding and a dialog for editing would be the
-   * same form drawn twice.
+   * The customer in the side panel — the one being added or edited, and `null` when the panel
+   * is folded away.
    */
   const [editing, setEditing] = useState<CustomerView | null>(null);
   const toast = useToast();
@@ -80,17 +48,7 @@ export function Credit() {
     [toast],
   );
 
-  /**
-   * **One list, everybody on it** — the owner, 2026-08-24: *"when i add a
-   * credit customer, it seemed like it disappeared but the thing was it was in
-   * everybody section… there is no need for that two sections there. just list
-   * all of them."*
-   *
-   * The screen used to open on "who owes me", so a customer you had just added
-   * — who owes nothing yet — was added into a view that by definition could not
-   * show them. Two views of one list is what made adding one look like losing
-   * one. The Owes and Oldest columns still say who owes what.
-   */
+  /** One list, everybody on it. */
   const load = useCallback(() => {
     call('customers').then(setRows).catch(report);
   }, [report]);
@@ -117,8 +75,8 @@ export function Credit() {
     {
       key: 'oldest',
       header: 'Oldest',
-      // The number an owner acts on: not "he owes me money" but "he has owed
-      // me this for 74 days".
+      // The number an owner acts on: not "he owes me money" but "he has owed me this for 74
+      // days".
       render: (c) => c.oldest,
     },
     {
@@ -168,11 +126,10 @@ export function Credit() {
 
   return (
     <Page className="mb-credit" scroll={false}>
-      {/* **The rail already says Credit** (owner, 2026-08-24: *"there is credit
-          wrtten again at top with 0 beside it why it is there… no need for
-          those all it look s repeated and cluttered"*), so this screen opens
-          with the two things you do on it: find somebody, and add somebody.
-          The search sits where the button was; the button is the panel's. */}
+      {/*
+        The rail already says Credit, so this screen opens with the two things you do on it:
+        find somebody, and add somebody.
+      */}
       <Toolbar>
         <div className="mb-credit__find">
           <SearchField
@@ -191,8 +148,8 @@ export function Credit() {
         panel={
           editing ? (
             <EditCustomer
-              // A different customer is a different form — remounted, so the
-              // boxes are not left holding the last one's name.
+              // A different customer is a different form — remounted, so the boxes are not left
+              // holding the last one's name.
               key={editing.id}
               customer={editing}
               onClose={() => setEditing(null)}
@@ -484,13 +441,7 @@ function EditCustomer({
   );
 }
 
-/**
- * **Putting a bill on somebody's account**, from the billing screen.
- *
- * Exported because that is where a credit sale happens — mid-bill, with the
- * customer standing there — and a screen that made a cashier leave the bill to
- * find a customer would be a screen nobody used.
- */
+/** Putting a bill on somebody's account, from the billing screen. */
 export function PutOnAccount({
   onClose,
   onDone,

@@ -4,7 +4,7 @@ import type { LeaveRequestView } from "./LeaveRequestView";
 
 export type LeaveView = { 
 /**
- * Whose balances these are. Empty on the shop-wide view.
+ * Whose balances these are.
  */
 staffId: string, balances: Array<LeaveBalanceView>, requests: Array<LeaveRequestView>, 
 /**

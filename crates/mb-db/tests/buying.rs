@@ -1,17 +1,3 @@
-//! **Buying** — P26, scope 4.5 and 4.8.
-//!
-//! The tests that decide whether this shipped or only compiled. Three of them
-//! matter more than the rest:
-//!
-//! * **T5 — the four ledgers reconcile.** One cash delivery moves the shelf, the
-//!   supplier's balance and the drawer, and writes **no `expenses` row and no
-//!   `cash_movements` row** (D120). One rupee, one row.
-//! * **T8 — the count posts a DELTA, not a SET** (D127). Count on Sunday night,
-//!   take a delivery on Monday morning, approve at nine. A test that asserts the
-//!   shelf equals the counted figure here is asserting the bug.
-//! * **T12 — a return leaves at the cost it arrived at** (D126), which is D113
-//!   pointing the other way.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -25,9 +11,8 @@ use common::Scratch;
 use common::{OUTLET, STAFF_SQL};
 use mb_core::purchase::{Entry, Invoice};
 use mb_core::{
-    Registration,
-    BusinessDay, Dimension, MaterialId, Money, Pack, Qty, RoundingMode, StaffId, Timestamp,
-    UnitCost,
+    BusinessDay, Dimension, MaterialId, Money, Pack, Qty, Registration, RoundingMode, StaffId,
+    Timestamp, UnitCost,
 };
 use mb_db::repo::buying::{self, PurchaseKind, Supplier, SupplierPayment};
 use mb_db::repo::stock::Material;
@@ -41,9 +26,13 @@ fn day() -> BusinessDay {
     BusinessDay::from_days_since_epoch(20_700)
 }
 
-/// What somebody wrote on the sheet: the truth and the label (D109).
+/// What somebody wrote on the sheet: the truth and the label.
 fn written(base: Qty, typed: Qty, unit: &str) -> mb_db::repo::counts::Written {
-    mb_db::repo::counts::Written { base, typed, unit: unit.to_owned() }
+    mb_db::repo::counts::Written {
+        base,
+        typed,
+        unit: unit.to_owned(),
+    }
 }
 
 fn grams(n: i64) -> Qty {
@@ -138,10 +127,6 @@ fn deliver(
     .expect("record the delivery")
 }
 
-// ===========================================================================
-// T1 and T2 — units and the weighted average, hand-computed
-// ===========================================================================
-
 #[test]
 fn t1_two_bags_land_on_the_shelf_at_forty_rupees_a_kilo() {
     let (_scratch, db) = shop_with_materials();
@@ -158,11 +143,15 @@ fn t1_two_bags_land_on_the_shelf_at_forty_rupees_a_kilo() {
         let repos = Repos::new(tx);
         // 2 bags × 25 kg = 50,000 g.
         assert_eq!(
-            repos.stock().balance(OUTLET, &MaterialId::new("mat_rice"))?,
+            repos
+                .stock()
+                .balance(OUTLET, &MaterialId::new("mat_rice"))?,
             grams(50_000)
         );
         // ₹2,000 for 50 kg is ₹40 a kilo, which is 4000 paise per 1,000 g.
-        let material = repos.stock().material(OUTLET, &MaterialId::new("mat_rice"))?;
+        let material = repos
+            .stock()
+            .material(OUTLET, &MaterialId::new("mat_rice"))?;
         assert_eq!(
             material.expect("rice").avg_cost,
             UnitCost::from_paise_per_thousand(4_000)
@@ -174,8 +163,8 @@ fn t1_two_bags_land_on_the_shelf_at_forty_rupees_a_kilo() {
 
 #[test]
 fn t1_the_row_still_reads_two_bags_after_the_bag_size_changes() {
-    // **D109.** Store only "2 bags" and correcting the bag size rewrites last
-    // month; store only base units and the buy list says "bring 50,000 g".
+    // Store only "2 bags" and correcting the bag size rewrites last month; store only base
+    // units and the buy list says "bring 50,000 g".
     let (_scratch, db) = shop_with_materials();
     deliver(
         &db,
@@ -189,7 +178,9 @@ fn t1_the_row_still_reads_two_bags_after_the_bag_size_changes() {
     db.transaction(|tx| {
         let mut changed = rice();
         changed.packs = vec![("bag".to_owned(), grams(26_000))];
-        Repos::new(tx).stock().save_material(OUTLET, &changed, at(2))
+        Repos::new(tx)
+            .stock()
+            .save_material(OUTLET, &changed, at(2))
     })
     .expect("change the bag size");
 
@@ -201,7 +192,9 @@ fn t1_the_row_still_reads_two_bags_after_the_bag_size_changes() {
         assert_eq!(purchase.lines[0].base_qty, grams(50_000));
         // And the shelf did not move because a pack was renamed.
         assert_eq!(
-            repos.stock().balance(OUTLET, &MaterialId::new("mat_rice"))?,
+            repos
+                .stock()
+                .balance(OUTLET, &MaterialId::new("mat_rice"))?,
             grams(50_000)
         );
         Ok(())
@@ -211,24 +204,38 @@ fn t1_the_row_still_reads_two_bags_after_the_bag_size_changes() {
 
 #[test]
 fn t2_the_weighted_average_is_exact_across_a_sequence() {
-    // Hand-computed, step by step, and asserted against the arithmetic rather
-    // than against what the code happened to produce:
-    //
-    //   2 bags at ₹1,000  ->  50 kg, ₹2,000            -> ₹40.00 a kilo
-    //   1 bag  at ₹1,300  ->  75 kg, ₹3,300            -> ₹44.00 a kilo
-    //   sell 25 kg        ->  50 kg, cost unchanged    -> ₹44.00 a kilo
-    //   1 bag  at ₹1,000  ->  75 kg, (50×44 + 25×40)/75 -> ₹42.666… a kilo
+    // Hand-computed, step by step, and asserted against the arithmetic rather than against what
+    // the code happened to produce:.
     let (_scratch, db) = shop_with_materials();
     let mat = [(MaterialId::new("mat_rice"), "bag".to_owned())];
 
-    deliver(&db, "pur_1", &mat, &invoice(vec![line(2, 0, rupees(1_000), bag())]), day(), at(1));
-    assert_eq!(avg_cost(&db, "mat_rice"), UnitCost::from_paise_per_thousand(4_000));
+    deliver(
+        &db,
+        "pur_1",
+        &mat,
+        &invoice(vec![line(2, 0, rupees(1_000), bag())]),
+        day(),
+        at(1),
+    );
+    assert_eq!(
+        avg_cost(&db, "mat_rice"),
+        UnitCost::from_paise_per_thousand(4_000)
+    );
 
-    deliver(&db, "pur_2", &mat, &invoice(vec![line(1, 0, rupees(1_300), bag())]), day(), at(2));
-    assert_eq!(avg_cost(&db, "mat_rice"), UnitCost::from_paise_per_thousand(4_400));
+    deliver(
+        &db,
+        "pur_2",
+        &mat,
+        &invoice(vec![line(1, 0, rupees(1_300), bag())]),
+        day(),
+        at(2),
+    );
+    assert_eq!(
+        avg_cost(&db, "mat_rice"),
+        UnitCost::from_paise_per_thousand(4_400)
+    );
 
-    // Twenty-five kilos leave as wastage. **A withdrawal does not move an
-    // average** — it is the same goods at the same price.
+    // Twenty-five kilos leave as wastage.
     db.transaction(|tx| {
         let movement = mb_db::repo::stock::Movement::new(
             "mov_waste",
@@ -241,14 +248,25 @@ fn t2_the_weighted_average_is_exact_across_a_sequence() {
         Repos::new(tx).stock().record(OUTLET, &movement)
     })
     .expect("waste some rice");
-    assert_eq!(avg_cost(&db, "mat_rice"), UnitCost::from_paise_per_thousand(4_400));
+    assert_eq!(
+        avg_cost(&db, "mat_rice"),
+        UnitCost::from_paise_per_thousand(4_400)
+    );
 
-    deliver(&db, "pur_3", &mat, &invoice(vec![line(1, 0, rupees(1_000), bag())]), day(), at(4));
-    // (50,000 × 4400 + 25,000 × 4000) ÷ 75,000 = 4266.66… , rounded once.
-    assert_eq!(avg_cost(&db, "mat_rice"), UnitCost::from_paise_per_thousand(4_267));
+    deliver(
+        &db,
+        "pur_3",
+        &mat,
+        &invoice(vec![line(1, 0, rupees(1_000), bag())]),
+        day(),
+        at(4),
+    );
+    // (50,000 × 4400 + 25,000 × 4000) ÷ 75,000 = 4266.66…, rounded once.
+    assert_eq!(
+        avg_cost(&db, "mat_rice"),
+        UnitCost::from_paise_per_thousand(4_267)
+    );
 
-    // **D114 still holds with purchases in it**: rebuilding from the ledger
-    // leaves every balance identical.
     let before = balance(&db, "mat_rice");
     db.transaction(|tx| Repos::new(tx).stock().rebuild_balances(OUTLET, at(5)))
         .expect("rebuild");
@@ -267,14 +285,17 @@ fn avg_cost(db: &Db, material: &str) -> UnitCost {
 }
 
 fn balance(db: &Db, material: &str) -> Qty {
-    db.read_transaction(|tx| Repos::new(tx).stock().balance(OUTLET, &MaterialId::new(material)))
-        .expect("read the balance")
+    db.read_transaction(|tx| {
+        Repos::new(tx)
+            .stock()
+            .balance(OUTLET, &MaterialId::new(material))
+    })
+    .expect("read the balance")
 }
 
 #[test]
 fn t3_a_free_bag_reaches_the_shelf_and_lowers_the_cost() {
-    // **D123 — the free bag is a DENOMINATOR.** Eleven bags arrived and ₹10,000
-    // was paid, so a kilo cost ₹36.36 and not ₹40.
+    // The free bag is a DENOMINATOR.
     let (_scratch, db) = shop_with_materials();
     deliver(
         &db,
@@ -285,12 +306,13 @@ fn t3_a_free_bag_reaches_the_shelf_and_lowers_the_cost() {
         at(1),
     );
     assert_eq!(balance(&db, "mat_rice"), grams(275_000));
-    assert_eq!(avg_cost(&db, "mat_rice"), UnitCost::from_paise_per_thousand(3_636));
+    assert_eq!(
+        avg_cost(&db, "mat_rice"),
+        UnitCost::from_paise_per_thousand(3_636)
+    );
 }
 
-// ===========================================================================
-// T5 — the four ledgers reconcile
-// ===========================================================================
+// The four ledgers reconcile.
 
 #[test]
 fn t5_a_cash_delivery_moves_the_shelf_the_ledger_and_the_drawer_and_nothing_else() {
@@ -326,17 +348,25 @@ fn t5_a_cash_delivery_moves_the_shelf_the_ledger_and_the_drawer_and_nothing_else
     db.read_transaction(|tx| {
         let repos = Repos::new(tx);
         // The shelf moved.
-        assert_eq!(repos.stock().balance(OUTLET, &MaterialId::new("mat_rice"))?, grams(50_000));
+        assert_eq!(
+            repos
+                .stock()
+                .balance(OUTLET, &MaterialId::new("mat_rice"))?,
+            grams(50_000)
+        );
         // Nothing is owed.
         assert_eq!(repos.buying().supplier_balance("sup_metro")?, Money::ZERO);
         // The drawer paid it out.
         assert_eq!(repos.buying().cash_paid_out(OUTLET, day())?, rupees(2_000));
 
-        // **And there is no second row for the same fact** (D120). This is the
-        // assertion that stops somebody "helpfully" also writing an expense.
+        // And there is no second row for the same fact.
         let expenses: i64 = tx.query_row("SELECT count(*) FROM expenses", [], |r| r.get(0))?;
         let cash: i64 = tx.query_row("SELECT count(*) FROM cash_movements", [], |r| r.get(0))?;
-        assert_eq!((expenses, cash), (0, 0), "a purchase writes neither of these");
+        assert_eq!(
+            (expenses, cash),
+            (0, 0),
+            "a purchase writes neither of these"
+        );
         Ok(())
     })
     .expect("read it back");
@@ -362,10 +392,6 @@ fn t5_a_credit_delivery_leaves_the_drawer_alone_and_the_balance_owing() {
     })
     .expect("read it back");
 }
-
-// ===========================================================================
-// T6 and T7 — the ledger is the balance, and ageing runs from the due date
-// ===========================================================================
 
 #[test]
 fn t6_the_supplier_balance_is_always_the_sum_of_its_rows() {
@@ -427,7 +453,10 @@ fn t6_the_supplier_balance_is_always_the_sum_of_its_rows() {
         .and_then(|m| m.sub(rupees(200)))
         .expect("adds");
     db.read_transaction(|tx| {
-        assert_eq!(Repos::new(tx).buying().supplier_balance("sup_metro")?, expected);
+        assert_eq!(
+            Repos::new(tx).buying().supplier_balance("sup_metro")?,
+            expected
+        );
         Ok(())
     })
     .expect("read it back");
@@ -435,9 +464,7 @@ fn t6_the_supplier_balance_is_always_the_sum_of_its_rows() {
 
 #[test]
 fn t7_a_purchase_ages_from_its_due_day_and_not_its_invoice_day() {
-    // **D131** — a payment term is a shift of the date, not a second algorithm.
-    // Metro's terms are 15 days, so a delivery on day 20,700 falls due on
-    // 20,715: still "current" on the 18th and overdue on the 20th.
+    // A payment term is a shift of the date, not a second algorithm.
     let (_scratch, db) = shop_with_materials();
     deliver(
         &db,
@@ -461,12 +488,13 @@ fn t7_a_purchase_ages_from_its_due_day_and_not_its_invoice_day() {
         .expect("age the account")
     };
 
-    // Fourteen days after the invoice is one day BEFORE it is due, and the
-    // ageing says so with a negative number — *"due tomorrow"*. That is the
-    // difference a payment term makes and the reason D131 shifts the DATE
-    // rather than adding a second algorithm: a customer's sale is never in the
-    // future, and a supplier's invoice usually is.
-    assert_eq!(ageing_on(14).oldest_days, Some(-1), "due tomorrow, not overdue");
+    // Fourteen days after the invoice is one day BEFORE it is due, and the ageing says so with
+    // a negative number — "due tomorrow".
+    assert_eq!(
+        ageing_on(14).oldest_days,
+        Some(-1),
+        "due tomorrow, not overdue"
+    );
     // Twenty days after the invoice is five days past due.
     assert_eq!(ageing_on(20).oldest_days, Some(5));
 
@@ -474,16 +502,16 @@ fn t7_a_purchase_ages_from_its_due_day_and_not_its_invoice_day() {
     db.transaction(|tx| {
         let mut cash_and_carry = metro();
         cash_and_carry.terms_days = 0;
-        Repos::new(tx).buying().save_supplier(OUTLET, &cash_and_carry, at(30))
+        Repos::new(tx)
+            .buying()
+            .save_supplier(OUTLET, &cash_and_carry, at(30))
     })
     .expect("change the terms");
-    // **And last month does not move**, because `due_day` was frozen at entry.
+    // And last month does not move, because `due_day` was frozen at entry.
     assert_eq!(ageing_on(20).oldest_days, Some(5));
 }
 
-// ===========================================================================
-// T12 — cancel, and a return at the cost it arrived at
-// ===========================================================================
+// Cancel, and a return at the cost it arrived at.
 
 #[test]
 fn t12_cancelling_a_delivery_negates_it_at_the_original_cost() {
@@ -511,10 +539,16 @@ fn t12_cancelling_a_delivery_negates_it_at_the_original_cost() {
     assert_eq!(balance(&db, "mat_rice"), Qty::ZERO);
     db.read_transaction(|tx| {
         let repos = Repos::new(tx);
-        let purchase = repos.buying().purchase(OUTLET, "pur_1")?.expect("still on file");
-        // **D47** — the paper is still there, marked, and the reason with it.
+        let purchase = repos
+            .buying()
+            .purchase(OUTLET, "pur_1")?
+            .expect("still on file");
+        // The paper is still there, marked, and the reason with it.
         assert!(purchase.cancelled.is_some());
-        assert_eq!(purchase.cancelled.expect("cancelled").reason, "Entered twice");
+        assert_eq!(
+            purchase.cancelled.expect("cancelled").reason,
+            "Entered twice"
+        );
         // And it is out of the supplier's ledger.
         assert_eq!(repos.buying().supplier_balance("sup_metro")?, Money::ZERO);
         Ok(())
@@ -524,24 +558,40 @@ fn t12_cancelling_a_delivery_negates_it_at_the_original_cost() {
 
 #[test]
 fn t12_a_return_leaves_at_what_those_goods_cost_when_they_came() {
-    // **D126, which is D113 pointing the other way.** Two bags come back next
-    // week, after the price has risen. They must take out ₹40 a kilo, not the
-    // new average — otherwise the value of everything still on the shelf
-    // silently changes.
     let (_scratch, db) = shop_with_materials();
     let mat = [(MaterialId::new("mat_rice"), "bag".to_owned())];
 
-    let first = deliver(&db, "pur_1", &mat, &invoice(vec![line(10, 0, rupees(1_000), bag())]), day(), at(1));
-    deliver(&db, "pur_2", &mat, &invoice(vec![line(10, 0, rupees(1_500), bag())]), day(), at(2));
+    let first = deliver(
+        &db,
+        "pur_1",
+        &mat,
+        &invoice(vec![line(10, 0, rupees(1_000), bag())]),
+        day(),
+        at(1),
+    );
+    deliver(
+        &db,
+        "pur_2",
+        &mat,
+        &invoice(vec![line(10, 0, rupees(1_500), bag())]),
+        day(),
+        at(2),
+    );
     // (250,000 × 4000 + 250,000 × 6000) ÷ 500,000 = 5000 paise per kilo.
-    assert_eq!(avg_cost(&db, "mat_rice"), UnitCost::from_paise_per_thousand(5_000));
+    assert_eq!(
+        avg_cost(&db, "mat_rice"),
+        UnitCost::from_paise_per_thousand(5_000)
+    );
 
     let original_cost = first.lines[0].landed_unit_cost;
     assert_eq!(original_cost, UnitCost::from_paise_per_thousand(4_000));
 
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        let supplier = repos.buying().supplier(OUTLET, "sup_metro")?.expect("on file");
+        let supplier = repos
+            .buying()
+            .supplier(OUTLET, "sup_metro")?
+            .expect("on file");
         let mut back = buying::draft(
             "pur_ret_1",
             &supplier,
@@ -563,14 +613,22 @@ fn t12_a_return_leaves_at_what_those_goods_cost_when_they_came() {
     db.read_transaction(|tx| {
         let repos = Repos::new(tx);
         // Twenty bags in, two back out.
-        assert_eq!(repos.stock().balance(OUTLET, &MaterialId::new("mat_rice"))?, grams(450_000));
+        assert_eq!(
+            repos
+                .stock()
+                .balance(OUTLET, &MaterialId::new("mat_rice"))?,
+            grams(450_000)
+        );
         // The movement is valued at ₹40 a kilo — 2 bags × 25 kg × ₹40 = ₹2,000.
         let value: i64 = tx.query_row(
             "SELECT total_cost FROM stock_movements WHERE id = 'mov_pur_ret_1_1'",
             [],
             |r| r.get(0),
         )?;
-        assert_eq!(value, -200_000, "the goods leave at what they cost coming in");
+        assert_eq!(
+            value, -200_000,
+            "the goods leave at what they cost coming in"
+        );
         // Eight of the original ten are still returnable.
         assert_eq!(repos.buying().returnable("pur_1", 1)?, grams(200_000));
         Ok(())
@@ -578,21 +636,8 @@ fn t12_a_return_leaves_at_what_those_goods_cost_when_they_came() {
     .expect("read it back");
 }
 
-// ===========================================================================
-// T8 and T9 — the count
-// ===========================================================================
-
 #[test]
 fn t8_the_count_posts_a_delta_so_mondays_delivery_survives() {
-    // **D127, and the reason this decision exists.**
-    //
-    // Sunday 11 pm: the book says 12 kg, the shelf holds 10.
-    // Monday  8 am: 25 kg arrives.
-    // Monday  9 am: the owner approves Sunday's count.
-    //
-    // The shelf must then hold 33 kg — 10 counted plus 25 delivered — and NOT
-    // the 10 kg a "set the balance" implementation would leave. A test that
-    // asserts 10 here is asserting the bug.
     let (_scratch, db) = shop_with_materials();
     db.transaction(|tx| {
         let movement = mb_db::repo::stock::Movement::new(
@@ -611,7 +656,9 @@ fn t8_the_count_posts_a_delta_so_mondays_delivery_survives() {
     // Sunday night.
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        repos.counts().open(OUTLET, "cnt_1", "Store", day(), at(2), None)?;
+        repos
+            .counts()
+            .open(OUTLET, "cnt_1", "Store", day(), at(2), None)?;
         repos.counts().record_line(
             OUTLET,
             "cnt_1",
@@ -648,7 +695,7 @@ fn t8_the_count_posts_a_delta_so_mondays_delivery_survives() {
         .expect("approve the count");
     assert_eq!(moved, 1);
 
-    // 37 − 2 = 35 kg. The delivery survived; only the counted difference moved.
+    // 37 − 2 = 35 kg.
     assert_eq!(balance(&db, "mat_paneer"), grams(35_000));
 
     db.read_transaction(|tx| {
@@ -657,9 +704,7 @@ fn t8_the_count_posts_a_delta_so_mondays_delivery_survives() {
         // The line still shows the book as it was at 11 pm on Sunday.
         assert_eq!(count.lines[0].book_qty, grams(12_000));
         assert_eq!(count.lines[0].variance_qty, grams(-2_000));
-        // Valued at cost: 2 kg of paneer at ₹400 a kilo is ₹800 short — and
-        // **the rupee figure is the one an owner reads**, because "2 kg" is a
-        // number nobody acts on.
+        // Valued at cost: 2 kg of paneer at ₹400 a kilo is ₹800 short.
         assert_eq!(count.lines[0].variance_value, rupees(-800));
         // And the adjustment posted is the variance, not the counted figure.
         let adjustment: i64 = tx.query_row(
@@ -668,7 +713,6 @@ fn t8_the_count_posts_a_delta_so_mondays_delivery_survives() {
             |r| r.get(0),
         )?;
         assert_eq!(adjustment, -2_000_000, "the delta, never the count");
-        // **D115 stops being 'never' for this material.**
         assert!(
             repos
                 .stock()
@@ -687,7 +731,9 @@ fn t9_an_approved_count_is_sealed_and_a_second_open_one_is_refused() {
     let (_scratch, db) = shop_with_materials();
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        repos.counts().open(OUTLET, "cnt_1", "Store", day(), at(1), None)?;
+        repos
+            .counts()
+            .open(OUTLET, "cnt_1", "Store", day(), at(1), None)?;
         repos.counts().record_line(
             OUTLET,
             "cnt_1",
@@ -699,15 +745,21 @@ fn t9_an_approved_count_is_sealed_and_a_second_open_one_is_refused() {
     })
     .expect("count something");
 
-    // **D129** — one open count per location, and the refusal names the first.
+    // One open count per location, and the refusal names the first.
     let second = db.transaction(|tx| {
-        Repos::new(tx).counts().open(OUTLET, "cnt_2", "Store", day(), at(3), None)
+        Repos::new(tx)
+            .counts()
+            .open(OUTLET, "cnt_2", "Store", day(), at(3), None)
     });
     let message = second.expect_err("a second count is refused").to_string();
     assert!(message.contains("already open"), "{message}");
 
-    db.transaction(|tx| Repos::new(tx).counts().approve(OUTLET, "cnt_1", at(4), day(), None))
-        .expect("approve");
+    db.transaction(|tx| {
+        Repos::new(tx)
+            .counts()
+            .approve(OUTLET, "cnt_1", at(4), day(), None)
+    })
+    .expect("approve");
 
     // Sealed: no more lines, no second approval, no giving up on it.
     let edited = db.transaction(|tx| {
@@ -721,40 +773,59 @@ fn t9_an_approved_count_is_sealed_and_a_second_open_one_is_refused() {
     });
     assert!(edited.is_err(), "an approved count cannot be added to");
     assert!(
-        db.transaction(|tx| Repos::new(tx).counts().approve(OUTLET, "cnt_1", at(6), day(), None))
+        db.transaction(|tx| Repos::new(tx)
+            .counts()
+            .approve(OUTLET, "cnt_1", at(6), day(), None))
             .is_err(),
         "an approved count cannot be approved twice"
     );
     assert!(
-        db.transaction(|tx| Repos::new(tx).counts().abandon(OUTLET, "cnt_1", "no", at(7)))
+        db.transaction(|tx| Repos::new(tx)
+            .counts()
+            .abandon(OUTLET, "cnt_1", "no", at(7)))
             .is_err(),
         "an approved count cannot be given up on"
     );
 
     // And once the first is finished, a second may start.
-    db.transaction(|tx| Repos::new(tx).counts().open(OUTLET, "cnt_2", "Store", day(), at(8), None))
-        .expect("a second count is allowed now");
+    db.transaction(|tx| {
+        Repos::new(tx)
+            .counts()
+            .open(OUTLET, "cnt_2", "Store", day(), at(8), None)
+    })
+    .expect("a second count is allowed now");
 }
 
 #[test]
 fn t9_a_count_is_never_deleted_and_giving_up_needs_a_reason() {
     let (_scratch, db) = shop_with_materials();
-    db.transaction(|tx| Repos::new(tx).counts().open(OUTLET, "cnt_1", "Store", day(), at(1), None))
-        .expect("open");
+    db.transaction(|tx| {
+        Repos::new(tx)
+            .counts()
+            .open(OUTLET, "cnt_1", "Store", day(), at(1), None)
+    })
+    .expect("open");
 
     assert!(
-        db.transaction(|tx| Repos::new(tx).counts().abandon(OUTLET, "cnt_1", "   ", at(2)))
+        db.transaction(|tx| Repos::new(tx)
+            .counts()
+            .abandon(OUTLET, "cnt_1", "   ", at(2)))
             .is_err(),
         "a blank reason is refused"
     );
 
     db.transaction(|tx| {
-        Repos::new(tx).counts().abandon(OUTLET, "cnt_1", "Ran out of time", at(3))
+        Repos::new(tx)
+            .counts()
+            .abandon(OUTLET, "cnt_1", "Ran out of time", at(3))
     })
     .expect("give up");
 
     db.read_transaction(|tx| {
-        let count = Repos::new(tx).counts().count(OUTLET, "cnt_1")?.expect("still on file");
+        let count = Repos::new(tx)
+            .counts()
+            .count(OUTLET, "cnt_1")?
+            .expect("still on file");
         assert_eq!(count.state, mb_db::repo::counts::CountState::Abandoned);
         assert_eq!(count.ended_reason.as_deref(), Some("Ran out of time"));
         Ok(())
@@ -762,9 +833,7 @@ fn t9_a_count_is_never_deleted_and_giving_up_needs_a_reason() {
     .expect("read it back");
 }
 
-// ===========================================================================
-// T11 — both tax worlds
-// ===========================================================================
+// Both tax worlds.
 
 #[test]
 fn t11_the_same_invoice_costs_more_for_a_shop_that_cannot_claim_the_tax() {
@@ -801,9 +870,7 @@ fn t11_the_same_invoice_costs_more_for_a_shop_that_cannot_claim_the_tax() {
     assert!(scheme.lines[0].landed_unit_cost > claiming.lines[0].landed_unit_cost);
 }
 
-// ===========================================================================
-// T13 — a purchase order, and a purchase with no order at all
-// ===========================================================================
+// A purchase order, and a purchase with no order at all.
 
 #[test]
 fn t13_an_order_can_be_received_short_and_a_purchase_needs_no_order() {
@@ -837,12 +904,14 @@ fn t13_an_order_can_be_received_short_and_a_purchase_needs_no_order() {
     })
     .expect("raise an order");
 
-    // Eight arrive, at a higher rate. Both are recorded as they happened; the
-    // screen says so and refuses nothing (D130).
+    // Eight arrive, at a higher rate.
     let mut received = db
         .transaction(|tx| {
             let repos = Repos::new(tx);
-            let supplier = repos.buying().supplier(OUTLET, "sup_metro")?.expect("on file");
+            let supplier = repos
+                .buying()
+                .supplier(OUTLET, "sup_metro")?
+                .expect("on file");
             let mut draft = buying::draft(
                 "pur_1",
                 &supplier,
@@ -859,7 +928,7 @@ fn t13_an_order_can_be_received_short_and_a_purchase_needs_no_order() {
     assert_eq!(balance(&db, "mat_rice"), grams(200_000));
     received.po_id = None;
 
-    // **And a purchase with no order touches nothing PO-shaped.**
+    // And a purchase with no order touches nothing PO-shaped.
     deliver(
         &db,
         "pur_2",
@@ -869,22 +938,19 @@ fn t13_an_order_can_be_received_short_and_a_purchase_needs_no_order() {
         at(3),
     );
     db.read_transaction(|tx| {
-        let plain = Repos::new(tx).buying().purchase(OUTLET, "pur_2")?.expect("on file");
+        let plain = Repos::new(tx)
+            .buying()
+            .purchase(OUTLET, "pur_2")?
+            .expect("on file");
         assert_eq!(plain.po_id, None);
         Ok(())
     })
     .expect("read it back");
 }
 
-// ===========================================================================
-// T14 — the profit statement, and the double count named out loud
-// ===========================================================================
+// The profit statement, and the double count named out loud.
 
 /// The worked month, in ordinary numbers.
-///
-/// **This is audit B14's answer.** v1 subtracted expenses from revenue and
-/// called the result profit; it never knew what the food cost, so the number it
-/// printed was not wrong by a percentage — it was a different quantity.
 #[test]
 fn t14_the_profit_statement_reconciles_and_names_the_double_count() {
     let scratch = Scratch::new("profit");
@@ -895,8 +961,8 @@ fn t14_the_profit_statement_reconciles_and_names_the_double_count() {
     db.transaction(|tx| {
         let repos = Repos::new(tx);
         let mut rice = rice();
-        // The category matches an expense category, which is how the double
-        // count is found later.
+        // The category matches an expense category, which is how the double count is found
+        // later.
         rice.category = "Groceries".to_owned();
         repos.stock().save_material(OUTLET, &rice, at(0))?;
         repos.buying().save_supplier(OUTLET, &metro(), at(0))?;
@@ -927,11 +993,10 @@ fn t14_the_profit_statement_reconciles_and_names_the_double_count() {
     );
 
     // Ten dosas at ₹100 each, GST 5% exclusive: ₹1,000 of goods, ₹50 of tax.
-    // Each takes 200 g of rice, so 2 kg leaves at ₹40 a kilo = ₹80 of food.
     settle_one(&db, "ord_1", 10);
 
-    // ₹500 of running costs, of which ₹300 is typed into a category the shop
-    // also buys through Purchases.
+    // ₹500 of running costs, of which ₹300 is typed into a category the shop also buys through
+    // Purchases.
     db.transaction(|tx| {
         let repos = Repos::new(tx);
         for (id, category, amount) in [
@@ -973,7 +1038,7 @@ fn t14_the_profit_statement_reconciles_and_names_the_double_count() {
     assert_eq!(profit.gross_sales, rupees(1_050));
     assert_eq!(profit.tax, rupees(50));
     assert_eq!(profit.net_sales, rupees(1_000));
-    // **The rice bought for ₹4,000 is not a cost.** Only the 2 kg eaten is.
+    // The rice bought for ₹4,000 is not a cost.
     assert_eq!(profit.food_used, rupees(80));
     assert_eq!(profit.cost_of_food, rupees(80));
     assert_eq!(profit.gross_margin, rupees(920));
@@ -981,7 +1046,7 @@ fn t14_the_profit_statement_reconciles_and_names_the_double_count() {
     // Running costs are the expenses, and the purchase is not among them.
     assert_eq!(profit.running_costs, rupees(500));
     assert_eq!(profit.left, rupees(420));
-    // **And the double count is named**, not assumed away.
+    // And the double count is named, not assumed away.
     assert_eq!(profit.double_counted, rupees(300));
 }
 
@@ -1004,7 +1069,13 @@ fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
         prep_minutes: None,
     };
     let mut cart = Cart::new();
-    cart.add(snapshot, Qty::from_whole(qty).expect("in range"), None, vec![]).expect("adds");
+    cart.add(
+        snapshot,
+        Qty::from_whole(qty).expect("in range"),
+        None,
+        vec![],
+    )
+    .expect("adds");
     let bill = compute_bill(
         BillInput::new(&cart, Registration::Regular)
             .with_order_type(OrderType::Parcel)
@@ -1027,24 +1098,33 @@ fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
     draft.core.cart = cart;
     let till = mb_db::Till::new(OUTLET, common::TERMINAL);
     let open = mb_db::open_draft(db, till, draft).expect("opened");
-    mb_db::settle(db, till, open, bill, settlement, at(7), StaffId::new("staff_1"))
-        .expect("settled")
+    mb_db::settle(
+        db,
+        till,
+        open,
+        bill,
+        settlement,
+        at(7),
+        StaffId::new("staff_1"),
+    )
+    .expect("settled")
 }
 
-// ===========================================================================
-// Every new report runs — the test that catches a typo in a hand-written query
-// ===========================================================================
+// Every new report runs — the test that catches a typo in a hand-written query.
 
 #[test]
 fn every_buying_report_runs_on_a_real_shop() {
-    // SQL is not checked by the compiler, so a column that does not exist
-    // compiles and fails on a customer's machine. This walks all seven.
+    // SQL is not checked by the compiler, so a column that does not exist compiles and fails on
+    // a customer's machine.
     let (_scratch, db) = shop_with_materials();
     deliver(
         &db,
         "pur_1",
         &[(MaterialId::new("mat_rice"), "bag".to_owned())],
-        &invoice(vec![Entry { tax_rate_bp: 500, ..line(2, 0, rupees(1_000), bag()) }]),
+        &invoice(vec![Entry {
+            tax_rate_bp: 500,
+            ..line(2, 0, rupees(1_000), bag())
+        }]),
         day(),
         at(1),
     );
@@ -1052,13 +1132,18 @@ fn every_buying_report_runs_on_a_real_shop() {
         &db,
         "pur_2",
         &[(MaterialId::new("mat_rice"), "bag".to_owned())],
-        &invoice(vec![Entry { tax_rate_bp: 500, ..line(2, 0, rupees(1_400), bag()) }]),
+        &invoice(vec![Entry {
+            tax_rate_bp: 500,
+            ..line(2, 0, rupees(1_400), bag())
+        }]),
         day(),
         at(2),
     );
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        repos.counts().open(OUTLET, "cnt_1", "Store", day(), at(3), None)?;
+        repos
+            .counts()
+            .open(OUTLET, "cnt_1", "Store", day(), at(3), None)?;
         repos.counts().record_line(
             OUTLET,
             "cnt_1",
@@ -1066,7 +1151,9 @@ fn every_buying_report_runs_on_a_real_shop() {
             &written(grams(99_000), grams(99_000), "g"),
             at(4),
         )?;
-        repos.counts().approve(OUTLET, "cnt_1", at(5), day(), None)?;
+        repos
+            .counts()
+            .approve(OUTLET, "cnt_1", at(5), day(), None)?;
         Ok(())
     })
     .expect("count and approve");
@@ -1079,29 +1166,29 @@ fn every_buying_report_runs_on_a_real_shop() {
 
         let trend = repos.buying().price_trend(OUTLET, from, to)?;
         assert_eq!(trend.len(), 1);
-        // ₹40 then ₹56 a kilo — **plus the 5% this shop cannot claim back**
-        // (D124), so the trend reads ₹42 and ₹58.80. The average is ₹50.40 and
-        // the last delivery is 16.6% above it. **The rise is the finding**, and
-        // the trend follows the LANDED cost because that is what the food
-        // actually cost.
+        // ₹40 then ₹56 a kilo — plus the 5% this shop cannot claim back, so the trend reads ₹42
+        // and ₹58.80. The average is ₹50.40 and the last delivery is 16.6% above it.
         assert_eq!(trend[0].average, UnitCost::from_paise_per_thousand(5_040));
         assert_eq!(trend[0].latest, UnitCost::from_paise_per_thousand(5_880));
         assert_eq!(trend[0].change_bp(), Some(1_666));
 
         assert_eq!(repos.buying().input_credit(OUTLET, from, to)?.len(), 1);
         // The shop is not claiming, so nothing is creditable.
-        assert_eq!(repos.buying().creditable_total(OUTLET, from, to)?, Money::ZERO);
+        assert_eq!(
+            repos.buying().creditable_total(OUTLET, from, to)?,
+            Money::ZERO
+        );
         assert_eq!(repos.buying().outstanding(OUTLET, to)?.len(), 1);
         assert_eq!(repos.counts().variance_history(OUTLET, from, to)?.len(), 1);
-        repos.reports().profit(OUTLET, mb_db::repo::reports::Period::new(from, to))?;
+        repos
+            .reports()
+            .profit(OUTLET, mb_db::repo::reports::Period::new(from, to))?;
         Ok(())
     })
     .expect("every report runs");
 }
 
-// ===========================================================================
-// T15 — the photograph, and a backup that is a folder
-// ===========================================================================
+// The photograph, and a backup that is a folder.
 
 #[test]
 fn t15_a_backup_carries_the_photographs_and_a_verify_catches_a_damaged_one() {
@@ -1115,13 +1202,15 @@ fn t15_a_backup_carries_the_photographs_and_a_verify_catches_a_damaged_one() {
     let backup = mb_db::backup::take(&db, &backup_path, "test").expect("take a backup");
     assert_eq!(backup.manifest.attachments.len(), 1);
     assert!(
-        mb_db::backup::backup_attachments_dir(&backup_path).join("abc123.jpg").exists(),
+        mb_db::backup::backup_attachments_dir(&backup_path)
+            .join("abc123.jpg")
+            .exists(),
         "the photograph is in the backup"
     );
     assert!(mb_db::backup::verify(&backup_path).expect("verify").is_ok());
 
-    // Damage it. **A picture of a ₹40,000 invoice that silently rots is exactly
-    // what a verify exists to find.**
+    // Damage it. A picture of a ₹40,000 invoice that silently rots is exactly what a verify
+    // exists to find.
     std::fs::write(
         mb_db::backup::backup_attachments_dir(&backup_path).join("abc123.jpg"),
         vec![9_u8; 4_000],
@@ -1130,19 +1219,23 @@ fn t15_a_backup_carries_the_photographs_and_a_verify_catches_a_damaged_one() {
     let report = mb_db::backup::verify(&backup_path).expect("verify");
     assert!(!report.is_ok());
     assert_eq!(report.bad_attachments, vec!["abc123.jpg".to_owned()]);
-    assert!(report.summary().contains("photograph"), "{}", report.summary());
+    assert!(
+        report.summary().contains("photograph"),
+        "{}",
+        report.summary()
+    );
 }
 
 #[test]
 fn t15_a_backup_from_before_this_session_still_restores() {
-    // **The compatibility promise in D132.** Customers will hold single-file
-    // backups taken before P26, and a manifest with no `attachment` lines must
-    // restore exactly as it always did.
     let scratch = Scratch::new("oldbackup");
     let db = scratch.open();
     let backup_path = scratch.db_path().with_file_name("old.db");
     let backup = mb_db::backup::take(&db, &backup_path, "test").expect("take a backup");
-    assert!(backup.manifest.attachments.is_empty(), "no photographs, no lines");
+    assert!(
+        backup.manifest.attachments.is_empty(),
+        "no photographs, no lines"
+    );
     assert!(
         !mb_db::backup::backup_attachments_dir(&backup_path).exists(),
         "and no empty folder either"

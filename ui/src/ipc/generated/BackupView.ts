@@ -7,19 +7,15 @@ export type BackupView = {
  */
 folder: string, secondFolder: string, 
 /**
- * Where the shop's live data file is (audit A5), so a support call can
- * ask for one folder.
+ * Where the shop's live data file is, so a support call can ask for one folder.
  */
 database: string, backups: Array<BackupRowView>, 
 /**
- * **The sentence at the top, and it is the whole point of the screen.**
- * "Last backed up this morning, and it was checked." — or the opposite,
- * loudly.
+ * The sentence at the top, and it is the whole point of the screen.
  */
 headline: string, 
 /**
- * `ok`, `warn` or `danger`. Colour is never the only signal (§2), so the
- * headline says it in words too.
+ * `ok`, `warn` or `danger`.
  */
 tone: string, 
 /**

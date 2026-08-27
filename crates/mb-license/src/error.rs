@@ -1,7 +1,4 @@
 //! The one error type this crate hands upwards.
-//!
-//! R3: no silent failure. Every variant here is something a person can be told
-//! about, and `src-tauri/src/words.rs` turns each one into a sentence.
 
 use thiserror::Error;
 
@@ -11,8 +8,7 @@ pub enum LicenceError {
     #[error("{0}")]
     Cloud(#[from] crate::cloud::CloudError),
 
-    /// The snapshot did not verify. **Never fatal** — the counter falls back to
-    /// [`crate::Entitlement::unactivated`] and keeps billing (T13).
+    /// The snapshot did not verify.
     #[error("{0}")]
     Snapshot(#[from] crate::snapshot::VerifyError),
 
@@ -20,10 +16,7 @@ pub enum LicenceError {
     #[error("{0}")]
     Emergency(#[from] crate::emergency::EmergencyError),
 
-    /// A call ran past its deadline. This is D92, and it is deliberately its
-    /// own variant rather than a `Cloud` one: "the server said no" and "the
-    /// server said nothing for eight seconds" are different sentences and lead
-    /// a shopkeeper to different actions.
+    /// A call ran past its deadline.
     #[error("that took too long, so we stopped waiting")]
     Timedout,
 

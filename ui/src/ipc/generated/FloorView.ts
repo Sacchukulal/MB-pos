@@ -5,32 +5,19 @@ import type { TableRowView } from "./TableRowView";
 import type { TableView } from "./TableView";
 
 /**
- * The whole floor in one answer: the tiles, the plan, the numbers, the
- * thresholds that decided the tile states.
+ * The whole floor in one answer: the tiles, the plan, the numbers, the thresholds that decided
+ * the tile states.
  */
 export type FloorView = { tiles: Array<TableView>, sections: Array<SectionView>, tables: Array<TableRowView>, occupancy: OccupancyView, 
 /**
- * How many squares each way. The screen draws the grid from this rather
- * than from a number of its own that could disagree.
+ * How many squares each way.
  */
 grid: number, warnMinutes: number, lateMinutes: number, 
 /**
- * True once ANY table has been placed. False means the section grid is
- * what gets drawn — and that is not a degraded mode: no shop should have
- * to draw a floor plan before it can bill.
+ * True once ANY table has been placed.
  */
 hasLayout: boolean, 
 /**
- * **Whether this person may change the room.**
- *
- * Asked here rather than worked out on the screen, for R8's reason: the
- * rule is `Permission::TablesManage`, every command on this screen already
- * checks it with `guard::require`, and a second copy of it in TypeScript is
- * a second copy that can drift.
- *
- * It is a **courtesy and not the control** — hiding the panel saves a
- * waiter from a row of buttons that can only fail; `guard::require` is
- * what actually refuses, and there is a test that calls the commands
- * without going near this field.
+ * Whether this person may change the room.
  */
 canArrange: boolean, };

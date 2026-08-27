@@ -1,44 +1,4 @@
-//! **Every report, and every one of them groups by the STORED business day.**
-//!
-//! # The finding this module exists to close
-//!
-//! Audit **B1**: the day-wise report bucketed by **UTC** date while the range
-//! filter used local time, *"so the same bill appeared on two different days on
-//! two different screens"*. P03 fixed the cause by storing `business_day` on
-//! the order; this is where every report finally reads it. **There is no
-//! `date(created_at)` anywhere in this file and there must never be one.**
-//!
-//! Audit **B11** is the other one: *"the tax report splits GST 50/50 into
-//! CGST/SGST always. No IGST, no inter-state, no HSN summary, and nothing that
-//! can be filed directly."* [`Reports::tax_by_rate`] sums `bill_lines`, which
-//! are the per-line figures `compute_bill` produced and P05 stored — so the
-//! report cannot disagree with the paper, because it is not doing the sum
-//! again.
-//!
-//! # Why the reports live in mb-db
-//!
-//! Audit **E3**: *"business rules live inside screen files."* What counts as a
-//! sale — settled but not voided, the bill's own total rather than the sum of
-//! its payments, the merged-away order excluded because its food was sold on
-//! another bill (D61) — is a rule, and a rule in a screen is the finding.
-//!
-//! They are not in mb-core either: these are aggregates over stored rows, and
-//! mb-core has no storage.
-//!
-//! # What makes the budgets hold
-//!
-//! `PERFORMANCE.md` R2 is 2.5 s for a year, about 75,000 bills, and §5's rules
-//! R1–R3 are how:
-//!
-//! * every query here is filtered by `(outlet_id, business_day)`, which is
-//!   **`idx_orders_day`** — the index is named in a comment on each query, and
-//!   a query that cannot name its index has not been thought about;
-//! * a report runs on a **reader** connection (P04's `conn.rs` has one writer
-//!   and four readers), so a year-long scan never takes the writer a settle
-//!   needs;
-//! * nothing here is a running total kept somewhere. A running total is a
-//!   second source of truth, and this schema has already refused one of those
-//!   (`customers` has no balance column, D65).
+//! Every report, and every one of them groups by the STORED business day.
 
 use mb_core::{BusinessDay, Money, Qty, Timestamp};
 use rusqlite::Transaction;
@@ -47,10 +7,6 @@ use crate::encode;
 use crate::error::DbError;
 
 /// A stretch of business days, inclusive at both ends.
-///
-/// **Days, not instants.** A report is asked for "this month", and a month is
-/// a set of business days — the moment anything here takes a `Timestamp`, B1
-/// has a way back in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Period {
     pub from: BusinessDay,
@@ -74,16 +30,7 @@ impl Period {
         self.from.days_until(self.to) + 1
     }
 
-    /// **The same number of days, ending the day before this one starts.**
-    ///
-    /// Scope 10.9, audit **G2**: *"today vs yesterday, this month vs last —
-    /// the phone app has it, the till does not."*
-    ///
-    /// Deliberately NOT "the previous calendar month". A seven-day window
-    /// compares against the seven days before it, and a single day against the
-    /// day before — which is what an owner means by "up 8% on last Tuesday",
-    /// and which is right across a month end and a leap year without knowing
-    /// anything about either (T9).
+    /// The same number of days, ending the day before this one starts.
     #[must_use]
     pub fn previous(self) -> Period {
         let length = self.days();
@@ -96,25 +43,16 @@ impl Period {
 }
 
 /// What a sales report can be grouped by.
-///
-/// One query with a different `GROUP BY`, because that is what these reports
-/// genuinely are. Eight hand-written queries would be eight places for the
-/// definition of "a sale" to drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SalesBy {
     Day,
-    /// Audit **G4** — the peak hour, which the phone app had and the till did
-    /// not. The hour is taken from `settled_at` in **local** time, because a
-    /// shop asks "when is my rush?" about the clock on its wall.
+    /// The peak hour, which the phone app had and the till did not.
     Hour,
     OrderType,
     PaymentMode,
     Cashier,
     Section,
-    /// **P27 — which till took the money.** A shop with two counters asks this
-    /// on day one: *"is the second one paying for itself?"* Grouped on the
-    /// STORED `terminal_id`, so a bill forwarded from a secondary counts to the
-    /// till that wrote it and not to the one that received it (D136).
+    /// Which till took the money.
     Terminal,
     Item,
     Category,
@@ -125,27 +63,24 @@ pub enum SalesBy {
 pub struct Bucket {
     /// The stable key: a staff id, a rate in basis points, an hour number.
     pub key: String,
-    /// What a person reads. For a cashier this is their name, resolved by the
-    /// query rather than by the caller — a report that hands back ids and
-    /// expects the screen to join them is a screen writing SQL by post.
+    /// What a person reads.
     pub label: String,
     pub bills: i64,
-    /// The bill's own grand total. **Not the sum of its payments** — an
-    /// overpayment is change handed back, and change is not takings.
+    /// The bill's own grand total.
     pub gross: Money,
     pub discount: Money,
     pub tax: Money,
-    /// Only for item and category reports; `None` elsewhere, because a
-    /// quantity of "dine-in" is not a thing.
+    /// Only for item and category reports; `None` elsewhere, because a quantity of "dine-in" is
+    /// not a thing.
     pub qty: Option<Qty>,
 }
 
-/// One rate in the rate-wise tax report — **audit B11's answer.**
+/// One rate in the rate-wise tax report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaxBucket {
     pub rate_bp: i64,
-    /// `gst`, `exempt`, `outside_gst` or `untaxed` — a rate means a different
-    /// thing in each, so the bucket carries the kind rather than the rate alone.
+    /// `gst`, `exempt`, `outside_gst` or `untaxed` — a rate means a different thing in each, so
+    /// the bucket carries the kind rather than the rate alone.
     pub tax_kind: String,
     pub taxable: Money,
     pub cgst: Money,
@@ -166,22 +101,19 @@ pub struct HsnBucket {
     pub igst: Money,
 }
 
-/// One person's tips over a period — P29, scope 8.5.
+/// One person's tips over a period.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TipRow {
     pub who: String,
-    /// **Already in the drawer.** A cash tip is physically there, which is why
-    /// `cash_position` counts `amount + tip` — and why a shop paying tips out
-    /// at close needs this figure apart from the one below.
+    /// Already in the drawer.
     pub cash: Money,
-    /// Card, UPI, or on an account. Owed to the person, not in the till.
+    /// Card, UPI, or on an account.
     pub other: Money,
     pub total: Money,
     pub bills: i64,
 }
 
-/// One line of the control report: something a person did that an owner may
-/// want to ask about.
+/// One line of the control report: something a person did that an owner may want to ask about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlRow {
     pub business_day: BusinessDay,
@@ -194,16 +126,15 @@ pub struct ControlRow {
     pub amount: Money,
 }
 
-/// One item, with what it earned and what it cost — scope 10.3, audit **G5**.
+/// One item, with what it earned and what it cost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemMargin {
     pub item_id: String,
     pub name: String,
     pub qty: Qty,
     pub revenue: Money,
-    /// **`None` means the cost price is not known**, and the report says so
-    /// rather than treating the item as pure margin. An owner who reads 100%
-    /// margin on a dish they have not costed will make a decision on it.
+    /// `None` means the cost price is not known, and the report says so rather than treating
+    /// the item as pure margin.
     pub cost: Option<Money>,
 }
 
@@ -218,19 +149,10 @@ impl<'a> ReportsRepo<'a> {
         ReportsRepo { tx }
     }
 
-    /// **What counts as a sale**, written once.
-    ///
-    /// Settled or voided — a voided bill is still in the day's record and the
-    /// report shows it as a deduction rather than pretending it never
-    /// happened (D47: a correction is a state, never a deletion). A CANCELLED
-    /// order is not here: it was never sold, and a merged-away order is
-    /// cancelled precisely so its food is not counted twice (D61).
+    /// What counts as a sale, written once.
     const SOLD: &'static str = "o.state = 'settled'";
 
     /// Every grouped sales report.
-    ///
-    /// Uses **`idx_orders_day`** — `(outlet_id, business_day)` — for the scan,
-    /// then joins by primary key.
     pub fn sales_by(
         &self,
         outlet: &str,
@@ -243,10 +165,9 @@ impl<'a> ReportsRepo<'a> {
         );
         let sold = Self::SOLD;
 
-        // Item and category read `order_lines`, so they are a different shape:
-        // a bill's grand total cannot be attributed to one line, and pretending
-        // otherwise is how an item report stops adding up. They report the
-        // LINE's own figures, which is what "item sales" means.
+        // Item and category read `order_lines`, so they are a different shape: a bill's grand
+        // total cannot be attributed to one line, and pretending otherwise is how an item
+        // report stops adding up.
         let sql = match by {
             SalesBy::Item | SalesBy::Category => {
                 let (key, label) = match by {
@@ -276,10 +197,8 @@ impl<'a> ReportsRepo<'a> {
             _ => {
                 let (key, label, extra_join) = match by {
                     SalesBy::Day => ("o.business_day", "o.business_day", ""),
-                    // Local time: `settled_at` is UTC milliseconds and the
-                    // shop's clock is +05:30, so the offset is added before the
-                    // hour is taken. A peak hour in UTC is a peak hour in a
-                    // country the shop is not in.
+                    // Local time: `settled_at` is UTC milliseconds and the shop's clock is
+                    // +05:30, so the offset is added before the hour is taken.
                     SalesBy::Hour => (
                         "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
                         "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
@@ -293,10 +212,9 @@ impl<'a> ReportsRepo<'a> {
                     ),
                     SalesBy::Terminal => (
                         "o.terminal_id",
-                        // The till's NAME, resolved here — the same rule the
-                        // cashier report follows, and for the same reason: a
-                        // report that hands back ids is a screen writing SQL by
-                        // post.
+                        // The till's NAME, resolved here — the same rule the cashier report
+                        // follows, and for the same reason: a report that hands back ids is a
+                        // screen writing SQL by post.
                         "COALESCE(tm.name, o.terminal_id)",
                         "LEFT JOIN terminals tm ON tm.id = o.terminal_id",
                     ),
@@ -306,16 +224,9 @@ impl<'a> ReportsRepo<'a> {
                         "LEFT JOIN dining_tables t ON t.id = o.table_id \
                          LEFT JOIN sections sec ON sec.id = t.section_id",
                     ),
-                    // A payment mode is a property of the PAYMENT, not of the
-                    // bill: one bill can be cash and UPI at once (scope 1.15).
-                    // So this one sums payments and its "bills" is a distinct
-                    // count — the totals will not equal the sales summary, and
-                    // that is correct rather than a bug.
-                    _ => (
-                        "p.mode",
-                        "p.mode",
-                        "JOIN payments p ON p.order_id = o.id",
-                    ),
+                    // A payment mode is a property of the PAYMENT, not of the bill: one bill
+                    // can be cash and UPI at once.
+                    _ => ("p.mode", "p.mode", "JOIN payments p ON p.order_id = o.id"),
                 };
                 let amount = if by == SalesBy::PaymentMode {
                     "COALESCE(SUM(p.amount), 0)"
@@ -370,8 +281,8 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
-    /// **Audit B11.** Rate-wise taxable value and tax, from the per-line
-    /// figures `compute_bill` produced — never recomputed here.
+    /// Rate-wise taxable value and tax, from the per-line figures `compute_bill` produced —
+    /// never recomputed here.
     pub fn tax_by_rate(&self, outlet: &str, period: Period) -> Result<Vec<TaxBucket>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT bl.rate_bp, bl.tax_kind,
@@ -412,12 +323,7 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
-    /// The HSN summary a GSTR-1 asks for (scope 2.8).
-    ///
-    /// Lines with no HSN are grouped under an empty code and the screen says
-    /// how many — a shop below the turnover threshold has none, and silently
-    /// dropping them would make the taxable values disagree with the rate-wise
-    /// report.
+    /// The HSN summary a GSTR-1 asks for.
     pub fn tax_by_hsn(&self, outlet: &str, period: Period) -> Result<Vec<HsnBucket>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT COALESCE(l.hsn, ''),
@@ -458,28 +364,10 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
-    /// **The report an owner uses to spot a problem at the counter** (10.5).
-    ///
-    /// Voids, cancellations, refunds, reprints and bill discounts, in one list
-    /// with who and why. Four `SELECT`s in a `UNION ALL` rather than four
-    /// reports, because the question is "what happened here today?" and the
-    /// answer is one column of time.
-/// **Tips, by whoever settled the bill** — P29, scope 8.5.
-    ///
-    /// The arithmetic was already right: a tip changes what is DUE and never
-    /// what the bill IS, so it is outside the taxable value and outside every
-    /// sales figure in this product. What a shop actually asked for is this —
-    /// **who took them**, so they can be shared out at the end of the week.
-    ///
-    /// Attributed to the person who SETTLED the bill, which is the honest
-    /// answer available: a restaurant that pools tips does not care, and one
-    /// that does not pool them settles at the till where the waiter is
-    /// standing. A per-line waiter attribution would be a second answer to a
-    /// question this product cannot really answer.
-    ///
-    /// Split by mode, because a CASH tip is already in the drawer and a CARD
-    /// tip is not — a shop paying out cash tips from the till at close needs
-    /// the two figures apart or the drawer will not balance.
+    /// The report an owner uses to spot a problem at the counter (10.5).
+    /// Tips, by whoever settled the bill.
+    /// The arithmetic was already right: a tip changes what is DUE and never what the bill IS,
+    /// so it is outside the taxable value and outside every sales figure in this product.
     pub fn tips_by_staff(&self, outlet: &str, period: Period) -> Result<Vec<TipRow>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT COALESCE(s.name, 'Not recorded'),
@@ -570,11 +458,8 @@ impl<'a> ReportsRepo<'a> {
             ],
             |row| {
                 Ok(ControlRow {
-                    business_day: encode::business_day_from_sql(
-                        row.get(0)?,
-                        "orders.business_day",
-                    )
-                    .unwrap_or_else(|_| BusinessDay::from_days_since_epoch(0)),
+                    business_day: encode::business_day_from_sql(row.get(0)?, "orders.business_day")
+                        .unwrap_or_else(|_| BusinessDay::from_days_since_epoch(0)),
                     at: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
                     kind: row.get(2)?,
                     reference: row.get(3)?,
@@ -591,7 +476,6 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
-    /// Scope 10.3 — volume against margin, from P13's cost price.
     pub fn menu_engineering(
         &self,
         outlet: &str,
@@ -631,8 +515,8 @@ impl<'a> ReportsRepo<'a> {
                     name: row.get(1)?,
                     qty: Qty::from_thousandths(qty.max(0)),
                     revenue: encode::money_from_sql(row.get(3)?),
-                    // The count guards the MAX: an item with no costed row at
-                    // all must be `None`, not `Some(0)`.
+                    // The count guards the MAX: an item with no costed row at all must be
+                    // `None`, not `Some(0)`.
                     cost: if costed > 0 {
                         cost.map(encode::money_from_sql)
                     } else {
@@ -648,16 +532,8 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
-    /// Audit **G5** — *"top items that stopped selling"*.
-    ///
-    /// Items that sold in the period BEFORE this one and not in it. A shop
-    /// notices a dish disappearing from the till long after it stopped being
-    /// ordered, and this is the list that says so.
-    pub fn stopped_selling(
-        &self,
-        outlet: &str,
-        period: Period,
-    ) -> Result<Vec<Bucket>, DbError> {
+    /// "top items that stopped selling".
+    pub fn stopped_selling(&self, outlet: &str, period: Period) -> Result<Vec<Bucket>, DbError> {
         let before = period.previous();
         let mut stmt = self.tx.prepare(
             "SELECT COALESCE(l.item_id, l.name) AS k, l.name,
@@ -705,13 +581,7 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
-    /// **The profit statement — P26, D133, and audit B14's answer.**
-    ///
-    /// > *v1 subtracted expenses from revenue and printed the result. It never
-    /// > knew what the food cost, so the number it printed was not wrong by a
-    /// > percentage — it was a different quantity altogether.*
-    ///
-    /// Three blocks, and the middle one is the whole point:
+    /// The profit statement.
     ///
     /// ```text
     ///   Sales (net of tax)
@@ -720,26 +590,14 @@ impl<'a> ReportsRepo<'a> {
     /// − Running costs                  <- expenses
     /// = What is left
     /// ```
-    ///
-    /// **Money paid for stock is NOT a running cost.** Rice bought on the 3rd is
-    /// not a cost on the 3rd; it is a cost when it is eaten. That is the entire
-    /// difference between this number and v1's.
-    ///
-    /// The double count is real and is caught rather than assumed away: a shop
-    /// that starts using purchases while still typing "Vegetables ₹2,000" into
-    /// Spends counts it twice, so [`Profit::double_counted`] carries what those
-    /// categories came to and the screen says so (D100 — an unhealthy row
-    /// carries its own fix).
     pub fn profit(&self, outlet: &str, period: Period) -> Result<Profit, DbError> {
         let from = encode::business_day_to_sql(period.from);
         let to = encode::business_day_to_sql(period.to);
 
         let (gross, tax): (i64, i64) = self.tx.query_row(
-            // There is no `bills.tax_total` and there must not be: the three
-            // GST columns are what a rate-wise return is filed from, and a
-            // fourth column holding their sum is a fourth place for them to
-            // disagree. Liquor's `non_gst_value` is deliberately not here —
-            // it is not tax, it is money the shop keeps.
+            // There is no `bills.tax_total` and there must not be: the three GST columns are
+            // what a rate-wise return is filed from, and a fourth column holding their sum is a
+            // fourth place for them to disagree.
             "SELECT COALESCE(SUM(b.grand_total), 0),
                     COALESCE(SUM(b.total_cgst + b.total_sgst + b.total_igst), 0)
                FROM bills b JOIN orders o ON o.id = b.order_id
@@ -749,10 +607,8 @@ impl<'a> ReportsRepo<'a> {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
 
-        // **What the kitchen actually used**, from the ledger and nothing else:
-        // what a sale took, what went in the bin, and what a count found
-        // missing. `total_cost` is negative on the way out, so this reads as a
-        // positive cost.
+        // What the kitchen actually used, from the ledger and nothing else: what a sale took,
+        // what went in the bin, and what a count found missing.
         let cost_of = |kinds: &str| -> Result<i64, DbError> {
             Ok(self.tx.query_row(
                 &format!(
@@ -775,10 +631,8 @@ impl<'a> ReportsRepo<'a> {
             |row| row.get(0),
         )?;
 
-        // **The double count.** An expense in a category the shop also buys
-        // through Purchases is money that may be in both blocks. Matched on the
-        // category NAME against a material's own category, because that is the
-        // word the shopkeeper used in both places.
+        // The double count. An expense in a category the shop also buys through Purchases is
+        // money that may be in both blocks.
         let double_counted: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(e.amount), 0)
                FROM expenses e JOIN expense_categories c ON c.id = e.category_id
@@ -808,7 +662,7 @@ impl<'a> ReportsRepo<'a> {
     }
 }
 
-/// **D133** — the five numbers, and the two warnings that go under them.
+/// The five numbers, and the two warnings that go under them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Profit {
     pub gross_sales: Money,
@@ -818,23 +672,20 @@ pub struct Profit {
     /// What the bills' recipes actually took off the shelf, at cost.
     pub food_used: Money,
     pub wastage: Money,
-    /// What a stock count found missing — the honest part of the cost, and the
-    /// one nobody wants to look at.
+    /// What a stock count found missing — the honest part of the cost, and the one nobody wants
+    /// to look at.
     pub shrinkage: Money,
-    /// food + wastage + shrinkage.
+    /// Food + wastage + shrinkage.
     pub cost_of_food: Money,
     pub gross_margin: Money,
     pub running_costs: Money,
     pub left: Money,
-    /// **The catch, not an assumption.** Expenses typed into Spends in a
-    /// category the shop also buys through Purchases: money that may be counted
-    /// in both blocks, named out loud so somebody can go and look.
+    /// The catch, not an assumption.
     pub double_counted: Money,
 }
 
 impl Profit {
-    /// Gross margin as a percentage of net sales, in basis points. `None` when
-    /// nothing was sold, because a percentage of nothing is not a number.
+    /// Gross margin as a percentage of net sales, in basis points.
     #[must_use]
     #[allow(
         clippy::integer_division,
@@ -851,10 +702,6 @@ impl Profit {
 }
 
 /// A SQLite value as text, whatever type it came back as.
-///
-/// `business_day` and the hour are integers, a staff id is text. One function
-/// rather than a per-report cast, because the alternative is a `CAST` in nine
-/// queries and one of them being forgotten.
 fn text_of(value: &rusqlite::types::Value) -> String {
     match value {
         rusqlite::types::Value::Integer(n) => n.to_string(),
@@ -865,14 +712,13 @@ fn text_of(value: &rusqlite::types::Value) -> String {
 }
 
 /// The words a person reads for a grouped key.
-///
-/// **Crown jewel 14 at the report layer**: a report that says `dine_in` and
-/// `14` has handed its reader two tags and a puzzle.
 fn label_for(by: SalesBy, raw: &rusqlite::types::Value) -> String {
     let text = text_of(raw);
     match by {
-        SalesBy::Day => encode::business_day_from_sql(text.parse().unwrap_or(0), "orders.business_day")
-            .map_or_else(|_| text.clone(), |day| day.to_string()),
+        SalesBy::Day => {
+            encode::business_day_from_sql(text.parse().unwrap_or(0), "orders.business_day")
+                .map_or_else(|_| text.clone(), |day| day.to_string())
+        }
         SalesBy::Hour => {
             let hour: i64 = text.parse().unwrap_or(0);
             let next = (hour + 1) % 24;
@@ -896,8 +742,7 @@ fn label_for(by: SalesBy, raw: &rusqlite::types::Value) -> String {
     }
 }
 
-/// One drawer, counted at the end of one shift — **scope 9.8's report half**,
-/// built at P30.
+/// One drawer, counted at the end of one shift.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandoverRow {
     pub day: BusinessDay,
@@ -910,33 +755,17 @@ pub struct HandoverRow {
     pub closed_at: Timestamp,
     pub expected: Money,
     pub counted: Money,
-    /// counted − expected, as it was STORED at the close (never recomputed, so
-    /// a void three weeks later cannot rewrite what was handed over).
+    /// Counted − expected, as it was STORED at the close (never recomputed, so a void three
+    /// weeks later cannot rewrite what was handed over).
     pub variance: Money,
     pub note: Option<String>,
-    /// Who was clocked in on that till's day. A handover with no names on it
-    /// answers "how much" and not "who", and the second question is the one
-    /// asked when the money is short.
+    /// Who was clocked in on that till's day.
     pub who_was_on: Vec<String>,
 }
 
 impl<'a> ReportsRepo<'a> {
-    /// **Every drawer handed over in a period** — scope 9.8, the half P28
-    /// left.
-    ///
-    /// P27 built the boundary (a till closes its drawer per shift, D140) and
-    /// P28 built attendance; neither built the report that puts them beside
-    /// each other, which is the thing a manager actually reads at ten o'clock:
-    /// *whose shift was this, what did the drawer say, and did it match?*
-    ///
-    /// The shop's roll-up row is included and named, because a two-till shop
-    /// hands over twice and reconciles once, and a report showing only the
-    /// tills would not add up to the day.
-    pub fn handovers(
-        &self,
-        outlet: &str,
-        period: Period,
-    ) -> Result<Vec<HandoverRow>, DbError> {
+    /// Every drawer handed over in a period.
+    pub fn handovers(&self, outlet: &str, period: Period) -> Result<Vec<HandoverRow>, DbError> {
         let from = encode::business_day_to_sql(period.from);
         let to = encode::business_day_to_sql(period.to);
         let mut stmt = self.tx.prepare(
@@ -975,9 +804,7 @@ impl<'a> ReportsRepo<'a> {
             });
         }
 
-        // Who was on, per day. One query for the whole period rather than one
-        // per row: a month of two-till closes is sixty rows and would be sixty
-        // round trips (PERFORMANCE §5 rule 4).
+        // Who was on, per day.
         let mut people = self.tx.prepare(
             "SELECT a.business_day, s.name
                FROM attendance a JOIN staff s ON s.id = a.staff_id

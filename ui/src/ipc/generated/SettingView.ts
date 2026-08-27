@@ -3,28 +3,23 @@ import type { ChoiceView } from "./ChoiceView";
 
 export type SettingView = { key: string, 
 /**
- * The sub-heading this setting sits under. The screen draws it when it
- * changes, which is what turns thirty-nine settings into five short lists.
+ * The sub-heading this setting sits under.
  */
 topic: string, 
 /**
- * **The line this setting shares with the next**, or empty when it has a
- * line of its own. A size and its bold tick are one decision, so they are
- * one line — see `catalog::ROWS`.
+ * The line this setting shares with the next, or empty when it has a line of its own.
  */
 row: string, 
 /**
- * The word this control wears *inside* a shared line. `label` is still
- * its full name, and still what a search and a screen reader get.
+ * The word this control wears inside a shared line.
  */
 short: string, label: string, help: string, 
 /**
- * `tick`, `number`, `amount`, `phone`, `words` or `choice` — what control
- * to draw. Words rather than a Rust type name, because the screen reads it.
+ * `tick`, `number`, `amount`, `phone`, `words` or `choice` — what control to draw.
  */
 control: string, 
 /**
- * The current value, always as text. See the module note.
+ * The current value, always as text.
  */
 value: string, choices: Array<ChoiceView>, 
 /**

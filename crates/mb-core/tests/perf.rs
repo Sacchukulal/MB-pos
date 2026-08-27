@@ -1,32 +1,8 @@
-//! Performance budget B4 — decision D12.
-//!
-//! `docs/PERFORMANCE.md` §2.2:
-//!
-//! > **B4** `compute_bill`, 50 lines, mixed rates, discounts, charges —
-//! > budget **200 µs**, ceiling **1 ms**, on the reference machine
-//! > (i3, 4 GB RAM, 5400 rpm HDD, Windows 10).
-//!
-//! Run it with:
-//!
 //! ```text
 //! cargo test --release --test perf -- --nocapture
 //! ```
-//!
-//! **The assertion runs in release builds only.** A debug build of this crate
-//! is 10-50× slower, and a test that fails on every `cargo test` is a test
-//! everyone learns to ignore. In debug it still measures and prints, so the
-//! number is always in front of you.
-//!
-//! No benchmark framework. Compiling criterion to time a 200 µs function is
-//! not a trade worth making (rule R6); `Instant` is enough to catch the kind
-//! of regression that matters — an accidental clone or an allocation inside
-//! the loop, not a 3% drift.
 
-// This is a measuring harness, not shipped code. `expect` here IS the
-// assertion, and dividing an elapsed total by the number of runs is the
-// measurement itself — the workspace denies both because of D7, which is about
-// the money path. (The clippy.toml exemption only reaches `#[test]` functions,
-// and the cart builder below is a plain helper.)
+// This is a measuring harness, not shipped code.
 #![allow(
     clippy::expect_used,
     clippy::integer_division,
@@ -40,19 +16,15 @@ use mb_core::{
 };
 use std::time::Instant;
 
-/// The budget and the ceiling, from `docs/PERFORMANCE.md`.
 const BUDGET_NANOS: u128 = 200_000;
 const CEILING_NANOS: u128 = 1_000_000;
 
-/// A busy table: 50 lines, every treatment, fractional quantities, modifiers
-/// and discounts scattered through it. Deliberately worse than a real bill —
-/// a 50-line order is a large party, and most bills are under ten.
+/// A busy table: 50 lines, every treatment, fractional quantities, modifiers and discounts
+/// scattered through it.
 fn busy_cart() -> Cart {
     let pc = |percent: u32| TaxRate::from_percent(percent).expect("a real rate");
     let rates = [pc(5), pc(12), pc(18), pc(28)];
-    // Every shape a line can take, so the budget is measured against the worst
-    // realistic bill. P33 added the last two: liquor carrying state VAT, and a
-    // genuinely untaxed line.
+    // Every shape a line can take, so the budget is measured against the worst realistic bill.
     let specs = [
         TaxSpec::gst(pc(5)),
         TaxSpec::gst_inclusive(pc(18)),
@@ -100,16 +72,23 @@ fn busy_cart() -> Cart {
     cart
 }
 
-/// The three charges a real bill carries, each with its own rate — which is
-/// what budget B4 actually describes ("50 lines, mixed rates, discounts,
-/// charges"). Until P02 there were no charges, so the P01 figure measured less
-/// than the budget claimed.
+/// The three charges a real bill carries, each with its own rate.
 fn charges() -> Vec<Charge> {
     let pc = |percent: u32| TaxRate::from_percent(percent).expect("a real rate");
     vec![
         Charge::percent(ChargeKind::Service, "Service Charge", 1_000, pc(18)),
-        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(2_000), pc(5)),
-        Charge::flat(ChargeKind::Delivery, "Delivery", Money::from_paise(4_000), pc(18)),
+        Charge::flat(
+            ChargeKind::Packing,
+            "Packing",
+            Money::from_paise(2_000),
+            pc(5),
+        ),
+        Charge::flat(
+            ChargeKind::Delivery,
+            "Delivery",
+            Money::from_paise(4_000),
+            pc(18),
+        ),
     ]
 }
 
@@ -129,8 +108,8 @@ fn compute_bill_stays_within_budget_b4() {
             ))
     };
 
-    // Warm up: first call pays for page faults and branch prediction, and
-    // measuring that would measure the machine rather than the code.
+    // Warm up: first call pays for page faults and branch prediction, and measuring that would
+    // measure the machine rather than the code.
     for _ in 0..200 {
         let bill = compute_bill(input()).expect("computes");
         std::hint::black_box(&bill);
@@ -144,9 +123,13 @@ fn compute_bill_stays_within_budget_b4() {
     }
     let per_call = started.elapsed().as_nanos() / RUNS;
 
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    // Printed as integers: the workspace denies float arithmetic outright (D2),
-    // and there is no reason for a stopwatch to be the one exception.
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    // Printed as integers: the workspace denies float arithmetic outright, and there is no
+    // reason for a stopwatch to be the one exception.
     println!(
         "\nB4  compute_bill, 50 lines : {per_call} ns/call  ({}.{:03} µs)  [{profile}]\n    budget {BUDGET_NANOS} ns, ceiling {CEILING_NANOS} ns",
         per_call / 1_000,

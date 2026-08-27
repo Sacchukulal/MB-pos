@@ -1,21 +1,3 @@
-//! **P29's rule, proved** — T1, T2 and half of T6.
-//!
-//! > Every device here is optional, and every one of them can be absent,
-//! > unplugged, broken or slow. **Not one of them may ever block a sale.**
-//!
-//! That is requirement 3 of the ten applied to hardware, and it is the kind of
-//! rule that is true on the day it is written and false a year later. So it is
-//! a test: a shop with nothing plugged in bills normally (T1), and a shop with
-//! a scale on a port that does not exist gets a sentence and still bills (T2).
-//!
-//! The customer display's half of T6 is here too, and it is a SOURCE test —
-//! reading `devices.rs` and asserting the window is built unfocused and never
-//! asked for focus afterwards. There is no way to assert "focus stayed in the
-//! billing box" without a second monitor and a person; there is a way to
-//! assert the only two lines that could take it do not exist, and that is the
-//! honest version. The other half is in the UI suite, where the display page
-//! is asserted to have nothing focusable on it at all.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -93,30 +75,25 @@ fn a_bill(app: &App) -> String {
         Ok(())
     })
     .expect("parcel");
-    crate::ipc::cart_add_on(app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
-        .expect("added");
+    crate::ipc::cart_add_on(app, "itm_dosa".to_owned(), Some("1".to_owned()), None).expect("added");
     let total = app
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
-    crate::ipc::cart_add_payment_on(app, "Cash".to_owned(), total.paise(), None)
-        .expect("paid");
+    crate::ipc::cart_add_payment_on(app, "Cash".to_owned(), total.paise(), None).expect("paid");
     crate::flows::complete_bill_on(app).expect("settled")
 }
 
-// ---------------------------------------------------------------------------
-// T1 — nothing plugged in
-// ---------------------------------------------------------------------------
+// Nothing plugged in.
 
-/// **T1.** A counter with no scanner, no scale, no display and no label
-/// printer bills normally, and nothing on the device screen reads as a
-/// problem.
+/// A counter with no scanner, no scale, no display and no label printer bills normally, and
+/// nothing on the device screen reads as a problem.
 #[test]
 fn a_shop_with_no_devices_at_all_bills_normally_and_is_not_nagged() {
     let scratch = Scratch::new("dev_t1");
     let app = a_shop(&scratch, "t1");
 
-    // The defaults are "nothing plugged in", which is what nearly every shop
-    // that buys this will have.
+    // The defaults are "nothing plugged in", which is what nearly every shop that buys this
+    // will have.
     let config = app.shop_config();
     assert!(config.devices.scale_port.is_empty());
     assert!(!config.devices.display_on);
@@ -141,7 +118,7 @@ fn a_shop_with_no_devices_at_all_bills_normally_and_is_not_nagged() {
     );
     assert!(!scale.testable, "there is nothing to test");
 
-    // **The scanner is always ready**, because there is nothing to plug in.
+    // The scanner is always ready, because there is nothing to plug in.
     let scanner = view
         .devices
         .iter()
@@ -149,8 +126,7 @@ fn a_shop_with_no_devices_at_all_bills_normally_and_is_not_nagged() {
         .expect("a scanner row");
     assert!(scanner.set_up);
 
-    // Reading a scale that does not exist is not an error, and does not
-    // interrupt anything.
+    // Reading a scale that does not exist is not an error, and does not interrupt anything.
     let read = read_scale_on(&app).expect("no error");
     assert!(!read.answered);
     assert_eq!(read.says, "No scale is set up. Type the quantity instead.");
@@ -159,20 +135,16 @@ fn a_shop_with_no_devices_at_all_bills_normally_and_is_not_nagged() {
     assert!(!a_bill(&app).is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// T2 — plugged in, not answering
-// ---------------------------------------------------------------------------
+// Plugged in, not answering.
 
-/// **T2.** A scale on a port that does not exist gives up inside its deadline,
-/// says something a shopkeeper can act on, and **the sale still completes**.
+/// A scale on a port that does not exist gives up inside its deadline, says something a
+/// shopkeeper can act on, and the sale still completes.
 #[test]
 fn a_scale_that_does_not_answer_says_so_quickly_and_the_bill_still_settles() {
     let scratch = Scratch::new("dev_t2");
     let app = a_shop(&scratch, "t2");
 
-    // A port nothing is on. On Windows this fails to open; elsewhere the build
-    // says serial ports are not available. Both are the same kind of answer,
-    // which is the point.
+    // A port nothing is on.
     let mut config = app.shop_config();
     config.devices.scale_port = "COM99".to_owned();
     app.publish_shop_config(config);
@@ -197,13 +169,12 @@ fn a_scale_that_does_not_answer_says_so_quickly_and_the_bill_still_settles() {
         "a dead device must give up inside its deadline, took {took:?}"
     );
 
-    // **The sale still completes.** This is the whole rule.
+    // The sale still completes.
     let number = a_bill(&app);
     assert!(!number.is_empty());
 
-    // And the device screen shows it as set up but says what happened when
-    // asked — a configured device that is not answering is a different fact
-    // from one that was never set up.
+    // And the device screen shows it as set up but says what happened when asked — a configured
+    // device that is not answering is a different fact from one that was never set up.
     let view = devices_on(&app).expect("the device screen");
     let scale = view
         .devices
@@ -220,7 +191,8 @@ fn a_label_with_no_label_printer_says_where_to_set_one_up() {
     let scratch = Scratch::new("dev_label");
     let app = a_shop(&scratch, "label");
 
-    let refused = crate::devices::print_label_on(&app, "2 x Masala Dosa".to_owned(), "T-14".to_owned());
+    let refused =
+        crate::devices::print_label_on(&app, "2 x Masala Dosa".to_owned(), "T-14".to_owned());
     let error = refused.expect_err("there is no label printer");
     assert_eq!(error.code, "label.none");
     assert!(error.message.contains("Settings"), "{}", error.message);
@@ -229,20 +201,8 @@ fn a_label_with_no_label_printer_says_where_to_set_one_up() {
     assert!(!a_bill(&app).is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// T6 — the customer display never takes focus
-// ---------------------------------------------------------------------------
+// The customer display never takes focus.
 
-/// **T6, the half that can be proved here.**
-///
-/// A cashier who has to click back into the search box after every item will
-/// unplug the display by Friday, so this is the condition on the feature
-/// existing at all. There are exactly two ways a Tauri window can take focus —
-/// being built focused, and being asked afterwards — and this asserts neither
-/// happens.
-///
-/// The other half is in the UI suite: the display page has nothing focusable
-/// on it, so it could not take focus even if it were shown in the main window.
 #[test]
 fn the_customer_display_is_built_unfocused_and_never_asks_for_focus() {
     let source = include_str!("devices.rs");
@@ -255,9 +215,7 @@ fn the_customer_display_is_built_unfocused_and_never_asks_for_focus() {
         source.contains(".focused(DISPLAY_TAKES_FOCUS)"),
         "the display window must be built from that constant"
     );
-    // The two calls that would undo it. `set_focus` is the direct one;
-    // `always_on_top` is the one that looks harmless and puts a window over
-    // the billing screen anyway.
+    // The two calls that would undo it.
     assert!(
         !source.contains("set_focus"),
         "nothing in the device module may ask for focus"

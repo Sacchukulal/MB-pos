@@ -1,60 +1,34 @@
-/**
- * **The billing keyboard — crown jewel 1, and the reason the counter is fast.**
- *
- * > *"The billing keyboard flow. Enter / Esc / arrows, the 'type a table number
- * > and press Enter' trick, 'Enter on empty box = print KOT or complete bill',
- * > the order-type lock. **This is why your counter is fast.** Copy it line by
- * > line and test it line by line."*
- *
- * # A pure reducer, and no React in this file
- *
- * `reduce(state, event)` returns the new state **and a list of commands to
- * perform**. It calls no IPC, touches no DOM, and can be driven exhaustively in
- * a test with no browser at all.
- *
- * That shape is the answer to the diagnosis this session inherited: *"not
- * scattered key handlers, which is how v1 ended up with focus bugs nobody could
- * reason about."* A reducer that returns commands is testable the way
- * `compute_bill` is testable, and it is held to the same standard.
- *
- * # Focus is single-valued
- *
- * The search box has focus unless a mode has taken it. There is never a case
- * where two surfaces both think an arrow key belongs to them — the state says
- * which one owns it, and there is only one state.
- */
+/** The billing keyboard. */
 
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 
-// ---------------------------------------------------------------------------
 // What the screen can be doing.
-// ---------------------------------------------------------------------------
 
 export type Mode =
   | { kind: 'searching' }
   /** The quantity popup. Everything else is inert while it is open. */
   | { kind: 'quantity'; item: MenuItemView; typed: string }
-  /** Moving around the table grid. Entered by pressing Down on an empty box. */
+  /** Moving around the table grid. */
   | { kind: 'grid'; index: number }
   /** The chosen table is busy: merge, or take a sub-table letter (1.6). */
   | { kind: 'table-busy'; table: TableView; choice: number }
-  /** The shortcut sheet (audit F4). */
+  /** The shortcut sheet. */
   | { kind: 'help' };
 
 export interface State {
   mode: Mode;
   /** What is in the search box. */
   text: string;
-  /** Which suggestion is highlighted. Always valid, or -1 for none. */
+  /** Which suggestion is highlighted. */
   highlighted: number;
   suggestions: readonly MenuItemView[];
   /** The floor, so Enter on a typed table name can resolve it. */
   tables: readonly TableView[];
-  /** Scope 1.5 — and the LOCK is what stops a parcel counter re-picking it. */
+  /** And the LOCK is what stops a parcel counter re-picking it. */
   orderType: string;
   orderTypeLocked: boolean;
-  /** Whether the cart has anything in it. Decides Enter-on-empty. */
+  /** Whether the cart has anything in it. */
   cartHasItems: boolean;
   /** Whether the kitchen has been told everything in the cart. */
   kitchenUpToDate: boolean;
@@ -70,9 +44,7 @@ export const ORDER_TYPES = [
   'Delivery',
 ] as const;
 
-// ---------------------------------------------------------------------------
 // What happens to it.
-// ---------------------------------------------------------------------------
 
 export type Event =
   | { kind: 'key'; key: string; shift?: boolean }
@@ -82,18 +54,12 @@ export type Event =
   | { kind: 'cart'; hasItems: boolean; kitchenUpToDate: boolean }
   | { kind: 'order-type'; value: string }
   | { kind: 'toggle-lock' }
-  /** A tap. Touch reaches everything the keyboard does (scope 1.28). */
+  /** A tap. Touch reaches everything the keyboard does. */
   | { kind: 'tap-suggestion'; index: number }
   | { kind: 'tap-tile'; index: number }
   | { kind: 'click-empty'; textSelected: boolean; controlFocused: boolean };
 
-/**
- * What the screen must actually go and do.
- *
- * Every one of these is a **named function on the screen** — P09 built them
- * that way on purpose so this session binds keys to the same things a mouse
- * presses, rather than re-implementing them.
- */
+/** What the screen must actually go and do. */
 export type Command =
   | { do: 'search'; text: string }
   | { do: 'add-item'; itemId: string; qty: string }
@@ -124,9 +90,7 @@ export function initial(orderType = 'Dine in'): State {
   };
 }
 
-/**
- * The whole keyboard, as one function.
- */
+/** The whole keyboard, as one function. */
 export function reduce(state: State, event: Event): [State, Command[]] {
   switch (event.kind) {
     case 'suggestions': {
@@ -188,9 +152,6 @@ export function reduce(state: State, event: Event): [State, Command[]] {
     }
 
     case 'click-empty':
-      // **v1 stole focus from custom controls.** Not here: a click that lands
-      // on nothing returns the caret to the box, and a click while text is
-      // selected or a control has focus does not.
       if (event.textSelected || event.controlFocused) return [state, []];
       return [state, [{ do: 'focus-search' }]];
 
@@ -200,15 +161,15 @@ export function reduce(state: State, event: Event): [State, Command[]] {
 }
 
 function key(state: State, pressed: string): [State, Command[]] {
-  // ---- the popup owns everything while it is open ----------------------
+  // The popup owns everything while it is open.
   if (state.mode.kind === 'quantity') {
     const popup = state.mode;
     if (pressed === 'Escape') {
       return [{ ...state, mode: { kind: 'searching' } }, []];
     }
     if (pressed === 'Enter') {
-      // **Blank means one.** Typing a quantity is optional, which is what
-      // makes "name, Enter, Enter" two keystrokes.
+      // Blank means one. Typing a quantity is optional, which is what makes "name, Enter,
+      // Enter" two keystrokes.
       const qty = popup.typed.trim() === '' ? '1' : popup.typed.trim();
       return [
         { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 },
@@ -218,7 +179,6 @@ function key(state: State, pressed: string): [State, Command[]] {
     return [state, []];
   }
 
-  // ---- help ------------------------------------------------------------
   if (state.mode.kind === 'help') {
     if (pressed === 'Escape' || pressed === '?') {
       return [{ ...state, mode: { kind: 'searching' } }, []];
@@ -226,7 +186,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     return [state, []];
   }
 
-  // ---- the busy-table chooser (scope 1.6) ------------------------------
+  // The busy-table chooser.
   if (state.mode.kind === 'table-busy') {
     const busy = state.mode;
     // 0 is "merge"; 1..7 are the letters B to H.
@@ -266,7 +226,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     return [state, []];
   }
 
-  // ---- the grid --------------------------------------------------------
+  // The grid.
   if (state.mode.kind === 'grid') {
     const grid = state.mode;
     if (pressed === 'Escape') {
@@ -284,10 +244,10 @@ function key(state: State, pressed: string): [State, Command[]] {
     return [state, []];
   }
 
-  // ---- searching: the default, and where a cashier lives ---------------
+  // searching: the default, and where a cashier lives.
   if (pressed === '?') {
-    // Only when the box is empty; otherwise "?" is a character somebody is
-    // typing into a search.
+    // Only when the box is empty; otherwise "?" is a character somebody is typing into a
+    // search.
     if (state.text === '') {
       return [{ ...state, mode: { kind: 'help' } }, []];
     }
@@ -295,7 +255,7 @@ function key(state: State, pressed: string): [State, Command[]] {
   }
 
   if (pressed === 'Escape') {
-    // **Unwinds ONE layer at a time.** Suggestions first, then the order.
+    // Unwinds ONE layer at a time.
     if (state.suggestions.length > 0 || state.text !== '') {
       return [
         { ...state, text: '', suggestions: [], highlighted: -1 },
@@ -315,8 +275,8 @@ function key(state: State, pressed: string): [State, Command[]] {
         [],
       ];
     }
-    // Down on an empty box with nothing suggested enters the grid — which is
-    // how a cashier gets to the floor without the mouse.
+    // Down on an empty box with nothing suggested enters the grid — which is how a cashier gets
+    // to the floor without the mouse.
     if (state.text === '' && state.tables.length > 0) {
       return [{ ...state, mode: { kind: 'grid', index: 0 } }, []];
     }
@@ -332,8 +292,8 @@ function key(state: State, pressed: string): [State, Command[]] {
     return [state, []];
   }
 
-  // Left/Right cycle the order type — UNLESS the lock is on, which is the
-  // whole point of the lock (crown jewel 1).
+  // Left/Right cycle the order type — UNLESS the lock is on, which is the whole point of the
+  // lock.
   if (pressed === 'ArrowLeft' || pressed === 'ArrowRight') {
     if (hasSuggestions || state.orderTypeLocked) return [state, []];
     const at = ORDER_TYPES.indexOf(state.orderType as (typeof ORDER_TYPES)[number]);
@@ -353,9 +313,8 @@ function key(state: State, pressed: string): [State, Command[]] {
       }
     }
 
-    // **Type a table name and press Enter** — the trick, and it takes
-    // precedence over item search because a cashier types "6" far more often
-    // than they mean an item called 6.
+    // Type a table name and press Enter — the trick, and it takes precedence over item search
+    // because a cashier types "6" far more often than they mean an item called 6.
     if (state.text !== '') {
       const table = matchTable(state.tables, state.text);
       if (table) {
@@ -368,7 +327,7 @@ function key(state: State, pressed: string): [State, Command[]] {
       return [state, []];
     }
 
-    // **ENTER ON AN EMPTY BOX.** Four cases, all from audit 2.3.
+    // ENTER ON AN EMPTY BOX.
     if (state.cartHasItems) {
       return [
         state,
@@ -387,8 +346,7 @@ function key(state: State, pressed: string): [State, Command[]] {
 
 /** A tile was chosen, by key or by tap. */
 function openTile(state: State, table: TableView): [State, Command[]] {
-  // A busy table with a dine-in order in the cart is the sub-table question
-  // (scope 1.6, crown jewel 3).
+  // A busy table with a dine-in order in the cart is the sub-table question.
   if (table.orderId !== null && state.cartHasItems) {
     return [
       { ...state, mode: { kind: 'table-busy', table, choice: 0 } },
@@ -401,19 +359,7 @@ function openTile(state: State, table: TableView): [State, Command[]] {
   ];
 }
 
-/**
- * Two-dimensional movement over a grid that wraps.
- *
- * `null` means "that key was not a movement". The grid is a flat list in
- * section order, so moving down crosses a section boundary and eventually
- * reaches the "No table" group — T5 walks the whole thing and asserts every
- * tile is reachable and nothing is a dead end.
- *
- * The column count is a **guess of six**, because the real one depends on the
- * window width and this file has no DOM. It is honest: wrapping by a fixed
- * stride still reaches every tile, which is the property that matters. The
- * screen highlights whatever index this returns.
- */
+/** Two-dimensional movement over a grid that wraps. */
 export const GRID_COLUMNS = 6;
 
 function moveInGrid(index: number, pressed: string, count: number): number | null {
@@ -432,13 +378,7 @@ function moveInGrid(index: number, pressed: string, count: number): number | nul
   }
 }
 
-/**
- * Does this text name a table?
- *
- * Case-insensitive and exact — "6" is table 6, not table 16. A cashier typing
- * a table number wants that table, and a prefix match here would make "1" mean
- * "12" on a busy floor.
- */
+/** Does this text name a table? */
 function matchTable(
   tables: readonly TableView[],
   text: string,
@@ -448,13 +388,7 @@ function matchTable(
   return tables.find((t) => t.label.toLowerCase() === wanted);
 }
 
-/**
- * Every shortcut, in one table — **and the help overlay is generated from it**
- * (audit F4).
- *
- * A key that exists and is undocumented is impossible rather than unlikely,
- * because there is one list and both the sheet and this file read it.
- */
+/** Every shortcut, in one table — and the help overlay is generated from it. */
 export const SHORTCUTS: readonly {
   keys: string;
   what: string;
@@ -476,9 +410,8 @@ export const SHORTCUTS: readonly {
   { group: 'The floor', keys: 'Enter', what: 'Open the highlighted table' },
   { group: 'The floor', keys: 'Esc', what: 'Back to the search box' },
   { group: 'Help', keys: '?', what: 'Show this sheet' },
-  // P11. The key is handled by the shell rather than by this reducer — it must
-  // work on every screen, not only on this one — but it is documented HERE,
-  // because the help sheet is generated from this table (audit F4) and a
-  // shortcut written down somewhere else is a shortcut nobody learns.
+  // The key is handled by the shell rather than by this reducer — it must work on every screen,
+  // not only on this one — but it is documented HERE, because the help sheet is generated from
+  // this table and a shortcut written down somewhere else is a shortcut nobody learns.
   { group: 'The counter', keys: 'Ctrl + L', what: 'Lock the counter' },
 ];

@@ -1,12 +1,4 @@
-/**
- * **The printer setup** — audit Part 3's "Printer Settings", and scope 7.11.
- *
- * A printer is a record, not a scalar, so it does not come down the catalogue
- * with the other ninety settings and it gets its own screen. What it shares
- * with them is the rule: every decision — what a paper size may be, what a
- * network address has to look like, whether this printer may be removed — is
- * Rust's, and this file collects characters and draws what it is handed.
- */
+/** The printer setup. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -129,25 +121,7 @@ export function Printers() {
         />
       ) : null}
 
-      {/*
-        **WHERE BILLS PRINT — one question, at the top, in a dropdown.**
-
-        The owner, 2026-08-17: *"the printer setting there is completely wrong
-        flow is there, no default printer selection option… just make it very
-        simple, just show option to select a default printer using drop down
-        and its settting like test print etc."*
-
-        They were describing a real hole. This screen was a flat list of
-        equal-looking cards, and which one the shop actually prints on was a
-        checkbox at the bottom of the add-a-printer dialog worded "Bills go
-        here unless something says otherwise". So a shop added its printer,
-        saw it listed, and kept printing to the stand-in — see
-        `save_printer_on`, where the other half of that bug lived.
-
-        The dropdown is the whole answer to "where do my bills come out?", and
-        everything a person does next — test it, straighten it, change it —
-        is directly underneath it rather than in a card they have to find.
-      */}
+      {/* WHERE BILLS PRINT — one question, at the top, in a dropdown. */}
       {chosen ? (
         <Card>
           <SectionHeader
@@ -172,10 +146,7 @@ export function Printers() {
             }
           />
 
-          {/* **The one warning worth interrupting somebody for.** A shop whose
-              bills go to the stand-in prints nothing at all, and nothing else
-              on this screen would tell them — the jobs queue, are marked done
-              and are thrown away, exactly as that row promises. */}
+          {/* The one warning worth interrupting somebody for. */}
           {chosen.isStandIn ? (
             <p className="mb-field__error" role="alert">
               <span aria-hidden="true">⚠</span>
@@ -210,25 +181,14 @@ export function Printers() {
         </Card>
       ) : null}
 
-      {/* **Scope 3.1, and it does something now.**
-          It was drawn only when `printers.length > 1 && routes.length > 0`, so
-          a shop with one printer never saw it and could not discover it before
-          buying a second — and, more to the point, `print_kitchen_ticket_on`
-          never read what it saved. See `flows::routed_printer`.
-
-          Shown whenever the shop has categories, with the reason it is greyed
-          out said in words rather than by not being there. */}
+      {/* 1, and it does something now. */}
       {view.routes.length > 0 ? (
         <Card>
           <SectionHeader
             title="Which printer each kind of food goes to"
             note="Anything not listed goes to the printer above."
           />
-          {/* **The stand-in is not a station.** It is excluded from the count
-              and from the options below: sending the tandoor's food to the
-              printer whose whole job is to print nothing is never what
-              somebody means, and offering it invites exactly the silent
-              failure this round is about. */}
+          {/* The stand-in is not a station. */}
           {view.printers.filter((p) => p.role !== 'bill' && !p.isStandIn).length < 2 ? (
             <p className="mb-field__hint">
               This shop has one kitchen printer, so everything goes there. Add a
@@ -266,8 +226,7 @@ export function Printers() {
         </Card>
       ) : null}
 
-      {/* Every printer the shop has, for adding, changing and removing. The
-          one it prints on is above; this is the cupboard. */}
+      {/* Every printer the shop has, for adding, changing and removing. */}
       {view.printers.length > 0 ? (
         <Card>
           <SectionHeader
@@ -337,12 +296,8 @@ export function Printers() {
 }
 
 /**
- * **What you do with the printer once you have chosen it**: prove it works,
- * straighten what it puts on the paper, change how it is set up.
- *
- * It sits directly under the dropdown rather than in a card of its own, because
- * *"select a default printer and its settting like test print etc."* is one
- * thought and used to be spread across a list of identical cards.
+ * What you do with the printer once you have chosen it: prove it works, straighten what it puts
+ * on the paper, change how it is set up.
  */
 function PrinterSettings({
   printer,
@@ -354,7 +309,6 @@ function PrinterSettings({
   printer: PrinterRowView;
   onEdit: () => void;
   onTest: () => void;
-  /** P07's alignment slip — see the button's own note. */
   onSlip: () => void;
   onNudge: (dx: number, dy: number) => void;
 }) {
@@ -362,24 +316,16 @@ function PrinterSettings({
     <>
       <div className="mb-row">
         <Button onClick={onTest}>Print a sample bill</Button>
-        {/* **The slip is not the sample bill, and P31 stopped pretending it
-            was.** P07 built it with the ALIGNMENT RULER on it, which is what
-            the four nudge buttons below are read against — a sample bill has
-            no ruler, so nudging by looking at one is guesswork.
-
-            It is also the only thing on this screen that prints with no shop
-            open, which is exactly when somebody needs to know whether the
-            printer works: a first run, and the minutes after a restore. */}
         <Button variant="quiet" onClick={onSlip}>
           Print the alignment slip
         </Button>
         <Button onClick={onEdit}>Change how it is set up</Button>
       </div>
 
-      {/* **Scope 7.11.** Thermal printers disagree about where the first dot
-          sits, so the same correct document comes out 2 mm off-centre on one
-          model and centred on another. The owner corrects it from the paper,
-          in millimetres — which is why there is no number to type. */}
+      {/*
+        Thermal printers disagree about where the first dot sits, so the same correct document
+        comes out 2 mm off-centre on one model and centred on another.
+      */}
       <div className="mb-printers__nudge">
         <span className="mb-field__hint">
           Off-centre on the paper? Print a sample, then nudge it. Now at{' '}
@@ -493,8 +439,6 @@ function PrinterDialog({
           />
         ) : null}
 
-        {/* **One paper size.** v1 had two, in two places, and they could
-            disagree — and paper belongs to a printer, not to a shop. */}
         <Select
           label="Paper width"
           value={String(draft.paperMm)}
@@ -524,14 +468,7 @@ function PrinterDialog({
           checked={draft.canKickDrawer}
           onChange={(event) => set({ canKickDrawer: event.currentTarget.checked })}
         />
-        {/* **It says "default" now, and it is not how you set one.**
-            This was the only way to choose where bills print, worded "Bills go
-            here unless something says otherwise" — a sentence that describes
-            being the default without ever using the word, at the bottom of a
-            dialog somebody is filling in for the first time. The dropdown at
-            the top of the screen is the answer to that question now; this
-            stays because setting it while adding a printer is convenient, and
-            it is worded so that skipping it is safe. */}
+        {/* It says "default" now, and it is not how you set one. */}
         <Checkbox
           label="Make this the printer bills print on"
           checked={draft.isDefault}

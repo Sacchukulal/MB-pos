@@ -14,7 +14,6 @@ kind: string, kindTag: string,
  */
 qty: string, takesOut: boolean, value: MoneyView, when: string, who: string, reason: string, note: string, 
 /**
- * D111 — this happened because a sale needed it and nobody had recorded
- * making any.
+ * This happened because a sale needed it and nobody had recorded making any.
  */
 wasAutomatic: boolean, };

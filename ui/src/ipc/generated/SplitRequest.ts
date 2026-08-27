@@ -9,8 +9,7 @@ export type SplitRequest = { orderId: string,
  */
 lines: Array<[number, string]>, 
 /**
- * Where the new order sits. `None` leaves it on the same table as a
- * second seat (`6A` / `6B`, scope 1.6).
+ * Where the new order sits.
  */
 toTable: string | null, 
 /**

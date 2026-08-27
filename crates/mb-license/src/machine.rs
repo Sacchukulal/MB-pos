@@ -1,60 +1,17 @@
-//! **Which computer this is** — and how sure we are, which turns out to matter
-//! more than the id itself.
-//!
-//! > **POS-A4:** *"If the PC dies, the shop cannot bill until support unlocks
-//! > the key. The licence is welded to the motherboard ID. There is no
-//! > self-service way to move it, and no emergency mode."*
-//!
-//! The binding is not the problem — a licence sold per till has to know which
-//! till. The problem was that v1 welded it to one number, gave nobody a way to
-//! move it, and then told the owner to phone support on a Saturday.
-//!
-//! So this module answers "which computer is this" as well as it honestly can,
-//! **says which way it found out** ([`Derivation`]), and hands the rest to
-//! `transfer` and to the emergency code.
-//!
-//! # The chain, and why the placeholder list is the point of it
-//!
-//! 1. `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` — Windows writes it at
-//!    install and does not change it.
-//! 2. P19's `counter-id.txt`, the server id already sitting beside the config.
-//!    It is already stable across restarts and already this machine's.
-//! 3. A fresh random id, written beside the config, and **honestly weaker**: it
-//!    does not survive somebody deleting the config folder. [`Derivation`]
-//!    carries that fact so a support call can be told.
-//!
-//! Every step's value goes through [`is_a_real_identity`] first. v1 had that
-//! list because OEMs ship whole production runs with the same firmware UUID,
-//! and because **a disk image clones a MachineGuid across every PC in a chain
-//! of shops** — which is the case that actually turns up, since the shops that
-//! buy several tills buy them from the same dealer who images them from one
-//! master. A placeholder that passes silently binds five tills to one licence
-//! and nobody finds out until the fifth one stops working.
-//!
-//! # The firmware UUID is deliberately NOT read
-//!
-//! Reading it needs COM (the `wmi` crate, which pulls a runtime) or a raw
-//! `GetSystemFirmwareTable` call. The workspace **forbids `unsafe`** and
-//! mb-winprint owns the single exception (D33). MachineGuid is also strictly
-//! better behaved than the firmware UUID on the machines this actually runs on
-//! — it is never blank, never "To be filled by O.E.M.", and never shared by an
-//! entire OEM batch. This paragraph is here so the next session does not
-//! "finish" the chain by adding a dependency to reach a worse source.
+//! Which computer this is — and how sure we are, which turns out to matter more than the id
+//! itself.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// How the id was arrived at. Shown on the account screen, because "we could
-/// not read this machine's id and made one up" is a thing an owner is entitled
-/// to know before they transfer a licence onto it.
+/// How the id was arrived at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Derivation {
-    /// Step 1. Survives everything short of reinstalling Windows.
+    /// Survives everything short of reinstalling Windows.
     MachineGuid,
-    /// Step 2. P19's identity file, beside the config.
     CounterId,
-    /// Step 3. Ours, and it is only as durable as the config folder.
+    /// Ours, and it is only as durable as the config folder.
     Generated,
     /// A test's, or a value read back out of a stored licence.
     Recorded,
@@ -71,8 +28,7 @@ impl Derivation {
         }
     }
 
-    /// Whether losing the config folder loses the identity. The account screen
-    /// says so quietly when it is true.
+    /// Whether losing the config folder loses the identity.
     #[must_use]
     pub const fn is_fragile(self) -> bool {
         matches!(self, Derivation::Generated)
@@ -80,12 +36,6 @@ impl Derivation {
 }
 
 /// A machine's identity, and how it was found.
-///
-/// **Equality is the value alone.** Two `MachineId`s that name the same
-/// computer are the same computer even if one was read from the registry and
-/// the other came back from the cloud inside a licence — and the binding check
-/// is exactly that comparison, so getting this wrong would unbind every counter
-/// on the first refresh.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineId {
     value: String,
@@ -110,12 +60,14 @@ impl MachineId {
         self.how
     }
 
-    /// What a person is shown. The full value is 32-plus characters of hex and
-    /// nobody reads it out correctly; the first eight, upper-cased, is what
-    /// support asks for and what the account screen prints.
+    /// What a person is shown.
     #[must_use]
     pub fn short(&self) -> String {
-        self.value.chars().take(8).collect::<String>().to_uppercase()
+        self.value
+            .chars()
+            .take(8)
+            .collect::<String>()
+            .to_uppercase()
     }
 
     /// For tests, and for reading one back out of a stored licence.
@@ -127,11 +79,7 @@ impl MachineId {
         }
     }
 
-    /// **The chain.** `dir` is the config folder — `%APPDATA%\MagicBill\`.
-    ///
-    /// Never fails. The last step always produces something, because a counter
-    /// that refused to start over an identity it could not read would be a
-    /// counter that stopped a shop trading (requirement 3).
+    /// The chain. `dir` is the config folder — `%APPDATA%\MagicBill\`.
     #[must_use]
     pub fn of(dir: &Path) -> MachineId {
         if let Some(value) = machine_guid()
@@ -143,9 +91,6 @@ impl MachineId {
             };
         }
 
-        // Step 2: P19 already put a stable id beside the config, for exactly
-        // the same reason this module exists — a counter whose DHCP lease moves
-        // it is still the same counter.
         if let Ok(text) = std::fs::read_to_string(dir.join("counter-id.txt"))
             && is_a_real_identity(text.trim())
         {
@@ -155,9 +100,8 @@ impl MachineId {
             };
         }
 
-        // Step 3. Written once and read forever after — otherwise every restart
-        // would look like a new machine and every restart would need a
-        // transfer.
+        // Written once and read forever after — otherwise every restart would look like a new
+        // machine and every restart would need a transfer.
         let path = dir.join("machine-id.txt");
         if let Ok(text) = std::fs::read_to_string(&path)
             && is_a_real_identity(text.trim())
@@ -178,9 +122,6 @@ impl MachineId {
 }
 
 /// Values that are not identities, however confidently a machine reports them.
-///
-/// Kept from v1 and extended. Every entry here is something a real PC has
-/// really answered with.
 const PLACEHOLDERS: &[&str] = &[
     "00000000-0000-0000-0000-000000000000",
     "ffffffff-ffff-ffff-ffff-ffffffffffff",
@@ -197,7 +138,7 @@ const PLACEHOLDERS: &[&str] = &[
     "0",
 ];
 
-/// **The gate every step of the chain goes through.**
+/// The gate every step of the chain goes through.
 #[must_use]
 pub fn is_a_real_identity(value: &str) -> bool {
     let trimmed = value.trim();
@@ -208,7 +149,7 @@ pub fn is_a_real_identity(value: &str) -> bool {
     if PLACEHOLDERS.contains(&lower.as_str()) {
         return false;
     }
-    // All one character — "0000000000", "----------". A real id is not.
+    // All one character — "0000000000", "----------".
     let mut chars = lower.chars().filter(|c| c.is_alphanumeric());
     match chars.next() {
         None => false,
@@ -220,15 +161,12 @@ fn normalise(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
-/// 32 hex characters from the OS's own source. `ring` is already here for the
-/// signature work, so this costs nothing extra.
+/// 32 hex characters from the OS's own source.
 fn fresh_id() -> String {
     use ring::rand::SecureRandom as _;
     let mut bytes = [0_u8; 16];
     if ring::rand::SystemRandom::new().fill(&mut bytes).is_err() {
         // Vanishingly unlikely, and still not a reason to stop a shop trading.
-        // The time is a poor identity and a working counter beats a correct
-        // one that will not open.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
@@ -242,11 +180,7 @@ fn machine_guid() -> Option<String> {
     use winreg::RegKey;
     use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
 
-    // **`KEY_WOW64_64KEY` is not decoration.** A 32-bit process reading this
-    // path lands in `Wow6432Node`, where the value does not exist — so without
-    // it, a 32-bit build silently falls through to step 2 and every machine
-    // gets a different id from the 64-bit build. That is a fleet-wide
-    // re-activation, caused by a missing flag.
+    // `KEY_WOW64_64KEY` is not decoration.
     RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey_with_flags(
             r"SOFTWARE\Microsoft\Cryptography",
@@ -259,9 +193,7 @@ fn machine_guid() -> Option<String> {
 
 #[cfg(not(windows))]
 fn machine_guid() -> Option<String> {
-    // The product is Windows-only (Tauri + mb-winprint). This exists so the
-    // crate still builds and tests on anything else, which is worth the four
-    // lines.
+    // The product is Windows-only (Tauri + mb-winprint).
     None
 }
 
@@ -270,20 +202,13 @@ mod tests {
     use super::*;
 
     fn scratch(label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mb-machine-{}-{label}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("mb-machine-{}-{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         dir
     }
 
-    /// **The placeholder list, every entry, fed in one at a time.**
-    ///
-    /// This is the test v1's chain did not have. A cloned disk image gives five
-    /// tills the same MachineGuid, and without this the fifth one to activate
-    /// silently steals the licence from the first.
+    /// The placeholder list, every entry, fed in one at a time.
     #[test]
     fn a_placeholder_is_never_an_identity() {
         for placeholder in PLACEHOLDERS {
@@ -310,15 +235,14 @@ mod tests {
         }
     }
 
-    /// Step 2: P19's file is used before anything is invented.
     #[test]
     fn the_counters_own_id_is_step_two() {
         let dir = scratch("counter-id");
         std::fs::write(dir.join("counter-id.txt"), "b41f0e2a9c7d4e11\n").expect("writes");
         let id = MachineId::of(&dir);
-        // On Windows step 1 will normally win, so this asserts the behaviour
-        // that is actually under test: whichever step answered, it is not the
-        // invented one, and the file was a candidate.
+        // On Windows step 1 will normally win, so this asserts the behaviour that is actually
+        // under test: whichever step answered, it is not the invented one, and the file was a
+        // candidate.
         assert!(matches!(
             id.how(),
             Derivation::MachineGuid | Derivation::CounterId
@@ -342,8 +266,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **Step 3 is stable across restarts**, or every restart would look like a
-    /// new computer and need a transfer.
+    /// Step 3 is stable across restarts, or every restart would look like a new computer and
+    /// need a transfer.
     #[test]
     fn a_generated_id_is_written_once_and_read_thereafter() {
         let dir = scratch("generated");
@@ -380,8 +304,7 @@ mod tests {
         assert_eq!(id.short(), "4C4C4544");
     }
 
-    /// It never fails, on any machine, in any state. Requirement 3's own
-    /// corollary: there is no identity problem that stops a shop trading.
+    /// It never fails, on any machine, in any state.
     #[test]
     fn the_chain_always_answers() {
         let dir = scratch("always");
@@ -390,8 +313,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Two different folders on the same machine still name the same machine,
-    /// as long as a real source answered. (On Windows this is step 1.)
+    /// Two different folders on the same machine still name the same machine, as long as a real
+    /// source answered.
     #[test]
     fn fresh_ids_do_not_collide() {
         let a = fresh_id();

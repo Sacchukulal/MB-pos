@@ -1,26 +1,5 @@
-//! **Variants, modifiers and combos** — the three ways one menu row becomes
-//! several things a customer can order.
-//!
-//! Scope 6.1, 6.2 and 6.3. P04 reserved every table here and nothing has ever
-//! written to one; this is where they start meaning something.
-//!
-//! > *"v1's menu was: category, name, price. That is all. It could not express
-//! > a GST rate per item, an HSN code, a half/full portion, an add-on, or a
-//! > cost price."*
-//!
-//! # Why the three live together
-//!
-//! They answer one question — *what exactly is on this line?* — and they share
-//! its one hard rule: **[`LineIdentity`](mb_core::LineIdentity) already decides
-//! what makes two lines the same thing**, and it does it with the item id, the
-//! note and the *sorted* modifier ids (P01). Nothing here may invent a second
-//! answer, because the kitchen ledger, the cart's merge and the bill's line all
-//! key on that one.
-//!
-//! A variant is therefore **its own item id**, not a flag on a line: "Dosa
-//! (Half)" and "Dosa (Full)" are two things to cook, two prices and two rows on
-//! a rate summary. That is also why `item_variants` carries a price and not a
-//! discount — a half dosa is not a discounted dosa.
+//! Variants, modifiers and combos — the three ways one menu row becomes several things a
+//! customer can order.
 
 use mb_core::{ComboComponent, ItemId, Money, Qty, Timestamp, combo};
 use rusqlite::Transaction;
@@ -29,7 +8,7 @@ use crate::encode;
 use crate::error::DbError;
 use crate::repo::outbox::{Op, OutboxRepo};
 
-/// One size of an item — half/full, 250g/500g/1kg. Scope 6.1.
+/// One size of an item — half/full, 250g/500g/1kg.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variant {
     pub id: ItemId,
@@ -41,7 +20,7 @@ pub struct Variant {
     pub is_active: bool,
 }
 
-/// A set of choices offered on an item. Scope 6.2.
+/// A set of choices offered on an item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModifierGroup {
     pub id: String,
@@ -58,19 +37,13 @@ pub struct ModifierGroup {
 pub struct Modifier {
     pub id: mb_core::ModifierId,
     pub name: String,
-    /// **May be negative** — *"no cheese, −10"* is a real line on a real menu.
-    /// Taxed at the LINE's rate, never its own (D54).
+    /// May be negative — "no cheese, −10" is a real line on a real menu.
     pub price_delta: Money,
     pub sort_order: i64,
     pub is_active: bool,
 }
 
 impl ModifierGroup {
-    /// **Scope 6.2's rule, and P13's T6.** Is this a legal set of choices?
-    ///
-    /// Checked here rather than on the screen for R8's reason: hiding a
-    /// checkbox is a courtesy, and a group that says "choose one" has to mean
-    /// it wherever the choice is made — including from a phone (Phase 11).
     pub fn check(&self, chosen: usize) -> Result<(), DbError> {
         let chosen = i64::try_from(chosen).unwrap_or(i64::MAX);
         if chosen < self.min_select {
@@ -91,7 +64,7 @@ impl ModifierGroup {
     }
 }
 
-/// A named set sold at one price. Scope 6.3.
+/// A named set sold at one price.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Combo {
     pub id: String,
@@ -105,10 +78,7 @@ pub struct Combo {
 pub struct ComboPart {
     pub item_id: ItemId,
     pub qty: Qty,
-    /// The stored proportion — a **cache** of the apportionment, for display
-    /// and reporting. The money is recomputed from live prices when the combo
-    /// is sold, because a component's price changes and a stored share would
-    /// then be stale in a way nobody would notice (D53).
+    /// The stored proportion — a cache of the apportionment, for display and reporting.
     pub share_bp: u32,
 }
 
@@ -122,10 +92,6 @@ impl<'a> CompositionRepo<'a> {
     pub(crate) fn new(tx: &'a Transaction<'a>) -> Self {
         CompositionRepo { tx }
     }
-
-    // -----------------------------------------------------------------------
-    // Variants — scope 6.1.
-    // -----------------------------------------------------------------------
 
     pub fn save_variant(
         &self,
@@ -149,7 +115,13 @@ impl<'a> CompositionRepo<'a> {
                 encode::bool_to_sql(variant.is_active),
             ],
         )?;
-        OutboxRepo::new(self.tx).enqueue(outlet, "item_variants", variant.id.as_str(), Op::Upsert, at)
+        OutboxRepo::new(self.tx).enqueue(
+            outlet,
+            "item_variants",
+            variant.id.as_str(),
+            Op::Upsert,
+            at,
+        )
     }
 
     pub fn variants_of(&self, item: &ItemId) -> Result<Vec<Variant>, DbError> {
@@ -180,10 +152,6 @@ impl<'a> CompositionRepo<'a> {
         }
         Ok(out)
     }
-
-    // -----------------------------------------------------------------------
-    // Modifiers — scope 6.2.
-    // -----------------------------------------------------------------------
 
     pub fn save_group(
         &self,
@@ -217,11 +185,13 @@ impl<'a> CompositionRepo<'a> {
             ],
         )?;
 
-        // The choices are replaced wholesale — a handful of rows, and a diff is
-        // where "the box looked unticked but the row was still there" comes
-        // from (`save_role` and `save` on a tax class make the same argument).
-        self.tx
-            .execute("DELETE FROM modifiers WHERE group_id = ?1", [group.id.as_str()])?;
+        // The choices are replaced wholesale — a handful of rows, and a diff is where "the box
+        // looked unticked but the row was still there" comes from (`save_role` and `save` on a
+        // tax class make the same argument).
+        self.tx.execute(
+            "DELETE FROM modifiers WHERE group_id = ?1",
+            [group.id.as_str()],
+        )?;
         for modifier in &group.modifiers {
             self.tx.execute(
                 "INSERT INTO modifiers (id, group_id, name, price_delta, sort_order, is_active)
@@ -299,7 +269,11 @@ impl<'a> CompositionRepo<'a> {
     }
 
     /// Which groups an item offers.
-    pub fn groups_for_item(&self, outlet: &str, item: &ItemId) -> Result<Vec<ModifierGroup>, DbError> {
+    pub fn groups_for_item(
+        &self,
+        outlet: &str,
+        item: &ItemId,
+    ) -> Result<Vec<ModifierGroup>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT group_id FROM item_modifier_groups WHERE item_id = ?1 ORDER BY sort_order",
         )?;
@@ -333,12 +307,6 @@ impl<'a> CompositionRepo<'a> {
     }
 
     /// Stop offering a group on an item.
-    ///
-    /// **This one really is a delete**, and it is the exception that proves the
-    /// rule about the menu never deleting anything: the row says *"this item
-    /// currently offers this group"*, and it is not a thing any bill points at.
-    /// A line that was sold with extra cheese froze the modifier onto itself
-    /// (crown jewel 4) and does not read this table ever again.
     pub fn detach_group(
         &self,
         outlet: &str,
@@ -362,17 +330,7 @@ impl<'a> CompositionRepo<'a> {
         Ok((self.variants_of(item)?, self.groups_for_item(outlet, item)?))
     }
 
-    // -----------------------------------------------------------------------
-    // Combos — scope 6.3.
-    // -----------------------------------------------------------------------
-
-    /// Save a combo, **apportioning its price as it goes**.
-    ///
-    /// The shares are computed by `mb_core::combo::apportion`, which is D14's
-    /// rounding rule — floor, then largest remainder — so they add back to the
-    /// combo price exactly. The stored `share_bp` is a proportion for display
-    /// and reporting; the money is recomputed at the moment of sale from live
-    /// prices (D53).
+    /// Save a combo, apportioning its price as it goes.
     pub fn save_combo(
         &self,
         outlet: &str,
@@ -417,8 +375,10 @@ impl<'a> CompositionRepo<'a> {
             ],
         )?;
 
-        self.tx
-            .execute("DELETE FROM combo_components WHERE combo_id = ?1", [combo.id.as_str()])?;
+        self.tx.execute(
+            "DELETE FROM combo_components WHERE combo_id = ?1",
+            [combo.id.as_str()],
+        )?;
         for share in &shares {
             self.tx.execute(
                 "INSERT INTO combo_components (combo_id, item_id, qty, share_bp)

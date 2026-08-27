@@ -6,23 +6,19 @@ import type { SlipLineView } from "./SlipLineView";
 /**
  * The whole screen.
  */
-export type DayCloseView = { 
-/**
- * "2026-08-09".
- */
-day: string, 
+export type DayCloseView = { day: string, 
 /**
  * The day in words, for the heading: "Today, Sunday 9 August".
  */
 daySays: string, takings: Array<SlipLineView>, drawer: Array<SlipLineView>, expected: MoneyView, denominations: Array<DenominationView>, counted: MoneyView, variance: MoneyView, 
 /**
- * **The sentence.** "Short by 340.00", "Over by 20.00", "Matches
- * exactly." Never a signed number on its own.
+ * The sentence. "Short by 340.00", "Over by 20.00", "Matches exactly." Never a signed
+ * number on its own.
  */
 varianceSays: string, 
 /**
- * `short`, `over` or `exact` — for the shape and the colour, and colour is
- * never the only signal.
+ * `short`, `over` or `exact` — for the shape and the colour, and colour is never the only
+ * signal.
  */
 varianceKind: string, 
 /**
@@ -38,8 +34,7 @@ isClosed: boolean,
  */
 closedSays: string, 
 /**
- * What carrying the float forward will do, in words. Empty when the shop
- * does not carry one.
+ * What carrying the float forward will do, in words.
  */
 carrySays: string, 
 /**
@@ -47,12 +42,6 @@ carrySays: string,
  */
 mayClose: boolean, 
 /**
- * **Which tills are in the shop's day, and which are not** (P27, D140).
- *
- * Empty in a one-till shop, which is every shop until somebody buys a
- * second computer. In a two-till shop it is the sentence that stops a
- * manager going home believing the day is closed: the shop's total is the
- * SUM of the drawers, so a drawer nobody counted is a total that is short
- * by whatever is in it.
+ * Which tills are in the shop's day, and which are not.
  */
 tillsSay: string, };

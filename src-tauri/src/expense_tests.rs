@@ -1,8 +1,4 @@
-//! **Expenses and the drawer, driven end to end** — P16.
-//!
-//! The cash position is the figure P18's day close will lean on, so the
-//! sequence that produces it is worth driving with the real commands: a float,
-//! a sale, a cash purchase, a payout, a bank drop, and then the arithmetic.
+//! Expenses and the drawer, driven end to end.
 
 #![allow(
     clippy::expect_used,
@@ -13,8 +9,8 @@
 use mb_db::{Db, DbConfig, Repos};
 
 use crate::expenses::{
-    ExpenseEdit, confirm_due_on, delete_expense_on, expenses_on, save_expense_on,
-    save_movement_on, save_recurring_on,
+    ExpenseEdit, confirm_due_on, delete_expense_on, expenses_on, save_expense_on, save_movement_on,
+    save_recurring_on,
 };
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
@@ -67,14 +63,19 @@ fn spend(app: &App, id: &str, what: &str, amount: &str, mode: &str) -> ExpenseEd
     edit
 }
 
-/// **The cash position, from a day the commands actually built.**
+/// The cash position, from a day the commands actually built.
 #[test]
 fn the_drawer_says_what_should_be_in_it() {
     let scratch = Scratch::new("drawer");
     let app = a_shop(&scratch);
 
-    save_movement_on(&app, "float".to_owned(), "2000".to_owned(), "opening".to_owned())
-        .expect("float");
+    save_movement_on(
+        &app,
+        "float".to_owned(),
+        "2000".to_owned(),
+        "opening".to_owned(),
+    )
+    .expect("float");
 
     // A cash sale, through the real billing path.
     app.with_cart_mut(|state| {
@@ -84,10 +85,12 @@ fn the_drawer_says_what_should_be_in_it() {
     .expect("parcel");
     crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
         .expect("added");
-    let bill = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total)).expect("bill");
+    let bill = app
+        .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
+        .expect("bill");
     app.with_cart_mut(|state| {
-        let payment = mb_core::Payment::new(mb_core::PaymentMode::Cash, bill)
-            .expect("a cash payment");
+        let payment =
+            mb_core::Payment::new(mb_core::PaymentMode::Cash, bill).expect("a cash payment");
         state.settlement.add(payment).map_err(|e| {
             crate::words::UiError::new("bill.pay", "That payment could not be taken.")
                 .with_detail(e.to_string())
@@ -98,8 +101,13 @@ fn the_drawer_says_what_should_be_in_it() {
 
     spend(&app, "exp_veg", "Vegetables", "400", "cash");
     spend(&app, "exp_rent", "Rent", "9000", "bank");
-    save_movement_on(&app, "payout".to_owned(), "300".to_owned(), "to the boy".to_owned())
-        .expect("payout");
+    save_movement_on(
+        &app,
+        "payout".to_owned(),
+        "300".to_owned(),
+        "to the boy".to_owned(),
+    )
+    .expect("payout");
     let view = save_movement_on(
         &app,
         "bank_drop".to_owned(),
@@ -108,7 +116,7 @@ fn the_drawer_says_what_should_be_in_it() {
     )
     .expect("drop");
 
-    // float 2000 + sales 126 + top-ups 0 − expenses 400 − payouts 300 − drops 1000
+    // Float 2000 + sales 126 + top-ups 0 − expenses 400 − payouts 300 − drops 1000.
     assert_eq!(view.cash.opening_float.paise, 200_000);
     assert_eq!(view.cash.cash_sales.paise, bill.paise());
     assert_eq!(
@@ -164,8 +172,7 @@ fn a_gst_split_says_the_rate_and_the_money() {
     assert_eq!(gas.reference.as_deref(), Some("INV-9"));
 }
 
-/// **An edit and a delete are both accountable** — audit B15, which v1 could
-/// do neither of.
+/// An edit and a delete are both accountable.
 #[test]
 fn an_edit_and_a_delete_both_leave_a_trail_with_before_and_after() {
     let scratch = Scratch::new("trail");
@@ -182,10 +189,17 @@ fn an_edit_and_a_delete_both_leave_a_trail_with_before_and_after() {
     assert!(after_delete.rows.is_empty(), "an expense really is deleted");
 
     let trail = crate::ipc::audit_trail_on(&app, None, None, None).expect("audit");
-    let saves = trail.entries.iter().filter(|e| e.what.contains("Recorded an expense")).count();
+    let saves = trail
+        .entries
+        .iter()
+        .filter(|e| e.what.contains("Recorded an expense"))
+        .count();
     assert!(saves >= 3, "every save is a row: {saves}");
     assert!(
-        trail.entries.iter().any(|e| e.what.contains("Deleted an expense")),
+        trail
+            .entries
+            .iter()
+            .any(|e| e.what.contains("Deleted an expense")),
         "and so is the delete",
     );
     // The delete carries what it deleted, which is the point of `before`.
@@ -194,11 +208,14 @@ fn an_edit_and_a_delete_both_leave_a_trail_with_before_and_after() {
         .iter()
         .find(|e| e.what.contains("Deleted an expense"))
         .expect("the delete");
-    assert!(deleted.before.is_some(), "a delete with no before is not evidence");
+    assert!(
+        deleted.before.is_some(),
+        "a delete with no before is not evidence"
+    );
 }
 
-/// A reminder posts NOTHING until somebody confirms it, and confirming twice
-/// on one day cannot post it twice.
+/// A reminder posts NOTHING until somebody confirms it, and confirming twice on one day cannot
+/// post it twice.
 #[test]
 fn a_reminder_is_a_reminder_until_somebody_says_yes() {
     let scratch = Scratch::new("reminder");
@@ -234,8 +251,8 @@ fn a_reminder_is_a_reminder_until_somebody_says_yes() {
     );
 }
 
-/// Money leaving a drawer without a reason is how a shortfall becomes an
-/// argument, so it is refused.
+/// Money leaving a drawer without a reason is how a shortfall becomes an argument, so it is
+/// refused.
 #[test]
 fn a_payout_needs_a_reason_and_an_expense_needs_a_description() {
     let scratch = Scratch::new("refusals");
@@ -272,22 +289,7 @@ fn a_payout_needs_a_reason_and_an_expense_needs_a_description() {
     assert_eq!(blank.code, "expense.what");
 }
 
-/// **Two spends made in the very same instant are two spends.**
-///
-/// The worst half of the clock-id bug lived here. `expenses` is an **upsert**,
-/// because saving an edited spend reuses its id — so when two spends were given
-/// the same id, the second did not fail. It silently **replaced** the first.
-/// Money gone from the day's list, no error, nothing on screen to say why.
-///
-/// # Why the timestamp is handed in rather than waited for
-///
-/// The first version of this test confirmed two reminders back to back and
-/// hoped they landed in the same millisecond. **They did not**, so it passed
-/// with the bug deliberately put back — which is a test that proves nothing.
-/// Checked, and that is how this one came to be written the other way.
-///
-/// One timestamp, two ids, both through the real command. Deterministic, and it
-/// fails the moment an id is a clock reading again.
+/// Two spends made in the very same instant are two spends.
 #[test]
 fn two_spends_made_in_the_same_instant_are_two_spends() {
     let scratch = Scratch::new("exp_same_instant");
@@ -309,11 +311,14 @@ fn two_spends_made_in_the_same_instant_are_two_spends() {
         .map(|r| r.description.as_str())
         .filter(|d| *d == "Rent" || *d == "Electricity")
         .collect();
-    assert_eq!(recorded.len(), 2, "one spend replaced the other: {recorded:?}");
+    assert_eq!(
+        recorded.len(),
+        2,
+        "one spend replaced the other: {recorded:?}"
+    );
 }
 
-/// And the flow it protects: two reminders due on the same day can both be
-/// confirmed. A smoke test for the path, not the proof above.
+/// And the flow it protects: two reminders due on the same day can both be confirmed.
 #[test]
 fn two_reminders_due_together_can_both_be_confirmed() {
     let scratch = Scratch::new("recurring_race");
@@ -332,8 +337,8 @@ fn two_reminders_due_together_can_both_be_confirmed() {
         .expect("a reminder");
     }
 
-    // Back to back, as fast as the machine goes — which is what "the same
-    // instant" means in practice.
+    // Back to back, as fast as the machine goes — which is what "the same instant" means in
+    // practice.
     crate::expenses::confirm_due_on(&app, "rec_rent".to_owned()).expect("rent");
     let view = crate::expenses::confirm_due_on(&app, "rec_power".to_owned()).expect("power");
 

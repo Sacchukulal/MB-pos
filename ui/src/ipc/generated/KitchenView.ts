@@ -5,7 +5,7 @@ import type { WaitingCourse } from "./WaitingCourse";
 
 export type KitchenView = { station: string, 
 /**
- * Every station this shop has. A screen is pointed at one of these.
+ * Every station this shop has.
  */
 stations: Array<string>, tickets: Array<KitchenTicket>, 
 /**
@@ -17,19 +17,10 @@ headline: string,
  */
 late: number, 
 /**
- * Courses a waiter can still fire (scope 3.5). Empty for a shop that does
- * not use courses, which is most of them.
+ * Courses a waiter can still fire.
  */
 waitingCourses: Array<WaitingCourse>, 
 /**
- * **The last card cleared at this station, so it can be brought back.**
- *
- * A cook clears the wrong ticket several times a week — a wet hand, a
- * crowded rail. The card is gone from the grid the instant it is cleared,
- * so the undo cannot live on the card: it has to live somewhere that is
- * still on screen. This is that somewhere.
- *
- * `None` when nothing has been cleared, which is what a screen looks like
- * at opening time.
+ * The last card cleared at this station, so it can be brought back.
  */
 lastCleared: Cleared | null, };

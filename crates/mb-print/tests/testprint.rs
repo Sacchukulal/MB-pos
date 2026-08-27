@@ -1,11 +1,3 @@
-//! **T11 and T12 — the test print, and the offset the owner can actually
-//! correct** (scope 7.11).
-//!
-//! The test print is the one thing that must work when nothing else does:
-//! first run, after a restore (D27 opens no database), and with no printer
-//! configured at all. So this file uses the File transport and, for the half
-//! that has to persist, a real database.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -25,14 +17,13 @@ use mb_print::queue::{Job, JobKind, MemoryStore, Queue, QueueConfig};
 use mb_print::testprint::test_document;
 use mb_print::text::to_text;
 
-/// T11. **A test print works with nothing configured**, all the way to bytes.
+/// A test print works with nothing configured, all the way to bytes.
 #[test]
 fn t11_a_test_print_reaches_paper_with_no_database_and_no_printer() {
     let scratch = common::Scratch::new("testprint");
     let path = scratch.path("roll.bin");
 
-    // No database anywhere in this test. That is the point: D27 says a restore
-    // runs before `Db::open`, and first run has nothing to open.
+    // No database anywhere in this test.
     let printer = PrinterConfig::new("prn_new", "Counter", Target::File { path: path.clone() });
     let queue = Queue::start(
         vec![printer.clone()],
@@ -54,13 +45,14 @@ fn t11_a_test_print_reaches_paper_with_no_database_and_no_printer() {
         )
         .expect("queued");
 
-    let printed = common::until(|| path.exists() && std::fs::metadata(&path).is_ok_and(|m| m.len() > 0));
+    let printed =
+        common::until(|| path.exists() && std::fs::metadata(&path).is_ok_and(|m| m.len() > 0));
     assert!(printed, "the test print never reached the file");
     queue.shutdown();
 }
 
-/// The slip carries the ruler, the offset in both units, and sample money that
-/// round-trips like every other amount on paper (R2).
+/// The slip carries the ruler, the offset in both units, and sample money that round-trips like
+/// every other amount on paper.
 #[test]
 fn t11_the_slip_says_everything_the_owner_needs_to_read_off_the_paper() {
     let printer = PrinterConfig::new("prn", "Counter", Target::None)
@@ -75,9 +67,7 @@ fn t11_the_slip_says_everything_the_owner_needs_to_read_off_the_paper() {
     assert!(text.contains("+2 mm right"), "{text}");
     assert!(text.contains("Sample bill"));
 
-    // R2: every amount on the slip is `Money::to_plain_string`, like every
-    // amount anywhere else. A test print that formatted its own numbers would
-    // be testing a renderer nobody uses.
+    // Every amount on the slip is `Money::to_plain_string`, like every amount anywhere else.
     let mut checked = 0;
     for token in text.split_whitespace() {
         if !token.contains('.') || !token.chars().all(|c| c.is_ascii_digit() || c == '.') {
@@ -91,18 +81,15 @@ fn t11_the_slip_says_everything_the_owner_needs_to_read_off_the_paper() {
     assert!(checked >= 5, "only found {checked} amounts on the slip");
 }
 
-/// T12. **The offset is adjustable, it moves everything, and it persists.**
-///
-/// Print, look at the paper, nudge, print again — and a printer that needs
-/// +2 mm today needs +2 mm forever.
+/// The offset is adjustable, it moves everything, and it persists.
 #[test]
 fn t12_nudging_moves_the_print_and_the_value_survives_a_restart() {
     let scratch = common::Scratch::new("offset");
     let db = Db::open(&DbConfig::new(scratch.path("shop.db"))).expect("opens");
     common::seed_printer(&db, "prn_counter");
 
-    let mut printer = PrinterConfig::new("prn_counter", "Counter", Target::None)
-        .with_paper(PaperKind::Mm80);
+    let mut printer =
+        PrinterConfig::new("prn_counter", "Counter", Target::None).with_paper(PaperKind::Mm80);
 
     let straight = layout(&test_document(&printer, None)).expect("lays out");
 
@@ -113,11 +100,7 @@ fn t12_nudging_moves_the_print_and_the_value_survives_a_restart() {
 
     let shifted = layout(&test_document(&printer, None)).expect("lays out");
 
-    // 3 mm on 80 mm paper is two columns, and EVERY line starts two columns
-    // further in. Asserted on the laid-out indent rather than on leading
-    // spaces, because a *centred* line re-centres inside the narrower width —
-    // which is right, and which counting spaces would read as "it moved by
-    // one".
+    // 3 mm on 80 mm paper is two columns, and EVERY line starts two columns further in.
     assert!(straight.lines.iter().all(|l| l.indent_dots == 0));
     let moved = shifted.base_advance * 2;
     assert!(
@@ -127,10 +110,15 @@ fn t12_nudging_moves_the_print_and_the_value_survives_a_restart() {
 
     // Nothing was lost off the right edge.
     let printed = to_text(&shifted);
-    let across = shifted.lines.iter().filter_map(|l| match &l.content {
-        mb_print::LaidContent::Separator { width, .. } => Some(*width),
-        _ => None,
-    }).max().unwrap_or(0);
+    let across = shifted
+        .lines
+        .iter()
+        .filter_map(|l| match &l.content {
+            mb_print::LaidContent::Separator { width, .. } => Some(*width),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
     for line in printed.lines() {
         assert!(
             line.chars().count() <= PaperKind::Mm80.columns(),
@@ -179,4 +167,3 @@ fn t12_nudging_moves_the_print_and_the_value_survives_a_restart() {
          every morning"
     );
 }
-

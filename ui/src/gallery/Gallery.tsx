@@ -1,17 +1,3 @@
-/**
- * The only screen this session ships — and it is not a demo.
- *
- * It is **how the owner looks at the theme system and says "change the
- * accent"**, which is the point of the whole session (UI_GUIDELINES §0, the
- * ruling of 2026-08-04). Every component, every state, every semantic colour
- * and the receipt preview, under whichever theme the sun/moon button is on.
- *
- * It is also what `tests/theme.test.tsx` renders: the swap test asserts this
- * page's DOM is identical under every theme, which is the owner's requirement
- * — *"changed easily … without touching any functionality of the app"* — as an
- * assertion rather than an intention.
- */
-
 import { useEffect, useState } from 'react';
 
 import {
@@ -66,11 +52,6 @@ export function Gallery() {
         note="Every component, every state, in the current theme."
       />
 
-      {/* ---------------------------------------------------------------
-          The theme controls. Deliberately first: this page exists so the
-          owner can change the look, and the owner's ruling is that changing
-          it costs one token block.
-          --------------------------------------------------------------- */}
       <Card>
         <SectionHeader
           title="Theme"
@@ -256,9 +237,9 @@ export function Gallery() {
 }
 
 /**
- * Sample rows. The amounts are shaped exactly as Rust sends them — integer
- * paise plus the string `Money::to_plain_string` produced — because a gallery
- * that formatted its own numbers would be demonstrating the wrong thing.
+ * Sample rows. The amounts are shaped exactly as Rust sends them — integer paise plus the
+ * string `Money::to_plain_string` produced — because a gallery that formatted its own numbers
+ * would be demonstrating the wrong thing.
  */
 const SAMPLE_ROWS = [
   {

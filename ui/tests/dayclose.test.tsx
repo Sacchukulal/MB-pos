@@ -1,15 +1,4 @@
-/**
- * **The day close screen** — P18.
- *
- * Rust proves the money (`dayclose_tests.rs` drives four nights end to end).
- * This proves the two claims that are the screen's own:
- *
- * 1. **every keystroke asks Rust** — the running total and the difference are
- *    never worked out here, so what is on screen while somebody counts cannot
- *    disagree with what gets saved;
- * 2. **the difference is shown as the sentence Rust wrote**, not as a signed
- *    number the screen formats.
- */
+/** The day close screen. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -26,13 +15,7 @@ const { ToastProvider } = await import('../src/kit');
 
 import type { DayCloseView } from '../src/ipc/generated/DayCloseView';
 
-/**
- * `MoneyView.paise` is a `bigint`, because Rust's is an `i64`.
- *
- * That is fine in this direction: D58 bans a `bigint` going INTO Rust, where
- * `JSON.stringify` would throw on it. Coming out it is just a number nothing
- * on this screen does arithmetic on.
- */
+/** `MoneyView.paise` is a `bigint`, because Rust's is an `i64`. */
 function money(paise: number, text: string) {
   return { paise: BigInt(paise), text };
 }
@@ -58,8 +41,6 @@ const view: DayCloseView = {
   closedSays: '',
   carrySays: '',
   mayClose: true,
-  // P27, D140. A one-till shop says nothing here, which is every shop in this
-  // file â the two-till sentence is proved in Rust, where the arithmetic is.
   tillsSay: '',
 };
 
@@ -105,10 +86,7 @@ it('sends the count to Rust and shows the total Rust sent back', async () => {
       counts: [{ value: 50_000, count: 20 }],
     }),
   );
-  // The running total is the one Rust computed. Nothing here multiplied
-  // twenty by five hundred.
-  // Twice: once on the ₹500 row, once as the running total — and both came
-  // down the wire.
+  // The running total is the one Rust computed.
   await waitFor(() => expect(screen.getAllByText('10000.00')).toHaveLength(2));
 });
 

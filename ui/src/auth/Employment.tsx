@@ -1,31 +1,4 @@
-/**
- * **The employment side of the Staff screen** — P28.
- *
- * Attendance, leave and salary. P11's People and Roles tabs are next to these
- * and stay what they are: identity, and what somebody may do. This is what they
- * are paid, when they worked, and when they were away.
- *
- * # The first screen built against UI_GUIDELINES §8
- *
- * P27.5 wrote the spacing, type, elevation, icon and layout contracts. This is
- * the first session that did not write them, so it is also the test of whether
- * they survive contact with somebody following them rather than making them:
- *
- * * every gap is named from the contract (`--gap-field` and friends), never a
- *   raw step off the scale;
- * * `Panel`, `Toolbar` and the kit's tabs, so nothing here re-invents a page;
- * * `<Icon>` for every icon — `check-layout.mjs` fails the build on a glyph;
- * * money is mono with `tabular-nums`, and **a column header is a label, not a
- *   figure** (P27.5 fixed that twice; it will come back if nobody says it).
- *
- * # Nothing here computes anything
- *
- * Not one figure on these screens is worked out in TypeScript. The balance is a
- * sum of a ledger in Rust, the payslip arithmetic is `mb_core::employment`, and
- * even "7½ days" is a sentence Rust wrote — because that same sentence appears
- * on a payslip and inside a refusal, and three copies is three chances for one
- * of them to say something different (§6).
- */
+/** The employment side of the Staff screen. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -57,7 +30,6 @@ import type { SalaryView } from '../ipc/generated/SalaryView';
 import type { ShiftView } from '../ipc/generated/ShiftView';
 import type { StaffCostView } from '../ipc/generated/StaffCostView';
 
-/** A day, as the product writes one everywhere: 2026-08-16. */
 function dayText(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
@@ -68,14 +40,7 @@ function todayText(): string {
   return dayText(new Date());
 }
 
-/**
- * **A fortnight back — what the attendance and payroll screens open on.**
- *
- * Not today. "Who is in right now" is already answered by the dot beside a name
- * on the People tab; the question these two screens exist for is "what happened
- * over a period", and a screen that opens on a single day answers it with an
- * empty table on every shop that is not mid-shift.
- */
+/** A fortnight back — what the attendance and payroll screens open on. */
 function fortnightAgoText(): string {
   const then = new Date();
   then.setDate(then.getDate() - 14);
@@ -93,24 +58,13 @@ function useReport() {
   );
 }
 
-// ===========================================================================
-// Attendance
-// ===========================================================================
-
-/**
- * **Who was here, and who was not.**
- *
- * The missed clock-outs are their own panel above the day rather than a row in
- * the middle of it, because they are the only thing on this screen somebody has
- * to *do* something about: until a shift has an end, nobody's hours can be
- * worked out and payroll silently leaves them out.
- */
+/** Who was here, and who was not. */
 export function Attendance({ staffId }: { staffId?: string }) {
   const [view, setView] = useState<AttendanceView | null>(null);
   const [from, setFrom] = useState(fortnightAgoText());
   const [to, setTo] = useState(todayText());
   const [fixing, setFixing] = useState<ShiftView | null>(null);
-  /** P31 — who is EXPECTED in, which nothing could say. */
+  /** Who is EXPECTED in, which nothing could say. */
   const [rostering, setRostering] = useState(false);
   const report = useReport();
 
@@ -155,8 +109,10 @@ export function Attendance({ staffId }: { staffId?: string }) {
           >
             {s.verdict}
           </Badge>
-          {/* A corrected row SAYS it was corrected (D47) — a correction
-              nobody can see is indistinguishable from the original. */}
+          {/*
+            A corrected row SAYS it was corrected — a correction nobody can see is
+            indistinguishable from the original.
+          */}
           {s.corrected ? (
             <span title={s.correctionReason ?? undefined}>
               <Badge tone="info">Changed</Badge>
@@ -184,10 +140,7 @@ export function Attendance({ staffId }: { staffId?: string }) {
       <Toolbar
         end={
           <Row gap="inline">
-            {/* **Who is meant to be in.** `save_roster` decides whether a shift
-                counts as late, and it had no button — so every "Late by 35
-                minutes" in the table above was judged against a roster nobody
-                could set. */}
+            {/* Who is meant to be in. */}
             {view?.mayCorrect ? (
               <Button variant="secondary" onClick={() => setRostering(true)}>
                 <Icon name="calendar" size="sm" />
@@ -300,8 +253,7 @@ function FixHours({
       }
     >
       <Stack gap="field">
-        {/* The sentence says WHY this is watched, in the place somebody is
-            about to do it. §6: written from the shop's side of the screen. */}
+        {/* The sentence says WHY this is watched, in the place somebody is about to do it. */}
         <p className="mb-muted">
           Changing somebody&rsquo;s hours is recorded with your name, the old
           times and the new ones. You cannot change your own.
@@ -326,14 +278,10 @@ function FixHours({
   );
 }
 
-// ===========================================================================
-// Leave
-// ===========================================================================
-
 export function Leave({ staffId }: { staffId?: string }) {
   const [view, setView] = useState<LeaveView | null>(null);
   const [asking, setAsking] = useState(false);
-  /** P31 — granting or taking back a balance, which had no button. */
+  /** Granting or taking back a balance, which had no button. */
   const [adjusting, setAdjusting] = useState(false);
   const report = useReport();
 
@@ -350,10 +298,10 @@ export function Leave({ staffId }: { staffId?: string }) {
       <Toolbar
         end={
           <>
-            {/* **A balance has to be able to move**, and `adjust_leave` was
-                the command that did it with nothing calling it. A year's
-                allowance at the start of April, three days carried forward,
-                a correction after an argument — none of it was possible. */}
+            {/*
+              A balance has to be able to move, and `adjust_leave` was the command that did it
+              with nothing calling it.
+            */}
             {view?.mayApprove ? (
               <Button variant="secondary" onClick={() => setAdjusting(true)}>
                 Grant or deduct
@@ -373,9 +321,7 @@ export function Leave({ staffId }: { staffId?: string }) {
         </span>
       </Toolbar>
 
-      {/* **The balance is a ledger, and the screen says so.** Accrued and taken
-          are both shown beside what is left, because a bare number is a number
-          somebody will argue with and nobody can check. */}
+      {/* The balance is a ledger, and the screen says so. */}
       <Panel title="What is left" flush>
         <Table
           rows={[...(view?.balances ?? [])]}
@@ -534,9 +480,11 @@ function Decide({
       >
         Approve
       </Button>
-      {/* Refusing opens a box for the reason rather than refusing outright —
-          a rejection with no reason is one nobody can appeal, and Rust refuses
-          it anyway, so asking here is kinder than a toast. */}
+      {/*
+        Refusing opens a box for the reason rather than refusing outright — a rejection with no
+        reason is one nobody can appeal, and Rust refuses it anyway, so asking here is kinder
+        than a toast.
+      */}
       <Button variant="secondary" small onClick={() => setRefusing(true)}>
         Refuse
       </Button>
@@ -619,9 +567,7 @@ function AskForLeave({
   );
 }
 
-// ===========================================================================
-// Salary and payroll
-// ===========================================================================
+// Salary and payroll.
 
 export function Salary({ people }: { people: readonly EmployeeView[] }) {
   const [who, setWho] = useState(people[0]?.id ?? '');
@@ -662,9 +608,7 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
         />
       </Toolbar>
 
-      {/* **The whole history, oldest first.** A raise is a new row, never an
-          edit — which is what lets last month's payslip recompute to the figure
-          it printed, for ever. */}
+      {/* The whole history, oldest first. */}
       <Panel title="What they are paid" note="A raise adds a row. Nothing is ever overwritten." flush>
         <Table
           rows={[...(view?.structures ?? [])]}
@@ -889,26 +833,13 @@ function GiveAdvance({
   );
 }
 
-/**
- * **The payroll screen.**
- *
- * A run is computed, reviewed, then approved — and the three are different
- * states on purpose, because the first thing an owner does with a payroll
- * figure is disagree with one line of it.
- */
+/** The payroll screen. */
 export function Payroll() {
   const [list, setList] = useState<PayrollListView | null>(null);
   const [run, setRun] = useState<PayrollView | null>(null);
   const [from, setFrom] = useState(fortnightAgoText());
   const [to, setTo] = useState(todayText());
-  /**
-   * **Wages against takings** — `staff_cost`, scope 9.16, wired at P31.
-   *
-   * *"The second of the two numbers that decide whether a restaurant makes
-   * money"*, says its own doc comment. P25 gave the first (food cost) a screen
-   * and this one never got past Rust. It sits here rather than in Reports
-   * because it is the same period an owner has already chosen above.
-   */
+  /** Wages against takings. */
   const [cost, setCost] = useState<StaffCostView | null>(null);
   const report = useReport();
 
@@ -919,7 +850,6 @@ export function Payroll() {
   useEffect(load, [load]);
 
   // Re-asked whenever the period moves, which is the only thing it depends on.
-  // Silent on failure: it is a figure beside the runs, not the runs.
   useEffect(() => {
     call('staff_cost', { from, to })
       .then(setCost)
@@ -967,9 +897,10 @@ export function Payroll() {
             </Stack>
             <Stack gap="inline">
               <span className="mb-muted">Wages as a share</span>
-              {/* Rust's sentence. It is a percentage when there is one and a
-                  reason when there is not — a screen dividing by a zero it
-                  cannot see would print Infinity. */}
+              {/*
+                Rust's sentence. It is a percentage when there is one and a reason when there is
+                not — a screen dividing by a zero it cannot see would print Infinity.
+              */}
               <strong>{cost.says}</strong>
             </Stack>
           </Row>
@@ -1062,25 +993,16 @@ function RunSheet({
 }) {
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState('');
-  /**
-   * P31 — the line being corrected, and what has been typed into it.
-   *
-   * The table already prints a * beside an edited figure, which means the
-   * VIEW has known about corrections all along and nothing could make one.
-   * The first thing an owner does with a payroll figure is disagree with one
-   * line of it; until now the only answer was to reverse the whole run.
-   */
+  /** The line being corrected, and what has been typed into it. */
   const [fixing, setFixing] = useState<{ staffId: string; name: string; net: string; note: string } | null>(null);
 
   return (
     <Modal open title={`Payroll ${run.from} to ${run.to}`} onClose={onClose} wide>
       <Stack gap="group">
-        {/* Rust's sentence, not one built here. §6. */}
+        {/* Rust's sentence, not one built here. */}
         <p className="mb-muted">{run.says}</p>
 
-        {/* **Every step of the arithmetic**, so an owner can add it up by
-            hand. Payroll somebody cannot check by hand is payroll they keep
-            doing in a notebook. */}
+        {/* Every step of the arithmetic, so an owner can add it up by hand. */}
         <Table
           rows={[...run.lines]}
           columns={[
@@ -1125,20 +1047,13 @@ function RunSheet({
               ),
             },
             {
-              // **P30 — the paper the person being paid holds** (scope 9.14).
-              // Only for somebody who may manage payroll: handing the slip
-              // over is the same authority as approving the run.
+              // The paper the person being paid holds.
               key: 'slip',
               header: '',
               render: (l) =>
                 run.mayManage ? (
                   <div className="mb-row">
-                    {/* **Correct one line, while the run is still a draft.**
-                        `edit_payroll_line` — and the `*` this table already
-                        prints beside an edited figure was, until P31, a mark
-                        nothing could ever produce. After approval the only
-                        honest answer is `reverse_payroll`, so the button is
-                        not there. */}
+                    {/* Correct one line, while the run is still a draft. */}
                     {run.state === 'draft' ? (
                       <Button
                         small
@@ -1159,8 +1074,8 @@ function RunSheet({
                       small
                       variant="quiet"
                       onClick={() => {
-                        // This sheet has no toast of its own; a failure goes the
-                        // same way every other failure on it does.
+                        // This sheet has no toast of its own; a failure goes the same way every
+                        // other failure on it does.
                         call('print_payslip', { runId: run.id, staffId: l.staffId }).catch(
                           onFailed,
                         );
@@ -1223,10 +1138,7 @@ function RunSheet({
           )
         ) : null}
 
-        {/* **Correcting one line, and it never hides the original.** Rust
-            keeps what it computed and marks the line as edited, which is why
-            the table can print a `*` beside it — a payroll figure somebody
-            changed by hand must be visibly one. */}
+        {/* Correcting one line, and it never hides the original. */}
         {fixing ? (
           <Panel title={`Correct ${fixing.name}`}>
             <Stack gap="field">
@@ -1278,27 +1190,9 @@ function RunSheet({
   );
 }
 
-// ---------------------------------------------------------------------------
-// P31 — the employment record itself, which nothing could edit.
-// ---------------------------------------------------------------------------
+// The employment record itself, which nothing could edit.
 
-/**
- * **Who somebody is at work, and the day they stopped being it.**
- *
- * `save_employee` has been in Rust since P28 and had no caller, so the whole
- * employment side of a person was unreachable: no designation, no department,
- * no emergency contact, no ID proof — and, worst of the six, **no way to record
- * that somebody has left.** A cook who walked out in April was still on the
- * payroll list in August, because the only thing that could take them off it
- * was a command with no button.
- *
- * # Leaving is a DATE, not a delete
- *
- * Scope 9.15: the record stays for ever. Their name is on bills, on attendance
- * rows and on payslips, and a shop that deletes them loses all three. So the
- * leaving date is the whole of it, and Rust sets the status from it — the two
- * travel together precisely so a screen cannot set one without the other.
- */
+/** Who somebody is at work, and the day they stopped being it. */
 export function EmploymentDetails({
   person,
   onClose,
@@ -1321,9 +1215,8 @@ export function EmploymentDetails({
   const [leftOn, setLeftOn] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Read what is already there rather than starting everybody blank: this
-  // dialog is opened far more often to correct one field than to fill in
-  // seven.
+  // Read what is already there rather than starting everybody blank: this dialog is opened far
+  // more often to correct one field than to fill in seven.
   useEffect(() => {
     call('employees')
       .then((list) => {
@@ -1362,8 +1255,7 @@ export function EmploymentDetails({
                   emergencyPhone,
                   idProof,
                   employmentType,
-                  // Empty is "still working" — Rust's rule, and it is what
-                  // sets the status. Typed as text and parsed there (D39).
+                  // Empty is "still working" — Rust's rule, and it is what sets the status.
                   leftOn,
                 },
               })
@@ -1436,22 +1328,7 @@ export function EmploymentDetails({
   );
 }
 
-/**
- * **Granting a balance, and taking one back** — `adjust_leave`, P28's command
- * with no button until P31.
- *
- * Every leave balance in the product could go down (somebody takes a day) and
- * could never go up. So a shop could not grant the year's allowance in April,
- * could not carry three days forward, and could not correct a mistake — the
- * ledger was write-once in one direction.
- *
- * # Half-days, because that is the unit the ledger keeps
- *
- * `LeaveBalanceView` counts halves and says them in words ("4½ days"). This
- * asks in halves too rather than inventing a days box and multiplying by two:
- * the multiplication would be a second answer, and it would be wrong for the
- * shop that grants an odd number.
- */
+/** Granting a balance, and taking one back. */
 function AdjustLeave({
   view,
   staffId,
@@ -1557,25 +1434,7 @@ function AdjustLeave({
   );
 }
 
-/**
- * **Who is expected in, on a day** — `save_roster`, P28's command with no
- * caller until P31.
- *
- * # It is not a nicety; it is what "late" means
- *
- * The attendance table has always printed a verdict — *"Late by 35 minutes"*,
- * *"On time"* — and `shift_view` works that out by looking up the roster day
- * for that person and reading the shift pattern on it. **With no roster there
- * is no expected start**, so every shift in the product was judged against
- * nothing. The verdict column was honest about what it knew and there was no
- * way to tell it anything.
- *
- * # A day OFF is a row, and that is deliberate
- *
- * `RosterDay` with no pattern means "rostered off", which mb-db's own comment
- * calls *"a different fact from having no row at all"*. So the pattern list has
- * an explicit "Off" — not a blank somebody has to guess the meaning of.
- */
+/** Who is expected in, on a day. */
 function SetRoster({
   view,
   onClose,
@@ -1653,8 +1512,8 @@ function SetRoster({
           value={patternId}
           onChange={(e) => setPatternId(e.target.value)}
           options={[
-            // Empty is a rostered day OFF — a real fact, and different from
-            // having no row at all. Said in words rather than left blank.
+            // Empty is a rostered day OFF — a real fact, and different from having no row at
+            // all.
             { value: '', label: 'Off that day' },
             ...view.patterns.map((p) => ({ value: p.id, label: p.says })),
           ]}

@@ -12,11 +12,11 @@ import type { WastageReasonView } from "./WastageReasonView";
  */
 export type InventoryView = { materials: Array<MaterialView>, 
 /**
- * Scope 4.9 — every dish on the menu, costed from its recipe.
+ * Every dish on the menu, costed from its recipe.
  */
 dishes: Array<DishCostView>, 
 /**
- * Scope 4.6 — grouped by where you buy it (D116).
+ * Grouped by where you buy it.
  */
 buyList: Array<BuyGroupView>, problems: Array<ProblemView>, movements: Array<StockMovementView>, 
 /**
@@ -28,8 +28,6 @@ wastageReasons: Array<WastageReasonView>, totalValue: MoneyView,
  */
 summary: string, 
 /**
- * Empty when the balance cache agrees with the ledger, which it should
- * always. D114: a cache nobody verifies is a stored balance with extra
- * words.
+ * Empty when the balance cache agrees with the ledger, which it should always.
  */
 cacheWarning: string, mayManage: boolean, mayWaste: boolean, mayAdjust: boolean, };

@@ -2,6 +2,6 @@
 
 export type StaffEdit = { id: string, name: string, code: string | null, roleId: string | null, 
 /**
- * "active", "suspended" or "left". Scope 9.15: never "deleted".
+ * "active", "suspended" or "left".
  */
 status: string, };

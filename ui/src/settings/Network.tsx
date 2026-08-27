@@ -1,24 +1,4 @@
-/**
- * **The phones this counter serves** — P19, decision D9.
- *
- * In v1 every tap on a waiter's phone travelled to Mumbai and back. From here
- * the phone talks to the counter over the shop's own WiFi, and this is the
- * screen where a person lets one in.
- *
- * # The two things that must both be true
- *
- * A phone joins only when it presents a code the counter is showing **right
- * now**, and **a person presses Allow having seen its name**. The second is the
- * one that matters: a code can leak — somebody photographs the screen — and a
- * person seeing "SM-A146B" appear when nobody is standing there is a person who
- * presses Refuse.
- *
- * # The QR is drawn, not fetched
- *
- * Rust sends rows of `#` and `.` and this draws them as a CSS grid. Sharp at
- * any size, no image decoding, no `dangerouslySetInnerHTML`, and no bitmap
- * crossing IPC to be scaled by a browser.
- */
+/** The phones this counter serves. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -43,19 +23,7 @@ export function Network() {
     call('network').then(setView).catch(complain);
   }, [complain]);
 
-  // **Rust pushes; React subscribes** (M4). A phone can present its code at any
-  // moment, and the person holding it is standing at the counter waiting for
-  // the name to appear — so the counter tells us and this screen runs no timer.
-  // The first version ran a `setInterval` while the code was showing, and
-  // `guards.test.ts` failed the build over it. That is D40 working: the rules
-  // that erode are enforced by scripts, not by agreement.
-  // **Subscribed once, and the empty dependency list is deliberate.** The
-  // first version depended on `complain`, which depends on the toast context
-  // and therefore changes identity whenever anything above this component
-  // re-renders — so the listener was torn down and re-attached repeatedly and
-  // the push landed in the gap. Found by pairing a real phone against the
-  // running counter and watching the panel not move while the log said the
-  // counter had told it.
+  // Rust pushes; React subscribes.
   useEffect(() => {
     if (!inApp()) return undefined;
     let stop: (() => void) | undefined;
@@ -126,18 +94,15 @@ export function Network() {
 
           {view.code ? (
             <div className="mb-network__pairing">
-              {/* A row of flex rows, not one grid — because a grid needs its
-                  column count, the count is data, and an inline style is what
-                  D21 and `check-tokens.mjs` forbid. Rows cost nothing and the
-                  guard stays honest. */}
+              {/* A row of flex rows, not one grid. */}
               <div
                 className="mb-network__qr"
                 role="img"
                 aria-label="Scan this with the Magic Bill app on the phone"
               >
                 {view.qr.map((row, y) => (
-                  // The code is positional: two identical rows are two
-                  // different places, so the coordinates ARE the identity.
+                  // The code is positional: two identical rows are two different places, so the
+                  // coordinates ARE the identity.
                   <div className="mb-network__qrrow" key={`${y}-${row}`}>
                     {[...row].map((cell, x) => (
                       <span

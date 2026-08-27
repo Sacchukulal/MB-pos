@@ -4,16 +4,10 @@ import type { ShiftView } from "./ShiftView";
 
 export type AttendanceView = { from: string, to: string, shifts: Array<ShiftView>, 
 /**
- * **Still clocked in from a day before today.** The one an owner has to
- * deal with, so it is its own list rather than a row in the middle.
+ * Still clocked in from a day before today.
  */
 missed: Array<ShiftView>, says: string, mayCorrect: boolean, 
 /**
- * **The shifts this shop runs** — P31.
- *
- * Already read here to work out whether somebody was late; sent on so the
- * roster can be SET as well as judged against. Without it `save_roster`
- * would need a screen where a person typed a pattern id, which is not a
- * thing anybody outside this repository knows.
+ * The shifts this shop runs.
  */
 patterns: Array<PatternView>, };

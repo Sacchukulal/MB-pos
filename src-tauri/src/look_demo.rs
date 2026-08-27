@@ -1,27 +1,4 @@
-//! **A whole shop, so the look can be designed against a real screen** — P27.5.
-//!
-//! Every earlier demo seeder fills one screen: `demo_stock` fills stock,
-//! `demo_buying` fills buying, `demo_kitchen` fills the pass. That is right for
-//! a feature session, which is looking at one thing.
-//!
-//! A DESIGN session is looking at all of them, next to each other, and the
-//! thing it is judging — alignment, density, hierarchy, rhythm — is invisible
-//! on an empty screen. A floor with no tables says nothing about whether forty
-//! tables read well. A report with no rows says nothing about whether a column
-//! of rupees lines up. The first look at this app during P27.5 found a "Nothing
-//! here" empty state on the floor and an onboarding checklist on billing, which
-//! between them tell you nothing about the product.
-//!
-//! So this seeds a plausible Bengaluru vegetarian restaurant at about half past
-//! eight on a Saturday evening: a menu of forty-odd dishes across seven
-//! categories, forty-six tables in four sections, fourteen of them occupied at
-//! different ages so the floor shows free, busy, warned and late at once, a
-//! day's settled bills behind it in every payment mode, six credit customers
-//! with one of them over the limit, and the evening's expenses.
-//!
-//! It is **not part of the suite** and it changes nothing the product does. It
-//! writes into the folder `MB_DEMO` names, which becomes the app's whole
-//! `APPDATA`, so it can never touch a real shop's data.
+//! A whole shop, so the look can be designed against a real screen.
 //!
 //! ```text
 //! $env:MB_DEMO="C:\some\scratch\demo"
@@ -54,13 +31,7 @@ use crate::inventory::{
 use crate::state::{App, OUTLET};
 
 /// The menu. Name, price in rupees, tax rate, and the category it sits in.
-///
-/// Real prices from a real menu board, because a design judged against
-/// `₹100.00` twelve times learns nothing about a column of rupees — it is the
-/// ragged ones (`₹1,240.00` under `₹40.00`) that show whether the numbers line
-/// up.
 const MENU: &[(&str, &str, i64, u8, &str)] = &[
-    // Tiffin
     ("itm_dosa_plain", "Plain Dosa", 60, 5, "cat_tiffin"),
     ("itm_dosa_masala", "Masala Dosa", 80, 5, "cat_tiffin"),
     ("itm_dosa_ghee", "Ghee Roast", 120, 5, "cat_tiffin"),
@@ -71,7 +42,7 @@ const MENU: &[(&str, &str, i64, u8, &str)] = &[
     ("itm_upma", "Rava Upma", 60, 5, "cat_tiffin"),
     ("itm_pongal", "Khara Pongal", 75, 5, "cat_tiffin"),
     ("itm_poori", "Poori Saagu", 90, 5, "cat_tiffin"),
-    // Rice and curry
+    // Rice and curry.
     ("itm_meals", "Full Meals", 180, 5, "cat_rice"),
     ("itm_bisibele", "Bisi Bele Bath", 110, 5, "cat_rice"),
     ("itm_curd_rice", "Curd Rice", 80, 5, "cat_rice"),
@@ -82,7 +53,6 @@ const MENU: &[(&str, &str, i64, u8, &str)] = &[
     ("itm_curry_kadai", "Kadai Vegetable", 210, 5, "cat_rice"),
     ("itm_curry_dal", "Dal Tadka", 160, 5, "cat_rice"),
     ("itm_curry_palak", "Palak Paneer", 230, 5, "cat_rice"),
-    // Tandoor
     ("itm_paneer_tikka", "Paneer Tikka", 280, 5, "cat_tandoor"),
     (
         "itm_mushroom_tikka",
@@ -93,19 +63,17 @@ const MENU: &[(&str, &str, i64, u8, &str)] = &[
     ),
     ("itm_veg_seekh", "Veg Seekh Kebab", 240, 5, "cat_tandoor"),
     ("itm_gobi_65", "Gobi 65", 190, 5, "cat_tandoor"),
-    // Chinese
     ("itm_noodles", "Veg Hakka Noodles", 170, 5, "cat_chinese"),
     ("itm_fried_rice", "Veg Fried Rice", 165, 5, "cat_chinese"),
     ("itm_manchurian", "Gobi Manchurian", 180, 5, "cat_chinese"),
     ("itm_chilli_paneer", "Chilli Paneer", 220, 5, "cat_chinese"),
-    // Breads
     ("itm_chapati", "Chapati", 25, 5, "cat_bread"),
     ("itm_naan", "Butter Naan", 55, 5, "cat_bread"),
     ("itm_naan_garlic", "Garlic Naan", 70, 5, "cat_bread"),
     ("itm_roti_tandoori", "Tandoori Roti", 35, 5, "cat_bread"),
     ("itm_kulcha", "Amritsari Kulcha", 95, 5, "cat_bread"),
-    // Drinks — the packaged ones are 12% and 18%, which is the point: a bill
-    // with one rate on it proves nothing about the tax block (UI_GUIDELINES §4).
+    // Drinks — the packaged ones are 12% and 18%, which is the point: a bill with one rate on
+    // it proves nothing about the tax block.
     ("itm_filter_coffee", "Filter Coffee", 40, 5, "cat_drinks"),
     ("itm_tea", "Tea", 30, 5, "cat_drinks"),
     ("itm_badam_milk", "Badam Milk", 60, 5, "cat_drinks"),
@@ -119,7 +87,6 @@ const MENU: &[(&str, &str, i64, u8, &str)] = &[
         "cat_drinks",
     ),
     ("itm_water", "Mineral Water 1L", 20, 18, "cat_drinks"),
-    // Desserts
     ("itm_gulab", "Gulab Jamun (2 pcs)", 70, 5, "cat_sweet"),
     ("itm_rasmalai", "Rasmalai", 90, 5, "cat_sweet"),
     ("itm_ice_cream", "Ice Cream Cup", 60, 18, "cat_sweet"),
@@ -135,19 +102,8 @@ const CATEGORIES: &[(&str, &str, Option<&str>)] = &[
     ("cat_sweet", "Desserts", None),
 ];
 
-/// The tables that are busy right now: table, minutes ago it was seated, what
-/// is on it, and how many of the first line the kitchen has already been told.
-///
-/// **The ages are the point.** The floor's whole job is telling a manager which
-/// table has been sitting too long, and it cannot be judged with every table
-/// the same age. Twelve of these are inside the warning threshold, three are
-/// past it, and two are properly late.
-/// One busy table in [`BUSY`]: which table, how long ago it was seated, what is
-/// on it, and how much of the first line the kitchen has been told about.
-///
-/// A named alias rather than the tuple inline — clippy is right that four
-/// levels of tuple is unreadable, and naming it is also the only place the
-/// meaning of each position is written down.
+/// The tables that are busy right now: table, minutes ago it was seated, what is on it, and how
+/// many of the first line the kitchen has already been told.
 type BusyTable = (
     &'static str,
     i64,
@@ -262,10 +218,7 @@ const BUSY: &[BusyTable] = &[
     ),
 ];
 
-/// The bills already settled today, so reports and the day close have a day
-/// behind them. Item, quantity, payment mode.
-/// P29. Somebody to deliver to. The address lives on the customer, so a
-/// regular is typed once and found by phone afterwards.
+/// The bills already settled today, so reports and the day close have a day behind them.
 const DELIVERY_CUSTOMERS: &[(&str, &str, &str, &str)] = &[
     (
         "cus_meera",
@@ -287,11 +240,10 @@ const DELIVERY_CUSTOMERS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
-/// P29. Five deliveries at five different points of an evening — and the two
-/// that matter are the last two: one still on the road with the money to
-/// collect, and one that never arrived.
+/// Five deliveries at five different points of an evening — and the two that matter are the
+/// last two: one still on the road with the money to collect, and one that never arrived.
 const DELIVERIES: &[(&str, i64, &str, &str, &str)] = &[
-    // item, quantity, customer, state, why it failed
+    // Item, quantity, customer, state, why it failed.
     ("itm_meals", 2, "cus_meera", "delivered", ""),
     ("itm_curry_pbm", 1, "cus_arun", "delivered", ""),
     ("itm_noodles", 2, "cus_farida", "assigned", ""),
@@ -348,9 +300,8 @@ fn demo_look() {
     std::fs::create_dir_all(&home).expect("the demo folder");
     let db_path = home.join("magicbill.db");
 
-    // Loudly, not `let _ =` — the same trap demo_stock documents: seeding on
-    // top of the last one doubles every figure, and the usual cause is the app
-    // still being open.
+    // Loudly, not `let _ =` — the same trap demo_stock documents: seeding on top of the last
+    // one doubles every figure, and the usual cause is the app still being open.
     for suffix in ["", "-wal", "-shm"] {
         let path = std::path::PathBuf::from(format!("{}{suffix}", db_path.display()));
         if path.exists() && std::fs::remove_file(&path).is_err() {
@@ -365,9 +316,8 @@ fn demo_look() {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, db_path.clone());
 
-    // A trial, so the screens behind a feature gate (stock, buying, the kitchen
-    // display) open rather than showing a licence wall. Rooted at the demo's own
-    // folder, so the licence.json this writes is the one the running app reads.
+    // A trial, so the screens behind a feature gate (stock, buying, the kitchen display) open
+    // rather than showing a licence wall.
     let machine = mb_license::MachineId::of(&home);
     let mut licensing = mb_license::Licensing::new(
         home.clone(),
@@ -429,8 +379,7 @@ fn demo_look() {
     );
 }
 
-/// The shop's own name on its own bill. A design judged against "SAMPLE" in the
-/// header is a design judged against a placeholder twice over.
+/// The shop's own name on its own bill.
 fn seed_identity(app: &App) {
     let old = app.shop_config();
     let mut new = old.clone();
@@ -492,9 +441,8 @@ fn seed_menu(app: &App) {
                             tax: mb_core::TaxSpec::gst_inclusive(rate_of(*rate)),
                             tax_class_id: None,
                             hsn: None,
-                            // A cost on the food, so the food-cost and profit
-                            // screens are not a column of dashes. About a third
-                            // of the price, which is roughly a real kitchen.
+                            // A cost on the food, so the food-cost and profit screens are not a
+                            // column of dashes.
                             cost_price: Some(Money::from_paise(rupees * 34)),
                             short_code: None,
                             prep_minutes: None,
@@ -521,9 +469,7 @@ fn rate_of(percent: u8) -> TaxRate {
     }
 }
 
-/// Four sections and forty-six tables — because the density problem
-/// UI_GUIDELINES §4 names ("a busy shop has 40+ tables") cannot be looked at
-/// with four.
+/// Four sections and forty-six tables.
 fn seed_room(app: &App) {
     app.with_shop(|shop| {
         shop.db
@@ -555,9 +501,9 @@ fn seed_room(app: &App) {
     })
     .expect("four sections");
 
-    // Written directly rather than through `add_tables_on`, for one reason:
-    // that helper derives the id from a slug of the label, and this seeder has
-    // to be able to NAME the table it seats an order on. The rows are identical.
+    // Written directly rather than through `add_tables_on`, for one reason: that helper derives
+    // the id from a slug of the label, and this seeder has to be able to NAME the table it
+    // seats an order on.
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -593,9 +539,9 @@ fn seed_room(app: &App) {
     .expect("forty-six tables");
 }
 
-/// The bills already taken today, through the real billing path — so the
-/// reports show figures the product produced rather than figures a fixture
-/// typed, and the day close has a drawer to count.
+/// The bills already taken today, through the real billing path — so the reports show figures
+/// the product produced rather than figures a fixture typed, and the day close has a drawer to
+/// count.
 fn seed_settled_bills(app: &App) -> usize {
     let mut done = 0;
     for (item, qty, mode) in SETTLED {
@@ -609,9 +555,8 @@ fn seed_settled_bills(app: &App) -> usize {
         let total = app
             .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
             .expect("bill");
-        // **Every fourth cash bill carries a tip** (P29, scope 8.5), so the
-        // day close's tips line and the tips report are not judged empty. A
-        // tip changes what is DUE and never what the bill IS.
+        // Every fourth cash bill carries a tip, so the day close's tips line and the tips
+        // report are not judged empty.
         let tip = if done % 4 == 3 && *mode == "cash" {
             Money::from_paise(2_000)
         } else {
@@ -644,8 +589,8 @@ fn mode_of(tag: &str) -> mb_core::PaymentMode {
     }
 }
 
-/// Fourteen tables occupied at different ages, plus two parcels and a
-/// self-service order so the grid's "No table" group is not empty either.
+/// Fourteen tables occupied at different ages, plus two parcels and a self-service order so the
+/// grid's "No table" group is not empty either.
 fn seed_open_orders(app: &App) {
     let now = crate::flows::now();
     let day = crate::flows::today(now);
@@ -691,9 +636,7 @@ fn seed_open_orders(app: &App) {
         save_open(app, draft);
     }
 
-    // Two parcels and a self-service order, waiting. These are the orders that
-    // are invisible in a floor plan and the reason the grid has a "No table"
-    // group at all (UI_GUIDELINES §4).
+    // Two parcels and a self-service order, waiting.
     for (n, (kind, minutes_ago, items)) in [
         (
             OrderType::Parcel,
@@ -791,9 +734,8 @@ fn rate_for(id: &str) -> TaxRate {
         })
 }
 
-/// Six credit customers, one of them over the limit — because "over the limit"
-/// is a state with its own words and its own colour, and it cannot be looked at
-/// if nobody is over.
+/// Six credit customers, one of them over the limit — because "over the limit" is a state with
+/// its own words and its own colour, and it cannot be looked at if nobody is over.
 fn seed_credit(app: &App) {
     for (id, name, phone, limit) in [
         ("cus_ramesh", "Ramesh Kumar", "9845012345", "5000"),
@@ -829,8 +771,8 @@ fn seed_credit(app: &App) {
         ("cus_lakshmi", "itm_curry_pbm", 3, false),
         ("cus_infosys", "itm_meals", 20, false),
         ("cus_suresh", "itm_meals", 2, false),
-        // Over the limit on purpose, and approved — so the screen has the
-        // state it otherwise never shows.
+        // Over the limit on purpose, and approved — so the screen has the state it otherwise
+        // never shows.
         ("cus_suresh", "itm_paneer_tikka", 6, true),
         ("cus_arvind", "itm_veg_pulao", 4, false),
     ] {
@@ -841,7 +783,7 @@ fn seed_credit(app: &App) {
         .expect("parcel");
         crate::ipc::cart_add_on(app, item.to_owned(), Some(qty.to_string()), None).expect("added");
         if put_on_account_on(app, customer.to_owned(), override_limit).is_err() {
-            // A refusal here is the product working. Clear the cart and move on.
+            // A refusal here is the product working.
             app.with_cart_mut(|state| {
                 *state = Default::default();
                 Ok(())
@@ -941,14 +883,6 @@ fn seed_expenses(app: &App) {
 }
 
 /// The shelf: what the kitchen buys, in the packs a shop actually buys it in.
-///
-/// Id, name, dimension, the pack it arrives in, who it comes from, the reorder
-/// level in that pack, and what one pack costs.
-/// One row of [`MATERIALS`], named because seven tuple positions with a nested
-/// tuple in the middle is not readable and clippy is right to say so.
-///
-/// `id, name, dimension, the pack it arrives in (name, size, unit), who it
-/// comes from, the reorder level in that pack, what one pack costs`.
 type Material = (
     &'static str,
     &'static str,
@@ -1116,10 +1050,9 @@ const MATERIALS: &[Material] = &[
     ),
 ];
 
-/// What is actually on the shelf right now, in the material's own unit — with
-/// two deliberately low so the "what to buy" list is not empty, and one that
-/// has gone below zero, which is a real thing that happens and has its own
-/// sentence on the screen.
+/// What is actually on the shelf right now, in the material's own unit — with two deliberately
+/// low so the "what to buy" list is not empty, and one that has gone below zero, which is a
+/// real thing that happens and has its own sentence on the screen.
 const ON_HAND: &[(&str, &str, &str)] = &[
     ("mat_rice", "48", "kg"),
     ("mat_atta", "16", "kg"),
@@ -1141,12 +1074,8 @@ const ON_HAND: &[(&str, &str, &str)] = &[
     ("mat_gaspacket", "2", "piece"),
 ];
 
-/// **Eighteen materials, because the stock screen is a TABLE and a table with
-/// three rows says nothing about a table.**
-///
-/// The Stock and Buying screens were the two P27.5 first looked at empty, and
-/// an empty table is a header and an empty state — neither of which is the
-/// thing being designed.
+/// Eighteen materials, because the stock screen is a TABLE and a table with three rows says
+/// nothing about a table.
 fn seed_shelf(app: &App) {
     for (id, name, dimension, pack, buy_from, reorder, _cost) in MATERIALS {
         save_material_on(
@@ -1213,17 +1142,7 @@ fn base_unit(dimension: &str) -> &'static str {
     }
 }
 
-/// **Point this shop's printer at the TVSE and say so** — P27.5, for the
-/// hardware checklist P07 left and nobody has ever run.
-///
-/// Separate from `demo_look` on purpose: seeding a shop is harmless, and
-/// pointing it at a real printer is a thing that makes paper come out of a
-/// machine in somebody's house. Run it deliberately.
-///
-/// It only CONFIGURES. Printing is done by pressing the button in the running
-/// app, because that is the path a shop uses and because the print queue is
-/// the app's, not a test's — a test that enqueues and exits proves nothing
-/// about whether the paper came out.
+/// Point this shop's printer at the TVSE and say so.
 ///
 /// ```text
 /// $env:MB_DEMO="C:\some\scratch\demo"
@@ -1271,13 +1190,10 @@ fn demo_printer() {
             paper_mm: 80,
             is_default: true,
             role: "bill".to_owned(),
-            // `raster`, not "picture" — the schema names the two engines
-            // `raster` and `text`, and the SCREEN calls them Picture and
-            // Printer font (P07 checklist point 3). Two vocabularies for the
-            // same pair, which the CHECK constraint caught the first time.
+            // `raster`, not "picture" — the schema names the two engines `raster` and `text`,
+            // and the SCREEN calls them Picture and Printer font.
             engine: "raster".to_owned(),
             is_bold_dark: false,
-            // P07 checklist point 6. Harmless with no drawer plugged in.
             can_kick_drawer: true,
         },
     )
@@ -1294,15 +1210,9 @@ fn demo_printer() {
     println!("Test print. The checklist is in docs/OWNER_TESTS.md.");
 }
 
-/// The people, and their employment — P28.
-///
-/// Nine, which is a real small restaurant: a manager, two cooks, a tandoor
-/// man, two waiters, a helper, a cashier and somebody who left in the middle of
-/// the month. **The one who left is the point** — scope 9.15 says a record is
-/// never deleted, and a screen that has never had one on it has never shown
-/// what that looks like.
+/// The people, and their employment.
 const PEOPLE: &[(&str, &str, &str, &str, &str, i64)] = &[
-    // id, name, designation, department, basis, amount in rupees
+    // Id, name, designation, department, basis, amount in rupees.
     (
         "staff_meena",
         "Meena",
@@ -1349,12 +1259,8 @@ const PEOPLE: &[(&str, &str, &str, &str, &str, i64)] = &[
     ("staff_gopal", "Gopal", "Helper", "Kitchen", "hourly", 90),
 ];
 
-/// Nine people, their salaries, a fortnight of attendance, a roster, leave
-/// entitlements and two advances.
-///
-/// **A shift a fortnight ago, not one starting now**, because the screens being
-/// designed here show a MONTH: a demo whose attendance is all in the last five
-/// minutes shows a table with one row in it and proves nothing about a table.
+/// Nine people, their salaries, a fortnight of attendance, a roster, leave entitlements and two
+/// advances.
 fn seed_people(app: &App) {
     let at = crate::flows::now();
     let today = crate::flows::today(at);
@@ -1403,8 +1309,8 @@ fn seed_people(app: &App) {
             app,
             crate::employment::SalaryEdit {
                 staff_id: (*id).to_owned(),
-                // Effective from a month ago, so a run over the last fortnight
-                // finds a structure rather than skipping everybody.
+                // Effective from a month ago, so a run over the last fortnight finds a
+                // structure rather than skipping everybody.
                 effective_from: ymd(BusinessDay::from_days_since_epoch(
                     today.days_since_epoch() - 40,
                 )),
@@ -1427,8 +1333,7 @@ fn seed_people(app: &App) {
         .expect("leave granted");
     }
 
-    // Somebody who left. **The record stays** (scope 9.15) — their name is on
-    // last month's bills and in the audit trail.
+    // Somebody who left. The record stays.
     crate::ipc::save_staff_member_on(
         app,
         crate::ipc::StaffEdit {
@@ -1458,39 +1363,33 @@ fn seed_people(app: &App) {
     )
     .expect("left");
 
-    // A fortnight of attendance: everybody in, everybody out, with two people
-    // late on two of the days so the verdict column has something in it.
+    // A fortnight of attendance: everybody in, everybody out, with two people late on two of
+    // the days so the verdict column has something in it.
     for back in 1..=14_i32 {
         let day = BusinessDay::from_days_since_epoch(today.days_since_epoch() - back);
         for (n, (id, ..)) in PEOPLE.iter().enumerate() {
             // A rest day each, staggered, so the roster has days off in it.
             if (i32::try_from(n).unwrap_or(0) + back) % 7 == 0 {
-                // A rostered day OFF — which is a different fact from having no
-                // roster row at all, and the screen must not call it an absence.
+                // A rostered day OFF — which is a different fact from having no roster row at
+                // all, and the screen must not call it an absence.
                 put_roster(app, id, day, None);
                 continue;
             }
-            // **The times match the pattern they are rostered against** —
-            // shp_morning is 07:00 to 15:00. The first version rostered the
-            // morning shift and clocked everybody in at 09:00, so the screen
-            // said "Late by 2h" against every name in the shop, which is
-            // correct and useless. A demo whose every row is the same warning
-            // is a demo that teaches you nothing about the warning.
+            // The times match the pattern they are rostered against — shp_morning is 07:00 to
+            // 15:00. The first version rostered the morning shift and clocked everybody in at
+            // 09:00, so the screen said "Late by 2h" against every name in the shop, which is
+            // correct and useless.
             let late = back % 5 == 0 && n % 3 == 0;
             let start = if late { 7 * 60 + 40 } else { 7 * 60 };
             let end = 15 * 60;
-            // **The roster first, then what happened.** Without a roster,
-            // attendance is a list of times with nothing to compare against —
-            // every verdict reads "worked, not rostered", which is honest and
-            // tells a manager nothing. It is also the whole reason the roster
-            // table exists.
+            // The roster first, then what happened.
             put_roster(app, id, day, Some("shp_morning"));
             put_shift(app, id, day, start, end);
         }
     }
 
-    // Two advances, one of them in instalments — so the payroll screen has a
-    // recovery on it and the drawer has a payout in it.
+    // Two advances, one of them in instalments — so the payroll screen has a recovery on it and
+    // the drawer has a payout in it.
     crate::employment::give_advance_on(
         app,
         "staff_kumar".to_owned(),
@@ -1539,24 +1438,16 @@ fn seed_people(app: &App) {
     .expect("asked");
 }
 
-/// **P29's evening.** Five deliveries at five different points, two riders,
-/// one handback that leaves somebody short, and one delivery that did not
-/// arrive.
-///
-/// Every screen this session added is judged empty otherwise — and the two
-/// that matter most (a rider carrying money, a payment nobody has confirmed)
-/// are exactly the ones that show nothing at all on a fresh shop.
 fn seed_delivery(app: &App) {
     use mb_db::repo::delivery::DeliveryState;
 
-    // The riders. Both are already on the staff list — a rider is a member of
-    // staff with a flag, not a second people table.
+    // The riders. Both are already on the staff list — a rider is a member of staff with a
+    // flag, not a second people table.
     for id in ["staff_kumar", "staff_ravi"] {
         crate::delivery::set_rider_on(app, id.to_owned(), true).expect("a rider");
     }
 
-    // Somebody to deliver to. The address lives on the CUSTOMER, so a regular
-    // is typed once and scanned by phone number afterwards.
+    // Somebody to deliver to.
     let now = crate::flows::now();
     let day = crate::flows::today(now);
     for (id, name, phone, address) in DELIVERY_CUSTOMERS {
@@ -1582,13 +1473,10 @@ fn seed_delivery(app: &App) {
         .expect("a delivery customer");
     }
 
-    // Five orders, billed and settled in cash — which is what a shop that
-    // takes the money at the counter and sends the food out does, and the case
-    // the drawer gets wrong.
+    // Five orders, billed and settled in cash — which is what a shop that takes the money at
+    // the counter and sends the food out does, and the case the drawer gets wrong.
     for (n, (item, qty, customer, state, failure)) in DELIVERIES.iter().enumerate() {
-        // **A parked order stays in the cart.** Without this the next delivery
-        // is added to the last one and the board ends up one short — which is
-        // exactly what happened the first time this ran.
+        // A parked order stays in the cart.
         crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
         app.with_cart_mut(|state| {
             state.order_type = OrderType::Delivery;
@@ -1602,8 +1490,8 @@ fn seed_delivery(app: &App) {
         let total = app
             .with_cart(|s| Ok(s.bill(&app.shop_config())?.grand_total))
             .expect("bill");
-        // The last two are not settled: one is still on the road with the
-        // money to collect, and one never arrived at all.
+        // The last two are not settled: one is still on the road with the money to collect, and
+        // one never arrived at all.
         let settle = !matches!(*state, "out" | "failed");
         if settle {
             app.with_cart_mut(|s| {
@@ -1620,10 +1508,7 @@ fn seed_delivery(app: &App) {
             crate::flows::park_open_order(app).expect("held");
         }
 
-        // **The one that has not been moved yet.** Several of these are
-        // written inside the same second, so "the newest" is not a reliable
-        // way to find the one just made — but exactly one of them is still
-        // waiting for a rider.
+        // The one that has not been moved yet.
         let order_id = crate::delivery::board_on(app, None)
             .expect("the board")
             .deliveries
@@ -1638,9 +1523,8 @@ fn seed_delivery(app: &App) {
         } else {
             "staff_ravi"
         };
-        // Walk the state machine, because it refuses a jump — which is the
-        // point of it, and a seeder that could skip a step would be seeding a
-        // state the product cannot reach.
+        // Walk the state machine, because it refuses a jump — which is the point of it, and a
+        // seeder that could skip a step would be seeding a state the product cannot reach.
         let steps: &[&str] = match *state {
             "assigned" => &["assigned"],
             "out" => &["assigned", "out"],
@@ -1670,10 +1554,7 @@ fn seed_delivery(app: &App) {
         let _ = day;
     }
 
-    // **One handback, and it is SHORT.** Kumar hands over two hundred of the
-    // three-sixty he collected, so the screen shows a real difference rather
-    // than a tidy zero — the tidy case proves nothing, and the difference is
-    // the whole reason the feature exists.
+    // One handback, and it is SHORT.
     crate::delivery::record_handback_on(
         app,
         "staff_kumar".to_owned(),
@@ -1683,13 +1564,11 @@ fn seed_delivery(app: &App) {
     .expect("a handback");
 }
 
-/// **One UPI payment nobody has confirmed**, so the day close's list is not
-/// empty on a screen that exists to show it.
+/// One UPI payment nobody has confirmed, so the day close's list is not empty on a screen that
+/// exists to show it.
 fn seed_unconfirmed(app: &App) {
-    // The last delivery was PARKED, so it is still in the cart — and adding to
-    // it here would have turned a failed delivery into a settled parcel. It
-    // did, once, and the delivery board quietly showed four rows instead of
-    // five.
+    // The last delivery was PARKED, so it is still in the cart — and adding to it here would
+    // have turned a failed delivery into a settled parcel.
     crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
         state.order_type = OrderType::Parcel;
@@ -1721,9 +1600,6 @@ fn ymd(day: BusinessDay) -> String {
 }
 
 /// One finished shift, written straight to the repo.
-///
-/// Not through `clock_in` / `clock_out`: those stamp the CURRENT time, which is
-/// exactly right for a counter and useless for seeding a fortnight.
 fn put_shift(app: &App, staff_id: &str, day: BusinessDay, start_minute: i64, end_minute: i64) {
     let stamp = |minute: i64| {
         mb_core::Timestamp::from_local_parts(

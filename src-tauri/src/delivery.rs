@@ -1,40 +1,8 @@
-//! **Orders that leave on a bike** — P29, scope 14.5.
-//!
-//! # Where the pieces live
-//!
-//! | | |
-//! |---|---|
-//! | the state machine | [`mb_db::repo::delivery::DeliveryState`] |
-//! | the rows and the arithmetic | [`mb_db::repo::delivery`] |
-//! | the slip | [`mb_print::template::delivery`] |
-//! | this file | the commands, the permission boundary, and the words |
-//!
-//! # The two facts a delivery screen has to keep apart
-//!
-//! An order has a state (`open`, `settled`) and a delivery has a state
-//! (`out`, `delivered`). They are not the same fact and they do not move
-//! together:
-//!
-//! * paid online, still on the road — settled, `out`;
-//! * handed over at the door for cash — `delivered`, and the bill is settled
-//!   at that moment or when the rider gets back;
-//! * nobody was home — `failed`, and the bill is whatever it was.
-//!
-//! **The money question is the second column, never the first.**
-//!
-//! # What a rider is carrying, and why it is not stored
+//! Orders that leave on a bike.
 //!
 //! ```text
 //!   cash on his delivered orders today  −  what he has handed back today
 //! ```
-//!
-//! Computed from rows every time (D120). A running figure on a person is a
-//! number that can disagree with the rows that made it, and on the evening it
-//! does, nobody can tell which one is lying — least of all the rider, who is
-//! the person being accused.
-//!
-//! [`mb_db::repo::money::MoneyRepo::cash_position`] subtracts the same figure,
-//! so the drawer stops being short all evening for a reason nobody can name.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -56,9 +24,7 @@ fn money(m: Money) -> MoneyView {
     MoneyView::from(m)
 }
 
-// ===========================================================================
-// The view models
-// ===========================================================================
+// The view models.
 
 /// One delivery, as the board shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -80,13 +46,12 @@ pub struct DeliveryView {
     /// Why it did not arrive, when it did not.
     pub failure: String,
     pub total: MoneyView,
-    /// What the rider has to collect at the door. Zero when it is paid.
+    /// What the rider has to collect at the door.
     pub collect: MoneyView,
-    /// True when the bill is settled — **and this is not the same as
-    /// delivered**, which is the whole point of the two columns.
+    /// True when the bill is settled — and this is not the same as delivered, which is the
+    /// whole point of the two columns.
     pub paid: bool,
-    /// What the board actually prints in the money column: "Collect ₹640.00",
-    /// or "Paid".
+    /// What the board actually prints in the money column: "Collect ₹640.00", or "Paid".
     pub money_says: String,
 }
 
@@ -103,8 +68,7 @@ pub struct RiderDayView {
     pub collected: MoneyView,
     pub handed_back: MoneyView,
     pub carrying: MoneyView,
-    /// "Carrying ₹900.00" or "Nothing outstanding" — the sentence the owner
-    /// reads at eleven o'clock.
+    /// "Carrying ₹900.00" or "Nothing outstanding".
     pub says: String,
 }
 
@@ -122,7 +86,6 @@ pub struct RiderView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryBoardView {
-    /// `2026-08-16`.
     pub day: String,
     pub deliveries: Vec<DeliveryView>,
     pub riders: Vec<RiderDayView>,
@@ -132,8 +95,7 @@ pub struct DeliveryBoardView {
     pub carrying: MoneyView,
     /// The headline sentence, in the shop's words.
     pub says: String,
-    /// True when the signed-in person may dispatch. The screen still SHOWS the
-    /// board to anybody signed in — reading where the food is is not a secret.
+    /// True when the signed-in person may dispatch.
     pub may_dispatch: bool,
 }
 
@@ -150,9 +112,7 @@ pub struct DeliveryEdit {
     pub failure: String,
 }
 
-// ===========================================================================
-// Reading the board
-// ===========================================================================
+// Reading the board.
 
 fn state_from_tag(tag: &str) -> UiResult<DeliveryState> {
     match tag {
@@ -179,14 +139,8 @@ fn blank_to_none(text: &str) -> Option<String> {
 
 fn view_of(row: &Delivery) -> DeliveryView {
     let paid = row.order_state == "settled";
-    // **What is left to collect at the door.** The bill total less what has
-    // already been paid against it — and a settled bill has nothing left,
-    // whichever way it was paid.
-    let collect = if paid {
-        Money::ZERO
-    } else {
-        row.total
-    };
+    // What is left to collect at the door.
+    let collect = if paid { Money::ZERO } else { row.total };
     let money_says = if paid {
         "Paid".to_owned()
     } else if collect == Money::ZERO {
@@ -236,9 +190,6 @@ fn rider_view_of(row: &RiderDay) -> RiderDayView {
 }
 
 pub fn board_on(app: &App, day: Option<String>) -> UiResult<DeliveryBoardView> {
-    // Reading the board needs no permission beyond being signed in: knowing
-    // where the food is is the floor's business, and a counter that has to ask
-    // the owner to see it is a counter that keeps the list on paper instead.
     let who = app
         .sessions()
         .current()
@@ -257,17 +208,12 @@ pub fn board_on(app: &App, day: Option<String>) -> UiResult<DeliveryBoardView> {
                 let repos = mb_db::Repos::new(tx);
                 let d = repos.delivery();
                 let mut rows = d.deliveries_on(OUTLET, day)?;
-                // **An order that has not been settled has no bill row.**
-                //
-                // Without this the board shows a rider 0.00 and "nothing to
-                // collect" on an order nobody has paid for — which is the
-                // single most expensive thing this screen could get wrong.
-                // The figure comes from the same function the floor tile uses,
-                // so the two cannot disagree about what an open order is worth.
+                // An order that has not been settled has no bill row.
                 for row in &mut rows {
                     if row.order_state != "settled"
-                        && let Some(order) =
-                            repos.orders().find(&mb_core::OrderId::new(row.order_id.clone()))?
+                        && let Some(order) = repos
+                            .orders()
+                            .find(&mb_core::OrderId::new(row.order_id.clone()))?
                         && let Some(total) = crate::billing::running_total(&order, &config)
                     {
                         row.total = Money::from_paise(total.paise);
@@ -331,9 +277,7 @@ fn parse_day(text: &str) -> UiResult<BusinessDay> {
     Ok(BusinessDay::from_ymd(year, month, dom))
 }
 
-// ===========================================================================
-// Moving a delivery along
-// ===========================================================================
+// Moving a delivery along.
 
 pub fn save_delivery_on(app: &App, edit: DeliveryEdit) -> UiResult<DeliveryBoardView> {
     let who = guard::require(app, Permission::DeliveryDispatch)?;
@@ -341,8 +285,7 @@ pub fn save_delivery_on(app: &App, edit: DeliveryEdit) -> UiResult<DeliveryBoard
     let day = today(at);
     let state = state_from_tag(&edit.state)?;
 
-    // A rider is compulsory from `assigned` onwards. The screen can offer the
-    // step, but the counter is not allowed to send food out with nobody.
+    // A rider is compulsory from `assigned` onwards.
     let rider = blank_to_none(&edit.rider_id);
     if rider.is_none()
         && matches!(
@@ -350,10 +293,7 @@ pub fn save_delivery_on(app: &App, edit: DeliveryEdit) -> UiResult<DeliveryBoard
             DeliveryState::Assigned | DeliveryState::Out | DeliveryState::Delivered
         )
     {
-        return Err(UiError::new(
-            "delivery.rider",
-            "Choose who is taking it.",
-        ));
+        return Err(UiError::new("delivery.rider", "Choose who is taking it."));
     }
 
     app.with_shop(|shop| {
@@ -370,7 +310,6 @@ pub fn save_delivery_on(app: &App, edit: DeliveryEdit) -> UiResult<DeliveryBoard
                     blank_to_none(&edit.failure).as_deref(),
                 )?;
 
-                // R11 — the audit row is in the SAME transaction as the change.
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -395,9 +334,7 @@ pub fn save_delivery_on(app: &App, edit: DeliveryEdit) -> UiResult<DeliveryBoard
     board_on(app, None)
 }
 
-// ===========================================================================
-// The money coming back
-// ===========================================================================
+// The money coming back.
 
 pub fn record_handback_on(
     app: &App,
@@ -409,8 +346,7 @@ pub fn record_handback_on(
     let at = now();
     let day = today(at);
 
-    // **The screen sends what was typed** and Rust parses it (D39). One money
-    // parser in the product, and JavaScript is not allowed near it.
+    // The screen sends what was typed and Rust parses it.
     let amount = crate::menu::parse_money_public(&amount)?;
     if amount <= Money::ZERO {
         return Err(UiError::new(
@@ -425,11 +361,6 @@ pub fn record_handback_on(
                 let repos = mb_db::Repos::new(tx);
                 let d = repos.delivery();
 
-                // **Before and after, in the audit row.** One permission covers
-                // dispatching and receipting, and this is the control that
-                // makes that safe: a handback that did not happen is visible as
-                // a rider whose carrying figure dropped with nobody at the
-                // till.
                 let before = d
                     .rider_day(OUTLET, day)?
                     .into_iter()
@@ -483,10 +414,6 @@ pub fn record_handback_on(
 }
 
 /// Say that somebody does, or does not, take orders out.
-///
-/// `StaffManage` and not `DeliveryDispatch`: this edits a person's record, and
-/// who is on the shop's staff is the same decision whether it is about riding
-/// or about anything else.
 pub fn set_rider_on(app: &App, staff_id: String, is_rider: bool) -> UiResult<DeliveryBoardView> {
     let who = guard::require(app, Permission::StaffManage)?;
     let at = now();
@@ -496,7 +423,9 @@ pub fn set_rider_on(app: &App, staff_id: String, is_rider: bool) -> UiResult<Del
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                repos.delivery().set_rider_flag(OUTLET, &staff_id, is_rider, at)?;
+                repos
+                    .delivery()
+                    .set_rider_flag(OUTLET, &staff_id, is_rider, at)?;
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -517,16 +446,9 @@ pub fn set_rider_on(app: &App, staff_id: String, is_rider: bool) -> UiResult<Del
     board_on(app, None)
 }
 
-// ===========================================================================
-// The paper
-// ===========================================================================
+// The paper.
 
 /// The slip that goes out with the rider.
-///
-/// **A printer that is missing must not stop a delivery** (the rule for this
-/// whole session): the job is queued exactly like a bill, so a shop whose
-/// printer is off prints it when the printer comes back, and the food still
-/// goes out.
 pub fn print_delivery_slip_on(app: &App, order_id: String) -> UiResult<String> {
     guard::require(app, Permission::DeliveryDispatch)?;
     let at = now();
@@ -565,22 +487,26 @@ pub fn print_delivery_slip_on(app: &App, order_id: String) -> UiResult<String> {
     };
     let document = mb_print::template::delivery_document(printer.paper, &ctx);
 
-    app.print(mb_print::queue::Job::new(
-                    mb_print::queue::JobKind::Delivery,
-                    &printer.id,
-                    document,
-                    today(at),
-                )
-                .because(format!("delivery {}", view.reference)),)
+    app.print(
+        mb_print::queue::Job::new(
+            mb_print::queue::JobKind::Delivery,
+            &printer.id,
+            document,
+            today(at),
+        )
+        .because(format!("delivery {}", view.reference)),
+    )
 }
 
 fn blank(text: &str) -> Option<&str> {
-    if text.trim().is_empty() { None } else { Some(text) }
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
-// ===========================================================================
-// The commands
-// ===========================================================================
+// The commands.
 
 #[tauri::command]
 pub fn delivery_board(

@@ -1,24 +1,8 @@
 #!/usr/bin/env node
 /**
- * R8, MADE MECHANICAL: **no business logic in React.**
+ * No arithmetic on money in TypeScript. Rust computes, React displays.
  *
- * The rule everybody agrees with, and the one most likely to erode, because
- * the first violation is always three characters long:
- *
- *     const total = a + b;
- *
- * D1 and audit E3 are what it costs: *"business rules live inside screen
- * files… to answer 'what exactly happens when a bill is settled?' you must
- * read four files at once."* And D2 is why it matters more here than anywhere:
- * money is an integer count of paise and JavaScript has no integers — it has
- * doubles, and `0.1 + 0.2` is the oldest bug in the industry.
- *
- * So: every rupee is computed in Rust, crosses as paise plus a preformatted
- * string, and TypeScript displays it. This fails the build if TypeScript does
- * arithmetic on anything money-shaped, or tries to format it itself.
- *
- * NO DEPENDENCIES (see check-tokens.mjs for why).
- *
+ * Usage:
  *   node scripts/check-no-money.mjs           check src/
  *   node scripts/check-no-money.mjs <dir>     check somewhere else
  */
@@ -36,12 +20,6 @@ const CHECKS = [
   {
     what: 'arithmetic on money',
     // `total + x`, `x * price`, `amount -= …`
-    //
-    // **Whitespace around the operator is required**, and that is not
-    // fussiness: the first version of this rule flagged `data-paise={…}` as a
-    // subtraction and an import path as a division. Real arithmetic in this
-    // codebase is spaced; a hyphenated JSX attribute and a `/` in a path are
-    // not. Compound assignment (`+=`) is caught either way.
     re: new RegExp(
       `\\b\\w*${MONEY}\\w*\\s*[+\\-*/]=|` +
         `\\b\\w*${MONEY}\\w*\\s+[+\\-*/]\\s|` +

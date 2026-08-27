@@ -1,37 +1,10 @@
 //! Orders: the aggregate the whole product turns around.
-//!
-//! An order is nine tables — the header, the typed lines, their modifiers, the
-//! computed bill, its lines, its charges, its rate summary, the payments and
-//! the kitchen ledger. [`OrderRepo::save`] writes all of them **inside the
-//! caller's transaction, or none of them.**
-//!
-//! # The private-field wall
-//!
-//! Shredding an order into rows is the easy direction. Four mb-core types have
-//! private fields and no `from_parts`, so [`OrderRepo::find`] rebuilds them by
-//! replaying their public API:
-//!
-//! | type | replayed by |
-//! |---|---|
-//! | [`Cart`] | `add` in stored `seq` order, then `set_line_discount` by index |
-//! | [`Settlement`] | `new`, `add` per payment, `set_tip` |
-//! | [`KitchenLedger`] | `new`, then `mark_printed` with the stored pairs |
-//! | [`TaxSummary`] | `new`, one synthesised `add` per stored rate row, then the two public totals |
-//!
-//! `Cart::add` **re-runs the merge rule**, which is why the rows are replayed
-//! in `seq` order and why the round trip is asserted rather than assumed. A
-//! cart can never hold two lines with the same identity — `add` merged them
-//! when they were typed — so the replay is exact, and `t1` proves it across a
-//! whole shop.
-//!
-//! `Counter` is deliberately not in that table. P04 decided it: the counter
-//! lives on disk as columns and `numbering::claim` is one SQL statement.
 
 use mb_core::{
     AnyOrder, Bill, BillCharge, BillLine, CancelledOrder, Cart, CategoryId, Claimed, DiscountEntry,
-    DraftOrder, GstAmounts, ItemId, ItemSnapshot, KitchenLedger, LineIdentity, Modifier, ModifierId,
-    Money, OpenOrder, OrderCore, OrderId, Payment, SettledOrder, Settlement, StaffId, TableId,
-    TaxOutcome, TaxSpec, TaxSummary, Vat, VoidedOrder,
+    DraftOrder, GstAmounts, ItemId, ItemSnapshot, KitchenLedger, LineIdentity, Modifier,
+    ModifierId, Money, OpenOrder, OrderCore, OrderId, Payment, SettledOrder, Settlement, StaffId,
+    TableId, TaxOutcome, TaxSpec, TaxSummary, Vat, VoidedOrder,
 };
 use rusqlite::{OptionalExtension as _, Transaction};
 
@@ -51,30 +24,11 @@ impl<'a> OrderRepo<'a> {
     }
 
     /// Write an order in whatever state it is in.
-    ///
-    /// **One transaction or nothing.** The header, every line, every modifier,
-    /// the computed bill and all four of its child tables, the payments, the
-    /// kitchen ledger and the outbox row commit together. An order that exists
-    /// without its lines is a bill that cannot be reprinted and a GST return
-    /// that will not tie; `t2` injects a failure halfway to prove it cannot
-    /// happen.
-    ///
-    /// Idempotent: saving the same order again replaces its rows. That is what
-    /// a state transition is — the same order, later.
     pub fn save(&self, outlet: &str, terminal: &str, order: &AnyOrder) -> Result<(), DbError> {
         let core = order.core();
         let id = core.id.as_str();
 
-        // Replace rather than accumulate. The children go first, because the
-        // foreign keys point upwards and nothing may cascade (D22 / P04).
-        //
-        // **The header itself is UPSERTED, not deleted and re-inserted**, and
-        // P12 is what found the difference: `reprints` and `refunds` point at
-        // `orders(id)`, so deleting the row to re-add it broke the foreign key
-        // — voiding a bill that had been reprinted failed with "FOREIGN KEY
-        // constraint failed" and the shop was told its data could not be read.
-        //
-        // The children have no such problem: nothing references an order line.
+        // Replace rather than accumulate.
         self.delete_children(id)?;
 
         let numbers = order.bill_number();
@@ -137,17 +91,21 @@ impl<'a> OrderRepo<'a> {
                 token.map(|c| c.formatted.clone()),
                 numbers.map(claimed_value).transpose()?,
                 numbers.map(|c| c.formatted.clone()),
-                settled.as_ref().map(|(at, _)| encode::timestamp_to_sql(*at)),
+                settled
+                    .as_ref()
+                    .map(|(at, _)| encode::timestamp_to_sql(*at)),
                 settled.as_ref().map(|(_, by)| by.as_str().to_owned()),
-                cancelled.as_ref().map(|(at, _, _)| encode::timestamp_to_sql(*at)),
+                cancelled
+                    .as_ref()
+                    .map(|(at, _, _)| encode::timestamp_to_sql(*at)),
                 cancelled.as_ref().map(|(_, by, _)| by.as_str().to_owned()),
                 cancelled.as_ref().map(|(_, _, why)| why.clone()),
-                voided.as_ref().map(|(at, _, _)| encode::timestamp_to_sql(*at)),
+                voided
+                    .as_ref()
+                    .map(|(at, _, _)| encode::timestamp_to_sql(*at)),
                 voided.as_ref().map(|(_, by, _)| by.as_str().to_owned()),
                 voided.as_ref().map(|(_, _, why)| why.clone()),
-                // P14: which seat of a shared table (scope 1.6) and how many
-                // are eating (1.24). Both nullable, and covers is honestly
-                // unknown rather than 1 — see `OrderCore::covers`.
+                // Which seat of a shared table and how many are eating (1.24).
                 core.sub_table.as_ref().map(|s| s.as_str().to_owned()),
                 core.covers,
             ],
@@ -161,8 +119,7 @@ impl<'a> OrderRepo<'a> {
             self.save_payments(id, settlement, core)?;
         }
 
-        // The outbox entry is written HERE, in the same transaction as the row
-        // it describes. A2 and A3 were one forgotten enqueue each.
+        // The outbox entry is written HERE, in the same transaction as the row it describes.
         OutboxRepo::new(self.tx).enqueue(outlet, "orders", id, Op::Upsert, core.created_at)?;
         Ok(())
     }
@@ -177,10 +134,9 @@ impl<'a> OrderRepo<'a> {
         let cart = self.read_cart(id.as_str())?;
         let kitchen = self.read_kitchen(id.as_str())?;
 
-        // Cloned rather than moved: `header` is still needed below for the
-        // state-specific columns, and a partial move would make the borrow
-        // checker's complaint the thing a reader notices instead of the shape
-        // of the match.
+        // Cloned rather than moved: `header` is still needed below for the state-specific
+        // columns, and a partial move would make the borrow checker's complaint the thing a
+        // reader notices instead of the shape of the match.
         let core = OrderCore {
             id: id.clone(),
             business_day: header.business_day,
@@ -252,13 +208,7 @@ impl<'a> OrderRepo<'a> {
         Ok(Some(order))
     }
 
-    /// **Which till holds this order** (P27, D137).
-    ///
-    /// Deliberately not on `AnyOrder`: which machine typed a bill is a fact
-    /// about the shop's wiring and not about the sale, and putting it in
-    /// `mb-core` would put it on the money path. It is read only to write a
-    /// sentence — *"Table 5 is already open on Counter 2"* — and never to
-    /// decide anything.
+    /// Which till holds this order.
     pub fn terminal_of(&self, id: &OrderId) -> Result<Option<String>, DbError> {
         Ok(self
             .tx
@@ -270,7 +220,7 @@ impl<'a> OrderRepo<'a> {
             .optional()?)
     }
 
-    /// Everything on the floor right now — what P09's table grid draws.
+    /// Everything on the floor right now.
     pub fn list_open(&self, outlet: &str) -> Result<Vec<AnyOrder>, DbError> {
         self.list_where(
             "outlet_id = ?1 AND state IN ('draft', 'open') ORDER BY created_at",
@@ -278,8 +228,7 @@ impl<'a> OrderRepo<'a> {
         )
     }
 
-    /// One business day, every state — what the day report and the Z-report
-    /// read. Grouped by the STORED day, never by a timestamp (D5).
+    /// One business day, every state — what the day report and the Z-report read.
     pub fn list_for_day(
         &self,
         outlet: &str,
@@ -291,8 +240,7 @@ impl<'a> OrderRepo<'a> {
         )
     }
 
-    /// Every order, oldest first. For backup verification and export, not for a
-    /// screen — nothing unbounded is ever rendered (`PERFORMANCE.md` §5 rule 4).
+    /// Every order, oldest first.
     pub fn list_all(&self) -> Result<Vec<AnyOrder>, DbError> {
         self.list_where("1 = 1 ORDER BY created_at, id", rusqlite::params![])
     }
@@ -323,14 +271,9 @@ impl<'a> OrderRepo<'a> {
         Ok(orders)
     }
 
-    // -----------------------------------------------------------------------
-    // Writing
-    // -----------------------------------------------------------------------
-
     fn delete_children(&self, id: &str) -> Result<(), DbError> {
-        // Deepest first. Nothing cascades in the money path (P04), so this is
-        // the only way children go, and it is deliberate: the delete is spelled
-        // out here where somebody can read it.
+        // Deepest first. Nothing cascades in the money path, so this is the only way children
+        // go, and it is deliberate: the delete is spelled out here where somebody can read it.
         self.tx.execute(
             "DELETE FROM order_line_modifiers
               WHERE order_line_id IN (SELECT id FROM order_lines WHERE order_id = ?1)",
@@ -378,12 +321,7 @@ impl<'a> OrderRepo<'a> {
                     line_id,
                     order_id,
                     seq_sql,
-                    // **An empty item id is NULL, not `''`.** The column is
-                    // nullable on purpose — an ad-hoc line typed at the counter
-                    // belongs to no menu row — and `''` would be a foreign key
-                    // to an item that does not exist, which SQLite refuses and
-                    // which would make an ad-hoc line impossible to bill.
-                    // Found at P25, by settling one.
+                    // An empty item id is NULL, not `''`.
                     Some(line.snapshot.item_id.as_str()).filter(|id| !id.is_empty()),
                     line.snapshot.name,
                     encode::money_to_sql(line.snapshot.unit_price),
@@ -393,7 +331,7 @@ impl<'a> OrderRepo<'a> {
                     line.snapshot.category_id.as_ref().map(CategoryId::as_str),
                     encode::qty_to_sql(line.qty),
                     line.note,
-                    // P24. Part of the snapshot, so they are written with it.
+                    // Part of the snapshot, so they are written with it.
                     line.snapshot.course,
                     line.snapshot.prep_minutes.map(i64::from),
                     kind,
@@ -442,9 +380,9 @@ impl<'a> OrderRepo<'a> {
                     encode::timestamp_to_sql(at),
                 ],
             )?;
-            // The modifier ids are inside identity_key; they are re-read from
-            // there, which is why the key's format is part of encode.rs's
-            // contract and not an implementation detail of this file.
+            // The modifier ids are inside identity_key; they are re-read from there, which is
+            // why the key's format is part of encode.rs's contract and not an implementation
+            // detail of this file.
             for (mseq, modifier) in identity.modifier_ids.iter().enumerate() {
                 let _ = (mseq, modifier);
             }
@@ -453,11 +391,6 @@ impl<'a> OrderRepo<'a> {
     }
 
     /// Shred a computed bill into its four tables.
-    ///
-    /// **The state VAT channel is stored, not dropped** (P33 Phase 2). So are
-    /// the registration and the state-tax name, frozen with the bill for the
-    /// same reason the place of supply already is: leaving the composition
-    /// scheme must not change what last year's bills reprint as.
     fn save_bill(&self, order_id: &str, bill: &Bill, core: &OrderCore) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO bills (order_id, subtotal, total_line_discount, total_bill_discount,
@@ -573,10 +506,12 @@ impl<'a> OrderRepo<'a> {
     ) -> Result<(), DbError> {
         for (seq, payment) in settlement.payments().iter().enumerate() {
             let cols = encode::payment_mode_to_sql(&payment.mode);
-            // The tip belongs to the settlement, not to one payment. It rides
-            // on the first row so `Settlement::with_tip` can be replayed, and
-            // the day close reads SUM(tip) either way.
-            let tip = if seq == 0 { settlement.tip() } else { Money::ZERO };
+            // The tip belongs to the settlement, not to one payment.
+            let tip = if seq == 0 {
+                settlement.tip()
+            } else {
+                Money::ZERO
+            };
             self.tx.execute(
                 "INSERT INTO payments (id, order_id, seq, mode, customer_id, mode_label, amount,
                                        tip, reference, settles_credit, received_at, received_by,
@@ -597,11 +532,7 @@ impl<'a> OrderRepo<'a> {
                     core.created_by.as_str(),
                     encode::business_day_to_sql(core.business_day),
                     payment.provider,
-                    // **P29.** Confirmed at the moment it was taken, or not at
-                    // all. A payment nobody has checked carries no time, which
-                    // is what puts it on the list a shop reads at close — and
-                    // the person is whoever was at the till, because a
-                    // confirmation with no name on it settles no argument.
+                    // Confirmed at the moment it was taken, or not at all.
                     if payment.confirmed {
                         Some(encode::timestamp_to_sql(core.created_at))
                     } else {
@@ -618,16 +549,13 @@ impl<'a> OrderRepo<'a> {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // Reading — the private-field wall
-    // -----------------------------------------------------------------------
+    // Reading — the private-field wall.
 
     fn read_header(&self, id: &str) -> Result<Option<Header>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            // New columns go on the END of this list, never in the middle: the
-            // reader below indexes by position, and inserting `sub_table` after
-            // `note` silently shifted every column after it by two. Caught by
-            // two P12 tests reading `cancelled_at` as text (P14).
+            // New columns go on the END of this list, never in the middle: the reader below
+            // indexes by position, and inserting `sub_table` after `note` silently shifted
+            // every column after it by two.
             "SELECT state, business_day, created_at, created_by, order_type, table_id, note,
                     token_value, token_formatted, bill_number_value, bill_number_formatted,
                     settled_at, settled_by, cancelled_at, cancelled_by, cancel_reason,
@@ -640,8 +568,7 @@ impl<'a> OrderRepo<'a> {
             return Ok(None);
         };
 
-        let business_day =
-            encode::business_day_from_sql(row.get(1)?, "orders.business_day")?;
+        let business_day = encode::business_day_from_sql(row.get(1)?, "orders.business_day")?;
         Ok(Some(Header {
             state: row.get(0)?,
             business_day,
@@ -654,12 +581,18 @@ impl<'a> OrderRepo<'a> {
             token_formatted: row.get(8)?,
             bill_value: row.get(9)?,
             bill_formatted: row.get(10)?,
-            settled_at: row.get::<_, Option<i64>>(11)?.map(encode::timestamp_from_sql),
+            settled_at: row
+                .get::<_, Option<i64>>(11)?
+                .map(encode::timestamp_from_sql),
             settled_by: row.get::<_, Option<String>>(12)?.map(StaffId::new),
-            cancelled_at: row.get::<_, Option<i64>>(13)?.map(encode::timestamp_from_sql),
+            cancelled_at: row
+                .get::<_, Option<i64>>(13)?
+                .map(encode::timestamp_from_sql),
             cancelled_by: row.get::<_, Option<String>>(14)?.map(StaffId::new),
             cancel_reason: row.get(15)?,
-            voided_at: row.get::<_, Option<i64>>(16)?.map(encode::timestamp_from_sql),
+            voided_at: row
+                .get::<_, Option<i64>>(16)?
+                .map(encode::timestamp_from_sql),
             voided_by: row.get::<_, Option<String>>(17)?.map(StaffId::new),
             void_reason: row.get(18)?,
             sub_table: row.get::<_, Option<String>>(19)?,
@@ -667,12 +600,7 @@ impl<'a> OrderRepo<'a> {
         }))
     }
 
-    /// Replays [`Cart::add`] in stored `seq` order.
-    ///
-    /// `add` re-runs the merge rule, which is exactly why the order matters. A
-    /// cart cannot hold two lines with the same identity — `add` merged them
-    /// when they were typed — so replaying in sequence reproduces it exactly,
-    /// and `t1` asserts that rather than trusting it.
+    /// Replays `Cart::add` in stored `seq` order.
     fn read_cart(&self, order_id: &str) -> Result<Cart, DbError> {
         let lines = self.read_line_rows(order_id)?;
         let mut cart = Cart::new();
@@ -697,10 +625,9 @@ impl<'a> OrderRepo<'a> {
             if let Some(category) = &line.category_id {
                 snapshot = snapshot.with_category(CategoryId::new(category.clone()));
             }
-            // P24. The snapshot is not the snapshot if these come back empty:
-            // an order read from disk is what `kitchen::send` fires from, so
-            // losing them here would silently switch off every course and
-            // every timer after a restart.
+            // The snapshot is not the snapshot if these come back empty: an order read from
+            // disk is what `kitchen::send` fires from, so losing them here would silently
+            // switch off every course and every timer after a restart.
             snapshot.course = line.course.clone();
             snapshot.prep_minutes = line.prep_minutes.and_then(|m| u32::try_from(m).ok());
 
@@ -725,8 +652,7 @@ impl<'a> OrderRepo<'a> {
                         line.seq
                     ))
                 })?;
-                let discount =
-                    encode::discount_from_sql(kind, value, "order_lines.discount_kind")?;
+                let discount = encode::discount_from_sql(kind, value, "order_lines.discount_kind")?;
                 let mut entry = DiscountEntry::new(discount);
                 if let Some(reason) = &line.discount_reason {
                     entry = entry.with_reason(reason.clone());
@@ -734,9 +660,8 @@ impl<'a> OrderRepo<'a> {
                 if let Some(by) = &line.discount_by {
                     entry = entry.authorised_by(StaffId::new(by.clone()));
                 }
-                cart.set_line_discount(index, Some(entry)).map_err(|e| {
-                    DbError::invariant(format!("order {order_id}: {e}"))
-                })?;
+                cart.set_line_discount(index, Some(entry))
+                    .map_err(|e| DbError::invariant(format!("order {order_id}: {e}")))?;
             }
         }
         Ok(cart)
@@ -797,11 +722,7 @@ impl<'a> OrderRepo<'a> {
         Ok(out)
     }
 
-    /// Replays [`KitchenLedger::mark_printed`].
-    ///
-    /// The identity's sorted modifier ids come back out of `identity_key`, and
-    /// the sort is mb-core's rule — this only decodes it. Crown jewel 2 said
-    /// the delta is remembered *in the database*; this is where that is true.
+    /// Replays `KitchenLedger::mark_printed`.
     fn read_kitchen(&self, order_id: &str) -> Result<KitchenLedger, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT identity_key, qty_told FROM kitchen_ledger WHERE order_id = ?1
@@ -824,7 +745,7 @@ impl<'a> OrderRepo<'a> {
         Ok(ledger)
     }
 
-    /// Replays [`Settlement`]: `new`, `add` per payment, then the tip.
+    /// Replays `Settlement`: `new`, `add` per payment, then the tip.
     fn read_settlement(&self, order_id: &str) -> Result<Settlement, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT mode, customer_id, mode_label, amount, tip, reference, settles_credit,
@@ -859,8 +780,8 @@ impl<'a> OrderRepo<'a> {
             if encode::bool_from_sql(credit, "payments.settles_credit")? {
                 payment = payment.settling_credit();
             }
-            // P29. A time in `confirmed_at` IS the confirmation; there is no
-            // second boolean that could disagree with it.
+            // A time in `confirmed_at` IS the confirmation; there is no second boolean that
+            // could disagree with it.
             payment.confirmed = confirmed.is_some();
             payment.provider = provider;
             settlement
@@ -931,10 +852,7 @@ impl<'a> OrderRepo<'a> {
             order_type: encode::order_type_from_sql(&order_type)?,
             place_of_supply: encode::place_of_supply_from_sql(&row.get::<_, String>(14)?)?,
             rounding: encode::rounding_mode_from_sql(&row.get::<_, String>(15)?)?,
-            // **Recovered, not stored** — P32. Which lines were priced
-            // tax-inclusive is already on the lines, so the split a printed
-            // bill needs is a property of what was read back rather than two
-            // more columns and a migration.
+            // Recovered, not stored.
             gst_included: GstAmounts::default(),
             gst_added: GstAmounts::default(),
             vat_included: Vat::ZERO,
@@ -950,9 +868,8 @@ impl<'a> OrderRepo<'a> {
     }
 
     fn read_bill_lines(&self, order_id: &str) -> Result<Vec<BillLine>, DbError> {
-        // The snapshot, the quantity, the note and the modifiers live on the
-        // TYPED line; only the computed figures live on the bill line. Joining
-        // them here is what keeps the line stored once (P04 item 4).
+        // The snapshot, the quantity, the note and the modifiers live on the TYPED line; only
+        // the computed figures live on the bill line.
         let cart = self.read_cart(order_id)?;
         let mut stmt = self.tx.prepare_cached(
             "SELECT bl.gross, bl.line_discount, bl.bill_discount_share, bl.net, bl.taxable,
@@ -1067,12 +984,7 @@ impl<'a> OrderRepo<'a> {
         Ok(out)
     }
 
-    /// Replays [`TaxSummary`].
-    ///
-    /// `bill_tax_rows` holds the GST book. The VAT book is **recovered from the
-    /// lines** — each liquor line stores its own rate and `vat`, so a second
-    /// table for the same figures would be a second answer — and the three
-    /// value totals are set from the bill header.
+    /// Replays `TaxSummary`.
     fn read_summary(
         &self,
         order_id: &str,
@@ -1103,19 +1015,20 @@ impl<'a> OrderRepo<'a> {
                 state: encode::money_from_sql(sgst),
                 integrated: encode::money_from_sql(igst),
             };
-            let gross = taxable
-                .add(gst.total().map_err(|e| {
-                    DbError::invariant(format!("order {order_id} tax row: {e}"))
-                })?)
-                .map_err(|e| DbError::invariant(format!("order {order_id} tax row: {e}")))?;
+            let gross =
+                taxable
+                    .add(gst.total().map_err(|e| {
+                        DbError::invariant(format!("order {order_id} tax row: {e}"))
+                    })?)
+                    .map_err(|e| DbError::invariant(format!("order {order_id} tax row: {e}")))?;
             summary
                 .add(TaxOutcome {
                     taxable,
                     gst,
                     vat: Vat::ZERO,
                     gross,
-                    // These rows are the GST summary, so the kind is GST by
-                    // construction — liquor never reaches this table.
+                    // These rows are the GST summary, so the kind is GST by construction —
+                    // liquor never reaches this table.
                     spec: TaxSpec::gst(encode::tax_rate_from_sql(
                         rate_bp,
                         "bill_tax_rows.rate_bp",
@@ -1164,8 +1077,6 @@ impl<'a> OrderRepo<'a> {
     }
 }
 
-// ---------------------------------------------------------------------------
-
 struct Header {
     state: String,
     business_day: mb_core::BusinessDay,
@@ -1186,10 +1097,7 @@ struct Header {
     voided_at: Option<mb_core::Timestamp>,
     voided_by: Option<StaffId>,
     void_reason: Option<String>,
-    /// P14, scope 1.6. Stored as the letter; parsed on the way out so a hand-
-    /// edited database cannot put "front-left" on a kitchen ticket.
     sub_table: Option<String>,
-    /// P14, scope 1.24.
     covers: Option<u32>,
 }
 
@@ -1212,9 +1120,7 @@ impl Header {
         )
     }
 
-    /// A column the state's CHECK constraint guarantees is present. Reaching
-    /// the error means the row was written by something other than this
-    /// program — so it is an error, never a default (D7).
+    /// A column the state's CHECK constraint guarantees is present.
     fn required<T>(&self, column: &'static str, value: Option<T>) -> Result<T, DbError> {
         value.ok_or_else(|| {
             DbError::invariant(format!(
@@ -1246,11 +1152,7 @@ struct LineRow {
     discount_by: Option<String>,
 }
 
-/// **The id of one order line, derived rather than generated.**
-///
-/// P25 reads it from outside this module: a stock movement points at the line it
-/// came from, so a per-line void reverses only its own share. Derived means the
-/// stock walk can name a line before the row is read back.
+/// The id of one order line, derived rather than generated.
 pub(crate) fn line_id(order_id: &str, seq: usize) -> String {
     format!("{order_id}_ln_{seq}")
 }
@@ -1285,9 +1187,7 @@ fn timestamps(order: &AnyOrder) -> (Option<Settled>, Option<Reasoned>, Option<Re
     }
 }
 
-/// A voided order keeps its bill and its amounts — P03 decided that
-/// deliberately, so reports can show gross takings and takings net of voids
-/// side by side.
+/// A voided order keeps its bill and its amounts.
 fn bill_and_settlement(order: &AnyOrder) -> Option<(&Bill, &Settlement)> {
     match order {
         AnyOrder::Settled(o) => Some((&o.bill, &o.settlement)),
@@ -1324,12 +1224,7 @@ fn claimed(
     })
 }
 
-/// The inverse of [`crate::encode::line_identity_key`].
-///
-/// Item, then note, then the sorted modifier ids, separated by the unit
-/// separator. An empty note field means `None` — a line whose note is the empty
-/// string is a line with no note as far as the cart's merge rule is concerned,
-/// because `Cart::add` normalises it.
+/// The inverse of `crate::encode::line_identity_key`.
 fn decode_identity(key: &str) -> LineIdentity {
     const US: char = '\u{1f}';
     let mut parts = key.split(US);

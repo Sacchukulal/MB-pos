@@ -5,8 +5,6 @@
  */
 export type PatternView = { id: string, 
 /**
- * "Morning — 7:00 to 15:00". Written here, because turning 420 minutes
- * past midnight into a time somebody reads is a conversion and every
- * conversion in this product happens once, in Rust (D39).
+ * "Morning — 7:00 to 15:00".
  */
 says: string, };

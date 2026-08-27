@@ -1,27 +1,4 @@
-//! **The IPC boundary.** One command per use case, named for the use case.
-//!
-//! *A deviation from this session's own prompt, and the reason:* the prompt
-//! asked for `ipc/` with a file per group. At P08 there is no billing screen,
-//! no menu and no reports, so that would be four files with two commands
-//! between them and a barrel to keep in step. One file with sections is honest
-//! now; the day `order.rs` has fifteen commands in it, split it. Splitting a
-//! file is free — that is the same argument `SCHEMA.md` makes about tables.
-//!
-//! # The rules this boundary obeys
-//!
-//! * **Named for the use case**: `settle_order`, never `update_orders`. A
-//!   command named after a table is a screen writing SQL by post, which is
-//!   audit E3 with extra steps.
-//! * **Every command returns a typed `Result`** whose error carries a code, a
-//!   sentence for the shopkeeper and the technical detail behind it — see
-//!   [`crate::words`], and audit F8.
-//! * **`?` on a `DbError` does not compile here.** Every error is converted by
-//!   hand, because the conversion is where somebody writes the sentence.
-//! * **Types are generated, never written twice** (`ts-rs`), and `cargo test`
-//!   regenerates and diffs them so the two sides cannot drift.
-//! * **Money crosses as integer paise plus a preformatted string.** Never as a
-//!   float, and never as a number TypeScript is expected to format — that is
-//!   R8, and `Money::to_plain_string` is the only formatter in the product.
+//! The IPC boundary. One command per use case, named for the use case.
 
 use mb_core::{BusinessDay, Timestamp};
 use mb_print::printer::{PrinterConfig, Target};
@@ -33,19 +10,9 @@ use crate::state::{App, OUTLET, PrintJobView};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
-// ---------------------------------------------------------------------------
 // Money, as it crosses.
-// ---------------------------------------------------------------------------
 
-/// **The only shape money takes on the wire.**
-///
-/// Both halves are produced in Rust: `paise` is the integer of record (D2) and
-/// `text` is what a screen displays, already formatted by
-/// `Money::to_plain_string`. TypeScript never computes either.
-///
-/// It would be smaller to send only the integer and format it in TypeScript.
-/// It would also be a second money path, in a language with no integers, and
-/// `0.1 + 0.2` is the oldest bug in the industry.
+/// The only shape money takes on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -54,23 +21,13 @@ pub struct MoneyView {
     pub text: String,
 }
 
-/// **A stored count, made sendable.**
-///
-/// Every count that crosses the IPC boundary is a `u32`, because `ts-rs`
-/// renders an `i64` as a TypeScript `bigint` and `JSON.stringify` throws on
-/// one (D58). SQLite hands them back as `i64`, so the narrowing happens here,
-/// once, and it clamps rather than wrapping: a shop with more than four
-/// billion tables has a different problem, and saturating says so honestly.
-#[must_use]
 /// A rate from whole percent, for the demo shop's fixed menu.
-///
-/// `unwrap_or` rather than `expect`: the workspace forbids a panic on the money
-/// path (D7). These are literals that cannot fail, and a nil rate on a demo
-/// item is a visibly wrong number rather than a counter that will not start.
 fn demo_rate(percent: u32) -> mb_core::TaxRate {
     mb_core::TaxRate::from_percent(percent).unwrap_or(mb_core::TaxRate::ZERO)
 }
 
+/// A stored count, made sendable.
+#[must_use]
 pub fn count(n: i64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
@@ -84,35 +41,24 @@ impl From<mb_core::Money> for MoneyView {
     }
 }
 
-// ---------------------------------------------------------------------------
 // What the app is, right now.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
-    /// False on a first run. The shell opens to "create or restore" rather
-    /// than to a blank screen.
+    /// False on a first run.
     pub has_shop: bool,
     pub shop_path: Option<String>,
     pub theme: String,
     pub text_size: String,
     pub version: String,
-    /// Where the logs are, so "send me the log" is a button and not a phone
-    /// call about file paths (audit E7).
+    /// Where the logs are, so "send me the log" is a button and not a phone call about file
+    /// paths.
     pub logs_path: Option<String>,
-    /// **The licence banner, or empty** (P21).
-    ///
-    /// It rides on `app_status` rather than on `account` because `account`
-    /// needs `reports.view` — and the person who needs to be told the plan ran
-    /// out is whoever is standing at the counter, who is usually a cashier.
-    /// A warning only the owner can see is a warning nobody reads.
-    ///
-    /// It never says billing has stopped, because billing never stops; every
-    /// sentence `words::licence_banner` writes ends by saying what still works.
+    /// The licence banner, or empty.
     pub licence: String,
-    /// `ok`, `warn` or `danger`. The sentence says it too (§2).
+    /// `ok`, `warn` or `danger`.
     pub licence_tone: String,
 }
 
@@ -137,12 +83,8 @@ pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
     }
 }
 
-/// The look, saved. Applied before the first paint on the next start, so the
-/// window never flashes light and then goes dark.
-///
-/// **Rust stores the choice and does not know what it means.** A theme is data
-/// (D21, and the owner's ruling of 2026-08-04): adding one must never require
-/// a change on this side, so this validates nothing and stores the name.
+/// The look, saved. Applied before the first paint on the next start, so the window never
+/// flashes light and then goes dark.
 #[tauri::command]
 pub fn set_appearance(app: tauri::State<'_, App>, theme: String, text_size: String) {
     app.update_config(|config| {
@@ -151,7 +93,7 @@ pub fn set_appearance(app: tauri::State<'_, App>, theme: String, text_size: Stri
     });
 }
 
-/// Audit E7 — *"there is nothing to read"*. One button.
+/// "there is nothing to read".
 #[tauri::command]
 pub fn reveal_logs() -> UiResult<String> {
     let Some(dir) = crate::logging::directory() else {
@@ -163,12 +105,7 @@ pub fn reveal_logs() -> UiResult<String> {
     Ok(dir.display().to_string())
 }
 
-// ---------------------------------------------------------------------------
-// Printing.
-// ---------------------------------------------------------------------------
-
-/// A printer, as a settings screen shows it. P17 owns the screen; this exists
-/// so the test print has something to aim at.
+/// A printer, as a settings screen shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -178,29 +115,11 @@ pub struct PrinterView {
     pub connection: String,
     pub paper_mm: i64,
     pub is_default: bool,
-    /// Scope 7.11, in the units the owner nudges in.
     pub offset_x_mm: i64,
     pub offset_y_mm: i64,
 }
 
-// **`list_printers` was here, and P31 deleted it.**
-//
-// P08 wrote it so the test print had something to aim at. P17 then built
-// `settings::printers::printer_setup`, which answers the same question and
-// three more — the Windows printers this machine can see, the category
-// routes, and whether the shop is running on a stand-in. Nothing ever called
-// this one again.
-//
-// Two commands answering one question is audit E6, and the way that ends is
-// somebody fixing a bug in the copy nobody uses. `PrinterView` stays: it is
-// what `nudge_offset_on` gives back to P17's screen.
-
-/// The test print — P07 built the slip, the ruler and the nudge; this is what
-/// makes them reachable.
-///
-/// **It works with no shop open**, which is the whole point of it: first run,
-/// and after a restore, are exactly when somebody needs to know whether
-/// printing works, and D27 says the database is deliberately not open then.
+/// The test print.
 #[tauri::command]
 pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResult<String> {
     guard::require(&app, Permission::SettingsPrinter)?;
@@ -214,9 +133,7 @@ pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResu
 
     let job = Job::new(JobKind::Test, &printer.id, document, day).because("test print");
 
-    // With a shop, the job is durable and survives a power cut. Without one,
-    // the queue is in memory — D32's port, and the reason a test print works
-    // when nothing else does.
+    // With a shop, the job is durable and survives a power cut.
     let queued = app.print(job.clone());
 
     match queued {
@@ -224,14 +141,11 @@ pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResu
         Err(e) if e.code == "shop.none" => {
             log_info!("test print with no shop open — using an in-memory queue");
             let queue = app.transient_queue(vec![printer]);
-            // **The one enqueue outside `App::print`**, and it has to be: there
-            // is no shop, so there is no chosen typeface to stamp on. It prints
-            // in the built-in face, which is the only one a counter with no
-            // settings could have meant. `hygiene_tests` allows this line by
-            // name.
+            // The one enqueue outside `App::print`, and it has to be: there is no shop, so
+            // there is no chosen typeface to stamp on.
             let id = queue.enqueue(job).map_err(|e| words::from_print(&e))?;
-            // The transient queue is dropped with the print in flight; the
-            // worker thread owns the job and finishes it.
+            // The transient queue is dropped with the print in flight; the worker thread owns
+            // the job and finishes it.
             std::mem::forget(queue);
             Ok(id)
         }
@@ -239,18 +153,6 @@ pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResu
     }
 }
 
-// **`nudge_print_offset` was here, and P31 deleted it.**
-//
-// It was a one-line wrapper around `nudge_offset_on` below, and P17's
-// `settings::printers::nudge_printer` is another one — around the same body,
-// with the same permission, returning the same view. Two doors into one room,
-// and the shop only ever used one of them.
-//
-// The BODY stays, and it is the point: D46 put the arithmetic and the clamp in
-// one place precisely so a second nudge could not grow a second answer.
-
-/// The body (D46), so P17's printer screen nudges through the SAME arithmetic
-/// and the same clamp rather than growing a second one.
 pub fn nudge_offset_on(
     app: &App,
     printer_id: String,
@@ -270,8 +172,8 @@ pub fn nudge_offset_on(
             ));
         };
 
-        // Clamped by mb-print, so there is one rule rather than two: a nudge
-        // that could ever be a real correction is +/- 20 mm.
+        // Clamped by mb-print, so there is one rule rather than two: a nudge that could ever be
+        // a real correction is +/- 20 mm.
         let mut config = PrinterConfig::new(&row.id, &row.name, Target::None);
         config.paper.offset = mb_print::paper::Offset::new(
             i32::try_from(row.offset_x_mm).unwrap_or(0),
@@ -311,11 +213,7 @@ pub fn nudge_offset_on(
     })
 }
 
-/// What the shell's indicator shows — **audit D4's visible half.**
-///
-/// From `snapshot()` rather than from the event stream, so a screen that
-/// attached after the `Parked` event is not blind to the one thing it exists
-/// to show.
+/// What the shell's indicator shows.
 #[tauri::command]
 pub fn list_print_jobs(app: tauri::State<'_, App>) -> UiResult<Vec<PrintJobView>> {
     app.with_shop(|shop| Ok(shop.queue.snapshot().iter().map(to_view).collect()))
@@ -333,8 +231,7 @@ pub fn dismiss_print_job(app: tauri::State<'_, App>, id: String) -> UiResult<()>
     app.with_shop(|shop| shop.queue.dismiss(&id).map_err(|e| words::from_print(&e)))
 }
 
-/// The queue's vocabulary, turned into words — crown jewel 14, and the reason
-/// a screen never sees a tag like `parked`.
+/// The queue's vocabulary, turned into words.
 pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
     use mb_print::queue::{JobKind as K, JobState as S};
     PrintJobView {
@@ -348,9 +245,8 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             K::Drawer => "Cash drawer",
             K::DayClose => "Closing slip",
             K::Delivery => "Delivery slip",
-            // Named plainly, because this is the job a shopkeeper must notice
-            // if it fails: the code on it is on screen for one dialog and
-            // nowhere else afterwards.
+            // Named plainly, because this is the job a shopkeeper must notice if it fails: the
+            // code on it is on screen for one dialog and nowhere else afterwards.
             K::Recovery => "Recovery code",
         }
         .to_owned(),
@@ -369,9 +265,7 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
 }
 
 fn find_printer(app: &tauri::State<'_, App>, id: &str) -> UiResult<PrinterConfig> {
-    // With a shop, use the configured printer. Without one — first run — fall
-    // back to a file in the log folder, so "does printing work?" has an answer
-    // before anything else exists.
+    // With a shop, use the configured printer.
     let configured = app.with_shop(|shop| {
         let rows = shop
             .db
@@ -414,8 +308,8 @@ fn now_millis() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0))
 }
 
-/// Every command, in one place, so `main.rs` reads as a list rather than a
-/// macro nobody can grep.
+/// Every command, in one place, so `main.rs` reads as a list rather than a macro nobody can
+/// grep.
 #[macro_export]
 macro_rules! commands {
     () => {
@@ -428,9 +322,6 @@ macro_rules! commands {
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
             $crate::ipc::preview_test_page,
-            // **Audit D6, at last** — the REAL bill and the REAL kitchen ticket,
-            // before either reaches paper (P32). `bill.create`, because
-            // looking at what you are about to print is part of billing.
             $crate::ipc::preview_order,
             $crate::ipc::preview_kitchen,
             $crate::ipc::current_cart,
@@ -450,17 +341,12 @@ macro_rules! commands {
             $crate::ipc::cart_set_discount,
             $crate::ipc::cart_clear_discount,
             $crate::flows::print_kitchen_ticket,
-            // P32 — the cook lost the paper. The WHOLE order, marked as a
-            // reprint, with the ledger untouched.
+            // The cook lost the paper.
             $crate::flows::reprint_kitchen_ticket,
-            // P32 — scope 7.10, the A4 invoice a B2B customer asks for. The PDF
-            // sink has existed since P06 and nothing but the report exporter
-            // ever called it.
             $crate::flows::bill_pdf,
             $crate::flows::complete_bill,
             $crate::flows::print_open_bill,
-            // P11 — signing in, the people, the history. `guard.rs` has a test
-            // that every one of these has an access decision recorded.
+            // Signing in, the people, the history.
             $crate::ipc::lock_state,
             $crate::ipc::login,
             $crate::ipc::lock_now,
@@ -472,7 +358,7 @@ macro_rules! commands {
             $crate::ipc::save_role,
             $crate::ipc::list_permissions,
             $crate::ipc::audit_trail,
-            // P12 — the four ways a shop takes something back (B5, B6, D7).
+            // The four ways a shop takes something back.
             $crate::corrections::list_bills,
             $crate::corrections::day_totals,
             $crate::corrections::reasons,
@@ -481,7 +367,7 @@ macro_rules! commands {
             $crate::corrections::void_line,
             $crate::corrections::reprint_bill,
             $crate::corrections::refund_bill,
-            // P13 — the menu.
+            // The menu.
             $crate::menu::menu_tax_classes,
             $crate::menu::menu_categories,
             $crate::menu::menu_rows,
@@ -530,8 +416,7 @@ macro_rules! commands {
             $crate::expenses::save_recurring_expense,
             $crate::expenses::confirm_recurring_expense,
             $crate::expenses::export_expenses,
-            // P28 — the employment side: shifts, attendance, leave, salary
-            // and payroll. Every one checks its permission server-side (T10).
+            // The employment side: shifts, attendance, leave, salary and payroll.
             $crate::employment::employees,
             $crate::employment::save_employee,
             $crate::employment::attendance,
@@ -553,36 +438,33 @@ macro_rules! commands {
             $crate::employment::approve_payroll,
             $crate::employment::reverse_payroll,
             $crate::employment::staff_cost,
-            // P30 — the payslip P28 named as not done (scope 9.14).
             $crate::employment::print_payslip,
-            // P29 — delivery, the riders, and the cash they are carrying.
+            // Delivery, the riders, and the cash they are carrying.
             $crate::delivery::delivery_board,
             $crate::delivery::save_delivery,
             $crate::delivery::record_handback,
             $crate::delivery::set_rider,
             $crate::delivery::print_delivery_slip,
-            // P29 — what the payment machines said, and what nobody has
-            // confirmed yet.
+            // What the payment machines said, and what nobody has confirmed yet.
             $crate::payments::payments,
             $crate::payments::confirm_payment,
-            // P29 — the device screen, the scale, the customer display and
-            // parcel labels.
+            // The device screen, the scale, the customer display and parcel labels.
             $crate::devices::device_manager,
             $crate::devices::scanned,
             $crate::devices::read_scale_once,
             $crate::devices::show_customer_display,
             $crate::devices::print_label,
-            // P30.5 — the first run, and making a shop at all.
+            // The first run, and making a shop at all.
             $crate::firstrun::first_run,
             $crate::firstrun::create_shop,
             $crate::firstrun::use_existing_shop,
-            // P31 — the logo, and the two Browse buttons that did not exist.
+            // The logo, and the two Browse buttons that did not exist.
             $crate::logo::logo,
             $crate::logo::pick_a_logo,
             $crate::logo::save_logo,
             $crate::logo::remove_logo,
             $crate::logo::pick_a_folder,
-            // P25 — the stock book.
+            // The stock book.
             $crate::inventory::inventory,
             $crate::inventory::recipe,
             $crate::inventory::save_material,
@@ -593,7 +475,7 @@ macro_rules! commands {
             $crate::inventory::resolve_stock_problem,
             $crate::inventory::stock_variance,
             $crate::inventory::buy_list_text,
-            // P26 — buying, and the count.
+            // Buying, and the count.
             $crate::buying::buying,
             $crate::buying::supplier_account,
             $crate::buying::purchase,
@@ -620,8 +502,7 @@ macro_rules! commands {
             $crate::terminals::join_master,
             $crate::terminals::send_waiting_bills,
             $crate::share::share_report,
-            // P17 — the settings. Five commands for ninety settings, because
-            // the catalogue is the screen.
+            // The settings.
             $crate::settings::ipc::settings_all,
             $crate::settings::ipc::reload_settings,
             $crate::settings::ipc::search_settings,
@@ -647,8 +528,8 @@ macro_rules! commands {
             $crate::settings::ipc::run_settings_import,
             $crate::settings::numbering::numbering,
             $crate::settings::numbering::save_counter,
-            // P18 — thirteen reports behind three commands, for the same reason
-            // the settings screen is one component: the list is the screen.
+            // Thirteen reports behind three commands, for the same reason the settings screen
+            // is one component: the list is the screen.
             $crate::reports::report_list,
             $crate::reports::report,
             $crate::reports::report_csv,
@@ -658,19 +539,17 @@ macro_rules! commands {
             $crate::dayclose::count_cash,
             $crate::dayclose::close_day,
             $crate::dayclose::reopen_day,
-            // P19 — the phones this counter serves.
+            // The phones this counter serves.
             $crate::lan::network,
             $crate::lan::open_pairing,
             $crate::lan::close_pairing,
             $crate::lan::allow_device,
             $crate::lan::refuse_device,
             $crate::lan::revoke_device,
-            // P20 — the floor's items, into the cashier's bill or not.
+            // The floor's items, into the cashier's bill or not.
             $crate::orders::take_the_floors_items,
             $crate::orders::dismiss_the_floors_items,
-            // P21 — the licence. Reading the screen is `reports.view`; every
-            // one of the others is `licence.manage`, and none of them is
-            // Public: the lock screen has no business changing a licence.
+            // The licence.
             $crate::licensing::account,
             $crate::licensing::activate,
             $crate::licensing::start_trial,
@@ -678,27 +557,19 @@ macro_rules! commands {
             $crate::licensing::transfer_here,
             $crate::licensing::use_emergency_code,
             $crate::licensing::refresh_licence,
-            // P22 — is this counter healthy, and what can we send to support.
-            // Reading health is `reports.view`; the bundle is `backup.run`,
-            // because it is the other end of the same support conversation as
-            // replacing a database.
+            // Is this counter healthy, and what can we send to support.
             $crate::health::health,
             $crate::diagnostics::diagnostics_plan,
             $crate::diagnostics::write_diagnostics,
-            // P22 — the update, and the way back. Looking is `reports.view`;
-            // dismissing one or going back a version changes what this computer
-            // runs, so both are `settings.store`.
+            // The update, and the way back.
             $crate::updates::look_for_an_update,
             $crate::updates::dismiss_update,
             $crate::updates::go_back_a_version,
-            // Deliberately Public: on a first run the stand-in is who is
-            // standing there, and a set-up list that refuses to draw until
-            // somebody has a PIN is a list nobody can use to create the PIN.
+            // Deliberately Public: on a first run the stand-in is who is standing there, and a
+            // set-up list that refuses to draw until somebody has a PIN is a list nobody can
+            // use to create the PIN.
             $crate::setup::setup_list,
-            // P24 — the kitchen screen. All `bill.create`: a cook clearing a
-            // ticket is doing the shop's work, and a kitchen that needed a
-            // manager's permission to say "done" would be a kitchen that
-            // stopped using the screen by Tuesday.
+            // The kitchen screen.
             $crate::kitchen::kitchen,
             $crate::kitchen::kitchen_shown,
             $crate::kitchen::kitchen_bump,
@@ -706,30 +577,18 @@ macro_rules! commands {
             $crate::kitchen::kitchen_recall,
             $crate::kitchen::kitchen_acknowledge,
             $crate::kitchen::kitchen_fire,
-            // Development only — see its own documentation. It does not exist
-            // in a release build.
+            // Development only — see its own documentation.
             #[cfg(debug_assertions)]
             $crate::ipc::seed_demo_shop,
         ]
     };
 }
 
-// ---------------------------------------------------------------------------
 // The preview — the fourth sink's input.
-// ---------------------------------------------------------------------------
 
-// **There was a second `metrics_for` here, and it was the bug it exists to
-// prevent.** It took a font KEY, while `App::metrics_for` takes a job KIND and
-// asks `face_for` — the same question the queue asks. Two functions answering
-// "which face" is exactly how a preview and a printer come to draw different
-// documents, so there is one, on `App`.
+// There was a second `metrics_for` here, and it was the bug it exists to prevent.
 
 /// Lay out a sample bill and hand it to the screen.
-///
-/// The sample is **P07's test slip** rather than a second invented one: it is
-/// already a real-looking bill with real amounts, it already carries the
-/// alignment ruler and the print offset, and it needs no shop — which means the
-/// preview works on a first run, like everything else in this session.
 #[tauri::command]
 pub fn preview_test_page(
     app: tauri::State<'_, App>,
@@ -746,19 +605,7 @@ pub fn preview_test_page(
     Ok(crate::preview::to_preview(&laid, &metrics, engine))
 }
 
-/// **The REAL bill for the REAL order, before it prints** — audit D6, and it
-/// was never built until P32.
-///
-/// > *"No bill preview before printing. You cannot see the actual bill for the
-/// > actual order before it comes out of the printer."*
-///
-/// `ipc.rs` has carried a comment since P08 saying *"P09 will add
-/// `preview_order(order_id)` beside this"*. P09 to P31 came and went; a grep
-/// for the name found the comment and nothing else. Until now the only preview
-/// in the product was of an invented sample — which is also why a bill printing
-/// a database key where the table's name goes survived to a real install.
-///
-/// It costs one command, because the sink already exists.
+/// The REAL bill for the REAL order, before it prints.
 #[tauri::command]
 pub fn preview_order(
     app: tauri::State<'_, App>,
@@ -776,14 +623,7 @@ pub fn preview_kitchen(
     crate::flows::preview_kitchen_on(&app, order_id)
 }
 
-// ---------------------------------------------------------------------------
-// The billing screen (P09).
-//
-// Every one of these returns the WHOLE new `CartView`. There is no partial
-// update and no delta: the bill is recomputed from the cart every time
-// (D4, and it costs 14 µs), so a screen that rendered a delta would be a
-// screen that could be stale.
-// ---------------------------------------------------------------------------
+// The billing screen.
 
 use crate::billing::{
     CartState, CartView, MenuItemView, TableView, cart_view, floor_view, menu_view,
@@ -797,9 +637,7 @@ pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
     app.with_cart(|state| cart_view(state, &app.shop_config()))
 }
 
-/// Put an item in. **`Cart::add` merges** by `LineIdentity` — same item, same
-/// note, same modifiers — which is P01's rule and the reason the cart is not
-/// in TypeScript.
+/// Put an item in.
 pub fn cart_add_on(
     app: &App,
     item_id: String,
@@ -858,22 +696,7 @@ pub fn cart_set_qty(
     shown(&handle, view)
 }
 
-/// **One more, or one less** — the − and + on a cart line.
-///
-/// # Why this is a command and not `qty + 1` on the screen
-///
-/// A quantity is a whole number of THOUSANDTHS (`mb_core::Qty`), and it crosses
-/// the wire as the string a shopkeeper reads: "2", "0.5", "1.333". Stepping it
-/// in TypeScript means `parseFloat` and a double — and `0.1 + 0.2` is
-/// `0.30000000000000004`, which comes back here as a quantity with seventeen
-/// decimal places and is refused. R8 and D2 both say the arithmetic belongs on
-/// this side; this is one of the places that is true for a reason rather than
-/// on principle.
-///
-/// **Down to nothing removes the line**, because that is what a cashier
-/// pressing − on a single item means. `Cart::set_qty` would refuse a zero — and
-/// a button that does nothing at the end of its range is a button somebody
-/// presses four more times.
+/// One more, or one less — the − and + on a cart line.
 #[tauri::command]
 pub fn cart_step_qty(
     app: tauri::State<'_, App>,
@@ -934,8 +757,8 @@ pub fn cart_remove(
     shown(&handle, view)
 }
 
-/// New order. Keeps the order type, because **the type lock** (crown jewel 1)
-/// is what stops a parcel counter re-selecting it forty times an hour.
+/// New order. Keeps the order type, because the type lock is what stops a parcel counter
+/// re-selecting it forty times an hour.
 pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
@@ -963,8 +786,8 @@ pub fn cart_set_order_type(
     })?;
     let view = app.with_cart_mut(|state| {
         state.order_type = kind;
-        // A parcel has no table, and leaving a stale one would settle the bill
-        // against a table nobody is sitting at.
+        // A parcel has no table, and leaving a stale one would settle the bill against a table
+        // nobody is sitting at.
         if !matches!(kind, mb_core::OrderType::DineIn) {
             state.table = None;
             state.table_label = None;
@@ -989,27 +812,13 @@ pub fn cart_add_payment(
     )
 }
 
-/// **P29, scope 8.3: the payment goes past a provider on its way onto the
-/// bill.**
-///
-/// Cash is untouched — the notes are in the drawer and nobody has to be asked.
-/// Everything electronic is asked about, and there are three answers:
-///
-/// * approved — taken, and marked confirmed;
-/// * waiting — taken, and marked **unconfirmed**, which is what the manual
-///   provider that ships says about everything (a person looked at a phone);
-/// * declined — **not taken at all**, so the bill stays unsettled and the
-///   cashier can ask for another way to pay. That is T8, and it is the one
-///   case where a machine is allowed to stop a payment: not because it broke,
-///   but because the bank said no.
 pub fn cart_add_payment_on(
     app: &App,
     mode: String,
     amount_paise: i64,
     reference: Option<String>,
 ) -> UiResult<CartView> {
-    // One counter action at a time — see `App::begin_action`. Held for the
-    // whole flow, so a second press cannot land between the read and the write.
+    // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
     let mode = match mode.as_str() {
@@ -1020,17 +829,7 @@ pub fn cart_add_payment_on(
     };
     let amount = mb_core::Money::from_paise(amount_paise);
 
-    // **The shape is checked before anything is asked.** `Payment::new` below
-    // refuses a zero or negative amount, and it is right to — a zero-rupee
-    // payment row is noise in every report downstream. But that check used to
-    // happen AFTER `ask_about`, which means a doomed press had already gone out
-    // to the card machine and written a row in the attempts ledger.
-    //
-    // Found on 2026-08-22 alongside the owner's *"it also shows some error
-    // notification"*: the screen was offering the modes on a bill that was
-    // already paid, so every press sent zero. The screen no longer offers them
-    // (see `PaymentModes`), and this is the same refusal moved to the front of
-    // the queue so nothing outside this process is touched on the way to it.
+    // The shape is checked before anything is asked.
     if !amount.is_positive() {
         return Err(
             UiError::new("payment.invalid", "That payment could not be taken.")
@@ -1062,9 +861,8 @@ pub fn cart_add_payment_on(
         UiError::new("payment.invalid", "That payment could not be taken.")
             .with_detail(e.to_string())
     })?;
-    // The provider's reference wins over the typed one when there is one: an
-    // approval code from a machine is worth more than a number somebody read
-    // off a screen.
+    // The provider's reference wins over the typed one when there is one: an approval code from
+    // a machine is worth more than a number somebody read off a screen.
     let confirmed = answer.is_approved();
     if let mb_core::provider::Answer::Approved { reference: given } = &answer
         && !given.is_empty()
@@ -1101,16 +899,7 @@ pub fn cart_clear_payments(
     shown(&handle, view)
 }
 
-/// **The cash the customer handed over, as typed.**
-///
-/// The one box on the till that a cashier types money into. It OWNS the cash
-/// line: every commit replaces what was there, so a mistyped amount is fixed by
-/// typing it again rather than by an undo button. An empty box means no cash
-/// has been counted, and the whole balance goes down in whichever mode is lit
-/// when the bill is completed.
-///
-/// The amount arrives as TEXT and Rust parses it (R8) — the screen never turns
-/// rupees into paise.
+/// The cash the customer handed over, as typed.
 #[tauri::command]
 pub fn cart_cash_given(
     app: tauri::State<'_, App>,
@@ -1142,37 +931,9 @@ pub fn cart_cash_given(
     )
 }
 
-// ---------------------------------------------------------------------------
-// Money off a bill — scope 1.12, audit B7, and the owner's 2026-08-17
-// *"where is discount option?? i want to give discount to customer, here no
-// option showing."*
-// ---------------------------------------------------------------------------
+// Money off a bill.
 
-/// **Take money off this bill.**
-///
-/// # Everything for this existed except the door
-///
-/// `mb_core::Discount` spreads a bill-level discount across the lines *before*
-/// tax, so a bill mixing 5% food and 18% packaged goods still ties rate by rate
-/// (audit B11); `DiscountPolicy` decides who may give how much and when a
-/// reason is compulsory; `Actor::discount_policy` builds one from the signed-in
-/// person's role; `BillDiscountBill` is a permission with a checkbox on the
-/// roles screen; `CartState.bill_discount` is read by `CartState::bill` and
-/// printed by the bill template. **All of it was reachable from nothing.**
-/// `bill_discount` was assigned `None` in `Default` and never written again, so
-/// no cashier could give a customer a rupee off, ever, by any route.
-///
-/// # Percent or amount, and the arithmetic is Rust's
-///
-/// `value` arrives as TEXT — "10" for a percentage, "50.00" for rupees — for
-/// the reason every money field in this product does (R8, D39): parsing it in
-/// TypeScript is how `0.30000000000000004` gets onto a bill.
-///
-/// # The policy is checked against the person, not the shop
-///
-/// A waiter may be allowed 5% and a manager 20%. `check` is given the SUBTOTAL,
-/// because that is what a percentage is a percentage of, and its refusals are
-/// already sentences a cashier can act on.
+/// Take money off this bill.
 pub fn cart_set_discount_on(
     app: &App,
     kind: String,
@@ -1220,13 +981,10 @@ pub fn cart_set_discount_on(
     if let Some(reason) = reason {
         entry = entry.with_reason(reason);
     }
-    // **Who allowed it**, which is what makes the audit row worth having and
-    // what `DiscountEntry::authorised_by` has been waiting for since P02.
     entry = entry.authorised_by(who.staff_id.clone());
 
     app.with_cart_mut(|state| {
-        // The base a percentage is taken off. Computed from the cart as it is
-        // now, with no discount applied, which is what `check` compares against.
+        // The base a percentage is taken off.
         let base = state.bill(&config)?.subtotal;
         who.discount_policy()
             .check(&entry, base)
@@ -1236,9 +994,8 @@ pub fn cart_set_discount_on(
     })
 }
 
-/// **Clear the discount.** Separate from setting one so that "no discount" is
-/// never expressed as "a discount of zero", which would print a zero line on
-/// the bill and read as a mistake.
+/// Clear the discount. Separate from setting one so that "no discount" is never expressed as "a
+/// discount of zero", which would print a zero line on the bill and read as a mistake.
 pub fn cart_clear_discount_on(app: &App) -> UiResult<CartView> {
     guard::require(app, Permission::BillDiscountBill)?;
     app.with_cart_mut(|state| {
@@ -1247,11 +1004,7 @@ pub fn cart_clear_discount_on(app: &App) -> UiResult<CartView> {
     })
 }
 
-/// `"12.5"` to `1250` basis points, **without a float**.
-///
-/// `f64` gets 12.5 exactly and 0.1 not at all, and a percentage that is a
-/// hair under what was typed produces a discount a paisa off what the customer
-/// was promised. Two decimal places is the resolution basis points have.
+/// `"12.5"` to `1250` basis points, without a float.
 fn percent_to_bp(typed: &str) -> UiResult<u32> {
     let typed = typed.trim();
     let wrong = || UiError::new("discount.percent", "Type the percentage, like 10 or 12.5.");
@@ -1293,17 +1046,15 @@ pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
     cart_clear_discount_on(&app)
 }
 
-/// The floor — **the only view of open orders** (scope 1.4).
+/// The floor — the only view of open orders.
 pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     guard::require(app, Permission::BillCreate)?;
-    // **Both halves of "where is the cashier"** — see `TableView::selected`.
-    // The order is `None` until a line is typed; the table is set the moment
-    // one is tapped.
+    // Both halves of "where is the cashier" — see `TableView::selected`.
     let (loaded, on_table) =
         app.with_cart(|state| Ok((state.order_id.clone(), state.table.clone())))?;
-    // The same two thresholds the floor screen uses, from the same place —
-    // a billing grid and a floor plan disagreeing about which table is late
-    // would be worse than neither of them saying so.
+    // The same two thresholds the floor screen uses, from the same place — a billing grid and a
+    // floor plan disagreeing about which table is late would be worse than neither of them
+    // saying so.
     let (warn, late) = crate::floor::thresholds(app)?;
     app.with_shop(|shop| {
         let (tables, sections, open) = shop
@@ -1322,8 +1073,8 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
             &sections,
             &open,
             crate::billing::Room {
-                // The billing grid IS the cart's view of the room, so it is the
-                // one screen that marks a tile. See `TableView::selected`.
+                // The billing grid IS the cart's view of the room, so it is the one screen that
+                // marks a tile.
                 cart_is_on: Some(crate::billing::CartIsOn {
                     order: loaded.as_deref(),
                     table: on_table.as_deref(),
@@ -1337,7 +1088,7 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     })
 }
 
-/// The menu, for putting something in the cart. P13 owns the menu screens.
+/// The menu, for putting something in the cart.
 #[tauri::command]
 pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
     guard::require(&app, Permission::BillCreate)?;
@@ -1350,20 +1101,8 @@ pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
     })
 }
 
-/// Put a small shop in the database so the billing screen has something to
-/// render — **development only, and it cannot ship.**
-///
-/// `#[cfg(debug_assertions)]`: the command does not exist in a release build,
-/// so there is no "demo data" button for a shop to press by accident and no
-/// feature invented outside `FEATURE_SCOPE.md`. P13 builds the real menu
-/// screens and P14 the real floor; this exists so that "run it and look at it"
-/// — which P08 added to the method after shipping two visible bugs — is
-/// possible at all before those sessions.
-///
-/// The items are deliberately awkward rather than tidy: a long name that must
-/// wrap, a 5% line, an 18% line, an inclusive-priced line and a **non-GST**
-/// one, because a bar that cannot bill is audit B10 and the totals block is
-/// where it shows.
+/// Put a small shop in the database so the billing screen has something to render — development
+/// only, and it cannot ship.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
@@ -1374,11 +1113,6 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
 
     let at = Timestamp::from_millis(now_millis());
 
-    // A first run has no database at all, and the real "create a new shop"
-    // flow is P22's first-run wizard. Rather than invent a product feature
-    // here, the dev seeder makes one where the shop would go and records it
-    // the same way the wizard will — through mb-db's own locate, so there is
-    // still exactly one answer to "where is the shop?" (audit A5).
     if !app.has_shop() {
         let dir = crate::config::AppConfig::directory();
         let path = dir.join("demo-shop.db");
@@ -1406,8 +1140,8 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                     )?;
                 }
 
-                // Twenty-two tables across three sections: enough that density
-                // is a real question at 1366x768 rather than a theoretical one.
+                // Twenty-two tables across three sections: enough that density is a real
+                // question at 1366x768 rather than a theoretical one.
                 let mut n = 0;
                 for (section, count) in [("sec_0", 10), ("sec_1", 8), ("sec_2", 4)] {
                     for seat in 1..=count {
@@ -1429,10 +1163,8 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                 }
 
                 // The category has to exist before an item can point at it —
-                // `items.category_id` references `categories(id)`, and the
-                // first run of this seeder hit that constraint. Which is the
-                // schema doing its job: P04 turned off nothing, so a dangling
-                // reference cannot be written even by a developer in a hurry.
+                // `items.category_id` references `categories(id)`, and the first run of this
+                // seeder hit that constraint.
                 repos.menu().save_category(
                     OUTLET,
                     &mb_db::repo::menu::Category {
@@ -1440,18 +1172,14 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                         name: "Food".to_owned(),
                         sort_order: 0,
                         is_active: true,
-                        // The demo shop has one kitchen screen, which is what
-                        // a real small shop has. A second station is a word
-                        // typed on a category — see P24.
+                        // The demo shop has one kitchen screen, which is what a real small shop
+                        // has.
                         station: None,
                     },
                     at,
                 )?;
 
-                // **One `TaxSpec` per item, not a rate and a treatment side by
-                // side** (P33). The water is MRP, so its tax is already inside
-                // the price; the beer is outside GST. Both are shapes the old
-                // pair of fields could only half express.
+                // One `TaxSpec` per item, not a rate and a treatment side by side.
                 let menu: [(&str, &str, i64, TaxSpec); 8] = [
                     (
                         "itm_dosa",
@@ -1483,8 +1211,7 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                         4_000,
                         mb_core::TaxSpec::gst(demo_rate(18)),
                     ),
-                    // The demo bar line. Seeded at a zero VAT rate, matching the
-                    // seeded liquor class — audit section 3.1, fixed in Phase 5.
+                    // The demo bar line.
                     (
                         "itm_beer",
                         "Beer 650ml",
@@ -1512,9 +1239,8 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                             category_id: Some(CategoryId::new("cat_food")),
                             name: (*name).to_owned(),
                             unit_price: Money::from_paise(*paise),
-                            // The demo shop points its items at the seeded
-                            // classes, so a rate change on the class moves
-                            // them — which is what a real shop does.
+                            // The demo shop points its items at the seeded classes, so a rate
+                            // change on the class moves them — which is what a real shop does.
                             tax_class_id: Some(mb_core::TaxClassId::new(match tax.kind {
                                 mb_core::TaxKind::OutsideGst => "tax_liquor",
                                 _ if tax.rate.basis_points() == 1_800 => "tax_packaged_18",
@@ -1524,11 +1250,8 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                             hsn: Some("2106".to_owned()),
                             cost_price: None,
                             short_code: None,
-                            // **The demo shop gets real prep times and
-                            // courses**, so the kitchen screen has something
-                            // to show the first time somebody opens it. A
-                            // dosa takes longer than a coffee, and that is the
-                            // difference the timer exists to make visible.
+                            // The demo shop gets real prep times and courses, so the kitchen
+                            // screen has something to show the first time somebody opens it.
                             prep_minutes: Some(if *paise > 8_000 { 12 } else { 4 }),
                             course: Some(
                                 if *paise > 8_000 { "Main" } else { "Starter" }.to_owned(),
@@ -1547,12 +1270,7 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
     })
 }
 
-/// Ranked item search — audit 2.3, budget B2.
-///
-/// Runs here rather than in React because **ranking is a rule**: name-start
-/// beats word-start beats inside-word, and a second copy of that in TypeScript
-/// would disagree with this one the moment P13 adds short codes to the same
-/// box. See `search.rs`.
+/// Ranked item search.
 pub fn search_items_on(
     app: &App,
     text: String,
@@ -1564,10 +1282,7 @@ pub fn search_items_on(
             .db
             .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
             .map_err(|e| words::from_db(&e))?;
-        // **The shop's setting, not this function's default** (P17). The
-        // argument stays so a caller can override it for one search; without a
-        // caller saying otherwise, "how does search match?" is a thing the
-        // owner chose on the Billing settings screen.
+        // The shop's setting, not this function's default.
         Ok(crate::search::search(
             &items,
             &text,
@@ -1576,18 +1291,10 @@ pub fn search_items_on(
     })
 }
 
-/// Load a table's running order into the cart — **budget B7**.
-///
-/// The order's own cart replaces the current one, and its `KitchenLedger`
-/// comes with it, which is what makes the kitchen delta right afterwards
-/// (crown jewel 2: *"what was printed is remembered in the database, not in
-/// the screen's memory"*).
+/// Load a table's running order into the cart.
 pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
-    // **The label, not the id.** The cart carries `tbl_7` because that is the
-    // key an order is saved against; the cashier's table is called 7 and the
-    // header said "Table tbl_7" until somebody looked at it. Resolved here,
-    // once, rather than by trimming a prefix off an id anywhere else.
+    // The label, not the id.
     let label = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).floor().list_tables(OUTLET))
@@ -1600,16 +1307,7 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
             })
     })?;
 
-    // **An order with no table is identified by its own id** — P30 found this
-    // by restarting mid-service and tapping the parked parcel order.
-    //
-    // The floor's "No table" group holds parcel and self-service orders, and
-    //  gives such a tile the ORDER's id because there is no table to
-    // name it after. This function only ever looked for a table, so tapping one
-    // of those tiles found nothing, fell into the "free table" branch below,
-    // and started a NEW empty order whose table was set to an order id — which
-    // then failed the foreign key on settle and told the shop its data could
-    // not be read. The parked food was still on disk and unreachable.
+    // An order with no table is identified by its own id.
     let found = app.with_shop(|shop| {
         let open = shop
             .db
@@ -1627,20 +1325,17 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
             Some(order) => {
                 let core = order.core();
                 // The whole order comes across: its cart, its type, its id.
-                // Nothing is re-derived, because a screen that re-derived it
-                // would be a second copy of the order.
                 state.cart = core.cart.clone();
                 state.order_type = core.order_type;
                 state.order_id = Some(core.id.as_str().to_owned());
-                // A parcel keeps its own (absent) table. Writing the order id
-                // in here is what produced the foreign-key failure above.
+                // A parcel keeps its own (absent) table.
                 state.table = core.table.as_ref().map(|t| t.as_str().to_owned());
                 state.table_label = core.table.as_ref().and(label.clone());
                 state.settlement = mb_core::Settlement::new();
             }
             None => {
-                // A free table: start a new order on it rather than refusing,
-                // because "press the table and start typing" is the flow.
+                // A free table: start a new order on it rather than refusing, because "press
+                // the table and start typing" is the flow.
                 *state = crate::billing::CartState {
                     order_type: state.order_type,
                     table: Some(table_id.clone()),
@@ -1653,12 +1348,7 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// P11 — signing in, the people, and the history.
-//
-// Audit C1: "There is no login on the POS at all." Everything below exists to
-// make that sentence untrue, and `guard.rs` is what makes it stay untrue.
-// ---------------------------------------------------------------------------
+// Signing in, the people, and the history.
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission, Pin, PinHash, RoleShape};
@@ -1674,39 +1364,16 @@ pub struct LockState {
     pub signed_in_as: Option<String>,
     pub role: Option<String>,
     /// What this person may do, so the rail can hide what they cannot open.
-    ///
-    /// **This is a courtesy and not the control.** `guard::require` refuses the
-    /// commands themselves, and there is a test that calls them directly. A
-    /// screen that treated this list as the security boundary would be audit
-    /// C1 with extra steps.
     pub permissions: Vec<String>,
-    /// True while nobody in this shop has a PIN. The banner reads off it, and
-    /// it is why the app opens straight into billing on a shop's first day.
+    /// True while nobody in this shop has a PIN.
     pub nobody_has_a_pin: bool,
-    /// Everybody who could sign in. **Only people with a PIN**, because a name
-    /// on this list that cannot be chosen is a support call.
+    /// Everybody who could sign in.
     pub people: Vec<PersonView>,
-    /// Whether this shop has a recovery code at all, so the lock screen only
-    /// offers "forgotten your PIN?" when there is something to offer.
+    /// Whether this shop has a recovery code at all, so the lock screen only offers "forgotten
+    /// your PIN?" when there is something to offer.
     pub can_recover: bool,
-    /// **Who the recovery code may set a PIN for**, which is *not* a subset of
-    /// [`Self::people`] — and the difference is a way to be locked out of your
-    /// own shop for good.
-    ///
-    /// `people` is "who can sign in", so it holds only staff who already have a
-    /// PIN. The forgotten-PIN screen was drawing its list from it, and that is
-    /// fine right up until the one person who manages staff has **no** PIN: a
-    /// manager who taps *Remove the PIN* on themselves while a cashier still has
-    /// one leaves a shop that locks (somebody has a PIN, so it locks) and whose
-    /// owner is not on the list (they have none, so they are filtered out). The
-    /// recovery code is the way back from exactly that, and it had nobody to
-    /// offer it to.
-    ///
-    /// So this list is drawn from what the code is *allowed* to do rather than
-    /// from what the pad can do with it: everybody active who holds
-    /// `staff.manage`, PIN or no PIN. It is the same rule
-    /// `recover_with_code_on` enforces, sent up so the screen cannot invite a
-    /// refusal — or, worse, offer nothing at all.
+    /// Who the recovery code may set a PIN for, which is not a subset of `Self::people` — and
+    /// the difference is a way to be locked out of your own shop for good.
     pub recoverable: Vec<PersonView>,
 }
 
@@ -1720,8 +1387,8 @@ pub struct PersonView {
     pub role: Option<String>,
     pub status: String,
     pub has_pin: bool,
-    /// Empty unless this person is locked out — then it is the sentence the
-    /// screen shows, already counted down.
+    /// Empty unless this person is locked out — then it is the sentence the screen shows,
+    /// already counted down.
     pub locked_out: Option<String>,
     pub permissions: Vec<String>,
     pub max_discount_bp: Option<u32>,
@@ -1729,9 +1396,6 @@ pub struct PersonView {
 }
 
 /// The key the shop's recovery code hash is stored under.
-///
-/// A setting rather than a column: it belongs to the shop, not to a person, and
-/// P04's settings table is exactly the shape for "one value the shop has".
 const RECOVERY_KEY: &str = "auth.recovery_hash";
 
 pub fn lock_state_on(app: &App) -> UiResult<LockState> {
@@ -1765,8 +1429,7 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
                 .collect()
         }),
         nobody_has_a_pin: people.iter().all(|p| !p.has_pin),
-        // Two lists off one read, and they are deliberately different. See
-        // `LockState::recoverable` for the lockout that made them different.
+        // Two lists off one read, and they are deliberately different.
         recoverable: people
             .iter()
             .filter(|p| {
@@ -1777,8 +1440,7 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
             })
             .cloned()
             .collect(),
-        // Only people who can actually sign in. A name that cannot be chosen is
-        // a support call about a screen that "does nothing".
+        // Only people who can actually sign in.
         people: people
             .into_iter()
             .filter(|p| p.has_pin && p.status == "active")
@@ -1844,12 +1506,7 @@ fn lockout_message(
     }
 }
 
-/// **Sign in — one person, one verification.**
-///
-/// BACKEND-**D1** is the finding this shape exists to close: v1 tried the typed
-/// PIN against *every* active staff row, so with ten staff a random guess was
-/// ten times likelier to land, and here it would also cost ten Argon2
-/// verifications. The cashier says who they are first, then proves it.
+/// Sign in — one person, one verification.
 pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState> {
     let at = crate::flows::now();
     let day = crate::flows::today(at);
@@ -1871,8 +1528,7 @@ pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState>
         ));
     };
 
-    // Scope 9.15 — somebody who has left keeps their history and loses their
-    // way in. T3: it takes effect on the next action, not the next shift.
+    // Somebody who has left keeps their history and loses their way in.
     if member.status != mb_db::repo::people::StaffStatus::Active {
         return Err(UiError::new(
             "auth.not_active",
@@ -1902,9 +1558,8 @@ pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState>
     };
 
     if !mb_auth::verify_pin(&typed, &stored) {
-        // The failure is written BEFORE the refusal is returned, because that
-        // row IS the lockout counter (item 4) and a refusal that did not count
-        // would be no lockout at all.
+        // The failure is written BEFORE the refusal is returned, because that row IS the
+        // lockout counter (item 4) and a refusal that did not count would be no lockout at all.
         app.record(
             &AuditEntry::new(
                 at,
@@ -1937,7 +1592,7 @@ pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState>
     lock_state_on(app)
 }
 
-/// mb-db's row becomes mb-auth's actor. One place, like `printer_config_for`.
+/// Mb-db's row becomes mb-auth's actor.
 pub fn actor_for(member: &mb_db::repo::people::StaffMember) -> mb_auth::Actor {
     mb_auth::Actor {
         staff_id: member.id.clone(),
@@ -1951,21 +1606,8 @@ pub fn actor_for(member: &mb_db::repo::people::StaffMember) -> mb_auth::Actor {
 }
 
 /// Lock the screen — by the button, or by `Ctrl+L`.
-///
-/// **It touches nothing but the session.** The cart, the kitchen ledger and the
-/// print queue are all exactly where they were; that is item 8, and T7.
 pub fn lock_now_on(app: &App) -> UiResult<LockState> {
-    // **A shop with no PIN cannot be locked, because there would be no way
-    // back in.**
-    //
-    // Found by looking at the window: on a first run the title bar offered a
-    // lock button, and pressing it — or Ctrl+L — ended the stand-in session
-    // and put up a lock screen with an empty staff list. The only escape was
-    // restarting the app. One click to a dead end, with every test green.
-    //
-    // Refused HERE rather than by hiding the button, for P11's reason: hiding
-    // a control is a courtesy and Rust is the control. Ctrl+L works on every
-    // screen and would have got past a hidden button anyway.
+    // A shop with no PIN cannot be locked, because there would be no way back in.
     if !app.shop_has_a_pin() {
         return Err(UiError::new(
             "auth.nothing_to_unlock_with",
@@ -1987,14 +1629,7 @@ pub fn lock_now_on(app: &App) -> UiResult<LockState> {
     lock_state_on(app)
 }
 
-/// **The way back in when the PIN is gone.**
-///
-/// Deliberately not rate-limited: the per-person lockout exists so a malicious
-/// waiter cannot lock the owner out with five wrong guesses, and that
-/// protection is worth nothing if this path can be locked instead. The defence
-/// here is 31^10 and an Argon2 verification per attempt, not a counter.
-///
-/// Using it kills the old code and issues a new one, which the screen prints.
+/// The way back in when the PIN is gone.
 pub fn recover_with_code_on(
     app: &App,
     code: String,
@@ -2033,7 +1668,6 @@ pub fn recover_with_code_on(
         ));
     }
 
-    // A new code, before the old one stops working.
     let (fresh, fresh_hash) = mb_auth::new_recovery_code().map_err(|e| {
         UiError::new(
             "auth.recovery_failed",
@@ -2054,9 +1688,7 @@ pub fn recover_with_code_on(
                         "that person is not on the staff list",
                     ));
                 };
-                // Only somebody who manages staff. Otherwise the recovery code
-                // would be a way to hand a waiter a new PIN and the run of the
-                // shop with it.
+                // Only somebody who manages staff.
                 if !member.permissions.has(Permission::StaffManage) {
                     return Err(mb_db::DbError::invariant(
                         "the recovery code can only set a PIN for somebody who manages staff",
@@ -2098,17 +1730,13 @@ pub fn recover_with_code_on(
     })?;
 
     log_warn!("the recovery code was used, and a new one was issued");
-    // On paper as well as on screen — see `print_the_recovery_slip`. This one
-    // replaces a code that was working a moment ago, so the slip says so.
+    // On paper as well as on screen — see `print_the_recovery_slip`.
     print_the_recovery_slip(app, &fresh.to_print(), day, true);
-    // Returned so the screen can show it once as well. From this moment it
-    // exists nowhere else.
+    // Returned so the screen can show it once as well.
     Ok(fresh.to_print())
 }
 
-// ---------------------------------------------------------------------------
 // The people screen.
-// ---------------------------------------------------------------------------
 
 pub fn list_staff_on(app: &App) -> UiResult<Vec<PersonView>> {
     guard::require(app, Permission::StaffManage)?;
@@ -2118,20 +1746,7 @@ pub fn list_staff_on(app: &App) -> UiResult<Vec<PersonView>> {
                 let repos = mb_db::Repos::new(tx);
                 let mut out = Vec::new();
                 for member in repos.people().list_staff(OUTLET)? {
-                    // **The stand-in is not a person, and the staff list is
-                    // "who works here"** (P30.5).
-                    //
-                    // `staff_default` exists because `orders.created_by` is a
-                    // NOT NULL foreign key and a shop has to be able to bill
-                    // before anybody has signed in — see `state::DEFAULT_STAFF`.
-                    // It is the counter itself. Listing it put a row called
-                    // "Counter · No role yet · PIN None" at the top of the
-                    // staff screen of every new shop, next to the owner's own
-                    // name, and the owner's first question was who that was.
-                    //
-                    // Hidden here rather than deleted: it is the author of
-                    // every bill taken before the first sign-in, and those
-                    // bills must keep saying who took them.
+                    // The stand-in is not a person, and the staff list is "who works here".
                     if member.id.as_str() == crate::state::DEFAULT_STAFF {
                         continue;
                     }
@@ -2161,10 +1776,7 @@ pub struct RoleView {
     pub name: String,
     pub is_builtin: bool,
     pub permissions: Vec<String>,
-    /// **A percentage as text, both ways** — `"12.5%"` out, whatever was typed
-    /// back in. D39 and R8: the screen does not divide by a hundred, any more
-    /// than it divides paise by a hundred. The money guard failed the build on
-    /// the first version of this, which did exactly that.
+    /// A percentage as text, both ways — `"12.5%"` out, whatever was typed back in.
     pub max_discount_percent: Option<String>,
     pub max_discount: Option<MoneyView>,
 }
@@ -2199,8 +1811,7 @@ pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
     let at = crate::flows::now();
     let day = crate::flows::today(at);
 
-    // **BACKEND-G7 at the boundary.** A code the screen sent that this build
-    // does not know is refused here, by name, rather than silently dropped.
+    // BACKEND-G7 at the boundary.
     let permissions = mb_auth::PermissionSet::from_codes(&role.permissions)
         .map_err(|e| UiError::new("role.permission", format!("{e}. Reload and try again.")))?;
 
@@ -2229,18 +1840,12 @@ pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
                     .list_roles(OUTLET)?
                     .into_iter()
                     .find(|r| r.id == shape.id);
-                // **Before and after, not just after** — see the note in
-                // `save_staff_member_on`. A shop that has never had an
-                // administrator must be able to get one.
+                // Before and after, not just after — see the note in `save_staff_member_on`.
                 let had_one = !repos.people().active_administrators(OUTLET)?.is_empty();
                 repos.people().save_role(OUTLET, &shape, at)?;
 
-                // **The last-administrator rule.** A shop nobody can administer
-                // can never be repaired from its own counter. The check is
-                // after the write and inside the transaction on purpose: it
-                // asks the real question — "who can administer this shop now?"
-                // — rather than trying to predict the answer, and the rollback
-                // undoes it.
+                // The last-administrator rule. A shop nobody can administer can never be
+                // repaired from its own counter.
                 if had_one && repos.people().active_administrators(OUTLET)?.is_empty() {
                     return Err(mb_db::DbError::invariant(
                         "that would leave nobody able to manage staff — give somebody else \
@@ -2288,7 +1893,7 @@ pub struct StaffEdit {
     pub name: String,
     pub code: Option<String>,
     pub role_id: Option<String>,
-    /// "active", "suspended" or "left". Scope 9.15: never "deleted".
+    /// "active", "suspended" or "left".
     pub status: String,
 }
 
@@ -2319,14 +1924,7 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
                 let repos = mb_db::Repos::new(tx);
                 let existing = repos.people().find_staff(OUTLET, &staff.id)?;
                 let before = existing.as_ref().map(staff_json);
-                // **Whether there WAS one, not only whether there is one.**
-                //
-                // Found by driving a shop's first day end to end: the rule as
-                // first written refused the very first hire, because a brand-new
-                // shop has no administrator before the write either. "Do not
-                // remove the last one" and "there must always be one" are
-                // different rules, and only the first one is true — a shop that
-                // has never had an administrator has to be able to get one.
+                // Whether there WAS one, not only whether there is one.
                 let had_one = !repos.people().active_administrators(OUTLET)?.is_empty();
                 let member = mb_db::repo::people::StaffMember {
                     id: mb_core::StaffId::new(staff.id.clone()),
@@ -2334,8 +1932,7 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
                     code: staff.code.clone(),
                     role_id: staff.role_id.clone(),
                     role_name: None,
-                    // A PIN is set by its own command. Editing a name must not
-                    // be able to clear somebody's way in.
+                    // A PIN is set by its own command.
                     pin_hash: existing.as_ref().and_then(|m| m.pin_hash.clone()),
                     status,
                     permissions: mb_auth::PermissionSet::new(),
@@ -2376,8 +1973,7 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
     list_staff_on(app)
 }
 
-/// **Never the PIN itself.** The audit trail is the one table that must not
-/// contain a secret, and this is the function that would have put one there.
+/// Never the PIN itself.
 fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
     serde_json::json!({
         "name": member.name,
@@ -2389,10 +1985,6 @@ fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
 }
 
 /// Set or clear a PIN.
-///
-/// Returns the shop's recovery code **only when one is generated**, which is
-/// the first time a PIN is set on somebody who manages staff. It is shown once
-/// and printed, and after that it exists nowhere but on paper.
 pub fn set_staff_pin_on(
     app: &App,
     staff_id: String,
@@ -2401,8 +1993,7 @@ pub fn set_staff_pin_on(
     let who = guard::require(app, Permission::StaffManage)?;
     let at = crate::flows::now();
     let day = crate::flows::today(at);
-    // What the shop looked like BEFORE. "The first PIN" is a thing you can only
-    // know by having asked first — see `relock_if_this_was_the_first_pin`.
+    // What the shop looked like BEFORE.
     let had_a_pin = app.shop_has_a_pin();
 
     let hashed = match pin.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
@@ -2435,9 +2026,8 @@ pub fn set_staff_pin_on(
                         "that person is not on the staff list",
                     ));
                 };
-                // A PIN with no role is somebody who can sign in and do
-                // nothing, which looks like a broken app rather than a locked
-                // one.
+                // A PIN with no role is somebody who can sign in and do nothing, which looks
+                // like a broken app rather than a locked one.
                 if hashed.is_some() && member.role_id.is_none() {
                     return Err(mb_db::DbError::invariant(
                         "give this person a role before setting their PIN",
@@ -2446,9 +2036,8 @@ pub fn set_staff_pin_on(
                 member.pin_hash = hashed.as_ref().map(|h| h.as_str().to_owned());
                 repos.people().save_staff(OUTLET, &member, at)?;
 
-                // The shop's first recovery code, the first time somebody who
-                // manages staff gets a PIN. Not on every PIN: a second code
-                // would silently retire the slip already in the drawer.
+                // The shop's first recovery code, the first time somebody who manages staff
+                // gets a PIN.
                 let existing: Option<String> = repos.settings().get(OUTLET, RECOVERY_KEY)?;
                 let mut issued = None;
                 if existing.is_none()
@@ -2494,43 +2083,20 @@ pub fn set_staff_pin_on(
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // **On paper as well as on screen**, and BEFORE the relock below — a shop
-    // whose first PIN has just been set is about to be looking at a lock
-    // screen, and the slip should already be coming out of the printer by then.
-    // This is the shop's first code, so there is no older one to retire.
+    // On paper as well as on screen, and BEFORE the relock below — a shop whose first PIN has
+    // just been set is about to be looking at a lock screen, and the slip should already be
+    // coming out of the printer by then.
     if let Some(code) = issued.as_deref() {
         print_the_recovery_slip(app, code, day, false);
     }
 
-    // **Setting the first PIN locks the app, here and now.** Proving it works
-    // while that person is still standing at the counter is worth four seconds;
-    // finding out at 8 am tomorrow is not.
+    // Setting the first PIN locks the app, here and now.
     app.relock_if_this_was_the_first_pin(had_a_pin);
 
     Ok(issued)
 }
 
-/// **Put the shop's recovery code on paper.**
-///
-/// `mb_auth::recovery` has always said this printed, and the audit log has
-/// always read back *"New recovery code printed"* — and until 2026-08-22
-/// nothing did it. The code went to the screen, was shown once, and a shop that
-/// closed that dialog without a pen to hand had lost the only thing that gets
-/// it back into its own counter, with its own history saying a slip had come
-/// out. Found going through the sign-in path after the owner asked for it to be
-/// gone through properly.
-///
-/// # It cannot fail the thing it is part of
-///
-/// By the time this runs the new PIN and the new code hash are **committed**.
-/// So a printer that is off, out of paper, or not configured at all must not
-/// turn a successful recovery into an error: the caller would report failure
-/// for something that has already happened, and the screen would throw away a
-/// code that is now the only working one. It logs and returns.
-///
-/// That is the same trade `relock_if_this_was_the_first_pin` makes on the line
-/// below, and it is why the code is **also** returned to the screen. Two ways
-/// out for one secret, because there is no third chance at it.
+/// Put the shop's recovery code on paper.
 fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_older: bool) {
     let printed = crate::flows::default_printer(app).and_then(|printer| {
         let config = app.shop_config();
@@ -2539,8 +2105,8 @@ fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_
             printer.paper,
             &mb_print::template::RecoveryContext {
                 code,
-                // A PIN can be set before the shop profile is finished, and a
-                // slip with no name on it is better than no slip.
+                // A PIN can be set before the shop profile is finished, and a slip with no name
+                // on it is better than no slip.
                 store: (!store.name.trim().is_empty()).then_some(&store),
                 issued_on: &day_in_words(day),
                 replaces_an_older_code: replaces_an_older,
@@ -2553,8 +2119,8 @@ fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_
     });
 
     if let Err(cause) = printed {
-        // Loud, because the shop is now one closed dialog away from having no
-        // way back in — and this is the line a support call starts from.
+        // Loud, because the shop is now one closed dialog away from having no way back in — and
+        // this is the line a support call starts from.
         log_warn!(
             "the recovery slip could not be printed ({}) — the code is on screen only",
             cause.message
@@ -2562,9 +2128,6 @@ fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_
     }
 }
 
-/// "22 August 2026". The slip is read months later by somebody who is stuck, so
-/// it gets the month in words rather than `2026-08-22` — there is no ambiguity
-/// to have about which number is the day.
 fn day_in_words(day: BusinessDay) -> String {
     const MONTHS: [&str; 12] = [
         "January",
@@ -2581,8 +2144,8 @@ fn day_in_words(day: BusinessDay) -> String {
         "December",
     ];
     let (year, month, d) = day.to_ymd();
-    // `month` is 1..=12 from `to_ymd`; this arrives at the right name without
-    // a cast that D7 would have to argue about, and at "" if it ever does not.
+    // `month` is 1..=12 from `to_ymd`; this arrives at the right name without a cast that D7
+    // would have to argue about, and at "" if it ever does not.
     let name = usize::try_from(month)
         .ok()
         .and_then(|month| month.checked_sub(1))
@@ -2592,22 +2155,17 @@ fn day_in_words(day: BusinessDay) -> String {
     format!("{d} {name} {year}")
 }
 
-// ---------------------------------------------------------------------------
 // The history.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct AuditView {
     pub entries: Vec<AuditEntryView>,
-    /// The sentence to show when the chain is broken — audit C4's
-    /// "tamper-evident", made visible. `None` when the history hangs together.
+    /// The sentence to show when the chain is broken.
     pub tampered: Option<String>,
-    /// Every action this build knows, for the filter — from the list, not from
-    /// whatever happens to be in this shop's data. A filter that cannot offer
-    /// "voided a bill" until somebody has voided one is useless at exactly the
-    /// moment it is needed.
+    /// Every action this build knows, for the filter — from the list, not from whatever happens
+    /// to be in this shop's data.
     pub actions: Vec<(String, String)>,
 }
 
@@ -2616,8 +2174,6 @@ pub struct AuditView {
 #[serde(rename_all = "camelCase")]
 pub struct AuditEntryView {
     pub seq: i64,
-    /// Already formatted. R8 — TypeScript does no arithmetic, and that includes
-    /// arithmetic on dates.
     pub when: String,
     pub who: String,
     pub what: String,
@@ -2684,23 +2240,10 @@ fn entry_view(row: &mb_auth::AuditRow) -> AuditEntryView {
     }
 }
 
-/// **A change, in words a shopkeeper reads** — audit F8, and D39.
-///
-/// `audit_log`'s before/after is JSON, deliberately: the shape differs per
-/// action and nothing ever queries inside it, which is why it is the one place
-/// JSON is allowed in this database. **Showing that JSON to the owner is a
-/// different decision, and it was the wrong one.** The History screen was
-/// rendering `{"state":"settled","total_paise":39300}` at somebody who wanted
-/// to know who voided a bill — *"errors show raw system text to a restaurant
-/// owner"* is the same finding, one screen along.
-///
-/// It is formatted **here** rather than in React because a `*_paise` value is
-/// money, and money is formatted in exactly one place (D39, R8) —
-/// `Money::to_plain_string`.
+/// A change, in words a shopkeeper reads.
 fn readable_change(json: &str) -> String {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         // Unparseable: show it as it is rather than hiding a row of history.
-        // A trail with a gap in it is worth less than an ugly line in it.
         return json.to_owned();
     };
     let Some(fields) = value.as_object() else {
@@ -2709,14 +2252,7 @@ fn readable_change(json: &str) -> String {
 
     let mut parts: Vec<String> = Vec::new();
     for (key, field) in fields {
-        // **A settings change is keyed by its setting's KEY, and the screen
-        // must not show one.** P17 stores `receipt.footer` on purpose — a key
-        // is stable and a label gets reworded, and history that changes its
-        // words when a screen is edited is history nobody can rely on. So the
-        // record keeps the key and this, the one place a machine state becomes
-        // words, looks the label up. Found by looking at the History screen
-        // after saving a setting: it read "Receipt.footer Thank you, visit
-        // again", which is audit F8 with a full stop in it.
+        // A settings change is keyed by its setting's KEY, and the screen must not show one.
         if let Some(entry) = crate::settings::catalog::find(key) {
             let shown = match field {
                 serde_json::Value::String(s) if s.is_empty() => "—".to_owned(),
@@ -2752,16 +2288,7 @@ fn readable_change(json: &str) -> String {
     parts.join(", ")
 }
 
-// ---------------------------------------------------------------------------
 // The command wrappers.
-//
-// Every P11 command's body takes `&App` and lives above; these are the Tauri
-// seats. The split is not ceremony — `tauri::State` cannot be constructed in a
-// test, so a body that took one could only ever be driven by hand through the
-// window. Signing in, locking, setting the first PIN and the last-administrator
-// rule are all sequences, and a sequence that can only be checked by clicking
-// is a sequence that gets checked once.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn lock_state(app: tauri::State<'_, App>) -> UiResult<LockState> {
@@ -2835,15 +2362,13 @@ pub fn audit_trail(
     audit_trail_on(&app, staff_id, action_code, days)
 }
 
-/// The floor, as a screen shows it. Body over `&App` (D46) so P12's
-/// "does a cancel free the table?" can be asked without a window.
+/// The floor, as a screen shows it.
 #[tauri::command]
 pub fn open_orders(app: tauri::State<'_, App>) -> UiResult<Vec<TableView>> {
     open_orders_on(&app)
 }
 
-/// Ranked item search (P10, budget B2). Body over `&App` (D46) so B2 can be
-/// measured without a window.
+/// Ranked item search.
 #[tauri::command]
 pub fn search_items(
     app: tauri::State<'_, App>,
@@ -2853,8 +2378,8 @@ pub fn search_items(
     search_items_on(&app, text, mode)
 }
 
-// Bodies over `&App` (D46), so the billing budgets can be measured and the
-// correction sequences driven without a window.
+// Bodies over `&App`, so the billing budgets can be measured and the correction sequences
+// driven without a window.
 
 #[tauri::command]
 pub fn open_table(
@@ -2865,12 +2390,6 @@ pub fn open_table(
     shown(&handle, open_table_on(&app, table_id))
 }
 
-/// **P29, scope 7.8 — the customer sees the bill as it is typed.**
-///
-/// Every command that changes the cart goes through here. It does nothing at
-/// all when the display is off, which is every shop that has not asked for
-/// one, and it can never fail into the billing path: a second screen that is
-/// unplugged is a log line.
 fn shown(handle: &tauri::AppHandle, view: UiResult<CartView>) -> UiResult<CartView> {
     if let Ok(cart) = &view {
         crate::devices::show_bill(handle, cart);
@@ -2902,8 +2421,6 @@ pub fn cart_clear(
 mod change_words {
     use super::readable_change;
 
-    /// **Audit F8, on the History screen.** The owner asked who voided a bill;
-    /// they should not be reading `total_paise` and a pair of braces.
     #[test]
     fn a_change_reads_as_words_and_rupees() {
         let said =
@@ -2915,7 +2432,7 @@ mod change_words {
 
     #[test]
     fn money_is_formatted_by_rust_and_only_by_rust() {
-        // D39: TypeScript never divides by a hundred, here or anywhere.
+        // TypeScript never divides by a hundred, here or anywhere.
         assert_eq!(readable_change(r#"{"amount_paise":5}"#), "Amount 0.05");
         assert_eq!(
             readable_change(r#"{"amount_paise":100000}"#),

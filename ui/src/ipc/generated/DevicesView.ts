@@ -6,7 +6,6 @@ import type { DeviceView } from "./DeviceView";
  */
 export type DevicesView = { devices: Array<DeviceView>, 
 /**
- * The honest headline: what this build has and has not been tried
- * against.
+ * The honest headline: what this build has and has not been tried against.
  */
 says: string, };

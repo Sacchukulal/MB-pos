@@ -1,27 +1,4 @@
-//! **What a customer owes, how old it is, and whether they may owe more.**
-//!
-//! Scope 5.1, 5.2, 5.3. The owner renamed this from "khata" on 2026-08-08.
-//!
-//! # An account, not a balance
-//!
-//! v1 kept `credit_balance REAL` on the customer row, beside the payments that
-//! made it — two sources of truth for what somebody owes, one of them a
-//! floating-point number. mb-db already refuses to store a balance
-//! ([`MoneyRepo::customer_balance`] is a `SUM` every time); this module is the
-//! other half: **everything a screen wants to know about an account is derived
-//! here, from the movements, by a pure function.**
-//!
-//! Nothing in this file touches a database or a clock. That is what makes the
-//! ageing arithmetic — which is the part an owner will argue with — provable.
-//!
-//! # The part that is actually hard: ageing
-//!
-//! "He owes me ₹4,200" is not useful. "He has owed me ₹4,200 for 74 days" is
-//! what an owner acts on, and getting there means deciding **which sale a
-//! repayment paid off**. There is no invoice reference on a repayment in a
-//! shop like this — somebody hands over ₹500 against a running account — so
-//! this module applies **oldest first (FIFO)**, which is what every shopkeeper
-//! means and what every accountant expects.
+//! What a customer owes, how old it is, and whether they may owe more.
 
 use serde::{Deserialize, Serialize};
 
@@ -29,17 +6,13 @@ use crate::businessday::BusinessDay;
 use crate::money::{Money, MoneyError};
 
 /// One thing that happened to an account.
-///
-/// Deliberately not an enum of rows-in-tables: a sale, a repayment, an opening
-/// balance and a write-off all move the same number, and the day a fifth kind
-/// appears it should not need a new function.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Movement {
     pub day: BusinessDay,
     pub kind: MovementKind,
-    /// **Always positive.** The direction is the kind's business, not the
-    /// sign's — a negative "amount" in a ledger is how a subtraction becomes an
-    /// addition in somebody's report six months later.
+    /// Always positive. The direction is the kind's business, not the sign's — a negative
+    /// "amount" in a ledger is how a subtraction becomes an addition in somebody's report six
+    /// months later.
     pub amount: Money,
     /// The bill number, the repayment's reference, or the adjustment's reason.
     pub note: String,
@@ -48,15 +21,13 @@ pub struct Movement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MovementKind {
-    /// A bill settled on credit. Increases what is owed.
+    /// A bill settled on credit.
     Sale,
-    /// Money handed over against the account. Decreases it.
+    /// Money handed over against the account.
     Repayment,
-    /// What was owed before this product existed. Increases it.
+    /// What was owed before this product existed.
     Opening,
     /// A correction or a write-off, with a reason and a name against it.
-    /// `increases` says which way, because both directions are real: a
-    /// forgotten sale added later, and money written off as unrecoverable.
     Adjustment { increases: bool },
 }
 
@@ -75,21 +46,24 @@ impl MovementKind {
 /// What is owed, from the movements and nothing else.
 pub fn balance(movements: &[Movement]) -> Result<Money, MoneyError> {
     movements.iter().try_fold(Money::ZERO, |running, m| {
-        if m.kind.adds() { running.add(m.amount) } else { running.sub(m.amount) }
+        if m.kind.adds() {
+            running.add(m.amount)
+        } else {
+            running.sub(m.amount)
+        }
     })
 }
 
-/// How old the outstanding money is — scope 5.1's ageing.
+/// How old the outstanding money is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Ageing {
     /// Owed for less than 30 days.
     pub current: Money,
     pub days_30: Money,
     pub days_60: Money,
-    /// Ninety days and older. The bucket an owner phones about.
+    /// Ninety days and older.
     pub days_90: Money,
-    /// How long the oldest unpaid money has been outstanding. `None` when
-    /// nothing is owed.
+    /// How long the oldest unpaid money has been outstanding.
     pub oldest_days: Option<i32>,
 }
 
@@ -99,20 +73,9 @@ impl Ageing {
     }
 }
 
-/// Age the account **oldest first**.
-///
-/// Repayments are applied to the oldest outstanding sale, then the next, and
-/// the remainder — money handed over against nothing yet owed — sits as a
-/// credit that reduces the newest bucket. That last case is real: a customer
-/// who overpays is in credit, and the account then shows a negative balance
-/// rather than pretending the money was not received.
-///
-/// `today` is passed in, never read from a clock, because ageing has to be
-/// testable across a month boundary and because D5 says the business day is
-/// stamped, not derived.
+/// Age the account oldest first.
 pub fn ageing(movements: &[Movement], today: BusinessDay) -> Result<Ageing, MoneyError> {
-    // Oldest first, so a repayment meets the sales in the order a shopkeeper
-    // would clear them.
+    // Oldest first, so a repayment meets the sales in the order a shopkeeper would clear them.
     let mut owed: Vec<(BusinessDay, Money)> = Vec::new();
     let mut sorted: Vec<&Movement> = movements.iter().collect();
     sorted.sort_by_key(|m| m.day.days_since_epoch());
@@ -161,8 +124,8 @@ pub fn ageing(movements: &[Movement], today: BusinessDay) -> Result<Ageing, Mone
         };
         *bucket = bucket.add(*amount)?;
     }
-    // Money held on account shows as a negative "current" rather than
-    // vanishing — the balance and the ageing must agree.
+    // Money held on account shows as a negative "current" rather than vanishing — the balance
+    // and the ageing must agree.
     if credit.is_positive() {
         buckets.current = buckets.current.sub(credit)?;
     }
@@ -170,7 +133,7 @@ pub fn ageing(movements: &[Movement], today: BusinessDay) -> Result<Ageing, Mone
     Ok(buckets)
 }
 
-/// A statement over a date range — scope 5.3.
+/// A statement over a date range.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Statement {
     pub from: BusinessDay,
@@ -182,9 +145,6 @@ pub struct Statement {
 }
 
 /// Everything between two days, with the balance either side of it.
-///
-/// **opening + movements = closing, exactly**, which is the only property of a
-/// statement that matters and is asserted for any range.
 pub fn statement(
     movements: &[Movement],
     from: BusinessDay,
@@ -207,26 +167,30 @@ pub fn statement(
 
     let opening = balance(&before)?;
     let closing = rows.iter().try_fold(opening, |running, m| {
-        if m.kind.adds() { running.add(m.amount) } else { running.sub(m.amount) }
+        if m.kind.adds() {
+            running.add(m.amount)
+        } else {
+            running.sub(m.amount)
+        }
     })?;
 
-    Ok(Statement { from, to, opening, rows, closing })
+    Ok(Statement {
+        from,
+        to,
+        opening,
+        rows,
+        closing,
+    })
 }
 
-/// Whether this bill may go on the account — scope 5.2.
+/// Whether this bill may go on the account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LimitVerdict {
-    /// No limit set, or comfortably inside it. **A customer with no limit is
-    /// not a customer with a limit of zero.**
+    /// No limit set, or comfortably inside it.
     Fine,
-    /// Inside the limit but within a tenth of it — worth saying, not worth
-    /// stopping. A cashier who is told at 4,900 of 5,000 can ask; one who is
-    /// told at 5,001 has already served the food.
+    /// Inside the limit but within a tenth of it — worth saying, not worth stopping.
     Close,
-    /// Over. Whether this stops the sale is the caller's decision (D18: the
-    /// policy is checked by the caller), and overriding it needs a permission
-    /// and writes an audit row.
     Over,
 }
 
@@ -248,22 +212,23 @@ pub fn headroom(balance: Money, limit: Option<Money>, bill: Money) -> Result<Hea
         // A tenth of the limit, computed by the one rounding path there is.
         Some(limit) => {
             let cushion = limit.mul_ratio(1, 10)?;
-            if after.add(cushion)? > limit { LimitVerdict::Close } else { LimitVerdict::Fine }
+            if after.add(cushion)? > limit {
+                LimitVerdict::Close
+            } else {
+                LimitVerdict::Fine
+            }
         }
     };
-    Ok(Headroom { limit, balance, after, verdict })
+    Ok(Headroom {
+        limit,
+        balance,
+        after,
+        verdict,
+    })
 }
 
-/// **The identity of a customer in this market is a phone number**, so two rows
-/// with the same one are two balances for one person.
-///
-/// Compared as the last ten digits: `+91 98765 43210`, `098765-43210` and
-/// `9876543210` are one customer. **What was typed is what is stored** — the
-/// same argument `cart::normalise_note` makes about a kitchen note, and
-/// `mb_core::table` about a table's label.
-///
-/// Returns `None` for something that is not a phone number at all, which is
-/// how a caller tells "no phone given" from "that phone".
+/// The identity of a customer in this market is a phone number, so two rows with the same one
+/// are two balances for one person.
 #[must_use]
 pub fn phone_key(phone: &str) -> Option<String> {
     let digits: String = phone.chars().filter(char::is_ascii_digit).collect();
@@ -308,8 +273,8 @@ mod tests {
         );
     }
 
-    /// An adjustment goes both ways, and both are real: a sale somebody forgot
-    /// to put on the account, and money written off.
+    /// An adjustment goes both ways, and both are real: a sale somebody forgot to put on the
+    /// account, and money written off.
     #[test]
     fn an_adjustment_can_go_either_way() {
         let up = Movement {
@@ -322,36 +287,62 @@ mod tests {
             kind: MovementKind::Adjustment { increases: false },
             ..up.clone()
         };
-        assert_eq!(balance(&[up]).expect("b"), Money::from_rupees(100).expect("m"));
-        assert_eq!(balance(&[down]).expect("b"), Money::from_rupees(-100).expect("m"));
+        assert_eq!(
+            balance(&[up]).expect("b"),
+            Money::from_rupees(100).expect("m")
+        );
+        assert_eq!(
+            balance(&[down]).expect("b"),
+            Money::from_rupees(-100).expect("m")
+        );
     }
 
-    /// **Oldest first.** ₹500 handed over against a ₹300 sale from January and
-    /// a ₹400 sale from March clears January entirely and ₹200 of March.
+    /// Oldest first. ₹500 handed over against a ₹300 sale from January and a ₹400 sale from
+    /// March clears January entirely and ₹200 of March.
     #[test]
     fn a_repayment_clears_the_oldest_debt_first() {
         let movements = vec![sale(0, 300), sale(60, 400), repaid(70, 500)];
         let aged = ageing(&movements, day(75)).expect("ageing");
 
-        assert_eq!(aged.total().expect("total"), Money::from_rupees(200).expect("m"));
+        assert_eq!(
+            aged.total().expect("total"),
+            Money::from_rupees(200).expect("m")
+        );
         // What is left is the March sale, 15 days old — NOT the January one.
         assert_eq!(aged.current, Money::from_rupees(200).expect("m"));
         assert_eq!(aged.days_90, Money::ZERO);
         assert_eq!(aged.oldest_days, Some(15));
     }
 
-    /// The buckets, and the boundary. 30 days old belongs to 30-60, not to
-    /// "current" — an off-by-one here is an owner phoning the wrong customer.
+    /// The buckets, and the boundary.
     #[test]
     fn the_buckets_land_on_the_right_side_of_their_boundaries() {
-        let movements = vec![sale(0, 100), sale(29, 200), sale(30, 300), sale(59, 400), sale(60, 500)];
+        let movements = vec![
+            sale(0, 100),
+            sale(29, 200),
+            sale(30, 300),
+            sale(59, 400),
+            sale(60, 500),
+        ];
         let aged = ageing(&movements, day(89)).expect("ageing");
 
         assert_eq!(aged.days_90, Money::ZERO, "nothing is 90 days old yet");
         // Ages, in the order the sales were made: 89, 60, 59, 30, 29 days.
-        assert_eq!(aged.days_60, Money::from_rupees(300).expect("m"), "the 89 and 60 day old money");
-        assert_eq!(aged.days_30, Money::from_rupees(700).expect("m"), "the 59 and 30 day old money");
-        assert_eq!(aged.current, Money::from_rupees(500).expect("m"), "29 days old");
+        assert_eq!(
+            aged.days_60,
+            Money::from_rupees(300).expect("m"),
+            "the 89 and 60 day old money"
+        );
+        assert_eq!(
+            aged.days_30,
+            Money::from_rupees(700).expect("m"),
+            "the 59 and 30 day old money"
+        );
+        assert_eq!(
+            aged.current,
+            Money::from_rupees(500).expect("m"),
+            "29 days old"
+        );
         assert_eq!(aged.oldest_days, Some(89));
 
         // One more day and the oldest crosses into 90+.
@@ -359,13 +350,16 @@ mod tests {
         assert_eq!(later.days_90, Money::from_rupees(100).expect("m"));
     }
 
-    /// A customer who overpays is in credit, and the account says so rather
-    /// than losing the money.
+    /// A customer who overpays is in credit, and the account says so rather than losing the
+    /// money.
     #[test]
     fn money_paid_in_advance_shows_as_credit_and_pays_the_next_bill() {
         let movements = vec![sale(0, 100), repaid(1, 500)];
         let aged = ageing(&movements, day(2)).expect("ageing");
-        assert_eq!(aged.total().expect("total"), Money::from_rupees(-400).expect("m"));
+        assert_eq!(
+            aged.total().expect("total"),
+            Money::from_rupees(-400).expect("m")
+        );
         assert_eq!(
             balance(&movements).expect("balance"),
             aged.total().expect("total"),
@@ -375,10 +369,13 @@ mod tests {
         // And the next sale draws it down instead of ageing.
         let with_sale = vec![sale(0, 100), repaid(1, 500), sale(2, 300)];
         let aged = ageing(&with_sale, day(3)).expect("ageing");
-        assert_eq!(aged.total().expect("total"), Money::from_rupees(-100).expect("m"));
+        assert_eq!(
+            aged.total().expect("total"),
+            Money::from_rupees(-100).expect("m")
+        );
     }
 
-    /// **The property that makes a statement a statement.**
+    /// The property that makes a statement a statement.
     #[test]
     fn opening_plus_movements_equals_closing_for_any_range() {
         let movements = vec![
@@ -393,7 +390,11 @@ mod tests {
             for to in from..60 {
                 let s = statement(&movements, day(from), day(to)).expect("statement");
                 let moved = s.rows.iter().try_fold(s.opening, |running, m| {
-                    if m.kind.adds() { running.add(m.amount) } else { running.sub(m.amount) }
+                    if m.kind.adds() {
+                        running.add(m.amount)
+                    } else {
+                        running.sub(m.amount)
+                    }
                 });
                 assert_eq!(moved.expect("sum"), s.closing, "range {from}..{to}");
             }
@@ -424,13 +425,12 @@ mod tests {
                 .verdict,
             LimitVerdict::Close,
         );
-        // Over.
-        let over = headroom(owed, Some(limit), Money::from_rupees(1_000).expect("m"))
-            .expect("headroom");
+        let over =
+            headroom(owed, Some(limit), Money::from_rupees(1_000).expect("m")).expect("headroom");
         assert_eq!(over.verdict, LimitVerdict::Over);
         assert_eq!(over.after, Money::from_rupees(5_200).expect("m"));
 
-        // **No limit is not a limit of zero.**
+        // No limit is not a limit of zero.
         assert_eq!(
             headroom(owed, None, Money::from_rupees(90_000).expect("m"))
                 .expect("headroom")

@@ -1,7 +1,4 @@
-//! The Windows spooler, RAW — scope 7.1.
-//!
-//! What almost every shop runs today, and the only thing v1 could do. All the
-//! `unsafe` is in `mb-winprint` (D34); this file is the safe half.
+//! The Windows spooler, RAW.
 
 use crate::transport::{Discovered, Transport, TransportError};
 
@@ -23,9 +20,9 @@ impl Transport for SpoolerTransport {
         {
             use mb_winprint::WinPrintError;
             mb_winprint::write_raw(&self.name, document, bytes).map_err(|e| match e {
-                // A printer somebody has renamed or removed in Windows will not
-                // come back by being asked again, so this parks at once rather
-                // than retrying five times to be sure.
+                // A printer somebody has renamed or removed in Windows will not come back by
+                // being asked again, so this parks at once rather than retrying five times to
+                // be sure.
                 WinPrintError::NoSuchPrinter { .. } | WinPrintError::BadName { .. } => {
                     TransportError::Refused {
                         target: self.name.clone(),
@@ -53,9 +50,6 @@ impl Transport for SpoolerTransport {
 }
 
 /// Ask the operating system which printers exist.
-///
-/// **Not a PowerShell process** — audit D2, and the reason [`super::Discovery`]
-/// caches the answer.
 pub fn enumerate() -> Result<Vec<Discovered>, TransportError> {
     #[cfg(windows)]
     {
@@ -74,8 +68,8 @@ pub fn enumerate() -> Result<Vec<Discovered>, TransportError> {
     }
     #[cfg(not(windows))]
     {
-        // Not an error: a developer on another platform has no Windows printers
-        // and that is the correct answer, not a failure to be handled.
+        // Not an error: a developer on another platform has no Windows printers and that is the
+        // correct answer, not a failure to be handled.
         Ok(Vec::new())
     }
 }

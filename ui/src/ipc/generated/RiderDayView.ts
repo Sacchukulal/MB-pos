@@ -6,7 +6,6 @@ import type { MoneyView } from "./MoneyView";
  */
 export type RiderDayView = { id: string, name: string, out: number, delivered: number, failed: number, collected: MoneyView, handedBack: MoneyView, carrying: MoneyView, 
 /**
- * "Carrying ₹900.00" or "Nothing outstanding" — the sentence the owner
- * reads at eleven o'clock.
+ * "Carrying ₹900.00" or "Nothing outstanding".
  */
 says: string, };

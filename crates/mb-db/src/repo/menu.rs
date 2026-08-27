@@ -1,12 +1,4 @@
 //! The live menu.
-//!
-//! mb-core has [`ItemSnapshot`] — what an item *was* when it was sold — but no
-//! type for what an item *is* today, because the billing rules never need one:
-//! a bill reads the snapshot on its own line and never joins back to the menu
-//! (crown jewel 4). So the live-menu types live here, and they are still typed
-//! values — [`Money`], [`TaxSpec`] — not rows.
-//!
-//! P13 owns the screens. This owns the rows.
 
 use mb_core::{CategoryId, ItemId, ItemSnapshot, Money, TaxClassId, TaxSpec, Timestamp};
 use rusqlite::Transaction;
@@ -21,12 +13,7 @@ pub struct Category {
     pub name: String,
     pub sort_order: i64,
     pub is_active: bool,
-    /// **Which kitchen screen this category's food goes to** (P24, scope 3.3).
-    ///
-    /// `None` is the shop's one screen, which is the normal case. A shop
-    /// splits its kitchen by typing a section name here — there is no separate
-    /// station screen to learn, and adding, renaming or removing a section is
-    /// editing the categories that belong to it.
+    /// Which kitchen screen this category's food goes to.
     pub station: Option<String>,
 }
 
@@ -37,27 +24,19 @@ pub struct MenuItem {
     pub category_id: Option<CategoryId>,
     pub name: String,
     pub unit_price: Money,
-    /// **What the owner CHOSE** (P13). The [`TaxSpec`] below is what that
-    /// choice currently resolves to — denormalised so the billing path never
-    /// joins for a rate, and rewritten by `TaxClassRepo::save` when the class
-    /// changes. A past bill is untouched by any of it: its line froze its own
-    /// copy (crown jewel 4, D52).
     pub tax_class_id: Option<TaxClassId>,
-    /// The kind, the rate and the pricing basis, together, in `tax_kind`,
-    /// `tax_rate_bp` and `tax_basis`. P33 replaced a `TaxRate` beside a
-    /// four-valued treatment, which could not say "outside GST at 20% state
-    /// VAT" at all — so a bar's stock could not be put on a menu.
+    /// The kind, the rate and the pricing basis, together, in `tax_kind`, `tax_rate_bp` and
+    /// `tax_basis`.
     pub tax: TaxSpec,
     pub hsn: Option<String>,
-    /// Scope 4.1. `None`, not zero — a shop that has not costed its menu must
-    /// not be shown a margin of 100%.
+    /// `None`, not zero — a shop that has not costed its menu must not be shown a margin of
+    /// 100%.
     pub cost_price: Option<Money>,
-    /// Scope 1.3, typed at the counter instead of the name.
+    /// 3, typed at the counter instead of the name.
     pub short_code: Option<String>,
-    /// Scope 3.6, the KDS prep-time target.
+    /// 6, the KDS prep-time target.
     pub prep_minutes: Option<i64>,
-    /// Scope 3.5 — which course this dish belongs to. `None` means no course,
-    /// and a shop where every dish is `None` fires the whole order at once.
+    /// Which course this dish belongs to.
     pub course: Option<String>,
     pub is_open_price: bool,
     pub is_available: bool,
@@ -66,10 +45,6 @@ pub struct MenuItem {
 
 impl MenuItem {
     /// Freeze this item onto a line.
-    ///
-    /// The one place the live menu turns into a snapshot. After this the bill
-    /// never looks at the menu again, which is why renaming or repricing an
-    /// item tomorrow cannot change a bill printed today.
     #[must_use]
     pub fn snapshot(&self) -> ItemSnapshot {
         let mut snapshot = ItemSnapshot::new(
@@ -267,9 +242,11 @@ impl<'a> MenuRepo<'a> {
     pub fn find_item(&self, id: &ItemId) -> Result<Option<MenuItem>, DbError> {
         let outlet: Option<String> = self
             .tx
-            .query_row("SELECT outlet_id FROM items WHERE id = ?1", [id.as_str()], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT outlet_id FROM items WHERE id = ?1",
+                [id.as_str()],
+                |r| r.get(0),
+            )
             .ok();
         let Some(outlet) = outlet else {
             return Ok(None);
@@ -281,20 +258,6 @@ impl<'a> MenuRepo<'a> {
     }
 
     /// Take an item off the menu.
-    ///
-    /// This is the operation P13 offers, and it is not a DELETE. An item that
-    /// has ever been billed cannot be deleted — `order_lines.item_id` is what
-    /// item-wise sales (10.2) reads a year later, so a sold item is history in
-    /// the same way a staff member who has left is (9.15).
-    /// **P29, scope 7.6 — the item a scanner just typed.**
-    ///
-    /// A barcode IS a short code: it is characters typed at the counter
-    /// instead of a name, only typed by a machine. So it lives in the same
-    /// column, and a shop that already types "D1" for a dosa can point a
-    /// scanner at a packet and get the same lookup.
-    ///
-    /// Case-insensitive, because a scanner's letters and a person's are the
-    /// same code.
     pub fn find_by_code(
         &self,
         outlet: &str,
@@ -335,10 +298,6 @@ impl<'a> MenuRepo<'a> {
     }
 
     /// Delete an item that has never been sold.
-    ///
-    /// Refuses, in words a cashier could act on, if the item is on any order —
-    /// the foreign key would refuse it anyway, but a leaked constraint name is
-    /// not an error message.
     pub fn delete_item(&self, outlet: &str, id: &ItemId, at: Timestamp) -> Result<(), DbError> {
         let sold: i64 = self.tx.query_row(
             "SELECT count(*) FROM order_lines WHERE item_id = ?1",

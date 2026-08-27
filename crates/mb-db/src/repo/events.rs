@@ -1,27 +1,4 @@
-//! **What happened to an order, and when** — `order_events`.
-//!
-//! P04 modelled this table and nothing has written to it until now. P14 is its
-//! first writer, and the reason is scope 14.2:
-//!
-//! > *"time since the last kitchen ticket — 'food ordered 18 minutes ago and
-//! > nothing since'"*
-//!
-//! # Why not the kitchen ledger
-//!
-//! Because the ledger is **what the kitchen currently believes**, not a
-//! history — `KitchenLedger::mark_cancelled` says so in those words. Its rows
-//! are rewritten wholesale every time the order is saved, so a timestamp on
-//! them would move when a cashier edited a line, and "18 minutes since the
-//! ticket" would silently become "0 minutes since somebody typed".
-//!
-//! An event is the honest shape: it happened, at a moment, and nothing later
-//! changes it.
-//!
-//! # The vocabulary
-//!
-//! Spelled once, here, as constants. A string literal typed at two call sites
-//! is a filter that silently matches nothing — the same argument
-//! `mb_auth::audit::action` makes about audit codes.
+//! What happened to an order, and when — `order_events`.
 
 use mb_core::{BusinessDay, StaffId, Timestamp};
 use rusqlite::{OptionalExtension, Transaction};
@@ -29,13 +6,13 @@ use rusqlite::{OptionalExtension, Transaction};
 use crate::encode;
 use crate::error::DbError;
 
-/// A kitchen ticket went to the printer (crown jewel 2's delta KOT).
+/// A kitchen ticket went to the printer.
 pub const KITCHEN_TICKET: &str = "kitchen_ticket";
-/// The order moved to another table (scope 1.23).
+/// The order moved to another table.
 pub const MOVED: &str = "moved";
-/// This order's food was folded into another bill (scope 1.22).
+/// This order's food was folded into another bill.
 pub const MERGED: &str = "merged";
-/// Part of this order left for a bill of its own (scope 1.21).
+/// Part of this order left for a bill of its own.
 pub const SPLIT: &str = "split";
 
 #[derive(Debug)]
@@ -49,8 +26,8 @@ impl<'a> EventsRepo<'a> {
         EventsRepo { tx }
     }
 
-    /// Write one down. **Append only** — there is no update and no delete
-    /// here, because an event that can be edited is not evidence.
+    /// Write one down. Append only — there is no update and no delete here, because an event
+    /// that can be edited is not evidence.
     pub fn record(
         &self,
         order_id: &str,
@@ -76,24 +53,7 @@ impl<'a> EventsRepo<'a> {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // P20: applied_events — crown jewel 11, and the table P04 reserved for it.
-    //
-    // > *"Every phone request is applied exactly once, guarded by a local
-    // > ledger, so a re-delivered message never double-prints a KOT."*
-    //
-    // v1 had this and it was right. What it did not have is the rule below:
-    // the id and the EFFECT go into the same transaction. Recording the id
-    // first swallows an intent on a crash; recording it afterwards applies one
-    // twice. There is no third option and no safe ordering outside a
-    // transaction.
-    // -----------------------------------------------------------------------
-
     /// What the counter answered the first time, if this intent has been seen.
-    ///
-    /// **The original outcome, byte for byte** — not "already applied". The
-    /// phone is going to show this to a waiter, and two different sentences
-    /// for one event is how a waiter stops trusting the screen.
     pub fn recall(&self, event_id: &str) -> Result<Option<String>, DbError> {
         let mut stmt = self
             .tx
@@ -106,11 +66,6 @@ impl<'a> EventsRepo<'a> {
     }
 
     /// Remember that this intent was applied, and what was said about it.
-    ///
-    /// `INSERT` and not `INSERT OR REPLACE`: a second insert of the same id is
-    /// a **constraint violation and should be**, because reaching here twice
-    /// means the check above was skipped, and turning that into a silent
-    /// overwrite is exactly the double-apply this table exists to stop.
     pub fn remember(
         &self,
         outlet: &str,
@@ -133,7 +88,7 @@ impl<'a> EventsRepo<'a> {
         Ok(())
     }
 
-    /// When this order last did that. `None` if it never has.
+    /// When this order last did that.
     pub fn last_at(&self, order_id: &str, event: &str) -> Result<Option<Timestamp>, DbError> {
         Ok(self
             .tx
@@ -147,8 +102,8 @@ impl<'a> EventsRepo<'a> {
             .map(encode::timestamp_from_sql))
     }
 
-    /// The same question asked of every open order at once — one query for a
-    /// floor of sixty tables rather than sixty (budget B8's neighbourhood).
+    /// The same question asked of every open order at once — one query for a floor of sixty
+    /// tables rather than sixty.
     pub fn last_for_each(&self, event: &str) -> Result<Vec<(String, Timestamp)>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT order_id, max(at) FROM order_events WHERE event = ?1 GROUP BY order_id",
@@ -164,10 +119,11 @@ impl<'a> EventsRepo<'a> {
         Ok(out)
     }
 
-    /// Everything that happened to one order, oldest first. P18's bill history
-    /// and P24's kitchen screen both want this; it is here now because writing
-    /// events without a way to read them back is how a table gets forgotten.
-    pub fn for_order(&self, order_id: &str) -> Result<Vec<(Timestamp, String, Option<String>)>, DbError> {
+    /// Everything that happened to one order, oldest first.
+    pub fn for_order(
+        &self,
+        order_id: &str,
+    ) -> Result<Vec<(Timestamp, String, Option<String>)>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT at, event, detail FROM order_events WHERE order_id = ?1 ORDER BY at",
         )?;

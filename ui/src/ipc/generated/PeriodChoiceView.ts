@@ -2,10 +2,5 @@
 
 /**
  * A one-press period.
- *
- * **Computed in Rust, and D70 is why it has to be.** "Today" on this screen is
- * the shop's BUSINESS day — a shop that closes at 1 am has a day that starts at
- * 5 am, and a browser asked for today's date at half past midnight would answer
- * with tomorrow. That is audit B1 wearing a third hat.
  */
 export type PeriodChoiceView = { label: string, from: string, to: string, };

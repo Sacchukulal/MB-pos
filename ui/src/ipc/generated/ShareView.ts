@@ -5,12 +5,12 @@
  */
 export type ShareView = { 
 /**
- * The summary itself, so the screen can put it on the clipboard without
- * composing a word of it.
+ * The summary itself, so the screen can put it on the clipboard without composing a word
+ * of it.
  */
 text: string, 
 /**
- * **The limit, said out loud** — empty for the channels that have none.
+ * The limit, said out loud — empty for the channels that have none.
  */
 caveat: string, 
 /**

@@ -1,21 +1,4 @@
-//! Budgets **P1, P2 and P3** — and they are new rows in the speed contract.
-//!
-//! P06 owned no budget in `docs/PERFORMANCE.md`, which was a gap: **B6** gives
-//! P07 50 ms (ceiling 150) to get a kitchen ticket into the print queue, and
-//! rendering the document happens inside that. A session that produces the
-//! artifact another session is measured on should carry a number.
-//!
-//! | | what | budget | ceiling |
-//! |---|---|---|---|
-//! | P1 | Lay out and render a 40-line bill to text | 2 ms | 10 ms |
-//! | P2 | Lay out and render the same bill to PDF | 5 ms | 20 ms |
-//! | P3 | Lay out and render a 20-item kitchen ticket | 1 ms | 5 ms |
-//!
-//! The three ceilings together are a third of B6, which leaves P07 the rest for
-//! the spooler.
-//!
-//! §3.1's rules: release-only assertions, print every run, assert the ceiling
-//! rather than the budget, `std::time::Instant` only.
+//! Budgets P1, P2 and P3 — and they are new rows in the speed contract.
 //!
 //! ```text
 //! cargo test -p mb-print --release --test perf -- --nocapture
@@ -34,25 +17,23 @@ use std::time::Instant;
 
 use common::Fixture;
 use mb_core::{ItemId, LineIdentity, OrderType, Qty};
+use mb_print::font::Font;
 use mb_print::layout::layout;
 use mb_print::paper::{Paper, PaperKind};
-use mb_print::settings::KitchenSettings;
-use mb_print::template::{Copy, KitchenContext, TicketKind, TicketLine, bill_document, kitchen_document};
-use mb_print::font::Font;
 use mb_print::printer::PrinterConfig;
 use mb_print::queue::sqlite::SqliteStore;
 use mb_print::queue::{Job, JobKind, Queue, QueueConfig};
 use mb_print::raster::{RasterOptions, to_raster};
+use mb_print::settings::KitchenSettings;
+use mb_print::template::{
+    Copy, KitchenContext, TicketKind, TicketLine, bill_document, kitchen_document,
+};
 use mb_print::{pdf, text};
 
 const RUNS: u32 = 200;
 
-/// A forty-line bill, because that is what P1 says and the anti-drift fixture
-/// is deliberately only three.
-///
-/// Forty is a real table of eight ordering properly, and it is the same figure
-/// budget B4 uses for `compute_bill`, so the two numbers are about the same
-/// bill.
+/// A forty-line bill, because that is what P1 says and the anti-drift fixture is deliberately
+/// only three.
 fn big_fixture() -> Fixture {
     use mb_core::{Cart, ItemSnapshot, Money, PriceBasis, TaxKind, TaxRate, TaxSpec};
 
@@ -63,16 +44,15 @@ fn big_fixture() -> Fixture {
             1 => common::pc(12),
             _ => common::pc(18),
         };
-        // The four shapes a line can take, which is what the old four-valued
-        // `TaxTreatment` used to enumerate. P33 split it into a legal kind and a
-        // pricing basis, so the four are spelled out here rather than named by
-        // one enum — and a line outside GST now carries a real VAT rate, which
-        // the old model had nowhere to put.
         let tax = match n % 4 {
             0 => TaxSpec::gst(rate),
             1 => TaxSpec::gst_inclusive(rate),
             2 => TaxSpec::exempt(),
-            _ => TaxSpec { kind: TaxKind::OutsideGst, rate: TaxRate::ZERO, basis: PriceBasis::Exclusive },
+            _ => TaxSpec {
+                kind: TaxKind::OutsideGst,
+                rate: TaxRate::ZERO,
+                basis: PriceBasis::Exclusive,
+            },
         };
         let snapshot = ItemSnapshot::new(
             ItemId::new(format!("itm_{n:03}")),
@@ -107,7 +87,8 @@ fn p1_and_p2_a_bill_renders_well_inside_b6() {
     let paper = Paper::new(PaperKind::Mm80);
 
     // Warm the allocator so the first run is not the measurement.
-    let _ = layout(&bill_document(&common::metrics(paper.kind), &ctx).expect("builds")).expect("lays out");
+    let _ = layout(&bill_document(&common::metrics(paper.kind), &ctx).expect("builds"))
+        .expect("lays out");
 
     let started = Instant::now();
     for _ in 0..RUNS {
@@ -198,39 +179,43 @@ fn p3_a_kitchen_ticket_renders_in_almost_no_time() {
     assert!(p3 < 5.0, "P3 took {p3:.2} ms, over the 5 ms ceiling");
 }
 
-/// **P4 — the raster sink, and the row `PERFORMANCE.md` §4 already promised.**
-///
-/// That file says, in writing, *"the raster sink lands at P07 and will be the
-/// expensive one; it gets its own row then."* This is that row: lay out a
-/// forty-line bill and draw every dot of it.
-///
-/// | | budget | ceiling |
-/// |---|---|---|
-/// | P4 | 20 ms | 60 ms |
-///
-/// **P4 is not inside B6, and that matters.** Rasterising happens on the
-/// printer's worker thread, after the cashier has already been let go. If it
-/// ever ends up on the billing path, B6 is what will notice.
 #[test]
 fn p4_a_bill_becomes_dots_inside_its_budget() {
     let fixture = big_fixture();
     let paper = Paper::new(PaperKind::Mm80);
     let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
-    let doc = bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds");
+    let doc = bill_document(
+        &common::metrics(paper.kind),
+        &fixture.context(Copy::Original),
+    )
+    .expect("builds");
     let laid = layout(&doc).expect("lays out");
 
-    // Warmed once: the glyph cache fills on the first bill of the day and never
-    // grows again, so the interesting number is the second bill and every one
-    // after it. Measuring the first would be measuring the cache.
-    let warm = to_raster(&laid, &mb_print::metrics::Metrics::face(laid.paper, std::sync::Arc::clone(&font)), RasterOptions::default()).expect("rasters");
+    // Warmed once: the glyph cache fills on the first bill of the day and never grows again, so
+    // the interesting number is the second bill and every one after it.
+    let warm = to_raster(
+        &laid,
+        &mb_print::metrics::Metrics::face(laid.paper, std::sync::Arc::clone(&font)),
+        RasterOptions::default(),
+    )
+    .expect("rasters");
 
     let runs = 50;
     let started = Instant::now();
     for _ in 0..runs {
-        let doc = bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds");
+        let doc = bill_document(
+            &common::metrics(paper.kind),
+            &fixture.context(Copy::Original),
+        )
+        .expect("builds");
         let laid = layout(&doc).expect("lays out");
         std::hint::black_box(
-            to_raster(&laid, &mb_print::metrics::Metrics::face(laid.paper, std::sync::Arc::clone(&font)), RasterOptions::default()).expect("rasters"),
+            to_raster(
+                &laid,
+                &mb_print::metrics::Metrics::face(laid.paper, std::sync::Arc::clone(&font)),
+                RasterOptions::default(),
+            )
+            .expect("rasters"),
         );
     }
     let p4 = started.elapsed().as_secs_f64() * 1_000.0 / f64::from(runs);
@@ -247,16 +232,7 @@ fn p4_a_bill_becomes_dots_inside_its_budget() {
     assert!(p4 < 60.0, "P4 took {p4:.2} ms, over the 60 ms ceiling");
 }
 
-/// **B6 — a kitchen ticket handed to the print queue.**
-///
-/// The one row in `PERFORMANCE.md` §2.2 that had nobody's measurement against
-/// it: *"kitchen ticket handed to the print queue (not printed — queued):
-/// 50 ms, ceiling 150 ms."*
-///
-/// Measured as it will really happen — against a **real SQLite file**, because
-/// the durable write is the whole point of the queue and on the reference
-/// machine's 5400 rpm disk the fsync *is* the measurement (§1: 5–15 ms an
-/// fsync). A `MemoryStore` figure would be a lie by omission.
+/// A kitchen ticket handed to the print queue.
 #[test]
 fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
     let scratch = common::Scratch::new("b6");
@@ -310,9 +286,7 @@ fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
         let one = Instant::now();
         let doc = kitchen_document(paper, &ctx).expect("builds");
         queue
-            .enqueue(
-                Job::new(JobKind::Kitchen, "prn_kitchen", doc, day).because("table 6"),
-            )
+            .enqueue(Job::new(JobKind::Kitchen, "prn_kitchen", doc, day).because("table 6"))
             .expect("queued");
         worst = worst.max(one.elapsed().as_secs_f64() * 1_000.0);
     }

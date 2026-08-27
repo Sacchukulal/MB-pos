@@ -1,27 +1,9 @@
 //! The identity types.
-//!
-//! **They are text, not autoincrementing integers, and that is a decision with
-//! a reason.**
-//!
-//! `FEATURE_SCOPE.md` 11.1 and 11.2 require two billing PCs in one shop, and
-//! 11.4 requires several outlets under one owner. An autoincrement id collides
-//! the moment two machines create a row at the same second, and there is no way
-//! to repair that afterwards without renumbering history. P04 makes these UUID
-//! text columns.
-//!
-//! Deciding it here costs one newtype per id. Discovering it at P27, with a
-//! year of bills already written, costs a migration of every table that
-//! references an item.
-//!
-//! They are newtypes rather than bare `String`s so that an item id can never be
-//! passed where a category id belongs — the compiler catches it, and that class
-//! of bug is invisible in a review.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Declares one id newtype. They differ only in their name, and their name is
-/// the entire point, so a macro keeps them from drifting apart.
+/// Declares one id newtype.
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
@@ -69,18 +51,21 @@ macro_rules! id_type {
 }
 
 id_type!(ItemId, "Identifies a menu item.");
-id_type!(ModifierId, "Identifies a modifier (`extra cheese`, `no onion`).");
+id_type!(
+    ModifierId,
+    "Identifies a modifier (`extra cheese`, `no onion`)."
+);
 id_type!(CategoryId, "Identifies a menu category.");
-id_type!(StaffId, "Identifies a staff member. P11 gives them roles and PINs.");
-id_type!(CustomerId, "Identifies a customer. P15 gives them a credit ledger.");
-id_type!(OrderId, "Identifies one order, through every state it passes.");
-id_type!(TableId, "Identifies a table. P14 gives it a position on the floor.");
+id_type!(StaffId, "Identifies a staff member.");
+id_type!(CustomerId, "Identifies a customer.");
+id_type!(
+    OrderId,
+    "Identifies one order, through every state it passes."
+);
+id_type!(TableId, "Identifies a table.");
 id_type!(
     MaterialId,
-    "Identifies a raw material or a made material (P25). \
-     **Not an `ItemId`** — an item is something a customer buys and a material is \
-     something a kitchen consumes, and the day somebody sells a kilo of rice over \
-     the counter those are still two different rows with two different prices."
+    "Identifies a raw or made material. Not an `ItemId`: an item is sold, a material is consumed."
 );
 
 #[cfg(test)]
@@ -89,10 +74,8 @@ mod tests {
 
     #[test]
     fn ids_of_different_kinds_are_different_types() {
-        // The point of the newtypes: this file would not compile if an ItemId
-        // could be compared with a CategoryId. The runtime assertion below is
-        // only here so the test has something to run; the real check is that
-        // `assert_eq!(ItemId::new("x"), CategoryId::new("x"))` does not build.
+        // The point of the newtypes: this file would not compile if an ItemId could be compared
+        // with a CategoryId.
         let item = ItemId::new("itm_7f3a");
         assert_eq!(item.as_str(), "itm_7f3a");
         assert_eq!(item.to_string(), "itm_7f3a");
@@ -102,8 +85,6 @@ mod tests {
 
     #[test]
     fn ids_serialise_as_bare_strings() {
-        // Transparent, so P04's database columns and P08's TypeScript types
-        // see a plain string rather than a wrapper object.
         let json = serde_json::to_string(&ItemId::new("itm_1")).expect("serialises");
         assert_eq!(json, "\"itm_1\"");
         let back: ItemId = serde_json::from_str(&json).expect("deserialises");

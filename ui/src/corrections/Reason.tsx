@@ -1,22 +1,4 @@
-/**
- * **One dialog, four callers** — void, cancel, void a line, reprint.
- *
- * The draft prompt asked for this and it was right: four dialogs would be four
- * places to forget the free-text box, four wordings of the same confirmation,
- * and four chances for one of them to stop being compulsory.
- *
- * # The confirmation says what will happen
- *
- * UI_GUIDELINES §6: *"a button says exactly what happens; the confirmation
- * echoes it."* So it is **"Void bill 0042 — ₹450.00"**, never "Confirm?" —
- * and the amount comes across preformatted from Rust (D39), because the one
- * moment you must not get a number wrong is the moment you are undoing one.
- *
- * # The reasons are the shop's
- *
- * They come from the `reasons` table, per kind. A list in this file would be a
- * support call from the first shop whose reasons are not ours.
- */
+/** One dialog, four callers — void, cancel, void a line, reprint. */
 
 import { useEffect, useState } from 'react';
 
@@ -31,11 +13,11 @@ export type ReasonKind = 'void' | 'cancel' | 'item_void' | 'reprint';
 
 export interface ReasonDialogProps {
   kind: ReasonKind;
-  /** "Void bill 0042 — ₹450.00". Already a whole sentence. */
+  /** "Void bill 0042 — ₹450.00". */
   what: string;
-  /** The button, in the same words. "Void the bill", not "OK". */
+  /** The button, in the same words. */
   confirmLabel: string;
-  /** True when this action needs a manager's PIN as well (P12 item 4). */
+  /** True when this action needs a manager's PIN as well. */
   needsApproval?: boolean;
   approvers?: readonly { id: string; name: string }[];
   onCancel: () => void;
@@ -66,9 +48,7 @@ export function ReasonDialog({
         setChosen(list[0]?.text ?? '');
       })
       .catch((cause) => {
-        // A shop whose reason list will not load can still type one. Refusing
-        // to let them correct a bill because a dropdown failed would be worse
-        // than the thing being corrected.
+        // A shop whose reason list will not load can still type one.
         if (isUiError(cause)) setProblem(cause.message);
       });
   }, [kind]);
@@ -131,11 +111,7 @@ export function ReasonDialog({
               />
             ))}
           </div>
-          {/* **The same four digits as the lock screen.** This box had no
-              ceiling at all, so a manager approving a void could keep typing
-              past the length of a PIN and only find out from Rust. One rule —
-              `mb_auth::pin::PIN_DIGITS` — and every box that takes a PIN holds
-              to it. */}
+          {/* The same four digits as the lock screen. */}
           <Input
             label="Their PIN"
             type="password"

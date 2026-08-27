@@ -14,73 +14,35 @@ export type CartView = { lines: Array<CartLineView>, bill: BillView, orderType: 
  */
 paid: MoneyView, 
 /**
- * What is still owed. Zero when the bill is covered.
+ * What is still owed.
  */
 balance: MoneyView, 
 /**
- * What to hand back. Zero unless the customer over-paid in cash (1.16).
+ * What to hand back.
  */
 change: MoneyView, isEmpty: boolean, 
 /**
  * Whether the kitchen has been told everything on this bill.
- *
- * **Decides what Enter on an empty box does** (audit 2.3): print the
- * ticket, or complete the bill. It comes from the order's own ledger, so
- * it is right after a merge and after a restart.
  */
 kitchenUpToDate: boolean, 
 /**
- * **Whether the kitchen has been told ANYTHING on this order yet** — which
- * is a different question from [`CartView::kitchen_up_to_date`], and the
- * screen needs both.
- *
- * Before the first ticket, ✕ on a line is somebody undoing a mis-tap two
- * seconds after making it, and asking them to type a reason for that is
- * how a till gets slower for no gain. After it, food is being cooked: the
- * same ✕ has to become a **void** — a reason, an audit row and a
- * cancellation slip to the kitchen — which is `void_line`, and is audit
- * B5/B6.
+ * Whether the kitchen has been told ANYTHING on this order yet — which is a different
+ * question from `CartView::kitchen_up_to_date`, and the screen needs both.
  */
 kitchenTold: boolean, 
 /**
- * **How many people are on this table** (P14, scope 14.3).
- *
- * On the view because the split dialog has to show what is already set —
- * and because `set_covers` had no caller at all until P31, so every
- * per-cover figure in Reports had nothing to divide by.
+ * How many people are on this table.
  */
 covers: number | null, 
 /**
- * **The order's id, once it has one.**
- *
- * `None` while the cart is only somebody typing. It becomes `Some` at the
- * moment `park_open_order` claims a bill number — the first kitchen ticket
- * or an opened table — and from then on the order is IN THE SHOP'S BOOKS.
- *
- * That is exactly the line at which "Cancel order" stops meaning "clear
- * the screen" and starts meaning `cancel_order`: a reason, an audit row, a
- * cancelled order the reports can see, and the kitchen told to stop.
+ * The order's id, once it has one.
  */
 orderId: string | null, 
 /**
- * **What the floor did to this order while the cashier had it open**
- * (P20, D83).
- *
- * Not merged into the lines above: a phone that adds a dosa must not
- * silently rewrite what somebody is halfway through settling. The screen
- * shows these and offers to take them in, and the cashier's payments and
- * discounts are untouched either way.
+ * What the floor did to this order while the cashier had it open.
  */
 fromTheFloor: Array<FloorChange>, 
 /**
- * **Audit I6 — a very long order, mentioned rather than refused.**
- *
- * Empty on every ordinary bill. Past forty lines it carries a sentence
- * about how much paper the kitchen ticket will be, because that is the
- * point at which a printer becomes the slowest thing in the shop and the
- * bill is usually two parties on one table.
- *
- * A warning and never a limit: a wedding party really does order sixty
- * dishes, and requirement 3 says billing never stops.
+ * A very long order, mentioned rather than refused.
  */
 lengthSays: string, };

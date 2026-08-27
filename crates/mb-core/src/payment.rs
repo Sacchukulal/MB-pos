@@ -1,12 +1,4 @@
 //! How a bill gets paid: several modes on one bill, change, and tips.
-//!
-//! v1 allowed **one payment mode per bill** (audit B9). Part cash and part UPI
-//! is extremely common in an Indian restaurant, and on v1 the cashier had to
-//! lie about it — which quietly corrupted every payment-mode report.
-//!
-//! **A settlement is not an input to `compute_bill`.** A bill is computed, then
-//! it is paid. Keeping the two apart is what lets P12 void a paid bill and P18
-//! report on payment modes without either of them touching the tax engine.
 
 use crate::ids::CustomerId;
 use crate::money::{Money, MoneyError};
@@ -20,7 +12,9 @@ pub enum PaymentError {
     #[error("a tip cannot be negative")]
     NegativeTip,
     /// You cannot hand change back out of a card machine.
-    #[error("card, UPI and credit payments come to ₹{non_cash}, which is more than the ₹{due} owed — take the extra in cash or reduce the amount")]
+    #[error(
+        "card, UPI and credit payments come to ₹{non_cash}, which is more than the ₹{due} owed — take the extra in cash or reduce the amount"
+    )]
     CannotOverpayWithoutCash { non_cash: Money, due: Money },
     #[error("an amount on this settlement is too large to handle: {0}")]
     Money(#[from] MoneyError),
@@ -29,10 +23,6 @@ pub enum PaymentError {
 type Result<T> = std::result::Result<T, PaymentError>;
 
 /// How one payment was made.
-///
-/// **`Credit` holds the customer id inside the variant**, so a credit sale with
-/// nobody to bill is not a state this program can be in. It is made
-/// unrepresentable rather than validated:
 ///
 /// ```
 /// # use mb_core::{payment::PaymentMode, CustomerId};
@@ -47,10 +37,9 @@ pub enum PaymentMode {
     Cash,
     Card,
     Upi,
-    /// On the customer's credit. The id is not optional.
+    /// On the customer's credit.
     Credit(CustomerId),
-    /// Cheque, meal card, a wallet the shop uses. Kept narrow — free text
-    /// syncs to the cloud forever (D16).
+    /// Cheque, meal card, a wallet the shop uses.
     Other(String),
 }
 
@@ -62,10 +51,6 @@ impl PaymentMode {
     }
 
     /// The label a payment-mode report groups by.
-    ///
-    /// **Every `Credit` groups together**, whichever customer it was. The
-    /// report the owner wants is "how much went on credit this month", not one
-    /// row per customer — that is a credit statement, which is P15's job.
     #[must_use]
     pub fn report_label(&self) -> &str {
         match self {
@@ -83,28 +68,12 @@ impl PaymentMode {
 pub struct Payment {
     pub mode: PaymentMode,
     pub amount: Money,
-    /// A UPI reference, a card approval code, a cheque number. Short.
+    /// A UPI reference, a card approval code, a cheque number.
     pub reference: Option<String>,
-    /// **Audit B12.** v1 recorded a credit settlement with the payment mode
-    /// `"Full Settlement"`, which is not a payment mode and polluted every
-    /// payment-mode report. A credit settlement is a real payment — cash, UPI
-    /// or card — that happens to clear a balance. So `mode` says what it
-    /// **was** and this flag says what it **did**.
     pub settles_credit: bool,
-    /// **P29, scope 8.3 — did the money actually arrive?**
-    ///
-    /// False on every electronic payment this product takes today, because the
-    /// provider that ships ([`crate::provider::Manual`]) cannot check a bank
-    /// and will not pretend to. Cash and credit are true the moment they are
-    /// taken: the notes are in the drawer, and a promise IS the record.
-    ///
-    /// The point of the field is the LIST it makes possible — "show me
-    /// tonight's unconfirmed payments" — because a shop cannot chase what it
-    /// cannot list.
     #[serde(default)]
     pub confirmed: bool,
-    /// Which provider answered. `None` on the modes nobody has to be asked
-    /// about.
+    /// Which provider answered. `None` on the modes nobody has to be asked about.
     #[serde(default)]
     pub provider: Option<String>,
 }
@@ -115,10 +84,7 @@ impl Payment {
             // A zero-rupee payment row is noise in every report downstream.
             return Err(PaymentError::NonPositiveAmount);
         }
-        // **Cash and credit start confirmed, everything else does not.** The
-        // default is the safe direction: a mode this product has not thought
-        // about yet lands on the list a person reads, rather than quietly
-        // counting as money in hand.
+        // Cash and credit start confirmed, everything else does not.
         let confirmed = matches!(mode, PaymentMode::Cash | PaymentMode::Credit(_));
         Ok(Payment {
             mode,
@@ -136,7 +102,7 @@ impl Payment {
         self
     }
 
-    /// What a provider said about it (P29).
+    /// What a provider said about it.
     #[must_use]
     pub fn answered_by(mut self, provider: impl Into<String>, confirmed: bool) -> Self {
         self.provider = Some(provider.into());
@@ -144,7 +110,7 @@ impl Payment {
         self
     }
 
-    /// Mark this as clearing a credit balance. The mode stays what it was.
+    /// Mark this as clearing a credit balance.
     #[must_use]
     pub fn settling_credit(mut self) -> Self {
         self.settles_credit = true;
@@ -156,9 +122,7 @@ impl Payment {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Settlement {
     payments: Vec<Payment>,
-    /// Scope 8.5. Money the customer adds on top. It is **not** part of the
-    /// bill's taxable value and never enters the GST summary — a tip is not a
-    /// supply by the restaurant, it is a gift to the staff.
+    /// Money the customer adds on top.
     tip: Money,
 }
 
@@ -211,7 +175,10 @@ impl Settlement {
 
     fn total_non_cash(&self) -> Result<Money> {
         Ok(Money::try_sum(
-            self.payments.iter().filter(|p| !p.mode.is_cash()).map(|p| p.amount),
+            self.payments
+                .iter()
+                .filter(|p| !p.mode.is_cash())
+                .map(|p| p.amount),
         )?)
     }
 
@@ -229,20 +196,17 @@ impl Settlement {
         Ok(!self.balance(grand_total)?.is_positive())
     }
 
-    /// What to hand back. Zero unless more was tendered than was owed.
+    /// What to hand back.
     pub fn change_due(&self, grand_total: Money) -> Result<Money> {
         let balance = self.balance(grand_total)?;
-        Ok(if balance.is_negative() { balance.neg() } else { Money::ZERO })
+        Ok(if balance.is_negative() {
+            balance.neg()
+        } else {
+            Money::ZERO
+        })
     }
 
-    /// **You cannot get change out of a card machine.**
-    ///
-    /// So the non-cash payments together may never exceed what is owed. Cash
-    /// may, and the excess becomes [`Settlement::change_due`].
-    ///
-    /// This is checked here rather than in [`Settlement::add`] because `add`
-    /// does not know the bill total — and asking it to would mean re-validating
-    /// every earlier payment each time a new one arrives.
+    /// You cannot get change out of a card machine.
     pub fn validate(&self, grand_total: Money) -> Result<()> {
         let due = self.amount_due(grand_total)?;
         let non_cash = self.total_non_cash()?;
@@ -253,8 +217,6 @@ impl Settlement {
     }
 
     /// Totals by mode, for the payment-mode report, in the order first seen.
-    ///
-    /// Every `Credit` collapses into one row — see [`PaymentMode::report_label`].
     pub fn total_by_mode(&self) -> Result<Vec<(String, Money)>> {
         let mut totals: Vec<(String, Money)> = Vec::new();
         for payment in &self.payments {
@@ -282,7 +244,6 @@ mod tests {
 
     #[test]
     fn part_cash_and_part_upi_settles_a_bill_exactly() {
-        // The case v1 forced the cashier to lie about (audit B9).
         let mut settlement = Settlement::new();
         settlement.add(pay(PaymentMode::Cash, 300)).expect("adds");
         settlement.add(pay(PaymentMode::Upi, 200)).expect("adds");
@@ -298,7 +259,11 @@ mod tests {
     fn an_underpaid_bill_is_not_settled() {
         let mut settlement = Settlement::new();
         settlement.add(pay(PaymentMode::Cash, 450)).expect("adds");
-        assert_eq!(settlement.balance(rs(500)), Ok(rs(50)), "positive means still owed");
+        assert_eq!(
+            settlement.balance(rs(500)),
+            Ok(rs(50)),
+            "positive means still owed"
+        );
         assert_eq!(settlement.is_settled(rs(500)), Ok(false));
         assert_eq!(settlement.change_due(rs(500)), Ok(Money::ZERO));
     }
@@ -318,11 +283,14 @@ mod tests {
         settlement.add(pay(PaymentMode::Card, 600)).expect("adds");
         assert_eq!(
             settlement.validate(rs(500)),
-            Err(PaymentError::CannotOverpayWithoutCash { non_cash: rs(600), due: rs(500) })
+            Err(PaymentError::CannotOverpayWithoutCash {
+                non_cash: rs(600),
+                due: rs(500)
+            })
         );
 
-        // But card up to the total, with cash on top, is fine — the change
-        // comes out of the cash.
+        // But card up to the total, with cash on top, is fine — the change comes out of the
+        // cash.
         let mut settlement = Settlement::new();
         settlement.add(pay(PaymentMode::Card, 400)).expect("adds");
         settlement.add(pay(PaymentMode::Cash, 200)).expect("adds");
@@ -344,7 +312,7 @@ mod tests {
 
     #[test]
     fn a_tip_is_owed_on_top_and_is_never_taxed() {
-        // Scope 8.5. The tip changes what is DUE, not what the bill is.
+        // The tip changes what is DUE, not what the bill is.
         let mut settlement = Settlement::with_tip(rs(50)).expect("valid tip");
         assert_eq!(settlement.amount_due(rs(500)), Ok(rs(550)));
 
@@ -352,16 +320,16 @@ mod tests {
         assert_eq!(settlement.is_settled(rs(500)), Ok(true));
         assert_eq!(settlement.change_due(rs(500)), Ok(Money::ZERO));
 
-        // The bill's own grand total is untouched — nothing here can reach the
-        // tax summary, because a tip is not a supply by the restaurant.
+        // The bill's own grand total is untouched — nothing here can reach the tax summary,
+        // because a tip is not a supply by the restaurant.
         assert_eq!(settlement.tip(), rs(50));
         assert_eq!(Settlement::with_tip(rs(-1)), Err(PaymentError::NegativeTip));
     }
 
     #[test]
     fn credit_carries_its_customer_and_reports_as_one_credit_row() {
-        // Two different customers on one bill is unusual but legal — a split
-        // between two regulars. The report wants one Credit row, not two.
+        // Two different customers on one bill is unusual but legal — a split between two
+        // regulars.
         let mut settlement = Settlement::new();
         settlement
             .add(pay(PaymentMode::Credit(CustomerId::new("cus_1")), 200))
@@ -373,7 +341,6 @@ mod tests {
         let totals = settlement.total_by_mode().expect("totals");
         assert_eq!(totals, vec![("Credit".to_owned(), rs(500))]);
 
-        // And the id is still reachable for P15's ledger.
         let PaymentMode::Credit(ref customer) = settlement.payments()[0].mode else {
             panic!("the first payment must be a credit payment");
         };
@@ -382,10 +349,10 @@ mod tests {
 
     #[test]
     fn a_credit_settlement_keeps_its_real_payment_mode() {
-        // Audit B12: v1 wrote the mode as "Full Settlement". Here the mode is
-        // Cash, and the flag records what the payment did.
         let mut settlement = Settlement::new();
-        settlement.add(pay(PaymentMode::Cash, 500).settling_credit()).expect("adds");
+        settlement
+            .add(pay(PaymentMode::Cash, 500).settling_credit())
+            .expect("adds");
 
         assert!(settlement.payments()[0].settles_credit);
         assert_eq!(settlement.payments()[0].mode, PaymentMode::Cash);
@@ -405,7 +372,10 @@ mod tests {
 
         assert_eq!(
             settlement.total_by_mode(),
-            Ok(vec![("UPI".to_owned(), rs(125)), ("Cash".to_owned(), rs(50))])
+            Ok(vec![
+                ("UPI".to_owned(), rs(125)),
+                ("Cash".to_owned(), rs(50))
+            ])
         );
     }
 

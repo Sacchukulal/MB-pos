@@ -1,11 +1,4 @@
-/**
- * **T3 — the UI kit.** Rendering, keyboard reach, disabled and error states.
- *
- * Vitest + Testing Library, and the one-line reason: Testing Library asserts on
- * what a cashier can see and reach — text, roles, labels — rather than on a
- * component's internals, so these tests survive a change to the look. Which is
- * exactly what this session is for.
- */
+/** The UI kit. */
 
 import { readFileSync } from 'node:fs';
 
@@ -29,8 +22,8 @@ afterEach(cleanup);
 
 describe('Button', () => {
   it('is reachable and pressable by keyboard alone', async () => {
-    // The keyboard-first rule (§1): "a cashier must be able to run a whole
-    // shift without touching the mouse."
+    // The keyboard-first rule (§1): "a cashier must be able to run a whole shift without
+    // touching the mouse.".
     const onClick = vi.fn();
     render(<Button onClick={onClick}>Settle</Button>);
 
@@ -57,8 +50,7 @@ describe('Button', () => {
   });
 
   it('uses a semantic colour for a destructive action, never the accent', () => {
-    // §2 rule 1: changing a shop's accent must never make "delete" look like
-    // "save". The class is the check, because the colour is a token.
+    // §2 rule 1: changing a shop's accent must never make "delete" look like "save".
     render(<Button variant="danger">Void bill</Button>);
     expect(screen.getByRole('button')).toHaveClass('mb-button--danger');
   });
@@ -77,10 +69,7 @@ describe('Input', () => {
     expect(screen.getByLabelText('GSTIN')).toHaveAttribute('aria-invalid', 'true');
   });
 
-  /**
-   * **A hint is asked for, an error is told to you** — the owner, 2026-08-24:
-   * *"i dont like you adding those sub lines below all those feilds."*
-   */
+  /** A hint is asked for, an error is told to you. */
   it('puts the hint in a tip beside the label, not a line under the box', () => {
     const { container, rerender } = render(<Input label="Phone" hint="Ten digits." />);
 
@@ -99,8 +88,6 @@ describe('Input', () => {
 
 describe('Money', () => {
   it('renders exactly what Rust formatted, and computes nothing', () => {
-    // R8 and D2. The paise ride along for anything that needs the integer;
-    // what is SHOWN is the string `Money::to_plain_string` produced.
     render(<Money value={{ paise: 128_050n, text: '1,280.50' }} />);
     const shown = screen.getByText('1,280.50');
     expect(shown).toBeInTheDocument();
@@ -110,8 +97,8 @@ describe('Money', () => {
 
 describe('ConfirmDialog', () => {
   it('says exactly what will happen, on the button', async () => {
-    // §6: "a button says exactly what happens; the confirmation echoes it."
-    // There is deliberately no default of "OK".
+    // "a button says exactly what happens; the confirmation echoes it." There is deliberately
+    // no default of "OK".
     const onConfirm = vi.fn();
     render(
       <ConfirmDialog
@@ -127,15 +114,7 @@ describe('ConfirmDialog', () => {
     expect(onConfirm).toHaveBeenCalledOnce();
   });
 
-  /**
-   * **All three ways out are reachable** — P18.
-   *
-   * P17 added the third button and never put three long labels in one dialog.
-   * Closing a day offers "Cancel / Close without printing / Close and print
-   * the slip", which is wider than a 26rem modal, and the row did not wrap —
-   * Cancel was pushed off the left edge and clipped. Found by looking at the
-   * screen, which is why the fix is in `kit.css` and the guard is here.
-   */
+  /** All three ways out are reachable. */
   it('keeps all three ways out when the labels are long', async () => {
     const onCancel = vi.fn();
     const onOther = vi.fn();
@@ -151,12 +130,10 @@ describe('ConfirmDialog', () => {
         onCancel={onCancel}
       />,
     );
-    // Wrapping is what keeps the third button on the page. jsdom applies no
-    // stylesheet, so the rule is checked in the stylesheet itself — the same
-    // trick `contrast.test.ts` uses, and for the same reason.
+    // Wrapping is what keeps the third button on the page.
     const css = readFileSync('src/kit/kit.css', 'utf8');
-    // The rule where it is DEFINED — `\n.x {` — not the first place the class
-    // is mentioned, which can be a descendant selector further up the file.
+    // The rule where it is DEFINED — `\n.x {` — not the first place the class is mentioned,
+    // which can be a descendant selector further up the file.
     const rule = css.slice(css.indexOf('\n.mb-modal__actions {'));
     expect(rule.slice(0, rule.indexOf('}'))).toContain('flex-wrap: wrap');
 
@@ -227,8 +204,7 @@ describe('Table', () => {
         rowKey={(r) => r.name}
       />,
     );
-    // §3: "a column of rupees that doesn't line up looks broken to a
-    // shopkeeper."
+    // "a column of rupees that doesn't line up looks broken to a shopkeeper.".
     expect(screen.getByRole('columnheader', { name: 'Total' })).toHaveClass(
       'mb-numeric',
     );
@@ -237,8 +213,8 @@ describe('Table', () => {
 
 describe('Badge', () => {
   it('carries a word as well as a colour', () => {
-    // §2 rule 2: "colour is never the only signal." Grey-scale the screen and
-    // "Paid" still says paid.
+    // §2 rule 2: "colour is never the only signal." Grey-scale the screen and "Paid" still says
+    // paid.
     render(<Badge tone="ok">Paid</Badge>);
     expect(screen.getByText('Paid')).toBeInTheDocument();
   });
@@ -252,26 +228,10 @@ describe('a dialog and the caret (§1, keyboard-first)', () => {
         <Input label="Price" />
       </Modal>,
     );
-    // The panel used to win this race, so the first thing typed into a fresh
-    // dialog went nowhere. Found by opening "Add a size", typing "Half", and
-    // watching it vanish (P13).
     const name = screen.getByLabelText('Name') as HTMLInputElement;
     expect(document.activeElement).toBe(name);
   });
 
-  /**
-   * **P21, and the other half of the same bug.**
-   *
-   * The focus effect used to depend on `onClose` as well as `open`, and every
-   * caller in the product passes `onClose={() => setSomething(null)}` — a new
-   * function on every render. So every keystroke re-ran it and dragged the
-   * caret back to the FIRST field. Latent since P13 because every dialog until
-   * P21's had one field, where putting the focus back where it already was is
-   * invisible.
-   *
-   * Found by typing a licence key and then a code into the account screen and
-   * getting "MB-STUB-000123456" in one box and "1" in the other.
-   */
   it('leaves the caret where the person put it when the dialog re-renders', () => {
     function TwoFields() {
       const [key, setKey] = useState('');

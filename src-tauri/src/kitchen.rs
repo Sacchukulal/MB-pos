@@ -1,28 +1,4 @@
-//! **The kitchen display** — P24, scope 3.3 to 3.7.
-//!
-//! A screen on the kitchen wall instead of a paper ticket. One card per order,
-//! read from two metres away, and a cook taps to clear it.
-//!
-//! # What this file is, and what it is not
-//!
-//! It is a VIEW of things that already exist. The kitchen ledger (crown jewel
-//! 2) knows what the kitchen was told; `mb_core::kitchen_delivery` decides what
-//! happens to a ticket; `mb_db::repo::kitchen` stores the answer. This turns
-//! the three into cards.
-//!
-//! # No timer lives here, and none lives on the screen
-//!
-//! PERFORMANCE §5 rule 10, and P14 learned it on the floor grid: a card does
-//! not own a clock. The screen ticks once, re-reads the minutes each ticket
-//! already carries, and repaints. A KDS with a timer per card is budget M3's
-//! leak with extra steps — and M3 exists because *"v1's KDS-style timer screens
-//! are exactly where a re-render storm hides"*.
-//!
-//! # Both kinds of bump, because the owner asked for both
-//!
-//! Tap one dish as it comes off the pass, or clear the whole card. A big
-//! kitchen finishes dishes at different times; a small one sends the order out
-//! together. Neither is unusual, so both are here.
+//! The kitchen display.
 
 use std::collections::BTreeMap;
 
@@ -37,11 +13,6 @@ use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
 /// The station a shop has until it says otherwise.
-///
-/// **One screen is the normal case**, and a shop that never thinks about
-/// stations must never have to. The station is a real field on every ticket
-/// from the first day — splitting a kitchen into tandoor and chinese later then
-/// costs nothing, because no ticket has to be rewritten.
 pub const DEFAULT_STATION: &str = "Kitchen";
 
 /// One dish on a card.
@@ -55,11 +26,9 @@ pub struct KitchenLine {
     pub name: String,
     /// "extra spicy", "no onion" — the thing a cook must not miss.
     pub note: Option<String>,
-    /// Which course this dish belongs to. Empty when the shop does not use
-    /// courses, which is most shops.
+    /// Which course this dish belongs to.
     pub course: String,
-    /// **Added after the kitchen first saw this order.** A cook who glanced
-    /// away must not miss an addition.
+    /// Added after the kitchen first saw this order.
     pub is_new: bool,
     /// A cook has ticked this dish off.
     pub is_done: bool,
@@ -77,30 +46,22 @@ pub struct KitchenTicket {
     pub place: String,
     pub token: String,
     pub waiter: Option<String>,
-    /// Minutes since the counter told the kitchen. Computed in Rust so the
-    /// screen does no arithmetic (R8).
+    /// Minutes since the counter told the kitchen.
     pub waiting_minutes: u32,
     /// Already a sentence: "4 min", "11 min".
     pub waiting: String,
     /// "12 min" — what this firing was expected to take, or empty.
     pub expected: String,
-    /// `new`, `cooking`, `late`, `printed` or `cancelled`. **Colour is never
-    /// the only carrier** (§2) — the screen shows a word and a border too,
-    /// because the room is bright, the screen is two metres away, and a
-    /// colour-blind cook is not a rare event.
+    /// `new`, `cooking`, `late`, `printed` or `cancelled`.
     pub tone: String,
     /// What the tone means, in words.
     pub says: String,
     /// Which course this firing is, or empty.
     pub course: String,
     pub lines: Vec<KitchenLine>,
-    /// **A cancellation nobody has acknowledged.** The one thing on this screen
-    /// allowed to interrupt: food already cooking is thrown away, and food not
-    /// started is cooked for nobody.
+    /// A cancellation nobody has acknowledged.
     pub is_cancelled: bool,
-    /// True when this went to paper because no screen drew it in time. Shown
-    /// greyed and silent — the kitchen has it, and counting it again is the
-    /// double-cook the whole design prevents.
+    /// True when this went to paper because no screen drew it in time.
     pub was_printed: bool,
 }
 
@@ -121,25 +82,16 @@ pub struct WaitingCourse {
 #[serde(rename_all = "camelCase")]
 pub struct KitchenView {
     pub station: String,
-    /// Every station this shop has. A screen is pointed at one of these.
+    /// Every station this shop has.
     pub stations: Vec<String>,
     pub tickets: Vec<KitchenTicket>,
     /// "3 orders waiting" — or that nothing is.
     pub headline: String,
     /// How many need somebody right now, for the title and the sound.
     pub late: u32,
-    /// Courses a waiter can still fire (scope 3.5). Empty for a shop that does
-    /// not use courses, which is most of them.
+    /// Courses a waiter can still fire.
     pub waiting_courses: Vec<WaitingCourse>,
-    /// **The last card cleared at this station, so it can be brought back.**
-    ///
-    /// A cook clears the wrong ticket several times a week — a wet hand, a
-    /// crowded rail. The card is gone from the grid the instant it is cleared,
-    /// so the undo cannot live on the card: it has to live somewhere that is
-    /// still on screen. This is that somewhere.
-    ///
-    /// `None` when nothing has been cleared, which is what a screen looks like
-    /// at opening time.
+    /// The last card cleared at this station, so it can be brought back.
     pub last_cleared: Option<Cleared>,
 }
 
@@ -153,30 +105,16 @@ pub struct Cleared {
     pub what: String,
 }
 
-/// **When a ticket turns late, if the dishes on it have no target of their
-/// own.**
-///
-/// P13 stores `prep_minutes` per item and the ticket's target is its slowest
-/// dish. This is the fallback for a menu nobody has costed in time yet — a
-/// number, so a shop gets a useful screen before it has done any set-up.
+/// When a ticket turns late, if the dishes on it have no target of their own.
 const LATE_AFTER_MINUTES: u32 = 15;
 
-/// **What the kitchen should be looking at.**
-///
-/// Never fails on a shop that will not open — a kitchen screen that goes blank
-/// because of a database problem is the failure this whole session exists to
-/// prevent. It shows nothing and says so.
+/// What the kitchen should be looking at.
 #[must_use]
 pub fn look(app: &App, station: &str) -> KitchenView {
     look_at(app, station, now())
 }
 
 /// `look`, at a stated time.
-///
-/// **The clock is an argument, not a global.** A ticket that is fifteen minutes
-/// late is a state, and a state a test cannot reach is a state nobody ever
-/// checks — waiting out a real quarter of an hour is not a test anybody runs
-/// twice. Every timing rule on this screen is decided here from `at`.
 #[must_use]
 pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
     let gathered = app
@@ -193,8 +131,8 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                             orders.insert(ticket.delivery.order_id.clone(), order);
                         }
                     }
-                    // What can still be fired: every open order's courses that
-                    // have no delivery yet.
+                    // What can still be fired: every open order's courses that have no delivery
+                    // yet.
                     let tables = repos.floor().list_tables(OUTLET)?;
                     let mut waiting = Vec::new();
                     for order in repos.orders().list_open(OUTLET)? {
@@ -206,10 +144,7 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                             }
                             waiting.push(WaitingCourse {
                                 order_id: core.id.as_str().to_owned(),
-                                // **The token as well as the table.** Two
-                                // parties can share a table (P14), so three
-                                // buttons all reading "Table 5 · Main" is
-                                // three ways to fire the wrong one.
+                                // The token as well as the table.
                                 place: match order.token() {
                                     Some(t) => {
                                         format!("{} #{}", place_of(&order, &tables), t.formatted)
@@ -222,8 +157,8 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                         }
                     }
                     let staff = repos.people().list_staff(OUTLET)?;
-                    // The undo, and the order behind it so the bar can say
-                    // which card it would bring back.
+                    // The undo, and the order behind it so the bar can say which card it would
+                    // bring back.
                     let cleared = repos.kitchen().last_bumped(OUTLET, station)?;
                     let cleared_order = match &cleared {
                         Some(t) => repos
@@ -305,8 +240,8 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                 .map_or_else(String::new, |t| format!(" #{}", t.formatted));
             Cleared {
                 id: ticket.delivery.id.clone(),
-                // "Table 5 #12", or just the number if the order has gone —
-                // enough to know it is the right one before pressing.
+                // "Table 5 #12", or just the number if the order has gone — enough to know it
+                // is the right one before pressing.
                 what: match (place.is_empty(), token.is_empty()) {
                     (true, true) => "the last one".to_owned(),
                     _ => format!("{place}{token}").trim().to_owned(),
@@ -317,11 +252,6 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
 }
 
 /// "Table 7", "Parcel" — what a cook shouts across the kitchen.
-///
-/// **The LABEL, never the id.** A cook shouts "table five", and P14 already
-/// separates the two because a shop renumbers its tables and an id cannot
-/// change. Printing `tbl_5` on the wall is the sort of thing that survives to
-/// a customer's kitchen and looks broken there.
 fn place_of(order: &AnyOrder, tables: &[mb_db::repo::floor::DiningTable]) -> String {
     let core = order.core();
     core.table.as_ref().map_or_else(
@@ -376,8 +306,8 @@ fn card(
         ("cooking", "Cooking".to_owned())
     };
 
-    // The lines, from the ORDER — and which of them the kitchen had not seen
-    // when this firing went out, which is what makes an addition obvious.
+    // The lines, from the ORDER — and which of them the kitchen had not seen when this firing
+    // went out, which is what makes an addition obvious.
     let lines = order.map_or_else(Vec::new, |order| {
         let core = order.core();
         let told = core.kitchen.told();
@@ -385,8 +315,8 @@ fn card(
             .lines()
             .iter()
             .filter(|line| {
-                // A firing shows only its own course, so firing the mains does
-                // not re-show the starters (T6).
+                // A firing shows only its own course, so firing the mains does not re-show the
+                // starters.
                 match ticket.course.as_deref() {
                     None | Some("") => true,
                     Some(course) => line.snapshot.course.as_deref() == Some(course),
@@ -395,9 +325,7 @@ fn card(
             .map(|line| {
                 let identity = line.identity();
                 let key = line_key(&identity);
-                // **From the ledger, not from timestamps.** The ledger already
-                // knows what quantity the kitchen was told about; anything
-                // beyond that is an addition.
+                // From the ledger, not from timestamps.
                 let seen = told
                     .iter()
                     .find(|(id, _)| id == &identity)
@@ -455,11 +383,7 @@ fn card(
     }
 }
 
-/// **How a line is named for a per-item bump.**
-///
-/// The item and its note, because that is what makes two lines of the same dish
-/// different on a ticket — "Paneer Tikka" and "Paneer Tikka, no onion" are two
-/// jobs for the cook, and ticking one must not tick the other.
+/// How a line is named for a per-item bump.
 fn line_key(identity: &mb_core::LineIdentity) -> String {
     match &identity.note {
         Some(note) if !note.is_empty() => {
@@ -469,23 +393,20 @@ fn line_key(identity: &mb_core::LineIdentity) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// What a cook can do. D46: each body takes `&App`.
-// ---------------------------------------------------------------------------
+// What a cook can do.
 
 pub fn look_on(app: &App, station: Option<String>) -> UiResult<KitchenView> {
     crate::guard::require(app, Permission::BillCreate)?;
     Ok(look(app, station.as_deref().unwrap_or(DEFAULT_STATION)))
 }
 
-/// The screen drew it. **Acked on DRAW, not on receipt** — see
-/// `mb_core::kitchen_delivery`.
+/// The screen drew it.
 pub fn shown_on(app: &App, id: String) -> UiResult<KitchenView> {
     crate::guard::require(app, Permission::BillCreate)?;
     let at = now();
     let station = with_ticket(app, &id, |ticket| {
-        // A late ack on an already-printed ticket is REFUSED, and that refusal
-        // is the point — the paper is in the kitchen already.
+        // A late ack on an already-printed ticket is REFUSED, and that refusal is the point —
+        // the paper is in the kitchen already.
         let _ = ticket.delivery.shown(at);
         Ok(ticket.delivery.station.clone())
     })?;
@@ -512,8 +433,7 @@ pub fn bump_on(app: &App, id: String) -> UiResult<KitchenView> {
 pub fn bump_line_on(app: &App, id: String, key: String) -> UiResult<KitchenView> {
     crate::guard::require(app, Permission::BillCreate)?;
     let station = with_ticket(app, &id, |ticket| {
-        // Toggling, not just adding: a cook who ticks the wrong dish presses it
-        // again. An undo that needs a different button is an undo nobody finds.
+        // Toggling, not just adding: a cook who ticks the wrong dish presses it again.
         if let Some(index) = ticket.bumped_lines.iter().position(|k| k == &key) {
             ticket.bumped_lines.remove(index);
         } else {
@@ -524,7 +444,7 @@ pub fn bump_line_on(app: &App, id: String, key: String) -> UiResult<KitchenView>
     Ok(look(app, &station))
 }
 
-/// **A cook bumped the wrong ticket. This is not an edge case, it is Tuesday.**
+/// A cook bumped the wrong ticket.
 pub fn recall_on(app: &App, id: String) -> UiResult<KitchenView> {
     let who = crate::guard::require(app, Permission::BillCreate)?;
     let station = with_ticket(app, &id, |ticket| {
@@ -540,9 +460,6 @@ pub fn recall_on(app: &App, id: String) -> UiResult<KitchenView> {
 }
 
 /// Somebody pressed "Got it" on a cancellation.
-///
-/// **Recorded with the person**, because "who was told that order was
-/// cancelled?" is a question an owner asks when a dish still went out.
 pub fn acknowledge_on(app: &App, id: String) -> UiResult<KitchenView> {
     let who = crate::guard::require(app, Permission::BillCreate)?;
     let at = now();
@@ -550,19 +467,19 @@ pub fn acknowledge_on(app: &App, id: String) -> UiResult<KitchenView> {
         ticket.acked_at = Some(at);
         Ok(ticket.delivery.station.clone())
     })?;
-    crate::log_info!("kitchen: {} acknowledged the cancellation of {id}", who.name);
+    crate::log_info!(
+        "kitchen: {} acknowledged the cancellation of {id}",
+        who.name
+    );
     Ok(look(app, &station))
 }
 
-/// **Fire a course** (scope 3.5) — send the next part of an order to the
-/// kitchen when the table is ready for it.
+/// Fire a course — send the next part of an order to the kitchen when the table is ready for
+/// it.
 pub fn fire_on(app: &App, order_id: String, course: String) -> UiResult<KitchenView> {
     let who = crate::guard::require(app, Permission::BillCreate)?;
 
-    // **The kitchen is never told twice.** The screen already hides a course
-    // that has gone, but two waiters on two terminals can press the same
-    // button within a second of each other, and the second press must not
-    // become a second lot of food. The deliveries themselves are the record.
+    // The kitchen is never told twice.
     let already = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).kitchen().courses_fired(&order_id))
@@ -582,8 +499,6 @@ pub fn fire_on(app: &App, order_id: String, course: String) -> UiResult<KitchenV
 }
 
 /// Read a ticket, change it, and write it back — in one transaction.
-///
-/// D82's shape: the change and its record commit together or not at all.
 fn with_ticket<T>(
     app: &App,
     id: &str,
@@ -615,18 +530,10 @@ fn with_ticket<T>(
     }
 }
 
-/// **Send an order to the kitchen screen.** Returns the station it went to.
-///
-/// Called from the same place the kitchen ticket is printed, so screen and
-/// paper stay in step. `course` of `None` sends the whole order, which is what
-/// a shop that does not use courses always does.
+/// Send an order to the kitchen screen.
 pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String> {
     let at = now();
-    let id = format!(
-        "kds_{order_id}_{}_{}",
-        course.unwrap_or("all"),
-        at.millis()
-    );
+    let id = format!("{}_{order_id}", crate::newid::fresh_at("kds", at));
 
     app.with_shop(|shop| {
         shop.db
@@ -635,11 +542,7 @@ pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String>
                 let order = repos.orders().find(&OrderId::new(order_id.to_owned()))?;
                 let categories = repos.menu().list_categories(OUTLET)?;
 
-                // **The station comes from the CATEGORY of the food.** A ticket
-                // goes where its dishes are cooked, and a firing with dishes
-                // from two stations becomes two tickets — which is what a real
-                // kitchen needs, because the tandoor cannot see the wok's
-                // screen.
+                // The station comes from the CATEGORY of the food.
                 let mut by_station: BTreeMap<String, Option<u32>> = BTreeMap::new();
                 if let Some(order) = &order {
                     for line in order.core().cart.lines() {
@@ -662,8 +565,8 @@ pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String>
                             })
                             .filter(|s| !s.trim().is_empty())
                             .unwrap_or_else(|| DEFAULT_STATION.to_owned());
-                        // The target is the SLOWEST dish: the order is ready
-                        // when the last thing on it is.
+                        // The target is the SLOWEST dish: the order is ready when the last
+                        // thing on it is.
                         let slowest = by_station.entry(station).or_insert(None);
                         if let Some(minutes) = line.snapshot.prep_minutes {
                             *slowest = Some(slowest.unwrap_or(0).max(minutes));
@@ -679,17 +582,8 @@ pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String>
                     if index == 0 {
                         first = station.clone();
                     }
-                    let delivery = Delivery::new(
-                        &format!("{id}_{station}"),
-                        order_id,
-                        station,
-                        at,
-                    );
-                    // The order's OWN business day, not today's — D5, and B1's
-                    // lesson: a ticket sent at 00:30 belongs to the day the
-                    // order does, which for a shop that closes at 1 am is
-                    // yesterday. Falling back to today only when the order has
-                    // gone.
+                    let delivery = Delivery::new(&format!("{id}_{station}"), order_id, station, at);
+                    // The order's OWN business day, not today's.
                     let day = order
                         .as_ref()
                         .map_or_else(|| crate::flows::today(at), |o| o.core().business_day);
@@ -703,24 +597,15 @@ pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String>
     })
 }
 
-/// **The paper fallback.** Called on a timer by `main`.
-///
-/// Any ticket nobody drew within `ACK_SECONDS` goes to the printer, is marked
-/// `printed`, and is logged — audit D4: a failure that is only a toast is a
-/// failure nobody heard.
-///
-/// Returns how many went to paper, so the caller can say so.
+/// The paper fallback. Called on a timer by `main`.
 pub fn print_what_nobody_drew(app: &App) -> u32 {
     print_what_nobody_drew_at(app, now())
 }
 
-/// `print_what_nobody_drew`, at a stated time — see `look_at` for why the clock
-/// is an argument.
+/// `print_what_nobody_drew`, at a stated time — see `look_at` for why the clock is an argument.
 pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
-    // This runs on its own thread every five seconds, so it is the one caller
-    // that can genuinely collide with a cashier. It waits its turn like every
-    // other action — a reprint must not land in the middle of a sale that is
-    // halfway written.
+    // This runs on its own thread every five seconds, so it is the one caller that can
+    // genuinely collide with a cashier.
     let _one_at_a_time = app.begin_action();
 
     let overdue = app
@@ -733,18 +618,18 @@ pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
 
     let mut printed = 0;
     for ticket in overdue {
-        if ticket.delivery.decide(at, mb_core::kitchen_delivery::ACK_SECONDS) != Action::PrintNow {
+        if ticket
+            .delivery
+            .decide(at, mb_core::kitchen_delivery::ACK_SECONDS)
+            != Action::PrintNow
+        {
             continue;
         }
-        // The paper first, then the mark. A mark written before the paper is a
-        // ticket the counter believes it printed and nobody has.
+        // The paper first, then the mark.
         let sent = crate::flows::print_kitchen_ticket_for(app, &ticket.delivery.order_id);
 
-        // **An empty id means there was nothing left to send**, because the
-        // counter had already put this food on paper when the button was
-        // pressed. That is the ordinary case in a shop with no kitchen screen,
-        // and it is not a warning: no paper is missing and nobody has to go and
-        // look at anything.
+        // An empty id means there was nothing left to send, because the counter had already put
+        // this food on paper when the button was pressed.
         let nothing_left_to_send = matches!(&sent, Ok(id) if id.is_empty());
 
         let outcome = with_ticket(app, &ticket.delivery.id.clone(), |t| {
@@ -752,10 +637,7 @@ pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
             Ok(())
         });
 
-        // **And when the mark fails, say so.** It used to be silent: the paper
-        // had gone out, the ticket was still waiting to be drawn, and five
-        // seconds later this printed it again — and again, for as long as the
-        // order was open, with nothing in the log to explain the pile of paper.
+        // And when the mark fails, say so.
         if let Err(e) = &outcome {
             crate::log_warn!(
                 "order={} went to paper but could not be marked as printed ({e}). \
@@ -779,18 +661,18 @@ pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
             "order={} no kitchen screen drew this in time, so it went to paper \
              ({}). Check the screen at the {} station.",
             ticket.delivery.order_id,
-            if sent.is_ok() { "printed" } else { "and the printer refused too" },
+            if sent.is_ok() {
+                "printed"
+            } else {
+                "and the printer refused too"
+            },
             ticket.delivery.station,
         );
     }
     printed
 }
 
-/// **Watch for tickets nobody drew.** Started once, from `main`.
-///
-/// One sleeping thread, checking every few seconds. Not a React timer: a
-/// screen that is not open would not run one, and the whole point is that this
-/// works when the screen is dead.
+/// Watch for tickets nobody drew.
 pub fn watch_for_undrawn_tickets(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
@@ -799,16 +681,15 @@ pub fn watch_for_undrawn_tickets(handle: &tauri::AppHandle) {
         .name("mb-kitchen-fallback".to_owned())
         .spawn(move || {
             loop {
-                // Well under `ACK_SECONDS`, so a ticket goes to paper close to
-                // the deadline rather than up to a deadline late.
+                // Well under `ACK_SECONDS`, so a ticket goes to paper close to the deadline
+                // rather than up to a deadline late.
                 std::thread::sleep(std::time::Duration::from_secs(5));
                 let Some(app) = ticking.try_state::<App>() else {
                     return;
                 };
                 let printed = print_what_nobody_drew(&app);
                 if printed > 0 {
-                    // The counter says so out loud — audit D4: a failure that
-                    // is only a toast is a failure nobody heard.
+                    // The counter says so out loud.
                     crate::push::emit_print_queue(&ticking);
                 }
             }
@@ -816,9 +697,7 @@ pub fn watch_for_undrawn_tickets(handle: &tauri::AppHandle) {
         .ok();
 }
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn kitchen(app: tauri::State<'_, App>, station: Option<String>) -> UiResult<KitchenView> {
@@ -907,7 +786,7 @@ mod tests {
         }
     }
 
-    /// **A cancellation beats everything else on the card**, including late.
+    /// A cancellation beats everything else on the card, including late.
     #[test]
     fn an_unacknowledged_cancellation_is_the_loudest_thing_on_the_screen() {
         let mut ticket = a_ticket(State::Shown, 30);
@@ -932,7 +811,7 @@ mod tests {
         assert!(card.says.contains("paper"));
     }
 
-    /// The minutes are computed in Rust. The screen does no arithmetic (R8).
+    /// The minutes are computed in Rust.
     #[test]
     fn the_screen_is_given_minutes_and_a_sentence() {
         let card = drawn(&a_ticket(State::Shown, 11));
@@ -940,8 +819,7 @@ mod tests {
         assert_eq!(card.waiting, "11 min");
     }
 
-    /// **The item's own prep time decides late, not one number for everything.**
-    /// A coffee is late at four minutes; a biryani is not.
+    /// The item's own prep time decides late, not one number for everything.
     #[test]
     fn a_dish_with_its_own_target_uses_it() {
         let mut quick = a_ticket(State::Shown, 6);
@@ -951,7 +829,11 @@ mod tests {
 
         let mut slow = a_ticket(State::Shown, 6);
         slow.expected_minutes = Some(20);
-        assert_eq!(drawn(&slow).tone, "cooking", "a 20-minute dish at 6 minutes");
+        assert_eq!(
+            drawn(&slow).tone,
+            "cooking",
+            "a 20-minute dish at 6 minutes"
+        );
     }
 
     /// A menu nobody has costed still gets a useful screen.
@@ -959,16 +841,30 @@ mod tests {
     fn a_dish_with_no_target_falls_back_to_a_named_number() {
         let at = Timestamp::from_millis(0);
         assert_eq!(
-            card(&a_ticket(State::Shown, i64::from(LATE_AFTER_MINUTES) - 1), None, &[], &[], at).tone,
+            card(
+                &a_ticket(State::Shown, i64::from(LATE_AFTER_MINUTES) - 1),
+                None,
+                &[],
+                &[],
+                at
+            )
+            .tone,
             "cooking"
         );
         assert_eq!(
-            card(&a_ticket(State::Shown, i64::from(LATE_AFTER_MINUTES)), None, &[], &[], at).tone,
+            card(
+                &a_ticket(State::Shown, i64::from(LATE_AFTER_MINUTES)),
+                None,
+                &[],
+                &[],
+                at
+            )
+            .tone,
             "late"
         );
     }
 
-    /// **Two lines of the same dish are two jobs** when one has a note.
+    /// Two lines of the same dish are two jobs when one has a note.
     #[test]
     fn a_note_makes_a_line_its_own_job() {
         let plain = mb_core::LineIdentity {

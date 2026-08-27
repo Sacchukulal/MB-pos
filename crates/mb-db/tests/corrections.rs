@@ -1,8 +1,4 @@
-//! **Voids, cancels, reprints, refunds — and the sum that has to tie.**
-//!
-//! The reconciliation test is the one that matters. A void a report cannot see
-//! is a void that looks like theft to whoever audits the shop, and audit B5's
-//! whole complaint is that a mistake had nowhere to go.
+//! Voids, cancels, reprints, refunds — and the sum that has to tie.
 
 #![allow(
     clippy::expect_used,
@@ -15,10 +11,9 @@ mod common;
 use common::Scratch;
 use common::shop::{self, OUTLET, TERMINAL};
 use mb_core::{
-    Registration,
     AnyOrder, BillInput, BusinessDay, Cart, ItemSnapshot, Money, OrderId, OrderType, Payment,
-    PaymentMode, PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TaxRate, TaxSpec,
-    Timestamp, compute_bill,
+    PaymentMode, PlaceOfSupply, Qty, Registration, RoundingMode, Settlement, StaffId, TaxRate,
+    TaxSpec, Timestamp, compute_bill,
 };
 use mb_db::repo::corrections::{Reason, Refund};
 use mb_db::{Db, Repos};
@@ -48,13 +43,8 @@ fn tea() -> ItemSnapshot {
 /// Settle one bill of `qty` dosa, and return the order.
 fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
     let mut cart = Cart::new();
-    cart.add(
-        tea(),
-        Qty::from_whole(qty).expect("in range"),
-        None,
-        vec![],
-    )
-    .expect("adds");
+    cart.add(tea(), Qty::from_whole(qty).expect("in range"), None, vec![])
+        .expect("adds");
 
     let bill = compute_bill(
         BillInput::new(&cart, Registration::Regular)
@@ -80,11 +70,19 @@ fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
 
     let till = mb_db::Till::new(OUTLET, TERMINAL);
     let open = mb_db::open_draft(db, till, draft).expect("opened");
-    mb_db::settle(db, till, open, bill, settlement, at(2), StaffId::new("staff_1"))
-        .expect("settled")
+    mb_db::settle(
+        db,
+        till,
+        open,
+        bill,
+        settlement,
+        at(2),
+        StaffId::new("staff_1"),
+    )
+    .expect("settled")
 }
 
-/// **T3 — gross − voids = net.** The figure a chartered accountant asks for.
+/// Gross − voids = net.
 #[test]
 fn gross_minus_voids_equals_net_across_a_day() {
     let scratch = Scratch::new("recon");
@@ -99,9 +97,7 @@ fn gross_minus_voids_equals_net_across_a_day() {
 
     let mut voided_total = Money::ZERO;
     for order in settled.iter().take(2) {
-        voided_total = voided_total
-            .add(order.bill.grand_total)
-            .expect("in range");
+        voided_total = voided_total.add(order.bill.grand_total).expect("in range");
         let voided = order
             .clone()
             .void("Billed twice", StaffId::new("staff_1"), at(9))
@@ -138,7 +134,7 @@ fn gross_minus_voids_equals_net_across_a_day() {
     assert!(totals.net.is_positive());
 }
 
-/// **T2.** A voided bill keeps its number, and keeps its money on the row.
+/// A voided bill keeps its number, and keeps its money on the row.
 #[test]
 fn a_voided_bill_keeps_its_number_and_its_amounts() {
     let scratch = Scratch::new("void_keeps");
@@ -177,8 +173,7 @@ fn a_voided_bill_keeps_its_number_and_its_amounts() {
     }
 }
 
-/// **T8.** The reprint count is the number on the paper, and the original is
-/// copy 1.
+/// The reprint count is the number on the paper, and the original is copy 1.
 #[test]
 fn the_reprint_number_is_the_number_on_the_paper() {
     let scratch = Scratch::new("reprints");
@@ -218,7 +213,7 @@ fn the_reprint_number_is_the_number_on_the_paper() {
     assert_eq!(rows[0].printed_by, Some(StaffId::new("staff_1")));
 }
 
-/// **T11.** A refund needs a voided bill, and cannot exceed what was taken.
+/// A refund needs a voided bill, and cannot exceed what was taken.
 #[test]
 fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
     let scratch = Scratch::new("refunds");
@@ -269,10 +264,12 @@ fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
                 .record_refund(OUTLET, &refund(too_much, "ref_2"), day())
         })
         .expect_err("more went back than came in");
-    assert!(refused.to_string().contains("left to give back"), "{refused}");
+    assert!(
+        refused.to_string().contains("left to give back"),
+        "{refused}"
+    );
 
-    // Part of it now. A flat amount rather than half, because dividing money
-    // is what D7 forbids and a test is not an exception.
+    // Part of it now.
     let half = Money::from_paise(1_000);
     db.transaction(|tx| {
         Repos::new(tx)
@@ -289,7 +286,10 @@ fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
                 .record_refund(OUTLET, &refund(taken, "ref_4"), day())
         })
         .expect_err("the second refund ignored the first");
-    assert!(refused.to_string().contains("left to give back"), "{refused}");
+    assert!(
+        refused.to_string().contains("left to give back"),
+        "{refused}"
+    );
 
     let so_far = db
         .transaction(|tx| Repos::new(tx).corrections().refunded_so_far(&order))
@@ -301,10 +301,13 @@ fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
         .transaction(|tx| Repos::new(tx).corrections().day_totals(OUTLET, day()))
         .expect("totals");
     assert_eq!(totals.refunded, half);
-    assert_eq!(totals.voids, taken, "the void is the whole bill, refund or not");
+    assert_eq!(
+        totals.voids, taken,
+        "the void is the whole bill, refund or not"
+    );
 }
 
-/// **T12.** The reason list is data, and a shop's edits are its own.
+/// The reason list is data, and a shop's edits are its own.
 #[test]
 fn the_reason_list_is_the_shops_own() {
     let scratch = Scratch::new("reasons");
@@ -427,12 +430,6 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
     assert_eq!(totals.voids, Money::ZERO);
 }
 
-/// **T2 and T3 — the claim D52 makes, tested.**
-///
-/// Editing a tax class rewrites the live menu. It does NOT touch a bill that
-/// has already been printed, and it does NOT touch the lines already on an
-/// order that is still open — those froze their own rate when they were added
-/// (crown jewel 4).
 #[test]
 fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
     use mb_core::{TaxClassId, TaxRate};
@@ -441,15 +438,16 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
     let db = scratch.open();
     shop::build(&db);
 
-    // The fixture's dosa is on "Restaurant food 5%", and there is a settled
-    // bill with a dosa on it.
+    // The fixture's dosa is on "Restaurant food 5%", and there is a settled bill with a dosa on
+    // it.
     let before_rate = db
         .transaction(|tx| {
             Ok(Repos::new(tx)
                 .menu()
                 .find_item(&mb_core::ItemId::new("itm_dosa"))?
                 .expect("the dosa")
-                .tax.rate)
+                .tax
+                .rate)
         })
         .expect("read");
     assert_eq!(before_rate, TaxRate::from_percent(5).expect("5%"));
@@ -457,9 +455,8 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
     // What the settled bill says today.
     let billed_rates: Vec<i64> = db
         .read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT DISTINCT rate_bp FROM bill_tax_rows ORDER BY rate_bp",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT DISTINCT rate_bp FROM bill_tax_rows ORDER BY rate_bp")?;
             let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
             Ok(rows.filter_map(Result::ok).collect())
         })
@@ -489,17 +486,21 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
                 .menu()
                 .find_item(&mb_core::ItemId::new("itm_dosa"))?
                 .expect("the dosa")
-                .tax.rate)
+                .tax
+                .rate)
         })
         .expect("read");
-    assert_eq!(after_rate, TaxRate::from_percent(18).expect("18%"), "the live menu did not follow");
+    assert_eq!(
+        after_rate,
+        TaxRate::from_percent(18).expect("18%"),
+        "the live menu did not follow"
+    );
 
-    // **And the bill did not.**
+    // And the bill did not.
     let still: Vec<i64> = db
         .read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT DISTINCT rate_bp FROM bill_tax_rows ORDER BY rate_bp",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT DISTINCT rate_bp FROM bill_tax_rows ORDER BY rate_bp")?;
             let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
             Ok(rows.filter_map(Result::ok).collect())
         })
@@ -516,19 +517,19 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
                 .menu()
                 .find_item(&mb_core::ItemId::new("itm_beer"))?
                 .expect("the beer")
-                .tax.kind)
+                .tax
+                .kind)
         })
         .expect("read");
-    assert_eq!(orphan, mb_core::TaxKind::OutsideGst, "the beer moved with the food");
+    assert_eq!(
+        orphan,
+        mb_core::TaxKind::OutsideGst,
+        "the beer moved with the food"
+    );
 }
 
-/// Every class `mb-core` ships is seeded and live, and the liquor one is what
-/// lets a bar bill at all.
-///
-/// **The database holds one class mb-core does not ship**: `tax_packaged_12`.
-/// The 12% slab was abolished on 22 September 2025, so migration 0004
-/// deactivates it rather than deleting a row an existing shop's items may still
-/// point at. So the two lists are compared class by class, not by length.
+/// Every class `mb-core` ships is seeded and live, and the liquor one is what lets a bar bill
+/// at all.
 #[test]
 fn the_seeded_classes_match_the_ones_mb_core_ships() {
     let scratch = Scratch::new("taxclass_seed");
@@ -548,13 +549,16 @@ fn the_seeded_classes_match_the_ones_mb_core_ships() {
         assert!(found.is_active, "{} is seeded switched off", expected.name);
     }
 
-    // The retired slab: still there, so nothing points at a missing row, and
-    // off, so it is not offered to anybody setting up a menu today.
+    // The retired slab: still there, so nothing points at a missing row, and off, so it is not
+    // offered to anybody setting up a menu today.
     let retired = stored
         .iter()
         .find(|c| c.id.as_str() == "tax_packaged_12")
         .expect("the abolished 12% slab is retired, not deleted");
-    assert!(!retired.is_active, "the abolished 12% slab is still on offer");
+    assert!(
+        !retired.is_active,
+        "the abolished 12% slab is still on offer"
+    );
     assert_eq!(stored.len(), mb_core::starting_classes().len() + 1);
 
     // The commercial one: outside GST, priced tax-in, with a rate the shop sets.
@@ -566,12 +570,4 @@ fn the_seeded_classes_match_the_ones_mb_core_ships() {
     assert_eq!(liquor.tax.basis, mb_core::PriceBasis::Inclusive);
 }
 
-// **The per-order-type rate override test is GONE, with the feature.**
-//
-// P33, audit §3.5. `TaxClass::with_override`, `for_order_type` and
-// `TaxClassRepo::resolve` were modelled, stored in `tax_class_rates`, written
-// by the repository — and read by no caller anywhere in the product. The
-// belief that justified them, that "some states tax the same dish differently
-// to take away", is not current law either: parcel from a restaurant is
-// restaurant service at the same rate as dine-in. A rule that cannot fire,
-// resting on a fact that is not true, was deleted rather than wired up.
+// The per-order-type rate override test is GONE, with the feature.

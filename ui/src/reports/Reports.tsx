@@ -1,24 +1,4 @@
-/**
- * **Every report, on one screen** — scope 10, audit G1–G7.
- *
- * # There is one component here and there will only ever be one
- *
- * P17 proved the shape: the settings screen is one component over one
- * catalogue, and adding a setting touches no `.tsx` file. A report is the same
- * kind of thing — a title, some columns and some rows — so it gets the same
- * treatment. Thirteen reports, one table, one export path.
- *
- * Adding a report is a function in `mb-db/src/repo/reports.rs` and a line in
- * `src-tauri/src/reports.rs`'s `CATALOGUE`. **Nothing in this file changes**,
- * and a Rust test walks the list in both directions to keep that true.
- *
- * # Nothing on this page is a number
- *
- * Every cell arrives as a string that `Money::to_plain_string` produced, the
- * comparison arrives as a finished sentence, and the notes arrive written.
- * R8 and §6: this file has no arithmetic and no sentence assembly in it, which
- * is exactly what audit E3 found wrong with v1's reports.
- */
+/** Every report, on one screen. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -54,18 +34,9 @@ interface Line {
 
 export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const [list, setList] = useState<ReportListView | null>(null);
-  /**
-   * **The licence saying no, held rather than flashed** (P30.5).
-   *
-   * Reports are behind the licence (D86). On a shop without one this screen
-   * used to open on a spinner that never stopped and a red toast that slid
-   * away after four seconds — permanently blank, with the only explanation
-   * already gone. Now the refusal IS the screen, and it says how to fix it.
-   */
+  /** The licence saying no, held rather than flashed. */
   const [locked, setLocked] = useState<string>('');
-  // **The dashboard is what this screen opens on.** Audit G1: the owner's
-  // first question is "what needs me", and a screen that opens on a list of
-  // reports makes them ask it themselves.
+  // The dashboard is what this screen opens on.
   const [chosen, setChosen] = useState<string>(TODAY);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -75,8 +46,8 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   const complain = useCallback(
     (cause: unknown) => {
-      // A refusal is an answer, not a fault: it belongs on the screen, and a
-      // toast on top of it would say the same thing twice and then vanish.
+      // A refusal is an answer, not a fault: it belongs on the screen, and a toast on top of it
+      // would say the same thing twice and then vanish.
       if (isLicenceRefusal(cause)) {
         setLocked(cause.message);
         return;
@@ -86,8 +57,8 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     [toast],
   );
 
-  // The list, and with it the period presets — which come from Rust because
-  // "today" is the shop's business day and only Rust knows when that starts.
+  // The list, and with it the period presets — which come from Rust because "today" is the
+  // shop's business day and only Rust knows when that starts.
   useEffect(() => {
     call('report_list')
       .then((fresh) => {
@@ -101,9 +72,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       .catch(complain);
   }, [complain]);
 
-  // One effect, one call: whenever the report or the period changes, ask
-  // again. No caching — a report is a question about right now, and a stale
-  // answer with today's date on it is worse than a spinner.
+  // One effect, one call: whenever the report or the period changes, ask again.
   useEffect(() => {
     // Neither the dashboard nor the day close is a report.
     if (!from || !to || chosen === DAY_CLOSE || chosen === TODAY) return;
@@ -123,19 +92,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       .catch(complain);
   };
 
-  /**
-   * **Send the figures to somebody** — scope 10.13, `share_report`, which was
-   * written at P26 and never called.
-   *
-   * Rust composes the summary and, crucially, **says what each way of sending
-   * it cannot do** (D134): WhatsApp will not carry a table, e-mail opens a
-   * draft it cannot attach to. The screen shows that sentence rather than
-   * inventing a cheerful one, because a summary that arrives mangled is worse
-   * than one that was never sent.
-   *
-   * "Copy" is first and is the default, because it is the only one that cannot
-   * fail: a shopkeeper pastes it wherever they were going to send it anyway.
-   */
+  /** Send the figures to somebody. */
   const share = (channel: 'copy' | 'whats_app' | 'email' | 'folder') => {
     call('share_report', { id: chosen, period: { from, to }, channel })
       .then((shared) => {
@@ -162,15 +119,15 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   return (
     <div className="mb-reports">
       <Scroller inset className="mb-reports__rail">
-        {/* At the top and on their own: one is the question an owner opens
-            this screen to ask, the other is the thing a shop does every single
-            night. Neither is a report. */}
+        {/*
+          At the top and on their own: one is the question an owner opens this screen to ask,
+          the other is the thing a shop does every single night.
+        */}
         <div className="mb-reports__group">
           {[
-            // Not just "Today": there is a period preset by that name three
-            // inches to the right, and two buttons saying the same word that
-            // do different things is how a screen teaches somebody to distrust
-            // it. Found by a test that could not tell them apart either.
+            // Not just "Today": there is a period preset by that name three inches to the
+            // right, and two buttons saying the same word that do different things is how a
+            // screen teaches somebody to distrust it.
             { id: TODAY, label: 'Today at a glance' },
             { id: DAY_CLOSE, label: 'Close the day' },
           ].map((entry) => (
@@ -251,9 +208,9 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
               note={report.subtitle}
               action={
                 <div className="mb-reports__exports">
-                  {/* Sending it first, saving it second: an owner looking at
-                      this at 11 p.m. wants it on their phone far more often
-                      than they want a file on the till. */}
+                  {/*
+                    Sending it first, saving it second: an owner looking at this at 11 p.m.
+                  */}
                   <Button small variant="quiet" onClick={() => share('copy')}>
                     Copy
                   </Button>
@@ -308,9 +265,9 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
                 columns={columns}
                 rows={lines}
                 rowKey={(line) => `${line.at}`}
-                // The totals belong to the table: a second table underneath
-                // could not agree with it about column widths, and a column of
-                // rupees that does not line up looks broken (§3).
+                // The totals belong to the table: a second table underneath could not agree
+                // with it about column widths, and a column of rupees that does not line up
+                // looks broken (§3).
                 footer={report.totals ?? undefined}
                 empty={
                   <EmptyState

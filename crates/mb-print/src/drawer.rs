@@ -1,23 +1,11 @@
-//! The cash drawer — **scope 7.4, and v1 had none at all.**
-//!
-//! A drawer is wired to the printer, not to the PC: the printer's RJ11 socket
-//! fires a solenoid when it receives `ESC p`. So "open the drawer" is a byte
-//! sequence on a print job, which is why it lives in this crate.
-//!
-//! # Every rule here is a cash-control decision, not a preference
-//!
-//! The market gap table marks "cash drawer kick" as a cross against Magic Bill.
-//! Filling that in carelessly would be worse than leaving it empty: a till that
-//! can be opened without a sale is exactly the hole audit group C is about.
+//! The cash drawer.
 
 use mb_core::Settlement;
 use serde::{Deserialize, Serialize};
 
 use crate::template::Copy;
 
-/// Which pin of the printer's drawer socket. Two is much the commoner; five
-/// exists because some cash drawers and some printers disagree, and a shop that
-/// has the wrong one gets a drawer that never opens and no explanation.
+/// Which pin of the printer's drawer socket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DrawerPin {
@@ -30,8 +18,7 @@ pub enum DrawerPin {
 pub struct DrawerConfig {
     pub enabled: bool,
     pub pin: DrawerPin,
-    /// Only open when some of the money was cash. On by default: a card-only
-    /// bill has no change to give and no notes to put away.
+    /// Only open when some of the money was cash.
     pub cash_only: bool,
     /// How long the solenoid is energised, in milliseconds.
     pub on_ms: u16,
@@ -45,10 +32,8 @@ impl Default for DrawerConfig {
             enabled: false,
             pin: DrawerPin::Pin2,
             cash_only: true,
-            // 50 ms is long enough for every solenoid on the market and short
-            // enough not to cook one. Somebody will eventually try 255; that
-            // holds the coil energised for a quarter of a second on every bill,
-            // and coils are wound for pulses.
+            // 50 ms is long enough for every solenoid on the market and short enough not to
+            // cook one.
             on_ms: 50,
             off_ms: 50,
         }
@@ -68,17 +53,14 @@ impl DrawerConfig {
     }
 }
 
-/// `ESC p` counts in units of two milliseconds, in one byte — so 510 ms is the
-/// longest pulse the command can express, and anything longer is clamped rather
-/// than wrapped round to something short.
+/// `ESC p` counts in units of two milliseconds, in one byte — so 510 ms is the longest pulse
+/// the command can express, and anything longer is clamped rather than wrapped round to
+/// something short.
 fn clamp_units(ms: u16) -> u8 {
     u8::try_from(ms.div_euclid(2)).unwrap_or(u8::MAX)
 }
 
 /// Whether this settlement, printed as this kind of copy, may open the drawer.
-///
-/// `can_kick` is the printer's capability: a printer with no drawer socket is
-/// not a failure, it is a shop that does not have a drawer.
 #[must_use]
 pub fn should_kick(
     config: &DrawerConfig,
@@ -90,26 +72,21 @@ pub fn should_kick(
         return false;
     }
 
-    // **A reprint never opens the drawer, whatever the settings say.**
-    // Otherwise "reprint the last bill" is a way to open the till without a
-    // sale, and it is one that leaves a receipt to explain itself with.
-    // A voided bill's copy does not either: the money went back to the customer
-    // through whatever P12 decides, not through a drawer that opens itself.
+    // A reprint never opens the drawer, whatever the settings say.
     if !matches!(copy, Copy::Original) {
         return false;
     }
 
     let Some(settlement) = settlement else {
-        // No settlement means this is not a bill — a kitchen ticket, a label, a
-        // test print. None of them is a sale.
+        // No settlement means this is not a bill — a kitchen ticket, a label, a test print.
         return false;
     };
 
     if !config.cash_only {
         return true;
     }
-    // A split payment with any cash in it still needs the drawer: the cashier
-    // has notes in their hand either way.
+    // A split payment with any cash in it still needs the drawer: the cashier has notes in
+    // their hand either way.
     settlement
         .payments()
         .iter()

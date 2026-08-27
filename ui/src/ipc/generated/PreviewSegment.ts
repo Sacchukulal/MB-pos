@@ -5,8 +5,7 @@
  */
 export type PreviewSegment = { 
 /**
- * The text inside the box, already trimmed. The screen aligns it; it does
- * not slice anything, because slicing is deciding.
+ * The text inside the box, already trimmed.
  */
 text: string, 
 /**

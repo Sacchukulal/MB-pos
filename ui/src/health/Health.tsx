@@ -1,20 +1,4 @@
-/**
- * **"Is this counter healthy?"** — P22.
- *
- * # Every row is a sentence, and this file writes none of them
- *
- * R8, and crown jewel 14. `health.rs` composes each row including its fix, and
- * D100 is the rule it follows: *"disk space low" is a fact a shopkeeper cannot
- * act on.* So there is no `if (tone === 'danger')` copy in here — the screen
- * chooses where a row goes and what it looks like, and never what it says.
- *
- * # And it is where support starts
- *
- * The diagnostics bundle lives at the bottom, because the sequence is: the
- * owner opens this screen, sees which row is amber, tries the fix it names,
- * and — if that does not work — presses Copy diagnostics and emails us. D94:
- * they see exactly what is in it before it exists.
- */
+/** "Is this counter healthy?". */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -36,7 +20,7 @@ const TONES: Record<string, BadgeTone> = {
   danger: 'danger',
 };
 
-/** What the chip says. The row's own sentence carries the detail. */
+/** What the chip says. */
 const CHIPS: Record<string, string> = {
   ok: 'Fine',
   warn: 'Look at this',
@@ -125,7 +109,7 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         <Table columns={columns} rows={[...view.rows]} rowKey={(row) => row.id} />
       </Card>
 
-      {/* D94 — the manifest before the zip. */}
+      {/* The manifest before the zip. */}
       <Card>
         <SectionHeader
           title="Send us what is happening"
@@ -170,12 +154,6 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           </>
         ) : (
           <div className="mb-health__actions mb-row mb-row--end">
-            {/* **Audit E7's other half.** The bundle is what somebody sends
-                when they can be talked through it; this is what somebody
-                sends when they cannot. `reveal_logs` opens the folder in
-                Explorer and had never been called from anywhere — the log
-                file existed and there was no way to reach it from inside the
-                program that wrote it. */}
             <Button
               variant="quiet"
               onClick={() => {

@@ -1,30 +1,4 @@
-/**
- * **The kitchen display** — P24, scope 3.3.
- *
- * A screen on the kitchen wall instead of a paper ticket. Read from two metres,
- * in a bright hot room, by somebody whose hands are full.
- *
- * # Three rules this screen is built around
- *
- * **1. Huge type, and no mouse.** Everything is a big touch target. Every
- * action also has a number key, because plenty of shops mount a keyboard or a
- * numpad instead of a touchscreen — press `1` to clear the first card.
- *
- * **2. Colour is never the only signal.** UI_GUIDELINES §2, and here it is not
- * a nicety: the room is bright, the screen is across it, and a colour-blind
- * cook is not a rare event. Every card carries a WORD and a border as well as a
- * colour.
- *
- * **3. No card owns a clock.** PERFORMANCE §5 rule 10, and P14 learned it on
- * the floor grid. One shared tick re-reads the minutes Rust already computed.
- * A timer per card is budget M3's leak — and M3 exists because *"v1's KDS-style
- * timer screens are exactly where a re-render storm hides"*.
- *
- * # Nothing here decides anything
- *
- * R8. Which colour, how many minutes, what the state is called, whether a line
- * is new — all of it arrives from `kitchen.rs`. This file draws.
- */
+/** The kitchen display. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -40,11 +14,11 @@ export function Kitchen() {
   const [view, setView] = useState<KitchenView | null>(null);
   const [station, setStation] = useState<string | null>(null);
 
-  // **ONE clock for the whole screen** — see the note above.
+  // ONE clock for the whole screen — see the note above.
   const tick = useTick();
 
-  // One reporter for the whole product, obeying the tone the engine set — so
-  // "the kitchen already has this" is not shown in the colour of a real fault.
+  // One reporter for the whole product, obeying the tone the engine set — so "the kitchen
+  // already has this" is not shown in the colour of a real fault.
   const report = useReport();
 
   const load = useCallback(() => {
@@ -52,23 +26,16 @@ export function Kitchen() {
     call('kitchen', { station })
       .then(setView)
       .catch(() => {
-        /* A kitchen screen that goes blank is the failure this whole feature
-           exists to prevent. It keeps what it had and tries again on the next
-           tick; the counter is meanwhile printing anything nobody drew. */
+        /*
+         * A kitchen screen that goes blank is the failure this whole feature exists to prevent.
+         */
       });
   }, [station]);
 
-  // Re-read on every tick. The tickets carry their own minutes, so this is a
-  // repaint of values Rust computed and not a clock running here.
+  // Re-read on every tick.
   useEffect(load, [load, tick]);
 
-  /**
-   * **Tell the counter this screen DREW the ticket** — not that it arrived.
-   *
-   * An ack meaning "the bytes got here" lies exactly when a tablet's power
-   * saver has frozen the tab, which is the case the paper fallback exists for.
-   * So this runs after the cards are on screen.
-   */
+  /** Tell the counter this screen DREW the ticket — not that it arrived. */
   useEffect(() => {
     if (!view) return;
     for (const ticket of view.tickets) {
@@ -82,8 +49,7 @@ export function Kitchen() {
     work.then(setView).catch(report);
   };
 
-  // **Keyboard, for a shop that mounted a numpad instead of a touchscreen.**
-  // `1`..`9` clears that card. Both ways in, always (T9).
+  // Keyboard, for a shop that mounted a numpad instead of a touchscreen.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!view || event.ctrlKey || event.altKey) return;
@@ -125,10 +91,7 @@ export function Kitchen() {
             ))}
           </span>
         )}
-        {/* **The undo, and it lives here because a cleared card is gone.**
-            A cook who clears the wrong ticket has nothing left to press on —
-            so the way back has to be somewhere still on screen. It names the
-            card, so nobody brings back the wrong one. */}
+        {/* The undo, and it lives here because a cleared card is gone. */}
         {view.lastCleared && (
           <button
             type="button"
@@ -142,8 +105,7 @@ export function Kitchen() {
         )}
       </header>
 
-      {/* Courses waiting to be fired (scope 3.5). Empty for the shops that do
-          not use courses, which is most of them — and they never see this. */}
+      {/* Courses waiting to be fired. */}
       {view.waitingCourses.length > 0 && (
         <div className="mb-kds__fire">
           <span className="mb-kds__fire-label">Ready to fire:</span>
@@ -226,10 +188,7 @@ function Card({
             key={line.key}
             className={line.isDone ? 'mb-kds__line mb-kds__line--done' : 'mb-kds__line'}
           >
-            {/* Tap one dish as it comes off the pass — the owner asked for
-                both this and clearing the whole card. Tapping again unticks
-                it, because a cook who ticks the wrong dish presses it again
-                and an undo behind a different button is one nobody finds. */}
+            {/* Tap one dish as it comes off the pass. */}
             <button type="button" className="mb-kds__tick" onClick={() => onBumpLine(line.key)}>
               <span className="mb-kds__qty">{line.qty}</span>
               <span className="mb-kds__name">
@@ -244,9 +203,7 @@ function Card({
 
       <footer className="mb-kds__actions">
         {ticket.isCancelled ? (
-          // **A cancellation cannot be dismissed, only acknowledged** (D107).
-          // Food already cooking is thrown away; food not started is cooked for
-          // nobody. It is the one thing here allowed to interrupt.
+          // A cancellation cannot be dismissed, only acknowledged.
           <Button variant="danger" wide onClick={onAcknowledge}>
             Got it — cancelled
           </Button>

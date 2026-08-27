@@ -1,15 +1,4 @@
 //! Staff, roles and permissions.
-//!
-//! **Permissions come back as a typed set, not as strings.** That is
-//! BACKEND-G7: v1's permission map was free-form, "any key can be written; a
-//! typo in a permission name silently means 'denied'". Here a permission that
-//! is not a row cannot be *granted* — the foreign key refuses it — and a code
-//! that is not a [`Permission`] cannot be *read*: it becomes
-//! [`DbError::BadValue`] at the row, exactly like `StaffStatus::from_sql`.
-//!
-//! P11 turned this file from "returns what the table says" into "returns what
-//! the program understands", which is the difference between the fix being in
-//! the schema and the fix being load-bearing.
 
 use mb_auth::{Permission, PermissionSet, PinHash, RoleShape};
 use mb_core::{Money, StaffId, Timestamp};
@@ -19,8 +8,7 @@ use crate::encode;
 use crate::error::DbError;
 use crate::repo::outbox::{Op, OutboxRepo};
 
-/// Scope 9.15: a staff record is never deleted. Someone who left in March is
-/// still on March's bills, March's audit trail and March's payroll.
+/// A staff record is never deleted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaffStatus {
     Active,
@@ -57,35 +45,28 @@ pub struct StaffMember {
     pub code: Option<String>,
     pub role_id: Option<String>,
     pub role_name: Option<String>,
-    /// Argon2id, chosen and owned by `mb-auth` (P11). This crate stores and
-    /// returns the string and forms no opinion about it beyond "it parses" —
-    /// a column that will not parse is a locked door, never "no PIN set".
+    /// Argon2id, chosen and owned by `mb-auth`.
     pub pin_hash: Option<String>,
     pub status: StaffStatus,
     /// Every permission the role grants.
     pub permissions: PermissionSet,
-    /// Scope 1.12, from the role. Carried on the staff member because the
-    /// caller wants one lookup, not two, at the moment a discount is typed.
+    /// 12, from the role.
     pub max_discount_bp: Option<u32>,
     pub max_discount: Option<Money>,
 }
 
 impl StaffMember {
-    /// The stored PIN, parsed — or [`DbError::BadValue`] if the column has been
-    /// truncated or edited.
-    ///
-    /// `Ok(None)` genuinely means *this person has no PIN*, which is a real
-    /// state a shop lives in on its first day (P11 item 9) and must not be
-    /// confused with a broken one.
+    /// The stored PIN, parsed — or `DbError::BadValue` if the column has been truncated or
+    /// edited.
     pub fn pin(&self) -> Result<Option<PinHash>, DbError> {
         match &self.pin_hash {
             None => Ok(None),
-            Some(stored) => PinHash::from_stored(stored).map(Some).map_err(|_| {
-                DbError::BadValue {
+            Some(stored) => PinHash::from_stored(stored)
+                .map(Some)
+                .map_err(|_| DbError::BadValue {
                     column: "staff.pin_hash",
                     value: "unreadable".to_owned(),
-                }
-            }),
+                }),
         }
     }
 }
@@ -102,9 +83,6 @@ impl<'a> PeopleRepo<'a> {
     }
 
     /// Every permission this build knows, straight from the seeded table.
-    ///
-    /// P11 builds its role screen from this and from nothing else, so a
-    /// permission it can offer is a permission that exists.
     pub fn permission_codes(&self) -> Result<Vec<(String, String)>, DbError> {
         let mut stmt = self
             .tx
@@ -120,10 +98,6 @@ impl<'a> PeopleRepo<'a> {
     }
 
     /// Save a role and the exact set of permissions it grants.
-    ///
-    /// The permissions are replaced wholesale rather than diffed: a role is a
-    /// bundle, the bundle is small, and a diff is where "the checkbox looked
-    /// off but the row was still there" comes from.
     pub fn save_role(&self, outlet: &str, role: &RoleShape, at: Timestamp) -> Result<(), DbError> {
         let id = role.id.as_str();
         self.tx.execute(
@@ -240,13 +214,8 @@ impl<'a> PeopleRepo<'a> {
         Ok(staff)
     }
 
-    /// One person, by id — what a login needs, and the reason it is a query
-    /// rather than a filter over [`Self::list_staff`].
-    ///
-    /// BACKEND-**D1** is the finding: v1 compared the typed PIN against *every*
-    /// active staff row, which made a random guess ten times likelier to land
-    /// with ten staff, and would cost ten Argon2 verifications here. The cashier
-    /// says who they are, then proves it — one row, one verification.
+    /// One person, by id — what a login needs, and the reason it is a query rather than a
+    /// filter over `Self::list_staff`.
     pub fn find_staff(&self, outlet: &str, id: &str) -> Result<Option<StaffMember>, DbError> {
         Ok(self
             .list_staff(outlet)?
@@ -286,12 +255,7 @@ impl<'a> PeopleRepo<'a> {
         Ok(roles)
     }
 
-    /// **How many active people can still administer this shop.**
-    ///
-    /// The caller refuses the change that would take this to zero — see
-    /// `AuthError::LastAdministrator`. A shop with nobody who can manage staff
-    /// is a shop that can never be repaired from its own counter, and the only
-    /// moment to notice is before the write.
+    /// How many active people can still administer this shop.
     pub fn active_administrators(&self, outlet: &str) -> Result<Vec<StaffId>, DbError> {
         Ok(self
             .list_staff(outlet)?
@@ -312,9 +276,9 @@ impl<'a> PeopleRepo<'a> {
         for row in rows {
             codes.push(row?);
         }
-        // **BACKEND-G7's other half.** A code the program does not know is an
-        // error at the row, not a permission quietly dropped from the set —
-        // which is what a silent "denied" looked like from behind the counter.
+        // BACKEND-G7's other half. A code the program does not know is an error at the row, not
+        // a permission quietly dropped from the set — which is what a silent "denied" looked
+        // like from behind the counter.
         PermissionSet::from_codes(codes).map_err(|e| DbError::BadValue {
             column: "role_permissions.permission_code",
             value: e.to_string(),

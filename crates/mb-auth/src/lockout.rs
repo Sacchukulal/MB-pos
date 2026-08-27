@@ -1,37 +1,12 @@
-//! **The backoff, and where the count comes from.**
-//!
-//! > BACKEND-**D1**: *"A 4-digit staff PIN with no lockout … No lockout, no
-//! > delay, no captcha, no attempt log. A few thousand automated tries gets
-//! > somebody in as *some* employee."*
-//!
-//! # The count is not a column
-//!
-//! It is `login.failed` rows in the audit log since that person's last
-//! `login.ok`. No counter to reset, nothing to keep in step — and, the part
-//! that matters, **the lockout survives a restart**, which an in-memory counter
-//! does not and which is the first thing anybody trying PINs would discover.
-//!
-//! It also means the attempt log BACKEND-D1 asks for and the lockout are the
-//! same fact rather than two facts that can disagree.
-//!
-//! # Per person, never global
-//!
-//! A global lockout is a waiter's route to locking the owner out of their own
-//! shop on a Saturday night. And the recovery path (see [`crate::recovery`]) is
-//! never locked out at all, for the same reason: it is what stops five wrong
-//! guesses from being a denial of service against the person who owns the till.
+//! The backoff, and where the count comes from.
 
 use std::time::Duration;
 
-/// Four wrong PINs cost nothing. A cashier mistypes; a shop is busy.
+/// Four wrong PINs cost nothing.
 pub const LOCKOUT_FREE_ATTEMPTS: u32 = 4;
 
-/// How long this person must wait, given how many times they have failed since
-/// they last got in.
-///
-/// The steps are 30 s, 2 min, then 15 min: long enough that a script is
-/// pointless (a million guesses at 15 minutes is 28 years), short enough that a
-/// cashier who genuinely forgot is not sent home.
+/// How long this person must wait, given how many times they have failed since they last got
+/// in.
 #[must_use]
 pub fn lockout_after(failures: u32) -> Option<Duration> {
     match failures {
@@ -42,8 +17,7 @@ pub fn lockout_after(failures: u32) -> Option<Duration> {
     }
 }
 
-/// What the lock screen says. **Never "attempt 5 of 5"** — that tells somebody
-/// guessing exactly how much room is left. It says the wait and nothing else.
+/// What the lock screen says.
 #[must_use]
 pub fn wait_message(remaining: Duration) -> String {
     let seconds = remaining.as_secs();
@@ -101,11 +75,16 @@ mod tests {
     fn the_message_gives_nothing_away() {
         for failures in 5..9 {
             let message = wait_message(lockout_after(failures).expect("locked"));
-            // The number in "15 minutes" is fine. A number of ATTEMPTS is not:
-            // "attempt 5 of 5" tells a guesser exactly how much room is left.
+            // The number in "15 minutes" is fine.
             let lower = message.to_lowercase();
-            assert!(!lower.contains("attempt"), "{message} counts attempts out loud");
-            assert!(!lower.contains(" of "), "{message} counts attempts out loud");
+            assert!(
+                !lower.contains("attempt"),
+                "{message} counts attempts out loud"
+            );
+            assert!(
+                !lower.contains(" of "),
+                "{message} counts attempts out loud"
+            );
             assert!(
                 !lower.contains("last"),
                 "{message} warns that this is the last one"

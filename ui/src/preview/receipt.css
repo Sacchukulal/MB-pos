@@ -1,44 +1,22 @@
-/* The receipt preview.
-
-   **Everything on this page is measured in printer dots** — P32. One variable,
-   `--dot`, says how many screen pixels a dot is worth, and every position, size
-   and height is a dot count Rust computed. Change `--dot` and the paper zooms;
-   nothing else can move relative to anything else.
-
-   It used to lay text out in `ch` units and scale a size against 24, while the
-   printer scaled the face to fit a twelve-dot column. Two size models, and the
-   paper was the only place anybody could see them disagree: the screen said 24
-   and the roll drew 13. */
+/* The receipt preview. */
 
 .mb-receipt {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  /* `flex-start` shrink-wrapped the paper to its content, which is right in the
-     gallery and wrong everywhere narrow: a flex item's min-width is `auto`, so
-     the paper refused to shrink and the WHOLE SCREEN scrolled sideways
-     instead. UI_GUIDELINES §1 forbids that outright. */
+  /*
+   * `flex-start` shrink-wrapped the paper to its content, which is right in the gallery and
+   * wrong everywhere narrow: a flex item's min-width is `auto`, so the paper refused to shrink
+   * and the WHOLE SCREEN scrolled sideways instead.
+   */
   align-items: stretch;
   min-width: 0;
-  /* **So `cqw` below is a real length.** See `--receipt-paper`. */
+  /* So `cqw` below is a real length. */
   container-type: inline-size;
 }
 
 .mb-receipt__paper {
-  /* **The one number the page is drawn from.** The paper is as wide as the
-     panel allows, up to a comfortable reading size, and a dot is that width
-     divided by the dots the roll actually has. So an 80 mm roll and a 58 mm
-     roll are drawn at the same width on screen and a dot on the narrow one is
-     bigger — which is exactly right: the two rolls are the same size in the
-     hand and differ in how much fits on them.
-
-     **`cqw`, not `%`, and that was a real bug.** A percentage inside `--dot`
-     is resolved against the containing block's WIDTH when the variable lands
-     in `width` and against its HEIGHT when it lands in `height` — and the
-     paper's height is `auto`, so every row collapsed to nothing and the whole
-     preview drew as a thin strip of rules with no text in it. Found on the
-     owner's screen, P32. A container query unit is a length wherever it is
-     used, which is the property this needs. */
+  /* The one number the page is drawn from. */
   --receipt-paper: min(100cqw, var(--panel-width));
   --dot: calc(var(--receipt-paper) / var(--receipt-dots, 576));
 
@@ -46,17 +24,7 @@
   width: var(--receipt-paper);
   margin: 0;
   padding: calc(var(--dot) * 16) 0;
-  /* **White paper and black ink, in both themes** — the owner, 2026-08-24:
-     *"print preview should always be in white no matter the theme. that is the
-     only exception in no hardcoding rule."*
-
-     This is a picture of a thermal roll, not a surface of the app. The roll is
-     white and the printer only makes black, so drawn in the dark theme's
-     colours it is a picture of something no printer can produce — and the one
-     job of this panel is showing what will come out. Every rule, every QR and
-     every barcode below draws in `currentColor`, so setting these two here is
-     the whole of it. See `--print-paper` in tokens.css: they are still tokens,
-     they are simply the two a theme may not move. */
+  /* White paper and black ink, in both themes. */
   background: var(--print-paper);
   color: var(--print-ink);
   border: var(--border-width) solid var(--border);
@@ -65,25 +33,21 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  /* Never wraps and never re-flows: the layout already decided every break, and
-     a preview that re-wrapped would be a second layout engine (D1). */
+  /*
+   * Never wraps and never re-flows: the layout already decided every break, and a preview that
+   * re-wrapped would be a second layout engine.
+   */
   white-space: pre;
   overflow: hidden;
 }
 
-/* One row of the roll. Its height is what the paper will actually spend. */
+/* One row of the roll. */
 .mb-receipt__row {
   position: relative;
   height: calc(var(--tall, 0) * var(--dot));
 }
 
-/* **One aligned box**, at the dots the layout put it at.
-
-   A typewriter face and a proportional one are drawn the same way here, which
-   is what `raster.rs` does too: the box is where the layout said, and the text
-   is aligned inside it. That is what lands a column of amounts on the same
-   right edge whatever face a shop chooses — the one thing a shopkeeper checks a
-   bill for. */
+/* One aligned box, at the dots the layout put it at. */
 .mb-receipt__box {
   position: absolute;
   left: calc(var(--at, 0) * var(--dot));
@@ -92,14 +56,9 @@
   height: calc(var(--tall, 0) * var(--dot));
   display: flex;
   align-items: center;
-  /* **The size the printer will draw, converted once.** The layout speaks in
-     cap heights and a browser sizes by em; 0.72 is the cap ratio of every face
-     on offer to within a few per cent. See `CAP_RATIO` in `Receipt.tsx`. */
+  /* The size the printer will draw, converted once. */
   font-size: calc(var(--cap, 15) * var(--dot) / 0.72);
-  /* It does not clip. The printer does not either — `raster.rs` starts an
-     over-wide run at its box's left edge and lets it run on, because rule one
-     is wrap, never truncate. Losing a character off a bill to make a column
-     tidy is the wrong trade in both places. */
+  /* It does not clip. */
   overflow: visible;
 }
 
@@ -119,15 +78,16 @@
   font-weight: var(--weight-bold);
 }
 
-/* **A rule is a rule.** Solid, thick, doubled or dashed — drawn, at the
-   thickness and the spacing `layout::Rule` gives the printer. */
+/* A rule is a rule. */
 .mb-receipt__rule {
   position: absolute;
   left: calc(var(--at, 0) * var(--dot));
   width: calc(var(--wide, 0) * var(--dot));
   height: calc(var(--thick, 1) * var(--dot));
-  /* Centred in its row, and the strokes stacked from there — the same
-     arithmetic `RasterSink::draw_rule` does. */
+  /*
+   * Centred in its row, and the strokes stacked from there — the same arithmetic
+   * `RasterSink::draw_rule` does.
+   */
   top: calc(
     (var(--tall, 0) - var(--strokes, 1)) * var(--dot) / 2 + var(--stroke, 0) * var(--dot)
   );
@@ -144,8 +104,7 @@
   );
 }
 
-/* The shop's own logo, at the size it will print. A shop could never see that
-   before it printed one (P32). */
+/* The shop's own logo, at the size it will print. */
 .mb-receipt__logo {
   position: absolute;
   left: calc(var(--at, 0) * var(--dot));
@@ -163,9 +122,7 @@
   font-size: var(--text-sm);
 }
 
-/* The QR square, at the size the printer's own encoder will make it. The
-   payload is on the title, because what a shop tuning a letterhead needs to
-   know is how much paper this costs — see the note in `Receipt.tsx`. */
+/* The QR square, at the size the printer's own encoder will make it. */
 .mb-receipt__qr {
   position: absolute;
   left: calc(var(--at, 0) * var(--dot));
@@ -216,8 +173,7 @@
   font-weight: var(--weight-regular);
 }
 
-/* **How much roll this costs.** The owner's complaint began with paper being
-   eaten; the screen says how much before it is. */
+/* How much roll this costs. */
 .mb-receipt__length {
   margin: 0;
   color: var(--text-muted);

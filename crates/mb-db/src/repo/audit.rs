@@ -1,28 +1,3 @@
-//! **The audit trail — write it, read it, and check whether it can be
-//! believed.**
-//!
-//! > Audit **C4**: *"No audit trail on the counter. Nothing records who deleted
-//! > an item, who changed a price, who reprinted a bill, who edited the bill
-//! > counter, who changed a payment mode. The cloud admin panel has a full
-//! > audit log; the till has none."*
-//!
-//! # The rule that makes it an audit trail rather than a log
-//!
-//! **An entry is written in the SAME transaction as the thing it describes.**
-//! That is the outbox's rule for the same reason (audit A2 and A3 were each
-//! exactly one forgotten enqueue): a row that can be committed without its
-//! audit entry, or an entry without its subject, is not evidence of anything.
-//!
-//! `settle` is already one transaction (P05, budget B5); the audit row joins
-//! it rather than following it.
-//!
-//! # It does not sync
-//!
-//! No outbox row, ever. `audit_log` is unbounded, it is the widest row in the
-//! product, and nothing on the phone reads it — the same reasoning D16 applied
-//! to the print spool in D35. P33 may choose to sync a narrowed projection of
-//! it; that is P33's decision to take with the quota in front of it.
-
 use mb_auth::audit::{AuditEntry, AuditRow, Broken, chain_hash, verify_chain};
 use mb_core::{BusinessDay, Timestamp};
 use rusqlite::Transaction;
@@ -38,9 +13,7 @@ pub struct AuditFilter {
     pub to_day: Option<BusinessDay>,
     pub staff_id: Option<String>,
     pub action: Option<String>,
-    /// The screen shows a page, not a year. There is no "all" — a query with no
-    /// limit against a table with no ceiling is how a report blocks billing
-    /// (§2.3: reports may be slower; they may never slow down billing).
+    /// The screen shows a page, not a year.
     pub limit: u32,
 }
 
@@ -56,12 +29,8 @@ impl<'a> AuditRepo<'a> {
     }
 
     /// Append one entry, and link it to the one before it.
-    ///
-    /// Returns the `seq` it was given, which is what a test asserts on and what
-    /// a support call can be pointed at.
     pub fn append(&self, outlet: &str, entry: &AuditEntry) -> Result<i64, DbError> {
-        // MAX(seq) + 1, inside this transaction. Exact because P04 gave this
-        // database exactly one writer; see the module note in `conn.rs`.
+        // MAX(seq) + 1, inside this transaction.
         let previous: Option<(i64, String)> = self
             .tx
             .query_row(
@@ -96,10 +65,10 @@ impl<'a> AuditRepo<'a> {
             after_json: after_json.as_deref(),
         });
 
-        // The id is derived from the outlet and the sequence rather than from a
-        // clock: two entries written in the same millisecond are ordinary, and
-        // an id that could collide in the one table nobody may edit afterwards
-        // is not a risk worth taking for a shorter string.
+        // The id is derived from the outlet and the sequence rather than from a clock: two
+        // entries written in the same millisecond are ordinary, and an id that could collide in
+        // the one table nobody may edit afterwards is not a risk worth taking for a shorter
+        // string.
         let id = format!("aud_{outlet}_{seq}");
 
         self.tx.execute(
@@ -164,13 +133,6 @@ impl<'a> AuditRepo<'a> {
     }
 
     /// Walk the whole chain and report the first break.
-    ///
-    /// Reads in `seq` order, because [`verify_chain`] requires it and sorting
-    /// inside the verifier would hide a repository bug behind a sort.
-    ///
-    /// **This is a §2.3 query, not a §2.2 one.** It reads every row a shop has
-    /// ever written, so the screen runs it on demand and never on the billing
-    /// path.
     pub fn verify(&self, outlet: &str) -> Result<Result<(), Broken>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT a.id, a.seq, a.at, a.business_day, a.staff_id, NULL, a.action,
@@ -187,8 +149,7 @@ impl<'a> AuditRepo<'a> {
         Ok(verify_chain(&all))
     }
 
-    /// How many entries this shop has. For the screen's empty state, and for
-    /// the M5 measurement.
+    /// How many entries this shop has.
     pub fn count(&self, outlet: &str) -> Result<i64, DbError> {
         Ok(self.tx.query_row(
             "SELECT COUNT(*) FROM audit_log WHERE outlet_id = ?1",
@@ -197,11 +158,8 @@ impl<'a> AuditRepo<'a> {
         )?)
     }
 
-    /// Failed logins by this person since they last got in — **the lockout
-    /// count**, and the reason it needs no column of its own.
-    ///
-    /// It also survives a restart, which an in-memory counter does not, and
-    /// which is the first thing anybody trying PINs would discover.
+    /// Failed logins by this person since they last got in — the lockout count, and the reason
+    /// it needs no column of its own.
     pub fn failed_logins_since_success(
         &self,
         outlet: &str,

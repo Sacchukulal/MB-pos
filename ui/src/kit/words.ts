@@ -1,9 +1,4 @@
-/**
- * Counting things, in shop English.
- *
- * "3 item(s)" is how a developer writes it and nobody says it. One place turns
- * a number into words so no screen has to decide again.
- */
+/** Counting things, in shop English. */
 export function plural(
   count: number | bigint,
   one: string,

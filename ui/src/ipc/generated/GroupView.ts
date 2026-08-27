@@ -3,7 +3,6 @@ import type { SettingView } from "./SettingView";
 
 export type GroupView = { code: string, label: string, 
 /**
- * **False greys the whole section out** — a courtesy. `save_settings`
- * re-checks it per setting, which is the control (D45).
+ * False greys the whole section out — a courtesy.
  */
 canEdit: boolean, settings: Array<SettingView>, };

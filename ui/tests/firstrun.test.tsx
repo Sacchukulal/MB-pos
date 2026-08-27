@@ -1,12 +1,4 @@
-/**
- * **The first five minutes** — P30.5, D155.
- *
- * The owner installed the first build on a second computer and the product had
- * no way to create a shop at all: the counter opened onto nothing, every
- * command failed, the failures stacked up as toasts and a six-item checklist
- * took the page. What follows is the set of claims that must not quietly come
- * undone, and each of them is one the screenshot argued for.
- */
+/** The first five minutes. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -23,7 +15,6 @@ const { FirstRun } = await import('../src/setup/FirstRun');
 import type { FirstRunView } from '../src/ipc/generated/FirstRunView';
 import type { TaxClassView } from '../src/ipc/generated/TaxClassView';
 
-/** What this shop actually has — not the four slabs the wizard used to hardcode. */
 const shopsClasses: TaxClassView[] = [
   {
     id: 'tax_food_5',
@@ -90,13 +81,7 @@ function wire(over: Partial<FirstRunView> = {}) {
 beforeEach(() => call.mockReset());
 afterEach(cleanup);
 
-/**
- * **It says where the data goes before it puts any there.**
- *
- * A shopkeeper who cannot answer "where are my bills kept?" has no way to back
- * the shop up, move it to a new computer, or believe the promise on the line
- * above it that nothing leaves the machine.
- */
+/** It says where the data goes before it puts any there. */
 it('opens on a welcome that names the file it is about to create', async () => {
   wire();
   render(<FirstRun onDone={vi.fn()} />);
@@ -106,17 +91,7 @@ it('opens on a welcome that names the file it is about to create', async () => {
   expect(screen.getByRole('button', { name: 'Start a new shop' })).toBeTruthy();
 });
 
-/**
- * **The screen asks for the PIN the program will accept.**
- *
- * The first draft said "four digits or more" and checked for four while
- * `mb_auth::pin` required six to eight — so the form invited a PIN and then
- * refused it. Found by typing 1234 into it.
- *
- * **A PIN is four digits now** (owner, 2026-08-17), so 1234 is the RIGHT
- * answer and this test needed a new wrong one. That is the point of it: the
- * two rules move together or the form lies again.
- */
+/** The screen asks for the PIN the program will accept. */
 it('asks for the PIN rule Rust actually holds', async () => {
   wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
@@ -128,15 +103,12 @@ it('asks for the PIN rule Rust actually holds', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
   expect(await screen.findByText('A PIN is 4 digits.')).toBeTruthy();
-  // And it refused BEFORE creating anybody — a retry must not leave the shop
-  // with two owners in the staff list.
+  // And it refused BEFORE creating anybody — a retry must not leave the shop with two owners in
+  // the staff list.
   expect(call).not.toHaveBeenCalledWith('save_staff_member', expect.anything());
 });
 
-/**
- * **A second try edits the same person.** The id is kept, so mistyping the PIN
- * once does not hire a second owner nobody can explain.
- */
+/** A second try edits the same person. */
 it('keeps the same person when the PIN is typed again', async () => {
   wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
@@ -156,12 +128,7 @@ it('keeps the same person when the PIN is typed again', async () => {
   expect(calls).toHaveLength(1);
 });
 
-/**
- * **Signing in is part of setting up** (D155).
- *
- * Asking for the PIN twenty seconds after choosing it reads as the program
- * having lost it.
- */
+/** Signing in is part of setting up. */
 it('signs the owner in with the PIN they just chose', async () => {
   wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
@@ -181,14 +148,7 @@ it('signs the owner in with the PIN they just chose', async () => {
   );
 });
 
-/**
- * **The recovery code gets a page to itself, and it is a door you cannot walk
- * past.**
- *
- * It is shown once and never again. The first draft printed it in a box above
- * the item form on the next step, which is how the one line nobody can recover
- * guarantees itself to be skipped.
- */
+/** The recovery code gets a page to itself, and it is a door you cannot walk past. */
 it('will not move on until the recovery code is written down', async () => {
   wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
@@ -214,12 +174,7 @@ it('will not move on until the recovery code is written down', async () => {
   expect(await screen.findByText('What you sell')).toBeTruthy();
 });
 
-/**
- * **The last step says plainly that it can be skipped**, and it is ONE button.
- *
- * The first draft had "I will do this later" beside "Skip and start billing",
- * which are two ways of writing the same click.
- */
+/** The last step says plainly that it can be skipped, and it is ONE button. */
 it('offers one way out of the optional step, and says it is optional', async () => {
   wire({ hasShop: true, hasDetails: true, hasPin: true });
   const done = vi.fn();
@@ -231,13 +186,7 @@ it('offers one way out of the optional step, and says it is optional', async () 
   expect(done).toHaveBeenCalled();
 });
 
-/**
- * **The wizard offers the shop's own classes** — P33 §5.6.
- *
- * It used to hardcode four slab ids, one of them a 12% class abolished in
- * September 2025 and gone from the database since migration 0004 — so the first
- * item a new shop typed could point at a class that does not exist.
- */
+/** The wizard offers the shop's own classes. */
 it('offers the shop own tax classes, not a hardcoded slab list', async () => {
   wire({ hasShop: true, hasDetails: true, hasPin: true });
   render(<FirstRun onDone={vi.fn()} />);
@@ -258,11 +207,7 @@ it('offers the shop own tax classes, not a hardcoded slab list', async () => {
   });
 });
 
-/**
- * **Somebody who stopped halfway comes back where they stopped.** The step is
- * derived from what is in the shop, never remembered — the one thing D102 got
- * exactly right and this screen keeps.
- */
+/** Somebody who stopped halfway comes back where they stopped. */
 it('resumes at the first thing that is still missing', async () => {
   wire({ hasShop: true });
   render(<FirstRun onDone={vi.fn()} />);

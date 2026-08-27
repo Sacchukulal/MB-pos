@@ -10,11 +10,11 @@ export type BuyMaterialView = { id: string, name: string, baseUnit: string, pack
  */
 purchaseUnit: string, 
 /**
- * "₹1,000.00 a bag, last on 12 Aug" — what this supplier last charged,
- * which is information and **never a cost** (D122).
+ * "₹1,000.00 a bag, last on 12 Aug" — what this supplier last charged, which is
+ * information and never a cost.
  */
 lastRate: string, lastRatePaise: bigint, 
 /**
- * "₹42.30 a kg" — what the shelf says it costs now (D118).
+ * "₹42.30 a kg" — what the shelf says it costs now.
  */
 cost: string, };

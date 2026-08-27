@@ -1,11 +1,5 @@
-//! Opening the shop's data file, and the rules that keep a report from ever
-//! standing in front of a cashier.
-//!
-//! One writer, several readers. SQLite allows exactly one writer at a time, and
-//! scope 16.6 says reports must never block billing — so the billing path owns
-//! the writer and everything that only reads takes a connection from the pool.
-//! Audit E1 is what happens without it: "a heavy report on a slow PC can make
-//! the search box stutter mid-rush."
+//! Opening the shop's data file, and the rules that keep a report from ever standing in front
+//! of a cashier.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -16,20 +10,6 @@ use crate::error::DbError;
 use crate::migrate;
 
 /// How hard a commit works to survive a power cut.
-///
-/// **The default is [`Synchronous::Full`], and that overrules
-/// `docs/PERFORMANCE.md` §5 rule 2 as written.** In WAL mode `NORMAL` does not
-/// fsync on commit, so a power cut loses the last committed transactions — the
-/// file survives, the last bills do not. Requirement 1 of the ten is that a
-/// failure loses NOTHING, and an Indian restaurant counter loses mains power as
-/// a matter of routine rather than as an accident.
-///
-/// The cost is one fsync per commit, and §5 rule 1 already says a settle is one
-/// transaction, so it is one fsync and not four. `tests/perf.rs` measures both
-/// settings and prints them; the numbers are in `docs/PERFORMANCE.md` §4.
-///
-/// `Normal` stays available on purpose: an import, a restore or a bulk rebuild
-/// is not a bill, and lowering it deliberately for that work is correct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Synchronous {
     #[default]
@@ -49,18 +29,9 @@ impl Synchronous {
 /// Where the database is and how it should behave.
 #[derive(Debug, Clone)]
 pub struct DbConfig {
-    /// **This comes from the caller and this crate never guesses it.**
-    ///
-    /// It must be read from an application config file on disk, never from web
-    /// local storage. Audit A5: v1 kept it in the browser's storage, so
-    /// clearing that storage — or an external drive changing its letter —
-    /// showed the owner a first-run wizard with their live shop sitting three
-    /// folders away. P08 owns finding the path; P22 owns the "we found a
-    /// database here — use it?" recovery.
+    /// This comes from the caller and this crate never guesses it.
     pub path: PathBuf,
-    /// How long a contended write waits before giving up. Without it SQLite
-    /// returns SQLITE_BUSY at once and the caller sees a failure that was only
-    /// ever a wait.
+    /// How long a contended write waits before giving up.
     pub busy_timeout_ms: u32,
     /// How many read connections to pre-open.
     pub readers: usize,
@@ -81,11 +52,6 @@ impl DbConfig {
 }
 
 /// The shop's data file: one writer, a small pool of readers.
-///
-/// [`Db::transaction`] is the **only** way to write. Not the recommended way —
-/// there is no other public route to the writer connection at all. A write that
-/// escapes a transaction is a write that can half-happen, and half a settled
-/// bill is the worst row in the product.
 #[derive(Debug)]
 pub struct Db {
     path: PathBuf,
@@ -94,11 +60,7 @@ pub struct Db {
 }
 
 impl Db {
-    /// Opens or creates the file, sets the pragmas, and brings the schema up to
-    /// date.
-    ///
-    /// Migrating on open is deliberate: there is no state in which the program
-    /// holds a connection to a database whose schema it has not checked.
+    /// Opens or creates the file, sets the pragmas, and brings the schema up to date.
     pub fn open(config: &DbConfig) -> Result<Db, DbError> {
         if let Some(parent) = config.path.parent()
             && !parent.as_os_str().is_empty()
@@ -112,8 +74,8 @@ impl Db {
         }
 
         let mut writer = open_one(&config.path, config)?;
-        // Persistent, set once, and it is the whole of scope 16.6: a report
-        // reading for two seconds must not stop a cashier settling a bill.
+        // Persistent, set once, and it is the whole of scope 16.6: a report reading for two
+        // seconds must not stop a cashier settling a bill.
         writer
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|source| DbError::Open {
@@ -148,24 +110,12 @@ impl Db {
     }
 
     /// Runs `f` on a read connection from the pool.
-    ///
-    /// Blocks only if every reader is busy — never on the writer, which is the
-    /// point of the pool existing.
     pub fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T, DbError>) -> Result<T, DbError> {
         let lease = self.readers.acquire();
         f(lease.conn())
     }
 
-    /// Runs `f` inside a **read-only** transaction on a pooled reader.
-    ///
-    /// P18's reports need a [`Transaction`] because that is what a
-    /// [`crate::Repos`] borrows — but a report must never take the writer, or a
-    /// year-long scan stands in front of the next bill. That is scope 16.6 and
-    /// audit E1 in one sentence, and `read` alone could not satisfy it because
-    /// it hands out a bare `Connection`.
-    ///
-    /// The transaction is rolled back, never committed. Nothing here may write,
-    /// and a rollback on a connection that wrote nothing costs nothing.
+    /// Runs `f` inside a read-only transaction on a pooled reader.
     pub fn read_transaction<T>(
         &self,
         f: impl FnOnce(&Transaction<'_>) -> Result<T, DbError>,
@@ -173,24 +123,18 @@ impl Db {
         let lease = self.readers.acquire();
         let tx = lease.conn().unchecked_transaction()?;
         match f(&tx) {
-            // Explicit, so a rollback failure surfaces instead of being eaten
-            // by a destructor.
+            // Explicit, so a rollback failure surfaces instead of being eaten by a destructor.
             Ok(value) => {
                 tx.rollback()?;
                 Ok(value)
             }
-            // Dropping the transaction rolls it back; returning the caller's
-            // error unchanged matters more than reporting the rollback.
+            // Dropping the transaction rolls it back; returning the caller's error unchanged
+            // matters more than reporting the rollback.
             Err(e) => Err(e),
         }
     }
 
     /// Runs `f` inside a transaction on the single writer connection.
-    ///
-    /// Commits if `f` returns `Ok`, rolls back otherwise. A settle is ONE
-    /// transaction — the number claim, the order rows, the payment rows and the
-    /// kitchen ledger together — which is `PERFORMANCE.md` §5 rule 1 and also
-    /// what makes D6's atomic numbering true.
     pub fn transaction<T>(
         &self,
         f: impl FnOnce(&Transaction<'_>) -> Result<T, DbError>,
@@ -203,8 +147,8 @@ impl Db {
                 Ok(value)
             }
             Err(e) => {
-                // Dropping the transaction rolls it back; being explicit means
-                // a rollback failure is not swallowed by a destructor.
+                // Dropping the transaction rolls it back; being explicit means a rollback
+                // failure is not swallowed by a destructor.
                 tx.rollback()?;
                 Err(e)
             }
@@ -212,39 +156,15 @@ impl Db {
     }
 
     /// Writes the WAL back into the main file.
-    ///
-    /// Used by the size measurement (budget M5) and by P05's backup —
-    /// copying the main file while a WAL is outstanding copies a database that
-    /// is missing its most recent bills.
     pub fn checkpoint(&self) -> Result<(), DbError> {
         let writer = lock(&self.writer);
         writer.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
 
-    /// Write a consistent copy of the whole database to `to`, **while the shop
-    /// keeps billing**.
-    ///
-    /// `VACUUM INTO`, on a **reader** — so the writer is never held and a
-    /// cashier never waits behind a backup. In WAL mode the reader takes a
-    /// snapshot, so the copy is a single point in time even though bills are
-    /// being settled through it.
-    ///
-    /// **This reverses the call P05's prompt made**, which was to use SQLite's
-    /// online backup API for the sake of a page-by-page progress callback. The
-    /// prompt did not know what implementing it turned up: SQLite restarts a
-    /// backup whenever the source is written by another connection, so on a
-    /// busy counter — which is exactly when a scheduled backup fires — that API
-    /// can restart indefinitely and never finish. A progress bar is a nicety;
-    /// a backup that may never complete is a correctness bug, and correctness
-    /// wins. `VACUUM INTO` takes one read snapshot, cannot restart, and
-    /// defragments as it copies, so the file is smaller too.
-    ///
-    /// If a determinate progress bar is ever genuinely needed, the stepping API
-    /// is still there and the trade is now written down.
+    /// Write a consistent copy of the whole database to `to`, while the shop keeps billing.
     pub fn backup_to(&self, to: &Path) -> Result<(), DbError> {
-        // VACUUM INTO refuses to overwrite. Say so in our own words rather than
-        // letting SQLite's message reach an owner.
+        // VACUUM INTO refuses to overwrite.
         if to.exists() {
             return Err(DbError::invariant(format!(
                 "there is already a file at {} — a backup never overwrites one",
@@ -258,12 +178,7 @@ impl Db {
     }
 }
 
-/// Opens one connection and applies the pragmas that are **per-connection**.
-///
-/// `foreign_keys` is the one that matters and the one v1 never set. SQLite
-/// defaults it OFF, it is not stored in the file, and it must be turned on
-/// again for every single connection — which is why the test for it uses a
-/// connection taken from the reader pool and not just the writer.
+/// Opens one connection and applies the pragmas that are per-connection.
 fn open_one(path: &Path, config: &DbConfig) -> Result<Connection, DbError> {
     let conn = Connection::open(path).map_err(|source| DbError::Open {
         path: path.to_path_buf(),
@@ -272,7 +187,9 @@ fn open_one(path: &Path, config: &DbConfig) -> Result<Connection, DbError> {
 
     let setup = || -> Result<(), rusqlite::Error> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.busy_timeout(std::time::Duration::from_millis(u64::from(config.busy_timeout_ms)))?;
+        conn.busy_timeout(std::time::Duration::from_millis(u64::from(
+            config.busy_timeout_ms,
+        )))?;
         // A report's sort should not touch a 5400 rpm disk.
         conn.pragma_update(None, "temp_store", "MEMORY")?;
         Ok(())
@@ -285,14 +202,7 @@ fn open_one(path: &Path, config: &DbConfig) -> Result<Connection, DbError> {
     Ok(conn)
 }
 
-// ---------------------------------------------------------------------------
 // The reader pool.
-//
-// NO POOL CRATE (R6). r2d2 and deadpool manage lifecycles, health checks, idle
-// reaping and async — none of which applies to four connections to one local
-// file that live exactly as long as the process. What is needed is "hand out
-// one of four connections and put it back", and that is what this is.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 struct ReaderPool {
@@ -330,8 +240,7 @@ impl ReaderPool {
     }
 }
 
-/// A borrowed read connection. Returns itself to the pool on drop, including on
-/// an early return or an unwind, so a pool cannot leak its way down to zero.
+/// A borrowed read connection.
 #[derive(Debug)]
 struct Lease<'a> {
     pool: &'a ReaderPool,
@@ -354,22 +263,8 @@ impl Drop for Lease<'_> {
 }
 
 /// Takes a lock, recovering from poisoning rather than propagating it.
-///
-/// A poisoned mutex here means some other thread panicked while holding a
-/// connection. The connection itself is fine — an open transaction rolls back
-/// when it is dropped — and refusing to bill for the rest of the shift because
-/// a report thread fell over is the wrong trade at a counter.
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// ---------------------------------------------------------------------------
 // A note on encryption, which is a SEAM and not an implementation.
-//
-// Turning SQLCipher on would take: rusqlite's `bundled-sqlcipher` feature
-// instead of `bundled`; a key supplied on DbConfig; a `PRAGMA key` issued in
-// `open_one` BEFORE any other statement, including the pragmas above; and a
-// decision about where the key lives. That last one is the actual hard part and
-// it belongs with P21's device binding, not here. Nothing in this file assumes
-// the file is unencrypted, so the change stays inside `open_one`.
-// ---------------------------------------------------------------------------

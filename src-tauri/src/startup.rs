@@ -1,31 +1,15 @@
-//! **The order of operations at start-up — the highest-risk hundred lines in
-//! the product.**
-//!
-//! P05 already made these decisions and P08 must not re-make them. Getting the
-//! order wrong does not produce a bug report; it produces a shop with no data.
+//! The order of operations at start-up — the highest-risk hundred lines in the product.
 //!
 //! ```text
 //!   1. logging up                          (main.rs, before this)
-//!   2. read where the shop is              audit A5 — a file, never browser storage
-//!   3. IS THERE A RESTORE REQUEST?         D27 — before anything opens
-//!   4. is the database still there?        A5 — locate/ searches
+//!   2. read where the shop is              a file, never browser storage
+//!   3. IS THERE A RESTORE REQUEST?         before anything opens
+//!   4. is the database still there?        locate/ searches
 //!   5. still nothing? open anyway          first run is a state, not an error
 //!   6. Db::open (which migrates)
 //!   7. build the print queue               (state.rs)
 //!   8. show the window
 //! ```
-//!
-//! # Step 3 is the one that matters
-//!
-//! **D27: a restore runs BEFORE the database is opened.** `mb_db::backup`'s
-//! `restore` takes paths and not a `&Db` — proved by a `compile_fail` test —
-//! and the target file is removed first so that Windows *refuses* a restore
-//! aimed at an open database instead of corrupting it. P05's notes record that
-//! the corruption really happened while those tests were being written.
-//!
-//! So the request is a plain file that `request_restore` writes, readable
-//! without opening SQLite because the database may be the broken thing, and
-//! this is the code that acts on it at the only moment it is safe to.
 
 use std::path::{Path, PathBuf};
 
@@ -38,46 +22,35 @@ use crate::{log_info, log_warn};
 /// What start-up found, and therefore what the window opens into.
 #[derive(Debug)]
 pub enum Startup {
-    /// A shop, open and migrated. The normal morning.
+    /// A shop, open and migrated.
     Ready {
         db: Box<Db>,
         path: PathBuf,
-        /// True when step 3 put a backup back. The shell says so once — an
-        /// owner who has just restored needs to be told it worked.
+        /// True when step 3 put a backup back.
         restored: bool,
     },
-    /// No database and no candidate. The app opens to "create a new shop or
-    /// restore a backup" — **never a blank screen, never an error dialog on
-    /// top of nothing.**
+    /// No database and no candidate.
     FirstRun,
     /// `locate` found databases the configuration did not mention.
-    ///
-    /// **We ask. We never adopt one silently.** Audit A5 is about an owner
-    /// being shown a first-run wizard with their live shop three folders away;
-    /// the opposite mistake — quietly opening a stale copy found on another
-    /// drive — is worse, because it looks like it worked.
     FoundCandidates {
         candidates: Vec<FoundDatabase>,
-        /// The path the configuration pointed at, when there was one. "Your
-        /// D: drive is not plugged in" and "you have never set this up" are
-        /// very different sentences.
+        /// The path the configuration pointed at, when there was one.
         expected: Option<PathBuf>,
     },
-    /// It is there and it will not open. The window still opens, and it says
-    /// why, in words (audit F8).
+    /// It is there and it will not open.
     Failed { error: UiError },
 }
 
-/// Run the sequence. Every step is a log line, because this is the sequence
-/// nobody can reproduce afterwards (audit E7).
+/// Run the sequence. Every step is a log line, because this is the sequence nobody can
+/// reproduce afterwards.
 #[must_use]
 pub fn run(config_dir: &Path) -> Startup {
-    log_info!("start-up: beginning, configuration in {}", config_dir.display());
+    log_info!(
+        "start-up: beginning, configuration in {}",
+        config_dir.display()
+    );
 
-    // ---- step 2: where does the configuration say the shop is? ------------
-    // A recorded path that no longer exists comes back as `Some` on purpose —
-    // P05's note: the caller needs to tell "we have never been set up" from
-    // "the drive is not plugged in".
+    // Where does the configuration say the shop is?
     let recorded = match mb_db::locate::read_config(config_dir) {
         Ok(found) => found,
         Err(e) => {
@@ -86,7 +59,7 @@ pub fn run(config_dir: &Path) -> Startup {
         }
     };
 
-    // ---- step 3: a restore request, BEFORE anything opens (D27) -----------
+    // A restore request, BEFORE anything opens.
     let restored = match take_restore_request(config_dir, recorded.as_deref()) {
         Ok(done) => done,
         Err(error) => {
@@ -95,7 +68,7 @@ pub fn run(config_dir: &Path) -> Startup {
         }
     };
 
-    // ---- step 4 --------------------------------------------------------
+    // Step 4.
     if let Some(path) = recorded.as_ref() {
         if path.exists() {
             log_info!("start-up: opening the shop at {}", path.display());
@@ -109,9 +82,7 @@ pub fn run(config_dir: &Path) -> Startup {
         log_info!("start-up: no data file has been recorded yet");
     }
 
-    // The drive letter changed, or the configuration was lost. A5: v1 showed a
-    // first-run wizard in exactly this situation, with the shop three folders
-    // away.
+    // The drive letter changed, or the configuration was lost.
     let extra: Vec<PathBuf> = recorded.iter().cloned().collect();
     let candidates = mb_db::locate::search_usual_places(&extra);
     if candidates.is_empty() {
@@ -149,7 +120,6 @@ pub fn open(path: &Path, restored: bool) -> Startup {
     }
 }
 
-/// Adopt a database the owner has confirmed, and remember it.
 pub fn adopt(config_dir: &Path, path: &Path) -> Result<Startup, UiError> {
     mb_db::locate::write_config(config_dir, path).map_err(|e| words::from_db(&e))?;
     log_info!("start-up: the owner chose {}", path.display());
@@ -157,19 +127,13 @@ pub fn adopt(config_dir: &Path, path: &Path) -> Result<Startup, UiError> {
 }
 
 /// Step 3, in full.
-///
-/// Returns whether a restore happened. The request file is cleared **after** a
-/// successful restore and not before: a power cut half way through leaves the
-/// request in place, so the next start tries again rather than opening a
-/// half-restored file.
 fn take_restore_request(config_dir: &Path, target: Option<&Path>) -> Result<bool, UiError> {
     let Some(request) = mb_db::backup::pending_restore(config_dir) else {
         return Ok(false);
     };
 
     let Some(target) = target else {
-        // A restore with nowhere to go. Clearing it would be worse: the owner
-        // asked for it, and it is the only record that they did.
+        // A restore with nowhere to go.
         log_warn!(
             "start-up: a restore from {} was requested, but no data file location \
              is recorded, so there is nothing to restore ONTO",
@@ -189,13 +153,9 @@ fn take_restore_request(config_dir: &Path, target: Option<&Path>) -> Result<bool
         target.display()
     );
 
-    let report =
-        mb_db::backup::restore(&request.from, target).map_err(|e| words::from_db(&e))?;
+    let report = mb_db::backup::restore(&request.from, target).map_err(|e| words::from_db(&e))?;
 
     if report.rolled_back {
-        // P05's restore verifies what it put down and puts the old file back if
-        // it is bad. That is a success of the machinery and a failure for the
-        // owner, and they are not the same sentence.
         let why = report.failure.clone().unwrap_or_default();
         log_warn!("start-up: the restore was rolled back: {why}");
         let _ = mb_db::backup::clear_pending_restore(config_dir);
@@ -218,8 +178,8 @@ fn take_restore_request(config_dir: &Path, target: Option<&Path>) -> Result<bool
     );
 
     if let Err(e) = mb_db::backup::clear_pending_restore(config_dir) {
-        // Not fatal, but it must be loud: an uncleared request restores again
-        // on the next start, over the top of a day's billing.
+        // Not fatal, but it must be loud: an uncleared request restores again on the next
+        // start, over the top of a day's billing.
         log_warn!("start-up: THE RESTORE REQUEST COULD NOT BE CLEARED: {e}");
     }
     Ok(true)

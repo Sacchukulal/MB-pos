@@ -7,8 +7,8 @@ export type CountLineView = { materialId: string, material: string,
  */
 counted: string, 
 /**
- * **The book AS IT WAS when this line was counted** (D127), so the screen
- * can show what the software thought at that moment.
+ * The book AS IT WAS when this line was counted, so the screen can show what the software
+ * thought at that moment.
  */
 book: string, 
 /**

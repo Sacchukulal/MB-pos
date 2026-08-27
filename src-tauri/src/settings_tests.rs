@@ -1,16 +1,4 @@
-//! **The settings spine, driven against a real database** — P17 part 1.
-//!
-//! The unit tests in `settings/tests.rs` prove the catalogue is complete and
-//! internally consistent. These prove the three things only a database and a
-//! renderer can answer:
-//!
-//! * **T1** — every receipt and kitchen setting actually changes the paper. A
-//!   toggle that changes nothing is a lie on a screen, and the only way to know
-//!   is to render twice and compare.
-//! * **T3 / T11** — saving writes only what moved, and a row stored as the
-//!   wrong type is an error rather than a default (D7).
-//! * **T5** — changing the business-day start re-buckets FUTURE orders and does
-//!   not move a bill that is already written (D5, scope 13.3).
+//! The settings spine, driven against a real database.
 
 #![allow(
     clippy::expect_used,
@@ -34,15 +22,9 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
     app
 }
 
-// ---------------------------------------------------------------------------
-// T1 — every setting changes the paper.
-// ---------------------------------------------------------------------------
+// Every setting changes the paper.
 
-/// A value for this entry that is **different from the one it holds**.
-///
-/// Derived from the `Kind` rather than listed by hand, so a setting added
-/// tomorrow is covered tonight — which is the same argument the catalogue
-/// itself makes.
+/// A value for this entry that is different from the one it holds.
 fn something_else(entry: &Entry, config: &ShopConfig) -> Value {
     match ((entry.read)(config), entry.kind) {
         (Value::Bool(b), _) => Value::Bool(!b),
@@ -69,10 +51,7 @@ fn something_else(entry: &Entry, config: &ShopConfig) -> Value {
     }
 }
 
-/// **The fixture is deliberately maximal.** A preview that only ever shows two
-/// cups of tea is how a setting ships broken: `show.hsn` changes nothing
-/// without an HSN, `composition_note` prints nothing for a shop that is not a
-/// composition dealer, and the QR width means nothing with no UPI id.
+/// The fixture is deliberately maximal.
 fn a_shop_with_everything() -> ShopConfig {
     let mut config = ShopConfig::default();
     config.store.name = "Anna Kuteera".to_owned();
@@ -92,12 +71,8 @@ fn a_shop_with_everything() -> ShopConfig {
     config
 }
 
-/// The bill this fixture renders: mixed rates, a bill discount, a service
-/// charge, a long name that wraps, a per-line note, an HSN and a split payment.
-///
-/// A representative bill is not a nicety here. `show.hsn` changes nothing
-/// without an HSN, `payment_lines` changes nothing without two payments, and
-/// `below_column_names` changes nothing on paper too narrow to have columns.
+/// The bill this fixture renders: mixed rates, a bill discount, a service charge, a long name
+/// that wraps, a per-line note, an HSN and a split payment.
 fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
     use mb_core::{
         AnyOrder, BusinessDay, Cart, Discount, DiscountEntry, DraftOrder, ItemSnapshot, Money,
@@ -159,8 +134,7 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
     )
     .on_table(TableId::new("6"))
     .core;
-    // **A cover count**, so `receipt.show.covers` has something to show — a
-    // toggle that changes nothing on the sample is a toggle T1 cannot check.
+    // A cover count, so `receipt.show.covers` has something to show.
     let mut core = core;
     core.covers = Some(4);
     let open = OpenOrder {
@@ -208,8 +182,8 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
 
 fn render_bill(config: &ShopConfig, bill: &mb_core::Bill, order: &mb_core::AnyOrder) -> String {
     let store = config.store.to_print_store();
-    // The built-in face on 80 mm — `bill_document` measures the room before it
-    // decides whether the item table is one line or two (P32).
+    // The built-in face on 80 mm — `bill_document` measures the room before it decides whether
+    // the item table is one line or two.
     let metrics = mb_print::metrics::Metrics::face(
         mb_print::paper::Paper::new(mb_print::paper::PaperKind::Mm80),
         std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
@@ -228,17 +202,14 @@ fn render_bill(config: &ShopConfig, bill: &mb_core::Bill, order: &mb_core::AnyOr
             waiter: Some("Suresh"),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
-            // A logo has to EXIST for the logo settings to be able to do
-            // anything — and it has to DECODE, or `logo` and `logo_width_pct`
-            // are two settings pointing at a picture the sink skips. The old
-            // `vec![8, 8, 0xFF]` was not one of ours and never drew.
+            // A logo has to EXIST for the logo settings to be able to do anything — and it has
+            // to DECODE, or `logo` and `logo_width_pct` are two settings pointing at a picture
+            // the sink skips.
             logo: Some(mb_print::image::Monochrome::blank(32, 16).encode()),
         },
     )
     .expect("a bill document");
-    // **The laid-out lines, not the text.** `to_text` drops the style, so
-    // comparing text would let "Total in bold" pass as a setting that changes
-    // nothing — which is exactly the class of bug T1 exists to catch.
+    // The laid-out lines, not the text.
     format!(
         "{:?}",
         mb_print::layout::layout(&document).expect("lays out")
@@ -284,9 +255,7 @@ fn render_ticket(config: &ShopConfig) -> String {
     )
 }
 
-/// **T1.** Drive every receipt and kitchen setting to a different value and
-/// assert the paper differs. Driven from the catalogue, so it cannot go out of
-/// date.
+/// Drive every receipt and kitchen setting to a different value and assert the paper differs.
 #[test]
 fn every_setting_on_the_paper_changes_the_paper() {
     let base_config = a_shop_with_everything();
@@ -298,27 +267,8 @@ fn every_setting_on_the_paper_changes_the_paper() {
         if !matches!(entry.group, Group::Receipt | Group::Kitchen) {
             continue;
         }
-        // **The two typeface settings, and they are exempt for a real reason
-        // rather than a convenient one** (P31).
-        //
-        // This test compares the LAID-OUT document, and a typeface cannot
-        // change that: `mb-print` lays a receipt out on a character grid —
-        // `paper.dots()` divided by `paper.columns()` — so every face produces
-        // the same 48 columns and the same line breaks. The difference is in
-        // the DOTS, one layer further down, and it is real.
-        //
-        // D71 is what happened last time somebody added a font list without
-        // that layer existing: three choices, three identical documents, and
-        // the list was deleted. It is back because the wiring is:
-        //
-        // * `queue::the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for`
-        //   — the key on the job is the key the raster sink is drawn with;
-        // * `queue::the_typeface_survives_being_parked_and_picked_up_again`
-        //   — and it survives a power cut;
-        // * `the_chosen_typeface_is_the_one_the_bill_is_printed_in` below
-        //   — and the shop's setting is what puts it on the job.
-        //
-        // If those three go, this exemption goes with them and D71 stands.
+        // The two typeface settings, and they are exempt for a real reason rather than a
+        // convenient one.
         if entry.key == "receipt.font" || entry.key == "kitchen.font" {
             continue;
         }
@@ -352,10 +302,6 @@ fn every_setting_on_the_paper_changes_the_paper() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// T3, T7, T11 — the storage half.
-// ---------------------------------------------------------------------------
-
 /// Every `settings` row in the shop, for a before/after comparison.
 fn every_row(app: &App) -> Vec<(String, String)> {
     app.with_shop(|shop| {
@@ -374,7 +320,7 @@ fn every_row(app: &App) -> Vec<(String, String)> {
     .expect("the settings table reads")
 }
 
-/// **T3.** Changing one setting writes one row.
+/// Changing one setting writes one row.
 #[test]
 fn saving_one_setting_writes_exactly_one_row() {
     let scratch = Scratch::new("settings-one-row");
@@ -419,8 +365,8 @@ fn saving_one_setting_writes_exactly_one_row() {
     assert_eq!(after[0].0, "receipt.footer");
 }
 
-/// The store profile is one row, and it is only rewritten when something in it
-/// moved — a shop editing its footer must not restamp its own GSTIN.
+/// The store profile is one row, and it is only rewritten when something in it moved — a shop
+/// editing its footer must not restamp its own GSTIN.
 #[test]
 fn a_footer_edit_does_not_touch_the_store_profile() {
     let scratch = Scratch::new("settings-profile");
@@ -478,7 +424,7 @@ fn updated_at(app: &App) -> i64 {
     .expect("the profile exists")
 }
 
-/// **T7.** Export, wipe, import, and every setting is back.
+/// Export, wipe, import, and every setting is back.
 #[test]
 fn a_configuration_survives_the_database_being_emptied() {
     let scratch = Scratch::new("settings-round-trip");
@@ -525,8 +471,7 @@ fn a_configuration_survives_the_database_being_emptied() {
     assert_eq!(app.shop_config(), new);
 }
 
-/// **T11.** A row stored as the wrong type is an error that names the key, not
-/// a silent default (D7).
+/// A row stored as the wrong type is an error that names the key, not a silent default.
 #[test]
 fn a_setting_stored_as_the_wrong_type_is_an_error_that_names_it() {
     let scratch = Scratch::new("settings-wrong-type");
@@ -595,21 +540,14 @@ fn a_stored_value_outside_its_range_is_refused_on_load() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// T5 — the day start.
-// ---------------------------------------------------------------------------
+// The day start.
 
-/// **T5.** Changing when the day starts re-buckets FUTURE orders and does not
-/// move one that is already written.
-///
-/// D5 and scope 13.3: *the business day is stored, never derived.* The whole
-/// value of storing it is that this is true.
+/// Changing when the day starts re-buckets FUTURE orders and does not move one that is already
+/// written.
 #[test]
 fn changing_the_day_start_does_not_move_a_bill_that_is_already_written() {
     use mb_core::{BusinessDay, DayRule, Timestamp, UtcOffset};
 
-    // 2026-08-03 02:30 IST, which is 2026-08-02 21:00 UTC. Under a 05:00 rule
-    // this belongs to the 2nd; under a 01:00 rule it belongs to the 3rd.
     let at = Timestamp::from_millis(1_785_704_400_000);
     let early = DayRule::new(60).expect("01:00 is a time");
     let late = DayRule::DEFAULT;
@@ -633,14 +571,14 @@ fn changing_the_day_start_does_not_move_a_bill_that_is_already_written() {
     new.day.starts_at_minutes = 60;
     save(&app, &old, &new);
 
-    // The NEXT order buckets by the new rule...
+    // The NEXT order buckets by the new rule..
     assert_eq!(crate::flows::today(at), under_early);
-    // ...and the one already written is untouched: it is a value that was
-    // stored, and nothing in `save_changes` goes near the orders table.
+    // ...and the one already written is untouched: it is a value that was stored, and nothing
+    // in `save_changes` goes near the orders table.
     assert_eq!(day_written, under_late);
 
-    // Put it back, because the day rule is process-wide (D70) and the rest of
-    // this binary's tests assume the standard one.
+    // Put it back, because the day rule is process-wide and the rest of this binary's tests
+    // assume the standard one.
     let old = new.clone();
     let mut back = old.clone();
     back.day.starts_at_minutes = 300;
@@ -688,20 +626,9 @@ fn only_the_store_group_lives_in_the_store_profile() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// P31 — the typeface, from the settings screen to the job.
-// ---------------------------------------------------------------------------
+// The typeface, from the settings screen to the job.
 
-/// **The shop's chosen face is the one on the job.**
-///
-/// `mb-print`'s queue tests prove the key on a job is the key the raster sink
-/// draws with, and that it survives a power cut. This is the other end of the
-/// same wire: that the value a shopkeeper picked on the settings screen is what
-/// gets put there — and that a bill and a kitchen ticket are answered
-/// **separately**, which is the whole of the owner's request.
-///
-/// Without this the two halves could both be right and the middle missing,
-/// which is exactly the shape of D71.
+/// The shop's chosen face is the one on the job.
 #[test]
 fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
     let scratch = Scratch::new("settings-typeface");
@@ -726,8 +653,7 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
     assert_eq!(config.receipt.font, "consolas");
     assert_eq!(config.kitchen.font, "courier");
 
-    // What `App::print` would stamp on each kind of paper. A bill and a ticket
-    // must not get the same answer, or the second setting is decoration.
+    // What `App::print` would stamp on each kind of paper.
     let day = crate::flows::today(crate::flows::now());
     let doc = || {
         mb_print::doc::Document::new(mb_print::paper::Paper::new(
@@ -748,8 +674,8 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
         "the kitchen ticket did not take the shop's kitchen face"
     );
 
-    // And a shop that has chosen nothing asks for nothing, which is the
-    // built-in face — not an empty string the loader would have to special-case.
+    // And a shop that has chosen nothing asks for nothing, which is the built-in face — not an
+    // empty string the loader would have to special-case.
     crate::settings::ipc::save_on(
         &app,
         vec![crate::settings::ipc::SettingEdit {
@@ -761,19 +687,7 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
     assert_eq!(app.face_for_test(bill.kind), Some("builtin".to_owned()));
 }
 
-// ---------------------------------------------------------------------------
-// The printers — 2026-08-17, and every one of these is a bug the owner hit.
-//
-// > *"There is a major bug in the printing, the printer setting there is
-// > completely wrong flow is there, no default printer selection option, and
-// > even if we added a printer again its not printig real bill… and more
-// > importently just not show off, make it functional also, cross check
-// > weather its functions working or not."*
-//
-// Nothing here asserts that a screen draws a dropdown. Each one asserts that
-// pressing the thing changes where paper comes out, because "it looks set up
-// and prints nothing" is precisely the failure being fixed.
-// ---------------------------------------------------------------------------
+// The printers.
 
 use crate::settings::printers::{
     PrinterEdit, printers_on, save_printer_on, set_default_printer_on,
@@ -786,9 +700,6 @@ fn a_printer(name: &str, windows_name: &str, role: &str) -> PrinterEdit {
         kind: "spooler".to_owned(),
         address: windows_name.to_owned(),
         paper_mm: 80,
-        // **Deliberately false**, which is the whole point: this is what the
-        // Add-a-printer dialog sends when somebody does not tick the box, and
-        // it is what the owner actually did.
         is_default: false,
         role: role.to_owned(),
         engine: "raster".to_owned(),
@@ -797,13 +708,7 @@ fn a_printer(name: &str, windows_name: &str, role: &str) -> PrinterEdit {
     }
 }
 
-/// **Adding your printer makes it the one bills print on.**
-///
-/// The reported bug, exactly: a shop starts with `state::fallback_row` holding
-/// the default — a `kind = 'none'` row whose job is to accept jobs and print
-/// nothing — and adding a real printer never took that back. So the owner set
-/// their TVSE up, saw it in the list, and every bill was rendered, queued,
-/// marked printed and discarded, with no error anywhere.
+/// Adding your printer makes it the one bills print on.
 #[test]
 fn adding_a_real_printer_takes_the_default_off_the_stand_in() {
     let scratch = Scratch::new("printer_default");
@@ -842,21 +747,13 @@ fn adding_a_real_printer_takes_the_default_off_the_stand_in() {
     assert_eq!(chosen.name, "TVS", "bills still go to the stand-in");
 }
 
-/// **A shop already stuck on the stand-in repairs itself when it opens.**
-///
-/// The fix above only helps a printer saved from now on. The owner's counter
-/// is already in the broken state — printer added, stand-in still holding the
-/// default, every bill discarded — and telling them to go and press a new
-/// dropdown is a workaround, not a fix. `retire_the_stand_in` runs on every
-/// start; this is the shop it was written for, built by hand.
+/// A shop already stuck on the stand-in repairs itself when it opens.
 #[test]
 fn a_shop_already_printing_nothing_fixes_itself_on_the_way_up() {
     let scratch = Scratch::new("printer_repair");
     let path = scratch.dir().join("stuck.db");
     let db = Db::open(&DbConfig::new(path.clone())).expect("open");
 
-    // Exactly what was on the owner's disk: the stand-in holding the default,
-    // and a real printer beside it that nothing prints on.
     db.transaction(|tx| {
         let repos = Repos::new(tx);
         let at = crate::flows::now();
@@ -927,11 +824,7 @@ fn a_shop_already_printing_nothing_fixes_itself_on_the_way_up() {
     );
 }
 
-/// **And a shop on its FIRST day is left alone.**
-///
-/// The repair must not fire when the stand-in is the only printer there is —
-/// that is the state it exists for, and "fixing" it would mean a shop with no
-/// printer had no default at all.
+/// And a shop on its FIRST day is left alone.
 #[test]
 fn a_brand_new_shop_keeps_its_stand_in() {
     let scratch = Scratch::new("printer_firstday");
@@ -946,17 +839,7 @@ fn a_brand_new_shop_keeps_its_stand_in() {
     );
 }
 
-/// **A size an older build wrote still opens** — 2026-08-17.
-///
-/// A text size was the ESC/POS multiplier (`1`, `2`, `3`) and is a height in
-/// dots now. Every shop that has ever changed a size has one of the old numbers
-/// on its disk, and `Kind::check` runs before `write` — so the counter opened,
-/// refused its own settings row, logged a warning nobody would see, and printed
-/// the STANDARD receipt instead of the tuned one. Found by opening a real shop
-/// that had "Item list size" set.
-///
-/// This is what an upgrade looks like from the shop's side: the size they chose
-/// is still the size they get.
+/// A size an older build wrote still opens.
 #[test]
 fn a_size_saved_by_an_older_build_still_opens() {
     let scratch = Scratch::new("settings_legacy_size");
@@ -994,10 +877,7 @@ fn a_size_saved_by_an_older_build_still_opens() {
         })
         .expect("the settings load, rather than falling back to standard");
 
-    // **Rung for rung** (P32). A stored 48 was the eighth size on the old list
-    // and reads back as the eighth on the new one, so the shop's receipt keeps
-    // the size it was tuned to even though the number that expresses it moved
-    // from a nominal row height to a cap height.
+    // Rung for rung.
     assert_eq!(
         config.receipt.sections.items.size,
         mb_print::Style::LADDER[7],
@@ -1012,18 +892,7 @@ fn a_size_saved_by_an_older_build_still_opens() {
     assert_eq!(config.receipt.sections.store_name.scale(), 3);
 }
 
-/// **A size that is no longer on the list still opens, at the nearest one that
-/// is.**
-///
-/// The size list changed three times on 2026-08-17 — three multipliers, then
-/// twenty-two `px` values, then ten plain numbers. Each time, a shop had rows
-/// on disk holding a value the new list did not contain, and `Kind::check`
-/// refused them: the counter opened, refused its own settings row, and printed
-/// the standard receipt while the screen still showed what the shop had
-/// chosen. **The owner hit it twice in one evening.**
-///
-/// A list that can change is a list that will change again, so this is a rule
-/// rather than a patch: an unknown height snaps to the nearest offered one.
+/// A size that is no longer on the list still opens, at the nearest one that is.
 #[test]
 fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
     let scratch = Scratch::new("settings_offlist_size");
@@ -1061,15 +930,15 @@ fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
         })
         .expect("the settings load rather than falling back to standard");
 
-    // 46 was never on any list and snaps to the nearest rung; 28 was the
-    // fourth entry of the nominal list and reads back as the fourth rung.
+    // 46 was never on any list and snaps to the nearest rung; 28 was the fourth entry of the
+    // nominal list and reads back as the fourth rung.
     assert!(mb_print::Style::LADDER.contains(&config.receipt.sections.items.size));
     assert_eq!(
         config.receipt.sections.meta.size,
         mb_print::Style::LADDER[3]
     );
-    // Whatever it snapped to must be something the screen can show back, or the
-    // dropdown would open on nothing.
+    // Whatever it snapped to must be something the screen can show back, or the dropdown would
+    // open on nothing.
     for size in [
         config.receipt.sections.items.size,
         config.receipt.sections.meta.size,
@@ -1081,15 +950,7 @@ fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
     }
 }
 
-/// **Choosing 2 inch changes the paper the bill is laid out on** — the owner's
-/// *"the paper size selection in top, it should 2 inch 3 inch 4 inch"*
-/// (2026-08-17).
-///
-/// Not a test that a dropdown exists: a test that the number reaches the
-/// LAYOUT. Paper width is the one setting that changes what every other
-/// receipt setting does — 48 columns on 80 mm against 32 on 58 — so a picker
-/// that saved without the preview and the paper following it would be worse
-/// than no picker.
+/// Choosing 2 inch changes the paper the bill is laid out on.
 #[test]
 fn choosing_the_paper_width_relays_out_the_bill() {
     let scratch = Scratch::new("printer_paper");
@@ -1100,10 +961,9 @@ fn choosing_the_paper_width_relays_out_the_bill() {
     let wide = crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
         .expect("the preview");
     assert!(wide.paper.contains("3 inch"), "{}", wide.paper);
-    // **Measured, not assumed** (P32): how many characters fit is a fact about
-    // the face and the size, so the number is whatever the built-in face gives
-    // at the body size — and it is more on the wider roll, which is the whole
-    // claim this test makes.
+    // Measured, not assumed: how many characters fit is a fact about the face and the size, so
+    // the number is whatever the built-in face gives at the body size — and it is more on the
+    // wider roll, which is the whole claim this test makes.
     let wide_columns = wide.doc.columns;
     assert!(
         wide_columns >= 40,
@@ -1121,8 +981,8 @@ fn choosing_the_paper_width_relays_out_the_bill() {
         narrow.doc.columns
     );
 
-    // And it is on the printer bills actually go to, so the paper a customer's
-    // bill comes out on moved with it — not just the picture on the screen.
+    // And it is on the printer bills actually go to, so the paper a customer's bill comes out
+    // on moved with it — not just the picture on the screen.
     assert_eq!(
         crate::flows::default_printer(&app)
             .expect("a printer")
@@ -1143,11 +1003,7 @@ fn choosing_the_paper_width_relays_out_the_bill() {
     assert!(crate::settings::printers::set_paper_on(&app, 70).is_err());
 }
 
-/// **A shop that has already chosen is not overruled.**
-///
-/// The rule above is "the placeholder gives way", not "the newest printer
-/// wins". A kitchen printer added second must not quietly take the bills off
-/// the counter printer.
+/// A shop that has already chosen is not overruled.
 #[test]
 fn a_second_printer_does_not_steal_the_default() {
     let scratch = Scratch::new("printer_second");
@@ -1171,8 +1027,7 @@ fn a_second_printer_does_not_steal_the_default() {
     assert!(!kitchen.is_default);
 }
 
-/// **The dropdown works** — `set_default_printer`, which did not exist, and
-/// whose absence was the owner's *"no default printer selection option"*.
+/// The dropdown works.
 #[test]
 fn choosing_where_bills_print_moves_them_there() {
     let scratch = Scratch::new("printer_choose");
@@ -1208,23 +1063,19 @@ fn choosing_where_bills_print_moves_them_there() {
         "Back office"
     );
 
-    // And an id that is not a printer is refused rather than leaving the shop
-    // with no default at all.
+    // And an id that is not a printer is refused rather than leaving the shop with no default
+    // at all.
     assert!(set_default_printer_on(&app, "prn_nothing".to_owned()).is_err());
 }
 
-/// **"Bills only" and "Kitchen tickets only" mean something now.**
-///
-/// The three roles were collected, stored and shown back, and no print path
-/// ever read them — so a shop whose default was its kitchen printer had every
-/// customer's bill printed on the pass.
+/// "Bills only" and "Kitchen tickets only" mean something now.
 #[test]
 fn a_kitchen_only_printer_does_not_get_the_bills() {
     let scratch = Scratch::new("printer_roles");
     let app = a_shop(&scratch, "printers");
 
-    // The kitchen printer arrives first, so it is the one that displaces the
-    // stand-in and holds `is_default`.
+    // The kitchen printer arrives first, so it is the one that displaces the stand-in and holds
+    // `is_default`.
     save_printer_on(&app, a_printer("Kitchen", "TVSE RP3200 Lite", "kitchen")).expect("saves");
     save_printer_on(&app, a_printer("Counter", "EPSON TM-T82", "bill")).expect("saves");
 

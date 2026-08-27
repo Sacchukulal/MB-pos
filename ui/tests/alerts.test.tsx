@@ -1,18 +1,4 @@
-/**
- * **The alerts bell** — P30.6, and it replaces `setup.test.tsx`.
- *
- * The owner installed the counter and found the top of every screen taken by
- * standing notices, and under them a six-row set-up checklist with a button on
- * each row:
- *
- * > *"instead of showing like this big line notification/error, just make a
- * > small bell button near sun moon button, so all push notifications and
- * > alerts are sent to there only."*
- *
- * So the claims D102 used to make about the set-up strip are made about this
- * panel now, plus two the bell adds: the count is the whole count, and the
- * colour is the WORST thing waiting rather than an average of everything.
- */
+/** The alerts bell. */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -52,23 +38,14 @@ function show(alerts: readonly Alert[], onGo = vi.fn(), onClose = vi.fn()) {
   return { onGo, onClose };
 }
 
-/**
- * **The sentence is Rust's and it is shown whole** (§6). Nothing in the panel
- * composes words about a machine state — the licence line here is the same
- * string the Account screen shows, and a shop that reads it twice reads the
- * same thing twice.
- */
+/** The sentence is Rust's and it is shown whole (§6). */
 it('shows each alert as the sentence it arrived as', () => {
   show([LICENCE, MENU]);
   expect(screen.getByText(/Your plan ended on 10 August/)).toBeTruthy();
   expect(screen.getByText('Type the items, or import a spreadsheet.')).toBeTruthy();
 });
 
-/**
- * **Every alert carries the button that fixes it** — D102's one idea worth
- * keeping. The panel is not a seventh editor; it opens the screen that already
- * does the job, and closes itself on the way.
- */
+/** Every alert carries the button that fixes it. */
 it('sends somebody to the screen that already does the job, and gets out of the way', () => {
   const { onGo, onClose } = show([MENU]);
   fireEvent.click(screen.getByRole('button', { name: 'Do it' }));
@@ -77,9 +54,8 @@ it('sends somebody to the screen that already does the job, and gets out of the 
 });
 
 /**
- * **Nothing is dismissible**, and that is the reason the banners were not
- * either: a dismissed warning is a problem that was never fixed. The only way
- * to clear one is to deal with it.
+ * Nothing is dismissible, and that is the reason the banners were not either: a dismissed
+ * warning is a problem that was never fixed.
  */
 it('offers no way to dismiss an alert', () => {
   show([LICENCE]);
@@ -90,21 +66,13 @@ it('offers no way to dismiss an alert', () => {
   }
 });
 
-/**
- * **A quiet shop is told it is quiet.** An empty panel with nothing in it reads
- * as broken.
- */
+/** A quiet shop is told it is quiet. */
 it('says so when nothing needs anybody', () => {
   show([]);
   expect(screen.getByText(/Nothing needs you/)).toBeTruthy();
 });
 
-/**
- * **The badge takes the worst tone, not the commonest.** Five set-up steps and
- * one ended licence is a red bell: the number cannot say which of the six
- * matters, so the colour does (§2 rule 2 — and the count is still there in
- * words for anybody who cannot see the colour).
- */
+/** The badge takes the worst tone, not the commonest. */
 it('is as loud as the worst thing waiting', () => {
   expect(loudest([])).toBe(null);
   expect(loudest([MENU])).toBe('info');

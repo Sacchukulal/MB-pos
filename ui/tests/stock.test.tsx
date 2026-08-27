@@ -1,17 +1,4 @@
-/**
- * **The stock screen** — P25.
- *
- * Rust proves the arithmetic (`tests/stock.rs`, `inventory_tests.rs`). This
- * proves the screen's three claims:
- *
- * 1. **every quantity is shown exactly as Rust said it** — "1.712 bag",
- *    "−180 g", "Buy 2 bag" — because a screen that divided a balance by a pack
- *    size would be a second answer to D108 and the two would disagree the first
- *    minute a shop corrected a bag;
- * 2. a problem is a whole sentence Rust wrote (D100), never a code this file
- *    turns into words;
- * 3. **the cache warning carries the button that fixes it** (D114).
- */
+/** The stock screen. */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,8 +7,7 @@ const call = vi.fn();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   isUiError: () => false,
-  // P30.5 — the screen asks this before it toasts. Nothing here refuses, so
-  // the honest answer is always no.
+  // The screen asks this before it toasts.
   isLicenceRefusal: () => false,
 }));
 
@@ -99,7 +85,7 @@ const view: InventoryView = {
       hasRecipe: true,
       recipeCost: money(2_820, '28.20'),
       typedCost: money(2_000, '20.00'),
-      // **D119** — the gap IS the finding, and Rust writes it as a sentence.
+      // The gap IS the finding, and Rust writes it as a sentence.
       margin: '76.5% margin',
       gap: '₹8.20 more than you thought',
       isIncomplete: false,
@@ -199,8 +185,8 @@ describe('the stock screen', () => {
 
   it('shows every quantity exactly as Rust said it', async () => {
     draw();
-    // **D108.** The screen never converts: 42,800 g reaches it as "1.712 bag"
-    // and 400 g as "0.4 kg", each in the unit a person would use.
+    // The screen never converts: 42,800 g reaches it as "1.712 bag" and 400 g as "0.4 kg", each
+    // in the unit a person would use.
     expect(await screen.findByText('1.712 bag')).toBeInTheDocument();
     expect(screen.getByText('0.4 kg')).toBeInTheDocument();
     expect(screen.getByText('2,688.00')).toBeInTheDocument();
@@ -219,7 +205,7 @@ describe('the stock screen', () => {
   it('shows a problem as the whole sentence Rust wrote', async () => {
     draw();
     fireEvent.click(await screen.findByText(/Needs a look/));
-    // D100: the row carries its own fix, and this file composes nothing.
+    // The row carries its own fix, and this file composes nothing.
     expect(
       screen.getByText(/Tea has no recipe, so selling it takes nothing off the shelf/),
     ).toBeInTheDocument();
@@ -258,7 +244,7 @@ describe('the stock screen', () => {
     fireEvent.click((await screen.findAllByText('Move'))[0]!);
     fireEvent.change(screen.getByLabelText('How much'), { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Record it' }));
-    // **D109.** "2" and "bag", never 50000. Rust converts.
+    // "2" and "bag", never 50000. Rust converts.
     expect(call).toHaveBeenCalledWith('record_stock_movement', {
       edit: {
         materialId: 'mat_rice',
@@ -280,15 +266,15 @@ describe('the stock screen', () => {
     expect(screen.getAllByText('20.00')).toHaveLength(2);
     expect(screen.getByText('₹8.20 more than you thought')).toBeInTheDocument();
     expect(screen.getByText('76.5% margin')).toBeInTheDocument();
-    // A dish nobody has costed is not a dish that costs nothing, so it offers
-    // to add a recipe rather than showing ₹0.00 as a food cost.
+    // A dish nobody has costed is not a dish that costs nothing, so it offers to add a recipe
+    // rather than showing ₹0.00 as a food cost.
     expect(screen.getByRole('button', { name: 'Add a recipe' })).toBeInTheDocument();
   });
 
   it('tells a shop with nothing in it what a material is for', async () => {
     draw({ materials: [], dishes: [], buyList: [], problems: [], movements: [] });
-    // §6 — an empty state that only says "No data" wastes the one moment
-    // somebody was looking for guidance.
+    // An empty state that only says "No data" wastes the one moment somebody was looking for
+    // guidance.
     expect(await screen.findByText('No materials yet')).toBeInTheDocument();
     expect(screen.getByText(/rice, oil, paneer/)).toBeInTheDocument();
   });

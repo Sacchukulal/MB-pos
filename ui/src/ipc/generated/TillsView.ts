@@ -5,16 +5,12 @@ export type TillsView = { tills: Array<TerminalView>,
 /**
  * This machine's row.
  */
-me: string, isMaster: boolean, 
+me: string, isMaster: boolean, awaySays: string, 
 /**
- * **D138's sentence**, and it is empty when there is nothing to say.
- */
-awaySays: string, 
-/**
- * "3 bills waiting to reach the main till."
+ * "3 bills waiting to reach the main till.".
  */
 waitingSays: string, waiting: number, 
 /**
- * How many tills the plan allows, and how many there are (D141).
+ * How many tills the plan allows, and how many there are.
  */
 allowed: number, limitSays: string, mayManage: boolean, };

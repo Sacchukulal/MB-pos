@@ -1,11 +1,7 @@
-/*
- * "Is this counter healthy?" — P22. Every value is a token (D38).
- */
+/* "Is this counter healthy?". */
 
 .mb-health {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -13,8 +9,7 @@
   height: 100%;
 }
 
-/* `.mb-card` is a COLUMN, so a row inside one says so — P18 shipped three
-   stacked and centred because of it. */
+/* `.mb-card` is a COLUMN, so a row inside one says so. */
 .mb-health__top {
   flex-direction: row;
   align-items: flex-start;
@@ -40,8 +35,7 @@
   font-weight: var(--weight-medium);
 }
 
-/* The sentence is the row. It wraps, and the "open that screen" link sits
-   under it rather than squeezing it. */
+/* The sentence is the row. */
 .mb-health__says {
   display: flex;
   flex-direction: column;
@@ -65,7 +59,7 @@
   text-transform: capitalize;
 }
 
-/* The bundle's manifest — D94: a person sees this before the zip exists. */
+/* The bundle's manifest. */
 .mb-health__bundle {
   list-style: none;
   margin: 0;
@@ -77,9 +71,10 @@
 
 .mb-health__bundle li {
   display: grid;
-  /* Fractions rather than a fixed first column: the file names are short and
-     the descriptions are the part worth the room. A raw `14rem` here is also
-     what the token guard rejects, and rightly (D21). */
+  /*
+   * Fractions rather than a fixed first column: the file names are short and the descriptions
+   * are the part worth the room.
+   */
   grid-template-columns: 1fr 2fr auto;
   gap: var(--space-3);
   align-items: baseline;
@@ -101,8 +96,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The sentence that answers "what did I just send you?" It is the reassurance,
-   so it is body text rather than fine print. */
+/*
+ * The sentence that answers "what did I just send you?" It is the reassurance, so it is body
+ * text rather than fine print.
+ */
 .mb-health__excludes {
   margin: var(--space-3) 0 0;
   padding: var(--space-3);

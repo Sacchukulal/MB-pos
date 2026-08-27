@@ -1,48 +1,4 @@
-//! **The server, and the one rule it must never break.**
-//!
-//! # It cannot slow down billing, and here is exactly why
-//!
-//! Requirement 3 of the ten is that billing never stops. A network layer that
-//! can make the cashier wait has broken it, so the guarantee is structural
-//! rather than careful:
-//!
-//! 1. **its own runtime, on its own thread.** Not the UI thread, not a Tauri
-//!    command, not the print queue's workers. `magic-bill` starts it and
-//!    forgets about it; the only thing they share is a `Counter` trait object.
-//! 2. **a handler never holds a lock the billing path needs.** Every `Counter`
-//!    method takes `&self`, returns owned data, and is expected to hold
-//!    whatever it locks for the length of one short call. mb-lan never receives
-//!    a guard and therefore cannot hold one across an `await` — which is the
-//!    single way an async network layer strangles a synchronous one.
-//! 3. **a database read goes to a READER.** P18 added `Db::read_transaction`
-//!    for exactly this, and the `Counter` implementation uses it. The writer
-//!    belongs to the till.
-//! 4. **every socket has a timeout.** A phone that connects and goes silent
-//!    costs one idle task and nothing else (T6).
-//! 5. **the broadcast channel is bounded.** A phone that cannot keep up is
-//!    disconnected, not allowed to grow a queue inside the counter's memory. A
-//!    tablet in a pocket with a dying battery is not a reason for the till to
-//!    run out of RAM.
-//!
-//! T5 measures it: fifty concurrent clients against a billing operation, and
-//! the number goes in `docs/PERFORMANCE.md`.
-//!
-//! # The threat model, in one paragraph
-//!
-//! A stranger on the shop's WiFi can see that a Magic Bill counter exists, can
-//! read its mDNS advertisement, and can call `/v1/hello`. Everything else needs
-//! a credential they do not have, issued over TLS by a person who pressed
-//! Allow. They cannot read another phone's traffic — it is encrypted to a
-//! certificate they cannot forge without the counter's private key. They cannot
-//! impersonate the counter to a *paired* phone, because that phone pinned the
-//! fingerprint. They can flood the counter with connections, which is why every
-//! unauthenticated route is behind the tightest rate limit in the product.
-//!
-//! What they CAN do, and it is written down rather than hidden: impersonate the
-//! counter to a phone that has never paired, since that phone has nothing to
-//! compare against. That is why pairing shows a fingerprint on the counter's
-//! screen and the QR carries it — the one moment trust is established is the
-//! one moment a person is looking.
+//! The server, and the one rule it must never break.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -60,28 +16,17 @@ use crate::error::LanError;
 use crate::limit::{Limiter, Rate};
 use crate::pairing::Desk;
 
-/// **The protocol version.** One integer, and a client on a different one is
-/// told to update in a sentence rather than left to fail mysteriously.
+/// The protocol version. One integer, and a client on a different one is told to update in a
+/// sentence rather than left to fail mysteriously.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What a phone that will not keep up is allowed to fall behind by.
-///
-/// Sixty-four messages is a couple of minutes of a busy floor. Past that the
-/// phone is disconnected and reconnects with a sequence number — which is the
-/// designed path (see `Push`), and much cheaper than an unbounded queue.
 const BROADCAST_DEPTH: usize = 64;
 
-/// How long a socket may be silent before it is closed. Long enough for a
-/// waiter to be doing something else; short enough that a phone left in a
-/// locker is not a connection the counter keeps for a shift.
+/// How long a socket may be silent before it is closed.
 const IDLE: Duration = Duration::from_secs(90);
 
 /// Who is on the other end of a connection.
-///
-/// A newtype and not a bare `SocketAddr`, because axum's `Connected` can only
-/// be implemented for a **local** type — and the TLS listener below is a
-/// listener axum has never heard of, so somebody has to say how an address is
-/// taken from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Peer(pub SocketAddr);
 
@@ -93,12 +38,11 @@ impl Peer {
     }
 }
 
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, tokio::net::TcpListener>>
+impl
+    axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, tokio::net::TcpListener>>
     for Peer
 {
-    fn connect_info(
-        stream: axum::serve::IncomingStream<'_, tokio::net::TcpListener>,
-    ) -> Self {
+    fn connect_info(stream: axum::serve::IncomingStream<'_, tokio::net::TcpListener>) -> Self {
         Peer(*stream.remote_addr())
     }
 }
@@ -110,16 +54,9 @@ impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, TlsL
 }
 
 /// One message pushed to every connected phone.
-///
-/// P19 defines the ENVELOPE and nothing that travels in it — the `kind` and
-/// `body` are opaque here on purpose, and P20 fills them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Push {
-    /// **Monotonic, and it is the whole reconnection design.** A phone that
-    /// drops for two seconds sends the last sequence it saw and gets what it
-    /// missed. Fifteen phones refetching everything after a blip is how a
-    /// counter stutters mid-rush, so a full refetch is a decision the server
-    /// makes explicitly (see `Missed::TooFarBehind`) and never a fallback.
+    /// Monotonic, and it is the whole reconnection design.
     pub seq: u64,
     pub kind: String,
     pub body: serde_json::Value,
@@ -131,8 +68,7 @@ pub struct Push {
 pub enum Missed {
     /// Here is what you missed, in order.
     Since { pushes: Vec<Push> },
-    /// You are further behind than the buffer goes. **Said explicitly**, so the
-    /// phone asks for a snapshot deliberately rather than discovering it.
+    /// You are further behind than the buffer goes.
     TooFarBehind { newest: u64 },
 }
 
@@ -145,7 +81,7 @@ pub struct Where {
     pub server_id: String,
 }
 
-/// Everything a handler can reach. Cheap to clone — it is all `Arc`.
+/// Everything a handler can reach.
 #[derive(Clone)]
 pub struct Shared {
     pub counter: Arc<dyn Counter>,
@@ -182,9 +118,7 @@ impl Shared {
         }
     }
 
-    /// Send something to every connected phone. **Never blocks and never
-    /// fails**: with nobody listening the send is a no-op, which is exactly
-    /// right — the counter's job is not to wait for phones.
+    /// Send something to every connected phone.
     pub fn push(&self, kind: &str, body: serde_json::Value) -> u64 {
         let seq = self
             .next_seq
@@ -224,9 +158,7 @@ fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// ---------------------------------------------------------------------------
 // The routes.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
 struct Hello {
@@ -234,14 +166,8 @@ struct Hello {
     protocol_version: u32,
     shop_name: String,
     fingerprint: String,
-    /// **P27.** A joining TILL needs the certificate itself to pin it, and a
-    /// phone reads this and ignores it.
-    ///
-    /// Publishing it costs nothing: a server presents its certificate on every
-    /// handshake, to anybody who connects. What makes it trustworthy is not
-    /// secrecy but the FINGERPRINT a person carried across the room on a QR
-    /// (D80) â this endpoint is how the till gets the bytes, and the QR is how
-    /// it knows they are the right ones.
+    /// A joining TILL needs the certificate itself to pin it, and a phone reads this and
+    /// ignores it.
     certificate_pem: String,
 }
 
@@ -259,8 +185,7 @@ fn refused(r: &Refusal) -> Response {
     trouble(status, r.message())
 }
 
-/// **The router.** Public so a test can drive it over plain TCP without TLS —
-/// which is what makes T1–T9 fast, while T10 exercises the real handshake.
+/// The router. Public so a test can drive it over plain TCP without TLS.
 pub fn router(shared: Shared) -> Router {
     Router::new()
         .route("/v1/hello", get(hello))
@@ -268,7 +193,7 @@ pub fn router(shared: Shared) -> Router {
         .route("/v1/pair/{request_id}", get(pair_status))
         .route("/v1/me", get(me))
         .route("/v1/stream", get(stream))
-        // P20 — what a phone came here to do. See `docs/LAN_PROTOCOL.md`.
+        // What a phone came here to do.
         .route("/v1/intent", post(intent))
         .route("/v1/batch", post(batch))
         .route("/v1/forward", post(forward))
@@ -276,8 +201,8 @@ pub fn router(shared: Shared) -> Router {
         .with_state(shared)
 }
 
-/// One intent. Idempotent by its own id, so a phone that lost the reply
-/// retries this exact request and gets the same answer.
+/// One intent. Idempotent by its own id, so a phone that lost the reply retries this exact
+/// request and gets the same answer.
 async fn intent(
     State(shared): State<Shared>,
     headers: HeaderMap,
@@ -292,12 +217,6 @@ async fn intent(
     answered(&outcome)
 }
 
-/// **P27 â a settled bill arriving from another till** (D136).
-///
-/// It goes through the same door, the same TLS and the same authentication as
-/// a phone's intent, because a second till is another paired device and not a
-/// second protocol. What differs is only the payload: a fact rather than a
-/// request.
 async fn forward(
     State(shared): State<Shared>,
     headers: HeaderMap,
@@ -340,24 +259,18 @@ async fn catalogue(
         return response;
     }
     match shared.counter.catalogue(query.version.as_deref()) {
-        // **304, and it is the point of the version.** 400 items to fifteen
-        // phones on every reconnect is a shop whose WiFi is the bottleneck.
+        // 304, and it is the point of the version.
         None => StatusCode::NOT_MODIFIED.into_response(),
         Some(catalogue) => Json(catalogue).into_response(),
     }
 }
 
 /// An outcome, with the status its own kind implies.
-///
-/// **Always a body with a sentence in it**, including on a refusal: the phone
-/// shows that string to a waiter who has a customer in front of them.
 fn answered(outcome: &crate::intent::Outcome) -> Response {
     use crate::intent::Outcome;
     let status = match outcome {
         Outcome::Ok { .. } => StatusCode::OK,
-        // 409 and not 400: nothing was malformed. The counter's state and the
-        // phone's disagreed, which is what a conflict status means, and a
-        // phone can use it to decide whether to refresh.
+        // 409 and not 400: nothing was malformed.
         Outcome::Refused { .. } => StatusCode::CONFLICT,
         // 202: taken, not applied, waiting for a person.
         Outcome::Held { .. } => StatusCode::ACCEPTED,
@@ -365,18 +278,10 @@ fn answered(outcome: &crate::intent::Outcome) -> Response {
     (status, Json(outcome)).into_response()
 }
 
-/// Unauthenticated on purpose: this is how a phone finds out what it is
-/// talking to, including whether its own version still fits. Version-free for
-/// the same reason — a client that is told "upgrade" must still be able to ask
-/// what it is talking to.
-async fn hello(
-    State(shared): State<Shared>,
-    ConnectInfo(from): ConnectInfo<Peer>,
-) -> Response {
-    if let Err(wait) = shared
-        .hello_limiter
-        .check(&from.ip(), (shared.clock)())
-    {
+/// Unauthenticated on purpose: this is how a phone finds out what it is talking to, including
+/// whether its own version still fits.
+async fn hello(State(shared): State<Shared>, ConnectInfo(from): ConnectInfo<Peer>) -> Response {
+    if let Err(wait) = shared.hello_limiter.check(&from.ip(), (shared.clock)()) {
         return too_many(wait);
     }
     Json(Hello {
@@ -395,8 +300,8 @@ async fn pair(
     Json(request): Json<PairRequest>,
 ) -> Response {
     let ip = from.ip();
-    // The tightest bucket in the product, and the module note says why: this is
-    // the Argon2 door and it is open to anybody on the WiFi.
+    // The tightest bucket in the product, and the module note says why: this is the Argon2 door
+    // and it is open to anybody on the WiFi.
     if let Err(wait) = shared.pair_limiter.check(&ip, (shared.clock)()) {
         return too_many(wait);
     }
@@ -408,12 +313,8 @@ async fn pair(
                 .to_owned(),
         );
     }
-    // The limit is checked BEFORE a person is asked, so nobody is shown an
-    // approval they are not allowed to grant.
-    //
-    // **A till is counted against a different line than a phone** (D141): they
-    // are priced separately, and a shop that has used up its phones must still
-    // be able to add the counter it paid for.
+    // The limit is checked BEFORE a person is asked, so nobody is shown an approval they are
+    // not allowed to grant.
     if request.platform.trim().eq_ignore_ascii_case("till") {
         if let Err(says) = shared.counter.till_room() {
             return refused(&Refusal::TooManyDevices(says));
@@ -455,17 +356,13 @@ async fn pair_status(
     axum::extract::Path(request_id): axum::extract::Path<String>,
     ConnectInfo(from): ConnectInfo<Peer>,
 ) -> Response {
-    if let Err(wait) = shared
-        .hello_limiter
-        .check(&from.ip(), (shared.clock)())
-    {
+    if let Err(wait) = shared.hello_limiter.check(&from.ip(), (shared.clock)()) {
         return too_many(wait);
     }
     match shared.desk.collect(&request_id) {
         Ok(Some(device)) => {
-            // A phone that has just paired starts with a full bucket: its
-            // first seconds must not be spent inside a limit the pairing
-            // attempt drained.
+            // A phone that has just paired starts with a full bucket: its first seconds must
+            // not be spent inside a limit the pairing attempt drained.
             shared.device_limiter.forget(&device.device_id);
             Json(device).into_response()
         }
@@ -480,7 +377,11 @@ async fn pair_status(
     }
 }
 
-async fn me(State(shared): State<Shared>, headers: HeaderMap, ConnectInfo(from): ConnectInfo<Peer>) -> Response {
+async fn me(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+) -> Response {
     let device = match authenticate(&shared, &headers, from) {
         Ok(d) => d,
         Err(response) => return response,
@@ -500,7 +401,7 @@ async fn me(State(shared): State<Shared>, headers: HeaderMap, ConnectInfo(from):
 
 #[derive(Debug, Deserialize)]
 struct StreamQuery {
-    /// The last sequence this phone saw. Absent means "everything you have".
+    /// The last sequence this phone saw.
     since: Option<u64>,
 }
 
@@ -531,10 +432,8 @@ async fn stream(
 
         loop {
             tokio::select! {
-                // A phone that cannot keep up is DISCONNECTED, not allowed to
-                // grow a queue in the counter's memory. It reconnects with its
-                // sequence number and is served from the buffer — which is the
-                // designed path, not a failure.
+                // A phone that cannot keep up is DISCONNECTED, not allowed to grow a queue in
+                // the counter's memory.
                 received = receiver.recv() => match received {
                     Ok(push) => {
                         let Ok(text) = serde_json::to_string(&push) else { continue };
@@ -545,8 +444,7 @@ async fn stream(
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 },
-                // Anything the phone says, plus its own liveness. A socket that
-                // says nothing for `IDLE` is closed — T6's other half.
+                // Anything the phone says, plus its own liveness.
                 from_phone = tokio::time::timeout(IDLE, socket.recv()) => match from_phone {
                     Ok(Some(Ok(Message::Close(_))) | None) | Err(_) => break,
                     Ok(Some(Err(_))) => break,
@@ -559,9 +457,6 @@ async fn stream(
 }
 
 fn too_many(seconds: u32) -> Response {
-    // A `Retry-After`, always. R3: a phone that is refused with no idea when to
-    // come back is a phone that retries into a wall and decides the counter is
-    // broken.
     let mut response = trouble(
         StatusCode::TOO_MANY_REQUESTS,
         format!("The counter is busy. Try again in {seconds} seconds."),
@@ -572,27 +467,18 @@ fn too_many(seconds: u32) -> Response {
     response
 }
 
-/// The gate. **Reads the register on every request** — see the `Counter`
-/// trait's own note, and T3.
+/// The gate. Reads the register on every request.
 #[allow(
     clippy::result_large_err,
     reason = "the Err IS an axum Response, because a refusal here is a whole \n              HTTP answer with a sentence in it — boxing it would cost an \n              allocation on the path a rejected flood takes"
 )]
-fn authenticate(
-    shared: &Shared,
-    headers: &HeaderMap,
-    from: Peer,
-) -> Result<Device, Response> {
-    // Version first, so a client that is too old is told to update rather than
-    // told its credential is bad. Getting this order wrong is how a phone shows
-    // "please pair again" for an app-store problem.
+fn authenticate(shared: &Shared, headers: &HeaderMap, from: Peer) -> Result<Device, Response> {
+    // Version first, so a client that is too old is told to update rather than told its
+    // credential is bad.
     if let Some(offered) = headers.get("x-magicbill-version") {
         let said = offered.to_str().unwrap_or("");
         if said != PROTOCOL_VERSION.to_string() {
-            return Err(trouble(
-                StatusCode::UPGRADE_REQUIRED,
-                upgrade_message(said),
-            ));
+            return Err(trouble(StatusCode::UPGRADE_REQUIRED, upgrade_message(said)));
         }
     }
 
@@ -606,9 +492,6 @@ fn authenticate(
         return Err(refused(&Refusal::NotPaired));
     };
 
-    // The rate limit is keyed by device BEFORE the credential is verified, so
-    // a stolen device id cannot be used to run Argon2 in a loop. An unknown id
-    // falls into the IP bucket instead.
     let key = if device_id.is_empty() {
         from.ip()
     } else {
@@ -618,9 +501,7 @@ fn authenticate(
         return Err(too_many(wait));
     }
 
-    // **One refusal for "no such device" and "wrong secret".** Telling them
-    // apart is a way to enumerate the shop's devices, and `Counter` returns a
-    // single `Option` so the difference is not available to say.
+    // One refusal for "no such device" and "wrong secret".
     let Some(device) = shared.counter.authenticate(device_id, secret) else {
         return Err(refused(&Refusal::NotPaired));
     };
@@ -629,9 +510,6 @@ fn authenticate(
 }
 
 /// The sentence a phone on the wrong version shows.
-///
-/// Crown jewel 14 and audit F8: not a tag, not a number, not "protocol
-/// mismatch". A waiter reads this and knows which of the two things to do.
 #[must_use]
 pub fn upgrade_message(offered: &str) -> String {
     let theirs: Option<u32> = offered.parse().ok();
@@ -641,24 +519,14 @@ pub fn upgrade_message(offered: &str) -> String {
              it from the Play Store."
                 .to_owned()
         }
-        Some(_) => {
-            "This phone's Magic Bill app is newer than the counter's. Update \
+        Some(_) => "This phone's Magic Bill app is newer than the counter's. Update \
              Magic Bill on the counter PC."
-                .to_owned()
-        }
+            .to_owned(),
         None => "This phone did not say which version it is. Update the app.".to_owned(),
     }
 }
 
 /// Check a permission for a request, server-side.
-///
-/// **D45, said again for the network.** A phone that hides a button is a
-/// courtesy; this is the control, and T4 proves it by calling with the button
-/// hidden.
-///
-/// # Errors
-///
-/// A [`Refusal`] carrying the sentence.
 pub fn require(device: &Device, need: mb_auth::Permission) -> Result<(), Refusal> {
     if device.permissions.has(need) {
         return Ok(());
@@ -666,9 +534,7 @@ pub fn require(device: &Device, need: mb_auth::Permission) -> Result<(), Refusal
     Err(Refusal::NotAllowed(need.what().to_owned()))
 }
 
-// ---------------------------------------------------------------------------
 // Running it.
-// ---------------------------------------------------------------------------
 
 /// A running server. Dropping it stops it.
 pub struct Running {
@@ -684,7 +550,7 @@ impl std::fmt::Debug for Running {
 }
 
 impl Running {
-    /// Stop it and wait. Called by the panel's off switch, and by `Drop`.
+    /// Stop it and wait.
     pub fn stop(&mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -701,31 +567,12 @@ impl Drop for Running {
     }
 }
 
-/// Start the server on its **own runtime, on its own thread**.
-///
-/// This is guarantee 1 from the module note and it is the reason the signature
-/// is blocking and returns a handle: `magic-bill` calls it once at start-up and
-/// never awaits anything.
-///
-/// # Errors
-///
-/// [`LanError::Listen`] when the port is taken — which on a shop PC means a
-/// second copy of Magic Bill, and the panel says so with the port in it.
+/// Start the server on its own runtime, on its own thread.
 pub fn start(shared: Shared, port: u16, tls: Option<TlsConfig>) -> Result<Running, LanError> {
     start_on(shared, Ipv4Addr::UNSPECIFIED, port, tls)
 }
 
 /// The same, on one interface.
-///
-/// **The tests use loopback and the counter uses every interface**, and the
-/// difference is not cosmetic: binding `0.0.0.0` is what makes Windows raise
-/// its firewall prompt, so a test suite that binds it leaves a stack of
-/// dialogs on a developer machine every time it runs. Found by running the
-/// app after a test run and finding five of them holding the keyboard.
-///
-/// # Errors
-///
-/// [`LanError::Listen`] when the port is taken.
 pub fn start_on(
     shared: Shared,
     interface: Ipv4Addr,
@@ -739,9 +586,6 @@ pub fn start_on(
         .name("mb-lan".to_owned())
         .spawn(move || {
             let runtime = match tokio::runtime::Builder::new_multi_thread()
-                // Two worker threads. The reference machine is a 4 GB i3 and
-                // this workload is fifteen idle sockets — the default (one per
-                // core) would spend memory on threads that never wake.
                 .worker_threads(2)
                 .enable_all()
                 .build()
@@ -763,7 +607,9 @@ pub fn start_on(
             thread: Some(thread),
         }),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(LanError::Io("the network thread stopped before it started".into())),
+        Err(_) => Err(LanError::Io(
+            "the network thread stopped before it started".into(),
+        )),
     }
 }
 
@@ -779,10 +625,6 @@ impl std::fmt::Debug for TlsConfig {
 
 impl TlsConfig {
     /// Build one from the counter's own certificate.
-    ///
-    /// # Errors
-    ///
-    /// When the certificate or key cannot be read.
     pub fn from_identity(identity: &crate::identity::Identity) -> Result<TlsConfig, LanError> {
         use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
@@ -792,15 +634,13 @@ impl TlsConfig {
             .ok_or_else(|| LanError::Identity("the private key could not be decoded".into()))?;
 
         let config = rustls::ServerConfig::builder()
-            // No client certificates. The phone proves itself with a bearer
-            // credential over the encrypted channel — issuing a client
-            // certificate per phone would be a second PKI to manage on a
-            // machine that has no administrator.
+            // No client certificates. The phone proves itself with a bearer credential over the
+            // encrypted channel — issuing a client certificate per phone would be a second PKI
+            // to manage on a machine that has no administrator.
             .with_no_client_auth()
             .with_single_cert(
                 vec![CertificateDer::from(der)],
-                PrivateKeyDer::try_from(key)
-                    .map_err(|e| LanError::Identity(e.to_string()))?,
+                PrivateKeyDer::try_from(key).map_err(|e| LanError::Identity(e.to_string()))?,
             )
             .map_err(|e| LanError::Identity(e.to_string()))?;
         Ok(TlsConfig(Arc::new(config)))
@@ -847,9 +687,7 @@ async fn serve(
 
     match tls {
         None => {
-            // Plain TCP. Used by the tests, and by nothing else — `magic-bill`
-            // always passes a `TlsConfig`, because the shop WiFi is not
-            // trustworthy and that is the whole point of this session.
+            // Plain TCP. Used by the tests, and by nothing else.
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown)
                 .await;
@@ -862,22 +700,12 @@ async fn serve(
     }
 }
 
-/// A listener that hands axum sockets which have **already** finished their TLS
-/// handshake.
-///
-/// # Why it is a channel and not a handshake inside `accept`
-///
-/// `axum::serve` calls `accept()` in a loop, one at a time. Doing the handshake
-/// there would mean one slow client — a port scanner that opens a socket and
-/// says nothing, a phone that walked out of range mid-negotiation — holds up
-/// every other phone trying to connect. That is T6, and it is the same failure
-/// mode audit D3 describes for printers.
-///
-/// So a background task accepts TCP and **spawns** each handshake with a
-/// timeout; only completed connections arrive here. A stalled handshake costs
-/// one idle task and blocks nothing.
+/// A listener that hands axum sockets which have already finished their TLS handshake.
 struct TlsListener {
-    ready: tokio::sync::mpsc::Receiver<(tokio_rustls::server::TlsStream<tokio::net::TcpStream>, SocketAddr)>,
+    ready: tokio::sync::mpsc::Receiver<(
+        tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+        SocketAddr,
+    )>,
     local: SocketAddr,
 }
 
@@ -886,9 +714,8 @@ impl TlsListener {
         let local = listener
             .local_addr()
             .unwrap_or_else(|_| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
-        // Bounded: a burst of connections must not become an unbounded queue
-        // inside the counter. Sixteen half-open sockets is already more than a
-        // shop ever has.
+        // Bounded: a burst of connections must not become an unbounded queue inside the
+        // counter.
         let (tx, ready) = tokio::sync::mpsc::channel(16);
         let acceptor = tokio_rustls::TlsAcceptor::from(config.0);
         tokio::spawn(async move {
@@ -911,8 +738,7 @@ impl TlsListener {
     }
 }
 
-/// Ten seconds to complete a TLS handshake. A phone on the shop's own WiFi
-/// takes milliseconds; anything slower is not a phone.
+/// Ten seconds to complete a TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl axum::serve::Listener for TlsListener {
@@ -924,9 +750,7 @@ impl axum::serve::Listener for TlsListener {
             if let Some(ready) = self.ready.recv().await {
                 return ready;
             }
-            // The feeding task is gone, which only happens when the runtime is
-            // shutting down. Yield rather than spin — the graceful-shutdown
-            // future is about to win the select anyway.
+            // The feeding task is gone, which only happens when the runtime is shutting down.
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }

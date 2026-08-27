@@ -9,16 +9,14 @@ export type SetupStep = { id: string,
  */
 title: string, 
 /**
- * **Why it is worth doing**, in the shop's words — not what it is.
- * "Your name and GSTIN go on every bill you print" beats "store details".
+ * Why it is worth doing, in the shop's words — not what it is.
  */
 why: string, done: boolean, 
 /**
- * The screen that does it. There is no seventh editor.
+ * The screen that does it.
  */
 goTo: string, 
 /**
- * **True when a shop cannot really trade without it.** Nothing here stops
- * the counter working; this only decides what is said loudest.
+ * True when a shop cannot really trade without it.
  */
 mattersMost: boolean, };

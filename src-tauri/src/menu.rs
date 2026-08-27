@@ -1,19 +1,3 @@
-//! **The menu, as an owner edits it** — scope 2.1, 2.3, 2.4, 4.1, 6.1–6.3.
-//!
-//! > *"v1's menu was: category, name, price. That is all… so it could not bill
-//! > a bar, an AC/non-AC outlet or anyone selling packaged goods, and it could
-//! > never compute a real margin."*
-//!
-//! Bodies over `&App` (D46), and every one of them is gated on `menu.manage`
-//! by `guard::require` — which is the control, not the rail item.
-//!
-//! # Cost price does not leave this process without permission
-//!
-//! Scope 4.1 stores it so P18 can show a margin. It is the owner's business and
-//! not the counter's, so `reports.view` decides whether it crosses the IPC
-//! boundary at all. **Hiding a column in React would send it anyway** — that is
-//! P11's lesson about courtesies, and it applies to data as much as to buttons.
-
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
 use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxRate};
@@ -28,9 +12,7 @@ use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // What the menu screen sees.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -38,21 +20,20 @@ use crate::words::{self, UiError, UiResult};
 pub struct TaxClassView {
     pub id: String,
     pub name: String,
-    /// Preformatted — "5%", "12.5%". R8: TypeScript divides nothing, ever.
+    /// Preformatted — "5%", "12.5%".
     pub rate: String,
     /// The same rate in basis points, so the editor can send it back unchanged.
     pub rate_bp: u32,
-    /// **The machine values.** The editor sends these back; it never reads the
-    /// words, so rewording a label cannot change what a class taxes (P33 §5.1).
+    /// The machine values. The editor sends these back; it never reads the words, so rewording
+    /// a label cannot change what a class taxes.
     #[ts(type = "\"gst\" | \"exempt\" | \"outside_gst\" | \"untaxed\"")]
     pub kind: mb_core::TaxKind,
     #[ts(type = "\"exclusive\" | \"inclusive\"")]
     pub basis: mb_core::PriceBasis,
-    /// For a person to read in the list. Never parsed back.
+    /// For a person to read in the list.
     pub treatment: String,
     pub is_active: bool,
-    /// How many items would move if this class changed. The screen says it out
-    /// loud before an owner edits a rate.
+    /// How many items would move if this class changed.
     pub items_using: i64,
 }
 
@@ -76,25 +57,20 @@ pub struct MenuRowView {
     pub category_id: Option<String>,
     pub price: MoneyView,
     pub tax_class_id: Option<String>,
-    /// What the item is actually charged at today — "5%", and the treatment in
-    /// words, so a screen never has to work it out.
+    /// What the item is actually charged at today — "5%", and the treatment in words, so a
+    /// screen never has to work it out.
     pub rate: String,
     pub hsn: Option<String>,
     pub short_code: Option<String>,
-    /// **Absent without `reports.view`.** Scope 4.1 is the owner's margin, not
-    /// the counter's business — and this is refused in Rust rather than hidden.
     pub cost: Option<MoneyView>,
-    /// Only when the cost is known and visible. Preformatted (R8).
+    /// Only when the cost is known and visible.
     pub margin: Option<String>,
     pub is_open_price: bool,
     pub is_available: bool,
-    /// Scope 3.5 — which course this dish belongs to, for the kitchen screen.
-    /// Blank means no course, and a menu where every dish is blank fires the
-    /// whole order at once (P24).
+    /// Which course this dish belongs to, for the kitchen screen.
     #[serde(default)]
     pub course: Option<String>,
-    /// Scope 3.6 — how many minutes the kitchen is expected to take. Blank
-    /// means no target, and a ticket with no target never turns late.
+    /// How many minutes the kitchen is expected to take.
     #[serde(default)]
     pub prep_minutes: Option<String>,
     pub variants: i64,
@@ -108,7 +84,7 @@ pub struct MenuEdit {
     pub id: String,
     pub name: String,
     pub category_id: Option<String>,
-    /// Typed by a person: "120", "120.50". Parsed by Rust (D39).
+    /// Typed by a person: "120", "120.50".
     pub price: String,
     pub tax_class_id: Option<String>,
     pub hsn: Option<String>,
@@ -116,17 +92,13 @@ pub struct MenuEdit {
     pub cost: Option<String>,
     pub is_open_price: bool,
     pub is_available: bool,
-    /// Scope 3.5 — the course. Blank means no course.
+    /// The course.
     #[serde(default)]
     pub course: Option<String>,
-    /// Scope 3.6 — minutes, typed by a person and parsed in Rust (D39).
+    /// Minutes, typed by a person and parsed in Rust.
     #[serde(default)]
     pub prep_minutes: Option<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Reading.
-// ---------------------------------------------------------------------------
 
 pub fn tax_classes_on(app: &App) -> UiResult<Vec<TaxClassView>> {
     guard::require(app, Permission::MenuManage)?;
@@ -155,10 +127,7 @@ pub fn tax_classes_on(app: &App) -> UiResult<Vec<TaxClassView>> {
     })
 }
 
-/// The tax, in words a shopkeeper reads — UI_GUIDELINES §6.
-///
-/// **Display only.** The kind and the basis cross the wire as themselves, so
-/// rewording these is safe (P33 §5.1).
+/// The tax, in words a shopkeeper reads.
 const fn tax_words(tax: mb_core::TaxSpec) -> &'static str {
     match tax.kind {
         mb_core::TaxKind::Exempt => "Exempt",
@@ -202,9 +171,7 @@ pub fn categories_on(app: &App) -> UiResult<Vec<CategoryView>> {
 
 pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
     let who = guard::require(app, Permission::MenuManage)?;
-    // **The margin is a separate permission from the menu.** A manager who may
-    // change a price is not automatically somebody who may see what the shop
-    // pays for it.
+    // The margin is a separate permission from the menu.
     let may_see_cost = who.can(Permission::ReportsView);
 
     app.with_shop(|shop| {
@@ -233,9 +200,7 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
                         cost: cost.map(MoneyView::from),
                         is_open_price: item.is_open_price,
                         is_available: item.is_available,
-                        // P24 — what the kitchen screen needs to know about
-                        // this dish. Formatted here, so the menu screen shows
-                        // "12 min" without doing arithmetic (R8).
+                        // What the kitchen screen needs to know about this dish.
                         course: item.course.clone(),
                         prep_minutes: item.prep_minutes.map(|m| m.to_string()),
                         variants,
@@ -248,9 +213,6 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
 }
 
 /// "58%" — the gross margin, formatted in Rust.
-///
-/// `None` when the item is free, because a margin on nothing is a division by
-/// zero dressed as a number.
 #[allow(
     clippy::integer_division,
     reason = "a percentage for a screen, not money — the money is price and cost"
@@ -264,15 +226,7 @@ fn margin_label(price: Money, cost: Money) -> Option<String> {
     Some(format!("{percent}%"))
 }
 
-// ---------------------------------------------------------------------------
-// Writing.
-// ---------------------------------------------------------------------------
-
 /// Save one item.
-///
-/// **The tax class decides the rate**, not the screen: the class is resolved
-/// here and its rate written onto the item, so an item and its class can never
-/// disagree (D56).
 pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -299,9 +253,8 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                 let repos = mb_db::Repos::new(tx);
                 let before = repos.menu().find_item(&ItemId::new(edit.id.clone()))?;
 
-                // The class, resolved. An item with no class keeps whatever it
-                // had — an imported one-off is a real thing and must not be
-                // silently moved to 5%.
+                // The class, resolved. An item with no class keeps whatever it had — an
+                // imported one-off is a real thing and must not be silently moved to 5%.
                 let tax = match &edit.tax_class_id {
                     Some(id) => {
                         let class = repos
@@ -312,8 +265,8 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                             })?;
                         class.tax
                     }
-                    // No class chosen: keep what the item already had, or start
-                    // it as ordinary GST at nil rate.
+                    // No class chosen: keep what the item already had, or start it as ordinary
+                    // GST at nil rate.
                     None => before
                         .as_ref()
                         .map_or(mb_core::TaxSpec::gst(TaxRate::ZERO), |b| b.tax),
@@ -329,11 +282,7 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                     hsn: edit.hsn.clone().filter(|h| !h.trim().is_empty()),
                     cost_price: cost,
                     short_code: edit.short_code.clone().filter(|s| !s.trim().is_empty()),
-                    // Scope 3.6 — the kitchen screen's target. Typed as text
-                    // and parsed HERE, because D39 says a number a person
-                    // types is parsed in Rust and never in the browser.
-                    // Unreadable text keeps whatever was there rather than
-                    // silently clearing a target the kitchen depends on.
+                    // The kitchen screen's target.
                     prep_minutes: edit
                         .prep_minutes
                         .as_ref()
@@ -347,8 +296,7 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                                     .or_else(|| before.as_ref().and_then(|b| b.prep_minutes))
                             },
                         ),
-                    // Scope 3.5 — the course. Blank means no course, and a
-                    // blank menu fires the whole order at once.
+                    // The course.
                     course: edit
                         .course
                         .clone()
@@ -360,8 +308,6 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                 };
                 repos.menu().save_item(OUTLET, &item, at)?;
 
-                // **R11 / audit C4: "who changed a price".** In the same
-                // transaction as the change.
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -386,8 +332,7 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
     menu_rows_on(app)
 }
 
-/// An HSN or SAC code is 2, 4, 6 or 8 digits — or nothing at all. Checked here
-/// rather than on the bill, where a wrong one is already printed.
+/// An HSN or SAC code is 2, 4, 6 or 8 digits — or nothing at all.
 fn check_hsn(hsn: Option<&str>) -> UiResult<()> {
     let Some(code) = hsn.map(str::trim).filter(|h| !h.is_empty()) else {
         return Ok(());
@@ -401,9 +346,7 @@ fn check_hsn(hsn: Option<&str>) -> UiResult<()> {
     ))
 }
 
-/// **Never the cost price.** The audit trail is read by anybody with
-/// `audit.view`, and what the shop pays for a dosa is a narrower secret than
-/// what it charges.
+/// Never the cost price.
 fn item_json(item: &MenuItem) -> serde_json::Value {
     serde_json::json!({
         "name": item.name,
@@ -414,7 +357,7 @@ fn item_json(item: &MenuItem) -> serde_json::Value {
     })
 }
 
-/// "86 it" — scope 3.5. **Stops new orders and disturbs no open one** (T10).
+/// "86 it".
 pub fn set_available_on(app: &App, item_id: String, available: bool) -> UiResult<Vec<MenuRowView>> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -447,16 +390,13 @@ pub fn set_available_on(app: &App, item_id: String, available: bool) -> UiResult
     menu_rows_on(app)
 }
 
-/// Save a category. **A category with items cannot be retired** — P13 item 6,
-/// and the message says what to do instead rather than letting a foreign key
-/// produce "the shop's data rejected that".
+/// Save a category. A category with items cannot be retired.
 pub fn save_category_on(
     app: &App,
     id: String,
     name: String,
     is_active: bool,
-    // P24 — which kitchen screen this category's food goes to. `None` keeps
-    // what is already set; blank text means the shop's one screen.
+    // Which kitchen screen this category's food goes to.
     station: Option<String>,
 ) -> UiResult<Vec<CategoryView>> {
     guard::require(app, Permission::MenuManage)?;
@@ -500,12 +440,7 @@ pub fn save_category_on(
                         name: name.trim().to_owned(),
                         sort_order: existing.as_ref().map_or(0, |c| c.sort_order),
                         is_active,
-                        // **This is how a shop makes a second kitchen screen**
-                        // (P24). Blank means the one screen; typing "Tandoor"
-                        // here sends this category's food to a screen of that
-                        // name. Adding, renaming and removing a section is
-                        // therefore editing the categories that belong to it —
-                        // there is no separate station screen to learn.
+                        // This is how a shop makes a second kitchen screen.
                         station: station
                             .map(|s| s.trim().to_owned())
                             .filter(|s| !s.is_empty())
@@ -521,9 +456,6 @@ pub fn save_category_on(
 }
 
 /// Save a tax class, and say how many items moved with it.
-///
-/// **The kind and the basis arrive as themselves**, not as words to be sniffed:
-/// a label is for reading (P33 §5.1).
 pub fn save_tax_class_on(
     app: &App,
     id: String,
@@ -541,9 +473,7 @@ pub fn save_tax_class_on(
         .unwrap_or(0);
     let rate = TaxRate::from_basis_points(bp)
         .ok_or_else(|| UiError::new("menu.rate", "A tax rate is between 0% and 100%."))?;
-    // Outside GST carries a STATE VAT rate, and the rate typed on this screen
-    // is that rate. Before P33 it could only ever be zero, which is why a bar
-    // undercharged every drink.
+    // Outside GST carries a STATE VAT rate, and the rate typed on this screen is that rate.
     let tax = mb_core::TaxSpec { kind, rate, basis };
 
     // The rate is free entry, so "exempt at 5%" is typeable and refused here.
@@ -597,7 +527,7 @@ pub fn save_tax_class_on(
     })
 }
 
-/// **T8** — a percentage across a category, exact to the paisa on every item.
+/// A percentage across a category, exact to the paisa on every item.
 pub fn change_prices_on(
     app: &App,
     category_id: Option<String>,
@@ -622,9 +552,8 @@ pub fn change_prices_on(
                     if wanted.is_some() && item.category_id != wanted {
                         continue;
                     }
-                    // **One rounding rule.** `mul_ratio` is the only place a
-                    // money value is rounded in this product (P00), so a bulk
-                    // rise cannot disagree with a discount.
+                    // One rounding rule. `mul_ratio` is the only place a money value is rounded
+                    // in this product, so a bulk rise cannot disagree with a discount.
                     let delta = item
                         .unit_price
                         .mul_ratio(i64::from(bp), 10_000)
@@ -665,8 +594,6 @@ pub fn change_prices_on(
 }
 
 /// A price or a cost, as a person typed it.
-/// The same parser, for the sessions that came after P13 and would otherwise
-/// write a second one. Money is parsed in Rust, in one place (D39).
 pub fn parse_money_public(text: &str) -> UiResult<Money> {
     parse_money(text, "amount")
 }
@@ -681,9 +608,7 @@ fn parse_money(text: &str, what: &'static str) -> UiResult<Money> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// The command seats (D46).
-// ---------------------------------------------------------------------------
+// The command seats.
 
 #[tauri::command]
 pub fn menu_tax_classes(app: tauri::State<'_, App>) -> UiResult<Vec<TaxClassView>> {
@@ -746,30 +671,24 @@ pub fn change_menu_prices(
     change_prices_on(&app, category_id, percent)
 }
 
-// ---------------------------------------------------------------------------
-// The spreadsheet — P13 item 7.
-//
-// "A shop with 400 items will not type them in, and a setup nobody finishes is
-// a sale nobody keeps."
-// ---------------------------------------------------------------------------
+// The spreadsheet.
 
 /// What an import would do, before it does anything.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPlanView {
-    /// The whole sentence, written in Rust: "312 new item(s) and 88 change(s)."
+    /// The whole sentence, written in Rust: "312 new item(s) and 88 change(s).".
     pub summary: String,
     pub new_items: i64,
     pub updated_items: i64,
-    /// "Line 4: there is no category called \"Snaks\"" — the line number is the
-    /// one in the owner's spreadsheet, counting the header as line 1.
+    /// "Line 4: there is no category called \"Snaks\"".
     pub refused: Vec<String>,
     /// Nothing may be imported until this is true.
     pub is_clean: bool,
 }
 
-/// Read a file and say what would happen. **Writes nothing.**
+/// Read a file and say what would happen.
 pub fn plan_import_on(app: &App, csv: String) -> UiResult<ImportPlanView> {
     guard::require(app, Permission::MenuManage)?;
     app.with_shop(|shop| {
@@ -792,12 +711,7 @@ pub fn plan_import_on(app: &App, csv: String) -> UiResult<ImportPlanView> {
     })
 }
 
-/// Do it — **planning again inside the same transaction**, so what is written
-/// is what the file says now rather than what it said when the owner looked.
-///
-/// The alternative is passing the plan across the IPC boundary and back, which
-/// would let a screen edit it. A plan is a decision about a file, and the file
-/// is the thing worth trusting.
+/// Do it.
 pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -862,13 +776,7 @@ pub fn export_menu(app: tauri::State<'_, App>) -> UiResult<String> {
     export_menu_on(&app)
 }
 
-// ---------------------------------------------------------------------------
-// What one item is made of — scope 6.1, 6.2, 6.3.
-//
-// Variants, modifier groups and combos each have their storage and their rules
-// already (mb-db's `composition`, mb-core's `combo`). This is the way in: the
-// screens that let an owner set them up, which is the last thing P13 owes.
-// ---------------------------------------------------------------------------
+// What one item is made of.
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -886,8 +794,7 @@ pub struct VariantView {
 pub struct ModifierView {
     pub id: String,
     pub name: String,
-    /// Preformatted, and it may be negative — "No onion, −10.00" is a real line
-    /// on a real menu. R8: TypeScript formats nothing.
+    /// Preformatted, and it may be negative — "No onion, −10.00" is a real line on a real menu.
     pub price_delta: MoneyView,
     pub is_active: bool,
 }
@@ -898,20 +805,13 @@ pub struct ModifierView {
 pub struct ModifierGroupView {
     pub id: String,
     pub name: String,
-    /// **`u32`, not `i64`, and the reason is the wire.** `ts-rs` renders an
-    /// `i64` as a TypeScript `bigint`, and `JSON.stringify` — which is what
-    /// Tauri's `invoke` uses — throws on one. A screen that honestly built a
-    /// `1n` could not send it back. Caught by saving a group and reading
-    /// *"Do not know how to serialize a BigInt"* (P13).
-    ///
-    /// A group with four billion choices is not a thing, so nothing is lost.
+    /// `u32`, not `i64`, and the reason is the wire.
     pub min_select: u32,
     pub max_select: Option<u32>,
-    /// The rule in words — "Choose one", "Any number". Worked out once, here,
-    /// rather than in every screen that shows a group (UI_GUIDELINES §6).
+    /// The rule in words — "Choose one", "Any number".
     pub rule: String,
     pub modifiers: Vec<ModifierView>,
-    /// Whether THIS item offers it. Only meaningful inside `item_composition`.
+    /// Whether THIS item offers it.
     pub attached: bool,
 }
 
@@ -922,9 +822,8 @@ pub struct ItemComposition {
     pub item_id: String,
     pub item_name: String,
     pub variants: Vec<VariantView>,
-    /// **Every group the shop has**, each flagged with whether this item offers
-    /// it — so attaching one is a tick rather than a retyping. A shop has
-    /// "Spice level" once, not once per curry.
+    /// Every group the shop has, each flagged with whether this item offers it — so attaching
+    /// one is a tick rather than a retyping.
     pub groups: Vec<ModifierGroupView>,
 }
 
@@ -941,8 +840,7 @@ fn group_rule(min: i64, max: Option<i64>) -> String {
     }
 }
 
-/// A stored count, made sendable. A number this could not hold is a number the
-/// database should not have, so it clamps rather than failing a whole screen.
+/// A stored count, made sendable.
 fn narrow(count: i64) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
 }
@@ -1004,11 +902,7 @@ pub fn item_composition_on(app: &App, item_id: String) -> UiResult<ItemCompositi
     })
 }
 
-/// Add or edit a size — scope 6.1.
-///
-/// **A variant carries its own price, not a discount off the parent.** A half
-/// plate is not a discounted full plate: it is a different thing to cook, at a
-/// price the owner sets, and it lands on its own line of a rate summary.
+/// Add or edit a size.
 pub fn save_variant_on(
     app: &App,
     item_id: String,
@@ -1045,7 +939,6 @@ pub fn save_variant_on(
                     },
                     at,
                 )?;
-                // R11 / audit C4 — a variant IS a price, so it is a price change.
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -1078,7 +971,7 @@ pub fn save_variant_on(
 pub struct GroupEdit {
     pub id: String,
     pub name: String,
-    /// See `ModifierGroupView` — `u32` so it can cross the wire at all.
+    /// See `ModifierGroupView`.
     pub min_select: u32,
     /// `None` means "any number".
     pub max_select: Option<u32>,
@@ -1091,7 +984,7 @@ pub struct GroupEdit {
 pub struct ModifierEdit {
     pub id: String,
     pub name: String,
-    /// Typed by a person, and it may lead with a minus. Parsed by Rust (D39).
+    /// Typed by a person, and it may lead with a minus.
     pub price_delta: String,
 }
 
@@ -1106,10 +999,6 @@ pub fn list_groups_on(app: &App) -> UiResult<Vec<ModifierGroupView>> {
 }
 
 /// Save a group and everything in it.
-///
-/// **An impossible group is refused as it is written**, not when a cashier
-/// meets it mid-rush: mb-db's `ModifierGroup::check` is the same rule, and
-/// "choose at least 3 of 2" fails here.
 pub fn save_group_on(app: &App, group: GroupEdit) -> UiResult<Vec<ModifierGroupView>> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -1177,10 +1066,7 @@ pub fn save_group_on(app: &App, group: GroupEdit) -> UiResult<Vec<ModifierGroupV
     list_groups_on(app)
 }
 
-/// A modifier's price difference, **which may be negative**.
-///
-/// "No cheese, −10" takes money off, and stripping the minus would quietly
-/// charge for it. Blank means free, because most choices are.
+/// A modifier's price difference, which may be negative.
 fn parse_delta(text: &str) -> UiResult<Money> {
     let text = text.trim();
     let (negative, rest) = match text
@@ -1197,7 +1083,7 @@ fn parse_delta(text: &str) -> UiResult<Money> {
     Ok(if negative { amount.neg() } else { amount })
 }
 
-/// Offer a group on an item, or stop offering it — scope 6.2.
+/// Offer a group on an item, or stop offering it.
 pub fn attach_group_on(
     app: &App,
     item_id: String,
@@ -1226,10 +1112,6 @@ pub fn attach_group_on(
     item_composition_on(app, item_id)
 }
 
-// ---------------------------------------------------------------------------
-// Combos — scope 6.3.
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -1239,8 +1121,7 @@ pub struct ComboView {
     pub price: MoneyView,
     pub is_active: bool,
     pub parts: Vec<ComboPartView>,
-    /// What the parts cost bought separately — so an owner can see what the
-    /// deal gives away without doing the arithmetic on paper.
+    /// What the parts cost bought separately.
     pub separately: MoneyView,
 }
 
@@ -1251,9 +1132,6 @@ pub struct ComboPartView {
     pub item_id: String,
     pub item_name: String,
     pub qty: String,
-    /// This part's slice of the combo price by D14's rule — **the money**, not
-    /// the stored proportion, so it is right today rather than on the day the
-    /// combo was made.
     pub share: MoneyView,
     /// "5%", so a mixed-rate combo shows why it has to be apportioned at all.
     pub rate: String,
@@ -1282,10 +1160,8 @@ pub fn list_combos_on(app: &App) -> UiResult<Vec<ComboView>> {
                 let mut out = Vec::new();
 
                 for combo in repos.composition().combos(OUTLET)? {
-                    // **The shares are recomputed from today's prices** rather
-                    // than read back from `share_bp` (D53). A component's price
-                    // moves and a stored share would be wrong in a way nobody
-                    // would ever notice.
+                    // The shares are recomputed from today's prices rather than read back from
+                    // `share_bp`.
                     let parts: Vec<mb_core::ComboComponent> = combo
                         .components
                         .iter()
@@ -1342,7 +1218,6 @@ pub fn list_combos_on(app: &App) -> UiResult<Vec<ComboView>> {
     })
 }
 
-/// Save a combo. The apportionment is the repository's, by D14's rule.
 pub fn save_combo_on(app: &App, combo: ComboEdit) -> UiResult<Vec<ComboView>> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -1371,8 +1246,7 @@ pub fn save_combo_on(app: &App, combo: ComboEdit) -> UiResult<Vec<ComboView>> {
         parts.push(mb_db::repo::composition::ComboPart {
             item_id: ItemId::new(item_id.clone()),
             qty: parsed,
-            // Filled in by `save_combo`, which is the only thing allowed to
-            // decide a share.
+            // Filled in by `save_combo`, which is the only thing allowed to decide a share.
             share_bp: 0,
         });
     }
@@ -1381,8 +1255,8 @@ pub fn save_combo_on(app: &App, combo: ComboEdit) -> UiResult<Vec<ComboView>> {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                // The standalone prices the shares are worked out from, read
-                // now so the stored proportions match today's menu.
+                // The standalone prices the shares are worked out from, read now so the stored
+                // proportions match today's menu.
                 let standalone: Vec<(ItemId, Money)> = repos
                     .menu()
                     .list_items(OUTLET, false)?
@@ -1428,7 +1302,7 @@ pub fn save_combo_on(app: &App, combo: ComboEdit) -> UiResult<Vec<ComboView>> {
     list_combos_on(app)
 }
 
-// --- the seats -------------------------------------------------------------
+// The seats.
 
 #[tauri::command]
 pub fn item_composition(app: tauri::State<'_, App>, item_id: String) -> UiResult<ItemComposition> {

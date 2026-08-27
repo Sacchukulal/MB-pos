@@ -1,17 +1,4 @@
-//! **T3 — the golden bytes.**
-//!
-//! A known bill, through the File transport, at every paper size and in both
-//! engines. What is committed is a **transcript** of the command stream rather
-//! than the raw bytes: forty kilobytes of dots is not a thing anybody can review
-//! as a diff, and reviewing the diff is the entire point of a golden file.
-//!
-//! The transcript is produced by walking the stream and naming each command,
-//! which means this test also proves the stream is **well formed** — every byte
-//! belongs to a command the decoder recognises. A stray byte in an ESC/POS
-//! stream is a printer printing garbage, and it is the kind of thing that only
-//! shows up on somebody's counter.
-//!
-//! Set `MB_UPDATE_GOLDEN=1` to rewrite them, and then read the diff.
+//! The golden bytes.
 
 #![allow(
     clippy::expect_used,
@@ -36,7 +23,7 @@ use mb_print::template::{Copy, bill_document};
 use mb_print::transport::Transport;
 use mb_print::transport::file::FileTransport;
 
-/// T3. Golden bytes, per paper size and per engine.
+/// Golden bytes, per paper size and per engine.
 #[test]
 fn t3_the_wire_is_what_it_was() {
     let fixture = Fixture::new();
@@ -52,11 +39,7 @@ fn t3_the_wire_is_what_it_was() {
         let doc = bill_document(&common::metrics(kind), &fixture.context(Copy::Original))
             .expect("builds");
 
-        // **Each engine's own metrics, which is what the queue does** (P32).
-        // The printer's own font has three sizes and nothing between; the
-        // graphics engine measures a real face. Laying both out the same way
-        // is what made this test fail the day sizes stopped being multiples —
-        // the text wire had four characters more per line than the roll holds.
+        // Each engine's own metrics, which is what the queue does.
         let paper = Paper::new(kind);
         let text_metrics = Metrics::printer_font(paper);
         let raster_metrics = Metrics::face(paper, std::sync::Arc::clone(&font));
@@ -64,7 +47,8 @@ fn t3_the_wire_is_what_it_was() {
         let for_raster = layout_for(&doc, &raster_metrics).expect("lays out");
 
         let text_bytes = encode_text(&for_text, &caps, &options);
-        let raster = to_raster(&for_raster, &raster_metrics, RasterOptions::default()).expect("rasters");
+        let raster =
+            to_raster(&for_raster, &raster_metrics, RasterOptions::default()).expect("rasters");
         let raster_bytes = encode_raster(&raster, &caps, &options);
 
         check(&format!("wire-{name}-text"), &text_bytes);
@@ -72,8 +56,8 @@ fn t3_the_wire_is_what_it_was() {
     }
 }
 
-/// The File transport writes what it was given, and appends — a file target is
-/// a paper roll, and a roll does not rewind.
+/// The File transport writes what it was given, and appends — a file target is a paper roll,
+/// and a roll does not rewind.
 #[test]
 fn the_file_transport_writes_the_bytes_and_does_not_rewind() {
     let scratch = common::Scratch::new("wire");
@@ -114,9 +98,13 @@ fn a_printer_with_no_qr_encoder_still_shows_the_customer_the_uri() {
 /// The defaults a `File` target gets are the ones a file can honour.
 #[test]
 fn a_file_printer_is_never_told_to_cut_or_to_kick() {
-    let printer = PrinterConfig::new("prn", "File", Target::File {
-        path: PathBuf::from("out.bin"),
-    });
+    let printer = PrinterConfig::new(
+        "prn",
+        "File",
+        Target::File {
+            path: PathBuf::from("out.bin"),
+        },
+    );
     let mut doc = mb_print::doc::Document::new(Paper::new(PaperKind::Mm80));
     doc.line("TOTAL 646.00");
     let laid = layout(&doc).expect("lays out");
@@ -126,9 +114,7 @@ fn a_file_printer_is_never_told_to_cut_or_to_kick() {
     assert!(!bytes.windows(2).any(|w| w == [0x1B, b'p']));
 }
 
-// ---------------------------------------------------------------------------
 // The transcript.
-// ---------------------------------------------------------------------------
 
 fn check(name: &str, bytes: &[u8]) {
     let transcript = transcribe(bytes);
@@ -153,10 +139,6 @@ fn check(name: &str, bytes: &[u8]) {
 }
 
 /// Walk an ESC/POS stream and name every command.
-///
-/// A byte the decoder does not recognise is reported rather than skipped: an
-/// unrecognised byte in this stream is a printer printing garbage, and the whole
-/// value of a golden file is that it notices.
 fn transcribe(bytes: &[u8]) -> String {
     let mut out = String::new();
     let mut i = 0;
@@ -255,7 +237,7 @@ fn group(bytes: &[u8], i: usize) -> (String, usize) {
             )
         }
         b'(' => {
-            // GS ( k pL pH …
+            // GS ( k pL pH ….
             let length = usize::from(at(bytes, i + 3)) + usize::from(at(bytes, i + 4)) * 256;
             let function = at(bytes, i + 6);
             let name = match function {

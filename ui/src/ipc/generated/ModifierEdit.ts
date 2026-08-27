@@ -2,6 +2,6 @@
 
 export type ModifierEdit = { id: string, name: string, 
 /**
- * Typed by a person, and it may lead with a minus. Parsed by Rust (D39).
+ * Typed by a person, and it may lead with a minus.
  */
 priceDelta: string, };

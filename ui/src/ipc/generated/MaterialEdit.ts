@@ -3,7 +3,6 @@ import type { PackEdit } from "./PackEdit";
 
 export type MaterialEdit = { id: string, name: string, dimension: string, category: string, buyFrom: string, 
 /**
- * Typed in the shop's own pack, with the unit beside it. Converted here,
- * never in the screen (R8, D109).
+ * Typed in the shop's own pack, with the unit beside it.
  */
 reorderLevel: string, reorderQty: string, reorderUnit: string, isPerishable: boolean, shelfLifeDays: number | null, isActive: boolean, packs: Array<PackEdit>, purchaseUnit: string, recipeUnit: string, };

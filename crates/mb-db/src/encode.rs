@@ -1,62 +1,9 @@
-//! mb-core values <-> SQLite values. **This module is the contract.**
-//!
-//! Every later session reads it and none of them may deviate. Two sessions
-//! inventing two encodings of `Qty` is the same class of bug D20 already caught
-//! once at P03, and it is invisible until a bill comes back wrong.
-//!
-//! | mb-core type | column type | encoding |
-//! |---|---|---|
-//! | [`Money`] | INTEGER | paise. Never REAL. Never text. |
-//! | [`Qty`] | INTEGER | thousandths of a unit |
-//! | [`TaxRate`] | INTEGER | basis points (500 = 5%) |
-//! | [`Timestamp`] | INTEGER | milliseconds since the Unix epoch, UTC |
-//! | [`BusinessDay`] | INTEGER | days since 1970-01-01 (D5) |
-//! | `ItemId`, `OrderId`, … | TEXT | the string the newtype holds |
-//! | `bool` | INTEGER | 0 or 1, NOT NULL, with a `CHECK (col IN (0,1))` |
-//! | `Option<T>` | nullable | NULL is "absent" and nothing else |
-//! | [`TaxKind`] | TEXT | `gst` \| `exempt` \| `outside_gst` \| `untaxed` |
-//! | [`PriceBasis`] | TEXT | `exclusive` \| `inclusive` |
-//! | [`TaxSpec`] | 2 TEXT + INTEGER | the two above, plus `rate_bp` |
-//! | [`Vat`](mb_core::Vat) | INTEGER | paise, in its own `vat` column. Never in a GST one. |
-//! | [`Registration`] | TEXT | `unregistered` \| `composition` \| `regular` |
-//! | [`StateTax`] | TEXT | `sgst` \| `utgst` |
-//! | [`PlaceOfSupply`] | TEXT | `intra` \| `inter` |
-//! | [`OrderType`] | TEXT | `dine_in` \| `parcel` \| `self_service` \| `delivery` |
-//! | [`RoundingMode`] | TEXT | `none` \| `nearest_rupee` \| `up` \| `down` |
-//!
-//! # Why timestamps are INTEGER and not ISO-8601 text
-//!
-//! [`Timestamp`] already *is* an `i64` of milliseconds, so an integer column is
-//! the same value with no conversion that can fail. Text would cost a parse on
-//! every read, three times the bytes against budget M5, and a column SQLite is
-//! perfectly happy to let you write rubbish into. The readable half is bought
-//! back for nothing by a view — see `v_orders_readable` in migration 0001,
-//! which renders `datetime(created_at/1000,'unixepoch','+05:30')` for anyone
-//! opening a backup in a SQLite browser.
-//!
-//! # Why enums are a tag column and not JSON
-//!
-//! A report has to answer "how much did we take on card this month". That is
-//! `WHERE mode = 'card'` against an index, or it is a full scan that parses
-//! 75,000 JSON documents. Budget R2 gives a year-long report 2.5 seconds.
-//!
-//! The four payload-carrying enums get a tag column plus a payload column, with
-//! a CHECK tying them together:
+//! Mb-core values <-> SQLite values.
 //!
 //! ```sql
 //! CHECK ((mode = 'credit') = (customer_id IS NOT NULL))
 //! CHECK ((mode = 'other')  = (mode_label  IS NOT NULL))
 //! ```
-//!
-//! # THE P04 / P05 SEAM
-//!
-//! **P04 owns the VALUE mapping** — how a `Money` becomes an `i64` and how an
-//! `'outside_gst'` becomes a `TaxKind`. Free functions, one value in, one value
-//! out.
-//!
-//! **P05 owns the ROW mapping** — `find_order`, `list_open_orders`,
-//! `save_settled_order`. If you find yourself writing one of those here, stop:
-//! it belongs in P05 and it will end up written twice.
 
 use mb_core::{
     BusinessDay, ChargeBasis, ChargeKind, Discount, Money, OrderType, PaymentMode, PlaceOfSupply,
@@ -65,11 +12,7 @@ use mb_core::{
 
 use crate::error::DbError;
 
-// ---------------------------------------------------------------------------
-// Scalars. Each of these is a newtype over an integer, so the mapping is the
-// identity — the functions exist so that the identity is written down in ONE
-// place and a future session cannot decide that `Qty` is "obviously" a REAL.
-// ---------------------------------------------------------------------------
+// Scalars. Each of these is a newtype over an integer, so the mapping is the identity.
 
 /// Paise. The whole of D2, in one line.
 #[must_use]
@@ -99,8 +42,8 @@ pub fn tax_rate_to_sql(r: TaxRate) -> i64 {
     i64::from(r.basis_points())
 }
 
-/// Rejects a stored rate above 100%, because [`TaxRate`] does and the disk is
-/// not more trustworthy than the caller (D7).
+/// Rejects a stored rate above 100%, because `TaxRate` does and the disk is not more
+/// trustworthy than the caller.
 pub fn tax_rate_from_sql(bp: i64, column: &'static str) -> Result<TaxRate, DbError> {
     let bp = u32::try_from(bp).map_err(|_| DbError::OutOfRange {
         column,
@@ -112,8 +55,7 @@ pub fn tax_rate_from_sql(bp: i64, column: &'static str) -> Result<TaxRate, DbErr
     })
 }
 
-/// Milliseconds since the Unix epoch, UTC. See the module docs for why this is
-/// not ISO-8601 text.
+/// Milliseconds since the Unix epoch, UTC.
 #[must_use]
 pub fn timestamp_to_sql(t: Timestamp) -> i64 {
     t.millis()
@@ -124,8 +66,7 @@ pub fn timestamp_from_sql(millis: i64) -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
-/// Days since 1970-01-01 (D5). Cheap to index, cheap to range-scan, and
-/// impossible to parse wrongly — which is the whole of audit finding B1.
+/// Days since 1970-01-01.
 #[must_use]
 pub fn business_day_to_sql(d: BusinessDay) -> i64 {
     i64::from(d.days_since_epoch())
@@ -140,11 +81,6 @@ pub fn business_day_from_sql(days: i64, column: &'static str) -> Result<Business
 }
 
 /// 0 or 1. Never NULL, never 'true', never 'Y'.
-///
-/// v1 declared 51 columns as `BOOLEAN` — a type SQLite does not have — and two
-/// of them defaulted to NULL, so a "boolean" in that product had three values.
-/// The coercion happens here and nowhere else, which is the whole point of the
-/// function existing at all for something this small.
 #[must_use]
 pub fn bool_to_sql(b: bool) -> i64 {
     i64::from(b)
@@ -161,18 +97,7 @@ pub fn bool_from_sql(v: i64, column: &'static str) -> Result<bool, DbError> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Plain enums. Tag text, matching serde's `rename_all = "snake_case"` so the
-// database, the JSON that P08 sends to the screen and the cloud all spell a
-// tax kind the same way.
-// ---------------------------------------------------------------------------
-
-// Each pair is written out rather than generated. The `_to_sql` direction is
-// kept honest by the compiler — a new variant makes the match non-exhaustive —
-// and the `_from_sql` direction is kept honest by the round-trip tests at the
-// bottom of this file, which iterate every variant. A macro was tried and only
-// hid which string went with which variant, which is the one thing a reader of
-// this module comes here to see.
+// Each pair is written out rather than generated.
 
 /// `tax_kind` / `kind`: what the supply is, in law.
 #[must_use]
@@ -185,8 +110,8 @@ pub fn tax_kind_to_sql(kind: TaxKind) -> &'static str {
     }
 }
 
-/// An unknown tag is an error, never a default: a line taxed as GST because
-/// somebody typed `gts` is a wrong bill (D7).
+/// An unknown tag is an error, never a default: a line taxed as GST because somebody typed
+/// `gts` is a wrong bill.
 pub fn tax_kind_from_sql(text: &str) -> Result<TaxKind, DbError> {
     match text {
         "gst" => Ok(TaxKind::Gst),
@@ -221,11 +146,6 @@ pub fn price_basis_from_sql(text: &str) -> Result<PriceBasis, DbError> {
 }
 
 /// The whole spec, from the three columns that hold it.
-///
-/// Every reader in this crate wants a [`TaxSpec`] and holds a rate beside the
-/// two tags, so composing them lives here once rather than as the same four
-/// lines in five repositories. `rate_column` names the rate column for the
-/// error message, the way [`tax_rate_from_sql`] wants it.
 pub fn tax_spec_from_sql_parts(
     rate_bp: i64,
     kind_text: &str,
@@ -240,9 +160,6 @@ pub fn tax_spec_from_sql_parts(
 }
 
 /// The tag text stored in a `registration` column.
-///
-/// Frozen onto each bill as well as held on the shop: leaving the composition
-/// scheme must not change what last year's bills reprint as.
 #[must_use]
 pub fn registration_to_sql(v: Registration) -> &'static str {
     match v {
@@ -264,8 +181,8 @@ pub fn registration_from_sql(text: &str) -> Result<Registration, DbError> {
     }
 }
 
-/// The tag text stored in a `state_tax` column — what the state half of an
-/// intra-state supply is called. Audit 3.10: a Chandigarh shop prints UTGST.
+/// The tag text stored in a `state_tax` column — what the state half of an intra-state supply
+/// is called.
 #[must_use]
 pub fn state_tax_to_sql(v: StateTax) -> &'static str {
     match v {
@@ -353,18 +270,10 @@ pub fn rounding_mode_from_sql(text: &str) -> Result<RoundingMode, DbError> {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Payload-carrying enums: a tag column plus a payload column.
-// ---------------------------------------------------------------------------
 
-/// How a [`PaymentMode`] is split across `payments.mode`,
-/// `payments.customer_id` and `payments.mode_label`.
-///
-/// Audit B12: v1 recorded a credit settlement with payment mode
-/// `"Full Settlement"`, which is not a payment mode, and it polluted every
-/// payment-mode report. mb-core fixed the shape — `mode` says what it WAS,
-/// `Payment::settles_credit` says what it DID. Do not undo that here by
-/// inventing a fifth tag.
+/// How a `PaymentMode` is split across `payments.mode`, `payments.customer_id` and
+/// `payments.mode_label`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentModeColumns {
     pub mode: &'static str,
@@ -403,9 +312,8 @@ pub fn payment_mode_to_sql(mode: &PaymentMode) -> PaymentModeColumns {
     }
 }
 
-/// The CHECK constraints on `payments` make the mismatched cases unstorable, so
-/// reaching one of them here means the row was written by something other than
-/// this program.
+/// The CHECK constraints on `payments` make the mismatched cases unstorable, so reaching one of
+/// them here means the row was written by something other than this program.
 pub fn payment_mode_from_sql(
     mode: &str,
     customer_id: Option<&str>,
@@ -430,9 +338,9 @@ pub fn payment_mode_from_sql(
     }
 }
 
-/// `charges.kind`. [`ChargeKind::Other`] carries a label, but a charge already
-/// has a `name` column holding exactly that, so the payload has nowhere new to
-/// go — the tag is `'other'` and the name is the label.
+/// `charges.kind`. `ChargeKind::Other` carries a label, but a charge already has a `name`
+/// column holding exactly that, so the payload has nowhere new to go — the tag is `'other'` and
+/// the name is the label.
 #[must_use]
 pub fn charge_kind_to_sql(kind: &ChargeKind) -> &'static str {
     match kind {
@@ -457,12 +365,7 @@ pub fn charge_kind_from_sql(kind: &str, name: &str) -> Result<ChargeKind, DbErro
     }
 }
 
-/// `basis` and `basis_value`: one column with two meanings, disambiguated by
-/// the tag beside it.
-///
-/// A reader who sees `basis_value` alone cannot know whether it is basis points
-/// or paise. That is the price of not carrying two mostly-NULL columns on every
-/// charge row, and it is paid deliberately.
+/// `basis` and `basis_value`: one column with two meanings, disambiguated by the tag beside it.
 #[must_use]
 pub fn charge_basis_to_sql(basis: ChargeBasis) -> (&'static str, i64) {
     match basis {
@@ -497,7 +400,11 @@ pub fn discount_to_sql(discount: Discount) -> (&'static str, i64) {
     }
 }
 
-pub fn discount_from_sql(kind: &str, value: i64, column: &'static str) -> Result<Discount, DbError> {
+pub fn discount_from_sql(
+    kind: &str,
+    value: i64,
+    column: &'static str,
+) -> Result<Discount, DbError> {
     match kind {
         "percent" => {
             let bp = u32::try_from(value).map_err(|_| DbError::OutOfRange {
@@ -521,11 +428,6 @@ pub fn discount_from_sql(kind: &str, value: i64, column: &'static str) -> Result
 }
 
 /// The state tag on `orders`, which is `AnyOrder`'s serde discriminator.
-///
-/// `AnyOrder` is `#[serde(tag = "state", rename_all = "snake_case")]`, so these
-/// five strings are already the wire format. Keeping the column identical means
-/// the counter, the phone and the cloud all spell a cancelled order the same
-/// way, and nobody writes a translation layer for it later.
 pub mod order_state {
     pub const DRAFT: &str = "draft";
     pub const OPEN: &str = "open";
@@ -537,17 +439,7 @@ pub mod order_state {
     pub const ALL: [&str; 5] = [DRAFT, OPEN, SETTLED, CANCELLED, VOIDED];
 }
 
-/// Canonical text for a [`mb_core::LineIdentity`], used as the kitchen ledger's
-/// key.
-///
-/// The identity is item + note + **sorted** modifier ids, and mb-core sorts
-/// them — that sort is what stops "cheese then no-onion" and "no-onion then
-/// cheese" being two different dishes to the kitchen. This function does not
-/// re-sort; it relies on mb-core having done it, because the rule must exist
-/// once (P03 item 4).
-///
-/// Unit separator (0x1F) between the parts, because it cannot occur in an id
-/// and will not occur in a note a human typed.
+/// Canonical text for a `mb_core::LineIdentity`, used as the kitchen ledger's key.
 #[must_use]
 pub fn line_identity_key(identity: &mb_core::LineIdentity) -> String {
     const US: char = '\u{1f}';
@@ -571,15 +463,23 @@ mod tests {
 
     #[test]
     fn scalars_round_trip() {
-        assert_eq!(money_from_sql(money_to_sql(Money::from_paise(-1234))).paise(), -1234);
-        assert_eq!(qty_from_sql(qty_to_sql(Qty::from_thousandths(500))).thousandths(), 500);
         assert_eq!(
-            timestamp_from_sql(timestamp_to_sql(Timestamp::from_millis(1_770_000_000_000))).millis(),
+            money_from_sql(money_to_sql(Money::from_paise(-1234))).paise(),
+            -1234
+        );
+        assert_eq!(
+            qty_from_sql(qty_to_sql(Qty::from_thousandths(500))).thousandths(),
+            500
+        );
+        assert_eq!(
+            timestamp_from_sql(timestamp_to_sql(Timestamp::from_millis(1_770_000_000_000)))
+                .millis(),
             1_770_000_000_000
         );
         let day = BusinessDay::from_ymd(2026, 8, 3);
         assert_eq!(
-            business_day_from_sql(business_day_to_sql(day), "orders.business_day").expect("in range"),
+            business_day_from_sql(business_day_to_sql(day), "orders.business_day")
+                .expect("in range"),
             day
         );
         let rate = TaxRate::from_percent(18).expect("18%");
@@ -591,7 +491,7 @@ mod tests {
 
     #[test]
     fn a_stored_rate_above_one_hundred_percent_is_refused() {
-        // The disk is not more trustworthy than the caller (D7).
+        // The disk is not more trustworthy than the caller.
         assert!(tax_rate_from_sql(10_001, "items.tax_rate_bp").is_err());
         assert!(tax_rate_from_sql(-1, "items.tax_rate_bp").is_err());
     }
@@ -600,7 +500,6 @@ mod tests {
     fn a_boolean_is_zero_or_one_and_nothing_else() {
         assert!(!bool_from_sql(0, "items.is_available").expect("false"));
         assert!(bool_from_sql(1, "items.is_available").expect("true"));
-        // v1 would have stored NULL here and called it a boolean.
         assert!(bool_from_sql(2, "items.is_available").is_err());
         assert!(bool_from_sql(-1, "items.is_available").is_err());
     }
@@ -613,7 +512,10 @@ mod tests {
             TaxKind::OutsideGst,
             TaxKind::Untaxed,
         ] {
-            assert_eq!(tax_kind_from_sql(tax_kind_to_sql(kind)).expect("known"), kind);
+            assert_eq!(
+                tax_kind_from_sql(tax_kind_to_sql(kind)).expect("known"),
+                kind
+            );
         }
         for basis in [PriceBasis::Exclusive, PriceBasis::Inclusive] {
             assert_eq!(
@@ -626,7 +528,10 @@ mod tests {
             Registration::Composition,
             Registration::Regular,
         ] {
-            assert_eq!(registration_from_sql(registration_to_sql(r)).expect("known"), r);
+            assert_eq!(
+                registration_from_sql(registration_to_sql(r)).expect("known"),
+                r
+            );
         }
         for s in [StateTax::Sgst, StateTax::Utgst] {
             assert_eq!(state_tax_from_sql(state_tax_to_sql(s)).expect("known"), s);
@@ -645,10 +550,16 @@ mod tests {
             RoundingMode::Up,
             RoundingMode::Down,
         ] {
-            assert_eq!(rounding_mode_from_sql(rounding_mode_to_sql(r)).expect("known"), r);
+            assert_eq!(
+                rounding_mode_from_sql(rounding_mode_to_sql(r)).expect("known"),
+                r
+            );
         }
         for p in [PlaceOfSupply::Intra, PlaceOfSupply::Inter] {
-            assert_eq!(place_of_supply_from_sql(place_of_supply_to_sql(p)).expect("known"), p);
+            assert_eq!(
+                place_of_supply_from_sql(place_of_supply_to_sql(p)).expect("known"),
+                p
+            );
         }
         // BACKEND-G7 wearing a schema hat: a typo is an error, not a default.
         assert!(price_basis_from_sql("exclusiv").is_err());
@@ -656,9 +567,7 @@ mod tests {
         assert!(order_type_from_sql("dinein").is_err());
     }
 
-    /// **Every kind x basis pair survives now** — which is the whole of P33
-    /// Phase 2. The Phase 1 shim projected 4x2 onto four strings and lost the
-    /// basis of a liquor line, `Untaxed` as its own category, and the VAT.
+    /// Every kind x basis pair survives now.
     #[test]
     fn every_kind_and_basis_pair_round_trips_through_its_own_columns() {
         for kind in [
@@ -683,21 +592,24 @@ mod tests {
         // The bar's sentence, in full: outside GST, 20% state VAT, priced tax-in.
         let beer = tax_spec_from_sql_parts(2_000, "outside_gst", "inclusive", "items.tax_rate_bp")
             .expect("known");
-        assert_eq!(beer, TaxSpec::liquor(TaxRate::from_percent(20).expect("20%")));
+        assert_eq!(
+            beer,
+            TaxSpec::liquor(TaxRate::from_percent(20).expect("20%"))
+        );
     }
 
     #[test]
     fn tag_text_matches_what_serde_writes() {
-        // The column, the JSON P08 sends to the screen and the cloud must all
-        // spell a tag the same way, or somebody writes a translation layer
-        // later and gets one variant wrong.
         let json = serde_json::to_string(&TaxKind::OutsideGst).expect("serialises");
         assert_eq!(json, "\"outside_gst\"");
         assert_eq!(tax_kind_to_sql(TaxKind::OutsideGst), "outside_gst");
 
         let json = serde_json::to_string(&Registration::Composition).expect("serialises");
         assert_eq!(json, "\"composition\"");
-        assert_eq!(registration_to_sql(Registration::Composition), "composition");
+        assert_eq!(
+            registration_to_sql(Registration::Composition),
+            "composition"
+        );
 
         let json = serde_json::to_string(&OrderType::SelfService).expect("serialises");
         assert_eq!(json, "\"self_service\"");
@@ -705,7 +617,10 @@ mod tests {
 
         let json = serde_json::to_string(&RoundingMode::NearestRupee).expect("serialises");
         assert_eq!(json, "\"nearest_rupee\"");
-        assert_eq!(rounding_mode_to_sql(RoundingMode::NearestRupee), "nearest_rupee");
+        assert_eq!(
+            rounding_mode_to_sql(RoundingMode::NearestRupee),
+            "nearest_rupee"
+        );
     }
 
     #[test]
@@ -728,14 +643,17 @@ mod tests {
 
         for plain in [PaymentMode::Cash, PaymentMode::Card, PaymentMode::Upi] {
             let cols = payment_mode_to_sql(&plain);
-            assert_eq!(payment_mode_from_sql(cols.mode, None, None).expect("known"), plain);
+            assert_eq!(
+                payment_mode_from_sql(cols.mode, None, None).expect("known"),
+                plain
+            );
         }
     }
 
     #[test]
     fn a_credit_payment_without_its_customer_is_refused() {
-        // The CHECK constraint stops this reaching the disk; this is the belt
-        // for that pair of braces.
+        // The CHECK constraint stops this reaching the disk; this is the belt for that pair of
+        // braces.
         assert!(payment_mode_from_sql("credit", None, None).is_err());
         assert!(payment_mode_from_sql("other", None, None).is_err());
         assert!(payment_mode_from_sql("full_settlement", None, None).is_err());
@@ -745,7 +663,10 @@ mod tests {
     fn charge_kind_carries_its_label_in_the_name_column() {
         let kind = ChargeKind::Other("Donation".to_owned());
         assert_eq!(charge_kind_to_sql(&kind), "other");
-        assert_eq!(charge_kind_from_sql("other", "Donation").expect("known"), kind);
+        assert_eq!(
+            charge_kind_from_sql("other", "Donation").expect("known"),
+            kind
+        );
         assert_eq!(
             charge_kind_from_sql("service", "Service Charge").expect("known"),
             ChargeKind::Service
@@ -754,7 +675,10 @@ mod tests {
 
     #[test]
     fn charge_basis_and_discount_round_trip() {
-        for basis in [ChargeBasis::Percent(1_000), ChargeBasis::Flat(Money::from_paise(5_000))] {
+        for basis in [
+            ChargeBasis::Percent(1_000),
+            ChargeBasis::Flat(Money::from_paise(5_000)),
+        ] {
             let (tag, value) = charge_basis_to_sql(basis);
             assert_eq!(charge_basis_from_sql(tag, value).expect("known"), basis);
         }
@@ -796,9 +720,8 @@ mod tests {
 
     #[test]
     fn the_kitchen_key_does_not_confuse_a_note_with_a_modifier() {
-        // Without a separator that cannot appear in an id, "itm_a" + note "b"
-        // and "itm_ab" with no note would collide, and the kitchen would be
-        // told about the wrong dish.
+        // Without a separator that cannot appear in an id, "itm_a" + note "b" and "itm_ab" with
+        // no note would collide, and the kitchen would be told about the wrong dish.
         let a = LineIdentity {
             item_id: ItemId::new("itm_a"),
             note: Some("b".to_owned()),
@@ -814,8 +737,8 @@ mod tests {
 
     #[test]
     fn order_state_tags_match_any_orders_serde_discriminator() {
-        // If these ever drift, the counter and the cloud disagree about what a
-        // cancelled order is called.
+        // If these ever drift, the counter and the cloud disagree about what a cancelled order
+        // is called.
         assert_eq!(order_state::ALL.len(), 5);
         for tag in order_state::ALL {
             assert!(tag.chars().all(|c| c.is_ascii_lowercase() || c == '_'));

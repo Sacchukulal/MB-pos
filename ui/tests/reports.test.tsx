@@ -1,18 +1,4 @@
-/**
- * **The reports screen** — P18's T11 on the TypeScript side.
- *
- * Rust proves what each report contains (`mb-db/tests/reports.rs`) and that the
- * catalogue has no gaps (`src-tauri/src/reports.rs`). This proves the one claim
- * that is the screen's own:
- *
- * > **the report list is the screen** — a report this file has never heard of,
- * > with columns it has never heard of, renders correctly and exports
- * > correctly.
- *
- * That is the property that makes "adding a report never touches a `.tsx`
- * file" true rather than aspirational, and it is the reason there is one
- * component here instead of thirteen.
- */
+/** The reports screen. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -44,7 +30,7 @@ const list: ReportListView = {
   reports: [
     { id: 'sales_day', title: 'Sales by day', group: 'Sales' },
     { id: 'tax_rate', title: 'Tax, rate-wise', group: 'Tax' },
-    // A report invented for this test. Nothing in the screen knows it exists.
+    // A report invented for this test.
     { id: 'wastage', title: 'Wastage by kitchen', group: 'Kitchen' },
   ],
 };
@@ -109,11 +95,7 @@ function open() {
   );
 }
 
-/**
- * The screen opens on the dashboard — audit G1: the owner's first question is
- * "what needs me", and a screen that opens on a list of reports makes them ask
- * it themselves. So a test about a REPORT has to choose one first.
- */
+/** The screen opens on the dashboard. */
 async function openOnAReport() {
   open();
   await waitFor(() => expect(screen.getByRole('button', { name: 'Sales by day' })).toBeTruthy());
@@ -122,8 +104,7 @@ async function openOnAReport() {
 
 it('renders a report it has never heard of, columns and all', async () => {
   open();
-  // The list groups itself from what Rust sent, including a group this file
-  // invented.
+  // The list groups itself from what Rust sent, including a group this file invented.
   await waitFor(() => expect(screen.getByRole('button', { name: 'Wastage by kitchen' })).toBeTruthy());
   // The group heading came from the data too.
   expect(screen.getByRole('heading', { name: 'Kitchen' })).toBeTruthy();
@@ -148,11 +129,10 @@ it('shows the comparison as the sentence Rust wrote, not as a percentage it work
 
 it('asks Rust for the period rather than working out what today is', async () => {
   await openOnAReport();
-  // Exactly one "Today" — the period preset. The dashboard's rail entry says
-  // "Today at a glance" precisely so these two are never confused.
+  // Exactly one "Today" — the period preset.
   await waitFor(() => expect(screen.getByRole('button', { name: 'Today' })).toBeTruthy());
-  // The first preset is used on open — and it came down the wire, because the
-  // shop's "today" starts at 5 am and a browser does not know that.
+  // The first preset is used on open — and it came down the wire, because the shop's "today"
+  // starts at 5 am and a browser does not know that.
   await waitFor(() =>
     expect(call).toHaveBeenCalledWith('report', {
       id: 'sales_day',
@@ -180,8 +160,7 @@ it('exports the report on screen, through Rust, and says where it went', async (
       period: { from: '2026-08-09', to: '2026-08-09' },
     }),
   );
-  // The whole sentence, written in Rust — a path in a toast with no sentence
-  // around it is audit F8.
+  // The whole sentence, written in Rust.
   await waitFor(() =>
     expect(screen.getByText('Saved as Wastage.csv, in your Documents folder.')).toBeTruthy(),
   );
@@ -190,18 +169,7 @@ it('exports the report on screen, through Rust, and says where it went', async (
   await waitFor(() => expect(call).toHaveBeenCalledWith('report_pdf', expect.anything()));
 });
 
-/**
- * **A licence refusal is an ANSWER, and it stays on the screen** — P30.5, D75.
- *
- * Reports are behind the licence (D86: the licence gates features, never
- * billing). Until P30.5 a shop without one opened this screen and got a spinner
- * that never stopped, plus a red toast that slid away after four seconds — so
- * the screen was permanently blank and the only explanation had already gone.
- * Found on a fresh install, which is the only place it could be found: a seeded
- * demo shop has a healthy licence.
- *
- * The sentence is Rust's, and it is the same one the banner uses.
- */
+/** A licence refusal is an ANSWER, and it stays on the screen. */
 it('says why, on the screen, when the licence does not cover reports', async () => {
   const refusal = {
     code: 'licence.not_operating',

@@ -1,30 +1,9 @@
 //! The ordered migrations, and the engine that applies them exactly once.
 //!
-//! # Why there is only one migration
-//!
-//! D11 — there are no existing customers. Every licence, restaurant and bill in
-//! v1 is test data the owner made himself, so there is nothing to preserve and
-//! no parallel run. Migration 0001 is therefore the WHOLE schema, in one file.
-//!
-//! The alternative is what the backend audit found (BACKEND-G6): *"Migration
-//! 0011 was completely replaced by 0012 a few weeks later, and 0012's original
-//! rules were then rewritten by 0014/0015/0016 and again by 0021. The current
-//! truth is spread across six files. Anybody reading the folder from the top
-//! gets the wrong answer."*
-//!
-//! # Why the ledger carries a checksum
-//!
-//! v1's whole migration ledger was:
-//!
 //! ```sql
 //! CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 //! SELECT COALESCE(MAX(version), 1) AS version FROM schema_version;
 //! ```
-//!
-//! No checksum, no name, no time — and `MAX(version)`, so a migration skipped
-//! in the middle was invisible forever. Here every applied migration gets its
-//! own row, and editing a shipped migration after it has run is refused rather
-//! than silently letting the database drift away from the code that reads it.
 
 use rusqlite::Connection;
 
@@ -35,8 +14,8 @@ use crate::error::DbError;
 pub struct Migration {
     /// Ascending, contiguous, and never reused.
     pub version: u32,
-    /// Shown in the ledger and in errors, so a refusal names something a human
-    /// can find on disk.
+    /// Shown in the ledger and in errors, so a refusal names something a human can find on
+    /// disk.
     pub name: &'static str,
     pub sql: &'static str,
 }
@@ -48,27 +27,20 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0001_initial",
         sql: include_str!("migrations/0001_initial.sql"),
     },
-    // **The first migration after the initial one**, and it is worth saying why
-    // it is a second file rather than an edit to the first. 0001 has run on the
-    // owner's laptop; `apply_all` checksums a shipped migration and refuses a
-    // file that has changed since it ran, precisely so a real shop's disk
-    // cannot drift away from the code that reads it. So the CHECK is widened
-    // forwards, never in place.
+    // The first migration after the initial one, and it is worth saying why it is a second file
+    // rather than an edit to the first.
     Migration {
         version: 2,
         name: "0002_recovery_slip",
         sql: include_str!("migrations/0002_recovery_slip.sql"),
     },
-    // P32 — a kitchen ticket gets a running number of its own, so a cook can
-    // say "KOT 14". The same widen-forwards rule as 0002.
+    // A kitchen ticket gets a running number of its own, so a cook can say "KOT 14".
     Migration {
         version: 3,
         name: "0003_kot_numbers",
         sql: include_str!("migrations/0003_kot_numbers.sql"),
     },
-    // P33 — the tax rework. `treatment` becomes `kind` + `basis`, liquor gets a
-    // VAT column, and the shop gets a three-way registration. Tables are
-    // rebuilt because SQLite cannot alter a CHECK.
+    // The tax rework.
     Migration {
         version: 4,
         name: "0004_tax_rework",
@@ -76,14 +48,13 @@ pub const MIGRATIONS: &[Migration] = &[
     },
 ];
 
-/// The highest version this build understands. A file above it is refused —
-/// see [`DbError::NewerSchema`].
+/// The highest version this build understands.
 #[must_use]
 pub fn latest_version() -> u32 {
     MIGRATIONS.last().map_or(0, |m| m.version)
 }
 
-/// What [`apply_all`] did.
+/// What `apply_all` did.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Applied {
     /// Versions applied by this call, in order.
@@ -93,19 +64,6 @@ pub struct Applied {
 }
 
 /// A 64-bit FNV-1a of the migration text, as lowercase hex.
-///
-/// **Why not SHA-256, and therefore why no `sha2` dependency (R6).** This is a
-/// tripwire against a shipped migration being edited, not a security control.
-/// An attacker who can edit `0001_initial.sql` is editing the source of the
-/// program; they can edit the expected checksum in the same commit, so a
-/// cryptographic hash buys nothing at all here. What it has to catch is a
-/// developer changing a migration that has already run on a real shop's disk,
-/// and sixteen lines of FNV catches that perfectly.
-///
-/// **Line endings are normalised first**, because git may check the .sql file
-/// out with CRLF on one machine and LF on another. Without this, the same
-/// commit would produce two different checksums and every second developer
-/// would see a tampering error on a file nobody touched.
 #[must_use]
 pub fn checksum(sql: &str) -> String {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -119,8 +77,8 @@ pub fn checksum(sql: &str) -> String {
     format!("{hash:016x}")
 }
 
-/// The ledger table. Created outside the migration list because the engine
-/// needs it before it can decide what to run.
+/// The ledger table. Created outside the migration list because the engine needs it before it
+/// can decide what to run.
 const LEDGER: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
         version    INTEGER NOT NULL PRIMARY KEY,
@@ -132,23 +90,12 @@ const LEDGER: &str = "
 ";
 
 /// Applies every migration this build knows that the file has not seen.
-///
-/// * Each migration runs **inside its own transaction**, together with the
-///   ledger row that records it. SQLite does DDL inside a transaction, so a
-///   migration that fails on its third statement leaves the database exactly
-///   where it was — no half-created schema, no ledger row.
-/// * An already-applied migration whose text has changed is refused before
-///   anything is written.
-/// * A file whose highest version is above [`latest_version`] is refused, so an
-///   old build cannot write rows a newer schema will not understand.
 pub fn apply_all(conn: &mut Connection) -> Result<Applied, DbError> {
     conn.execute_batch(LEDGER)?;
 
     let known = read_ledger(conn)?;
 
-    // Refuse a newer file BEFORE running anything. An old build that has
-    // already half-migrated a new database is a worse position than one that
-    // never opened it.
+    // Refuse a newer file BEFORE running anything.
     let latest = latest_version();
     if let Some(&(found, _, _)) = known.last()
         && found > latest
@@ -212,19 +159,14 @@ fn read_ledger(conn: &Connection) -> Result<Vec<(u32, String, String)>, DbError>
 }
 
 /// Run one migration with foreign keys suspended, then check them.
-///
-/// Rebuilding a table means dropping and renaming it, which foreign keys will
-/// refuse or cascade. `PRAGMA foreign_keys` is a no-op inside a transaction, so
-/// it has to be switched here, outside the one `run_one` opens.
-///
-/// `foreign_key_check` afterwards is the safety net: a rebuild that left an
-/// orphan fails the migration instead of shipping a broken database.
 fn run_one_with_fks_off(conn: &mut Connection, migration: &Migration) -> Result<(), DbError> {
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     let outcome = run_one(conn, migration);
     let checked = outcome.and_then(|()| {
         let broken: i64 = conn
-            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
             .unwrap_or(0);
         if broken == 0 {
             Ok(())
@@ -250,9 +192,8 @@ fn run_one(conn: &mut Connection, migration: &Migration) -> Result<(), DbError> 
             source,
         })?;
 
-    // Elapsed is recorded because a migration that takes four minutes on a
-    // 5400 rpm HDD is something the next release needs to know before it ships
-    // another one.
+    // Elapsed is recorded because a migration that takes four minutes on a 5400 rpm HDD is
+    // something the next release needs to know before it ships another one.
     let run_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
 
     tx.execute(
@@ -281,11 +222,6 @@ fn run_one(conn: &mut Connection, migration: &Migration) -> Result<(), DbError> 
 }
 
 /// Wall-clock milliseconds, UTC.
-///
-/// The ledger is the one place in this crate that reads the clock itself:
-/// everything else takes a [`mb_core::Timestamp`] from its caller, because D5
-/// says a business day is stamped once by the code that creates the order, not
-/// re-derived by whoever happens to be writing a row.
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -309,20 +245,22 @@ mod tests {
 
     #[test]
     fn the_checksum_ignores_line_endings() {
-        // Same commit, two machines, two git autocrlf settings. Without this,
-        // one of them sees a tampering error on a file nobody touched.
-        assert_eq!(checksum("CREATE TABLE a(b);\n"), checksum("CREATE TABLE a(b);\r\n"));
+        // Same commit, two machines, two git autocrlf settings.
+        assert_eq!(
+            checksum("CREATE TABLE a(b);\n"),
+            checksum("CREATE TABLE a(b);\r\n")
+        );
     }
 
     #[test]
     fn the_checksum_notices_a_one_character_edit() {
-        assert_ne!(checksum("CREATE TABLE a(b);"), checksum("CREATE TABLE a(c);"));
+        assert_ne!(
+            checksum("CREATE TABLE a(b);"),
+            checksum("CREATE TABLE a(c);")
+        );
     }
 
     /// The schema uses STRICT tables, `RETURNING` and DDL inside a transaction.
-    /// All three are the reason `rusqlite` is pulled in with `bundled` — a
-    /// system SQLite old enough to lack them would fail at migration time on a
-    /// customer's machine rather than here.
     #[test]
     fn the_bundled_sqlite_is_new_enough_for_this_schema() {
         // STRICT arrived in 3.37, RETURNING in 3.35.

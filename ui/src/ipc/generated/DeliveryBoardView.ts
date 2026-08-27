@@ -7,11 +7,7 @@ import type { RiderView } from "./RiderView";
 /**
  * The whole screen.
  */
-export type DeliveryBoardView = { 
-/**
- * `2026-08-16`.
- */
-day: string, deliveries: Array<DeliveryView>, riders: Array<RiderDayView>, 
+export type DeliveryBoardView = { day: string, deliveries: Array<DeliveryView>, riders: Array<RiderDayView>, 
 /**
  * Everybody flagged as a rider, for the assign menu.
  */
@@ -25,7 +21,6 @@ carrying: MoneyView,
  */
 says: string, 
 /**
- * True when the signed-in person may dispatch. The screen still SHOWS the
- * board to anybody signed in — reading where the food is is not a secret.
+ * True when the signed-in person may dispatch.
  */
 mayDispatch: boolean, };

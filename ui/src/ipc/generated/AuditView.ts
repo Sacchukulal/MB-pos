@@ -3,14 +3,11 @@ import type { AuditEntryView } from "./AuditEntryView";
 
 export type AuditView = { entries: Array<AuditEntryView>, 
 /**
- * The sentence to show when the chain is broken — audit C4's
- * "tamper-evident", made visible. `None` when the history hangs together.
+ * The sentence to show when the chain is broken.
  */
 tampered: string | null, 
 /**
- * Every action this build knows, for the filter — from the list, not from
- * whatever happens to be in this shop's data. A filter that cannot offer
- * "voided a bill" until somebody has voided one is useless at exactly the
- * moment it is needed.
+ * Every action this build knows, for the filter — from the list, not from whatever happens
+ * to be in this shop's data.
  */
 actions: Array<[string, string]>, };

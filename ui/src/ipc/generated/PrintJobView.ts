@@ -2,14 +2,10 @@
 
 /**
  * A print job, as a screen shows it.
- *
- * Deliberately not mb-print's `JobStatus`: that type is the queue's own
- * vocabulary, and the shell shows a sentence and a colour. Converting here
- * means P07's types can change without a screen changing.
  */
 export type PrintJobView = { id: string, printer: string, 
 /**
- * "Bill", "Kitchen ticket" — words, not tags (UI_GUIDELINES §6).
+ * "Bill", "Kitchen ticket" — words, not tags.
  */
 what: string, 
 /**

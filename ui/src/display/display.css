@@ -1,10 +1,4 @@
-/*
- * The customer's screen — P29, scope 7.8.
- *
- * Read from two metres away, by somebody who is not wearing their glasses, at
- * an angle, in a shop with a tube light. So: big, high contrast, and nothing
- * on it that is not the bill.
- */
+/* The customer's screen. */
 
 .mb-display {
   display: flex;
@@ -14,8 +8,10 @@
   padding: var(--space-6);
   background: var(--surface);
   color: var(--text);
-  /* Nothing here is clickable, so nothing here shows a text cursor either —
-     a customer dragging a selection across their own bill looks broken. */
+  /*
+   * Nothing here is clickable, so nothing here shows a text cursor either — a customer dragging
+   * a selection across their own bill looks broken.
+   */
   user-select: none;
 }
 
@@ -49,8 +45,10 @@
 }
 
 .mb-display__what {
-  /* A name wraps, never ellipsises (D30) — including on the screen the
-     customer is checking their own order against. */
+  /*
+   * A name wraps, never ellipsises — including on the screen the customer is checking their own
+   * order against.
+   */
   white-space: normal;
 }
 

@@ -1,37 +1,4 @@
-//! **Shifts, attendance, leave, salary and payroll** — P28.
-//!
-//! P11 built IDENTITY: who this is and what they may do. This is EMPLOYMENT:
-//! what they are paid, when they worked, when they were away, and how an owner
-//! manages all of it without standing at the counter.
-//!
-//! # Where the pieces live
-//!
-//! | | |
-//! |---|---|
-//! | the arithmetic | [`mb_core::employment`] — pure, no clock, no database |
-//! | the rows | [`mb_db::repo::employment`] |
-//! | this file | the commands, the permission boundary, and the words |
-//!
-//! Nothing here does a sum that `mb-core` could do, and nothing in `mb-core`
-//! knows what a transaction is. That split is what makes the payroll
-//! arithmetic — the part an owner will argue with — provable.
-//!
-//! # How payroll money reaches the drawer, and why it is TWO rows
-//!
-//! This is the part that is easy to get wrong, and getting it wrong makes the
-//! cash position disagree with itself.
-//!
-//! A salary paid in cash is an **expense**, not a cash movement — P16 settled
-//! that: the cash position already subtracts cash expenses, so writing both
-//! would count the money twice (the schema note on `cash_movements` says so in
-//! as many words).
-//!
-//! An **advance** is different. It is not a cost when it is handed over — it is
-//! money the shop expects back — so it is a `payout` cash movement and no
-//! expense at all. The drawer is genuinely down that much from that day, which
-//! is the honest thing for it to show.
-//!
-//! Then payroll approval has to reconcile the two:
+//! Shifts, attendance, leave, salary and payroll.
 //!
 //! ```text
 //!   10th   advance   payout −2,000            drawer −2,000
@@ -41,22 +8,11 @@
 //!                                    cash actually paid −18,000  ✓
 //!                                    salary cost         18,000  ✓
 //! ```
-//!
-//! The `top_up` is not an invention to make a number work: at the moment the
-//! advance is recovered it **stops being money owed to the shop** and becomes
-//! part of the salary that was already counted. Without it the drawer would be
-//! short by every advance ever given, for ever.
-//!
-//! **The honest limit:** on a run paid `bank`, that `top_up` credits the DRAWER
-//! rather than the bank. That is right when the advance was cash — which it
-//! always is, because an advance is notes handed over — and it keeps the one
-//! figure this product actually counts exactly correct. A shop that pays
-//! salaries by bank and gives advances by bank is not a shop this version
-//! serves; it is written down here rather than discovered.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use mb_auth::AuditEntry;
 use mb_auth::Permission;
 use mb_auth::audit::action;
 use mb_core::businessday::BusinessDay;
@@ -64,7 +20,6 @@ use mb_core::employment::{
     self, Basis, Component, ComponentKind, HalfDays, LeaveKind, Structure, Worked,
 };
 use mb_core::money::Money;
-use mb_auth::AuditEntry;
 use mb_db::repo::employment::{
     Attendance, LeaveRequest, PayrollLine, PayrollRun, RequestState, RosterDay, RunState,
 };
@@ -75,18 +30,12 @@ use crate::guard;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-/// The expense category a payroll run posts against. P16 seeds it.
+/// The expense category a payroll run posts against.
 const SALARY_CATEGORY: &str = "exc_salary";
 
-// ===========================================================================
-// The view models
-// ===========================================================================
+// The view models.
 
-// **MoneyView is ipc.rs's, not a second one.** P28 declared its own for
-// half an hour and it would have quietly overwritten the canonical file — the
-// two shapes happened to match, so nothing would have complained, and the
-// doc-comment explaining why money crosses the wire as a pair would have gone.
-// One shape for money on the wire, one file, one explanation.
+// MoneyView is ipc.rs's, not a second one.
 use crate::ipc::MoneyView;
 
 fn money(m: Money) -> MoneyView {
@@ -108,7 +57,7 @@ pub struct EmployeeView {
     pub status: String,
     /// "Joined 12 March 2025", or empty.
     pub joined: String,
-    /// Set when they have left. The record stays for ever (scope 9.15).
+    /// Set when they have left.
     pub left: String,
     /// What they are on right now, in words: "₹18,000 a month".
     pub salary_says: String,
@@ -128,7 +77,7 @@ pub struct EmployeeEdit {
     pub emergency_phone: String,
     pub id_proof: String,
     pub employment_type: String,
-    /// Typed by a person, parsed in Rust (D39). Empty is "still working".
+    /// Typed by a person, parsed in Rust.
     pub left_on: String,
 }
 
@@ -146,11 +95,11 @@ pub struct ShiftView {
     pub ended: String,
     /// "7h 30m", or "still in".
     pub worked: String,
-    /// From [`mb_core::employment::DayVerdict`], in words: "Late by 35 minutes".
+    /// From `mb_core::employment::DayVerdict`, in words: "Late by 35 minutes".
     pub verdict: String,
-    /// `ok`, `warn` or `danger` — for the badge. The sentence says it too (§2).
+    /// `ok`, `warn` or `danger` — for the badge.
     pub tone: String,
-    /// True when a manager changed it. The screen marks it (D47).
+    /// True when a manager changed it.
     pub corrected: bool,
     pub correction_reason: Option<String>,
 }
@@ -162,17 +111,11 @@ pub struct AttendanceView {
     pub from: String,
     pub to: String,
     pub shifts: Vec<ShiftView>,
-    /// **Still clocked in from a day before today.** The one an owner has to
-    /// deal with, so it is its own list rather than a row in the middle.
+    /// Still clocked in from a day before today.
     pub missed: Vec<ShiftView>,
     pub says: String,
     pub may_correct: bool,
-    /// **The shifts this shop runs** — P31.
-    ///
-    /// Already read here to work out whether somebody was late; sent on so the
-    /// roster can be SET as well as judged against. Without it `save_roster`
-    /// would need a screen where a person typed a pattern id, which is not a
-    /// thing anybody outside this repository knows.
+    /// The shifts this shop runs.
     pub patterns: Vec<PatternView>,
 }
 
@@ -182,9 +125,7 @@ pub struct AttendanceView {
 #[serde(rename_all = "camelCase")]
 pub struct PatternView {
     pub id: String,
-    /// "Morning — 7:00 to 15:00". Written here, because turning 420 minutes
-    /// past midnight into a time somebody reads is a conversion and every
-    /// conversion in this product happens once, in Rust (D39).
+    /// "Morning — 7:00 to 15:00".
     pub says: String,
 }
 
@@ -197,8 +138,7 @@ pub struct LeaveBalanceView {
     pub is_paid: bool,
     /// Half-days, as the number — for a screen that wants to compare.
     pub left_halves: i32,
-    /// The same thing in words: "7½ days". Written in Rust so the screen, the
-    /// payslip and a refusal cannot disagree (§6).
+    /// The same thing in words: "7½ days".
     pub left_says: String,
     pub accrued_says: String,
     pub taken_says: String,
@@ -225,7 +165,7 @@ pub struct LeaveRequestView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct LeaveView {
-    /// Whose balances these are. Empty on the shop-wide view.
+    /// Whose balances these are.
     pub staff_id: String,
     pub balances: Vec<LeaveBalanceView>,
     pub requests: Vec<LeaveRequestView>,
@@ -253,8 +193,7 @@ pub struct AdvanceView {
 pub struct SalaryView {
     pub staff_id: String,
     pub staff_name: String,
-    /// Every structure, oldest first. **The history stays** — a raise is a new
-    /// row, never an edit, which is what lets last month recompute the same.
+    /// Every structure, oldest first.
     pub structures: Vec<StructureView>,
     pub advances: Vec<AdvanceView>,
     pub outstanding: MoneyView,
@@ -298,8 +237,7 @@ pub struct PayLineView {
     pub unpaid_leave_deduction: MoneyView,
     pub advance_recovered: MoneyView,
     pub net: MoneyView,
-    /// Somebody changed a figure by hand. The screen shows it, so a reviewer
-    /// knows which lines are the computer's.
+    /// Somebody changed a figure by hand.
     pub edited: bool,
 }
 
@@ -338,8 +276,7 @@ pub struct PayrollRunView {
     pub people: u32,
 }
 
-/// Scope 9.16 — **the second of the two numbers that decide whether a
-/// restaurant makes money.** P25 gave the first (food cost); this is the other.
+/// The second of the two numbers that decide whether a restaurant makes money.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -351,10 +288,6 @@ pub struct StaffCostView {
     /// "23.4%", or a sentence saying why there is no percentage.
     pub says: String,
 }
-
-// ===========================================================================
-// Words
-// ===========================================================================
 
 fn day_words(day: BusinessDay) -> String {
     let (y, m, d) = day.to_ymd();
@@ -400,11 +333,6 @@ fn minutes_words(minutes: i64) -> String {
 }
 
 /// "₹18,000.00 a month".
-///
-/// **No rupee sign of its own** — `Money::to_indian_string` already carries
-/// one, and the first version added a second. Found by opening the Salary
-/// screen and reading "₹₹650.00 a day": the kind of thing no test would ever
-/// notice and every shopkeeper would (D55).
 fn basis_words(basis: Basis, amount: Money) -> String {
     let sum = amount.to_indian_string();
     match basis {
@@ -434,29 +362,20 @@ fn basis_from_tag(tag: &str) -> UiResult<Basis> {
     }
 }
 
-/// A verdict, in the words a shop reads (§6) — and its tone, which is the
-/// second signal (§2 rule 2: colour is never the only one).
+/// A verdict, in the words a shop reads (§6) — and its tone, which is the second signal.
 fn verdict_words(verdict: employment::DayVerdict) -> (String, &'static str) {
     use employment::DayVerdict as V;
     match verdict {
         V::Present => ("On time".to_owned(), "ok"),
-        V::Late { by_minutes } => (
-            format!("Late by {}", minutes_words(by_minutes)),
-            "warn",
-        ),
-        V::LeftEarly { by_minutes } => (
-            format!("Left {} early", minutes_words(by_minutes)),
-            "warn",
-        ),
+        V::Late { by_minutes } => (format!("Late by {}", minutes_words(by_minutes)), "warn"),
+        V::LeftEarly { by_minutes } => {
+            (format!("Left {} early", minutes_words(by_minutes)), "warn")
+        }
         V::Absent => ("Did not come".to_owned(), "danger"),
         V::Away => ("Away".to_owned(), "neutral"),
         V::Unrostered => ("Worked — not rostered".to_owned(), "neutral"),
     }
 }
-
-// ===========================================================================
-// Reading
-// ===========================================================================
 
 /// The People tab, with the employment side filled in.
 pub fn people_on(app: &App) -> UiResult<Vec<EmployeeView>> {
@@ -470,13 +389,10 @@ pub fn people_on(app: &App) -> UiResult<Vec<EmployeeView>> {
                 let mut out = Vec::new();
 
                 for person in repos.employment().list_employees(OUTLET)? {
-                    // **The salary is behind its own permission**, so a manager
-                    // who may edit staff does not thereby learn what everybody
-                    // earns. Hidden HERE and not in React, or it would have
-                    // been sent and merely not drawn.
+                    // The salary is behind its own permission, so a manager who may edit staff
+                    // does not thereby learn what everybody earns.
                     let salary_says = if may_see_pay {
-                        let structures =
-                            repos.employment().structures_for(OUTLET, &person.id)?;
+                        let structures = repos.employment().structures_for(OUTLET, &person.id)?;
                         employment::structure_on(&structures, today(now()))
                             .map(|s| basis_words(s.basis, s.amount))
                             .unwrap_or_default()
@@ -485,10 +401,7 @@ pub fn people_on(app: &App) -> UiResult<Vec<EmployeeView>> {
                     };
 
                     out.push(EmployeeView {
-                        is_in: repos
-                            .employment()
-                            .open_shift(OUTLET, &person.id)?
-                            .is_some(),
+                        is_in: repos.employment().open_shift(OUTLET, &person.id)?.is_some(),
                         id: person.id.clone(),
                         name: person.name.clone(),
                         designation: person.designation.clone(),
@@ -507,18 +420,14 @@ pub fn people_on(app: &App) -> UiResult<Vec<EmployeeView>> {
     })
 }
 
-/// Attendance over a window. `staff_id` empty is the whole shop.
+/// Attendance over a window.
 pub fn attendance_on(
     app: &App,
     staff_id: Option<String>,
     from: String,
     to: String,
 ) -> UiResult<AttendanceView> {
-    // **Reading your OWN attendance needs nothing but being signed in** (scope
-    // 9.14). Reading anybody else's needs `attendance.mark`. That single line
-    // is the whole of self-service's read side, and it is here rather than in
-    // React because a screen that merely does not draw a row has still been
-    // sent it.
+    // Reading your OWN attendance needs nothing but being signed in.
     let who = guard::require_any(
         app,
         &[Permission::AttendanceMark, Permission::AttendanceCorrect],
@@ -548,8 +457,12 @@ pub fn attendance_on(
                 let repos = mb_db::Repos::new(tx);
                 let names = staff_names(&repos)?;
                 let patterns = repos.employment().list_patterns(OUTLET)?;
-                let roster = repos.employment().roster_between(OUTLET, from_day, to_day)?;
-                let approved = repos.employment().approved_between(OUTLET, from_day, to_day)?;
+                let roster = repos
+                    .employment()
+                    .roster_between(OUTLET, from_day, to_day)?;
+                let approved = repos
+                    .employment()
+                    .approved_between(OUTLET, from_day, to_day)?;
                 let grace = grace_minutes(&repos)?;
 
                 let rows = repos
@@ -561,9 +474,7 @@ pub fn attendance_on(
                     if !asked_for.is_empty() && a.staff_id != asked_for {
                         continue;
                     }
-                    shifts.push(shift_view(
-                        &a, &names, &patterns, &roster, &approved, grace,
-                    ));
+                    shifts.push(shift_view(&a, &names, &patterns, &roster, &approved, grace));
                 }
 
                 let mut missed = Vec::new();
@@ -571,13 +482,15 @@ pub fn attendance_on(
                     if !asked_for.is_empty() && a.staff_id != asked_for {
                         continue;
                     }
-                    missed.push(shift_view(
-                        &a, &names, &patterns, &roster, &approved, grace,
-                    ));
+                    missed.push(shift_view(&a, &names, &patterns, &roster, &approved, grace));
                 }
 
                 let says = if missed.is_empty() {
-                    words::count(i64::try_from(shifts.len()).unwrap_or(i64::MAX), "shift", "shifts")
+                    words::count(
+                        i64::try_from(shifts.len()).unwrap_or(i64::MAX),
+                        "shift",
+                        "shifts",
+                    )
                 } else {
                     format!(
                         "{} shifts, and {} nobody clocked out of — those hours cannot be \
@@ -682,8 +595,7 @@ fn clock_words(at: mb_core::Timestamp) -> String {
     format!("{:02}:{:02}", minute / 60, minute % 60)
 }
 
-/// Minutes past midnight, as a clock face. P31 — a shift pattern's start and
-/// end, so the roster can say "Morning — 07:00 to 15:00" rather than "420".
+/// Minutes past midnight, as a clock face.
 #[allow(
     clippy::integer_division,
     reason = "a minute count into a clock face: both halves are used"
@@ -700,9 +612,7 @@ fn staff_names(
     repos.employment().names(OUTLET)
 }
 
-/// How late is late. A shop's own number, defaulting to ten minutes — which is
-/// forgiving on purpose: a grace period of zero turns every bus into a
-/// disciplinary matter and the report into noise nobody reads.
+/// How late is late.
 fn grace_minutes(repos: &mb_db::Repos<'_>) -> Result<i64, mb_db::DbError> {
     Ok(repos
         .settings()
@@ -718,9 +628,7 @@ pub fn leave_on(app: &App, staff_id: Option<String>) -> UiResult<LeaveView> {
         .ok_or_else(|| UiError::new("auth.locked", "The screen is locked. Sign in to carry on."))?;
     let may_approve = guard::require(app, Permission::LeaveApprove).is_ok();
 
-    // Self-service (9.14): your own is yours; anybody else's needs the
-    // permission. Enforced HERE, server-side — T11. A screen that merely does
-    // not draw a row has still been sent it.
+    // Self-service (9.14): your own is yours; anybody else's needs the permission.
     let asked_for = staff_id
         .clone()
         .unwrap_or_else(|| signed_in.actor.staff_id.as_str().to_owned());
@@ -741,8 +649,8 @@ pub fn leave_on(app: &App, staff_id: Option<String>) -> UiResult<LeaveView> {
                 let mut balances = Vec::new();
                 for t in &types {
                     let ledger = repos.employment().leave_ledger(OUTLET, &asked_for, &t.id)?;
-                    // **The balance is the sum of the ledger** — computed by
-                    // mb-core, from the rows, every time. Nothing is stored.
+                    // The balance is the sum of the ledger — computed by mb-core, from the
+                    // rows, every time.
                     let b = employment::leave_balance(&ledger);
                     balances.push(LeaveBalanceView {
                         leave_type_id: t.id.clone(),
@@ -869,15 +777,9 @@ pub fn salary_on(app: &App, staff_id: String) -> UiResult<SalaryView> {
     })
 }
 
-// ===========================================================================
-// Clocking on and off
-// ===========================================================================
+// Clocking on and off.
 
-/// **Clock in.** Needs nothing but being signed in — it IS the PIN.
-///
-/// Deliberately weak, and it is the counterpart to `attendance.correct` being
-/// strong: recording that you turned up should cost nothing, and changing the
-/// record afterwards should cost a permission and an audit row.
+/// Clock in. Needs nothing but being signed in — it IS the PIN.
 pub fn clock_in_on(app: &App, terminal_id: Option<String>) -> UiResult<AttendanceView> {
     let session = app
         .sessions()
@@ -885,9 +787,7 @@ pub fn clock_in_on(app: &App, terminal_id: Option<String>) -> UiResult<Attendanc
         .ok_or_else(|| UiError::new("auth.locked", "The screen is locked. Sign in to carry on."))?;
     let staff_id = session.actor.staff_id.as_str().to_owned();
     let at = now();
-    // **D5.** The day it STARTS in, stamped, never re-derived. A night shift
-    // belongs to this day whole — every hour of it, on the payroll and on the
-    // handover.
+    // The day it STARTS in, stamped, never re-derived.
     let day = today(at);
 
     app.with_shop(|shop| {
@@ -944,7 +844,7 @@ pub fn clock_in_on(app: &App, terminal_id: Option<String>) -> UiResult<Attendanc
     attendance_on(app, Some(staff_id), day_words(day), day_words(day))
 }
 
-/// **Clock out**, closing whichever row is open — which may be yesterday's.
+/// Clock out, closing whichever row is open — which may be yesterday's.
 pub fn clock_out_on(app: &App) -> UiResult<AttendanceView> {
     let session = app
         .sessions()
@@ -968,9 +868,6 @@ pub fn clock_out_on(app: &App) -> UiResult<AttendanceView> {
                     OUTLET,
                     &AuditEntry::new(
                         at,
-                        // The audit row belongs to TODAY; the shift belongs to
-                        // the day it started in. Two different facts, and a
-                        // night shift is exactly where they differ (D5).
                         day,
                         Some(session.actor.staff_id.clone()),
                         action::CLOCKED_OUT,
@@ -990,16 +887,10 @@ pub fn clock_out_on(app: &App) -> UiResult<AttendanceView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    attendance_on(
-        app,
-        Some(staff_id),
-        day_words(shift_day),
-        day_words(day),
-    )
+    attendance_on(app, Some(staff_id), day_words(shift_day), day_words(day))
 }
 
-/// **Correct a clock-in or a clock-out.** The one control in attendance that
-/// matters — see `Permission::AttendanceCorrect`.
+/// Correct a clock-in or a clock-out.
 pub fn correct_attendance_on(
     app: &App,
     id: String,
@@ -1036,8 +927,8 @@ pub fn correct_attendance_on(
                     ));
                 };
 
-                // **Never your own.** The whole point of the permission: hours
-                // a person can edit themselves are hours nobody can rely on.
+                // Never your own. The whole point of the permission: hours a person can edit
+                // themselves are hours nobody can rely on.
                 if row.staff_id == who.staff_id.as_str() {
                     return Err(mb_db::DbError::invariant(
                         "a person may not correct their own hours".to_owned(),
@@ -1051,10 +942,13 @@ pub fn correct_attendance_on(
 
                 row.started_at = stamp_on(row.day, start_minute);
                 row.ended_at = end_minute.map(|m| {
-                    // An end BEFORE the start is a night shift: it is on the
-                    // next calendar day, and the stamp has to say so or the
-                    // hours come out negative.
-                    let end_day = if m < start_minute { row.day.next() } else { row.day };
+                    // An end BEFORE the start is a night shift: it is on the next calendar day,
+                    // and the stamp has to say so or the hours come out negative.
+                    let end_day = if m < start_minute {
+                        row.day.next()
+                    } else {
+                        row.day
+                    };
                     stamp_on(end_day, m)
                 });
                 row.corrected_at = Some(at);
@@ -1095,8 +989,8 @@ pub fn correct_attendance_on(
     )
 }
 
-/// A shift by id, wherever it is — including one that is still open from a
-/// later day, which `attendance_between` would miss.
+/// A shift by id, wherever it is — including one that is still open from a later day, which
+/// `attendance_between` would miss.
 fn find_shift(
     repos: &mb_db::Repos<'_>,
     id: &str,
@@ -1118,7 +1012,12 @@ fn find_shift(
 }
 
 fn parse_clock(text: &str, field: &'static str) -> UiResult<i64> {
-    let bad = || UiError::new(field, "Type the time as 09:30 — the hour, then the minutes.");
+    let bad = || {
+        UiError::new(
+            field,
+            "Type the time as 09:30 — the hour, then the minutes.",
+        )
+    };
     let (h, m) = text.trim().split_once(':').ok_or_else(bad)?;
     let hour: i64 = h.trim().parse().map_err(|_| bad())?;
     let minute: i64 = m.trim().parse().map_err(|_| bad())?;
@@ -1131,20 +1030,10 @@ fn parse_clock(text: &str, field: &'static str) -> UiResult<i64> {
 /// A stamp at a minute of a business day, in the shop's own time.
 fn stamp_on(day: BusinessDay, minute: i64) -> mb_core::Timestamp {
     let seconds = u32::try_from(minute * 60).unwrap_or(0);
-    mb_core::Timestamp::from_local_parts(
-        day.days_since_epoch(),
-        seconds,
-        mb_core::UtcOffset::INDIA,
-    )
-    .unwrap_or_else(|_| now())
+    mb_core::Timestamp::from_local_parts(day.days_since_epoch(), seconds, mb_core::UtcOffset::INDIA)
+        .unwrap_or_else(|_| now())
 }
 
-// ===========================================================================
-// Leave
-// ===========================================================================
-
-/// Ask for leave. A person may ask for their own; a manager may enter one on
-/// somebody's behalf, and then the audit row says who did which.
 pub fn request_leave_on(
     app: &App,
     staff_id: String,
@@ -1176,10 +1065,7 @@ pub fn request_leave_on(
         return Err(UiError::new("leave.reason", "Say why the leave is needed."));
     }
     if half_days <= 0 {
-        return Err(UiError::new(
-            "leave.days",
-            "Leave is at least half a day.",
-        ));
+        return Err(UiError::new("leave.days", "Leave is at least half a day."));
     }
 
     let from_day = parse_day(&from, "leave.from")?;
@@ -1200,12 +1086,10 @@ pub fn request_leave_on(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
 
-                // **T3 — no two requests over the same days.** Checked against
-                // what is PENDING as well as what is approved: two overlapping
-                // requests waiting for a decision is the same mess arriving a
-                // day later.
-                let mut existing =
-                    repos.employment().approved_between(OUTLET, from_day, to_day)?;
+                // No two requests over the same days.
+                let mut existing = repos
+                    .employment()
+                    .approved_between(OUTLET, from_day, to_day)?;
                 existing.extend(repos.employment().pending_requests(OUTLET)?);
                 if let Some(clash) = existing.iter().find(|r| {
                     r.staff_id == asking_for
@@ -1261,14 +1145,9 @@ pub fn request_leave_on(
     leave_on(app, Some(asking_for))
 }
 
-/// **Approve or reject.** Approving writes the one `taken` row; rejecting
-/// writes none, so a rejected request cannot move a balance even by accident.
-pub fn decide_leave_on(
-    app: &App,
-    id: String,
-    approve: bool,
-    note: String,
-) -> UiResult<LeaveView> {
+/// Approve or reject. Approving writes the one `taken` row; rejecting writes none, so a
+/// rejected request cannot move a balance even by accident.
+pub fn decide_leave_on(app: &App, id: String, approve: bool, note: String) -> UiResult<LeaveView> {
     let who = guard::require(app, Permission::LeaveApprove)?;
     let at = now();
     let day = today(at);
@@ -1291,9 +1170,7 @@ pub fn decide_leave_on(
                     .into_iter()
                     .find(|r| r.id == id)
                 else {
-                    // Either it does not exist or somebody has already decided
-                    // it. Both are the same refusal from where the person is
-                    // standing, and saying which would leak whose it was.
+                    // Either it does not exist or somebody has already decided it.
                     return Err(mb_db::DbError::invariant(
                         "that request is not waiting for a decision".to_owned(),
                     ));
@@ -1310,10 +1187,7 @@ pub fn decide_leave_on(
                 repos.employment().save_leave_request(OUTLET, &request)?;
 
                 if approve {
-                    // **The ONE `taken` row.** A partial unique index on
-                    // `request_id` means a second approval is a constraint
-                    // violation rather than a doubled deduction that somebody
-                    // finds in March and cannot explain.
+                    // The ONE `taken` row.
                     repos.employment().post_leave(
                         OUTLET,
                         &crate::newid::fresh_at("lvl", at),
@@ -1353,9 +1227,6 @@ pub fn decide_leave_on(
 }
 
 /// Grant an entitlement, or correct a balance by hand.
-///
-/// The freehand row, and therefore the watched one: it carries a required
-/// reason for the same reason `stock.adjust` does.
 pub fn adjust_leave_on(
     app: &App,
     staff_id: String,
@@ -1430,12 +1301,10 @@ pub fn adjust_leave_on(
     leave_on(app, Some(staff_id))
 }
 
-// ===========================================================================
-// The employment record
-// ===========================================================================
+// The employment record.
 
-/// Scope 9.15. **Nobody is ever deleted** — `left` with a date is the only
-/// ending there is, because this person's name is on last year's bills.
+/// Nobody is ever deleted — `left` with a date is the only ending there is, because this
+/// person's name is on last year's bills.
 pub fn save_employee_on(app: &App, edit: EmployeeEdit) -> UiResult<Vec<EmployeeView>> {
     let who = guard::require(app, Permission::StaffManage)?;
     let at = now();
@@ -1457,10 +1326,8 @@ pub fn save_employee_on(app: &App, edit: EmployeeEdit) -> UiResult<Vec<EmployeeV
         Some(parse_day(&edit.left_on, "staff.left_on")?)
     };
 
-    // **The number somebody rings when there is an accident**, so it is worth
-    // the same rule as every other phone in the product. It was stored exactly
-    // as typed, which meant it could be a name (owner, 2026-08-22). See
-    // `mb_core::phone`.
+    // The number somebody rings when there is an accident, so it is worth the same rule as
+    // every other phone in the product.
     let emergency_phone = mb_core::Phone::parse_optional(&edit.emergency_phone)
         .map_err(|e| UiError::new("staff.emergency_phone", e.to_string()))?
         .map(|p| p.as_str().to_owned());
@@ -1468,9 +1335,9 @@ pub fn save_employee_on(app: &App, edit: EmployeeEdit) -> UiResult<Vec<EmployeeV
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                // The status and the leaving date travel together — the schema
-                // refuses a date on somebody still working, and this is what
-                // sets the status so the pair is always consistent.
+                // The status and the leaving date travel together — the schema refuses a date
+                // on somebody still working, and this is what sets the status so the pair is
+                // always consistent.
                 let status = if left_on.is_some() { "left" } else { "active" };
                 let repos = mb_db::Repos::new(tx);
                 repos.employment().save_employment(
@@ -1522,12 +1389,9 @@ fn blank_to_none(text: &str) -> Option<String> {
     }
 }
 
-// ===========================================================================
-// The roster
-// ===========================================================================
+// The roster.
 
-/// Say who is expected on a day. `pattern_id` empty is a rostered day OFF,
-/// which is a different fact from having no row at all.
+/// Say who is expected on a day.
 pub fn save_roster_on(
     app: &App,
     staff_id: String,
@@ -1578,20 +1442,17 @@ pub fn save_roster_on(
     attendance_on(app, Some(staff_id), day_words(on), day_words(on))
 }
 
-// ===========================================================================
-// Salary and advances
-// ===========================================================================
+// Salary and advances.
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct SalaryEdit {
     pub staff_id: String,
-    /// The date the new figure starts from. **A raise is a NEW ROW**, never an
-    /// edit — that is what lets last month recompute to what it printed.
+    /// The date the new figure starts from.
     pub effective_from: String,
     pub basis: String,
-    /// Typed by a person, parsed in Rust (D39).
+    /// Typed by a person, parsed in Rust.
     pub amount: String,
     pub components: Vec<ComponentEdit>,
 }
@@ -1613,7 +1474,10 @@ pub fn save_salary_on(app: &App, edit: SalaryEdit) -> UiResult<SalaryView> {
     let basis = basis_from_tag(&edit.basis)?;
     let amount = crate::menu::parse_money_public(&edit.amount)?;
     if amount.is_negative() {
-        return Err(UiError::new("salary.amount", "A salary is not less than nothing."));
+        return Err(UiError::new(
+            "salary.amount",
+            "A salary is not less than nothing.",
+        ));
     }
     let from = parse_day(&edit.effective_from, "salary.effective_from")?;
 
@@ -1684,8 +1548,8 @@ pub fn save_salary_on(app: &App, edit: SalaryEdit) -> UiResult<SalaryView> {
     salary_on(app, edit.staff_id)
 }
 
-/// **Give an advance.** Money out of the drawer today, recovered from the next
-/// run — see the module note on why this is a `payout` and not an expense.
+/// Give an advance. Money out of the drawer today, recovered from the next run — see the module
+/// note on why this is a `payout` and not an expense.
 pub fn give_advance_on(
     app: &App,
     staff_id: String,
@@ -1717,8 +1581,8 @@ pub fn give_advance_on(
                     .cloned()
                     .unwrap_or_default();
 
-                // **The drawer, today.** An advance that only appears at month
-                // end is a drawer that is short all month and nobody knows why.
+                // The drawer, today. An advance that only appears at month end is a drawer that
+                // is short all month and nobody knows why.
                 let movement_id = crate::newid::fresh_at("cm_adv", at);
                 repos.money().save_cash_movement(
                     OUTLET,
@@ -1771,16 +1635,7 @@ pub fn give_advance_on(
     salary_on(app, staff_id)
 }
 
-// ===========================================================================
-// Payroll
-// ===========================================================================
-
-/// **Work out a run.** Computes, stores as a DRAFT, and changes no money.
-///
-/// Recomputing an existing draft is allowed and is the ordinary thing: an owner
-/// fixes somebody's attendance and asks for the figures again. The recoveries
-/// are cleared first, or the second computation would recover the same advance
-/// twice.
+/// Work out a run.
 pub fn compute_payroll_on(app: &App, from: String, to: String) -> UiResult<PayrollView> {
     let who = guard::require(app, Permission::SalaryManage)?;
     let at = now();
@@ -1795,12 +1650,14 @@ pub fn compute_payroll_on(app: &App, from: String, to: String) -> UiResult<Payro
         ));
     }
 
-    // Calendar days, inclusive — **D148**. The denominator for a monthly
-    // salary's unpaid-leave deduction, and the shop's period decides it rather
-    // than a fixed 30 that would be wrong eight months a year.
+    // Calendar days, inclusive.
     let period_days = from_day.days_until(to_day) + 1;
 
-    let run_id = format!("pay_{}_{}", from_day.days_since_epoch(), to_day.days_since_epoch());
+    let run_id = format!(
+        "pay_{}_{}",
+        from_day.days_since_epoch(),
+        to_day.days_since_epoch()
+    );
 
     app.with_shop(|shop| {
         shop.db
@@ -1821,7 +1678,9 @@ pub fn compute_payroll_on(app: &App, from: String, to: String) -> UiResult<Payro
                 let attendance = repos
                     .employment()
                     .attendance_between(OUTLET, from_day, to_day)?;
-                let approved = repos.employment().approved_between(OUTLET, from_day, to_day)?;
+                let approved = repos
+                    .employment()
+                    .approved_between(OUTLET, from_day, to_day)?;
                 let types = repos.employment().list_leave_types(OUTLET)?;
 
                 let mut lines = Vec::new();
@@ -1832,9 +1691,6 @@ pub fn compute_payroll_on(app: &App, from: String, to: String) -> UiResult<Payro
                 for (staff_id, _name) in people {
                     let structures = repos.employment().structures_for(OUTLET, &staff_id)?;
                     // The structure that applied on the LAST day of the period.
-                    // A raise dated inside the period therefore applies to the
-                    // whole of it, which is what a shop means by "from this
-                    // month" — and T5 proves the previous month is untouched.
                     let Some(structure) = employment::structure_on(&structures, to_day) else {
                         continue;
                     };
@@ -1843,15 +1699,13 @@ pub fn compute_payroll_on(app: &App, from: String, to: String) -> UiResult<Payro
                     let mut minutes = 0_i64;
                     for a in attendance.iter().filter(|a| a.staff_id == staff_id) {
                         let Some(ended) = a.ended_at else {
-                            // Still open. Its hours cannot be worked out, and
-                            // guessing would be inventing pay.
+                            // Still open. Its hours cannot be worked out, and guessing would be
+                            // inventing pay.
                             continue;
                         };
                         days = days + HalfDays::from_days(1);
-                        minutes += employment::minutes_between(
-                            minute_of(a.started_at),
-                            minute_of(ended),
-                        );
+                        minutes +=
+                            employment::minutes_between(minute_of(a.started_at), minute_of(ended));
                     }
 
                     let unpaid = approved
@@ -1873,9 +1727,8 @@ pub fn compute_payroll_on(app: &App, from: String, to: String) -> UiResult<Payro
                         period_days,
                     };
 
-                    // What could be recovered is what the line is worth BEFORE
-                    // any recovery — computed once with nothing recovered, so
-                    // the cap is the real one.
+                    // What could be recovered is what the line is worth BEFORE any recovery —
+                    // computed once with nothing recovered, so the cap is the real one.
                     let dry = employment::pay_line(structure, &worked, Money::ZERO)
                         .map_err(|e| mb_db::DbError::invariant(format!("payroll: {e}")))?;
 
@@ -2035,18 +1888,7 @@ pub fn payroll_on(app: &App, run_id: String) -> UiResult<PayrollView> {
     })
 }
 
-
-/// **Put one person's payslip on paper** — scope 9.14's third part, P30.
-///
-/// P28 built the payroll and named this as not done. It is the piece the
-/// person being paid actually holds, and a shop that cannot hand one over
-/// settles every argument about pay by memory.
-///
-/// Printed like every other document, through P07's queue — so a printer that
-/// is off means a slip that prints when it comes back, exactly as a bill does.
-/// **`SalaryManage`, not `SalaryView`**: reading what somebody earns and
-/// handing them the paper are the same authority as approving the run that
-/// produced it, and this is the one that ends up in somebody's pocket.
+/// Put one person's payslip on paper.
 pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult<String> {
     guard::require(app, Permission::SalaryManage)?;
     let at = now();
@@ -2059,10 +1901,7 @@ pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult
         .iter()
         .find(|l| l.staff_id == staff_id)
         .ok_or_else(|| {
-            UiError::new(
-                "payroll.no_line",
-                "That person is not on this payroll run.",
-            )
+            UiError::new("payroll.no_line", "That person is not on this payroll run.")
         })?;
 
     let people = people_on(app)?;
@@ -2071,8 +1910,7 @@ pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult
         .and_then(|p| p.designation.clone())
         .filter(|d| !d.trim().is_empty());
 
-    // Every figure, in the order it was worked out. A slip that showed only
-    // the net would be a number somebody has to trust.
+    // Every figure, in the order it was worked out.
     let mut lines = vec![mb_print::template::PaySlipLine {
         label: "Earned".to_owned(),
         amount: line.earned.text.clone(),
@@ -2127,10 +1965,7 @@ pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult
             designation: designation.as_deref(),
             period: &period,
             basis_says: &basis_words(
-                // The tag on the view, back into the enum it came from. A
-                // basis this build has never heard of would be a payroll row
-                // written by a newer version, and "monthly" is the honest
-                // fallback for a slip somebody is holding.
+                // The tag on the view, back into the enum it came from.
                 basis_from_tag(&line.basis).unwrap_or(Basis::Monthly),
                 Money::from_paise(line.basis_amount.paise),
             ),
@@ -2142,13 +1977,15 @@ pub fn print_payslip_on(app: &App, run_id: String, staff_id: String) -> UiResult
         },
     );
 
-    app.print(mb_print::queue::Job::new(
-                    mb_print::queue::JobKind::DayClose,
-                    &printer.id,
-                    document,
-                    today(at),
-                )
-                .because(format!("payslip for {}", line.staff_name)),)
+    app.print(
+        mb_print::queue::Job::new(
+            mb_print::queue::JobKind::DayClose,
+            &printer.id,
+            document,
+            today(at),
+        )
+        .because(format!("payslip for {}", line.staff_name)),
+    )
 }
 
 pub fn payroll_list_on(app: &App) -> UiResult<PayrollListView> {
@@ -2180,10 +2017,6 @@ pub fn payroll_list_on(app: &App) -> UiResult<PayrollListView> {
 }
 
 /// Change one figure by hand before approving.
-///
-/// The first thing an owner does with a payroll figure is disagree with one
-/// line of it. The line is marked `edited` so a reviewer knows which numbers
-/// are the computer's and which are somebody's.
 pub fn edit_payroll_line_on(
     app: &App,
     run_id: String,
@@ -2195,7 +2028,10 @@ pub fn edit_payroll_line_on(
     let at = now();
     let value = crate::menu::parse_money_public(&net)?;
     if value.is_negative() {
-        return Err(UiError::new("payroll.net", "A payslip is not less than nothing."));
+        return Err(UiError::new(
+            "payroll.net",
+            "A payslip is not less than nothing.",
+        ));
     }
 
     app.with_shop(|shop| {
@@ -2245,18 +2081,17 @@ pub fn edit_payroll_line_on(
     payroll_on(app, run_id)
 }
 
-/// **Approve a run.** This is where money leaves the shop.
-///
-/// One expense for the gross, one compensating `top_up` for whatever came off
-/// advances, and the audit row — all in ONE transaction (D82). See the module
-/// note for why it is those two rows and not one or three.
+/// Approve a run. This is where money leaves the shop.
 pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResult<PayrollView> {
     let who = guard::require(app, Permission::SalaryManage)?;
     let at = now();
     let day = today(at);
 
     if !matches!(paid_by.as_str(), "cash" | "bank") {
-        return Err(UiError::new("payroll.paid_by", "Pay it in cash or by bank."));
+        return Err(UiError::new(
+            "payroll.paid_by",
+            "Pay it in cash or by bank.",
+        ));
     }
 
     app.with_shop(|shop| {
@@ -2266,9 +2101,8 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
                 let Some(mut run) = repos.employment().run(OUTLET, &run_id)? else {
                     return Err(mb_db::DbError::invariant("no such run".to_owned()));
                 };
-                // **T7 — approving twice is refused**, and it is refused here
-                // rather than tolerated, because the second approval would post
-                // a second expense for the same month.
+                // Approving twice is refused, and it is refused here rather than tolerated,
+                // because the second approval would post a second expense for the same month.
                 if run.state != RunState::Draft {
                     return Err(mb_db::DbError::invariant(
                         "that run has already been approved".to_owned(),
@@ -2282,10 +2116,8 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
                     ));
                 }
 
-                // **The COST is the gross**: what each person earned, before
-                // an advance they already took is deducted from what they are
-                // handed. Netting it would understate the shop's wage bill by
-                // every advance ever given.
+                // The COST is the gross: what each person earned, before an advance they
+                // already took is deducted from what they are handed.
                 let gross = Money::try_sum(
                     lines
                         .iter()
@@ -2319,8 +2151,7 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
                     },
                 )?;
 
-                // The compensating drawer row. Only when something was actually
-                // recovered — a run with no advances writes one row, not two.
+                // The compensating drawer row.
                 let movement_id = if recovered.is_positive() {
                     let id = crate::newid::fresh_at("cm_pay", at);
                     repos.money().save_cash_movement(
@@ -2378,11 +2209,7 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
     payroll_on(app, run_id)
 }
 
-/// **Reverse an approved run.** A correction is a STATE, not a delete (D47).
-///
-/// The expense and the drawer row are taken back, and every advance goes back
-/// to owing what it owed — because otherwise reversing a run would quietly
-/// forgive the money that came off them.
+/// Reverse an approved run.
 pub fn reverse_payroll_on(app: &App, run_id: String, reason: String) -> UiResult<PayrollView> {
     let who = guard::require(app, Permission::SalaryManage)?;
     let at = now();
@@ -2408,12 +2235,7 @@ pub fn reverse_payroll_on(app: &App, run_id: String, reason: String) -> UiResult
                     ));
                 }
 
-                // **The run lets go of the rows BEFORE they are deleted.**
-                //  is a foreign key, so deleting the
-                // expense while the run still points at it is a constraint
-                // violation — which is what the first version did, and the
-                // message a shop would have seen was about a foreign key
-                // rather than about anything they had done.
+                // The run lets go of the rows BEFORE they are deleted.
                 let expense = run.expense_id.take();
                 let movement = run.cash_movement_id.take();
                 run.state = RunState::Reversed;
@@ -2427,8 +2249,8 @@ pub fn reverse_payroll_on(app: &App, run_id: String, reason: String) -> UiResult
                 if let Some(id) = &movement {
                     repos.employment().delete_cash_movement(OUTLET, id)?;
                 }
-                // And every advance goes back to owing what it owed —
-                // otherwise reversing a run would quietly forgive money.
+                // And every advance goes back to owing what it owed — otherwise reversing a run
+                // would quietly forgive money.
                 repos.employment().clear_recoveries(&run_id)?;
 
                 repos.audit().append(
@@ -2451,12 +2273,9 @@ pub fn reverse_payroll_on(app: &App, run_id: String, reason: String) -> UiResult
     payroll_on(app, run_id)
 }
 
-// ===========================================================================
-// Staff cost (scope 9.16)
-// ===========================================================================
+// Staff cost.
 
-/// **The second of the two numbers that decide whether a restaurant makes
-/// money.** P25 gave the first — food cost. This is the other one.
+/// The second of the two numbers that decide whether a restaurant makes money.
 #[allow(
     clippy::integer_division,
     reason = "a percentage in basis points, kept in integers on purpose (D2): 
@@ -2475,13 +2294,13 @@ pub fn staff_cost_on(app: &App, from: String, to: String) -> UiResult<StaffCostV
                     .employment()
                     .staff_cost_between(OUTLET, from_day, to_day)?;
 
-                // Revenue over the same window, from the bills themselves — not
-                // a second sum kept anywhere, which is G1's whole lesson.
-                let revenue = repos.employment().revenue_between(OUTLET, from_day, to_day)?;
+                // Revenue over the same window, from the bills themselves.
+                let revenue = repos
+                    .employment()
+                    .revenue_between(OUTLET, from_day, to_day)?;
 
                 let says = if revenue.is_zero() {
-                    "No sales in this period, so there is no percentage to give."
-                        .to_owned()
+                    "No sales in this period, so there is no percentage to give.".to_owned()
                 } else {
                     // Basis points, so the division stays in integers.
                     let bp = i64::from(
@@ -2509,18 +2328,7 @@ pub fn staff_cost_on(app: &App, from: String, to: String) -> UiResult<StaffCostV
     })
 }
 
-// ===========================================================================
-// The commands
-//
-// **Thin, every one of them.** The permission check, the words and the
-// arithmetic are all above; these exist so Tauri has something to call, and so
-// that `ipc.rs` has one list of what this session added.
-//
-// P28's other half — scope 9.13, the owner managing this from a phone — is the
-// SERVICE these wrap, not the wrappers. `docs/LAN_PROTOCOL.md` names the same
-// command set over the LAN, and every one of them checks its permission
-// server-side (T10), because a phone is a screen and never an authority (D9).
-// ===========================================================================
+// The commands.
 
 #[tauri::command]
 pub fn employees(app: tauri::State<'_, App>) -> UiResult<Vec<EmployeeView>> {
@@ -2689,7 +2497,6 @@ pub fn reverse_payroll(
     reverse_payroll_on(&app, run_id, reason)
 }
 
-/// P30 — scope 9.14's third part.
 #[tauri::command]
 pub fn print_payslip(
     app: tauri::State<'_, App>,
@@ -2700,10 +2507,6 @@ pub fn print_payslip(
 }
 
 #[tauri::command]
-pub fn staff_cost(
-    app: tauri::State<'_, App>,
-    from: String,
-    to: String,
-) -> UiResult<StaffCostView> {
+pub fn staff_cost(app: tauri::State<'_, App>, from: String, to: String) -> UiResult<StaffCostView> {
     staff_cost_on(&app, from, to)
 }

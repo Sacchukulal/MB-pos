@@ -1,22 +1,8 @@
-//! **Mint the release signing keypair** — step 1 of `docs/RELEASE.md`.
+//! Mint the release signing keypair — step 1 of `docs/RELEASE.md`.
 //!
 //! ```text
 //! cargo run -p mb-license --example keygen
 //! ```
-//!
-//! Prints the private key (PKCS#8, base64) and the public key (raw 32 bytes,
-//! as a Rust array literal you paste into `snapshot::PRODUCTION_PUBLIC_KEY`).
-//!
-//! # Why this exists rather than a line in a README
-//!
-//! Audit **C9** is the highest-severity finding in the whole product and its
-//! fix is *"a 10-minute job with an enormous downside if skipped"*. A procedure
-//! whose first step is "generate a keypair somehow" does not get done in ten
-//! minutes. This one is a command.
-//!
-//! **The private key is printed once and never stored.** It goes straight into
-//! 1Password and the CI secret; there is deliberately no `--out` flag, because
-//! a release key sitting in a file on somebody's laptop is the finding.
 
 #![allow(
     clippy::expect_used,
@@ -37,7 +23,10 @@ fn main() {
 
     println!("PRIVATE — 1Password (Magic Bill / Release signing key) AND the CI");
     println!("secret MB_RELEASE_KEY. This is printed once and is not saved anywhere.\n");
-    println!("{}\n", base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref()));
+    println!(
+        "{}\n",
+        base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref())
+    );
 
     println!("PUBLIC — paste into `snapshot::PRODUCTION_PUBLIC_KEY`:\n");
     print!("pub const PRODUCTION_PUBLIC_KEY: Option<&[u8]> = Some(&[");

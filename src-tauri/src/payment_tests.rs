@@ -1,15 +1,3 @@
-//! **P29's money half, driven end to end** — T7, T8 and T9.
-//!
-//! Three questions a shop cannot answer today, and each one is a way money
-//! goes missing:
-//!
-//! * *did that UPI actually arrive?* — T7, and the answer is a LIST, because a
-//!   shop cannot chase what it cannot list;
-//! * *what happens when the card machine says no?* — T8, and the answer has to
-//!   be "nothing is settled and the reason is written down";
-//! * *is a tip part of my sales?* — T9, and the answer is no, in three
-//!   different places, because there are three places it could wrongly appear.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -29,9 +17,7 @@ use crate::reports::{PeriodArg, report_on};
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
 
-// ---------------------------------------------------------------------------
-// The fixture
-// ---------------------------------------------------------------------------
+// The fixture.
 
 fn a_shop(scratch: &Scratch, name: &str) -> App {
     let path = scratch.dir().join(format!("{name}.db"));
@@ -61,9 +47,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
     .expect("a menu");
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, path);
-    // Reports are behind the licence gate (D86). A test that did not license
-    // the shop would be testing the refusal, which  already
-    // does.
+    // Reports are behind the licence gate.
     app.use_licensing(crate::licence_tests::licence_in(
         scratch,
         "payments-licence",
@@ -107,8 +91,7 @@ fn one_dosa(app: &App) -> Money {
         Ok(())
     })
     .expect("parcel");
-    crate::ipc::cart_add_on(app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
-        .expect("added");
+    crate::ipc::cart_add_on(app, "itm_dosa".to_owned(), Some("1".to_owned()), None).expect("added");
     app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill")
 }
@@ -124,16 +107,10 @@ fn period() -> PeriodArg {
     }
 }
 
-// ---------------------------------------------------------------------------
-// T7 — the unconfirmed list
-// ---------------------------------------------------------------------------
+// The unconfirmed list.
 
-/// **T7.** A UPI payment taken by hand keeps its reference, and is **visibly
-/// unconfirmed** until somebody says the money arrived.
-///
-/// This is the whole feature. Nothing in this product can check a bank, so the
-/// honest thing is to say so — and then to make the list of what has not been
-/// checked something a shop reads before it closes.
+/// A UPI payment taken by hand keeps its reference, and is visibly unconfirmed until somebody
+/// says the money arrived.
 #[test]
 fn a_upi_payment_is_visibly_unconfirmed_until_somebody_says_otherwise() {
     let scratch = Scratch::new("pay_t7");
@@ -181,14 +158,13 @@ fn a_upi_payment_is_visibly_unconfirmed_until_somebody_says_otherwise() {
     );
     assert_eq!(after.says, "Everything taken today is confirmed.");
 
-    // And it cannot be confirmed twice — a second confirmation would be a
-    // second name on the same money.
+    // And it cannot be confirmed twice — a second confirmation would be a second name on the
+    // same money.
     let again = confirm_payment_on(&app, row.order_id.clone(), row.seq, String::new());
     assert!(again.is_err());
 }
 
-/// Cash is never on the unconfirmed list. A list nobody can read is a list
-/// nobody reads.
+/// Cash is never on the unconfirmed list.
 #[test]
 fn cash_never_reaches_the_unconfirmed_list() {
     let scratch = Scratch::new("pay_cash");
@@ -207,16 +183,10 @@ fn cash_never_reaches_the_unconfirmed_list() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// T8 — a decline
-// ---------------------------------------------------------------------------
+// A decline.
 
-/// **T8.** A declined card leaves the bill unsettled, and the reason is
-/// recorded in the machine's own words.
-///
-/// The provider here is a stand-in, driven through **the same command** the
-/// manual one goes through — which is the claim being made about a real
-/// aggregator dropping in without touching the billing code.
+/// A declined card leaves the bill unsettled, and the reason is recorded in the machine's own
+/// words.
 #[test]
 fn a_declined_card_leaves_the_bill_unsettled_and_says_why() {
     let scratch = Scratch::new("pay_t8");
@@ -241,7 +211,7 @@ fn a_declined_card_leaves_the_bill_unsettled_and_says_why() {
         error.message
     );
 
-    // **Nothing was taken**, so the bill cannot be completed.
+    // Nothing was taken, so the bill cannot be completed.
     let paid = app
         .with_cart(|state| Ok(state.settlement.total_paid().unwrap_or(Money::ZERO)))
         .expect("the cart");
@@ -270,13 +240,10 @@ fn a_declined_card_leaves_the_bill_unsettled_and_says_why() {
     assert!(view.says.contains("refused"), "{}", view.says);
 }
 
-// ---------------------------------------------------------------------------
-// T9 — a tip is not takings
-// ---------------------------------------------------------------------------
+// A tip is not takings.
 
-/// **T9.** A tip appears in none of the three places it could wrongly appear:
-/// the sales figure, the tax summary, or the staff-cost denominator — and it
-/// reconciles per person on the tips report.
+/// A tip appears in none of the three places it could wrongly appear: the sales figure, the tax
+/// summary, or the staff-cost denominator — and it reconciles per person on the tips report.
 #[test]
 fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
     let scratch = Scratch::new("pay_t9");
@@ -301,14 +268,9 @@ fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
     .expect("paid, tip included");
     crate::flows::complete_bill_on(&app).expect("settled");
 
-    // 1. **Not in sales.** The day's takings are the bill, not the bill plus
-    //    the tip.
+    // Not in sales. The day's takings are the bill, not the bill plus the tip.
     let sales = report_on(&app, "sales_day".to_owned(), period()).expect("the sales report");
-    let figures = sales
-        .rows
-        .iter()
-        .flat_map(|r| r.iter())
-        .collect::<Vec<_>>();
+    let figures = sales.rows.iter().flat_map(|r| r.iter()).collect::<Vec<_>>();
     assert!(
         figures.iter().any(|c| c.contains(&total.to_plain_string())),
         "the day's sales should be the bill total: {figures:?}"
@@ -319,8 +281,8 @@ fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
         "a tip has reached the sales figure: {figures:?}"
     );
 
-    // 2. **Not in tax.** A tip is not a supply by the restaurant, so it is not
-    //    a taxable value anywhere in the GST summary.
+    // Not in tax. A tip is not a supply by the restaurant, so it is not a taxable value
+    // anywhere in the GST summary.
     let gst = report_on(&app, "tax_rate".to_owned(), period()).expect("the tax report");
     let taxable: Vec<&String> = gst.rows.iter().flat_map(|r| r.iter()).collect();
     assert!(
@@ -328,10 +290,7 @@ fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
         "a tip has reached the tax summary: {taxable:?}"
     );
 
-    // 3. **Not in the staff-cost denominator.** Staff cost is measured against
-    //    what the shop SOLD; counting money that belongs to the staff as part
-    //    of the shop's sales would make the percentage flatter every time
-    //    somebody is tipped.
+    // Not in the staff-cost denominator.
     let cost = crate::employment::staff_cost_on(&app, today(), today()).expect("the staff cost");
     assert_eq!(
         cost.revenue.paise,
@@ -348,28 +307,17 @@ fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
         "the tip reconciles against the payment that carried it: {row:?}"
     );
     assert!(
-        tips.notes.iter().any(|n| n.contains("not the shop's money")),
+        tips.notes
+            .iter()
+            .any(|n| n.contains("not the shop's money")),
         "the report says so in words, once, in Rust: {:?}",
         tips.notes
     );
 }
 
-// ---------------------------------------------------------------------------
-// Money off a bill — scope 1.12, audit B7, and the owner's *"where is discount
-// option?? i want to give discount to customer, here no option showing"*
-// (2026-08-17).
-//
-// `mb_core::discount` proves the arithmetic in isolation and has since P02.
-// What was missing was any way to reach it: `CartState.bill_discount` was set
-// to `None` at birth and never written again. These prove the door.
-// ---------------------------------------------------------------------------
+// Money off a bill.
 
-/// **A percentage comes off, and the tax comes off with it.**
-///
-/// This is the whole reason a bill discount is spread across the lines BEFORE
-/// tax rather than taken off the grand total (audit B11): take 10% off the
-/// total after tax and the tax already printed is wrong for every rate, the
-/// rate-wise summary does not tie, and a CA cannot file from the bill.
+/// A percentage comes off, and the tax comes off with it.
 #[test]
 fn a_percentage_comes_off_the_bill_before_the_tax() {
     let scratch = Scratch::new("discount_percent");
@@ -377,17 +325,19 @@ fn a_percentage_comes_off_the_bill_before_the_tax() {
     as_owner(&app, "staff_meena", "Meena");
     let full = one_dosa(&app);
 
-    let view = crate::ipc::cart_set_discount_on(
-        &app,
-        "percent".to_owned(),
-        "10".to_owned(),
-        None,
-    )
-    .expect("the discount is given");
+    let view = crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "10".to_owned(), None)
+        .expect("the discount is given");
 
     // 120.00 of dosa, 10% off is 12.00, and the 5% GST is charged on 108.00.
-    assert_eq!(view.bill.bill_discount.text, "12.00", "{:?}", view.bill.bill_discount);
-    assert_eq!(view.bill.subtotal.text, "120.00", "the subtotal is before the discount");
+    assert_eq!(
+        view.bill.bill_discount.text, "12.00",
+        "{:?}",
+        view.bill.bill_discount
+    );
+    assert_eq!(
+        view.bill.subtotal.text, "120.00",
+        "the subtotal is before the discount"
+    );
     assert!(
         view.bill.grand_total.paise < full.paise(),
         "the bill did not get smaller: {} then {}",
@@ -398,18 +348,14 @@ fn a_percentage_comes_off_the_bill_before_the_tax() {
     let taxed: i64 = view.bill.tax_rows.iter().map(|r| r.taxable.paise).sum();
     assert_eq!(taxed, 10_800, "tax was charged on the undiscounted value");
 
-    // And taking it away puts the bill back exactly where it was — a discount
-    // is not a payment and must not leave a trace in the money.
+    // And taking it away puts the bill back exactly where it was — a discount is not a payment
+    // and must not leave a trace in the money.
     let back = crate::ipc::cart_clear_discount_on(&app).expect("cleared");
     assert_eq!(back.bill.grand_total.paise, full.paise());
     assert_eq!(back.bill.bill_discount.paise, 0);
 }
 
-/// **A flat amount, and half a per cent, both without a float.**
-///
-/// "12.5" is 1250 basis points. Parsed with `f64` it is 12.5 exactly and 0.1
-/// is not, which is the class of bug that puts a bill a paisa off what the
-/// customer was promised — so the percentage is parsed digit by digit.
+/// A flat amount, and half a per cent, both without a float.
 #[test]
 fn a_discount_is_parsed_without_a_float() {
     let scratch = Scratch::new("discount_parse");
@@ -418,25 +364,35 @@ fn a_discount_is_parsed_without_a_float() {
     one_dosa(&app);
 
     // Half a per cent of 120.00 is 0.60.
-    let view =
-        crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "0.5".to_owned(), None)
-            .expect("half a per cent");
-    assert_eq!(view.bill.bill_discount.text, "0.60", "{:?}", view.bill.bill_discount);
+    let view = crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "0.5".to_owned(), None)
+        .expect("half a per cent");
+    assert_eq!(
+        view.bill.bill_discount.text, "0.60",
+        "{:?}",
+        view.bill.bill_discount
+    );
 
     // 12.5% of 120.00 is 15.00 — and "12.5" must be 1250bp, not 125bp.
     let view =
         crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "12.5".to_owned(), None)
             .expect("twelve and a half");
-    assert_eq!(view.bill.bill_discount.text, "15.00", "{:?}", view.bill.bill_discount);
+    assert_eq!(
+        view.bill.bill_discount.text, "15.00",
+        "{:?}",
+        view.bill.bill_discount
+    );
 
     // And rupees off.
-    let view =
-        crate::ipc::cart_set_discount_on(&app, "amount".to_owned(), "50".to_owned(), None)
-            .expect("fifty rupees");
-    assert_eq!(view.bill.bill_discount.text, "50.00", "{:?}", view.bill.bill_discount);
+    let view = crate::ipc::cart_set_discount_on(&app, "amount".to_owned(), "50".to_owned(), None)
+        .expect("fifty rupees");
+    assert_eq!(
+        view.bill.bill_discount.text, "50.00",
+        "{:?}",
+        view.bill.bill_discount
+    );
 }
 
-/// **The refusals a cashier can act on**, in the words Rust already wrote.
+/// The refusals a cashier can act on, in the words Rust already wrote.
 #[test]
 fn a_discount_that_makes_no_sense_is_refused_in_words() {
     let scratch = Scratch::new("discount_refused");
@@ -445,12 +401,12 @@ fn a_discount_that_makes_no_sense_is_refused_in_words() {
     one_dosa(&app);
 
     for (kind, value) in [
-        ("percent", "101"),      // more than the whole bill
-        ("percent", "abc"),      // not a number
-        ("percent", ""),         // nothing typed
-        ("percent", "10.555"),   // finer than basis points go
-        ("amount", "-5"),        // a "negative discount" is a charge
-        ("nonsense", "10"),      // neither kind
+        ("percent", "101"),    // more than the whole bill
+        ("percent", "abc"),    // not a number
+        ("percent", ""),       // nothing typed
+        ("percent", "10.555"), // finer than basis points go
+        ("amount", "-5"),      // a "negative discount" is a charge
+        ("nonsense", "10"),    // neither kind
     ] {
         assert!(
             crate::ipc::cart_set_discount_on(&app, kind.to_owned(), value.to_owned(), None)
@@ -466,29 +422,9 @@ fn a_discount_that_makes_no_sense_is_refused_in_words() {
     assert!(!has, "a refused discount was applied anyway");
 }
 
-// ---------------------------------------------------------------------------
-// The press that could only ever fail — 2026-08-22
-// ---------------------------------------------------------------------------
+// The press that could only ever fail.
 
-/// **A zero-rupee payment is refused before anything outside this process is
-/// touched.**
-///
-/// The owner, from a real install: *"the payment mode selection is also not
-/// visible, and it also shows some error notification, what is it?"* The
-/// notification was **"That payment could not be taken — a payment has to be
-/// more than zero"**, and it came from pressing a mode on a bill that was
-/// already fully paid: each button takes *the balance*, and the balance was
-/// nought.
-///
-/// The screen is the half that was wrong and is fixed in `PaymentModes` — a
-/// button whose only possible outcome is an error should not be pressable. This
-/// test is about the other half. The refusal itself is correct and stays: a
-/// zero-rupee row is noise in every report downstream. But it used to happen
-/// **after** `ask_about`, so a press that could never succeed had already gone
-/// out to the payment provider and written a row in the attempts ledger.
-///
-/// Nothing that leaves the process may happen on the way to a refusal that was
-/// decidable from the arguments.
+/// A zero-rupee payment is refused before anything outside this process is touched.
 #[test]
 fn a_zero_payment_is_refused_without_asking_the_provider() {
     let scratch = Scratch::new("pay_zero");
@@ -498,7 +434,7 @@ fn a_zero_payment_is_refused_without_asking_the_provider() {
     let total = one_dosa(&app);
     cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("taken");
 
-    // The bill is covered. This is the press the owner made.
+    // The bill is covered.
     let refused = cart_add_payment_on(&app, "Card".to_owned(), 0, None)
         .expect_err("a zero payment was accepted");
     assert_eq!(refused.code, "payment.invalid");
@@ -508,8 +444,8 @@ fn a_zero_payment_is_refused_without_asking_the_provider() {
         "the reason a shopkeeper reads must still be the real one",
     );
 
-    // **Card is the mode on purpose**: cash and credit skip the ledger anyway,
-    // so only a mode that WOULD be written down can prove nothing was.
+    // Card is the mode on purpose: cash and credit skip the ledger anyway, so only a mode that
+    // WOULD be written down can prove nothing was.
     let view = payments_on(&app).expect("the payments screen");
     assert!(
         view.attempts.is_empty(),

@@ -1,33 +1,13 @@
-//! **Shifts, attendance, leave, salary and payroll, on disk** — P28.
-//!
-//! [`mb_core::employment`] does the arithmetic and knows nothing about a
-//! database. This reads and writes the rows it works on, and does no sums of
-//! its own beyond the two that SQL is the right tool for: a leave balance and
-//! an advance's outstanding amount, which are both `SUM` over a ledger.
-//!
-//! # Nothing here stores a balance
-//!
-//! Three times over. There is no `leave_balance` column, no `outstanding`
-//! column and no `total_paid` column, because a stored total is a total that
-//! will one day disagree with the rows that made it and there will be nothing
-//! to check it against. Same rule as credit (D120) and stock (D127), and the
-//! same rule the money repo already follows for what a customer owes.
-//!
-//! # The one thing this file guards
-//!
-//! **A leave request writes exactly one `taken` row, ever.** Not "the code is
-//! careful": a partial unique index on `leave_ledger.request_id` makes
-//! approving twice a constraint violation. The alternative is a doubled
-//! deduction that somebody finds in March and cannot explain.
+//! Shifts, attendance, leave, salary and payroll, on disk.
 
+use mb_core::Timestamp;
 use mb_core::businessday::BusinessDay;
 use mb_core::employment::{
     Advance, Basis, Component, ComponentKind, HalfDays, LeaveEntry, LeaveKind, Structure,
 };
 use mb_core::money::Money;
-use mb_core::Timestamp;
-use std::collections::BTreeMap;
 use rusqlite::{Transaction, params};
+use std::collections::BTreeMap;
 
 use crate::encode;
 use crate::error::DbError;
@@ -37,12 +17,9 @@ pub struct EmploymentRepo<'a> {
     tx: &'a Transaction<'a>,
 }
 
-// ---------------------------------------------------------------------------
-// The rows a screen reads
-// ---------------------------------------------------------------------------
+// The rows a screen reads.
 
-/// One person, on the employment side. P11's `StaffMember` is the identity;
-/// this is the employment record beside it (scope 9.15).
+/// One person, on the employment side.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Employee {
     pub id: String,
@@ -53,13 +30,11 @@ pub struct Employee {
     pub employment_type: String,
     pub status: String,
     pub joined_on: Option<BusinessDay>,
-    /// Set when they have left. **Nobody is ever deleted** — their name is on
-    /// last year's bills.
+    /// Set when they have left.
     pub left_on: Option<BusinessDay>,
 }
 
-/// A stored day, when there is one. Out of range is treated as absent rather
-/// than as an error: a nonsense `joined_on` must not stop a shop opening.
+/// A stored day, when there is one.
 fn day_opt(days: Option<i64>) -> Option<BusinessDay> {
     days.and_then(|d| i32::try_from(d).ok())
         .map(BusinessDay::from_days_since_epoch)
@@ -70,10 +45,9 @@ fn day_opt(days: Option<i64>) -> Option<BusinessDay> {
 pub struct ShiftPattern {
     pub id: String,
     pub name: String,
-    /// Minutes from midnight. `end` below `start` means it wraps past
-    /// midnight — a night shift — and
-    /// [`mb_core::employment::minutes_between`] is the only thing that may do
-    /// arithmetic on the pair.
+    /// Minutes from midnight. `end` below `start` means it wraps past midnight — a night shift
+    /// — and `mb_core::employment::minutes_between` is the only thing that may do arithmetic on
+    /// the pair.
     pub start_minute: i64,
     pub end_minute: i64,
     pub break_minutes: i64,
@@ -81,8 +55,7 @@ pub struct ShiftPattern {
     pub is_active: bool,
 }
 
-/// Who is expected on a day. `pattern_id: None` is a rostered day OFF, which
-/// is a different fact from having no row at all.
+/// Who is expected on a day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterDay {
     pub id: String,
@@ -97,14 +70,13 @@ pub struct RosterDay {
 pub struct Attendance {
     pub id: String,
     pub staff_id: String,
-    /// **The day it STARTED in** (D5). A night shift belongs to it whole.
+    /// The day it STARTED in.
     pub day: BusinessDay,
     pub terminal_id: Option<String>,
     pub shift_no: i64,
     pub pattern_id: Option<String>,
     pub started_at: Timestamp,
-    /// `None` is still clocked in. Still `None` the next morning is a missed
-    /// clock-out.
+    /// `None` is still clocked in.
     pub ended_at: Option<Timestamp>,
     pub corrected_at: Option<Timestamp>,
     pub corrected_by: Option<String>,
@@ -117,8 +89,7 @@ pub struct LeaveType {
     pub id: String,
     pub name: String,
     pub annual_half_days: Option<HalfDays>,
-    /// **The only column payroll reads.** An unpaid day is deducted from a
-    /// monthly salary; every other kind is not.
+    /// The only column payroll reads.
     pub is_paid: bool,
     pub sort_order: i64,
     pub is_active: bool,
@@ -173,8 +144,7 @@ pub struct LeaveRequest {
     pub decision_note: Option<String>,
 }
 
-/// One line of one payroll run, as stored. Every figure frozen — see the
-/// schema note on `payroll_lines`.
+/// One line of one payroll run, as stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayrollLine {
     pub id: String,
@@ -241,8 +211,6 @@ pub struct PayrollRun {
     pub note: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-
 fn basis_to_sql(b: Basis) -> &'static str {
     match b {
         Basis::Monthly => "monthly",
@@ -289,14 +257,9 @@ impl<'a> EmploymentRepo<'a> {
         EmploymentRepo { tx }
     }
 
-// -- the employment record ---------------------------------------------
+    // The employment record.
 
     /// Everybody, with the employment side filled in.
-    ///
-    /// **Here rather than in the command layer**, because the shell crate has
-    /// no `rusqlite` at all and must not grow one: D1 and audit E3 are about
-    /// rules leaking into screens, and SQL in a command file is the same leak
-    /// one layer up.
     pub fn list_employees(&self, outlet: &str) -> Result<Vec<Employee>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, name, designation, department, phone, employment_type,
@@ -334,9 +297,8 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    /// **Everybody a payroll run should consider**: anybody who had not already
-    /// left before the period started. Somebody who left mid-month is still
-    /// owed for the days they worked.
+    /// Everybody a payroll run should consider: anybody who had not already left before the
+    /// period started.
     pub fn employed_on_or_after(
         &self,
         outlet: &str,
@@ -356,11 +318,10 @@ impl<'a> EmploymentRepo<'a> {
     }
 
     /// The employment side of one person's record.
-    ///
-    /// **The status and the leaving date are set together**, always: the schema
-    /// refuses a date on somebody still working, so setting one without the
-    /// other would be a constraint violation a screen could reach.
-    #[allow(clippy::too_many_arguments, reason = "an employment record IS this many facts")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "an employment record IS this many facts"
+    )]
     pub fn save_employment(
         &self,
         outlet: &str,
@@ -415,9 +376,6 @@ impl<'a> EmploymentRepo<'a> {
     }
 
     /// What the shop took over a window, for the staff-cost percentage.
-    ///
-    /// **From the bills themselves**, not a second total kept somewhere — G1's
-    /// whole lesson is that two answers to one question eventually disagree.
     pub fn revenue_between(
         &self,
         outlet: &str,
@@ -425,11 +383,8 @@ impl<'a> EmploymentRepo<'a> {
         to: BusinessDay,
     ) -> Result<Money, DbError> {
         let total: i64 = self.tx.query_row(
-            // Joined to `orders`, because the outlet, the business day and the
-            // state all live there — and `state = 'settled'` is what excludes a
-            // void. It is the same clause every other revenue figure in this
-            // product uses, deliberately: two different definitions of "what
-            // the shop took" is G1 with more steps.
+            // Joined to `orders`, because the outlet, the business day and the state all live
+            // there — and `state = 'settled'` is what excludes a void.
             "SELECT coalesce(SUM(b.grand_total), 0)
                FROM bills b JOIN orders o ON o.id = b.order_id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
@@ -453,7 +408,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(())
     }
 
-    // -- shift patterns ----------------------------------------------------
+    // Shift patterns.
 
     pub fn save_pattern(&self, outlet: &str, p: &ShiftPattern) -> Result<(), DbError> {
         self.tx.execute(
@@ -513,7 +468,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    // -- the roster --------------------------------------------------------
+    // The roster.
 
     pub fn save_roster_day(
         &self,
@@ -586,13 +541,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    // -- attendance --------------------------------------------------------
-
-    /// **The row somebody is standing in front of**, if they are clocked in.
-    ///
-    /// One query rather than "list today and filter", because clocking out is
-    /// on the counter's path and a person may have an open row from yesterday
-    /// — a night shift, or a missed clock-out.
+    /// The row somebody is standing in front of, if they are clocked in.
     pub fn open_shift(&self, outlet: &str, staff_id: &str) -> Result<Option<Attendance>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, staff_id, business_day, terminal_id, shift_no, pattern_id,
@@ -671,11 +620,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    /// **Who is still clocked in from a day before this one.**
-    ///
-    /// A missed clock-out. Asked at the day close, and by the screen that
-    /// offers to correct them — because a row that is still open the next
-    /// morning is a person whose hours nobody can compute.
+    /// Who is still clocked in from a day before this one.
     pub fn missed_clock_outs(
         &self,
         outlet: &str,
@@ -695,8 +640,6 @@ impl<'a> EmploymentRepo<'a> {
         }
         Ok(out)
     }
-
-    // -- leave -------------------------------------------------------------
 
     pub fn save_leave_type(&self, outlet: &str, t: &LeaveType) -> Result<(), DbError> {
         self.tx.execute(
@@ -798,8 +741,7 @@ impl<'a> EmploymentRepo<'a> {
         )
     }
 
-    /// **The calendar.** Who is approved to be away in this window — the
-    /// question an owner asks before approving a third request for one Sunday.
+    /// The calendar. Who is approved to be away in this window.
     pub fn approved_between(
         &self,
         outlet: &str,
@@ -842,7 +784,9 @@ impl<'a> EmploymentRepo<'a> {
                 state: RequestState::from_sql(&row.get::<_, String>(7)?)?,
                 requested_at: encode::timestamp_from_sql(row.get(8)?),
                 requested_by: row.get(9)?,
-                decided_at: row.get::<_, Option<i64>>(10)?.map(encode::timestamp_from_sql),
+                decided_at: row
+                    .get::<_, Option<i64>>(10)?
+                    .map(encode::timestamp_from_sql),
                 decided_by: row.get(11)?,
                 decision_note: row.get(12)?,
             });
@@ -851,10 +795,6 @@ impl<'a> EmploymentRepo<'a> {
     }
 
     /// Write one row of the leave ledger.
-    ///
-    /// **The `request_id` is what stops a double approval**: a partial unique
-    /// index means the second attempt is a constraint violation, not a second
-    /// deduction.
     #[allow(clippy::too_many_arguments, reason = "a ledger row IS this many facts")]
     pub fn post_leave(
         &self,
@@ -892,8 +832,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(())
     }
 
-    /// One person's ledger in one leave type, for
-    /// [`mb_core::employment::leave_balance`].
+    /// One person's ledger in one leave type, for `mb_core::employment::leave_balance`.
     pub fn leave_ledger(
         &self,
         outlet: &str,
@@ -918,8 +857,6 @@ impl<'a> EmploymentRepo<'a> {
         }
         Ok(out)
     }
-
-    // -- salary ------------------------------------------------------------
 
     pub fn save_structure(
         &self,
@@ -949,9 +886,9 @@ impl<'a> EmploymentRepo<'a> {
             ],
         )?;
 
-        // The components belong to the structure and are rewritten with it —
-        // an edit that left the old rows behind would double somebody's food
-        // allowance, which is the kind of bug that pays out for months.
+        // The components belong to the structure and are rewritten with it — an edit that left
+        // the old rows behind would double somebody's food allowance, which is the kind of bug
+        // that pays out for months.
         self.tx.execute(
             "DELETE FROM salary_components WHERE structure_id = ?1",
             params![id],
@@ -976,8 +913,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(())
     }
 
-    /// One person's whole salary history, for
-    /// [`mb_core::employment::structure_on`].
+    /// One person's whole salary history, for `mb_core::employment::structure_on`.
     pub fn structures_for(&self, outlet: &str, staff_id: &str) -> Result<Vec<Structure>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, effective_from, basis, amount
@@ -1042,8 +978,6 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    // -- advances ----------------------------------------------------------
-
     #[allow(clippy::too_many_arguments, reason = "an advance IS this many facts")]
     pub fn save_advance(
         &self,
@@ -1079,8 +1013,8 @@ impl<'a> EmploymentRepo<'a> {
         Ok(())
     }
 
-    /// One person's advances, **with what has already come back off each** —
-    /// which is a `SUM` over `advance_recoveries` and never a stored column.
+    /// One person's advances, with what has already come back off each — which is a `SUM` over
+    /// `advance_recoveries` and never a stored column.
     pub fn advances_for(&self, outlet: &str, staff_id: &str) -> Result<Vec<Advance>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT a.id, a.business_day, a.amount, a.instalments,
@@ -1095,10 +1029,7 @@ impl<'a> EmploymentRepo<'a> {
         while let Some(row) = rows.next()? {
             out.push(Advance {
                 id: row.get(0)?,
-                day: encode::business_day_from_sql(
-                    row.get(1)?,
-                    "salary_advances.business_day",
-                )?,
+                day: encode::business_day_from_sql(row.get(1)?, "salary_advances.business_day")?,
                 amount: encode::money_from_sql(row.get(2)?),
                 instalments: i32::try_from(row.get::<_, i64>(3)?).unwrap_or(1),
                 recovered: encode::money_from_sql(row.get(4)?),
@@ -1122,9 +1053,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(())
     }
 
-    /// Undo a run's recoveries. Used when a draft is recomputed and when an
-    /// approved run is reversed — the advance has to go back to owing what it
-    /// owed, or reversing a run would quietly forgive money.
+    /// Undo a run's recoveries.
     pub fn clear_recoveries(&self, run_id: &str) -> Result<(), DbError> {
         self.tx.execute(
             "DELETE FROM advance_recoveries WHERE run_id = ?1",
@@ -1132,8 +1061,6 @@ impl<'a> EmploymentRepo<'a> {
         )?;
         Ok(())
     }
-
-    // -- payroll -----------------------------------------------------------
 
     pub fn save_run(&self, outlet: &str, r: &PayrollRun) -> Result<(), DbError> {
         self.tx.execute(
@@ -1271,9 +1198,7 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    /// **What a shop paid its people over a period**, for the staff-cost
-    /// figure (scope 9.16). Approved runs only — a draft is a proposal, and
-    /// counting one as a cost would report money that has not left.
+    /// What a shop paid its people over a period, for the staff-cost figure.
     pub fn staff_cost_between(
         &self,
         outlet: &str,
@@ -1305,8 +1230,12 @@ fn attendance_from_row(row: &rusqlite::Row<'_>) -> Result<Attendance, DbError> {
         shift_no: row.get(4)?,
         pattern_id: row.get(5)?,
         started_at: encode::timestamp_from_sql(row.get(6)?),
-        ended_at: row.get::<_, Option<i64>>(7)?.map(encode::timestamp_from_sql),
-        corrected_at: row.get::<_, Option<i64>>(8)?.map(encode::timestamp_from_sql),
+        ended_at: row
+            .get::<_, Option<i64>>(7)?
+            .map(encode::timestamp_from_sql),
+        corrected_at: row
+            .get::<_, Option<i64>>(8)?
+            .map(encode::timestamp_from_sql),
         corrected_by: row.get(9)?,
         correction_reason: row.get(10)?,
         note: row.get(11)?,
@@ -1321,12 +1250,16 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> Result<PayrollRun, DbError> {
         state: RunState::from_sql(&row.get::<_, String>(3)?)?,
         computed_at: encode::timestamp_from_sql(row.get(4)?),
         computed_by: row.get(5)?,
-        approved_at: row.get::<_, Option<i64>>(6)?.map(encode::timestamp_from_sql),
+        approved_at: row
+            .get::<_, Option<i64>>(6)?
+            .map(encode::timestamp_from_sql),
         approved_by: row.get(7)?,
         cash_movement_id: row.get(8)?,
         expense_id: row.get(9)?,
         paid_by: row.get(10)?,
-        reversed_at: row.get::<_, Option<i64>>(11)?.map(encode::timestamp_from_sql),
+        reversed_at: row
+            .get::<_, Option<i64>>(11)?
+            .map(encode::timestamp_from_sql),
         reversal_reason: row.get(12)?,
         note: row.get(13)?,
     })

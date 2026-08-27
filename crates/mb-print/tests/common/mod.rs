@@ -1,11 +1,4 @@
 //! One bill with everything on it.
-//!
-//! T1's claim is that no sink can drop anything, so a fixture that leaves out
-//! the awkward blocks only proves the easy ones survive. This one has mixed
-//! rates, a non-GST line, an exempt charge, a line discount that gets capped,
-//! a bill discount, a percentage charge and a flat one, round-off, three split
-//! payments including credit, a tip, a rate-wise summary, an HSN column, a
-//! customer GSTIN, a logo, a UPI QR, a footer, and a DUPLICATE marking.
 
 #![allow(
     clippy::expect_used,
@@ -14,7 +7,10 @@
     reason = "tests: expect is the assertion, and the fixture splits a fake total three ways"
 )]
 // Shared by five test binaries, each of which uses a different subset.
-#![allow(dead_code, reason = "shared by five test binaries, each using a different subset")]
+#![allow(
+    dead_code,
+    reason = "shared by five test binaries, each using a different subset"
+)]
 
 use mb_core::{
     AnyOrder, Bill, BillInput, BusinessDay, Cart, Charge, ChargeKind, Claimed, CustomerId,
@@ -26,11 +22,6 @@ use mb_print::settings::ReceiptSettings;
 use mb_print::template::{BillContext, BillCustomer, Copy, EInvoice, Store};
 
 /// A whole-percent rate.
-///
-/// P33 deleted `TaxRate::GST_5` and the rest of the named slabs — 12 % and 28 %
-/// were both abolished in September 2025, which is exactly why a rate is data a
-/// shop sets and never a constant a release ships. A fixture still needs real
-/// numbers, so it carries its own.
 pub fn pc(percent: u32) -> TaxRate {
     TaxRate::from_percent(percent).expect("a real rate")
 }
@@ -40,10 +31,7 @@ pub fn store() -> Store {
         name: "Anna Kuteera".to_owned(),
         address: "12 MG Road, Jayanagar, Bengaluru 560011".to_owned(),
         phone: Some("9880012345".to_owned()),
-        // **A GSTIN that would actually pass** — the check character is W, not
-        // 5. P17 built the portal's checksum for the settings screen and this
-        // fixture was the first thing it refused; a fixture describing an
-        // impossible shop is a trap for whoever copies it next.
+        // A GSTIN that would actually pass — the check character is W, not.
         gstin: Some("29ABCDE1234F1ZW".to_owned()),
         fssai: Some("11223344556677".to_owned()),
         state_code: Some("29".to_owned()),
@@ -62,8 +50,8 @@ pub fn customer() -> BillCustomer {
     }
 }
 
-/// A cart with the four cases that matter: a long name, mixed rates, an
-/// inclusive line and a non-GST line.
+/// A cart with the four cases that matter: a long name, mixed rates, an inclusive line and a
+/// non-GST line.
 pub fn cart() -> Cart {
     let mut cart = Cart::new();
 
@@ -85,13 +73,7 @@ pub fn cart() -> Cart {
     .with_tax(TaxSpec::gst_inclusive(pc(18)))
     .with_hsn("2201");
 
-    // **Alcohol at a zero VAT rate, which is what the old `NonGst` meant.**
-    //
-    // P33 made this line able to carry state VAT — a real Karnataka beer is 20 %
-    // — but a rate here would change every golden file, and the printed bill is
-    // being redesigned in one deliberate pass rather than drifting. So the
-    // fixture keeps the rate at zero and goes on proving the thing it was built
-    // to prove: that a supply outside GST stays outside every GST total.
+    // Alcohol at a zero VAT rate, which is what the old `NonGst` meant.
     let beer = ItemSnapshot::new(
         ItemId::new("itm_beer"),
         "Beer 650ml",
@@ -116,7 +98,7 @@ pub fn cart() -> Cart {
     cart.add(beer, Qty::from_whole(2).expect("qty"), None, vec![])
         .expect("add");
 
-    // A discount larger than the line, so `was_capped` reaches the paper (D15).
+    // A discount larger than the line, so `was_capped` reaches the paper.
     cart.set_line_discount(
         1,
         Some(
@@ -140,8 +122,8 @@ pub fn bill(cart: &Cart) -> Bill {
         )
         .with_tax(TaxSpec::exempt()),
     ];
-    // A regular taxpayer, which is what `Store::is_composition = false` and a
-    // GSTIN on the letterhead have always meant — P33 only gave the fact a name.
+    // A regular taxpayer, which is what `Store::is_composition = false` and a GSTIN on the
+    // letterhead have always meant.
     compute_bill(
         BillInput::new(cart, Registration::Regular)
             .with_bill_discount(DiscountEntry::new(
@@ -157,7 +139,10 @@ pub fn bill(cart: &Cart) -> Bill {
 
 pub fn settlement(bill: &Bill) -> Settlement {
     let mut settlement = Settlement::with_tip(Money::from_paise(2_000)).expect("tip");
-    let due = settlement.amount_due(bill.grand_total).expect("due").paise();
+    let due = settlement
+        .amount_due(bill.grand_total)
+        .expect("due")
+        .paise();
     let a = Money::from_paise(due / 2);
     let b = Money::from_paise(due / 4);
     let c = Money::from_paise(due - a.paise() - b.paise());
@@ -254,8 +239,7 @@ impl Fixture {
             store: store(),
             customer: customer(),
             settings: everything_on(),
-            // Not a real PNG; nothing in this crate decodes one. It exists so
-            // the Image block is exercised and the sinks have to decide.
+            // Not a real PNG; nothing in this crate decodes one.
             logo: vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
         }
     }
@@ -268,8 +252,8 @@ impl Fixture {
             settings: &self.settings,
             customer: Some(&self.customer),
             cashier: Some("Ravi"),
-            // P32: the table's own name, a time and a waiter — the values a
-            // real print resolves, so the fixture exercises the same shape.
+            // The table's own name, a time and a waiter — the values a real print resolves, so
+            // the fixture exercises the same shape.
             table: Some("6"),
             time: Some("19:42"),
             waiter: Some("Suresh"),
@@ -286,13 +270,7 @@ impl Default for Fixture {
     }
 }
 
-// ---------------------------------------------------------------------------
 // A scratch database, for the tests that need the queue to survive a restart.
-//
-// No `tempfile` dependency, for the same reason mb-db refuses one: a unique
-// directory under the OS temp folder is twenty lines, and every dependency —
-// even a dev one — is a line somebody has to justify (R6, scope 16.15).
-// ---------------------------------------------------------------------------
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -311,10 +289,7 @@ pub struct Scratch {
 impl Scratch {
     pub fn new(label: &str) -> Scratch {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "mb-print-{label}-{}-{n}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("mb-print-{label}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch directory");
         Scratch { dir }
     }
@@ -356,10 +331,6 @@ pub fn seed_printer(db: &Db, id: &str) {
 }
 
 /// Wait for a condition, polling briefly.
-///
-/// Threads are involved once the queue is in the picture; a bare assert
-/// straight after `enqueue` would be a race, and a fixed sleep would be a slow
-/// test that still races.
 pub fn until(mut check: impl FnMut() -> bool) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
@@ -371,13 +342,8 @@ pub fn until(mut check: impl FnMut() -> bool) -> bool {
     false
 }
 
-/// **The built-in face's metrics for a roll** — what a test that only wants a
-/// document hands `bill_document`.
-///
-/// `bill_document` takes metrics since P32 because how many characters fit
-/// decides whether the item table is one line or two: measured on the owner's
-/// own install, items at size 10 in Times New Roman leave three characters for
-/// the dish name.
+/// The built-in face's metrics for a roll — what a test that only wants a document hands
+/// `bill_document`.
 pub fn metrics(kind: mb_print::paper::PaperKind) -> mb_print::metrics::Metrics {
     mb_print::metrics::Metrics::face(
         mb_print::paper::Paper::new(kind),
@@ -385,8 +351,7 @@ pub fn metrics(kind: mb_print::paper::PaperKind) -> mb_print::metrics::Metrics {
     )
 }
 
-/// The same, for a roll that carries a print offset — the offset lives on the
-/// `Paper`, and since P32 the paper reaches the template through the metrics.
+/// The same, for a roll that carries a print offset.
 pub fn metrics_on(paper: mb_print::paper::Paper) -> mb_print::metrics::Metrics {
     mb_print::metrics::Metrics::face(
         paper,

@@ -1,22 +1,4 @@
-/**
- * **Today's bills — the way in to every correction.**
- *
- * P09's grid shows open orders only, so before this screen a settled bill was
- * unreachable: void, reprint and refund had no door. That is why it is here
- * rather than in P18's reports, and why it is deliberately *not* a report — it
- * is today, newest first, with four buttons on it.
- *
- * # A voided bill stays in the list
- *
- * Badged **Voided**, with its reason under it, and never removed. A bill that
- * vanishes is exactly what audit **B5** is complaining about — *"a CA will ask
- * where bill 1042 went"* — and the footer says gross, voids and net so the
- * three always tie on screen as well as in the database.
- *
- * The state is carried by the word, the badge and the reason rather than by
- * colour alone (§2) — checked by looking at it, which is also how the raw JSON
- * on the History screen was found.
- */
+/** Today's bills — the way in to every correction. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -65,8 +47,7 @@ export function Bills() {
     void load();
   }, [load]);
 
-  // Who could approve a void. Needs `staff.manage`, so a cashier simply gets an
-  // empty list and the dialog says a manager is needed — which is true.
+  // Who could approve a void.
   useEffect(() => {
     void (async () => {
       try {
@@ -125,10 +106,6 @@ export function Bills() {
             <Button small onClick={() => setPending({ kind: 'reprint', bill: b })}>
               Reprint
             </Button>
-            {/* **Scope 7.10 — the A4 invoice a B2B customer asks for.** The PDF
-                sink has existed since P06 and nothing but the report exporter
-                ever called it, so a customer asking for an invoice got a
-                three-inch till roll. */}
             <Button
               small
               variant="quiet"
@@ -223,14 +200,7 @@ function Correction({
   onFailed: (message: string, detail?: string) => void;
 }) {
   const { bill } = pending;
-  // **Rust decides whether a manager is needed; the screen finds out by
-  // asking.**
-  //
-  // The first version passed `needsApproval={false}` always, which was a dead
-  // end: over the shop's threshold Rust refuses with `void.needs_approval`, and
-  // a dialog with no PIN box gives the cashier no way to comply. So the refusal
-  // turns the fields on and the same dialog is used again — nobody is asked for
-  // a manager's PIN who did not need one, and nobody is stuck who did.
+  // Rust decides whether a manager is needed; the screen finds out by asking.
   const [needsApproval, setNeedsApproval] = useState(false);
 
   const kind: ReasonKind = pending.kind === 'reprint' ? 'reprint' : 'void';
@@ -263,9 +233,7 @@ function Correction({
       } else {
         await call('refund_bill', {
           orderId: bill.orderId,
-          // The paise integer Rust sent, handed straight back. TypeScript does
-          // not compute it, which is R8 and the reason MoneyView has both
-          // halves.
+          // The paise integer Rust sent, handed straight back.
           amountPaise: Number(bill.total.paise),
           mode: 'cash',
           reason,
@@ -274,8 +242,7 @@ function Correction({
       }
     } catch (cause) {
       if (isUiError(cause) && cause.code === 'void.needs_approval') {
-        // Not a failure the cashier caused: the dialog stays open and grows a
-        // PIN box.
+        // Not a failure the cashier caused: the dialog stays open and grows a PIN box.
         setNeedsApproval(true);
         onFailed(cause.message);
         return;

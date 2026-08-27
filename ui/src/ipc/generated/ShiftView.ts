@@ -13,14 +13,14 @@ ended: string,
  */
 worked: string, 
 /**
- * From [`mb_core::employment::DayVerdict`], in words: "Late by 35 minutes".
+ * From `mb_core::employment::DayVerdict`, in words: "Late by 35 minutes".
  */
 verdict: string, 
 /**
- * `ok`, `warn` or `danger` — for the badge. The sentence says it too (§2).
+ * `ok`, `warn` or `danger` — for the badge.
  */
 tone: string, 
 /**
- * True when a manager changed it. The screen marks it (D47).
+ * True when a manager changed it.
  */
 corrected: boolean, correctionReason: string | null, };

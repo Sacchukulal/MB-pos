@@ -1,32 +1,9 @@
-//! **The counter's side of the road** — P19, decision D9.
-//!
-//! `mb-lan` owns the sockets and knows nothing about the shop. This file is the
-//! other half of that seam: it implements `mb_lan::Counter` against the real
-//! database, and it owns the four commands the panel needs.
-//!
-//! # The rule that shapes every line here
-//!
-//! **Nothing on this path may reach the writer connection while a phone is
-//! waiting**, because the writer belongs to the till. So:
-//!
-//! * `authenticate` and `devices` use `Db::read_transaction` (P18 added it for
-//!   exactly this);
-//! * `seen` — which fires on EVERY request a phone makes — writes, and is
-//!   therefore **batched**: it remembers in memory and flushes on a timer. A
-//!   write on every poll would put fifteen phones on the till's writer.
-//!
-//! # The lock ordering, said out loud
-//!
-//! A handler holds `App`'s shop mutex for the length of one `with_shop` call
-//! and never across an `await`. mb-lan is `async`; this file is not. The seam
-//! between them is a plain function call that returns owned data, which is what
-//! makes the deadlock impossible rather than merely unlikely — and the one time
-//! that discipline slipped in P18, the test suite hung instead of failing.
+//! The counter's side of the road.
 
 use std::sync::{Arc, Mutex};
 
-use mb_auth::audit::{AuditEntry, action};
 use mb_auth::Permission;
+use mb_auth::audit::{AuditEntry, action};
 use mb_core::{StaffId, Timestamp};
 use mb_db::repo::devices::LanDevice;
 use serde::Serialize;
@@ -37,22 +14,12 @@ use crate::guard;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-/// Until P21 issues a licence with a plan on it, this is the number.
-///
-/// Fifteen is a large restaurant's floor staff. It is not a commercial
-/// decision — it is a ceiling that stops a shop accidentally running a hundred
-/// devices before anybody has measured what that does.
 const DEFAULT_DEVICE_LIMIT: u32 = 15;
 
 /// The bridge between mb-lan and the shop.
-///
-/// It holds a `tauri::AppHandle` and looks `App` up through it, exactly as
-/// `push.rs` does. Not an `Arc<App>`: Tauri OWNS the `App`, and a second
-/// owner living on a background thread would keep the whole shop — database,
-/// print queue and all — alive after the window closed.
 pub struct Bridge {
     handle: tauri::AppHandle,
-    /// "Last seen", waiting to be written. See the module note.
+    /// "Last seen", waiting to be written.
     pending: Mutex<Vec<(String, String, Timestamp)>>,
 }
 
@@ -71,10 +38,6 @@ impl Bridge {
     }
 
     /// Write the "last seen" marks that have piled up.
-    ///
-    /// Called on a timer by `magic-bill`, never by a request. One transaction
-    /// for all of them, which is one fsync for a minute of fifteen phones
-    /// polling rather than one per poll (D23 and budget B5's reasoning).
     pub fn flush_seen(&self) {
         let batch: Vec<_> = {
             let mut pending = lock(&self.pending);
@@ -107,23 +70,6 @@ impl mb_lan::Counter for Bridge {
     }
 
     fn device_limit(&self) -> u32 {
-        // **P21 landed, and this stopped being 15.**
-        //
-        // > **WEBSITE-C5:** *"The phone limit is shown and stored but only
-        // > checked at the moment a new phone first joins — never afterwards.
-        // > Lowering a customer's limit does not cut off phones already
-        // > enrolled."*
-        //
-        // Asking the entitlement here, on every pairing attempt, is that
-        // finding's fix: the number is read from the live plan rather than
-        // remembered from enrolment, so a plan that drops from four phones to
-        // two refuses the next join. `App::entitlement` reads a held value, so
-        // this costs a lock and no I/O.
-        //
-        // The fallback is the old ceiling and not zero: a counter whose `App`
-        // has gone away is a counter that is shutting down, and answering "no
-        // phones at all" would refuse a waiter mid-order for a reason that is
-        // not about their shop's licence.
         self.app()
             .map_or(DEFAULT_DEVICE_LIMIT, |h| h.entitlement().limits.devices)
     }
@@ -145,20 +91,12 @@ impl mb_lan::Counter for Bridge {
             .collect()
     }
 
-    /// **D141 — the licence counts tills at the door.**
-    ///
-    /// The same shape as `device_limit` and for the same WEBSITE-C5 reason: the
-    /// number is read from the live plan at the moment of joining, never
-    /// remembered from when the shop first paid.
-    ///
-    /// Only this call can answer it. A joining till has its own empty database
-    /// and cannot see the shop's roster or the shop's plan — the master can, and
-    /// the master is the one being asked.
+    /// The licence counts tills at the door.
     fn till_room(&self) -> Result<(), String> {
         let Some(handle) = self.app() else {
-            // Shutting down. Refusing here would be refusing a join for a reason
-            // that is not about the shop's licence, but so would allowing it —
-            // and this one is undoable by pressing the button again.
+            // Shutting down. Refusing here would be refusing a join for a reason that is not
+            // about the shop's licence, but so would allowing it — and this one is undoable by
+            // pressing the button again.
             return Err("The main till is closing. Try again once it is open.".to_owned());
         };
         let allowed = handle.entitlement().limits.terminals;
@@ -182,8 +120,7 @@ impl mb_lan::Counter for Bridge {
 
     fn authenticate(&self, device_id: &str, secret: &str) -> Option<mb_lan::Device> {
         let handle = self.app()?;
-        // **A READER, on every request.** The revoke has to bite immediately
-        // (T3), and the writer belongs to the till.
+        // A READER, on every request.
         let device = handle
             .with_shop(|shop| {
                 shop.db
@@ -198,10 +135,7 @@ impl mb_lan::Counter for Bridge {
             return None;
         }
 
-        // What this device's PERSON may do. A device with no staff member is a
-        // shared tablet, and it gets the shop's floor permissions rather than
-        // nothing — otherwise a tablet at the pass could not take an order,
-        // which is the only thing it exists to do.
+        // What this device's PERSON may do.
         let permissions = device
             .staff_id
             .as_ref()
@@ -233,8 +167,9 @@ impl mb_lan::Counter for Bridge {
             .app()
             .ok_or_else(|| mb_lan::Refusal::Refused("The counter is closing.".to_owned()))?;
         let at = now();
-        let (secret, hash) = mb_auth::new_device_secret()
-            .map_err(|_| mb_lan::Refusal::Refused("The credential could not be made.".to_owned()))?;
+        let (secret, hash) = mb_auth::new_device_secret().map_err(|_| {
+            mb_lan::Refusal::Refused("The credential could not be made.".to_owned())
+        })?;
         let id = format!("dev_{}", mb_auth::random_token(12));
         let who = handle.sessions().current().map(|s| s.actor.staff_id);
 
@@ -259,15 +194,21 @@ impl mb_lan::Counter for Bridge {
                             },
                             who.as_ref(),
                         )?;
-                        // R11 — the same transaction as the thing it records.
+                        // The same transaction as the thing it records.
                         repos.audit().append(
                             OUTLET,
-                            &AuditEntry::new(at, today(at), who.clone(), action::DEVICE_PAIRED, "device")
-                                .about(id.clone())
-                                .with_after(serde_json::json!({
-                                    "name": name,
-                                    "platform": platform,
-                                })),
+                            &AuditEntry::new(
+                                at,
+                                today(at),
+                                who.clone(),
+                                action::DEVICE_PAIRED,
+                                "device",
+                            )
+                            .about(id.clone())
+                            .with_after(serde_json::json!({
+                                "name": name,
+                                "platform": platform,
+                            })),
                         )?;
                         Ok(())
                     })
@@ -282,12 +223,7 @@ impl mb_lan::Counter for Bridge {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // P20. What a phone came here to do.
-    //
-    // Three one-line delegations, and that is the shape the seam was built
-    // for: `crate::orders` owns every decision and `mb-lan` owns none.
-    // -----------------------------------------------------------------------
+    // What a phone came here to do.
 
     fn apply(&self, device: &mb_lan::Device, intent: &mb_lan::Intent) -> mb_lan::Outcome {
         let Some(app) = self.app() else {
@@ -302,21 +238,17 @@ impl mb_lan::Counter for Bridge {
 
         match crate::orders::apply(&app, &device.id, &staff, &device.permissions, intent) {
             Ok(applied) => {
-                // **The cashier is told, never overwritten** (D83). This is
-                // outside the transaction because it touches the screen's
-                // state, and it is the reason `apply` hands the change back
-                // rather than writing it itself.
+                // The cashier is told, never overwritten.
                 if let Some(change) = applied.tell_the_cashier {
                     app.note_floor_change(change);
-                    // **And tell the screen**, because a note the cashier has
-                    // to press something to discover is a note they find
-                    // after they have taken the money.
+                    // And tell the screen, because a note the cashier has to press something to
+                    // discover is a note they find after they have taken the money.
                     crate::push::emit_floor_change(&self.handle);
                 }
                 applied.outcome
             }
-            // A database failure is the one thing that is not a business
-            // refusal, and it still reaches the waiter as a sentence.
+            // A database failure is the one thing that is not a business refusal, and it still
+            // reaches the waiter as a sentence.
             Err(e) => mb_lan::Outcome::Refused { message: e.message },
         }
     }
@@ -340,23 +272,12 @@ impl mb_lan::Counter for Bridge {
             })
     }
 
-    /// **P27, D136 — take a settled bill from another till.**
-    ///
-    /// A fact, not a request. Nothing is merged and nothing is recomputed: the
-    /// money came from the same `mb_core` this machine runs, and the number came
-    /// from a series only the sender issues (D135), so there is no version of
-    /// this bill here for it to conflict with.
-    fn receive(
-        &self,
-        device: &mb_lan::Device,
-        forwarded: &mb_lan::Forwarded,
-    ) -> mb_lan::Receipt {
+    fn receive(&self, device: &mb_lan::Device, forwarded: &mb_lan::Forwarded) -> mb_lan::Receipt {
         let Some(app) = self.app() else {
             return mb_lan::Receipt {
                 stored: Vec::new(),
                 refused: Vec::new(),
-                says: "The main till is closing. Nothing was stored — send it again."
-                    .to_owned(),
+                says: "The main till is closing. Nothing was stored — send it again.".to_owned(),
             };
         };
         let _ = device;
@@ -370,9 +291,8 @@ impl mb_lan::Counter for Bridge {
     fn catalogue(&self, held: Option<&str>) -> Option<mb_lan::Catalogue> {
         let app = self.app()?;
         let fresh = crate::orders::catalogue(&app).ok()?;
-        // **Unchanged is a real answer**, and the whole reason the version
-        // exists: 400 items to fifteen phones on every reconnect is a shop
-        // whose WiFi is the bottleneck.
+        // Unchanged is a real answer, and the whole reason the version exists: 400 items to
+        // fifteen phones on every reconnect is a shop whose WiFi is the bottleneck.
         if held == Some(fresh.version.as_str()) {
             return None;
         }
@@ -419,10 +339,6 @@ fn staff_permissions(app: &App, staff_id: &str) -> Option<mb_auth::PermissionSet
 }
 
 /// What a shared tablet may do: take an order, and nothing else.
-///
-/// **Not "everything" and not "nothing".** Nothing makes the tablet useless;
-/// everything puts voids and reports on a device four people touch in an hour,
-/// which is audit C1 rebuilt in a different room.
 fn floor_permissions() -> mb_auth::PermissionSet {
     let mut set = mb_auth::PermissionSet::new();
     set.insert(Permission::BillCreate);
@@ -433,31 +349,27 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// ---------------------------------------------------------------------------
 // The panel.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkView {
-    /// **The sentence at the top**, and it is the whole point of the screen:
-    /// "Phones can reach this counter at 192.168.1.7." — or the opposite, with
-    /// what to check.
+    /// The sentence at the top, and it is the whole point of the screen: "Phones can reach this
+    /// counter at 192.168.1.7." — or the opposite, with what to check.
     pub headline: String,
-    /// `ok`, `warn` or `danger`. The headline says it in words too (§2).
+    /// `ok`, `warn` or `danger`.
     pub tone: String,
     pub address: String,
     pub port: u32,
     pub fingerprint: String,
-    /// Written when the counter's certificate is new, because every phone must
-    /// then be added again — and fifteen waiters discovering that one at a
-    /// time during a rush is the alternative to saying so here.
+    /// Written when the counter's certificate is new, because every phone must then be added
+    /// again — and fifteen waiters discovering that one at a time during a rush is the
+    /// alternative to saying so here.
     pub certificate_note: String,
     pub devices: Vec<DeviceRowView>,
     pub waiting: Vec<WaitingView>,
-    /// The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid. Empty
-    /// unless pairing is open.
+    /// The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid.
     pub qr: Vec<String>,
     pub code: String,
     pub may_pair: bool,
@@ -485,7 +397,7 @@ pub struct WaitingView {
     pub name: String,
     pub platform: String,
     pub ip: String,
-    /// The whole sentence: "SM-A146B is asking to join, from 192.168.1.31."
+    /// The whole sentence: "SM-A146B is asking to join, from 192.168.1.31.".
     pub says: String,
 }
 
@@ -502,9 +414,7 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         })
         .unwrap_or_default();
 
-    let showing = network
-        .as_ref()
-        .and_then(|n| n.shared.desk.showing(now()));
+    let showing = network.as_ref().and_then(|n| n.shared.desk.showing(now()));
     let (qr, code) = match (&network, &showing) {
         (Some(n), Some((token, code))) => {
             let uri = mb_lan::qr::pairing_uri(&n.address, n.port, &n.fingerprint, token);
@@ -533,13 +443,7 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                 .to_owned(),
             "danger".to_owned(),
         ),
-        // **"Listening" is not "reachable", and this sentence must not pretend
-        // otherwise.** Found by running it: the very first launch raised a
-        // Windows Firewall prompt, and a shopkeeper who presses Cancel has a
-        // counter that is listening perfectly and that no phone can see. The
-        // panel cannot tell the difference from inside the process — an
-        // inbound packet that never arrives looks exactly like no phone
-        // trying — so it says what it knows and then says what to check.
+        // "Listening" is not "reachable", and this sentence must not pretend otherwise.
         Some(n) => (
             format!(
                 "This counter is waiting for phones at {} on port {}. If a \
@@ -554,7 +458,10 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
     Ok(NetworkView {
         headline,
         tone,
-        address: network.as_ref().map(|n| n.address.clone()).unwrap_or_default(),
+        address: network
+            .as_ref()
+            .map(|n| n.address.clone())
+            .unwrap_or_default(),
         port: network.as_ref().map_or(0, |n| u32::from(n.port)),
         fingerprint: network
             .as_ref()
@@ -619,12 +526,9 @@ fn staff_name(app: &App, staff_id: &str) -> Option<String> {
     .map(|p| p.name)
 }
 
-/// Show a pairing code. **Nothing is issued by this** — it only opens the door
-/// that a person then has to walk somebody through.
+/// Show a pairing code.
 pub fn open_pairing_on(app: &App) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
-    // P21's gate. A shop whose plan does not include phone ordering — or whose
-    // plan has run out — cannot open the pairing desk, and hears why.
     crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
     let network = app.network().ok_or_else(|| {
         UiError::new(
@@ -645,18 +549,14 @@ pub fn close_pairing_on(app: &App) -> UiResult<NetworkView> {
     view_on(app)
 }
 
-/// **A person pressed Allow.** This is the second of the two things that must
-/// both be true, and it is the one that matters — see `mb_lan::pairing`.
+/// A person pressed Allow.
 pub fn allow_on(app: &App, request_id: String) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
-    // **The gate is here as well as on `open_pairing`, deliberately.** A desk
-    // that was opened while the plan was live and is still open a minute after
-    // it lapsed would otherwise let a phone through — which is WEBSITE-C5's
-    // shape exactly: a check at the start of a flow is not a check.
+    // The gate is here as well as on `open_pairing`, deliberately.
     crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
-    let network = app.network().ok_or_else(|| {
-        UiError::new("lan.off", "The counter's network is switched off.")
-    })?;
+    let network = app
+        .network()
+        .ok_or_else(|| UiError::new("lan.off", "The counter's network is switched off."))?;
     let waiting = network.shared.desk.take(&request_id).ok_or_else(|| {
         UiError::new(
             "lan.gone",
@@ -728,9 +628,7 @@ pub fn revoke_on(app: &App, device_id: String) -> UiResult<NetworkView> {
     view_on(app)
 }
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn network(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
@@ -785,20 +683,11 @@ impl std::fmt::Debug for Network {
     }
 }
 
-/// Unused today, and named rather than guessed: [`StaffId`] is what the audit
-/// rows above carry.
 const _: Option<StaffId> = None;
 
-// ---------------------------------------------------------------------------
 // Starting it.
-// ---------------------------------------------------------------------------
 
 /// Bring the counter onto the network.
-///
-/// Called once at start-up, from `main`. **It never returns an error upward**:
-/// a counter that refuses to start because a port is taken is a counter that
-/// stops a restaurant billing, and requirement 3 says it must not. Everything
-/// that goes wrong is logged and shows up on the panel as a sentence.
 pub fn start(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
@@ -839,20 +728,7 @@ pub fn start(handle: &tauri::AppHandle) {
         }
     };
 
-    // **The usual port, and then any port** (P27, found by running it).
-    //
-    // 7331 is what the QR and the mDNS record carry, so a shop where it is free
-    // gets a predictable address a person can read out. But the port is not the
-    // identity — the certificate's fingerprint is (D80) — and both the QR and
-    // the advertisement carry whichever one this counter actually got. So a
-    // counter that cannot have 7331 takes what it can get instead of going off
-    // the network entirely.
-    //
-    // Found by P27's two-process run: the second till reported *"Only one usage
-    // of each socket address is normally permitted"* and served nothing. Two
-    // tills on one machine is a bench, but **anything else on a shop's PC
-    // holding 7331 produced exactly the same dead counter**, with an error in a
-    // log nobody reads and no way out.
+    // The usual port, and then any port.
     let running = match mb_lan::start(shared.clone(), mb_lan::DEFAULT_PORT, Some(tls.clone())) {
         Ok(running) => running,
         Err(first) => {
@@ -875,9 +751,7 @@ pub fn start(handle: &tauri::AppHandle) {
         .map(ToString::to_string)
         .unwrap_or_default();
 
-    // mDNS is the convenient path, never the necessary one. A shop whose router
-    // blocks multicast still adds phones by QR, so a failure here is logged and
-    // the counter carries on.
+    // MDNS is the convenient path, never the necessary one.
     let advertisement = mb_lan::discovery::Advertisement::start(
         &app.shop_config().store.name,
         running.port,
@@ -908,9 +782,7 @@ pub fn start(handle: &tauri::AppHandle) {
         advertisement,
     })));
 
-    // The "last seen" flush. **A timer and not a write per request**: fifteen
-    // phones polling would otherwise put fifteen writes a second on the
-    // connection the till settles bills with.
+    // The "last seen" flush.
     let ticking = handle.clone();
     std::thread::Builder::new()
         .name("mb-lan-seen".to_owned())
@@ -920,7 +792,9 @@ pub fn start(handle: &tauri::AppHandle) {
                 let Some(app) = ticking.try_state::<App>() else {
                     return;
                 };
-                let Some(network) = app.network() else { continue };
+                let Some(network) = app.network() else {
+                    continue;
+                };
                 network.bridge.flush_seen();
             }
         })

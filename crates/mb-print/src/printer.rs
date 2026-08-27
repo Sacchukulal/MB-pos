@@ -1,9 +1,4 @@
-//! What a printer *is*, from this crate's point of view.
-//!
-//! Everything the queue needs to turn a document into bytes and put them
-//! somewhere, in one struct, with no database anywhere near it. P17 edits these
-//! on a screen, mb-db stores them, and `queue::sqlite` is the only module that
-//! knows both.
+//! What a printer is, from this crate's point of view.
 
 use std::path::PathBuf;
 
@@ -16,44 +11,38 @@ use crate::paper::{Offset, Paper, PaperKind};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "snake_case")]
 pub enum Target {
-    /// The Windows spooler, RAW datatype. Scope 7.1 — what almost every shop
-    /// runs today.
-    Spooler { name: String },
-    /// Raw TCP, port 9100. Scope 7.2, and the biggest single hardware gap in
-    /// v1: a kitchen printer on the shop's own switch, with no PC in front of
-    /// it.
-    Network { host: String, port: u16 },
-    /// A COM port. Scope 7.3.
-    Serial { port: String, baud: u32 },
-    /// A file. Testing, "print to file", and the only transport every test in
-    /// this crate uses — which is how P07 stays provable with no hardware.
-    File { path: PathBuf },
+    /// The Windows spooler, RAW datatype.
+    Spooler {
+        name: String,
+    },
+    Network {
+        host: String,
+        port: u16,
+    },
+    Serial {
+        port: String,
+        baud: u32,
+    },
+    /// A file. Testing, "print to file", and the only transport every test in this crate uses.
+    File {
+        path: PathBuf,
+    },
     /// Accepts everything and prints nothing.
-    ///
-    /// **Not a placeholder.** A shop whose printer has not arrived yet must
-    /// still be able to bill (requirement 3 of the ten), and a queue with
-    /// nowhere to send is a queue that has to grow a special case.
     None,
 }
 
-/// Which sink a job is drawn with — v1's *"Print engine: Graphics or Text"*
-/// (audit Part 3), kept because a shop that has chosen one should not have it
-/// chosen again for them.
+/// Which sink a job is drawn with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
-    /// Crown jewel 17. What you see is what you get, and the path Kannada will
-    /// one day take.
+    /// What you see is what you get, and the path Kannada will one day take.
     #[default]
     Raster,
-    /// The printer's own font. Faster, smaller, and the only thing that works
-    /// on a printer with no raster support.
+    /// The printer's own font.
     Text,
 }
 
 /// What this printer is allowed to receive.
-///
-/// Routing that ignores this is how a customer's bill ends up in the tandoor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -76,22 +65,16 @@ impl Role {
 }
 
 /// What the hardware can do.
-///
-/// **These belong to the printer, not to the transport.** A TCP socket to port
-/// 9100 knows nothing about whether there is a blade or a drawer on the other
-/// end of it, and two printers reached the same way disagree about both. They
-/// are defaulted from the target and then the shop corrects them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capabilities {
     pub cut: bool,
     pub drawer: bool,
-    /// `GS v 0`. A printer without it can only be driven in [`Engine::Text`].
+    /// `GS v 0`. A printer without it can only be driven in `Engine::Text`.
     pub raster: bool,
-    /// `GS ( k` — the printer's own QR encoder (D36).
+    /// `GS ( k` — the printer's own QR encoder.
     pub native_qr: bool,
-    /// P29. `GS k` — the printer's own barcode encoder, which is what makes a
-    /// bill scannable back into the till. Same argument as the QR: the
-    /// printer draws it far better than a raster of ours would.
+    /// `GS k` — the printer's own barcode encoder, which is what makes a bill scannable back
+    /// into the till.
     #[serde(default = "yes")]
     pub native_barcode: bool,
 }
@@ -103,8 +86,7 @@ const fn yes() -> bool {
 
 impl Default for Capabilities {
     fn default() -> Self {
-        // What a thermal receipt printer sold in the last decade does. A shop
-        // whose printer is older turns one off and the queue stops sending it.
+        // What a thermal receipt printer sold in the last decade does.
         Capabilities {
             cut: true,
             drawer: true,
@@ -120,8 +102,8 @@ impl Capabilities {
     #[must_use]
     pub fn for_target(target: &Target) -> Capabilities {
         match target {
-            // A file has no blade and no solenoid, and a test that "cut the
-            // paper" would only be writing bytes nobody reads.
+            // A file has no blade and no solenoid, and a test that "cut the paper" would only
+            // be writing bytes nobody reads.
             Target::File { .. } | Target::None => Capabilities {
                 cut: false,
                 drawer: false,
@@ -142,18 +124,15 @@ pub struct PrinterConfig {
     pub id: String,
     pub name: String,
     pub target: Target,
-    /// **The paper and the offset both live here** (scope 7.11), so one shop
-    /// can run two printers with two different corrections and one document.
-    /// The queue overrides the document's paper from this before it lays out.
+    /// The paper and the offset both live here, so one shop can run two printers with two
+    /// different corrections and one document.
     pub paper: Paper,
     pub engine: Engine,
     pub role: Role,
     pub caps: Capabilities,
     pub drawer: DrawerConfig,
-    /// v1's "Bold & Dark" print option: emphasis and double-strike on
-    /// everything, for a printer whose head or paper has gone pale.
     pub bold_dark: bool,
-    /// Copies of every job. Some shops want two bill copies, one for the file.
+    /// Copies of every job.
     pub copies: u8,
     pub is_default: bool,
 }
@@ -205,12 +184,7 @@ impl PrinterConfig {
         self
     }
 
-    /// The engine this printer can **actually** use.
-    ///
-    /// A printer set to raster that cannot raster prints as text (item 5's
-    /// fallback), and the job records that it happened — a shop whose receipt
-    /// suddenly looks different gets an answer on the screen instead of making
-    /// a support call.
+    /// The engine this printer can actually use.
     #[must_use]
     pub const fn effective_engine(&self) -> Engine {
         match self.engine {
@@ -220,15 +194,7 @@ impl PrinterConfig {
     }
 }
 
-/// Scope 7.11 — the nudge.
-///
-/// Print, look at the paper, nudge, print again. The value belongs to the
-/// printer and is saved with it, because a printer that needs +2 mm today needs
-/// +2 mm forever.
-///
-/// Clamped to ±20 mm here rather than by the layout: the layout clamps to what
-/// fits on the paper, and this clamps to what could ever be a real correction.
-/// Both exist so a slip of a finger is not a bill printed sideways.
+/// The nudge.
 pub fn nudge(printer: &mut PrinterConfig, dx_mm: i32, dy_mm: i32) {
     printer.paper.offset = Offset {
         x_mm: (printer.paper.offset.x_mm + dx_mm).clamp(-20, 20),

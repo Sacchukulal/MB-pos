@@ -1,9 +1,4 @@
-/*
- * Voids, cancels, reprints and refunds.
- *
- * Not one raw value — every colour, size and space is a token (D21, and the
- * lint that fails the build).
- */
+/* Voids, cancels, reprints and refunds. */
 
 .mb-reasons {
   display: flex;
@@ -23,17 +18,13 @@
   border-radius: var(--radius-md);
 }
 
-/* Amounts line up, always — UI_GUIDELINES §3: "a column of rupees that doesn't
-   line up looks broken to a shopkeeper." */
+/* Amounts line up, always. */
 .mb-mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-/* The four figures at the top of the Bills screen. A grid rather than a plain
-   row, so they are equal widths and their labels start on the same line —
-   `mb-row` let each card size to its own number, which put "Taken today" and
-   "Voided" at different heights whenever one figure was longer than the other. */
+/* The four figures at the top of the Bills screen. */
 .mb-bills__stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));

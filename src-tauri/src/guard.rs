@@ -1,37 +1,8 @@
-//! **The one place this program says no.**
-//!
-//! > Audit **C1**: *"There is no login on the POS at all. Anybody who walks
-//! > behind the counter can open Reports and see the whole day's cash, change
-//! > the bill number, delete menu items, delete credit customers, or deactivate
-//! > the licence."*
-//!
-//! # Hiding a button is a courtesy; this is the control
-//!
-//! A permission check in TypeScript is decoration: the command is still there,
-//! and `window.__TAURI__.invoke` is two lines away in a dev console. Every
-//! guarded command therefore opens with one line —
+//! The one place this program says no.
 //!
 //! ```ignore
 //! let who = guard::require(&app, Permission::BillVoid)?;
 //! ```
-//!
-//! — and `require` does exactly three things: refuse when nobody is logged in,
-//! refuse when this person may not, and **touch the session's idle clock**, so
-//! that clock is fed by work rather than by mouse movement crossing the IPC
-//! boundary.
-//!
-//! # The coverage table, and why it is a table
-//!
-//! There are twenty-eight commands today and there will be well over a hundred
-//! by P30. A rule that every one of them is checked, enforced by everybody
-//! remembering, is D40's definition of a rule that erodes — *"the rules that
-//! erode are enforced by scripts, not by agreement"*.
-//!
-//! So [`COMMAND_ACCESS`] lists every command and what it needs, and a test
-//! reads `ipc.rs` and `flows.rs`, finds every `#[tauri::command]`, and fails if
-//! one is missing from the list. Adding a command without deciding is not a
-//! review comment; it is a red build. Choosing [`Access::Public`] is allowed —
-//! it just has to be chosen.
 
 use mb_auth::{Actor, Permission};
 
@@ -41,96 +12,49 @@ use crate::words::{UiError, UiResult};
 /// What a command needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// Anybody, including nobody: these work on the lock screen. Keep this list
-    /// short and keep the reason with it.
+    /// Anybody, including nobody: these work on the lock screen.
     Public,
-    /// **A session, but no particular permission** — P28.
-    ///
-    /// Not the same as `Public`, and the difference matters: these do NOT work
-    /// on the lock screen. Clocking yourself in is the case they exist for. It
-    /// IS the PIN — a person who has signed in has already proved who they
-    /// are — and making them ask for a second permission to say "I am here" is
-    /// how a shop ends up not recording attendance at all.
-    ///
-    /// Every one of them acts on the SIGNED-IN PERSON'S OWN data, or refuses.
-    /// That rule cannot be expressed in this table, because it depends on which
-    /// row is being asked for, so the command enforces it and T11 is the test
-    /// that it actually does.
-    ///
-    /// Classifying these as `Public` would have been a lie in the one table
-    /// whose whole job is to be true, and it would have pushed the public list
-    /// past the size at which it stops being a decision.
+    /// A session, but no particular permission.
     SignedIn,
-    /// **Before there is a shop to have a permission in** — P30.5.
-    ///
-    /// A fresh install has no database, no staff row and no session. The three
-    /// commands that get it out of that state therefore cannot need a
-    /// permission, cannot need a session, and cannot need a shop: they are what
-    /// MAKES the shop.
-    ///
-    /// They are not `Public`, and the difference is the same one P28 drew: a
-    /// public command works on the lock screen for ever, and these must stop
-    /// being freely callable the moment the shop is set up. **Once it is, they
-    /// require `backup.run`** — pointing a working till at a different
-    /// database is a backup-level decision, not a set-up one — and
-    /// `switching_shops_after_set_up_needs_the_backup_permission` is the test.
+    /// Before there is a shop to have a permission in.
     FirstRun,
     Needs(Permission),
-    /// **Any one of these opens the door** (P17).
-    ///
-    /// The settings screen is four screens in a trench coat: the shop's
-    /// details, tax, printers and backup are four permissions, and a shop that
-    /// gives one person the printers and another the tax rates is doing the
-    /// normal thing. Requiring all four to *read* the screen would mean nobody
-    /// but the owner could open it; requiring one particular one would mean the
-    /// printer person needed `settings.store` to reach the printers.
-    ///
-    /// **It is a read-side answer only.** Every save re-checks the permission
-    /// of the section it is writing, one by one, so this widens what can be
-    /// looked at and never what can be changed.
+    /// Any one of these opens the door.
     NeedsAny(&'static [Permission]),
 }
 
-/// **Every command in the product, and what it needs.**
+/// Every command in the product, and what it needs.
 pub const COMMAND_ACCESS: &[(&str, Access)] = &[
-    // --- works while locked, and has to ------------------------------------
-    // The shell reads its own state before anybody has logged in.
+    // Works while locked, and has to.
     ("app_status", Access::Public),
-    // The theme toggle is on the lock screen (UI_GUIDELINES §0: light and dark
-    // both ship, with a toggle the user can press — including this user).
+    // The theme toggle is on the lock screen.
     ("set_appearance", Access::Public),
-    // Audit E7: "send me the log" must be a button, and support asks for it
-    // precisely when nobody can get in.
+    // "send me the log" must be a button, and support asks for it precisely when nobody can get
+    // in.
     ("reveal_logs", Access::Public),
     // The lock screen itself.
     ("lock_state", Access::Public),
     ("login", Access::Public),
     ("lock_now", Access::Public),
     ("recover_with_code", Access::Public),
-    // The print queue indicator stays visible while locked — audit D4: a bill
-    // that printed wrong while the screen was locked is still the shop's
-    // problem, and a queue nobody can see is the finding itself.
+    // The print queue indicator stays visible while locked.
     ("list_print_jobs", Access::Public),
     // The preview of the built-in test slip needs no shop and no data.
     ("preview_test_page", Access::Public),
-    // P32 — audit D6. Looking at the bill you are about to print is part of
-    // making it, so it is the same permission as making one.
     ("preview_order", Access::Needs(Permission::BillCreate)),
-    // P32 — the cook lost the paper. Same authority as sending it the first
-    // time, because that is what it is.
-    ("reprint_kitchen_ticket", Access::Needs(Permission::BillCreate)),
-    // Making a customer's invoice out of a bill that already exists is reading,
-    // not billing — the same authority as looking at the bill list.
+    // The cook lost the paper.
+    (
+        "reprint_kitchen_ticket",
+        Access::Needs(Permission::BillCreate),
+    ),
+    // Making a customer's invoice out of a bill that already exists is reading, not billing —
+    // the same authority as looking at the bill list.
     ("bill_pdf", Access::Needs(Permission::ReportsView)),
     ("preview_kitchen", Access::Needs(Permission::BillCreate)),
-
-    // --- billing ------------------------------------------------------------
     ("current_cart", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
     ("cart_set_qty", Access::Needs(Permission::BillCreate)),
-    // P31. The - and + on a cart line. Same permission as setting the quantity
-    // outright, because it IS setting the quantity — the arithmetic is in Rust
-    // so that a thousandth cannot be lost to a JavaScript double (D2).
+    // The - and + on a cart line.
     ("cart_step_qty", Access::Needs(Permission::BillCreate)),
     ("cart_remove", Access::Needs(Permission::BillCreate)),
     ("cart_clear", Access::Needs(Permission::BillCreate)),
@@ -138,31 +62,33 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("cart_add_payment", Access::Needs(Permission::BillCreate)),
     ("cart_clear_payments", Access::Needs(Permission::BillCreate)),
     ("cart_cash_given", Access::Needs(Permission::BillCreate)),
-    // Money off a bill is its OWN permission, not BillCreate: taking an order
-    // and giving away the shop's margin are different levels of trust, and the
-    // roles screen has had the checkbox since P11 with nothing behind it.
-    ("cart_set_discount", Access::Needs(Permission::BillDiscountBill)),
-    ("cart_clear_discount", Access::Needs(Permission::BillDiscountBill)),
+    (
+        "cart_set_discount",
+        Access::Needs(Permission::BillDiscountBill),
+    ),
+    (
+        "cart_clear_discount",
+        Access::Needs(Permission::BillDiscountBill),
+    ),
     ("open_orders", Access::Needs(Permission::BillCreate)),
     ("menu_items", Access::Needs(Permission::BillCreate)),
     ("search_items", Access::Needs(Permission::BillCreate)),
     ("open_table", Access::Needs(Permission::BillCreate)),
-    ("print_kitchen_ticket", Access::Needs(Permission::BillCreate)),
+    (
+        "print_kitchen_ticket",
+        Access::Needs(Permission::BillCreate),
+    ),
     ("complete_bill", Access::Needs(Permission::BillCreate)),
-    // Carrying the bill to the table. **Not `BillReprint`**, which counts
-    // copies of a bill that has been paid — this is the FIRST piece of paper,
-    // for a bill nobody has paid yet, and refusing it to a waiter who may take
-    // the order would refuse them the ordinary second half of taking it.
+    // Carrying the bill to the table.
     ("print_open_bill", Access::Needs(Permission::BillCreate)),
-
-    // --- paper --------------------------------------------------------------
-    ("print_test_page", Access::Needs(Permission::SettingsPrinter)),
-    // Retrying or abandoning a print is reprinting a bill, which is a thing a
-    // shop counts (scope 1.20) and therefore a thing it permits.
+    (
+        "print_test_page",
+        Access::Needs(Permission::SettingsPrinter),
+    ),
+    // Retrying or abandoning a print is reprinting a bill, which is a thing a shop counts and
+    // therefore a thing it permits.
     ("retry_print_job", Access::Needs(Permission::BillReprint)),
     ("dismiss_print_job", Access::Needs(Permission::BillReprint)),
-
-    // --- people -------------------------------------------------------------
     ("list_staff", Access::Needs(Permission::StaffManage)),
     ("save_staff_member", Access::Needs(Permission::StaffManage)),
     ("set_staff_pin", Access::Needs(Permission::StaffManage)),
@@ -170,55 +96,53 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("save_role", Access::Needs(Permission::StaffManage)),
     ("list_permissions", Access::Needs(Permission::StaffManage)),
     ("audit_trail", Access::Needs(Permission::AuditView)),
-
-    // --- taking something back (P12) ----------------------------------------
-    // The day's takings on a screen, which is audit C1's first example of what
-    // anybody could see — so it is `reports.view`, not `bill.create`.
+    // Taking something back.
     ("list_bills", Access::Needs(Permission::ReportsView)),
     ("day_totals", Access::Needs(Permission::ReportsView)),
-    // The reason list itself is not sensitive; being unable to read it would
-    // make every correction dialog open empty.
+    // The reason list itself is not sensitive; being unable to read it would make every
+    // correction dialog open empty.
     ("reasons", Access::Needs(Permission::BillCreate)),
     ("void_bill", Access::Needs(Permission::BillVoid)),
-    // A refund is the money half of a void, so it is the same permission: a
-    // shop that let a cashier hand cash back without letting them void would
-    // have a hole shaped exactly like the one B5 describes.
     ("refund_bill", Access::Needs(Permission::BillVoid)),
     ("cancel_order", Access::Needs(Permission::OrderCancel)),
     ("void_line", Access::Needs(Permission::OrderItemVoid)),
     ("reprint_bill", Access::Needs(Permission::BillReprint)),
-
-    // --- the menu (P13) -----------------------------------------------------
+    // The menu.
     ("menu_tax_classes", Access::Needs(Permission::MenuManage)),
     ("menu_categories", Access::Needs(Permission::MenuManage)),
     ("menu_rows", Access::Needs(Permission::MenuManage)),
     ("save_menu_item", Access::Needs(Permission::MenuManage)),
     ("set_item_available", Access::Needs(Permission::MenuManage)),
     ("save_menu_category", Access::Needs(Permission::MenuManage)),
-    // A tax rate is not a menu edit: it is what the shop owes the
-    // government, and getting it wrong is a notice rather than a bad price.
+    // A tax rate is not a menu edit: it is what the shop owes the government, and getting it
+    // wrong is a notice rather than a bad price.
     ("save_tax_class", Access::Needs(Permission::SettingsTax)),
     ("change_menu_prices", Access::Needs(Permission::MenuManage)),
     ("plan_menu_import", Access::Needs(Permission::MenuManage)),
     ("run_menu_import", Access::Needs(Permission::MenuManage)),
     ("export_menu", Access::Needs(Permission::MenuManage)),
-    // What an item is made of (scope 6.1–6.3). All `menu.manage`: a size and a
-    // modifier are both prices, and a combo is a price with arithmetic in it.
+    // What an item is made of.
     ("item_composition", Access::Needs(Permission::MenuManage)),
     ("save_item_variant", Access::Needs(Permission::MenuManage)),
-    ("list_modifier_groups", Access::Needs(Permission::MenuManage)),
+    (
+        "list_modifier_groups",
+        Access::Needs(Permission::MenuManage),
+    ),
     ("save_modifier_group", Access::Needs(Permission::MenuManage)),
-    ("attach_modifier_group", Access::Needs(Permission::MenuManage)),
+    (
+        "attach_modifier_group",
+        Access::Needs(Permission::MenuManage),
+    ),
     ("list_combos", Access::Needs(Permission::MenuManage)),
     ("save_combo", Access::Needs(Permission::MenuManage)),
-    // The floor (P14). Reading it is billing work — a cashier has to see the
-    // tables. CHANGING the room is `tables.manage`, and the three operations
-    // are gated by what they really do: moving an order is billing, merging
-    // one away destroys a bill number and is gated like a void.
+    // The floor. Reading it is billing work — a cashier has to see the tables.
     ("floor_plan", Access::Needs(Permission::BillCreate)),
-    ("save_floor_section", Access::Needs(Permission::TablesManage)),
-    // The bulk pair. Same permission as the one-at-a-time commands they stand
-    // in for — a set of tables is not a different question from a table.
+    (
+        "save_floor_section",
+        Access::Needs(Permission::TablesManage),
+    ),
+    // The bulk pair. Same permission as the one-at-a-time commands they stand in for — a set of
+    // tables is not a different question from a table.
     (
         "delete_dining_tables",
         Access::Needs(Permission::TablesManage),
@@ -227,81 +151,90 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         "set_dining_tables_active",
         Access::Needs(Permission::TablesManage),
     ),
-    ("delete_floor_section", Access::Needs(Permission::TablesManage)),
+    (
+        "delete_floor_section",
+        Access::Needs(Permission::TablesManage),
+    ),
     ("save_dining_table", Access::Needs(Permission::TablesManage)),
     ("add_dining_tables", Access::Needs(Permission::TablesManage)),
-    ("place_dining_table", Access::Needs(Permission::TablesManage)),
-    ("delete_dining_table", Access::Needs(Permission::TablesManage)),
-    ("save_floor_thresholds", Access::Needs(Permission::TablesManage)),
+    (
+        "place_dining_table",
+        Access::Needs(Permission::TablesManage),
+    ),
+    (
+        "delete_dining_table",
+        Access::Needs(Permission::TablesManage),
+    ),
+    (
+        "save_floor_thresholds",
+        Access::Needs(Permission::TablesManage),
+    ),
     ("move_order", Access::Needs(Permission::BillCreate)),
     ("merge_orders", Access::Needs(Permission::BillVoid)),
     ("split_order", Access::Needs(Permission::BillCreate)),
     ("even_split", Access::Needs(Permission::BillCreate)),
     ("set_covers", Access::Needs(Permission::BillCreate)),
-
-    // --- customers and what they owe (P15) --------------------------------
-    // The owner renamed this from "khata" on 2026-08-08.
+    // Customers and what they owe.
     ("customers", Access::Needs(Permission::CustomersManage)),
-    ("customer_account", Access::Needs(Permission::CustomersManage)),
+    (
+        "customer_account",
+        Access::Needs(Permission::CustomersManage),
+    ),
     ("save_customer", Access::Needs(Permission::CustomersManage)),
-    // Taking money IN is a cashier's job — `credit.collect` exists for exactly
-    // this and nothing else.
+    // Taking money IN is a cashier's job — `credit.collect` exists for exactly this and nothing
+    // else.
     ("record_repayment", Access::Needs(Permission::CreditCollect)),
-    // Changing what somebody owes without money moving is not. It is the one
-    // door in this account that could make money disappear.
-    ("save_credit_adjustment", Access::Needs(Permission::CustomersManage)),
-    // Both of these happen mid-bill, so they are billing work; going PAST the
-    // limit asks for `customers.manage` a second time inside the command.
+    // Changing what somebody owes without money moving is not.
+    (
+        "save_credit_adjustment",
+        Access::Needs(Permission::CustomersManage),
+    ),
+    // Both of these happen mid-bill, so they are billing work; going PAST the limit asks for
+    // `customers.manage` a second time inside the command.
     ("credit_headroom", Access::Needs(Permission::BillCreate)),
     ("put_on_account", Access::Needs(Permission::BillCreate)),
-
-    // --- money going out, and the drawer (P16) ------------------------------
-    // All `expenses.manage`. A cashier who records a 40-rupee milk purchase
-    // mid-service is doing the thing this feature exists for, so the
-    // permission is on the role rather than on the till.
+    // Money going out, and the drawer.
     ("expenses", Access::Needs(Permission::ExpensesManage)),
     ("save_expense", Access::Needs(Permission::ExpensesManage)),
     ("delete_expense", Access::Needs(Permission::ExpensesManage)),
-    ("save_cash_movement", Access::Needs(Permission::ExpensesManage)),
-    ("save_expense_category", Access::Needs(Permission::ExpensesManage)),
-    ("save_recurring_expense", Access::Needs(Permission::ExpensesManage)),
-    ("confirm_recurring_expense", Access::Needs(Permission::ExpensesManage)),
+    (
+        "save_cash_movement",
+        Access::Needs(Permission::ExpensesManage),
+    ),
+    (
+        "save_expense_category",
+        Access::Needs(Permission::ExpensesManage),
+    ),
+    (
+        "save_recurring_expense",
+        Access::Needs(Permission::ExpensesManage),
+    ),
+    (
+        "confirm_recurring_expense",
+        Access::Needs(Permission::ExpensesManage),
+    ),
     ("export_expenses", Access::Needs(Permission::ExpensesManage)),
-    // --- P28: the employment side -----------------------------------------
-    //
-    // Five permissions, and the split is about WHO IS TRUSTED WITH WHAT rather
-    // than which screen a thing is on. The two that matter:
-    //
-    //   * **clocking yourself in and out is `Public`.** It IS the PIN — a
-    //     person who has signed in has already proved who they are, and making
-    //     them ask for a second permission to say "I am here" is how a shop
-    //     ends up not recording attendance at all. The command reads the
-    //     session and can only ever write the signed-in person's own row.
-    //
-    //   * **`correct_attendance` is its own permission**, because editing a
-    //     clock-out after the event is how hours get inflated. It also refuses
-    //     to touch the caller's own row, which is a rule no permission can
-    //     express — see the command.
+    // The employment side.
     ("employees", Access::Needs(Permission::StaffManage)),
     ("save_employee", Access::Needs(Permission::StaffManage)),
-    // Reading attendance: your own needs nothing beyond being signed in, and
-    // anybody ELSE's needs the permission. That cannot be said in this table —
-    // it depends on which row is being asked for — so the command decides, and
-    // this entry is `Public` on purpose rather than by omission. T11 is the
-    // test that it actually refuses.
+    // Reading attendance: your own needs nothing beyond being signed in, and anybody ELSE's
+    // needs the permission.
     ("attendance", Access::SignedIn),
     ("clock_in", Access::SignedIn),
     ("clock_out", Access::SignedIn),
-    ("correct_attendance", Access::Needs(Permission::AttendanceCorrect)),
+    (
+        "correct_attendance",
+        Access::Needs(Permission::AttendanceCorrect),
+    ),
     ("save_roster", Access::Needs(Permission::AttendanceMark)),
-    // The same "your own, or the permission" rule as `attendance`, for the same
-    // reason and with the same test.
+    // The same "your own, or the permission" rule as `attendance`, for the same reason and with
+    // the same test.
     ("leave", Access::SignedIn),
     ("request_leave", Access::SignedIn),
     ("decide_leave", Access::Needs(Permission::LeaveApprove)),
     ("adjust_leave", Access::Needs(Permission::LeaveApprove)),
-    // What a shop pays its people is a different secret from what it took at
-    // the till, so none of these is `ReportsView`.
+    // What a shop pays its people is a different secret from what it took at the till, so none
+    // of these is `ReportsView`.
     ("salary", Access::Needs(Permission::SalaryView)),
     ("save_salary", Access::Needs(Permission::SalaryManage)),
     ("give_advance", Access::Needs(Permission::SalaryManage)),
@@ -309,210 +242,151 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("payroll", Access::Needs(Permission::SalaryView)),
     ("compute_payroll", Access::Needs(Permission::SalaryManage)),
     ("edit_payroll_line", Access::Needs(Permission::SalaryManage)),
-    // **Where money leaves the shop.** The owner's decision, every time.
+    // Where money leaves the shop.
     ("approve_payroll", Access::Needs(Permission::SalaryManage)),
     ("reverse_payroll", Access::Needs(Permission::SalaryManage)),
     ("staff_cost", Access::Needs(Permission::SalaryView)),
-    // **The payslip is SalaryManage, not SalaryView** (P30): reading what
-    // somebody earns and handing them the paper that says so are the same
-    // authority as approving the run that produced it.
+    // The payslip is SalaryManage, not SalaryView: reading what somebody earns and handing them
+    // the paper that says so are the same authority as approving the run that produced it.
     ("print_payslip", Access::Needs(Permission::SalaryManage)),
-
-    // --- delivery (P29, scope 14.5) -----------------------------------------
-    // **Reading the board is SignedIn on purpose.** Where the food is is the
-    // floor's business, and a counter that has to fetch the owner to see which
-    // orders are still out is a counter that keeps the list on paper instead.
-    // The board says who is carrying how much, which is the one figure that
-    // matters, and hiding it would not make it safer — it would make it
-    // unwatched.
     ("delivery_board", Access::SignedIn),
-    // Everything that MOVES a delivery, or takes money off a rider, is the one
-    // permission. See the enum for why it is one and not two, and for the
-    // before-and-after audit row that makes that safe.
+    // Everything that MOVES a delivery, or takes money off a rider, is the one permission.
     ("save_delivery", Access::Needs(Permission::DeliveryDispatch)),
-    ("record_handback", Access::Needs(Permission::DeliveryDispatch)),
-    ("print_delivery_slip", Access::Needs(Permission::DeliveryDispatch)),
-    // Saying somebody is a rider edits their staff record, so it is the same
-    // decision as any other edit to it.
+    (
+        "record_handback",
+        Access::Needs(Permission::DeliveryDispatch),
+    ),
+    (
+        "print_delivery_slip",
+        Access::Needs(Permission::DeliveryDispatch),
+    ),
+    // Saying somebody is a rider edits their staff record, so it is the same decision as any
+    // other edit to it.
     ("set_rider", Access::Needs(Permission::StaffManage)),
-
-    // --- payments (P29, scope 8.3) ------------------------------------------
-    // Reading which payments nobody has confirmed is reading the day's money,
-    // so it is  — the same key that opens the cash position.
     ("payments", Access::Needs(Permission::ReportsView)),
-    // **Confirming is the cashier's**, not the owner's. The person with the
-    // bank app open is the person at the counter, and an owner-only
-    // confirmation is a list nobody ever clears. Every confirmation writes an
-    // audit row with a name and a time on it, which is what makes that safe.
     ("confirm_payment", Access::Needs(Permission::BillCreate)),
-
-    // --- the devices (P29, scope 7.6-7.9) -----------------------------------
-    // Setting up a scanner, a scale, a display or a label printer is the same
-    // job — usually the same person — as setting up a printer.
+    // The devices.
     ("device_manager", Access::Needs(Permission::SettingsPrinter)),
-    ("show_customer_display", Access::Needs(Permission::SettingsPrinter)),
-    // **Reading the scale is BillCreate**, not a settings permission: it is
-    // done mid-bill, by whoever is billing, forty times an evening.
+    (
+        "show_customer_display",
+        Access::Needs(Permission::SettingsPrinter),
+    ),
+    // Reading the scale is BillCreate, not a settings permission: it is done mid-bill, by
+    // whoever is billing, forty times an evening.
     ("read_scale_once", Access::Needs(Permission::BillCreate)),
-    // A scan is a keystroke on the billing screen, so it is the billing
-    // permission and nothing else.
+    // A scan is a keystroke on the billing screen, so it is the billing permission and nothing
+    // else.
     ("scanned", Access::Needs(Permission::BillCreate)),
     ("print_label", Access::Needs(Permission::BillCreate)),
-
-    // --- settings (P17) -----------------------------------------------------
-    // Reading is `NeedsAny`: the shop's details, tax, printers and backup are
-    // four permissions and a shop may well split them between two people.
-    // **Every save re-checks the section it is writing** — see
-    // `settings::ipc::permission_for`, which both sides call.
     ("settings_all", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("reload_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("search_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("save_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
-    ("settings_defaults_for", Access::NeedsAny(SETTINGS_PERMISSIONS)),
-    // The live preview. Reading only — it renders a SAMPLE bill and never
-    // touches a real one.
+    (
+        "settings_defaults_for",
+        Access::NeedsAny(SETTINGS_PERMISSIONS),
+    ),
+    // The live preview. Reading only — it renders a SAMPLE bill and never touches a real one.
     ("preview_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("export_settings", Access::Needs(Permission::SettingsStore)),
-    ("plan_settings_import", Access::NeedsAny(SETTINGS_PERMISSIONS)),
-    // **All four**, and the command re-checks each one: an import writes tax
-    // rates and printer setup, so it is not a store edit.
-    ("run_settings_import", Access::NeedsAny(SETTINGS_PERMISSIONS)),
+    (
+        "plan_settings_import",
+        Access::NeedsAny(SETTINGS_PERMISSIONS),
+    ),
+    // All four, and the command re-checks each one: an import writes tax rates and printer
+    // setup, so it is not a store edit.
+    (
+        "run_settings_import",
+        Access::NeedsAny(SETTINGS_PERMISSIONS),
+    ),
     // The counters. A bill number is what a GST return is a list of.
     ("numbering", Access::Needs(Permission::SettingsTax)),
     ("save_counter", Access::Needs(Permission::SettingsTax)),
-
-    // --- the printers, the backup and where the shop is (P17 part 4) -------
+    // The printers, the backup and where the shop is.
     ("printer_setup", Access::Needs(Permission::SettingsPrinter)),
     ("save_printer", Access::Needs(Permission::SettingsPrinter)),
     ("delete_printer", Access::Needs(Permission::SettingsPrinter)),
     ("route_category", Access::Needs(Permission::SettingsPrinter)),
-    ("set_default_printer", Access::Needs(Permission::SettingsPrinter)),
+    (
+        "set_default_printer",
+        Access::Needs(Permission::SettingsPrinter),
+    ),
     ("set_paper_size", Access::Needs(Permission::SettingsPrinter)),
-    ("print_sample_bill", Access::Needs(Permission::SettingsPrinter)),
+    (
+        "print_sample_bill",
+        Access::Needs(Permission::SettingsPrinter),
+    ),
     ("nudge_printer", Access::Needs(Permission::SettingsPrinter)),
-    // Backup is its own permission, and audit A1 is why: the person who may
-    // REPLACE a shop's whole database is not automatically the person who may
-    // change its footer message.
     ("backup_status", Access::Needs(Permission::BackupRun)),
     ("back_up_now", Access::Needs(Permission::BackupRun)),
     ("verify_backup", Access::Needs(Permission::BackupRun)),
     ("request_restore", Access::Needs(Permission::BackupRun)),
     ("cancel_restore", Access::Needs(Permission::BackupRun)),
     ("find_shops", Access::Needs(Permission::BackupRun)),
-
-    // --- the reports (P18) ---------------------------------------------------
-    // `reports.view` is the gate on the list and on every report in it; the
-    // control log asks for `audit.view` a SECOND time inside the command,
-    // because "who voided what and why" is the history, not a sales figure.
+    // The reports.
     ("report_list", Access::Needs(Permission::ReportsView)),
     ("report", Access::Needs(Permission::ReportsView)),
     ("report_csv", Access::Needs(Permission::ReportsView)),
     ("report_pdf", Access::Needs(Permission::ReportsView)),
-    // The dashboard is the day's takings on a screen, like every other
-    // report. What it ADDS to the attention list is filtered by what the
-    // person looking may already see — it never widens anything.
+    // The dashboard is the day's takings on a screen, like every other report.
     ("dashboard", Access::Needs(Permission::ReportsView)),
-
-    // --- closing the day (P18) ----------------------------------------------
-    // READING the count is `reports.view` — it is the day's cash on a screen,
-    // which is audit C1's own example. DOING it is `day.close`, and so is
-    // opening a closed day again: those are the two writes that decide whether
-    // yesterday can still be edited.
+    // Closing the day.
     ("day_close", Access::Needs(Permission::ReportsView)),
     ("count_cash", Access::Needs(Permission::ReportsView)),
     ("close_day", Access::Needs(Permission::DayClose)),
     ("reopen_day", Access::Needs(Permission::DayClose)),
-
-    // --- the phones this counter serves (P19) --------------------------------
-    // READING the panel is `reports.view`: it shows which devices exist and
-    // when they were last seen, which is shop information rather than a
-    // control. Every WRITE is `devices.pair` — letting a phone onto the shop's
-    // network is its own decision, and taking one off is the same decision
-    // backwards.
+    // The phones this counter serves.
     ("network", Access::Needs(Permission::ReportsView)),
     ("open_pairing", Access::Needs(Permission::DevicesPair)),
     ("close_pairing", Access::Needs(Permission::DevicesPair)),
     ("allow_device", Access::Needs(Permission::DevicesPair)),
     ("refuse_device", Access::Needs(Permission::DevicesPair)),
     ("revoke_device", Access::Needs(Permission::DevicesPair)),
-
-    // --- what the floor did while the cashier was typing (P20) -------------
-    // Billing work, on the cashier's own cart. The floor already changed the
-    // ORDER — the counter is the authority and took it — and these two only
-    // decide whether the lines join the bill being typed.
-    ("take_the_floors_items", Access::Needs(Permission::BillCreate)),
-    ("dismiss_the_floors_items", Access::Needs(Permission::BillCreate)),
-
-    // --- the licence (P21) ---------------------------------------------------
-    // READING it is `reports.view`: the plan, the renewal date and this
-    // computer's id are shop information, and an owner who cannot open Reports
-    // is not the person who chases a renewal. **Every write is
-    // `licence.manage`** — audit C1's own list of what anybody behind the
-    // counter could reach ends with "or deactivate the licence".
-    //
-    // Nothing here is Public. The lock screen has no business changing a
-    // licence, and `app_status` already carries the one fact the shell needs
-    // before anybody has signed in.
+    // What the floor did while the cashier was typing.
+    (
+        "take_the_floors_items",
+        Access::Needs(Permission::BillCreate),
+    ),
+    (
+        "dismiss_the_floors_items",
+        Access::Needs(Permission::BillCreate),
+    ),
+    // The licence.
     ("account", Access::Needs(Permission::ReportsView)),
     ("refresh_licence", Access::Needs(Permission::ReportsView)),
     ("activate", Access::Needs(Permission::LicenceManage)),
     ("start_trial", Access::Needs(Permission::LicenceManage)),
     ("deactivate", Access::Needs(Permission::LicenceManage)),
     ("transfer_here", Access::Needs(Permission::LicenceManage)),
-    ("use_emergency_code", Access::Needs(Permission::LicenceManage)),
-
-    // --- is this counter healthy (P22) --------------------------------------
-    // The panel is the day's state on a screen, like every other read: audit
-    // C1's rule. The BUNDLE is `backup.run` — it leaves the shop by email, and
-    // the person who may send us the counter's whole history is the same person
-    // who may replace its database.
+    (
+        "use_emergency_code",
+        Access::Needs(Permission::LicenceManage),
+    ),
+    // Is this counter healthy.
     ("health", Access::Needs(Permission::ReportsView)),
     ("diagnostics_plan", Access::Needs(Permission::BackupRun)),
     ("write_diagnostics", Access::Needs(Permission::BackupRun)),
-    // Looking for an update is reading. Dismissing one, or going back a
-    // version, changes what this computer runs — and I1 is a counter left on
-    // 1.4.0 because a dismissal was too easy, so it is not a cashier's button.
+    // Looking for an update is reading.
     ("look_for_an_update", Access::Needs(Permission::ReportsView)),
     ("dismiss_update", Access::Needs(Permission::SettingsStore)),
-    ("go_back_a_version", Access::Needs(Permission::SettingsStore)),
-    // **Public, and it is a decision.** On a first run the stand-in is who is
-    // standing there, and a set-up list that refuses to draw until somebody has
-    // a PIN is a list nobody can use to create the PIN — the same shape as the
-    // first-run bug P11 shipped. It reads counts and shows no shop data.
+    (
+        "go_back_a_version",
+        Access::Needs(Permission::SettingsStore),
+    ),
+    // Public, and it is a decision.
     ("setup_list", Access::Public),
-
-    // --- the first run (P30.5) ------------------------------------------------
-    // **The only commands in the product that work with no shop at all.**
-    // A fresh install has no database, so nothing here can ask for a
-    // permission — these are what create the thing a permission lives in.
+    // The first run.
     ("first_run", Access::FirstRun),
     ("create_shop", Access::FirstRun),
     ("use_existing_shop", Access::FirstRun),
-    // **Browse for a folder** — the other thing a fresh install needs and
-    // could not do. Classified with the three above rather than as Public for
-    // the reason `Access::FirstRun` gives: on a machine with no shop there is
-    // nobody to hold a permission, and the moment there IS a shop, pointing
-    // this till at a different folder stops being set-up and becomes a
-    // backup-level decision.
+    // Browse for a folder — the other thing a fresh install needs and could not do.
     ("pick_a_folder", Access::FirstRun),
-
-    // --- the logo (P31) --------------------------------------------------------
-    // `settings.printer`, and not `settings.store`: a logo is part of what the
-    // paper looks like, which is the permission that already owns the paper
-    // size, the offsets and the engine.
+    // The logo.
     ("logo", Access::Needs(Permission::SettingsPrinter)),
     ("pick_a_logo", Access::Needs(Permission::SettingsPrinter)),
     ("save_logo", Access::Needs(Permission::SettingsPrinter)),
     ("remove_logo", Access::Needs(Permission::SettingsPrinter)),
-
-    // --- the kitchen screen (P24) -------------------------------------------
-    // All `bill.create`. A cook clearing a ticket is doing the shop's work, and
-    // a kitchen that needed a manager's permission to say "done" is a kitchen
-    // that stops using the screen by Tuesday and goes back to paper.
-    //
-    // Every one of them is still AUDITED with the person and the device, which
-    // is the control that matters here — "who marked that done?" is the
-    // question an owner asks when a dish never reached a table.
+    // The kitchen screen.
     ("kitchen", Access::Needs(Permission::BillCreate)),
     ("kitchen_shown", Access::Needs(Permission::BillCreate)),
     ("kitchen_bump", Access::Needs(Permission::BillCreate)),
@@ -520,21 +394,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("kitchen_recall", Access::Needs(Permission::BillCreate)),
     ("kitchen_acknowledge", Access::Needs(Permission::BillCreate)),
     ("kitchen_fire", Access::Needs(Permission::BillCreate)),
-
-    // --- the stock book (P25) -----------------------------------------------
-    // **Four permissions, because these are four jobs.** Reading the low-stock
-    // list is not reading the day's cash, which is why `inventory.view` is not
-    // `reports.view`. Editing a recipe decides every stock and food-cost figure
-    // in the product, so it is the strongest. Recording wastage is deliberately
-    // WEAKER than adjusting: writing down that a pan was burnt is a normal
-    // evening for a cook, and a shop where only the owner may do it is a shop
-    // where nobody does. Adjusting is how a real correction is made and also
-    // how a theft is covered up, so it stands alone and always writes an audit
-    // row.
-    //
-    // The command itself picks between `stock.waste` and `stock.adjust` from
-    // the KIND of movement, which is why `record_stock_movement` is listed at
-    // the stronger of the two — this table is the floor, never the ceiling.
+    // The stock book.
     ("inventory", Access::Needs(Permission::InventoryView)),
     ("recipe", Access::Needs(Permission::InventoryView)),
     ("stock_variance", Access::Needs(Permission::InventoryView)),
@@ -542,30 +402,49 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("save_material", Access::Needs(Permission::InventoryManage)),
     ("save_recipe", Access::Needs(Permission::InventoryManage)),
     ("delete_recipe", Access::Needs(Permission::InventoryManage)),
-    ("resolve_stock_problem", Access::Needs(Permission::InventoryManage)),
-    ("record_stock_movement", Access::Needs(Permission::StockWaste)),
-    ("rebuild_stock_balances", Access::Needs(Permission::StockAdjust)),
-
-    // --- buying, and the count (P26) ----------------------------------------
-    // **Three permissions, and the split is P25's reasoning one module along.**
-    // Entering the delivery that just arrived is a daily job for whoever is at
-    // the counter; deciding which supplier gets paid this week is the owner's.
-    // And walking the store with a clipboard is a helper's job, while APPROVING
-    // what they wrote moves the book — so approval reuses `stock.adjust` rather
-    // than inventing a fourth permission that would let a shop grant the big
-    // power while denying the small one.
+    (
+        "resolve_stock_problem",
+        Access::Needs(Permission::InventoryManage),
+    ),
+    (
+        "record_stock_movement",
+        Access::Needs(Permission::StockWaste),
+    ),
+    (
+        "rebuild_stock_balances",
+        Access::Needs(Permission::StockAdjust),
+    ),
+    // Buying, and the count.
     ("buying", Access::Needs(Permission::PurchasesManage)),
     ("purchase", Access::Needs(Permission::PurchasesManage)),
-    ("supplier_account", Access::Needs(Permission::PurchasesManage)),
+    (
+        "supplier_account",
+        Access::Needs(Permission::PurchasesManage),
+    ),
     ("save_purchase", Access::Needs(Permission::PurchasesManage)),
-    ("cancel_purchase", Access::Needs(Permission::PurchasesManage)),
-    ("save_purchase_order", Access::Needs(Permission::PurchasesManage)),
-    ("set_order_state", Access::Needs(Permission::PurchasesManage)),
+    (
+        "cancel_purchase",
+        Access::Needs(Permission::PurchasesManage),
+    ),
+    (
+        "save_purchase_order",
+        Access::Needs(Permission::PurchasesManage),
+    ),
+    (
+        "set_order_state",
+        Access::Needs(Permission::PurchasesManage),
+    ),
     ("attach_photo", Access::Needs(Permission::PurchasesManage)),
     ("purchase_photo", Access::Needs(Permission::PurchasesManage)),
     ("save_supplier", Access::Needs(Permission::SuppliersManage)),
-    ("record_supplier_payment", Access::Needs(Permission::SuppliersManage)),
-    ("save_supplier_adjustment", Access::Needs(Permission::SuppliersManage)),
+    (
+        "record_supplier_payment",
+        Access::Needs(Permission::SuppliersManage),
+    ),
+    (
+        "save_supplier_adjustment",
+        Access::Needs(Permission::SuppliersManage),
+    ),
     ("stock_count", Access::Needs(Permission::InventoryView)),
     ("open_stock_count", Access::Needs(Permission::StockCount)),
     ("record_count_line", Access::Needs(Permission::StockCount)),
@@ -573,37 +452,29 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("remove_count_line", Access::Needs(Permission::StockCount)),
     ("abandon_stock_count", Access::Needs(Permission::StockCount)),
     ("count_sheet", Access::Needs(Permission::StockCount)),
-    ("approve_stock_count", Access::Needs(Permission::StockAdjust)),
-    // --- P27, the tills ------------------------------------------------------
-    // Reading the roster is reading the shop, and the banner on the billing
-    // screen needs it — so it is the reports permission and not the settings
-    // one, or a cashier could not see that their bills are queued.
+    (
+        "approve_stock_count",
+        Access::Needs(Permission::StockAdjust),
+    ),
     ("tills", Access::Needs(Permission::ReportsView)),
-    // Changing a till's series prefix changes what its bills are NUMBERED, so
-    // it sits with the shop's own settings and nothing weaker (D135).
+    // Changing a till's series prefix changes what its bills are NUMBERED, so it sits with the
+    // shop's own settings and nothing weaker.
     ("save_till", Access::Needs(Permission::SettingsStore)),
     ("make_master", Access::Needs(Permission::SettingsStore)),
     ("join_master", Access::Needs(Permission::SettingsStore)),
     // Pressing "send now" only drains a queue that would have drained itself.
-    // Anybody who may write a bill may push their own bills across.
     ("send_waiting_bills", Access::Needs(Permission::BillCreate)),
-
-    // D134. Sharing a report is reading it, so it is the report's own
-    // permission and nothing weaker â `report_on` checks it again anyway.
+    // Sharing a report is reading it, so it is the report's own permission and nothing weaker
+    // â `report_on` checks it again anyway.
     ("share_report", Access::Needs(Permission::ReportsView)),
-
-    // --- development only ---------------------------------------------------
-    // `#[cfg(debug_assertions)]` already keeps it out of a release build. It
-    // still needs a permission, because a dev build is what a support engineer
-    // runs on a shop's own machine.
+    // Development only.
     ("seed_demo_shop", Access::Needs(Permission::StaffManage)),
 ];
 
 /// Refuse, or hand back who is doing this.
 pub fn require(app: &App, need: Permission) -> UiResult<Actor> {
     let Some(session) = app.sessions().current() else {
-        // The screen turns this code into the lock screen. It is not an error
-        // the cashier has done anything about — they just need to sign in.
+        // The screen turns this code into the lock screen.
         return Err(UiError::new(
             "auth.locked",
             "The screen is locked. Sign in to carry on.",
@@ -622,7 +493,7 @@ pub fn require(app: &App, need: Permission) -> UiResult<Actor> {
         .with_detail(format!("needs {}", need.code())));
     }
 
-    // Work happened. This is what feeds the idle clock — see `session`.
+    // Work happened. This is what feeds the idle clock.
     app.sessions().touch(crate::flows::now());
     Ok(session.actor)
 }
@@ -635,8 +506,7 @@ pub const SETTINGS_PERMISSIONS: &[Permission] = &[
     Permission::BackupRun,
 ];
 
-/// Refuse unless this person has **at least one** of these — see
-/// [`Access::NeedsAny`].
+/// Refuse unless this person has at least one of these — see `Access::NeedsAny`.
 pub fn require_any(app: &App, needs: &[Permission]) -> UiResult<Actor> {
     let Some(session) = app.sessions().current() else {
         return Err(UiError::new(
@@ -645,8 +515,8 @@ pub fn require_any(app: &App, needs: &[Permission]) -> UiResult<Actor> {
         ));
     };
     if let Some(first) = needs.iter().find(|need| session.actor.must(**need).is_ok()) {
-        // Through the ordinary door, so the idle clock is fed in exactly one
-        // place and this cannot drift from it.
+        // Through the ordinary door, so the idle clock is fed in exactly one place and this
+        // cannot drift from it.
         return require(app, *first);
     }
     Err(UiError::new(
@@ -667,9 +537,7 @@ pub fn require_any(app: &App, needs: &[Permission]) -> UiResult<Actor> {
     )))
 }
 
-/// "you do not have permission to void a bill" → "You do not have permission to
-/// void a bill". The sentence is built here rather than stored capitalised
-/// because `AuthError`'s `Display` is also a log line.
+/// "you do not have permission to void a bill" → "You do not have permission to void a bill".
 fn capitalise(sentence: &str) -> String {
     let mut chars = sentence.chars();
     match chars.next() {
@@ -712,23 +580,15 @@ mod tests {
         }
     }
 
-    /// **T1 — and this is the test audit C1 is about.**
-    ///
-    /// The command is CALLED, not hidden. Every guarded command in the product
-    /// funnels through `require`, and `every_command_is_classified` below proves
-    /// there is no command that does not — so these two tests together are the
-    /// claim that a permission cannot be got past from a dev console.
     #[test]
     fn a_command_is_refused_when_the_person_may_not_do_it() {
         let app = an_app();
-        app.sessions()
-            .begin(a_waiter(), crate::flows::now(), false);
+        app.sessions().begin(a_waiter(), crate::flows::now(), false);
 
         // What a waiter may do.
         assert!(require(&app, Permission::BillCreate).is_ok());
 
-        // And what they may not. Audit C1 by name: "anybody who walks behind
-        // the counter can open Reports and see the whole day's cash."
+        // And what they may not.
         for refused in [
             Permission::ReportsView,
             Permission::BillVoid,
@@ -760,21 +620,18 @@ mod tests {
         }
     }
 
-    /// **A shop that does not exist yet has nothing to lock.**
-    ///
-    /// Found by running it: the first version opened a first run straight onto
-    /// the lock screen, with an empty staff list and no way past — nobody could
-    /// create the shop that would hold the PIN that would let them in.
+    /// A shop that does not exist yet has nothing to lock.
     #[test]
     fn a_first_run_is_not_locked_out_of_itself() {
         let app = an_app();
-        let session = app.sessions().current().expect("somebody is at the counter");
+        let session = app
+            .sessions()
+            .current()
+            .expect("somebody is at the counter");
         assert!(session.is_stand_in);
         assert!(require(&app, Permission::StaffManage).is_ok());
     }
 
-    /// **T7's half that lives here.** Locking touches the session and nothing
-    /// else — a shift change at 9 pm cannot cost a table its order.
     #[test]
     fn locking_does_not_touch_the_cart() {
         let app = an_app();
@@ -798,8 +655,8 @@ mod tests {
         .expect("the cart is where it was");
     }
 
-    /// Work feeds the idle clock, and it is the GUARD that feeds it — not a
-    /// mouse event crossing the IPC boundary.
+    /// Work feeds the idle clock, and it is the GUARD that feeds it — not a mouse event
+    /// crossing the IPC boundary.
     #[test]
     fn a_guarded_command_keeps_the_screen_awake() {
         let app = an_app();
@@ -819,8 +676,8 @@ mod tests {
         );
     }
 
-    /// A refusal must NOT touch it, or somebody pressing a button they are not
-    /// allowed to press would keep the till unlocked all night.
+    /// A refusal must NOT touch it, or somebody pressing a button they are not allowed to press
+    /// would keep the till unlocked all night.
     #[test]
     fn a_refused_command_does_not() {
         let app = an_app();
@@ -836,8 +693,8 @@ mod tests {
 
     #[test]
     fn the_stand_in_may_do_everything_on_a_shop_with_no_pin() {
-        // Requirement 3: a shop must be able to bill on its first day, and on
-        // that day nobody has a PIN. See `session::stand_in_actor`.
+        // Requirement 3: a shop must be able to bill on its first day, and on that day nobody
+        // has a PIN.
         let app = an_app();
         app.sessions().begin(
             crate::session::stand_in_actor("Counter", "staff_default"),
@@ -851,15 +708,7 @@ mod tests {
     }
 
     /// Every `#[tauri::command]` in the two files that define them.
-    ///
-    /// `include_str!` rather than reading the file at runtime: the sources are
-    /// baked in at compile time, so this cannot pass because somebody ran the
-    /// test from the wrong directory.
     fn declared_commands() -> BTreeSet<String> {
-        // **Every file that defines commands must be in this list**, and P12
-        // proved why it is a risk worth naming: a new module's commands would
-        // otherwise be invisible to the very test that exists to see them, and
-        // the coverage check would pass while covering nothing.
         const SOURCES: [&str; 32] = [
             include_str!("terminals.rs"),
             include_str!("orders.rs"),
@@ -901,24 +750,21 @@ mod tests {
                 if line.trim() != "#[tauri::command]" {
                     continue;
                 }
-                // The attribute may be followed by more attributes (`#[cfg]`),
-                // then the signature.
+                // The attribute may be followed by more attributes (`#[cfg]`), then the
+                // signature.
                 for next in lines.by_ref() {
                     let next = next.trim();
                     if next.starts_with('#') {
                         continue;
                     }
-                    // **`async` too**, and P27 is why: `join_master` waits for a
-                    // person at another counter to press Allow, so it has to be
-                    // async — and a scanner that only knew `pub fn` would have
-                    // let it in unclassified, which is the one thing this test
-                    // exists to prevent.
                     if let Some(rest) = next
                         .strip_prefix("pub fn ")
                         .or_else(|| next.strip_prefix("pub async fn "))
                     {
-                        let name: String =
-                            rest.chars().take_while(|c| *c != '(' && *c != '<').collect();
+                        let name: String = rest
+                            .chars()
+                            .take_while(|c| *c != '(' && *c != '<')
+                            .collect();
                         found.insert(name);
                     }
                     break;
@@ -928,7 +774,7 @@ mod tests {
         found
     }
 
-    /// **T11.** A command with no decision recorded fails the build.
+    /// A command with no decision recorded fails the build.
     #[test]
     fn every_command_is_classified() {
         let declared = declared_commands();
@@ -957,22 +803,11 @@ mod tests {
         );
     }
 
-    /// **And the file list itself is checked**, because it is the one part of
-    /// this mechanism that fails silently.
-    ///
-    /// P12 found the hole: it added `corrections.rs` with eight commands, and
-    /// `SOURCES` did not know about it — so the coverage test above would have
-    /// passed while covering none of them. A guard that can be bypassed by
-    /// adding a file is a guard with a hole shaped like a new feature.
-    ///
-    /// `CARGO_MANIFEST_DIR` is resolved at compile time, so this cannot pass by
-    /// being run from the wrong directory.
+    /// And the file list itself is checked, because it is the one part of this mechanism that
+    /// fails silently.
     #[test]
     fn every_file_that_defines_commands_is_scanned() {
-        // **Every .rs file under src/, at any depth.** P17 put commands in
-        // `src/settings/ipc.rs`, and a scan that only read the top level would
-        // have missed all five of them — which is the same hole P12 found by
-        // adding `corrections.rs`, one directory deeper.
+        // Every.rs file under src/, at any depth.
         fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).expect("a readable directory") {
                 let path = entry.expect("a directory entry").path();
@@ -989,9 +824,8 @@ mod tests {
         let mut missing = Vec::new();
         for path in files {
             let text = std::fs::read_to_string(&path).expect("a source file");
-            // **A LINE that is the attribute**, not a file that merely mentions
-            // it — the same rule the scanner uses. Matching on `contains` found
-            // this file itself, whose scanner compares against that string.
+            // A LINE that is the attribute, not a file that merely mentions it — the same rule
+            // the scanner uses.
             if !text.lines().any(|line| line.trim() == "#[tauri::command]") {
                 continue;
             }
@@ -1004,7 +838,11 @@ mod tests {
                     line.strip_prefix("pub fn ")
                         .or_else(|| line.strip_prefix("pub async fn "))
                 })
-                .map(|rest| rest.chars().take_while(|c| *c != '(' && *c != '<').collect())
+                .map(|rest| {
+                    rest.chars()
+                        .take_while(|c| *c != '(' && *c != '<')
+                        .collect()
+                })
                 .collect();
             if !names.iter().any(|n: &String| scanned.contains(n)) {
                 missing.push(path.display().to_string());
@@ -1017,20 +855,22 @@ mod tests {
         );
     }
 
-    /// The scan is the load-bearing half of the test above, so it gets its own
-    /// assertion rather than being trusted.
+    /// The scan is the load-bearing half of the test above, so it gets its own assertion rather
+    /// than being trusted.
     #[test]
     fn the_scan_finds_commands_in_both_files() {
         let declared = declared_commands();
         assert!(declared.contains("app_status"), "missed ipc.rs");
         assert!(declared.contains("complete_bill"), "missed flows.rs");
-        // One that is behind a #[cfg], which is the case that breaks a naive
-        // "the line after the attribute" scan.
-        assert!(declared.contains("seed_demo_shop"), "missed a cfg'd command");
+        // One that is behind a #[cfg], which is the case that breaks a naive "the line after
+        // the attribute" scan.
+        assert!(
+            declared.contains("seed_demo_shop"),
+            "missed a cfg'd command"
+        );
     }
 
-    /// Public is a decision, and a short list. If this number grows, somebody
-    /// is making things public to get past the build.
+    /// Public is a decision, and a short list.
     #[test]
     fn the_public_list_stays_short_and_deliberate() {
         let public = COMMAND_ACCESS

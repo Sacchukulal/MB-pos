@@ -13,12 +13,7 @@ ownerKind: string, ownerId: string, owner: string,
 /**
  * Empty for a dish; "this batch makes 4 kg" for a made material.
  */
-batch: string, batchQty: string, batchUnit: string, lines: Array<RecipeLineView>, cost: MoneyView, 
-/**
- * **What P13's typed cost price says**, beside what the recipe says. D119
- * — the gap between the two is itself the finding, so both are shown.
- */
-typedCost: MoneyView | null, sellsFor: MoneyView | null, 
+batch: string, batchQty: string, batchUnit: string, lines: Array<RecipeLineView>, cost: MoneyView, typedCost: MoneyView | null, sellsFor: MoneyView | null, 
 /**
  * "62% margin", or empty when there is no price to compare with.
  */

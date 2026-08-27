@@ -4,26 +4,20 @@ import type { MoneyView } from "./MoneyView";
 import type { TaxRowView } from "./TaxRowView";
 
 /**
- * The totals block — **a feature, not a footer.**
- *
- * Audit **B11**: *"the tax report splits GST 50/50 into CGST/SGST always. No
- * IGST, no inter-state, no HSN summary, and nothing that can be filed
- * directly."* This is where a chartered accountant first sees whether the
- * product can be filed from, so it never collapses into one "GST" line.
+ * The totals block — a feature, not a footer.
  */
 export type BillView = { subtotal: MoneyView, lineDiscount: MoneyView, billDiscount: MoneyView, totalDiscount: MoneyView, 
 /**
- * **D15.** *"A discount that had to be capped says so; the flag reaches
- * the bill."* It reaches `Bill`; if the screen dropped it, the flag would
- * have travelled three phases to die on the last hop.
+ * "A discount that had to be capped says so; the flag reaches the bill." It reaches
+ * `Bill`; if the screen dropped it, the flag would have travelled three phases to die on
+ * the last hop.
  */
 discountCapped: boolean, charges: Array<ChargeView>, 
 /**
- * One row per rate (scope 2.7). Two rates means two rows, always.
+ * One row per rate.
  */
 taxRows: Array<TaxRowView>, taxTotal: MoneyView, 
 /**
- * Scope 2.3 — the liquor line that lets a bar bill at all. **Never inside
- * a GST total.**
+ * The liquor line that lets a bar bill at all.
  */
 nonGstValue: MoneyView, exemptValue: MoneyView, roundOff: MoneyView, grandTotal: MoneyView, };

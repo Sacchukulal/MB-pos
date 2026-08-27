@@ -1,21 +1,4 @@
-//! **Buying and the count, driven end to end** — P26.
-//!
-//! `crates/mb-db/tests/buying.rs` proves the arithmetic against the disk. These
-//! drive the **real command bodies** in sequence, because that is where the
-//! bugs a unit test cannot see have lived in every session since P11: a
-//! permission checked in the wrong place, a refusal that never reaches a
-//! sentence, a second row nobody meant to write.
-//!
-//! Three of them are decisions rather than behaviour, and would be silently
-//! undone by a well-meaning future session:
-//!
-//! * **T5** — a cash delivery moves the DRAWER and writes no expense row
-//!   (D120). One rupee, one row.
-//! * **T8** — approving a count posts a delta, so a delivery that arrived
-//!   between the counting and the approving survives (D127).
-//! * **T17** — every state-changing command writes its audit row **in the same
-//!   transaction as the thing**, proved by rolling the transaction back and
-//!   finding no row (R11).
+//! Buying and the count, driven end to end.
 
 #![allow(
     clippy::expect_used,
@@ -47,20 +30,22 @@ fn a_shop(scratch: &Scratch) -> App {
         let mut rice = Material::new(MaterialId::new("mat_rice"), "Rice", Dimension::Weight);
         rice.packs = vec![("bag".to_owned(), Qty::from_whole(25_000).expect("in range"))];
         rice.purchase_unit = Some("bag".to_owned());
-        repos.stock().save_material(OUTLET, &rice, crate::flows::now())?;
+        repos
+            .stock()
+            .save_material(OUTLET, &rice, crate::flows::now())?;
 
         let mut paneer = Material::new(MaterialId::new("mat_paneer"), "Paneer", Dimension::Weight);
         paneer.packs = vec![("kg".to_owned(), Qty::from_whole(1_000).expect("in range"))];
         paneer.purchase_unit = Some("kg".to_owned());
-        repos.stock().save_material(OUTLET, &paneer, crate::flows::now())
+        repos
+            .stock()
+            .save_material(OUTLET, &paneer, crate::flows::now())
     })
     .expect("materials");
 
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, path);
-    // Buying is behind `Feature::Inventory` — D86's gate applied to the
-    // SCREENS, exactly as P25 did it. A test that did not license the shop
-    // would be testing the refusal, which `licence_tests` already does.
+    // Buying is behind `Feature::Inventory`.
     app.use_licensing(crate::licence_tests::licence_in(
         scratch,
         "buying-licence",
@@ -117,9 +102,7 @@ fn a_delivery(id: &str, lines: Vec<PurchaseLineEdit>) -> PurchaseEdit {
     }
 }
 
-// ===========================================================================
-// T5 — the four ledgers, through the commands
-// ===========================================================================
+// The four ledgers, through the commands.
 
 #[test]
 fn t5_a_cash_delivery_moves_the_drawer_and_writes_no_expense_row() {
@@ -131,25 +114,30 @@ fn t5_a_cash_delivery_moves_the_drawer_and_writes_no_expense_row() {
     edit.paid_now = "2000".to_owned();
     let view = save_purchase_on(&app, edit).expect("recorded");
 
-    // Nothing is owed, because it was paid at the door — and that is two rows,
-    // never a flag (D121).
+    // Nothing is owed, because it was paid at the door — and that is two rows, never a flag.
     assert_eq!(view.owed.paise, 0);
 
-    // **The drawer knows.** Before P26 a shop that paid the vegetable man from
-    // the till was told to expect money it had already handed over.
     let spends = crate::expenses::expenses_on(&app).expect("the drawer");
     assert_eq!(spends.cash.suppliers_paid.paise, 200_000);
-    assert_eq!(spends.cash.expected.paise, -200_000, "the drawer is down by what was paid");
+    assert_eq!(
+        spends.cash.expected.paise, -200_000,
+        "the drawer is down by what was paid"
+    );
 
-    // **And there is no second row for the same fact** (D120). This assertion
-    // is the whole of "one rupee, one row" — a future session that adds a
-    // helpful `save_expense` call here fails right at this line.
-    assert!(spends.rows.is_empty(), "a purchase must not also be an expense");
+    // And there is no second row for the same fact.
+    assert!(
+        spends.rows.is_empty(),
+        "a purchase must not also be an expense"
+    );
     assert_eq!(spends.movements.len(), 0, "nor a cash movement");
 
     // The shelf moved: 2 bags of 25 kg.
     let stock = crate::inventory::inventory_on(&app, None).expect("the stock screen");
-    let rice = stock.materials.iter().find(|m| m.id == "mat_rice").expect("rice");
+    let rice = stock
+        .materials
+        .iter()
+        .find(|m| m.id == "mat_rice")
+        .expect("rice");
     assert_eq!(rice.on_hand, "2 bag", "{}", rice.on_hand);
 }
 
@@ -159,23 +147,26 @@ fn t5_a_credit_delivery_leaves_the_drawer_alone_and_ages_from_the_due_day() {
     let app = a_shop(&scratch);
     a_supplier(&app, "sup_metro", "Metro", "15");
 
-    save_purchase_on(&app, a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]),
+    )
+    .expect("recorded");
 
     let spends = crate::expenses::expenses_on(&app).expect("the drawer");
     assert_eq!(spends.cash.suppliers_paid.paise, 0);
 
     let account = supplier_account_on(&app, "sup_metro".to_owned()).expect("the account");
     assert_eq!(account.supplier.balance.paise, 200_000);
-    // **D131** — fifteen days' terms, so it is not overdue today and the
-    // sentence says so rather than showing a confident zero.
+    // Fifteen days' terms, so it is not overdue today and the sentence says so rather than
+    // showing a confident zero.
     assert!(!account.supplier.is_overdue, "{}", account.supplier.when);
-    assert!(account.says.contains("none of it overdue yet"), "{}", account.says);
+    assert!(
+        account.says.contains("none of it overdue yet"),
+        "{}",
+        account.says
+    );
 }
-
-// ===========================================================================
-// D123 and D124, as a person sees them
-// ===========================================================================
 
 #[test]
 fn a_free_bag_and_a_tempo_both_reach_the_landed_cost_on_the_screen() {
@@ -189,17 +180,13 @@ fn a_free_bag_and_a_tempo_both_reach_the_landed_cost_on_the_screen() {
     save_purchase_on(&app, edit).expect("recorded");
 
     let paper = purchase_on(&app, "pur_1".to_owned()).expect("the paper");
-    // ₹10,000 of rice plus a ₹500 tempo bought ELEVEN bags: about ₹954.50 a
-    // bag, not the ₹1,000 printed on the invoice. That gap is the feature
-    // (D123).
-    //
-    // **₹954.50 and not ₹954.545**, because this reads the STORED cost — paise
-    // per 1,000 base units, of which a bag is 25,000 — so that the paper and
-    // the stock screen say the same number for the same rice. Dividing the
-    // line's value by its quantity here would be a second answer, and it was:
-    // the two screens read ₹929.14 and ₹929.25 side by side until this was
-    // fixed.
-    assert_eq!(paper.lines[0].landed, "₹954.50 per bag", "{}", paper.lines[0].landed);
+    // ₹10,000 of rice plus a ₹500 tempo bought ELEVEN bags: about ₹954.50 a bag, not the ₹1,000
+    // printed on the invoice.
+    assert_eq!(
+        paper.lines[0].landed, "₹954.50 per bag",
+        "{}",
+        paper.lines[0].landed
+    );
     assert_eq!(paper.total.paise, 1_050_000);
 }
 
@@ -213,29 +200,33 @@ fn a_five_percent_scheme_shop_is_told_the_tax_is_a_cost() {
     edit.lines[0].tax_percent = "5".to_owned();
     let view = save_purchase_on(&app, edit).expect("recorded");
 
-    // A shop with no composition flag set is a claiming shop, so the default
-    // sentence is the other one. **D124's whole point is that the shop decides,
-    // not the line.**
+    // A shop with no composition flag set is a claiming shop, so the default sentence is the
+    // other one.
     assert!(view.claims_input_tax);
     assert!(view.tax_note.contains("claimed back"), "{}", view.tax_note);
 
     let paper = purchase_on(&app, "pur_1".to_owned()).expect("the paper");
     assert_eq!(paper.creditable.paise, 20_000, "5% of ₹4,000 comes back");
     // And the food cost excludes it: ₹4,000 bought 10 kg, so ₹400 a kilo.
-    assert_eq!(paper.lines[0].landed, "₹400.00 per kg", "{}", paper.lines[0].landed);
+    assert_eq!(
+        paper.lines[0].landed, "₹400.00 per kg",
+        "{}",
+        paper.lines[0].landed
+    );
 }
 
-// ===========================================================================
-// D125 — the only correction path
-// ===========================================================================
+// The only correction path.
 
 #[test]
 fn a_delivery_is_cancelled_with_a_reason_and_never_edited() {
     let scratch = Scratch::new("buy_cancel");
     let app = a_shop(&scratch);
     a_supplier(&app, "sup_metro", "Metro", "0");
-    save_purchase_on(&app, a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]),
+    )
+    .expect("recorded");
 
     // A blank reason is refused in words a person reads.
     let refused = cancel_purchase_on(&app, "pur_1".to_owned(), "   ".to_owned());
@@ -249,19 +240,25 @@ fn a_delivery_is_cancelled_with_a_reason_and_never_edited() {
         .expect("cancelled");
     assert_eq!(view.owed.paise, 0);
 
-    // **D47** — the paper is still on the list, marked, with the reason on it.
+    // The paper is still on the list, marked, with the reason on it.
     let paper = purchase_on(&app, "pur_1".to_owned()).expect("still on file");
-    assert!(paper.cancelled.contains("Entered twice"), "{}", paper.cancelled);
+    assert!(
+        paper.cancelled.contains("Entered twice"),
+        "{}",
+        paper.cancelled
+    );
 
     // And the shelf is back where it was.
     let stock = crate::inventory::inventory_on(&app, None).expect("the stock screen");
-    let rice = stock.materials.iter().find(|m| m.id == "mat_rice").expect("rice");
+    let rice = stock
+        .materials
+        .iter()
+        .find(|m| m.id == "mat_rice")
+        .expect("rice");
     assert_eq!(rice.on_hand_base, "0", "{}", rice.on_hand);
 }
 
-// ===========================================================================
-// T8 — the count posts a delta
-// ===========================================================================
+// The count posts a delta.
 
 #[test]
 fn t8_a_delivery_between_the_counting_and_the_approving_survives() {
@@ -270,8 +267,11 @@ fn t8_a_delivery_between_the_counting_and_the_approving_survives() {
     a_supplier(&app, "sup_metro", "Metro", "0");
 
     // Sunday: 12 kg of paneer on the books.
-    save_purchase_on(&app, a_delivery("pur_1", vec![line("mat_paneer", "12", "kg", "400")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_1", vec![line("mat_paneer", "12", "kg", "400")]),
+    )
+    .expect("recorded");
 
     // Sunday night: somebody counts 10.
     let count = open_stock_count_on(&app, String::new()).expect("opened");
@@ -287,25 +287,37 @@ fn t8_a_delivery_between_the_counting_and_the_approving_survives() {
     )
     .expect("written down");
     assert_eq!(counted.lines[0].book, "12 kg", "{}", counted.lines[0].book);
-    assert_eq!(counted.lines[0].variance, "2 kg short", "{}", counted.lines[0].variance);
+    assert_eq!(
+        counted.lines[0].variance, "2 kg short",
+        "{}",
+        counted.lines[0].variance
+    );
     // A variance in rupees is the one somebody acts on.
     assert_eq!(counted.lines[0].variance_value.paise, -80_000);
     // And the screen says what approving will do BEFORE anybody presses it.
-    assert!(counted.effect.contains("take away from 1 material"), "{}", counted.effect);
+    assert!(
+        counted.effect.contains("take away from 1 material"),
+        "{}",
+        counted.effect
+    );
 
     // Monday morning: 25 kg arrives.
-    save_purchase_on(&app, a_delivery("pur_2", vec![line("mat_paneer", "25", "kg", "400")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_2", vec![line("mat_paneer", "25", "kg", "400")]),
+    )
+    .expect("recorded");
 
-    // Monday nine o'clock: the owner approves Sunday's count.
     approve_stock_count_on(&app, id.clone()).expect("approved");
 
-    // **37 − 2 = 35 kg.** A system that SET the balance to Sunday's 10 kg would
-    // have erased Monday's delivery, and nobody would have noticed for a month.
+    // 37 − 2 = 35 kg.
     let stock = crate::inventory::inventory_on(&app, None).expect("the stock screen");
-    let paneer = stock.materials.iter().find(|m| m.id == "mat_paneer").expect("paneer");
+    let paneer = stock
+        .materials
+        .iter()
+        .find(|m| m.id == "mat_paneer")
+        .expect("paneer");
     assert_eq!(paneer.on_hand, "35 kg", "{}", paneer.on_hand);
-    // And D115 stops saying "never" for it.
     assert_ne!(paneer.last_counted, "never counted");
 
     // Sealed: the same count cannot be approved twice.
@@ -314,18 +326,21 @@ fn t8_a_delivery_between_the_counting_and_the_approving_survives() {
 
 #[test]
 fn the_count_sheet_a_person_carries_has_no_book_quantity_on_it() {
-    // **D128**, through the command rather than the pure function — because the
-    // failure this guards against is a future session adding the figure at the
-    // command layer "so the sheet is more useful".
     let scratch = Scratch::new("buy_sheet");
     let app = a_shop(&scratch);
     a_supplier(&app, "sup_metro", "Metro", "0");
-    save_purchase_on(&app, a_delivery("pur_1", vec![line("mat_paneer", "12", "kg", "400")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_1", vec![line("mat_paneer", "12", "kg", "400")]),
+    )
+    .expect("recorded");
 
     let sheet = count_sheet_on(&app, String::new()).expect("a sheet");
     assert!(sheet.contains("Paneer"));
-    assert!(sheet.contains("______"), "there has to be somewhere to write");
+    assert!(
+        sheet.contains("______"),
+        "there has to be somewhere to write"
+    );
     for forbidden in ["12", "12000", "12.0"] {
         assert!(
             !sheet.contains(forbidden),
@@ -335,9 +350,7 @@ fn the_count_sheet_a_person_carries_has_no_book_quantity_on_it() {
     }
 }
 
-// ===========================================================================
-// A shop that has never counted is told so
-// ===========================================================================
+// A shop that has never counted is told so.
 
 #[test]
 fn a_shop_that_has_never_counted_its_store_is_told_on_both_screens() {
@@ -350,37 +363,39 @@ fn a_shop_that_has_never_counted_its_store_is_told_on_both_screens() {
 
     let view = buying_on(&app, None).expect("the buying screen");
     assert!(
-        view.attention.iter().any(|line| line.contains("Nobody has counted the store")),
+        view.attention
+            .iter()
+            .any(|line| line.contains("Nobody has counted the store")),
         "{:?}",
         view.attention
     );
 }
-
-// ===========================================================================
-// T17 — the audit row rides in the same transaction
-// ===========================================================================
 
 #[test]
 fn t17_every_buying_command_leaves_an_audit_row_a_person_can_read() {
     let scratch = Scratch::new("buy_audit");
     let app = a_shop(&scratch);
     a_supplier(&app, "sup_metro", "Metro", "0");
-    save_purchase_on(&app, a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]),
+    )
+    .expect("recorded");
     cancel_purchase_on(&app, "pur_1".to_owned(), "Entered twice".to_owned()).expect("cancelled");
 
     let rows = app
         .with_shop(|shop| {
             shop.db
                 .read_transaction(|tx| {
-                    // **`AuditFilter::default()` is a limit of ONE** — the
-                    // field defaults to 0 and `list` clamps it up to 1, so a
-                    // test that asks for "the trail" with a default filter gets
-                    // the newest row and nothing else. Found by this test
-                    // failing with only `purchase.cancelled` in it.
+                    // `AuditFilter::default()` is a limit of ONE — the field defaults to 0 and
+                    // `list` clamps it up to 1, so a test that asks for "the trail" with a
+                    // default filter gets the newest row and nothing else.
                     Repos::new(tx).audit().list(
                         OUTLET,
-                        &mb_db::repo::AuditFilter { limit: 50, ..Default::default() },
+                        &mb_db::repo::AuditFilter {
+                            limit: 50,
+                            ..Default::default()
+                        },
                     )
                 })
                 .map_err(|e| crate::words::from_db(&e))
@@ -389,28 +404,31 @@ fn t17_every_buying_command_leaves_an_audit_row_a_person_can_read() {
 
     let actions: Vec<&str> = rows.iter().map(|r| r.action.as_str()).collect();
     for expected in ["supplier.saved", "purchase.saved", "purchase.cancelled"] {
-        assert!(actions.contains(&expected), "{expected} is not in the trail: {actions:?}");
+        assert!(
+            actions.contains(&expected),
+            "{expected} is not in the trail: {actions:?}"
+        );
     }
     // Every one of them says who, and the words a shopkeeper reads.
     assert!(rows.iter().all(|r| r.staff_id.is_some()));
-    // And the trail speaks the owner's language, not ours (UI_GUIDELINES §6).
     assert_eq!(
         mb_auth::audit::action::words("purchase.cancelled"),
         "Cancelled a delivery"
     );
 }
 
-// ===========================================================================
-// A refusal a person can act on
-// ===========================================================================
+// A refusal a person can act on.
 
 #[test]
 fn a_return_of_more_than_arrived_is_refused_saying_how_much_is_left() {
     let scratch = Scratch::new("buy_return");
     let app = a_shop(&scratch);
     a_supplier(&app, "sup_metro", "Metro", "0");
-    save_purchase_on(&app, a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]))
-        .expect("recorded");
+    save_purchase_on(
+        &app,
+        a_delivery("pur_1", vec![line("mat_rice", "2", "bag", "1000")]),
+    )
+    .expect("recorded");
 
     let mut back = a_delivery("pur_ret", vec![line("mat_rice", "5", "bag", "1000")]);
     back.returns_purchase_id = "pur_1".to_owned();
@@ -427,7 +445,11 @@ fn a_return_of_more_than_arrived_is_refused_saying_how_much_is_left() {
     save_purchase_on(&app, back).expect("one bag back");
 
     let stock = crate::inventory::inventory_on(&app, None).expect("the stock screen");
-    let rice = stock.materials.iter().find(|m| m.id == "mat_rice").expect("rice");
+    let rice = stock
+        .materials
+        .iter()
+        .find(|m| m.id == "mat_rice")
+        .expect("rice");
     assert_eq!(rice.on_hand, "1 bag", "{}", rice.on_hand);
 }
 
@@ -441,8 +463,6 @@ fn a_supplier_with_a_wrong_gst_number_is_refused_before_it_reaches_a_return() {
             id: "sup_bad".to_owned(),
             name: "Metro".to_owned(),
             phone: String::new(),
-            // One character out. The portal would reject the claim months
-            // later; this rejects it now, with P17's own checksum.
             gstin: "29ABCDE1234F1Z5".to_owned(),
             address: String::new(),
             terms_days: "0".to_owned(),
@@ -472,18 +492,8 @@ fn a_supplier_with_a_wrong_gst_number_is_refused_before_it_reaches_a_return() {
 /// Keeps `Money` honest about being imported for a reason.
 const _: Option<Money> = None;
 
-// ===========================================================================
-// T16 — the budgets, three readings each
-// ===========================================================================
+// The budgets, three readings each.
 
-/// **I2 and I3**, and the benchmark discipline the master plan insists on:
-/// three readings, because a single run straight after a build reads high and
-/// looks like a regression (P13's B4 read 23.3 µs once and 15.5 three times).
-///
-/// Neither is on the sacred path — §2.3, not §2.2 — so the figures are printed
-/// and the assertion is the generous ceiling. This laptop is not the reference
-/// machine (i3 / 4 GB / 5400 rpm), so the number recorded in PERFORMANCE.md
-/// says which machine produced it.
 #[test]
 fn t16_saving_a_purchase_and_the_profit_statement_are_inside_their_budgets() {
     let scratch = Scratch::new("buy_perf");
@@ -540,11 +550,7 @@ fn t16_saving_a_purchase_and_the_profit_statement_are_inside_their_budgets() {
     );
 }
 
-// ===========================================================================
-// D55 — a session can see this app, and must
-// ===========================================================================
-
-/// **Seed a demo shop with buying in it, so a person can look at the screen.**
+/// Seed a demo shop with buying in it, so a person can look at the screen.
 ///
 /// ```powershell
 /// $env:MB_DEMO="C:\some\scratch\demo"
@@ -552,10 +558,6 @@ fn t16_saving_a_purchase_and_the_profit_statement_are_inside_their_budgets() {
 /// $env:APPDATA="C:\some\scratch\demo"   # the app's whole world, isolated
 /// cargo run -p magic-bill
 /// ```
-///
-/// `APPDATA` is what `mb_db::locate::default_config_dir` reads, so a demo can
-/// never touch a real shop's data — P25's `demo_kitchen` set this up and this is
-/// the same trick with a different shop in it.
 #[test]
 #[ignore = "D55: run by hand to look at the screen, not part of the suite"]
 fn demo_buying() {
@@ -582,8 +584,7 @@ fn demo_buying() {
         rice.reorder_level = Qty::from_whole(20_000).expect("in range");
         repos.stock().save_material(OUTLET, &rice, at)?;
 
-        let mut paneer =
-            Material::new(MaterialId::new("mat_paneer"), "Paneer", Dimension::Weight);
+        let mut paneer = Material::new(MaterialId::new("mat_paneer"), "Paneer", Dimension::Weight);
         paneer.packs = vec![("kg".to_owned(), Qty::from_whole(1_000).expect("in range"))];
         paneer.purchase_unit = Some("kg".to_owned());
         paneer.category = "Dairy".to_owned();
@@ -601,12 +602,8 @@ fn demo_buying() {
 
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, db_path);
-    // The licence lives beside the config (D85), which for this demo is the
-    // folder the running app will read — so it is licensed when it starts.
-    // **The REAL machine id, not the test one** â the licence is bound to the
-    // computer (D85), so a demo bound to `for_tests` opens on
-    // "this licence belongs to another computer" and every gated screen is
-    // blank. Found by running it.
+    // The licence lives beside the config, which for this demo is the folder the running app
+    // will read — so it is licensed when it starts.
     let machine = mb_license::MachineId::of(&home);
     let stub = std::sync::Arc::new(mb_license::cloud::Stub::active(
         &machine,
@@ -679,24 +676,15 @@ fn demo_buying() {
     )
     .expect("rice counted");
 
-    // **Fold the WAL back into the file before the app is asked to find it.**
-    // Without this the seeder leaves a 4 KB database and a 1.4 MB `-wal`, and
-    // the counter opens on "No shop has been set up on this computer yet" —
-    // which is a demo that looks like a broken build. Found by running it.
+    // Fold the WAL back into the file before the app is asked to find it.
     app.with_shop(|shop| shop.db.checkpoint().map_err(|e| crate::words::from_db(&e)))
         .expect("checkpoint");
-    // **And tell start-up where it is.** Without this the counter finds the file
-    // but ASKS rather than adopting (A5's screen), so the demo opens on "no shop
-    // has been set up" and every screen is empty. Also found by running it.
+    // And tell start-up where it is.
     mb_db::locate::write_config(&home, &home.join("magicbill.db")).expect("recorded");
     println!("demo shop ready at {}", home.display());
 }
 
-/// **A supplier's phone gets the same rule as a customer's.**
-///
-/// It had none at all until 2026-08-22 — a name typed into the phone box was
-/// stored as a phone number. See `mb_core::phone` for why there is one type
-/// rather than a check per screen.
+/// A supplier's phone gets the same rule as a customer's.
 #[test]
 fn a_supplier_phone_is_ten_digits_or_it_is_refused() {
     let scratch = Scratch::new("sup_phone");
@@ -739,21 +727,15 @@ fn a_supplier_phone_is_ten_digits_or_it_is_refused() {
         .iter()
         .find(|s| s.id == "sup_ok")
         .and_then(|s| s.phone.clone());
-    assert_eq!(stored.as_deref(), Some("9876543210"), "the +91 went to disk");
+    assert_eq!(
+        stored.as_deref(),
+        Some("9876543210"),
+        "the +91 went to disk"
+    );
 }
 
-/// **The rupee mark cannot reach the database**, and this is the end-to-end
-/// proof rather than the component test's.
-///
-/// The owner, 2026-08-22: *"also make sure when you add rupee symbol, it does
-/// not interfere with calculations (do not save rupee symbol also with amount
-/// to db, it would be problem) think properly."*
-///
-/// The screen never puts it in the value — `MoneyInput` draws the ₹ as a
-/// sibling of the box, so there is no code path that could. `Money::parse`
-/// strips it anyway, which is a second net and not the reason it is safe. This
-/// asserts the outcome either way: an amount that arrives wearing a symbol is
-/// stored as the number, and the number is right.
+/// The rupee mark cannot reach the database, and this is the end-to-end proof rather than the
+/// component test's.
 #[test]
 fn an_amount_is_stored_as_a_number_whatever_decoration_arrives_with_it() {
     for typed in ["₹1200.50", "1,200.50", " 1200.50 ", "1200.50"] {
@@ -764,8 +746,8 @@ fn an_amount_is_stored_as_a_number_whatever_decoration_arrives_with_it() {
         assert!(!parsed.to_plain_string().contains('₹'));
     }
 
-    // A letter is still a refusal — the filter on the screen is a courtesy and
-    // this is the control.
+    // A letter is still a refusal — the filter on the screen is a courtesy and this is the
+    // control.
     assert!(crate::menu::parse_money_public("12ab").is_err());
     assert!(crate::menu::parse_money_public("").is_err());
 }

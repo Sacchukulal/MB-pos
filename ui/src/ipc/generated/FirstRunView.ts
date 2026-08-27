@@ -5,8 +5,7 @@
  */
 export type FirstRunView = { 
 /**
- * **True while the counter must not be shown.** The shell reads this and
- * renders the set-up flow instead of the billing screen.
+ * True while the counter must not be shown.
  */
 needed: boolean, 
 /**
@@ -26,9 +25,7 @@ hasPin: boolean,
  */
 shopPath: string, 
 /**
- * Other databases already on this computer — an owner reinstalling, or a
- * drive letter that changed. Offering these is A5: v1 showed a first-run
- * wizard with the shop three folders away.
+ * Other databases already on this computer.
  */
 found: Array<string>, 
 /**

@@ -2,9 +2,6 @@
 
 /**
  * A pack a purchase line may be entered in.
- *
- * **Not `UnitView`** — P25 already exports one of those, and two Rust types
- * writing the same `.ts` file is silent (P21's `check-view-names` guard).
  */
 export type PackView = { name: string, 
 /**

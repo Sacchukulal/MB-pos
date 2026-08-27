@@ -1,30 +1,4 @@
-/**
- * **The account screen** — scope 2.10, and P21's face.
- *
- * # What v1 put here, and what was wrong with it
- *
- * *"After activation: your name, business, mobile, email, plan name, status
- * chip, **next billing date**, days left, 'Renew Plan' link, 'Sync Data' and
- * 'Deactivate' buttons."*
- *
- * Two things. The first is that **"your plan renews on 12 September" beats a
- * date field** — a screen that makes an owner do the arithmetic has not
- * answered the question they opened it to ask. The second is that Deactivate
- * lied: it cleared local storage and left the server holding the binding, so
- * the owner then could not activate on a new PC (BACKEND-C5). Here, Deactivate
- * says what it actually did, in both cases.
- *
- * # Nothing on this screen decides anything
- *
- * R8. Every sentence — the banner, the refusal, "checked 4 minutes ago", the
- * still-held warning, the clock note — is composed in `src-tauri/src/words.rs`,
- * which is *the one place a machine state becomes words* (crown jewel 14). This
- * file chooses which of them to draw and where. There is no date arithmetic, no
- * plural, and no "if expired then" in here.
- *
- * Every command returns the whole `LicenceView`, so pressing a button is
- * `setView(await call(...))` and there is no local state to fall out of step.
- */
+/** The account screen. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -37,22 +11,14 @@ import type { LicenceView } from '../ipc/generated/LicenceView';
 
 import './account.css';
 
-/**
- * The tone the counter chose, which is already a `BadgeTone` by name.
- *
- * Deliberately a lookup and not a cast: `LicenceView.tone` is a `String` on the
- * Rust side, so nothing but this line would notice if `tone_for` ever grew a
- * fourth answer. Colour is never the only carrier (§2) — the chip and the
- * sentence both say it too, so an unknown tone falls back to neutral and loses
- * nothing.
- */
+/** The tone the counter chose, which is already a `BadgeTone` by name. */
 const TONES: Record<string, BadgeTone> = {
   ok: 'ok',
   warn: 'warn',
   danger: 'danger',
 };
 
-/** magicbill.in, where a plan is actually bought. Phase 10 owns payment. */
+/** magicbill.in, where a plan is actually bought. */
 const RENEW_AT = 'https://magicbill.in/renew';
 
 type Asking = 'activate' | 'transfer' | 'trial' | 'emergency' | null;
@@ -123,13 +89,12 @@ export function Account() {
           <p className="mb-account__renews">{view.renewalSentence}</p>
         )}
 
-        {/* BACKEND-C5. The one sentence v1 never said. */}
         {view.stillHeld !== '' && (
           <p className="mb-account__warn" role="status">
             {view.stillHeld}
           </p>
         )}
-        {/* D90 — a warning, never a lock. */}
+        {/* A warning, never a lock. */}
         {view.clockNote !== '' && (
           <p className="mb-account__warn" role="status">
             {view.clockNote}
@@ -137,13 +102,7 @@ export function Account() {
         )}
 
         <div className="mb-account__actions mb-row mb-row--end">
-          {/* **"Check again" now actually checks again.**
-
-              It called `account`, which reads the entitlement this counter is
-              already holding — so a shop that had just paid pressed it, got
-              the same cached answer, and pressed it four more times.
-              `refresh_licence` is the one that asks, and it had never been
-              called from anywhere. */}
+          {/* "Check again" now actually checks again. */}
           <Button
             variant="quiet"
             disabled={busy}
@@ -206,12 +165,12 @@ export function Account() {
         </div>
       </Card>
 
-      {/* What the plan includes. Reading a limit here is how an owner finds out
-          why a sixteenth phone would not join. */}
+      {/* What the plan includes. */}
       <Card>
-        {/* A counter with no licence has no plan, and a heading that says "your
-            plan" over a card that lists two phones and a till is a small lie an
-            owner notices. Found by looking at it. */}
+        {/*
+          A counter with no licence has no plan, and a heading that says "your plan" over a card
+          that lists two phones and a till is a small lie an owner notices.
+        */}
         <SectionHeader
           title={view.isActivated ? 'What your plan includes' : 'What you can use now'}
         />
@@ -240,9 +199,11 @@ export function Account() {
         )}
       </Card>
 
-      {/* This computer. The id is here so support can ask for it, and the
-          derivation is here because "we could not read this machine's id and
-          made one up" is a thing an owner is entitled to know. */}
+      {/*
+        This computer. The id is here so support can ask for it, and the derivation is here
+        because "we could not read this machine's id and made one up" is a thing an owner is
+        entitled to know.
+      */}
       <Card>
         <SectionHeader title="This computer" />
         <dl className="mb-account__facts">
@@ -268,20 +229,7 @@ export function Account() {
         </div>
       </Card>
 
-      {/* --- the dialogs ----------------------------------------------------
-
-          **Two of these keep their paragraph, and the difference is the rule.**
-
-          The owner asked for explanations to become hover tips (2026-08-22) and
-          most of them did. A sentence that says **what pressing the button will
-          DO** is not an explanation — it is the confirmation, and
-          UI_GUIDELINES §6 says *"a button says exactly what happens; the
-          confirmation echoes it."* Hiding *"this will stop the licence working
-          on the computer it is on now"* behind a hover would be hiding the
-          consequence of an irreversible action.
-
-          So: what a thing IS goes in `note`. What a press will DO stays on the
-          screen.                                                              */}
+      {/* The dialogs. */}
 
       <Modal
         open={asking === 'activate' || asking === 'transfer'}
@@ -294,11 +242,9 @@ export function Account() {
             : 'We will send a code to the mobile number registered with your licence, so that nobody else can use your key.'}
         </p>
         {/*
-          `autoComplete="off"` on both, found by driving it: WebView2 offered to
-          remember the verification code and then drew its "Saved info" dropdown
-          straight over the Activate button. A one-time code is the last thing a
-          browser should keep, and a suggestion list covering the only button in
-          a dialog is the kind of thing no test can see.
+          `autoComplete="off"` on both, found by driving it: WebView2 offered to remember the
+          verification code and then drew its "Saved info" dropdown straight over the Activate
+          button.
         */}
         <Input
           label="Licence key"

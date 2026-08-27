@@ -1,27 +1,4 @@
-//! **The cart lives here, in Rust — and that is P09's real decision.**
-//!
-//! React holds no cart at all. Every change is a command that returns the whole
-//! new [`CartView`], and there are three reasons, of which the third is the one
-//! that matters:
-//!
-//! * **`Cart::add` merges lines** by `LineIdentity` — same item, same note,
-//!   same modifiers. That rule was decided at P01 and lives in mb-core. A cart
-//!   in TypeScript would be a second implementation of it, and the two would
-//!   disagree the first time somebody adds "dosa, no onion" twice.
-//! * **`compute_bill` is D4's eight-step pipeline, and it costs 14 µs** (budget
-//!   B4). Recomputing the entire bill on every keystroke is free, so there is
-//!   no performance argument for caching a total in React — and a cached total
-//!   is a total that can be stale.
-//! * **R8 stops being a rule somebody has to remember.** There is no money in
-//!   TypeScript to do arithmetic *on*. `check-no-money.mjs` guards the letter;
-//!   this guards the spirit.
-//!
-//! # Everything on this screen is a view model (D39)
-//!
-//! `CartView`, `TableView` and the rest are not mb-core's types. They are what
-//! a screen renders: money already formatted by `Money::to_plain_string`,
-//! states already turned into words, quantities already written the way a
-//! shopkeeper writes them. The conversion is here, once.
+//! The cart lives here, in Rust.
 
 use std::sync::Mutex;
 
@@ -35,14 +12,7 @@ use ts_rs::TS;
 use crate::ipc::MoneyView;
 use crate::words::{UiError, UiResult};
 
-// Scope 14.2's thresholds used to be one constant here. They are settings now
-// (`floor::WARN_KEY` / `floor::LATE_KEY`), read in Rust and passed in, because
-// a dosa counter turns a table in eight minutes and a fine-dining room in
-// ninety — one number is wrong for both.
-
-// ---------------------------------------------------------------------------
 // The cart, as the process holds it.
-// ---------------------------------------------------------------------------
 
 /// One counter's work in progress.
 #[derive(Debug)]
@@ -51,39 +21,24 @@ pub struct CartState {
     pub order_type: OrderType,
     /// The table this cart belongs to, when it is a dine-in order.
     pub table: Option<String>,
-    /// What the cashier calls that table — "7", not "tbl_7". The id above is
-    /// the key an order is saved against; this is the word on the screen.
+    /// What the cashier calls that table — "7", not "tbl_7".
     pub table_label: Option<String>,
-    /// The order being edited, when an existing one was opened. `None` for a
-    /// cart that has not been saved yet.
+    /// The order being edited, when an existing one was opened.
     pub order_id: Option<String>,
     pub settlement: Settlement,
     pub bill_discount: Option<DiscountEntry>,
-    /// **Crown jewel 2 lives here while the order is being typed**, and it
-    /// travels into the order when it is saved. What the kitchen was told is
-    /// never a screen's memory.
     pub kitchen: mb_core::KitchenLedger,
-    /// Scope 1.6 — which half of a shared table this order is (P14).
+    /// Which half of a shared table this order is.
     pub sub_table: Option<mb_core::SubTable>,
-    /// Whose account this bill went on, when it went on one (P15, scope 5.1).
+    /// Whose account this bill went on, when it went on one.
     pub customer: Option<String>,
-    /// Scope 1.24 — how many are eating. `None` is honestly unknown.
+    /// How many are eating.
     pub covers: Option<u32>,
-    /// Scope 1.26 — a note on the whole order, printed on the bill.
+    /// A note on the whole order, printed on the bill.
     pub note: Option<String>,
-    /// **What the floor did while the cashier had this open** (P20, D83).
-    ///
-    /// Never merged into `cart` by the applier: a phone that adds a dosa must
-    /// not silently rewrite what somebody is halfway through settling. The
-    /// screen shows these and offers to take them in, and the payments and the
-    /// discount are untouched either way.
+    /// What the floor did while the cashier had this open.
     pub from_the_floor: Vec<crate::orders::FloorChange>,
-    /// **Who put the first line on this bill** (P11).
-    ///
-    /// It becomes `orders.created_by`, while whoever is signed in when the
-    /// money is taken becomes `orders.settled_by`. Those are two different
-    /// people during a shift change, the schema has had both columns since P04,
-    /// and this field is what finally makes them mean something.
+    /// Who put the first line on this bill.
     pub opened_by: Option<mb_core::StaffId>,
 }
 
@@ -91,10 +46,8 @@ impl Default for CartState {
     fn default() -> Self {
         CartState {
             cart: Cart::new(),
-            // Dine-in is what a restaurant counter does most of, and the
-            // order-type LOCK (crown jewel 1) is what a parcel counter uses to
-            // stop re-selecting it forty times an hour. The lock is the
-            // screen's; the default is here.
+            // Dine-in is what a restaurant counter does most of, and the order-type LOCK is
+            // what a parcel counter uses to stop re-selecting it forty times an hour.
             order_type: OrderType::DineIn,
             table: None,
             table_label: None,
@@ -113,21 +66,16 @@ impl Default for CartState {
 }
 
 impl CartState {
-    /// Recompute from scratch. **There is no incremental path and there must
-    /// not be one:** D4 fixes the order of operations, and a bill that was
-    /// patched rather than recomputed is a bill nobody can reason about.
-    ///
-    /// **P17 put the shop's own answers in here.** The round-off mode and the
-    /// default service / packing / delivery charges were constants written at
-    /// this line: every shop rounded to the nearest rupee, and scope 1.14 was
-    /// an engine with no caller.
+    /// Recompute from scratch. There is no incremental path and there must not be one: D4 fixes
+    /// the order of operations, and a bill that was patched rather than recomputed is a bill
+    /// nobody can reason about.
     pub fn bill(&self, config: &crate::settings::ShopConfig) -> UiResult<Bill> {
-        // Built here rather than stored, because a charge belongs to the ORDER
-        // TYPE and that can change while the cart is open — switching a table
-        // to a parcel must drop the service charge and add the packing one.
+        // Built here rather than stored, because a charge belongs to the ORDER TYPE and that
+        // can change while the cart is open — switching a table to a parcel must drop the
+        // service charge and add the packing one.
         let charges = config.billing.charges_for(self.order_type);
-        // No place of supply: restaurant service is always intra-state (IGST
-        // Act s.12(4)), which is `PlaceOfSupply`'s default.
+        // No place of supply: restaurant service is always intra-state (IGST Act s.12(4)),
+        // which is `PlaceOfSupply`'s default.
         let mut input = BillInput::new(&self.cart, registration_of(config))
             .with_order_type(self.order_type)
             .with_rounding(config.billing.rounding)
@@ -157,61 +105,23 @@ pub struct CartView {
     pub payments: Vec<PaymentView>,
     /// What has been taken so far.
     pub paid: MoneyView,
-    /// What is still owed. Zero when the bill is covered.
+    /// What is still owed.
     pub balance: MoneyView,
-    /// What to hand back. Zero unless the customer over-paid in cash (1.16).
+    /// What to hand back.
     pub change: MoneyView,
     pub is_empty: bool,
     /// Whether the kitchen has been told everything on this bill.
-    ///
-    /// **Decides what Enter on an empty box does** (audit 2.3): print the
-    /// ticket, or complete the bill. It comes from the order's own ledger, so
-    /// it is right after a merge and after a restart.
     pub kitchen_up_to_date: bool,
-    /// **Whether the kitchen has been told ANYTHING on this order yet** — which
-    /// is a different question from [`CartView::kitchen_up_to_date`], and the
-    /// screen needs both.
-    ///
-    /// Before the first ticket, ✕ on a line is somebody undoing a mis-tap two
-    /// seconds after making it, and asking them to type a reason for that is
-    /// how a till gets slower for no gain. After it, food is being cooked: the
-    /// same ✕ has to become a **void** — a reason, an audit row and a
-    /// cancellation slip to the kitchen — which is `void_line`, and is audit
-    /// B5/B6.
+    /// Whether the kitchen has been told ANYTHING on this order yet — which is a different
+    /// question from `CartView::kitchen_up_to_date`, and the screen needs both.
     pub kitchen_told: bool,
-    /// **How many people are on this table** (P14, scope 14.3).
-    ///
-    /// On the view because the split dialog has to show what is already set —
-    /// and because `set_covers` had no caller at all until P31, so every
-    /// per-cover figure in Reports had nothing to divide by.
+    /// How many people are on this table.
     pub covers: Option<u32>,
-    /// **The order's id, once it has one.**
-    ///
-    /// `None` while the cart is only somebody typing. It becomes `Some` at the
-    /// moment `park_open_order` claims a bill number — the first kitchen ticket
-    /// or an opened table — and from then on the order is IN THE SHOP'S BOOKS.
-    ///
-    /// That is exactly the line at which "Cancel order" stops meaning "clear
-    /// the screen" and starts meaning `cancel_order`: a reason, an audit row, a
-    /// cancelled order the reports can see, and the kitchen told to stop.
+    /// The order's id, once it has one.
     pub order_id: Option<String>,
-    /// **What the floor did to this order while the cashier had it open**
-    /// (P20, D83).
-    ///
-    /// Not merged into the lines above: a phone that adds a dosa must not
-    /// silently rewrite what somebody is halfway through settling. The screen
-    /// shows these and offers to take them in, and the cashier's payments and
-    /// discounts are untouched either way.
+    /// What the floor did to this order while the cashier had it open.
     pub from_the_floor: Vec<crate::orders::FloorChange>,
-    /// **Audit I6 — a very long order, mentioned rather than refused.**
-    ///
-    /// Empty on every ordinary bill. Past forty lines it carries a sentence
-    /// about how much paper the kitchen ticket will be, because that is the
-    /// point at which a printer becomes the slowest thing in the shop and the
-    /// bill is usually two parties on one table.
-    ///
-    /// A warning and never a limit: a wedding party really does order sixty
-    /// dishes, and requirement 3 says billing never stops.
+    /// A very long order, mentioned rather than refused.
     pub length_says: String,
 }
 
@@ -222,11 +132,9 @@ pub struct CartLineView {
     pub index: usize,
     pub name: String,
     pub note: Option<String>,
-    /// Written as a shopkeeper writes it: "2", "0.5", "1.333" (scope 1.10).
-    /// `Qty` is thousandths; the formatting is mb-core's, not the screen's.
+    /// Written as a shopkeeper writes it: "2", "0.5", "1.333".
     pub qty: String,
-    /// "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute
-    /// with.
+    /// "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute with.
     pub rate_label: String,
     pub unit_price: MoneyView,
     pub gross: MoneyView,
@@ -236,12 +144,7 @@ pub struct CartLineView {
     pub modifiers: Vec<String>,
 }
 
-/// The totals block — **a feature, not a footer.**
-///
-/// Audit **B11**: *"the tax report splits GST 50/50 into CGST/SGST always. No
-/// IGST, no inter-state, no HSN summary, and nothing that can be filed
-/// directly."* This is where a chartered accountant first sees whether the
-/// product can be filed from, so it never collapses into one "GST" line.
+/// The totals block — a feature, not a footer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -250,16 +153,15 @@ pub struct BillView {
     pub line_discount: MoneyView,
     pub bill_discount: MoneyView,
     pub total_discount: MoneyView,
-    /// **D15.** *"A discount that had to be capped says so; the flag reaches
-    /// the bill."* It reaches `Bill`; if the screen dropped it, the flag would
-    /// have travelled three phases to die on the last hop.
+    /// "A discount that had to be capped says so; the flag reaches the bill." It reaches
+    /// `Bill`; if the screen dropped it, the flag would have travelled three phases to die on
+    /// the last hop.
     pub discount_capped: bool,
     pub charges: Vec<ChargeView>,
-    /// One row per rate (scope 2.7). Two rates means two rows, always.
+    /// One row per rate.
     pub tax_rows: Vec<TaxRowView>,
     pub tax_total: MoneyView,
-    /// Scope 2.3 — the liquor line that lets a bar bill at all. **Never inside
-    /// a GST total.**
+    /// The liquor line that lets a bar bill at all.
     pub non_gst_value: MoneyView,
     pub exempt_value: MoneyView,
     pub round_off: MoneyView,
@@ -300,96 +202,54 @@ pub struct PaymentView {
     pub reference: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
 // The floor.
-// ---------------------------------------------------------------------------
 
-/// One tile in the grid — **the only view of open orders** (scope 1.4).
+/// One tile in the grid — the only view of open orders.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct TableView {
     pub id: String,
     pub label: String,
-    /// The section's name, or `None` for the "No table" group that holds open
-    /// parcel and self-service orders — *"so no order is ever invisible"*.
+    /// The section's name, or `None` for the "No table" group that holds open parcel and
+    /// self-service orders — "so no order is ever invisible".
     pub section: Option<String>,
     pub seats: u32,
     pub state: TableState,
     /// `None` when the table is free.
     pub total: Option<MoneyView>,
-    /// How long it has been sitting. **Computed from the order's own
-    /// timestamp**, never from a counter the screen keeps — a screen that
-    /// counts loses the count when it re-renders, which is the same argument
-    /// D5 makes about business days.
+    /// How long it has been sitting.
     pub minutes: Option<u32>,
-    /// Whether the kitchen has been told (crown jewel 2's delta ledger).
+    /// Whether the kitchen has been told.
     pub kitchen_told: bool,
-    /// Minutes since the last kitchen ticket went out — scope 14.2's second
-    /// timer, and the one that catches a forgotten table: *"food ordered 18
-    /// minutes ago and nothing since"*. `None` when nothing has been sent.
-    ///
-    /// Read from `order_events`, never from the ledger: the ledger is what the
-    /// kitchen believes NOW and its rows are rewritten whenever the order
-    /// changes, so a timestamp on them would reset when a cashier typed.
+    /// Minutes since the last kitchen ticket went out — scope 14.2's second timer, and the one
+    /// that catches a forgotten table: "food ordered 18 minutes ago and nothing since".
     pub kitchen_minutes: Option<u32>,
     pub order_id: Option<String>,
-    /// The bill number this order has already claimed, formatted as it will be
-    /// printed. Empty until there is an order.
+    /// The bill number this order has already claimed, formatted as it will be printed.
     pub bill_number: Option<String>,
-    /// **This is the tile the cashier is looking at** — the cart is on it.
-    ///
-    /// A flag and not a [`TableState`], and that is the fix rather than a
-    /// detail of it. It WAS a state, `TableState::Loaded`, and two things
-    /// followed from that which the owner found on 2026-08-22:
-    ///
-    /// 1. **An empty table could not be selected.** `Loaded` was decided by
-    ///    matching the cart's ORDER against the tile's order, and a table with
-    ///    nothing typed on it yet has no order — the order is not created until
-    ///    the first line. So tapping table 2 opened the cart for table 2 and
-    ///    left every tile on the floor looking identical. *"user should know
-    ///    which table he selected right?"*
-    /// 2. **Selecting a late table hid that it was late.** One field cannot
-    ///    hold two facts, so `Loaded` overrode `Late` — and §4 calls the late
-    ///    signal *"the single most useful thing a floor view can show"*.
-    ///
-    /// Being selected is not a condition the table is in; it is a fact about
-    /// where the cashier is. So the tile draws the state AND the ring, and a
-    /// late table that is selected is visibly both.
+    /// This is the tile the cashier is looking at — the cart is on it.
     pub selected: bool,
 }
 
-/// **State is carried in form as well as colour** (UI_GUIDELINES §2 rule 2).
-/// Grey-scale the screen and all four must still be distinguishable.
+/// State is carried in form as well as colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum TableState {
-    /// Dashed outline, no fill. No colour at all.
+    /// Dashed outline, no fill.
     Free,
     /// Solid card, left stripe, amount in mono.
     Occupied,
-    /// Past the WARN threshold. Stripe plus a plain timer — the state that
-    /// says "keep an eye on this one" without shouting.
-    ///
-    /// P14 added this half. One threshold meant a table was fine and then
-    /// suddenly red, which is a smoke alarm rather than a floor view.
+    /// Past the WARN threshold.
     Waiting,
-    /// Past the LATE threshold. Stripe plus an emphasised timer.
-    ///
-    /// §4: *"the single most useful thing a floor view can show, and no
-    /// version of Magic Bill has ever had it. It is not optional."*
+    /// Past the LATE threshold.
     Late,
 }
 
-// **There was a fifth variant, `Loaded`, and removing it is the fix.** It meant
-// "the order currently in the cart", which is not a condition of the table at
-// all — see [`TableView::selected`] for the two bugs that came of keeping it
-// here. Nothing replaces it in this enum on purpose: a state that can hide
-// `Late` is a state that should not be in the same field as `Late`.
+// There was a fifth variant, `Loaded`, and removing it is the fix.
 
-/// A menu item, as the screen offers it. P13 owns the menu properly; this is
-/// what the billing screen needs to put something in a cart.
+/// A menu item, as the screen offers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -401,9 +261,7 @@ pub struct MenuItemView {
     pub category: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
 // Building the views.
-// ---------------------------------------------------------------------------
 
 /// The whole cart region, from the cart and its freshly computed bill.
 pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiResult<CartView> {
@@ -433,10 +291,8 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         .collect();
 
     let paid = state.settlement.total_paid().map_err(money_error)?;
-    // **`balance`, not `amount_due`.** `amount_due` is what the bill ASKS for
-    // (the total plus any tip); `balance` is what is LEFT after what has been
-    // taken. Getting these the wrong way round showed "Balance 336.00" beside
-    // "Cash 336.00" — found by paying a bill and looking at it.
+    // `balance`, not `amount_due`. `amount_due` is what the bill ASKS for (the total plus any
+    // tip); `balance` is what is LEFT after what has been taken.
     let due = state
         .settlement
         .balance(bill.grand_total)
@@ -517,24 +373,15 @@ fn bill_view(bill: &Bill) -> UiResult<BillView> {
     })
 }
 
-/// **Who this shop is, for the tax pipeline.** The single place the stored
-/// setting becomes [`mb_core::Registration`].
+/// Who this shop is, for the tax pipeline.
 pub fn registration_of(config: &crate::settings::ShopConfig) -> mb_core::Registration {
     config.store.registration()
 }
 
-/// What a line's tax is called on screen. A **label**, never a number to
-/// compute with — R8.
-///
-/// It takes the whole [`mb_core::TaxSpec`] rather than a rate and a treatment,
-/// because P33 split those into two independent questions: what KIND of supply
-/// this is, and whether the price already contains the tax. The old
-/// four-armed match could not express "outside GST, at 20% state VAT" at all,
-/// which is exactly the hole that let a bar undercharge every drink.
+/// What a line's tax is called on screen.
 fn rate_label(tax: mb_core::TaxSpec) -> String {
     match tax.kind {
-        // A liquor line with no rate reads as it always did. One with a rate
-        // says so — and only P33 made that state reachable.
+        // A liquor line with no rate reads as it always did.
         mb_core::TaxKind::OutsideGst => {
             if tax.rate.is_zero() {
                 "Non-GST".to_owned()
@@ -579,48 +426,18 @@ fn money_error(e: impl std::fmt::Display) -> UiError {
 }
 
 /// Build the floor: every table, plus the open orders that have no table.
-///
-/// Takes the open orders and the tables and joins them **here**, because the
-/// join is a screen concern — a table with no order is a tile, and an order
-/// with no table is also a tile, and neither of those is a row in a database.
-/// What is true of the whole ROOM rather than of one table — so `floor_view`
-/// takes four arguments instead of eight, the same trick [`Seat`] plays one
-/// level down.
 pub struct Room<'a> {
-    /// **Where the cashier's cart is — or `None` when the screen asking has no
-    /// cart behind it.**
-    ///
-    /// The Floor screen passes `None`, and that is the whole of it. The owner,
-    /// 2026-08-22: *"why is the table i selected in the billing section is
-    /// highlighted in floor section also? it makes no sense."* They are right.
-    /// A ring on a tile means **"this is the table your cart is on"**, which is
-    /// a fact about the billing screen; the Floor screen is a view of the room
-    /// and has no cart. Marking a tile there answered a question nobody on that
-    /// screen had asked.
-    ///
-    /// An `Option` rather than two `None`s so the caller has to say which it
-    /// is. A screen that forgets to pass a cart and a screen that has none
-    /// would otherwise look identical here.
+    /// Where the cashier's cart is — or `None` when the screen asking has no cart behind it.
     pub cart_is_on: Option<CartIsOn<'a>>,
     pub now: Timestamp,
-    /// **Both thresholds come from settings** (P14, scope 14.2). A dosa counter
-    /// turns a table in eight minutes and a fine-dining room in ninety; the one
-    /// hard-coded constant that used to live here was wrong for both.
+    /// Both thresholds come from settings.
     pub warn_after: i64,
     pub late_after: i64,
-    /// P17: the round-off mode and the default charges a running total is
-    /// computed with. A tile that rounded differently from the bill would be a
-    /// second money path (R2).
+    /// The round-off mode and the default charges a running total is computed with.
     pub config: &'a crate::settings::ShopConfig,
 }
 
-/// **Which tile the cart is on**, in the two ways it can be said.
-///
-/// Both, because a cart is on a table from the moment somebody taps it and only
-/// gets an order once a line is typed — and "which tile am I looking at" has to
-/// be answerable in the gap between those two. Answering it from the order
-/// alone is what left an empty selected table looking like every other empty
-/// table (owner, 2026-08-22). See [`TableView::selected`].
+/// Which tile the cart is on, in the two ways it can be said.
 pub struct CartIsOn<'a> {
     /// The saved order the cart is holding, once it has one.
     pub order: Option<&'a str>,
@@ -641,8 +458,8 @@ pub fn floor_view(
         late_after,
         config,
     } = room;
-    // Split out once. A screen with no cart marks nothing, and every comparison
-    // below is against `None`, which nothing matches.
+    // Split out once. A screen with no cart marks nothing, and every comparison below is
+    // against `None`, which nothing matches.
     let (loaded_order, loaded_table) =
         cart_is_on.map_or((None, None), |cart| (cart.order, cart.table));
     let mut out = Vec::with_capacity(tables.len() + open.len());
@@ -661,9 +478,7 @@ pub fn floor_view(
                 .is_some_and(|t| t.as_str() == table.id.as_str())
         });
 
-        // **Decided here, where both halves are in scope**, and nowhere else.
-        // `tile_for` can see the order and `floor_view` can see the table; a
-        // rule that needs both belongs to whichever can see both.
+        // Decided here, where both halves are in scope, and nowhere else.
         let selected = loaded_table == Some(table.id.as_str())
             || order.is_some_and(|o| loaded_order == Some(o.core().id.as_str()));
 
@@ -686,9 +501,7 @@ pub fn floor_view(
                 label: table.label.clone(),
                 section,
                 seats: crate::ipc::count(table.seats),
-                // **A free table is free even while it is being looked at.**
-                // This used to be the whole of the bug: there was nowhere to
-                // put "and the cashier is on it", so the tile said nothing.
+                // A free table is free even while it is being looked at.
                 state: TableState::Free,
                 selected,
                 total: None,
@@ -702,15 +515,12 @@ pub fn floor_view(
     }
 
     // The "No table" group — parcel and self-service orders, at the end.
-    // §4: *"so no order is ever invisible."* T4 exists because this is exactly
-    // the kind of order that goes missing.
     for order in open.iter().filter(|o| o.core().table.is_none()) {
-        // No token accessor on AnyOrder (a draft has none), so a tile with no
-        // table is labelled by its order type. P10 shows the token once an
-        // order has been opened and numbered.
+        // No token accessor on AnyOrder (a draft has none), so a tile with no table is labelled
+        // by its order type.
         let label = order_type_label(order.core().order_type).to_owned();
-        // A parcel or self-service order has no table, so the order is the
-        // only thing there is to match on.
+        // A parcel or self-service order has no table, so the order is the only thing there is
+        // to match on.
         let selected = loaded_order == Some(order.core().id.as_str());
         out.push(tile_for(
             order,
@@ -730,16 +540,13 @@ pub fn floor_view(
     out
 }
 
-/// Where a tile sits and how long a table may sit there — the four things
-/// that describe the SEAT rather than the order in it, so `tile_for` takes two
-/// arguments instead of six.
+/// Where a tile sits and how long a table may sit there — the four things that describe the
+/// SEAT rather than the order in it, so `tile_for` takes two arguments instead of six.
 struct Seat<'a> {
     label: String,
     section: Option<String>,
     seats: i64,
-    /// Already decided by [`floor_view`] — see [`TableView::selected`]. It
-    /// arrives answered rather than as the two ids to compare, because the
-    /// comparison needs the table and this struct describes one seat.
+    /// Already decided by `floor_view` — see `TableView::selected`.
     selected: bool,
     now: Timestamp,
     warn_after: i64,
@@ -765,9 +572,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         .max(0);
 
     TableView {
-        // **Being selected no longer costs the table its state.** This match
-        // began with `if loaded { Loaded }`, so opening a late table in the
-        // cart turned off the one signal §4 calls not optional.
+        // Being selected no longer costs the table its state.
         state: if minutes >= late_after {
             TableState::Late
         } else if minutes >= warn_after {
@@ -778,16 +583,12 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         selected,
         total: running_total(order, config),
         minutes: Some(crate::ipc::count(minutes)),
-        // The delta ledger (crown jewel 2) answers "is there anything the
-        // kitchen has not been told?". An error reading it is not a reason to
-        // claim the kitchen is up to date, so it reads as "not told".
+        // The delta ledger answers "is there anything the kitchen has not been told?".
         kitchen_told: core
             .kitchen
             .pending(&core.cart)
             .is_ok_and(|pending| pending.is_empty()),
-        // Filled in by `floor::floor_on`, which is the only caller with the
-        // events table open. A tile built anywhere else honestly says "no
-        // ticket time known" rather than guessing from created_at.
+        // Filled in by `floor::floor_on`, which is the only caller with the events table open.
         kitchen_minutes: None,
         order_id: Some(id.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
@@ -799,15 +600,6 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
 }
 
 /// What the tile shows as the running total.
-///
-/// Recomputed from the cart rather than stored: an open order has no bill yet,
-/// and inventing one on the tile would be a second money path (R2).
-/// The bill an order WOULD produce right now.
-///
-/// P29 reads it too: a delivery that has not been settled yet has no `bills`
-/// row, so the board would show a rider nothing to collect on an order the
-/// customer has not paid for. One function, so the floor tile and the delivery
-/// board cannot disagree about what an open order is worth.
 pub(crate) fn running_total(
     order: &AnyOrder,
     config: &crate::settings::ShopConfig,
@@ -836,14 +628,8 @@ pub fn menu_view(item: &mb_db::repo::menu::MenuItem) -> MenuItemView {
 }
 
 /// Turn a menu row into the snapshot a cart line is frozen from.
-///
-/// **Crown jewel 4** — *"frozen item snapshots on every order; old bills never
-/// change when you change a price."* The snapshot is taken here, at the moment
-/// of adding, and never looked up again.
 pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
-    // **The whole tax question moves across in one piece** (P33). It used to be
-    // a rate here and a treatment on the next line, which is how a liquor
-    // line lost its state VAT rate on the way to the cart.
+    // The whole tax question moves across in one piece.
     let mut snapshot = ItemSnapshot::new(
         item.id.clone(),
         item.name.clone(),
@@ -857,14 +643,9 @@ pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
     if let Some(category) = item.category_id.clone() {
         snapshot = snapshot.with_category(category);
     }
-    // P24, and crown jewel 4 is why they are copied rather than looked up
-    // later: an owner who changes a dish's course or its cooking time this
-    // evening must not change what the kitchen was already told this
-    // afternoon. Leaving these behind is not a small miss — it silently
-    // switches off every timer and every course on the kitchen screen.
     snapshot.course = item.course.clone();
-    // A negative or absurd number in the column becomes "no target" rather than
-    // a panic — the timer is a help, never a reason a bill cannot be rung up.
+    // A negative or absurd number in the column becomes "no target" rather than a panic — the
+    // timer is a help, never a reason a bill cannot be rung up.
     snapshot.prep_minutes = item.prep_minutes.and_then(|m| u32::try_from(m).ok());
     snapshot
 }
@@ -872,38 +653,13 @@ pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
 /// The cart, held for the life of the process.
 pub type Cart_ = Mutex<CartState>;
 
-// ---------------------------------------------------------------------------
-// Turning a cart into an order (P10).
-// ---------------------------------------------------------------------------
+// Turning a cart into an order.
 
-/// **The shop's FIRST till**, and only that.
-///
-/// Migration 0001 seeds this row, every bill a one-till shop has ever written
-/// points at it, and a shop that adds a second till in 2027 must not have its
-/// history orphaned from the machine that wrote it. So it stays, and it is the
-/// answer [`crate::state::App::terminal_id`] gives on a machine that has never
-/// joined anything.
-///
-/// **It is not "which till is this".** That question is answered by
-/// `App::terminal_id`, which reads this machine's own `terminal.json` — and
-/// after P27 it has to be, because the bill series is keyed on it (D135) and
-/// two tills answering `terminal_default` is two tills printing bill A/0001.
+/// The shop's FIRST till, and only that.
 pub const TERMINAL: &str = "terminal_default";
 
 impl CartState {
     /// Build the draft this cart represents.
-    ///
-    /// **Crown jewel 4 is already satisfied** by the time this runs: each line
-    /// was frozen from an `ItemSnapshot` when it was added, so an order carries
-    /// what the menu said *then* and *"old bills never change when you change a
-    /// price."*
-    /// Enough of an order for the kitchen templates to read — the cart, the
-    /// type and the ledger.
-    ///
-    /// P12's cancellation slip needs an `OrderCore` to look line names up in,
-    /// and the cart being mid-edit is exactly when it needs one. Nothing here
-    /// is saved; the id and the times are placeholders, and `to_draft` is still
-    /// the only thing that builds an order that reaches the disk.
     pub fn to_core_for_printing(&self) -> mb_core::OrderCore {
         mb_core::OrderCore {
             id: mb_core::OrderId::new(
@@ -927,10 +683,8 @@ impl CartState {
         }
     }
 
-    /// `by` is **who opened it**, not who is signed in now — the caller passes
-    /// `opened_by` and falls back to the current person only for a cart that
-    /// somehow has neither. See `flows::complete_bill`, which is the only
-    /// caller, and P11 item 8 for why the two differ.
+    /// `by` is who opened it, not who is signed in now — the caller passes `opened_by` and
+    /// falls back to the current person only for a cart that somehow has neither.
     pub fn to_draft(
         &self,
         at: Timestamp,
@@ -939,15 +693,11 @@ impl CartState {
     ) -> UiResult<mb_core::DraftOrder> {
         let day =
             mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
-        let id = mb_core::OrderId::new(self.order_id.clone().unwrap_or_else(|| {
-            // **The terminal used to be the whole of the uniqueness**, on the
-            // reasoning that D13 makes ids text because two terminals collide
-            // on integers. True, and not enough: two orders on the SAME till in
-            // one millisecond collided with each other. The random tail is what
-            // makes an id unique; the till stays because a support screenshot
-            // that says which counter wrote a row is worth the four characters.
-            format!("{}_{till}", crate::newid::fresh_at("ord", at))
-        }));
+        let id = mb_core::OrderId::new(
+            self.order_id
+                .clone()
+                .unwrap_or_else(|| format!("{}_{till}", crate::newid::fresh_at("ord", at))),
+        );
 
         let mut draft = mb_core::DraftOrder::new(id, day, at, self.order_type, by);
         if let Some(table) = self.table.as_ref() {
@@ -960,15 +710,7 @@ impl CartState {
     }
 }
 
-/// What the kitchen has not been told about yet — **crown jewel 2.**
-///
-/// > *"The delta KOT. Only what the kitchen has not seen gets printed, and what
-/// > was printed is remembered **in the database**, not in the screen's
-/// > memory."*
-///
-/// The ledger travels with the order, so this is right after a merge, after a
-/// restart, and on a second terminal. A screen-held delta would be wrong on all
-/// three.
+/// What the kitchen has not been told about yet.
 pub fn pending_for_kitchen(
     state: &CartState,
 ) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
@@ -1000,11 +742,7 @@ mod tests {
         Qty::from_whole(1).expect("qty")
     }
 
-    /// **T9 — the cart is in Rust, and the merge rule is mb-core's.**
-    ///
-    /// Adding the same item twice, with the same note, is ONE line of quantity
-    /// two. A cart in TypeScript would have re-implemented this and the two
-    /// would have disagreed the first time somebody pressed dosa twice.
+    /// The cart is in Rust, and the merge rule is mb-core's.
     #[test]
     fn adding_the_same_item_twice_merges_into_one_line() {
         let mut state = CartState::default();
@@ -1025,8 +763,8 @@ mod tests {
         assert_eq!(view.lines[0].qty, "2");
     }
 
-    /// A different note is a different line — the identity includes it, so
-    /// "dosa" and "dosa, no onion" go to the kitchen as two things.
+    /// A different note is a different line — the identity includes it, so "dosa" and "dosa, no
+    /// onion" go to the kitchen as two things.
     #[test]
     fn a_different_note_is_a_different_line() {
         let mut state = CartState::default();
@@ -1053,11 +791,7 @@ mod tests {
         );
     }
 
-    /// **T5 — the totals block never collapses** (audit B10 and B11).
-    ///
-    /// A bill with 5%, 18% and non-GST on it shows **two rate rows and a
-    /// separate non-GST value**. v1 showed one GST figure split 50/50 with no
-    /// rates at all, which is why a chartered accountant could not file from it.
+    /// The totals block never collapses.
     #[test]
     fn a_mixed_rate_bill_keeps_every_rate_apart() {
         let mut state = CartState::default();
@@ -1113,17 +847,14 @@ mod tests {
         assert!(view.bill.tax_rows.iter().any(|r| r.rate_label == "5%"));
         assert!(view.bill.tax_rows.iter().any(|r| r.rate_label == "18%"));
 
-        // Scope 2.3: the bar line, and it is NEVER inside a GST total.
+        // The bar line, and it is NEVER inside a GST total.
         assert_eq!(view.bill.non_gst_value.paise, 22_000);
         for row in &view.bill.tax_rows {
             assert!(row.taxable.paise < 22_000, "alcohol leaked into a GST row");
         }
     }
 
-    /// **Every figure the screen shows came from the bill Rust computed.**
-    ///
-    /// R8, checked rather than asserted: the view's grand total is the `Bill`'s
-    /// grand total, to the paisa, and its text is what `Money` formatted.
+    /// Every figure the screen shows came from the bill Rust computed.
     #[test]
     fn every_figure_is_the_cores_figure() {
         let mut state = CartState::default();
@@ -1159,16 +890,7 @@ mod tests {
         );
     }
 
-    /// **Balance is what is LEFT, not what the bill asks for.**
-    ///
-    /// The regression this pins was found by paying a bill and looking at it:
-    /// the panel said "Cash 336.00" and "Balance 336.00" at the same time,
-    /// because both this view and `complete_bill` had called `amount_due` —
-    /// which is the total plus tip and never falls as money comes in. The same
-    /// mistake made Complete bill refuse every bill on earth.
-    ///
-    /// Every assertion below is wrong under `amount_due` and right under
-    /// `balance`, which is the only reason to have it.
+    /// Balance is what is LEFT, not what the bill asks for.
     #[test]
     fn paying_the_bill_brings_the_balance_down_to_nothing() {
         let mut state = CartState::default();
@@ -1227,8 +949,7 @@ mod tests {
         assert!(state.settlement.is_settled(total).expect("settled"));
     }
 
-    /// **T7 — fractional quantity** (scope 1.10). `Qty` is thousandths; the
-    /// screen shows what mb-core formatted, never its own rounding.
+    /// Fractional quantity.
     #[test]
     fn a_fractional_quantity_reaches_the_screen_intact() {
         let mut state = CartState::default();
@@ -1255,8 +976,8 @@ mod tests {
         );
     }
 
-    /// A rate is a **label**, and the treatments do not have a percentage at
-    /// all — which is why nothing on the screen tries to compute with one.
+    /// A rate is a label, and the treatments do not have a percentage at all — which is why
+    /// nothing on the screen tries to compute with one.
     #[test]
     fn a_rate_is_a_label_not_a_number() {
         let pc = |n: u32| TaxRate::from_percent(n).expect("a real rate");
@@ -1270,12 +991,11 @@ mod tests {
             "Non-GST"
         );
         assert_eq!(rate_label(mb_core::TaxSpec::exempt()), "Exempt");
-        // **The state P33 made reachable**: liquor that actually carries a rate.
         assert_eq!(rate_label(mb_core::TaxSpec::liquor(pc(20))), "VAT 20%");
     }
 
-    /// The order type survives a round trip through the label, because the
-    /// screen sends back what it was given.
+    /// The order type survives a round trip through the label, because the screen sends back
+    /// what it was given.
     #[test]
     fn every_order_type_round_trips_through_its_label() {
         for kind in [

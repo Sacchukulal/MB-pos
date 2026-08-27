@@ -1,57 +1,11 @@
-//! **How big text is, in dots.** One answer, for every sink — P32.
-//!
-//! # Why this module exists
-//!
-//! [`crate::layout`] used to work out how many characters fit on a line with
-//! arithmetic:
+//! How big text is, in dots.
 //!
 //! ```text
 //! chars = usable_columns * 24 / height
 //! ```
-//!
-//! That is a **guess**. It assumes every character is half as wide as it is
-//! tall, which is true of the printer's own font and of nothing else. The
-//! raster sink then drew with a real typeface at a size chosen by a completely
-//! different rule, and the on-screen preview scaled the requested height in
-//! CSS by a third rule. Three answers to one question, and the paper was the
-//! only place anybody could see them disagree.
-//!
-//! Measured on the owner's own bill, 2026-08-23: a request for 24 dots drew a
-//! **13-dot** capital in a 27-dot row on the built-in face, and a 9-dot capital
-//! in Times New Roman. Five of the ten sizes on the settings screen printed
-//! identically.
-//!
-//! So the question is asked **once**, here, and the answer is handed to the
-//! layout and to every sink. The layout still decides every wrap, every column
-//! and every break — D29 is untouched — it simply stops inventing the one fact
-//! it was never in a position to know.
-//!
-//! # A size is a cap height
-//!
-//! The number a shop picks on the settings screen is **the height of a capital
-//! letter, in dots**. Not a nominal row height, not a multiplier: the thing a
-//! person can hold a ruler against. 8 dots to the millimetre, so size 15 is a
-//! capital just under 2 mm tall.
-//!
-//! Everything else follows from the face: the advance is whatever that face
-//! gives at that size, and the row is the real ink above and below the baseline
-//! plus a little leading. **Nothing is ever squeezed to make it fit** — the
-//! owner ruled on that, and a name too long for its column wraps instead.
-//!
-//! # Two engines, one shape
-//!
-//! [`Metrics::face`] measures a real typeface — the graphics engine, and the
-//! preview beside it. [`Metrics::printer_font`] describes the printer's own
-//! font, which has one face at 1×, 2× and 3× and cannot be asked for anything
-//! else. Both answer the same questions, so the layout does not care which it
-//! has, and `Grid` — the enum that used to carry that difference — is gone.
 
-// Dots, columns and cap heights. No amount is computed anywhere in this file:
-// the templates hand `Money::to_plain_string` in as text.
-#![allow(
-    clippy::integer_division,
-    reason = "dots and columns, not money"
-)]
+// Dots, columns and cap heights.
+#![allow(clippy::integer_division, reason = "dots and columns, not money")]
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -60,11 +14,10 @@ use crate::doc::Style;
 use crate::font::{Cell, Font};
 use crate::paper::Paper;
 
-/// **What one size is worth, in dots, on this paper in this face.**
+/// What one size is worth, in dots, on this paper in this face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SizeMetrics {
-    /// The cap height that will actually be drawn. Equal to what was asked for
-    /// on the graphics engine; snapped to 1×, 2× or 3× on the printer's own.
+    /// The cap height that will actually be drawn.
     pub cap: u16,
     /// One character's advance, in dots.
     pub advance: u32,
@@ -72,7 +25,7 @@ pub struct SizeMetrics {
     pub ascent: u32,
     /// Ink below the baseline, in dots.
     pub descent: u32,
-    /// The whole row: ink plus leading. **What the paper spends.**
+    /// The whole row: ink plus leading.
     pub row: u32,
     /// The ESC/POS multiplier nearest this size, for the text engine.
     pub scale: u8,
@@ -91,10 +44,6 @@ impl SizeMetrics {
 }
 
 /// Everything the layout and the sinks need to know about how big text is.
-///
-/// Cheap to clone: the face is an `Arc` and the measurements are cached behind
-/// one, so the queue can hand the same `Metrics` to a layout, a raster and a
-/// preview without measuring anything twice.
 #[derive(Clone)]
 pub struct Metrics {
     paper: Paper,
@@ -114,11 +63,7 @@ impl std::fmt::Debug for Metrics {
     }
 }
 
-/// **The capital height of the printer's own font at 1×.**
-///
-/// ESC/POS Font A is a 12 × 24 cell and its capitals are 17 dots. This is the
-/// number the text engine reports back, so a shop on that engine is told what
-/// it is really getting rather than what it asked for.
+/// The capital height of the printer's own font at 1×.
 const PRINTER_CAP: u16 = 17;
 
 impl Metrics {
@@ -147,18 +92,11 @@ impl Metrics {
         self.paper
     }
 
-    /// Printable dots across. A4 has none — it is the PDF sink's paper — and
-    /// reports its column count times the base advance instead, so a report
-    /// still lays out.
     #[must_use]
     pub fn dots(&self) -> u32 {
         match self.paper.kind.dots() {
             Some(dots) => dots,
-            // A4: no thermal head, so "dots" is a fiction. Make it a consistent
-            // one — the column count at **this face's** body advance, which is
-            // the same number `Laid::base_advance` records — rather than zero,
-            // or the printer grid's 12, which would leave the layout and the
-            // sinks dividing by different things.
+            // No thermal head, so "dots" is a fiction.
             None => {
                 let columns = u32::try_from(self.paper.columns()).unwrap_or(1);
                 columns * self.body().advance.max(1)
@@ -166,36 +104,32 @@ impl Metrics {
         }
     }
 
-    /// One column of the printer's own grid, in dots. 12 on 58 mm and 80 mm
-    /// paper, 13 on 100 mm. What an indent and a `Spacer` are counted in.
+    /// One column of the printer's own grid, in dots.
     #[must_use]
     pub fn base_advance(&self) -> u32 {
         self.paper.dots_per_column().unwrap_or(12)
     }
 
-    /// Is every character the same width? A proportional face is aligned by
-    /// the layout's boxes rather than by the spaces it padded with.
+    /// Is every character the same width?
     #[must_use]
     pub fn is_monospace(&self) -> bool {
         self.face.as_ref().is_none_or(|f| f.is_monospace())
     }
 
-    /// The face, for a sink that has to draw glyphs. `None` on the text engine,
-    /// where the printer draws its own.
+    /// The face, for a sink that has to draw glyphs.
     #[must_use]
     pub fn font(&self) -> Option<&Arc<Font>> {
         self.face.as_ref()
     }
 
-    /// The cell to rasterise this size in. Graphics engine only.
+    /// The cell to rasterise this size in.
     #[must_use]
     pub fn cell(&self, style: Style) -> Option<Cell> {
         let face = self.face.as_ref()?;
         Some(face.cell_for_cap(u32::from(self.size(style).cap)))
     }
 
-    /// **What this style is worth in dots.** The one question this module
-    /// exists to answer.
+    /// What this style is worth in dots.
     #[must_use]
     pub fn size(&self, style: Style) -> SizeMetrics {
         self.for_cap(style.size)
@@ -220,19 +154,22 @@ impl Metrics {
     }
 
     fn measure(&self, cap: u16) -> SizeMetrics {
-        let scale = Style { size: cap, bold: false }.scale();
+        let scale = Style {
+            size: cap,
+            bold: false,
+        }
+        .scale();
         match &self.face {
             None => {
-                // The printer's own font. Its cell is the paper's column, and
-                // there is nothing between the three multipliers.
+                // The printer's own font.
                 let n = u32::from(scale);
                 let advance = self.base_advance() * n;
                 let row = advance * 2;
                 SizeMetrics {
                     cap: PRINTER_CAP * u16::from(scale),
                     advance,
-                    // A 24-dot cell puts its baseline three quarters down,
-                    // which is what Font A does.
+                    // A 24-dot cell puts its baseline three quarters down, which is what Font A
+                    // does.
                     ascent: row * 3 / 4,
                     descent: row / 4,
                     row,
@@ -268,10 +205,7 @@ mod tests {
         Metrics::face(Paper::new(kind), font)
     }
 
-    /// **The size a shop picks is the size that gets drawn.**
-    ///
-    /// This is the whole of P32's first part, as one assertion. It fails on
-    /// every build before 2026-08-23, where asking for 24 drew 13.
+    /// The size a shop picks is the size that gets drawn.
     #[test]
     fn a_cap_height_is_the_cap_height_that_prints() {
         let metrics = face_metrics(PaperKind::Mm80);
@@ -298,10 +232,7 @@ mod tests {
         }
     }
 
-    /// **Every step up the ladder is visibly bigger.**
-    ///
-    /// Before P32, sizes 6 to 10 all printed at 26 dots — five choices on a
-    /// dropdown that did the same thing. Measured on the owner's install.
+    /// Every step up the ladder is visibly bigger.
     #[test]
     fn every_size_on_the_ladder_is_bigger_than_the_one_below() {
         let metrics = face_metrics(PaperKind::Mm80);
@@ -317,16 +248,11 @@ mod tests {
         }
     }
 
-    /// A row holds its ink and a little air, and nothing like the 27 dots a
-    /// 13-dot letter used to be given.
     #[test]
     fn a_row_is_its_ink_plus_leading() {
         let metrics = face_metrics(PaperKind::Mm80);
         let body = metrics.body();
         assert_eq!(body.row, body.ascent + body.descent + leading_of(body));
-        // 27 dots was what a 13-dot capital used to be given. The body
-        // capital is 15 dots now and the row is smaller than it was: a bigger
-        // letter in less paper, which is the whole of P32's first part.
         assert!(
             body.row < 27,
             "the body row is {} dots and it used to be 27 for a SMALLER letter",
@@ -338,8 +264,8 @@ mod tests {
         (u32::from(m.cap) * 12 / 100).max(2)
     }
 
-    /// The printer's own font has three sizes, and asking for anything else
-    /// gets the nearest — never a size the hardware cannot form.
+    /// The printer's own font has three sizes, and asking for anything else gets the nearest —
+    /// never a size the hardware cannot form.
     #[test]
     fn the_printer_font_has_only_three_answers() {
         let metrics = Metrics::printer_font(Paper::new(PaperKind::Mm80));
@@ -353,8 +279,8 @@ mod tests {
         assert_eq!(seen.len(), 3, "the ladder must reach all three multipliers");
     }
 
-    /// 80 mm paper at the body size is the density the product shipped with,
-    /// so no shop's bill suddenly needs a second line for a name that fitted.
+    /// 80 mm paper at the body size is the density the product shipped with, so no shop's bill
+    /// suddenly needs a second line for a name that fitted.
     #[test]
     fn the_body_size_keeps_a_usable_line_on_every_paper() {
         for (kind, least) in [

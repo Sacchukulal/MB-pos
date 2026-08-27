@@ -1,20 +1,4 @@
-/**
- * **Money going out, and what should be in the drawer** — scope 10.6.
- *
- * # Quick add is the whole feature
- *
- * A cashier records a ₹40 milk purchase mid-service or does not record it at
- * all, and the second one is exactly how v1's owner ended up with an inflated
- * net profit on their phone every single day (audit A2 / ANDROID-D1). So the
- * top of this screen is two fields and Enter, and everything else — the
- * category, the vendor, the GST split — is optional detail on a row that
- * already exists.
- *
- * # Nothing here is arithmetic
- *
- * The cash position arrives as figures AND as a sentence, the category totals
- * are summed in Rust, and the input credit arrives as "18% · 180.00". R8.
- */
+/** Money going out, and what should be in the drawer — scope 10.6. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -56,7 +40,7 @@ export function Expenses() {
   const [mode, setMode] = useState('cash');
   const [editing, setEditing] = useState<ExpenseRowView | null>(null);
   const [drawer, setDrawer] = useState(false);
-  /** P31 — the categories themselves, which nothing could add to. */
+  /** The categories themselves, which nothing could add to. */
   const [editingCategories, setEditingCategories] = useState(false);
   const toast = useToast();
 
@@ -154,8 +138,7 @@ export function Expenses() {
         }
       />
 
-      {/* Two fields and Enter. Everything else is optional detail on a row
-          that already exists. */}
+      {/* Two fields and Enter. */}
       <div className="mb-row mb-expenses__quick">
         <Input
           label="What"
@@ -192,21 +175,20 @@ export function Expenses() {
         <Button variant="primary" onClick={quickAdd}>
           Record it
         </Button>
-        {/* **Beside the box that uses them**, and this is a bug fixed by
-            looking: it was first put in the totals row, which only draws once
-            a shop has spent something TODAY — so on a quiet morning, and on
-            every shop's first day, the button was not there at all.
-
-            `save_expense_category` had no caller until P31, so the headings a
-            shop sorts its spending under were whatever migration 0001 seeded,
-            for ever. */}
+        {/*
+          Beside the box that uses them, and this is a bug fixed by looking: it was first put in
+          the totals row, which only draws once a shop has spent something TODAY — so on a quiet
+          morning, and on every shop's first day, the button was not there at all.
+        */}
         <Button variant="quiet" onClick={() => setEditingCategories(true)}>
           Categories
         </Button>
       </div>
 
-      {/* Scope 10.6's cash position — the number a drawer is counted against,
-          said as a sentence Rust wrote. */}
+      {/*
+        6's cash position — the number a drawer is counted against, said as a sentence Rust
+        wrote.
+      */}
       <div className="mb-expenses__cash">
         <span>
           In the drawer{' '}
@@ -484,22 +466,7 @@ function EditExpense({
   );
 }
 
-/**
- * **What a shop sorts its spending into** — `save_expense_category`, P16's
- * command with no caller until P31.
- *
- * The list was whatever migration 0001 seeded and could never change, so a
- * bakery filing everything under "Miscellaneous" had no way out of it — and
- * the category totals at the bottom of this screen, which are the whole reason
- * for having categories, told them nothing.
- *
- * # Retiring, not deleting
- *
- * There is no delete in Rust and this does not ask for one. Last April's
- * expenses point at their category, and removing it would leave them pointing
- * at nothing. "Remove" sets `isActive` false: it stops being offered on new
- * spending, and every figure already filed under it still adds up.
- */
+/** What a shop sorts its spending into. */
 function SpendCategories({
   view,
   onClose,
@@ -560,8 +527,8 @@ function SpendCategories({
 
       <div className="mb-stack">
         {view.allCategories
-          // The `null` id is "no category" — a real bucket on the totals and
-          // not a row anybody can rename.
+          // The `null` id is "no category" — a real bucket on the totals and not a row anybody
+          // can rename.
           .filter((c) => c.id !== null)
           .map((c) => (
             <div key={c.id} className="mb-row">

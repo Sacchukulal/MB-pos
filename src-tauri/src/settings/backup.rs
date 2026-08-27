@@ -1,22 +1,4 @@
-//! **Backup, restore, and where the shop's data actually is.**
-//!
-//! P05 built all of this — `take`, `verify`, `restore`, `prune`, `list`, the
-//! second location and the restore-before-open seam — and **none of it was
-//! reachable from a screen.** Audit group A is the most dangerous group in the
-//! whole report and its first finding is that a backup nobody has verified is
-//! not a backup. This is the screen that makes the answer visible.
-//!
-//! # Two rules that shape every function here
-//!
-//! **D27 — a restore runs BEFORE the database is opened.** So the Restore
-//! button does not restore. It writes a one-line request beside the config and
-//! asks for a restart, and start-up carries it out with nothing open. A restore
-//! that ran against a live database would be replacing the file the counter is
-//! billing into.
-//!
-//! **D26 — a backup is `VACUUM INTO`, not a file copy.** A file copy can catch
-//! a half-written page and produce a backup that opens fine and is wrong, which
-//! is the failure you never find out about until the day you need it.
+//! Backup, restore, and where the shop's data actually is.
 
 use mb_auth::Permission;
 use serde::{Deserialize, Serialize};
@@ -34,16 +16,12 @@ pub struct BackupView {
     /// Where they go, resolved — never the empty string the setting may hold.
     pub folder: String,
     pub second_folder: String,
-    /// Where the shop's live data file is (audit A5), so a support call can
-    /// ask for one folder.
+    /// Where the shop's live data file is, so a support call can ask for one folder.
     pub database: String,
     pub backups: Vec<BackupRowView>,
-    /// **The sentence at the top, and it is the whole point of the screen.**
-    /// "Last backed up this morning, and it was checked." — or the opposite,
-    /// loudly.
+    /// The sentence at the top, and it is the whole point of the screen.
     pub headline: String,
-    /// `ok`, `warn` or `danger`. Colour is never the only signal (§2), so the
-    /// headline says it in words too.
+    /// `ok`, `warn` or `danger`.
     pub tone: String,
     /// True when a restore is already waiting for the next start.
     pub restore_waiting: Option<String>,
@@ -55,11 +33,10 @@ pub struct BackupView {
 pub struct BackupRowView {
     pub path: String,
     pub name: String,
-    /// Already formatted (R8 — TypeScript does no arithmetic, on money or time).
+    /// Already formatted.
     pub taken_at: String,
     pub size: String,
-    /// What the last verify of THIS file found, in words. `None` means nobody
-    /// has ever checked it, and the screen says so rather than showing a tick.
+    /// What the last verify of THIS file found, in words.
     pub verified: Option<String>,
     pub verified_ok: bool,
 }
@@ -75,9 +52,6 @@ pub struct VerifyView {
 }
 
 /// Where backups go when the shop has not said.
-///
-/// Beside the database, because that is the folder a support call already asks
-/// for — and because a default that needs a dialog is a default nobody sets.
 pub(crate) fn folder_for(app: &App, config: &super::ShopConfig) -> std::path::PathBuf {
     if !config.backup.folder.trim().is_empty() {
         return std::path::PathBuf::from(config.backup.folder.trim());
@@ -86,18 +60,16 @@ pub(crate) fn folder_for(app: &App, config: &super::ShopConfig) -> std::path::Pa
         Ok(shop
             .path
             .parent()
-            .map_or_else(|| std::path::PathBuf::from("."), std::path::Path::to_path_buf)
+            .map_or_else(
+                || std::path::PathBuf::from("."),
+                std::path::Path::to_path_buf,
+            )
             .join("backups"))
     })
     .unwrap_or_else(|_| mb_db::locate::default_config_dir().join("backups"))
 }
 
 /// A file size, in the words a person reads.
-///
-/// Integer arithmetic, deliberately: `float_arithmetic` is denied
-/// workspace-wide (D7) and a file size is not money — but the reason the rule
-/// exists is that a number shown to somebody should be the number, and one
-/// decimal place of megabytes costs nothing to do exactly.
 #[allow(
     clippy::integer_division,
     reason = "tenths of a megabyte: the remainder is the decimal place, and it \
@@ -118,9 +90,7 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
         .with_shop(|shop| Ok(shop.path.display().to_string()))
         .unwrap_or_else(|_| "no shop is open".to_owned());
 
-    // **What a verify found, remembered.** `verify` reads the whole file, so it
-    // is a thing somebody presses rather than something a screen does on every
-    // paint — and its answer is stored against the file it was about.
+    // What a verify found, remembered.
     let verified = verify_marks(app);
 
     let rows: Vec<BackupRowView> = backups
@@ -134,9 +104,7 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
                     .path
                     .file_name()
                     .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-                taken_at: words::when(mb_core::Timestamp::from_millis(
-                    backup.manifest.taken_at_ms,
-                )),
+                taken_at: words::when(mb_core::Timestamp::from_millis(backup.manifest.taken_at_ms)),
                 size: megabytes(backup.manifest.bytes),
                 verified: mark.map(|(_, words)| words.clone()),
                 verified_ok: mark.is_some_and(|(_, w)| w.starts_with("Checked")),
@@ -145,7 +113,6 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
         })
         .collect();
 
-    // **The headline, and A1 is why it shouts.**
     let (headline, tone) = match rows.first() {
         None => (
             "This shop has never been backed up. Everything it has is on one \
@@ -177,7 +144,10 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
                 ""
             };
             (
-                format!("Last backed up {}, and it was checked.{second}", latest.taken_at),
+                format!(
+                    "Last backed up {}, and it was checked.{second}",
+                    latest.taken_at
+                ),
                 if second.is_empty() { "ok" } else { "warn" }.to_owned(),
             )
         }
@@ -196,9 +166,6 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
 }
 
 /// The verify marks, kept as one setting keyed by file name.
-///
-/// A setting rather than a table: it is a handful of short strings about files
-/// that come and go, and a table would need pruning to match `prune`.
 const VERIFIED_KEY: &str = "backup.verified";
 
 fn verify_marks(app: &App) -> Vec<(String, String)> {
@@ -264,9 +231,7 @@ pub fn back_up_now_on(app: &App) -> UiResult<BackupView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // **The second location, and it is the one that survives the disk.** A
-    // failure here does not fail the backup — one good copy is better than
-    // none — but it is said out loud rather than swallowed (R3).
+    // The second location, and it is the one that survives the disk.
     let second = config.backup.second_folder.trim().to_owned();
     if !second.is_empty() {
         match mb_db::backup::copy_to_second_location(&backup, std::path::Path::new(&second)) {
@@ -275,8 +240,7 @@ pub fn back_up_now_on(app: &App) -> UiResult<BackupView> {
         }
     }
 
-    // Keep only as many as the shop asked for. `prune` is P05's, and it reads
-    // the manifests rather than the file dates.
+    // Keep only as many as the shop asked for.
     match mb_db::backup::prune(&folder, at.millis()) {
         Ok(gone) if !gone.is_empty() => log_info!("{} old backup(s) removed", gone.len()),
         Ok(_) => {}
@@ -289,8 +253,8 @@ pub fn back_up_now_on(app: &App) -> UiResult<BackupView> {
 
 pub fn verify_on(app: &App, path: String) -> UiResult<VerifyView> {
     guard::require(app, Permission::BackupRun)?;
-    let report = mb_db::backup::verify(std::path::Path::new(&path))
-        .map_err(|e| words::from_db(&e))?;
+    let report =
+        mb_db::backup::verify(std::path::Path::new(&path)).map_err(|e| words::from_db(&e))?;
 
     let (ok, message) = if report.is_ok() && report.count_mismatches.is_empty() {
         (true, "Checked, and this backup is sound.".to_owned())
@@ -314,11 +278,7 @@ pub fn verify_on(app: &App, path: String) -> UiResult<VerifyView> {
         )
     };
 
-    remember_verify(
-        app,
-        &path,
-        if ok { "Checked" } else { "Did not pass" },
-    );
+    remember_verify(app, &path, if ok { "Checked" } else { "Did not pass" });
 
     Ok(VerifyView {
         ok,
@@ -337,8 +297,7 @@ const fn yes_no(ok: bool) -> &'static str {
     if ok { "ok" } else { "NOT ok" }
 }
 
-/// **D27 — this does not restore.** It writes the request and asks for a
-/// restart, because a restore replaces the file the counter is billing into.
+/// This does not restore.
 pub fn request_restore_on(app: &App, path: String) -> UiResult<BackupView> {
     let who = guard::require(app, Permission::BackupRun)?;
 
@@ -348,9 +307,7 @@ pub fn request_restore_on(app: &App, path: String) -> UiResult<BackupView> {
             "That backup file is not there any more. Choose another one.",
         ));
     }
-    // **Refuse to restore something that has not been checked.** A1 again: the
-    // one moment a bad backup does the most damage is the moment it replaces a
-    // good database.
+    // Refuse to restore something that has not been checked.
     let checked = verify_marks(app)
         .into_iter()
         .any(|(p, w)| p == path && w.starts_with("Checked"));
@@ -379,8 +336,6 @@ pub fn cancel_restore_on(app: &App) -> UiResult<BackupView> {
     status_on(app)
 }
 
-/// **Audit A5, and it is the screen somebody opens when everything else is
-/// broken.** Where the shop's usual places are, and what is in them.
 pub fn find_shops_on(app: &App) -> UiResult<Vec<String>> {
     guard::require(app, Permission::BackupRun)?;
     Ok(mb_db::locate::search_usual_places(&[])
@@ -399,9 +354,7 @@ pub fn find_shops_on(app: &App) -> UiResult<Vec<String>> {
         .collect())
 }
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn backup_status(app: tauri::State<'_, App>) -> UiResult<BackupView> {

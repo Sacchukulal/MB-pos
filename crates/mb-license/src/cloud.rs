@@ -1,31 +1,3 @@
-//! **The seam Phase 8 implements, and the stub this session builds against.**
-//!
-//! Requirement 7: *"this session defines the interface the cloud will
-//! implement. Behind it, a local stub is enough to build and test against.
-//! Nothing here may hang."*
-//!
-//! # No method takes a deadline, on purpose
-//!
-//! It would be the obvious signature and it would be the wrong one. See
-//! [`crate::deadline`]: a deadline the callee promises to honour is a request,
-//! not a deadline. Every **call site** wraps the call in
-//! [`crate::deadline::within`], so an implementation cannot forget one — and
-//! `no_cloud_call_is_unwrapped` in `state.rs` reads the source and proves no
-//! call site skipped it, which is the same shape as `guard`'s coverage test.
-//!
-//! # What the cloud must do that the counter cannot make it do
-//!
-//! Two of these findings are only half fixable from here, and
-//! `MB-pos/docs/LICENCE_PROTOCOL.md` says so in a box so P34 cannot miss it:
-//!
-//! * **BACKEND-C4** — when a binding moves, the old machine's **cloud
-//!   credential must be revoked**, not merely unbound. *"That old machine can
-//!   still push bills, write live orders and read the whole menu — for as long
-//!   as the subscription lasts."* The counter can ask; only the cloud can do it.
-//! * **BACKEND-C6** — first activation must verify **something the buyer has**.
-//!   That is why [`Cloud::activate`] takes a `proof` and why there is no way to
-//!   call it without one.
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -34,21 +6,16 @@ use crate::snapshot::SignedSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CloudError {
-    /// No network, DNS failure, the server is down. **Never fatal** — the
-    /// counter falls back to its cached snapshot and keeps working.
+    /// No network, DNS failure, the server is down.
     #[error("we could not reach our server")]
     Unreachable,
-    /// The server answered, and said no. The sentence is the SERVER'S, and it
-    /// is shown as-is: D84's rule ("a refusal a waiter reads") applied to a
-    /// refusal an owner reads. The counter composes nothing here, because the
-    /// reason a licence was refused is a thing only the cloud knows.
+    /// The server answered, and said no.
     #[error("{0}")]
     Refused(String),
     /// The key or the proof was wrong.
     #[error("that licence key and code did not match")]
     NotRecognised,
-    /// The licence is already on another machine and the caller did not ask to
-    /// move it.
+    /// The licence is already on another machine and the caller did not ask to move it.
     #[error("this licence is already in use on another computer")]
     BoundElsewhere { machine: String },
     /// The server answered with something this build could not read.
@@ -61,59 +28,29 @@ pub enum CloudError {
 pub struct Ask {
     pub key: String,
     pub machine: MachineId,
-    /// The counter's version, so the cloud can tell an old till from a new one
-    /// without guessing from behaviour.
+    /// The counter's version, so the cloud can tell an old till from a new one without guessing
+    /// from behaviour.
     pub counter_version: String,
 }
 
-/// **Everything that has to leave this machine.** Five calls, and no more.
+/// Everything that has to leave this machine.
 pub trait Cloud: Send + Sync + 'static {
-    /// First activation. **`proof` is BACKEND-C6**: the code sent to the
-    /// registered mobile or email. A key alone is not enough, because in v1
-    /// *"whoever types the key first becomes the counter"*.
-    ///
-    /// # Errors
-    ///
-    /// [`CloudError`].
     fn activate(&self, ask: &Ask, proof: &str) -> Result<SignedSnapshot, CloudError>;
 
     /// The routine check. Returns the current truth, signed.
-    ///
-    /// # Errors
-    ///
-    /// [`CloudError`].
     fn refresh(&self, ask: &Ask) -> Result<SignedSnapshot, CloudError>;
 
-    /// **Release the binding, server-side.** BACKEND-C5 is that this did not
-    /// exist: *"'Deactivate' on the counter is a trap. It only clears the key
-    /// locally."*
-    ///
-    /// The cloud must also revoke this machine's cloud credential (C4).
-    ///
-    /// # Errors
-    ///
-    /// [`CloudError`].
+    /// Release the binding, server-side.
     fn release(&self, ask: &Ask) -> Result<(), CloudError>;
 
-    /// Move a licence to this machine from wherever it was. POS-A4's
-    /// self-service path. `proof` again, for the same reason as `activate`.
-    ///
-    /// # Errors
-    ///
-    /// [`CloudError`].
+    /// Move a licence to this machine from wherever it was.
     fn transfer(&self, ask: &Ask, proof: &str) -> Result<SignedSnapshot, CloudError>;
 
     /// Requirement 4: a real self-service trial with an end date.
-    ///
-    /// # Errors
-    ///
-    /// [`CloudError`].
     fn start_trial(&self, ask: &Ask, contact: &str) -> Result<SignedSnapshot, CloudError>;
 }
 
-// ---------------------------------------------------------------------------
 // The stub.
-// ---------------------------------------------------------------------------
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -124,11 +61,7 @@ use crate::plan::Plan;
 use crate::snapshot::{self, Snapshot};
 use crate::status::{Licence, Status};
 
-/// **A cloud that lives in a `Mutex`.** Every test in this crate and in
-/// `src-tauri` runs against it; there is no HTTP anywhere in P21.
-///
-/// It can be told to be slow, to be unreachable, or to **never answer at all**
-/// — which is T9, and which is the state v1 deadlocked in.
+/// A cloud that lives in a `Mutex`.
 pub struct Stub {
     inner: Mutex<Inner>,
 }
@@ -141,8 +74,7 @@ struct Inner {
     not_after: Timestamp,
     max_offline_days: u16,
     behaviour: Behaviour,
-    /// So a test can assert that `release` really was called — BACKEND-C5's
-    /// whole content is that it was not.
+    /// So a test can assert that `release` really was called.
     pub released: Vec<String>,
     pub expected_proof: String,
 }
@@ -152,7 +84,7 @@ struct Inner {
 pub enum Behaviour {
     Normal,
     Unreachable,
-    /// Sleeps far past any deadline. T9.
+    /// Sleeps far past any deadline.
     NeverAnswers,
     Slow(Duration),
 }
@@ -193,9 +125,8 @@ impl Stub {
         }
     }
 
-    /// Poisoning is not a case worth modelling in a test double: a poisoned
-    /// mutex means a test thread panicked, and the failure that matters is that
-    /// panic rather than this lock.
+    /// Poisoning is not a case worth modelling in a test double: a poisoned mutex means a test
+    /// thread panicked, and the failure that matters is that panic rather than this lock.
     fn inner(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -226,7 +157,7 @@ impl Stub {
         self.inner().max_offline_days = days;
     }
 
-    /// **Did anybody actually release the binding?** BACKEND-C5.
+    /// Did anybody actually release the binding?
     #[must_use]
     pub fn released(&self) -> Vec<String> {
         self.inner().released.clone()
@@ -243,8 +174,7 @@ impl Stub {
             Behaviour::Normal => None,
             Behaviour::Unreachable => Some(CloudError::Unreachable),
             Behaviour::NeverAnswers => {
-                // The socket a PC suspend killed. The caller's deadline is the
-                // only thing that gets anybody out of here.
+                // The socket a PC suspend killed.
                 std::thread::sleep(Duration::from_secs(3_600));
                 Some(CloudError::Unreachable)
             }
@@ -278,7 +208,6 @@ impl Cloud for Stub {
         {
             let mut inner = self.inner();
             if proof != inner.expected_proof {
-                // BACKEND-C6: the key alone is not enough.
                 return Err(CloudError::NotRecognised);
             }
             if inner.licence.key != ask.key {
@@ -303,9 +232,6 @@ impl Cloud for Stub {
         }
         {
             let inner = self.inner();
-            // **The binding is checked on every refresh**, which is BACKEND-C4
-            // from the counter's side: a machine that is no longer the bound
-            // one stops being told it is entitled.
             if let Some(bound) = &inner.licence.bound_to
                 && bound != &ask.machine
             {
@@ -336,8 +262,6 @@ impl Cloud for Stub {
             if proof != inner.expected_proof {
                 return Err(CloudError::NotRecognised);
             }
-            // The old machine is released, and P34 must also revoke its cloud
-            // credential — BACKEND-C4, in the document, in a box.
             if let Some(old) = inner.licence.bound_to.clone() {
                 inner.released.push(old.value().to_owned());
             }
@@ -385,7 +309,6 @@ mod tests {
         (stub, machine)
     }
 
-    /// **BACKEND-C6.** The key alone does not activate anything.
     #[test]
     fn activation_needs_something_the_buyer_has() {
         let (stub, machine) = a_stub();
@@ -397,8 +320,6 @@ mod tests {
         assert!(stub.activate(&an_ask(&machine), "123456").is_ok());
     }
 
-    /// **BACKEND-C4, from this side.** A machine that is not the bound one is
-    /// refused on every refresh, not merely at enrolment.
     #[test]
     fn a_machine_that_is_no_longer_bound_is_refused_on_refresh() {
         let (stub, machine) = a_stub();
@@ -411,8 +332,6 @@ mod tests {
         }
     }
 
-    /// **BACKEND-C5.** Release actually releases, and a later activation on a
-    /// different machine works — which in v1 needed a support call.
     #[test]
     fn release_frees_the_licence_for_another_computer() {
         let (stub, machine) = a_stub();
@@ -424,13 +343,13 @@ mod tests {
         assert_eq!(stub.licence().bound_to, Some(new_pc));
     }
 
-    /// A transfer releases the old machine too — the half of C4 the counter
-    /// can see.
+    /// A transfer releases the old machine too.
     #[test]
     fn a_transfer_releases_the_machine_it_came_from() {
         let (stub, machine) = a_stub();
         let new_pc = MachineId::for_tests("machine-b-0002");
-        stub.transfer(&an_ask(&new_pc), "123456").expect("transfers");
+        stub.transfer(&an_ask(&new_pc), "123456")
+            .expect("transfers");
         assert!(stub.released().contains(&machine.value().to_owned()));
         assert_eq!(stub.licence().bound_to, Some(new_pc));
     }
@@ -439,7 +358,10 @@ mod tests {
     fn an_unreachable_cloud_says_so_rather_than_lying() {
         let (stub, machine) = a_stub();
         stub.behave(Behaviour::Unreachable);
-        assert_eq!(stub.refresh(&an_ask(&machine)), Err(CloudError::Unreachable));
+        assert_eq!(
+            stub.refresh(&an_ask(&machine)),
+            Err(CloudError::Unreachable)
+        );
     }
 
     #[test]

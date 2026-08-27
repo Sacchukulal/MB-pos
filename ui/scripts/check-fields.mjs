@@ -1,45 +1,8 @@
 #!/usr/bin/env node
 /**
- * **THE LINT THAT KEEPS A PHONE A PHONE AND AN AMOUNT A NUMBER.**
+ * THE LINT THAT KEEPS A PHONE A PHONE AND AN AMOUNT A NUMBER.
  *
- * The owner, 2026-08-22, from a real install:
- *
- * > *"i noticed while adding a credit customer, shop details, i can enter
- * > alphabets, more than 10 numbers, fix it, this app is india only so only 10
- * > digits needed."*
- *
- * > *"user needs to enter only numbers, not alphabet, it would mess up
- * > calculations also, didn't you even consider that? … These above places are
- * > wher i found phone number and amount feild is not correct, but if there are
- * > more places in entire app, fix there also. … You should always remember
- * > these things in future when adding phone number and amount feilds."*
- *
- * **"Always remember" is not a thing a person can promise.** Eight screens each
- * collected a phone or an amount with a plain `<Input>`, and every one of them
- * was written by somebody who knew the rule and was thinking about something
- * else at the time. `check-tokens.mjs` made a raw colour impossible and
- * nineteen sessions went by without one creeping back; this is the same
- * mechanism pointed at the same kind of failure.
- *
- * It fails the build on a field whose LABEL says it holds a phone number or an
- * amount, drawn with anything but the kit component for it:
- *
- *   * a phone   → `<PhoneInput>`  (ten digits, `+91` beside the box)
- *   * an amount → `<MoneyInput>`  (digits and one dot, `₹` beside the box)
- *
- * The label is what it reads, because the label is what the person filling the
- * field reads. A box called "Amount" that takes letters is wrong whatever the
- * variable behind it is called.
- *
- * # Getting out of it
- *
- * Put `field-lint-ok:` and a reason on the line above. There are real cases —
- * a per-cent box says "Rupees" on its other setting, a licence contact is a
- * *"Mobile or email"*. An escape with a reason is a decision; a lint nobody can
- * escape is a lint somebody deletes.
- *
- * NO DEPENDENCIES, for the same reason `check-tokens.mjs` has none.
- *
+ * Usage:
  *   node scripts/check-fields.mjs            check src/
  *   node scripts/check-fields.mjs <dir>      check somewhere else
  */
@@ -52,13 +15,7 @@ const root = process.argv[2] ?? 'src';
 /** Words that mean "this box holds a phone number". */
 const PHONE_WORDS = /\b(phone|mobile)\b/i;
 
-/**
- * Words that mean "this box holds money".
- *
- * `rate` is in and `tax rate` is not, which is why the exclusions exist: a GST
- * rate is a percentage and a supplier's rate is rupees per kilo. When a word is
- * genuinely both, the escape hatch above is the answer.
- */
+/** Words that mean "this box holds money". */
 const MONEY_WORDS =
   /\b(amount|price|cost|salary|advance|credit limit|rupees|paid|pay them|handed over|hand over|charges|discount|total on)\b/i;
 const NOT_MONEY =
@@ -96,11 +53,7 @@ function check(path) {
     if (!label) return;
     const text = label[1] ?? label[2] ?? '';
 
-    // **The hint counts as well as the label.** "Biggest discount" reads like
-    // money and its hint says *"Per cent"* — the field is a percentage, and the
-    // only thing on screen that says so is the hint. A lint that reads less
-    // than the shopkeeper does is a lint that cries wolf, and a lint that cries
-    // wolf gets an escape comment on every line until it means nothing.
+    // The hint counts as well as the label.
     const nearby = lines.slice(Math.max(0, index - 4), index + 5).join(' ');
     const hint = nearby.match(/hint=(?:"([^"]*)"|\{`([^`]*)`\})/);
     const around = `${text} ${hint?.[1] ?? hint?.[2] ?? ''}`;
@@ -110,9 +63,7 @@ function check(path) {
     else if (MONEY_WORDS.test(text) && !NOT_MONEY.test(around)) wants = 'money';
     if (!wants) return;
 
-    // **The opening tag, which may be several lines above the label.** A field
-    // is written `<Input\n  label="Amount"\n  … />` as often as on one line, so
-    // walk back to the tag that owns this label.
+    // The opening tag, which may be several lines above the label.
     let tagLine = index;
     let tag = null;
     for (let n = index; n >= 0 && n > index - 12; n -= 1) {
@@ -125,15 +76,13 @@ function check(path) {
     }
     if (!tag) return;
 
-    // Anything that is not a field at all — a Select of payment modes labelled
-    // "How", a Checkbox. Only the text-entry components are in scope.
+    // Anything that is not a field at all — a Select of payment modes labelled "How", a
+    // Checkbox.
     if (!['Input', 'NumberInput', 'MoneyInput', 'PhoneInput'].includes(tag)) return;
 
     if (tag === RIGHT[wants]) return;
 
-    // The documented way out. A few lines of room above the tag, because the
-    // reason is usually a JSX comment and a sentence worth reading rarely fits
-    // on one line.
+    // The documented way out.
     const above = lines.slice(Math.max(0, tagLine - 4), tagLine).join(' ');
     if (ESCAPE.test(above) || ESCAPE.test(lines[index - 1] ?? '')) {
       escapes += 1;

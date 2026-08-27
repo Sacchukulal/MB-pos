@@ -1,23 +1,4 @@
-//! **The menu, driven end to end against a real database.**
-//!
-//! # Why this file exists
-//!
-//! `signin_tests` says it: a sequence that can only be checked by clicking is a
-//! sequence that gets checked once. P13's flows are sequences of exactly that
-//! shape, and three of them are the ones an owner is most likely to run at 11pm
-//! on the day before they open:
-//!
-//! * set a tax rate, and watch **every item on that class** move with it;
-//! * export the menu, edit one cell in a spreadsheet, import it back;
-//! * put a price up by 10% across one category and no other.
-//!
-//! Each of those touches many rows through one call. The repositories are
-//! tested on their own; what is tested here is the *command* — the permission
-//! it demands, the words it answers with, and what it leaves behind on disk.
-//!
-//! The composition tests at the bottom cover scope 6.1–6.3: a size, a group of
-//! choices, and a combo whose price gets shared across parts on different tax
-//! rates.
+//! The menu, driven end to end against a real database.
 
 #![allow(
     clippy::expect_used,
@@ -37,8 +18,8 @@ use crate::menu::{
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
 
-/// A shop with three items on two tax classes — enough that "every item on this
-/// class" is a claim with a counter-example in it.
+/// A shop with three items on two tax classes — enough that "every item on this class" is a
+/// claim with a counter-example in it.
 fn a_shop_with_a_menu(scratch: &Scratch) -> App {
     let path = scratch.dir().join("menu.db");
     let db = Db::open(&DbConfig::new(path.clone())).expect("open");
@@ -96,8 +77,8 @@ fn price_of(app: &App, id: &str) -> String {
         .text
 }
 
-/// Just the percentage. The row also carries the treatment in words —
-/// "5% · Tax added on top" — and that half is asserted where it matters.
+/// Just the percentage. The row also carries the treatment in words — "5% · Tax added on top" —
+/// and that half is asserted where it matters.
 fn rate_of(app: &App, id: &str) -> String {
     menu_rows_on(app)
         .expect("the menu")
@@ -129,9 +110,7 @@ fn class_of(app: &App, id: &str) -> crate::menu::TaxClassView {
         .expect("that class")
 }
 
-/// **A rate changes, and everything on that class changes with it** — audit
-/// B10/B11: v1 had one rate for the whole shop, so this could not be got wrong
-/// and could not be got right either.
+/// A rate changes, and everything on that class changes with it.
 #[test]
 fn changing_a_class_moves_every_item_on_it_and_nothing_else() {
     let scratch = Scratch::new("tax_class");
@@ -140,7 +119,6 @@ fn changing_a_class_moves_every_item_on_it_and_nothing_else() {
     assert_eq!(rate_of(&app, "itm_tea"), "5%");
     assert_eq!(rate_of(&app, "itm_water"), "18%");
 
-    // The screen says how many will move BEFORE the owner commits.
     let classes = tax_classes_on(&app).expect("the classes");
     let food = classes
         .iter()
@@ -163,10 +141,12 @@ fn changing_a_class_moves_every_item_on_it_and_nothing_else() {
     assert_eq!(rate_of(&app, "itm_dosa"), "12%");
     assert_eq!(rate_of(&app, "itm_water"), "18%", "a different class");
 
-    // The NAME moves too. Leaving "Restaurant food 5%" on a class charging 12%
-    // is how a shop ends up believing the wrong thing about its own menu.
+    // The NAME moves too.
     let renamed = tax_classes_on(&app).expect("the classes");
-    let food = renamed.iter().find(|c| c.id == "tax_food_5").expect("still there");
+    let food = renamed
+        .iter()
+        .find(|c| c.id == "tax_food_5")
+        .expect("still there");
     assert_eq!(food.name, "Restaurant food 12%");
     assert_eq!(food.rate, "12%");
 }
@@ -190,11 +170,6 @@ fn an_impossible_rate_is_refused() {
     assert_eq!(rate_of(&app, "itm_tea"), "5%", "and nothing moved");
 }
 
-/// **The §5.1 fault, and the one that would have failed before P33.**
-///
-/// The screen used to read the treatment back out of its own display words —
-/// `.includes('Outside')` — so rewording a label turned liquor into a
-/// GST-taxable item with nothing to catch it.
 #[test]
 fn changing_a_class_label_does_not_change_what_it_taxes() {
     let scratch = Scratch::new("class_label");
@@ -222,8 +197,7 @@ fn changing_a_class_label_does_not_change_what_it_taxes() {
     assert_eq!(before.basis, PriceBasis::Inclusive);
     assert_eq!(before.rate_bp, 2000);
 
-    // Rename it to words that say none of that, sending back exactly what the
-    // view carried. Only the name may move.
+    // Rename it to words that say none of that, sending back exactly what the view carried.
     save_tax_class_on(
         &app,
         before.id.clone(),
@@ -246,8 +220,8 @@ fn changing_a_class_label_does_not_change_what_it_taxes() {
     );
 }
 
-/// A rate on a kind that cannot carry one is refused, not silently zeroed —
-/// which is why the editor disables the box rather than hinting at it.
+/// A rate on a kind that cannot carry one is refused, not silently zeroed — which is why the
+/// editor disables the box rather than hinting at it.
 #[test]
 fn an_exempt_class_cannot_be_given_a_rate() {
     let scratch = Scratch::new("exempt_rate");
@@ -265,8 +239,7 @@ fn an_exempt_class_cannot_be_given_a_rate() {
     assert_eq!(err.code, "menu.rate");
 }
 
-/// An HSN code is 2, 4, 6 or 8 digits. Three is a typo, and it would otherwise
-/// print on every bill.
+/// An HSN code is 2, 4, 6 or 8 digits.
 #[test]
 fn an_hsn_of_three_digits_is_refused() {
     let scratch = Scratch::new("hsn");
@@ -298,7 +271,7 @@ fn an_hsn_of_three_digits_is_refused() {
     assert_eq!(err.code, "menu.hsn");
 }
 
-/// **Ten percent on one category, and the rest of the menu untouched.**
+/// Ten percent on one category, and the rest of the menu untouched.
 #[test]
 fn a_bulk_price_change_rounds_once_and_stays_inside_its_category() {
     let scratch = Scratch::new("bulk");
@@ -310,15 +283,12 @@ fn a_bulk_price_change_rounds_once_and_stays_inside_its_category() {
     assert_eq!(price_of(&app, "itm_tea"), "22.00");
     assert_eq!(price_of(&app, "itm_dosa"), "132.00");
 
-    // And back down again is NOT a round trip — 10% off 132 is 118.80, not 120.
-    // The test states that on purpose: an owner who expects a round trip is
-    // going to be surprised by arithmetic, not by us.
+    // And back down again is NOT a round trip.
     change_prices_on(&app, None, "-10".to_owned()).expect("prices down");
     assert_eq!(price_of(&app, "itm_dosa"), "118.80");
 }
 
-/// **Export, change one cell, import back** — P13 item 7, and the flow that
-/// most often gets a whole menu into a new POS on day one.
+/// Export, change one cell, import back.
 #[test]
 fn the_menu_survives_a_trip_through_a_spreadsheet() {
     let scratch = Scratch::new("csv");
@@ -327,14 +297,17 @@ fn the_menu_survives_a_trip_through_a_spreadsheet() {
     let csv = export_menu_on(&app).expect("exported");
     assert!(csv.contains("Masala dosa"), "the menu is in it");
 
-    // The file carries paise, not rupees — a spreadsheet that rounds 120.00 to
-    // 120 is a spreadsheet, and this way there is nothing to round.
+    // The file carries paise, not rupees — a spreadsheet that rounds 120.00 to 120 is a
+    // spreadsheet, and this way there is nothing to round.
     let edited = csv.replace(",12000,", ",13500,");
     assert_ne!(edited, csv, "the fixture actually changed a cell");
 
     // The dry run writes NOTHING and says what it would do.
     let plan = plan_import_on(&app, edited.clone()).expect("planned");
-    assert!(plan.is_clean, "a file we just exported has no bad rows: {plan:?}");
+    assert!(
+        plan.is_clean,
+        "a file we just exported has no bad rows: {plan:?}"
+    );
     assert_eq!(
         price_of(&app, "itm_dosa"),
         "120.00",
@@ -347,8 +320,8 @@ fn the_menu_survives_a_trip_through_a_spreadsheet() {
     assert_eq!(rate_of(&app, "itm_water"), "18%", "and the rates came back");
 }
 
-/// A file with a bad cell is refused **by line number**, and the good lines do
-/// not sneak in — a half-imported menu is worse than no import.
+/// A file with a bad cell is refused by line number, and the good lines do not sneak in — a
+/// half-imported menu is worse than no import.
 #[test]
 fn a_bad_row_names_its_line_and_nothing_is_written() {
     let scratch = Scratch::new("csv_bad");
@@ -360,8 +333,9 @@ fn a_bad_row_names_its_line_and_nothing_is_written() {
     let plan = plan_import_on(&app, broken.clone()).expect("planned");
     assert!(!plan.is_clean, "a price in words is not a price");
     assert!(
-        plan.refused.iter().any(|r| r.contains("one hundred")
-            || r.chars().any(|c| c.is_ascii_digit())),
+        plan.refused
+            .iter()
+            .any(|r| r.contains("one hundred") || r.chars().any(|c| c.is_ascii_digit())),
         "the refusal points at the line: {:?}",
         plan.refused
     );
@@ -371,11 +345,7 @@ fn a_bad_row_names_its_line_and_nothing_is_written() {
     assert_eq!(price_of(&app, "itm_dosa"), "120.00", "nothing was written");
 }
 
-// ---------------------------------------------------------------------------
-// What an item is made of — scope 6.1–6.3.
-// ---------------------------------------------------------------------------
-
-/// **A half plate is its own price, not a discount.**
+/// A half plate is its own price, not a discount.
 #[test]
 fn a_size_is_a_price_of_its_own() {
     let scratch = Scratch::new("variants");
@@ -426,8 +396,8 @@ fn a_size_is_a_price_of_its_own() {
     assert_eq!(nameless.code, "menu.variant_name");
 }
 
-/// **A group is made once and offered on many items** — a shop has one "Spice
-/// level", not one per curry.
+/// A group is made once and offered on many items — a shop has one "Spice level", not one per
+/// curry.
 #[test]
 fn a_group_of_choices_is_shared_and_says_its_rule_in_words() {
     let scratch = Scratch::new("groups");
@@ -475,7 +445,7 @@ fn a_group_of_choices_is_shared_and_says_its_rule_in_words() {
     };
     assert_eq!(choice("Mild").paise, 0, "blank is free");
     assert_eq!(choice("Extra spicy").paise, 1000);
-    // **A minus survives.** Stripping it would quietly charge for "no onion".
+    // A minus survives. Stripping it would quietly charge for "no onion".
     assert_eq!(
         choice("No onion").paise,
         -500,
@@ -485,17 +455,27 @@ fn a_group_of_choices_is_shared_and_says_its_rule_in_words() {
     // Offered on the dosa, and on nothing else until it is.
     let dosa = attach_group_on(&app, "itm_dosa".to_owned(), "grp_spice".to_owned(), true)
         .expect("offered");
-    assert!(dosa.groups.iter().any(|g| g.id == "grp_spice" && g.attached));
+    assert!(
+        dosa.groups
+            .iter()
+            .any(|g| g.id == "grp_spice" && g.attached)
+    );
 
     let tea = item_composition_on(&app, "itm_tea".to_owned()).expect("the tea");
     assert!(
-        tea.groups.iter().any(|g| g.id == "grp_spice" && !g.attached),
+        tea.groups
+            .iter()
+            .any(|g| g.id == "grp_spice" && !g.attached),
         "every group is offered to the screen; only the ticked ones are on the item"
     );
 
     let off = attach_group_on(&app, "itm_dosa".to_owned(), "grp_spice".to_owned(), false)
         .expect("withdrawn");
-    assert!(off.groups.iter().any(|g| g.id == "grp_spice" && !g.attached));
+    assert!(
+        off.groups
+            .iter()
+            .any(|g| g.id == "grp_spice" && !g.attached)
+    );
     assert_eq!(
         list_groups_on(&app).expect("still listed").len(),
         1,
@@ -503,8 +483,7 @@ fn a_group_of_choices_is_shared_and_says_its_rule_in_words() {
     );
 }
 
-/// An impossible group is refused **when it is written**, not when a cashier
-/// meets it mid-rush.
+/// An impossible group is refused when it is written, not when a cashier meets it mid-rush.
 #[test]
 fn a_group_that_cannot_be_satisfied_is_refused() {
     let scratch = Scratch::new("bad_group");
@@ -529,9 +508,8 @@ fn a_group_that_cannot_be_satisfied_is_refused() {
     assert!(list_groups_on(&app).expect("listed").is_empty());
 }
 
-/// **A combo's price is shared by what is in it** (D14), and the shares add
-/// back to the price exactly — which is the whole reason a mixed-rate combo can
-/// be billed at all.
+/// A combo's price is shared by what is in it, and the shares add back to the price exactly —
+/// which is the whole reason a mixed-rate combo can be billed at all.
 #[test]
 fn a_combo_shares_its_price_across_two_different_tax_rates() {
     let scratch = Scratch::new("combos");
@@ -561,14 +539,24 @@ fn a_combo_shares_its_price_across_two_different_tax_rates() {
     let total: i64 = lunch.parts.iter().map(|p| p.share.paise).sum();
     assert_eq!(total, 13000, "the shares add back to the price EXACTLY");
 
-    let dosa = lunch.parts.iter().find(|p| p.item_id == "itm_dosa").expect("the dosa");
-    let water = lunch.parts.iter().find(|p| p.item_id == "itm_water").expect("the water");
+    let dosa = lunch
+        .parts
+        .iter()
+        .find(|p| p.item_id == "itm_dosa")
+        .expect("the dosa");
+    let water = lunch
+        .parts
+        .iter()
+        .find(|p| p.item_id == "itm_water")
+        .expect("the water");
     assert_eq!(dosa.rate, "5%");
     assert_eq!(water.rate, "18%");
-    assert!(dosa.share.paise > water.share.paise, "the dosa carries more of it");
+    assert!(
+        dosa.share.paise > water.share.paise,
+        "the dosa carries more of it"
+    );
 
-    // **The shares follow today's prices, not the day the combo was made** —
-    // D53. Put the water up and the split moves with it.
+    // The shares follow today's prices, not the day the combo was made.
     save_item_on(
         &app,
         MenuEdit {
@@ -591,7 +579,11 @@ fn a_combo_shares_its_price_across_two_different_tax_rates() {
     let after = list_combos_on(&app).expect("relisted");
     let lunch = after.first().expect("still there");
     assert_eq!(lunch.separately.text, "160.00");
-    let water_now = lunch.parts.iter().find(|p| p.item_id == "itm_water").expect("the water");
+    let water_now = lunch
+        .parts
+        .iter()
+        .find(|p| p.item_id == "itm_water")
+        .expect("the water");
     assert!(
         water_now.share.paise > water.share.paise,
         "a dearer part carries a bigger slice: {} then {}",
@@ -602,8 +594,7 @@ fn a_combo_shares_its_price_across_two_different_tax_rates() {
     assert_eq!(total, 13000, "and it still adds back exactly");
 }
 
-/// An empty combo is refused. Nothing to share by is not a rounding problem, it
-/// is a question with no answer.
+/// An empty combo is refused.
 #[test]
 fn a_combo_with_nothing_in_it_is_refused() {
     let scratch = Scratch::new("empty_combo");

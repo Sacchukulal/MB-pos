@@ -3,9 +3,6 @@ import type { MoneyView } from "./MoneyView";
 
 export type RoleView = { id: string, name: string, isBuiltin: boolean, permissions: Array<string>, 
 /**
- * **A percentage as text, both ways** — `"12.5%"` out, whatever was typed
- * back in. D39 and R8: the screen does not divide by a hundred, any more
- * than it divides paise by a hundred. The money guard failed the build on
- * the first version of this, which did exactly that.
+ * A percentage as text, both ways — `"12.5%"` out, whatever was typed back in.
  */
 maxDiscountPercent: string | null, maxDiscount: MoneyView | null, };

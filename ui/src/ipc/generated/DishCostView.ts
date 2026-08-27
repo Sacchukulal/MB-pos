@@ -2,36 +2,25 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * **What a dish costs to make, and what it earns** — scope 4.9.
- *
- * **D119 — both cost figures are here on purpose.** Scope 4.1 shipped at P13:
- * an item carries a typed cost price and reports use it. This session produces
- * a second, better answer to the same question, and quietly replacing the
- * first would hide the most valuable thing in the module: **the gap between
- * what an owner thinks a dish costs and what its recipe says it costs is
- * itself the finding.**
+ * What a dish costs to make, and what it earns.
  */
 export type DishCostView = { itemId: string, name: string, sellsFor: MoneyView, hasRecipe: boolean, 
 /**
- * What the recipe says, or ₹0.00 when there is no recipe — and
- * `has_recipe` is how a screen tells the two apart, because a dish nobody
- * has costed is not a dish that costs nothing.
+ * What the recipe says, or ₹0.00 when there is no recipe — and `has_recipe` is how a
+ * screen tells the two apart, because a dish nobody has costed is not a dish that costs
+ * nothing.
  */
-recipeCost: MoneyView, 
-/**
- * What P13's typed cost price says.
- */
-typedCost: MoneyView | null, 
+recipeCost: MoneyView, typedCost: MoneyView | null, 
 /**
  * "62.5% margin", or empty.
  */
 margin: string, 
 /**
- * **"₹8.20 more than you thought"** — the gap, said out loud, or empty.
+ * "₹8.20 more than you thought" — the gap, said out loud, or empty.
  */
 gap: string, 
 /**
- * Some material in this recipe has never been priced, so the cost is short
- * by an unknown amount and the screen must not present it as final.
+ * Some material in this recipe has never been priced, so the cost is short by an unknown
+ * amount and the screen must not present it as final.
  */
 isIncomplete: boolean, };

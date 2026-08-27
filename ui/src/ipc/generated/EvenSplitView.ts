@@ -2,16 +2,11 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * What an even split comes to, per guest — scope 1.21's other half.
- *
- * **This answers a question; it does not create bills.** Splitting the money
- * n ways without splitting the food is what a group asking "what do we each
- * owe?" actually wants, and inventing n orders to answer it would litter the
- * day with bills nobody asked for.
+ * What an even split comes to, per guest.
  */
 export type EvenSplitView = { total: MoneyView, ways: number, shares: Array<MoneyView>, 
 /**
- * "₹33.34 each, and one of you pays a paisa more" — said out loud,
- * because a remainder nobody mentions looks like a rounding bug.
+ * "₹33.34 each, and one of you pays a paisa more" — said out loud, because a remainder
+ * nobody mentions looks like a rounding bug.
  */
 note: string, };

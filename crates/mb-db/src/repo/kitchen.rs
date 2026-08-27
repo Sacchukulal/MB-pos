@@ -1,15 +1,4 @@
-//! **What the kitchen was told, and what happened to it** — P24.
-//!
-//! The kitchen LEDGER (crown jewel 2) already knows what was sent. This knows
-//! what became of it: did a screen draw it, did it fall back to paper, has a
-//! cook finished it.
-//!
-//! **Bump state lives here and not in the screen's memory.** A cook bumps a
-//! ticket, the tablet reloads, and the ticket must not come back — and a
-//! counter that reopens that table must see what the kitchen sees.
-//!
-//! The state machine itself is `mb_core::kitchen_delivery`: pure, no clock, no
-//! database. This file only stores its answers.
+//! What the kitchen was told, and what happened to it.
 
 use mb_core::kitchen_delivery::{Delivery, State};
 use mb_core::{StaffId, Timestamp};
@@ -21,20 +10,15 @@ use crate::error::DbError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ticket {
     pub delivery: Delivery,
-    /// **Which course this firing is** (scope 3.5). `None` is the whole order,
-    /// which is what a shop that does not use courses always sends.
+    /// Which course this firing is.
     pub course: Option<String>,
-    /// How long the kitchen is expected to take on this firing — the slowest
-    /// dish on it (scope 3.6). Stored rather than recomputed, so editing an
-    /// item's prep time next month does not rewrite last Tuesday's figures.
+    /// How long the kitchen is expected to take on this firing — the slowest dish on it.
     pub expected_minutes: Option<u32>,
     pub bumped_by: Option<StaffId>,
     pub bumped_on: Option<String>,
-    /// Lines a cook has ticked off one at a time. The owner asked for both:
-    /// tick a dish as it comes off the pass, or clear the whole card.
+    /// Lines a cook has ticked off one at a time.
     pub bumped_lines: Vec<String>,
-    /// A cancellation the kitchen has not acknowledged. **The one thing on the
-    /// screen allowed to interrupt.**
+    /// A cancellation the kitchen has not acknowledged.
     pub cancelled_at: Option<Timestamp>,
     pub acked_at: Option<Timestamp>,
 }
@@ -47,14 +31,10 @@ impl Ticket {
     }
 }
 
-/// **What the kitchen has already been told about one order.**
-///
-/// The deliveries themselves are the record — there is no separate "fired"
-/// flag that could get out of step with them.
+/// What the kitchen has already been told about one order.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Fired {
-    /// A firing that named no course. It covered every dish on the order, so
-    /// nothing on it may be fired again.
+    /// A firing that named no course.
     pub everything: bool,
     /// The courses fired by name.
     pub courses: Vec<String>,
@@ -84,10 +64,6 @@ impl<'a> KitchenRepo<'a> {
     }
 
     /// Send a ticket to a station.
-    ///
-    /// **Idempotent by its id** — D82's rule. The counter may retry, and a
-    /// retry that produced a second ticket would be the double-cook this whole
-    /// design exists to prevent.
     pub fn send(
         &self,
         outlet: &str,
@@ -118,9 +94,6 @@ impl<'a> KitchenRepo<'a> {
     }
 
     /// Every ticket the counter is still waiting on an ack for.
-    ///
-    /// **This is what the paper fallback reads.** A ticket nobody drew in time
-    /// goes to the printer, because the kitchen must never go blind.
     pub fn awaiting_ack(&self, outlet: &str) -> Result<Vec<Ticket>, DbError> {
         let mut stmt = self.tx.prepare(&format!(
             "SELECT {COLUMNS} FROM kitchen_deliveries
@@ -135,24 +108,16 @@ impl<'a> KitchenRepo<'a> {
     }
 
     /// Which courses of an order have already been fired.
-    ///
-    /// Firing the mains must not re-show the starters (T6), and the deliveries
-    /// themselves are the record of what has been fired — there is no separate
-    /// "fired" flag to get out of step.
     pub fn courses_fired(&self, order_id: &str) -> Result<Fired, DbError> {
-        let mut stmt = self.tx.prepare(
-            "SELECT course FROM kitchen_deliveries WHERE order_id = ?1",
-        )?;
+        let mut stmt = self
+            .tx
+            .prepare("SELECT course FROM kitchen_deliveries WHERE order_id = ?1")?;
         let mut rows = stmt.query(rusqlite::params![order_id])?;
         let mut fired = Fired::default();
         while let Some(row) = rows.next()? {
             match row.get::<_, Option<String>>(0)? {
-                // **A firing that named no course took the whole order with
-                // it**, which is what every shop that does not use courses
-                // does on every bill. Reading that row as "the course called
-                // empty string" is how the kitchen gets told twice: the mains
-                // would still be offered to fire after they had already gone,
-                // and a cook would make them again.
+                // A firing that named no course took the whole order with it, which is what
+                // every shop that does not use courses does on every bill.
                 None => fired.everything = true,
                 Some(course) if course.is_empty() => fired.everything = true,
                 Some(course) => {
@@ -167,18 +132,14 @@ impl<'a> KitchenRepo<'a> {
 
     /// One ticket.
     pub fn get(&self, id: &str) -> Result<Option<Ticket>, DbError> {
-        let mut stmt = self
-            .tx
-            .prepare(&format!("SELECT {COLUMNS} FROM kitchen_deliveries WHERE id = ?1"))?;
+        let mut stmt = self.tx.prepare(&format!(
+            "SELECT {COLUMNS} FROM kitchen_deliveries WHERE id = ?1"
+        ))?;
         let mut rows = stmt.query(rusqlite::params![id])?;
         rows.next()?.map(read).transpose()
     }
 
     /// Everything still outstanding at a station, oldest first.
-    ///
-    /// Oldest first is not a detail: a kitchen works the queue in the order it
-    /// arrived, and a screen that sorts any other way makes the oldest table
-    /// wait longest.
     pub fn outstanding(&self, outlet: &str, station: &str) -> Result<Vec<Ticket>, DbError> {
         let mut stmt = self.tx.prepare(&format!(
             "SELECT {COLUMNS} FROM kitchen_deliveries
@@ -193,13 +154,7 @@ impl<'a> KitchenRepo<'a> {
         Ok(out)
     }
 
-    /// **The card cleared most recently at this station.**
-    ///
-    /// A cleared card leaves the screen at once, so the undo cannot live on the
-    /// card — it has to live on the bar. This is what the bar offers back.
-    /// Only one, and only the newest: a cook who cleared the wrong ticket
-    /// notices within seconds, and a list of everything ever cleared is a list
-    /// nobody reads in a hot kitchen.
+    /// The card cleared most recently at this station.
     pub fn last_bumped(&self, outlet: &str, station: &str) -> Result<Option<Ticket>, DbError> {
         let mut stmt = self.tx.prepare(&format!(
             "SELECT {COLUMNS} FROM kitchen_deliveries
@@ -211,8 +166,8 @@ impl<'a> KitchenRepo<'a> {
         rows.next()?.map(read).transpose()
     }
 
-    /// Every station that has a ticket on it — so a screen with no station set
-    /// can still show something, and so the counter can list them.
+    /// Every station that has a ticket on it — so a screen with no station set can still show
+    /// something, and so the counter can list them.
     pub fn stations(&self, outlet: &str) -> Result<Vec<String>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT DISTINCT station FROM kitchen_deliveries
@@ -228,8 +183,7 @@ impl<'a> KitchenRepo<'a> {
 
     /// Store whatever the state machine decided.
     pub fn save(&self, ticket: &Ticket) -> Result<(), DbError> {
-        let lines = serde_json::to_string(&ticket.bumped_lines)
-            .unwrap_or_else(|_| "[]".to_owned());
+        let lines = serde_json::to_string(&ticket.bumped_lines).unwrap_or_else(|_| "[]".to_owned());
         self.tx.execute(
             "UPDATE kitchen_deliveries
                 SET state = ?2, shown_at = ?3, bumped_at = ?4, bumped_by = ?5,
@@ -251,10 +205,6 @@ impl<'a> KitchenRepo<'a> {
     }
 
     /// Mark every outstanding ticket for an order as cancelled.
-    ///
-    /// **It does not delete them.** D47: a correction is a state, never a
-    /// deletion — and here the reason is physical. Food is already cooking, and
-    /// a ticket that vanishes tells the cook nothing.
     pub fn cancel_order(&self, order_id: &str, at: Timestamp) -> Result<usize, DbError> {
         let changed = self.tx.execute(
             "UPDATE kitchen_deliveries
@@ -265,7 +215,7 @@ impl<'a> KitchenRepo<'a> {
         Ok(changed)
     }
 
-    /// Finished tickets in a period, for the kitchen-speed report (scope 3.7).
+    /// Finished tickets in a period, for the kitchen-speed report.
     pub fn finished_between(
         &self,
         outlet: &str,
@@ -286,7 +236,7 @@ impl<'a> KitchenRepo<'a> {
     }
 }
 
-/// One line of the kitchen-speed report (scope 3.7).
+/// One line of the kitchen-speed report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpeedRow {
     /// The station, or the hour, depending on what was asked for.
@@ -295,18 +245,12 @@ pub struct SpeedRow {
     /// Milliseconds. Formatted by the caller — this crate does no words.
     pub average_ms: i64,
     pub slowest_ms: i64,
-    /// How many crossed their own target. **The number an owner acts on**: an
-    /// average hides the Saturday that went wrong.
+    /// How many crossed their own target.
     pub late: i64,
 }
 
 impl<'a> KitchenRepo<'a> {
-    /// **How fast the kitchen is, per station** — scope 3.7, and the first real
-    /// measure of it this owner has ever had.
-    ///
-    /// Time from `sent_at` to `bumped_at`, which is exactly "how long after the
-    /// kitchen was told did the food come off the pass". It ties back to the
-    /// order, so a figure can always be traced to a bill (T10).
+    /// How fast the kitchen is, per station.
     pub fn speed_by_station(
         &self,
         outlet: &str,
@@ -316,18 +260,20 @@ impl<'a> KitchenRepo<'a> {
         self.speed(outlet, from, to, "station")
     }
 
-    /// The same, by hour of the day — which is how a shop finds out that seven
-    /// o'clock is where it loses people.
+    /// The same, by hour of the day — which is how a shop finds out that seven o'clock is where
+    /// it loses people.
     pub fn speed_by_hour(
         &self,
         outlet: &str,
         from: mb_core::BusinessDay,
         to: mb_core::BusinessDay,
     ) -> Result<Vec<SpeedRow>, DbError> {
-        // +05:30 in milliseconds, because D19 fixes this product at one zone
-        // and an hour bucket computed in UTC would put the dinner rush in the
-        // afternoon.
-        self.speed(outlet, from, to, "strftime('%H', (bumped_at + 19800000) / 1000, 'unixepoch')")
+        self.speed(
+            outlet,
+            from,
+            to,
+            "strftime('%H', (bumped_at + 19800000) / 1000, 'unixepoch')",
+        )
     }
 
     fn speed(
@@ -337,9 +283,8 @@ impl<'a> KitchenRepo<'a> {
         to: mb_core::BusinessDay,
         group: &str,
     ) -> Result<Vec<SpeedRow>, DbError> {
-        // `group` is one of two string literals chosen above and never comes
-        // from a caller, which is why it can be interpolated. Every value is
-        // still bound.
+        // `group` is one of two string literals chosen above and never comes from a caller,
+        // which is why it can be interpolated.
         let sql = format!(
             "SELECT {group} AS bucket,
                     COUNT(*),
@@ -384,10 +329,6 @@ fn state_code(state: State) -> &'static str {
 }
 
 /// An unknown state reads as `Pending`.
-///
-/// **Deliberately the safe direction**: `Pending` is the only state the counter
-/// still watches, so a row this build cannot understand ends up printed rather
-/// than silently forgotten. The kitchen must never go blind.
 fn state_from(code: &str) -> State {
     match code {
         "shown" => State::Shown,
@@ -398,9 +339,7 @@ fn state_from(code: &str) -> State {
 }
 
 fn read(row: &rusqlite::Row<'_>) -> Result<Ticket, DbError> {
-    // The order is COLUMNS', and the two must be changed together. A mismatch
-    // here is a ticket that says it was bumped by a timestamp, which is the
-    // kind of bug that reads fine and is nonsense.
+    // The order is COLUMNS', and the two must be changed together.
     let state_code: String = row.get(5)?;
     let lines: String = row.get(11)?;
     Ok(Ticket {

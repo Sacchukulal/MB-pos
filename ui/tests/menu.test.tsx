@@ -1,16 +1,4 @@
-/**
- * **The composition screens — scope 6.1, 6.2, 6.3.**
- *
- * Rust proves the rules (`menu_tests.rs` drives the commands end to end); this
- * proves what the screens do with them. Three things worth a test:
- *
- * 1. a size shows **its own price**, not a difference from the parent;
- * 2. "how many may they pick" is one choice on the screen and two numbers on
- *    the wire — and the mapping between them is where a group could silently
- *    become "at least 3 of 1";
- * 3. a combo shows every part's **share and rate**, because that is the whole
- *    reason a mixed-rate combo can be sold at all.
- */
+/** The composition screens. */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,8 +36,8 @@ const dosa: MenuRowView = {
   margin: null,
   isOpenPrice: false,
   isAvailable: true,
-  // P24 — a dish with no course and no target, which is what a shop that has
-  // not set up its kitchen screen has, and must keep working with.
+  // A dish with no course and no target, which is what a shop that has not set up its kitchen
+  // screen has, and must keep working with.
   course: null,
   prepMinutes: null,
   variants: 1n,
@@ -128,8 +116,8 @@ describe('a group of choices (scope 6.2)', () => {
 
     const sent = call.mock.calls.find((c) => c[0] === 'save_modifier_group');
     expect(sent, 'the group was saved').toBeTruthy();
-    // Plain numbers, deliberately: `JSON.stringify` throws on a BigInt, so a
-    // count that crosses the wire is a `u32` in Rust and a `number` here.
+    // Plain numbers, deliberately: `JSON.stringify` throws on a BigInt, so a count that crosses
+    // the wire is a `u32` in Rust and a `number` here.
     const group = (sent?.[1] as { group: { minSelect: number; maxSelect: number | null } }).group;
     expect(group.minSelect).toBe(0);
     expect(group.maxSelect).toBeNull();
@@ -142,8 +130,7 @@ describe('a group of choices (scope 6.2)', () => {
     fireEvent.click(await screen.findByText('Add a group'));
     const shape = screen.getByLabelText('How many may they pick') as HTMLSelectElement;
     const offered = [...shape.options].map((o) => o.value);
-    // Four shapes, every one of them satisfiable. Two number boxes would have
-    // let an owner type a group no cashier can ever get past.
+    // Four shapes, every one of them satisfiable.
     expect(offered).toEqual(['one', 'atMostOne', 'any', 'atLeastOne']);
   });
 });
@@ -208,11 +195,7 @@ describe('a combo (scope 6.3)', () => {
   });
 });
 
-/**
- * **The tax class editor** — P33 §5.1, the round trip that used to go through
- * prose. The screen read its own display words back (`.includes('Outside')`) to
- * decide what to save, so rewording a label made liquor GST-taxable.
- */
+/** The tax class editor. */
 describe('the tax class editor', () => {
   const liquor: TaxClassView = {
     id: 'tax_liquor',
@@ -282,11 +265,7 @@ describe('the tax class editor', () => {
   });
 });
 
-/**
- * **Typing a menu is a run, not a dialog reopened per dish** — the owner,
- * 2026-08-24: *"If the user has to add many items, he has to click add buton
- * and it pops up many times, it is tedious."*
- */
+/** Typing a menu is a run, not a dialog reopened per dish. */
 describe('adding items (2026-08-24)', () => {
   const classes: TaxClassView[] = [
     {

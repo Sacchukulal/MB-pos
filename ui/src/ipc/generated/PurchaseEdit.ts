@@ -3,12 +3,11 @@ import type { PurchaseLineEdit } from "./PurchaseLineEdit";
 
 export type PurchaseEdit = { id: string, supplierId: string, invoiceNo: string, lines: Array<PurchaseLineEdit>, invoiceDiscount: string, charges: string, 
 /**
- * What the paper's own total says, when somebody typed it. Compared, never
- * believed — the difference becomes a sentence.
+ * What the paper's own total says, when somebody typed it.
  */
 statedTotal: string, 
 /**
- * Money handed over at the door. **A second row, never a flag** (D121).
+ * Money handed over at the door.
  */
 paidNow: string, paidMode: string, attachmentId: string, poId: string, note: string, 
 /**

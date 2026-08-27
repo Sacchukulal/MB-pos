@@ -1,40 +1,9 @@
 #!/usr/bin/env node
 /**
- * **Which commands can the shop actually reach?** — P31.
+ * Which commands can the shop actually reach?
  *
- * Every session up to P30.5 proved its work with `cargo test`. The tests are
- * honest and they all pass — and a Rust command with a test and no button is a
- * feature the shop cannot use. When the owner installed the build and used it,
- * **29 of 226 commands had no caller at all**: no way to add a menu category,
- * no way to change a quantity on a bill, no way to go back a version.
- *
- * This is that count, made mechanical. Run it:
- *
- *     node scripts/audit-wiring.mjs
- *
- * It exits non-zero if anything is unreachable, so it can go in CI.
- *
- * # What it compares
- *
- * | | |
- * |---|---|
- * | registered | the `commands!()` macro in `src-tauri/src/ipc.rs` |
- * | declared | the `Commands` interface in `ui/src/ipc/call.ts` |
- * | called | any `call('name')` in `ui/src/`, outside `call.ts` |
- *
- * The first two already have a compiler between them — a name in one and not
- * the other stops the build. **The gap this finds is the third**, which nothing
- * else in the repository can see.
- *
- * # Dispatched names count as called
- *
- * `Reports.tsx` dispatches over `'report_csv' | 'report_pdf'`, and `Network.tsx` over four
- * pairing commands. Those are wired, and a naive grep says they are not — so a
- * quoted name anywhere in a screen file counts. That is deliberately loose:
- * this exists to find the command with NO mention at all, and a false alarm
- * that has to be argued about every run is a check people switch off.
- *
- * NO DEPENDENCIES, like every other script in this repository.
+ * Usage:
+ *   node scripts/audit-wiring.mjs
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -58,7 +27,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const ipc = readFileSync(IPC, 'utf8');
+const ipc = readFileSync(IPC, 'utf8').replace(/\r\n/g, '\n');
 const block = ipc.match(/macro_rules! commands \{[\s\S]*?generate_handler!\[([\s\S]*?)\n\s*\]\n/);
 if (!block) {
   console.error('  could not find the commands!() macro in ipc.rs');
@@ -66,7 +35,7 @@ if (!block) {
 }
 const registered = [...block[1].matchAll(/\$crate::(?:[\w]+::)*(\w+)\s*,/g)].map((m) => m[1]);
 
-const callTs = readFileSync(CALL_TS, 'utf8');
+const callTs = readFileSync(CALL_TS, 'utf8').replace(/\r\n/g, '\n');
 const iface = callTs.match(/export interface Commands \{([\s\S]*?)\n\}\n/);
 if (!iface) {
   console.error('  could not find the Commands interface in call.ts');

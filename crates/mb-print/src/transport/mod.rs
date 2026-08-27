@@ -1,29 +1,4 @@
-//! Getting bytes to a printer — **audit D2, which is the largest hardware gap
-//! in the product.**
-//!
-//! > *"Windows printers only, and only through the print spooler… There is no
-//! > direct network/IP printer support, no USB/serial, no Bluetooth, no
-//! > cash-drawer kick."*
-//!
-//! Four ways out, behind one trait:
-//!
-//! | | scope | |
-//! |---|---|---|
-//! | [`spooler`] | 7.1 | the Windows spooler, RAW — what almost every shop runs |
-//! | [`network`] | 7.2 | raw TCP to port 9100 — a kitchen printer with no PC |
-//! | [`serial`] | 7.3 | a COM port |
-//! | [`file`] | — | a file: testing, and "print to file" |
-//!
-//! Plus [`NullTransport`], which is not a placeholder: a shop whose printer has
-//! not arrived must still be able to bill (requirement 3 of the ten), and a
-//! queue with nowhere to send would have to grow a special case for it.
-//!
-//! # Every test in this crate uses the file transport
-//!
-//! That is deliberate, and it is the answer to "how much of P07 can be proved
-//! without hardware". The queue, the retries, the parking, the parallelism, the
-//! drawer rules, the routing and the bytes are all provable on any machine. The
-//! two OS transports are the only part that needs the owner's TVSE.
+//! Getting bytes to a printer.
 
 pub mod file;
 pub mod network;
@@ -39,33 +14,27 @@ use crate::printer::Target;
 /// What went wrong on the way to the paper.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TransportError {
-    /// This build cannot reach that kind of printer at all — a spooler printer
-    /// on a machine that is not Windows.
+    /// This build cannot reach that kind of printer at all — a spooler printer on a machine
+    /// that is not Windows.
     #[error("{what} is not available on this platform")]
     Unavailable { what: String },
 
-    /// Could not get to the printer. **Transient**: the kitchen printer is
-    /// switched off, and it will be switched on again.
+    /// Could not get to the printer.
     #[error("could not reach {target}: {reason}")]
     Connect { target: String, reason: String },
 
-    /// Got there and the write failed. Also transient — out of paper, cover
-    /// open, cable knocked.
+    /// Got there and the write failed.
     #[error("{target} accepted the connection but not the print: {reason}")]
     Write { target: String, reason: String },
 
-    /// Something no amount of retrying will fix: a printer name that does not
-    /// exist, a path that cannot be written. **Permanent**, so the queue parks
-    /// it at once rather than trying five times to be sure.
+    /// Something no amount of retrying will fix: a printer name that does not exist, a path
+    /// that cannot be written.
     #[error("{target} cannot be printed to: {reason}")]
     Refused { target: String, reason: String },
 }
 
 impl TransportError {
     /// Whether retrying could ever help.
-    ///
-    /// Retrying a permanent failure five times with backoff is fifteen seconds
-    /// of pretending, and it delays the moment the cashier finds out.
     #[must_use]
     pub const fn is_permanent(&self) -> bool {
         matches!(
@@ -76,13 +45,9 @@ impl TransportError {
 }
 
 /// Somewhere bytes can go.
-///
-/// `send` returns when the bytes have been **handed over**, not when paper has
-/// moved: a one-way ESC/POS link cannot tell us the second thing, and a trait
-/// that implied otherwise would be a promise the hardware does not make.
 pub trait Transport: Send + fmt::Debug {
-    /// `document` is the job name a shop sees in the Windows print queue, so it
-    /// should say something.
+    /// `document` is the job name a shop sees in the Windows print queue, so it should say
+    /// something.
     fn send(&mut self, bytes: &[u8], document: &str) -> Result<(), TransportError>;
 
     /// Where this goes, in words, for the status stream.
@@ -90,10 +55,6 @@ pub trait Transport: Send + fmt::Debug {
 }
 
 /// Open a transport for a target.
-///
-/// Opened per job and closed after it, deliberately — see [`network`] for why a
-/// held-open socket to an idle kitchen printer is a trap this product has
-/// already fallen into once, on the cloud side.
 pub fn open(target: &Target, timeout: Duration) -> Result<Box<dyn Transport>, TransportError> {
     match target {
         Target::File { path } => Ok(Box::new(file::FileTransport::new(path.clone()))),
@@ -111,14 +72,12 @@ pub fn open(target: &Target, timeout: Duration) -> Result<Box<dyn Transport>, Tr
 }
 
 /// How the queue gets a transport.
-///
-/// A trait rather than a call to [`open`] so that a test can hand the queue a
-/// printer that never answers — which is the only way to prove audit D3, and
-/// proving D3 is what this session is for. P08 gets the same seam if a terminal
-/// ever spools to another terminal (scope 11.1).
 pub trait TransportFactory: Send + Sync + fmt::Debug {
-    fn open(&self, target: &Target, timeout: Duration)
-    -> Result<Box<dyn Transport>, TransportError>;
+    fn open(
+        &self,
+        target: &Target,
+        timeout: Duration,
+    ) -> Result<Box<dyn Transport>, TransportError>;
 }
 
 /// The real four.
@@ -149,10 +108,6 @@ impl Transport for NullTransport {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Discovery, and the cache that is audit D2's other half.
-// ---------------------------------------------------------------------------
-
 /// A printer the operating system knows about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovered {
@@ -161,16 +116,7 @@ pub struct Discovered {
     pub is_network: bool,
 }
 
-/// The list of Windows printers, **cached**.
-///
-/// > Audit D2: *"printer names are fetched by running a PowerShell command
-/// > **each time**."*
-///
-/// The fix is two things and both matter: the list comes from the spooler API
-/// rather than from a shell, and it is asked for once rather than on every
-/// repaint of the settings screen. [`Discovery::refresh`] is the explicit
-/// reload, because a shop that has just plugged a printer in must be able to
-/// make it appear without restarting the counter.
+/// The list of Windows printers, cached.
 #[derive(Debug, Default)]
 pub struct Discovery {
     cached: Mutex<Option<Vec<Discovered>>>,
@@ -195,7 +141,7 @@ impl Discovery {
         Ok(fresh)
     }
 
-    /// Forget the cache. The next [`list`](Discovery::list) asks the OS again.
+    /// Forget the cache. The next `list` asks the OS again.
     pub fn refresh(&self) {
         *lock(&self.cached) = None;
     }
@@ -226,6 +172,9 @@ mod tests {
             reason: "no such printer".to_owned(),
         };
         assert!(!off.is_permanent(), "a printer that is off comes back on");
-        assert!(gone.is_permanent(), "a printer that does not exist will not");
+        assert!(
+            gone.is_permanent(),
+            "a printer that does not exist will not"
+        );
     }
 }

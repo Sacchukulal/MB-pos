@@ -1,47 +1,10 @@
-/**
- * **The layout primitives.** P27.5, and the reason the app stopped looking
- * "here and there".
- *
- * # What was wrong
- *
- * There was no `Page`, no `PageHeader`, no `Toolbar` and no `Panel`. So Stock's
- * header, Buying's header, Menu's header, Reports' header and Settings' header
- * were five separate pieces of CSS that were each meant to be the same thing.
- * They were not the same — different padding, different title size, different
- * gap to the content, different place for the actions — and they could never
- * have become the same by editing values, because the shape did not exist in
- * one place to edit.
- *
- * Nineteen sessions each did the reasonable thing in isolation. The result of
- * nineteen reasonable local decisions is a product that does not line up.
- *
- * # The rule these exist to enforce
- *
- * **A screen must not be able to invent its own layout.** After P27.5 a feature
- * CSS file describes only what is unique to that screen: the shape of a table
- * tile, the columns of the day close. The page margin, the header, the toolbar,
- * the gaps between sections and the surface a panel sits on all come from here,
- * and `scripts/check-layout.mjs` fails the build on a screen that sets its own
- * page padding or hand-rolls a header.
- *
- * If a screen cannot say what it needs with these, the answer is a new
- * primitive in this file — never a one-off in that screen.
- */
-
 import { forwardRef, type ReactNode } from 'react';
 
 import { cx } from './cx';
 import { Icon, type IconName } from './Icon';
 import { InfoTip } from './InfoTip';
 
-/**
- * The page. **Owns the page margin and nothing else owns it.**
- *
- * `scroll` is the common case and the default: the header stays put and the
- * body scrolls under it, which is what stops a screen's own title scrolling
- * away from the table it names. Billing passes `scroll={false}` because it
- * manages its own three columns and must never scroll as a whole.
- */
+/** The page. Owns the page margin and nothing else owns it. */
 export function Page({
   children,
   scroll = true,
@@ -58,20 +21,7 @@ export function Page({
   );
 }
 
-/**
- * An area that scrolls. **The only thing in the product that scrolls.**
- *
- * A screen keeps its own layout on this element — pass it as `className`, the
- * same way `Page` takes one — and gets the scrolling from here.
- *
- * The bar sits in the page margin rather than inside the content, so a table
- * in a scroller still lines up with the header above it. Every screen used to
- * write its own `overflow-y: auto`, which put the bar inside and left the
- * content 12px short of everything else on the page.
- *
- * `inset` is for a scroller that is not at the page's right edge — a side
- * panel, a rail, a dialog body — where there is no page margin to reach into.
- */
+/** An area that scrolls. */
 export const Scroller = forwardRef<
   HTMLDivElement,
   { children: ReactNode; inset?: boolean; className?: string }
@@ -83,13 +33,7 @@ export const Scroller = forwardRef<
   );
 });
 
-/**
- * The one page header in the product.
- *
- * `count` is set apart from the title rather than glued into it, because
- * "Menu (43)" is a title a translator cannot move and a number the eye has to
- * pick out of a word. Actions sit right, which is where a hand goes for them.
- */
+/** The one page header in the product. */
 export function PageHeader({
   title,
   subtitle,
@@ -99,12 +43,11 @@ export function PageHeader({
 }: {
   title: string;
   /**
-   * **A live FACT about what is on screen, never an explanation of the
-   * screen** — Stock's "4 items low, 1 out". If it is the same sentence every
-   * time the screen opens, it is an explanation: put it in `note`.
+   * A live FACT about what is on screen, never an explanation of the screen — Stock's "4 items
+   * low, 1 out".
    */
   subtitle?: string;
-  /** What the screen is for, as a tip you can ask for. Never a paragraph. */
+  /** What the screen is for, as a tip you can ask for. */
   note?: ReactNode;
   count?: number | string;
   actions?: ReactNode;
@@ -127,15 +70,8 @@ export function PageHeader({
 }
 
 /**
- * Filters, a search box, a view switch — the controls that change what the
- * page below is showing, as opposed to the actions in the header that change
- * the shop.
- *
- * Always directly under the header, always the same height, always the same
- * gap. The floor screen used to put its section chips on the left as filled
- * accent squares and its view tabs on the right as bare text, on one row, for
- * the same kind of choice. Two control languages in one strip is the specific
- * thing this stops.
+ * Filters, a search box, a view switch — the controls that change what the page below is
+ * showing, as opposed to the actions in the header that change the shop.
  */
 export function Toolbar({
   children,
@@ -152,14 +88,7 @@ export function Toolbar({
   );
 }
 
-/**
- * A panel down the side that folds away to a small button.
- *
- * The button that opens it and the chevron that closes it are in the same
- * place — the top of the column the panel opens into.
- *
- * `allowed={false}` hides it entirely. Rust's guard is the real control.
- */
+/** A panel down the side that folds away to a small button. */
 export function SideFold({
   open,
   label,
@@ -174,7 +103,7 @@ export function SideFold({
   label: string;
   onOpen: () => void;
   onFold: () => void;
-  /** What is inside the panel. Only rendered while it is open. */
+  /** What is inside the panel. */
   panel: ReactNode;
   children: ReactNode;
   allowed?: boolean;
@@ -224,26 +153,12 @@ export function SideFold({
   );
 }
 
-/**
- * The way out and the Save, at the foot of something that scrolls.
- *
- * Pinned, so it is never below the fold — which is where Save sat in the item
- * panel and in any dialog that filled the window. Put it last inside a `Fields`
- * or a `Stack`; it takes the slack above it and sticks to the bottom edge.
- */
+/** The way out and the Save, at the foot of something that scrolls. */
 export function Foot({ children }: { children: ReactNode }) {
   return <div className="mb-foot">{children}</div>;
 }
 
-/**
- * A raised surface on the page. **The only thing in the product that is
- * raised**, per the elevation contract in `tokens.css`: the page is flat,
- * panels sit on it, dialogs pop over it, and there is no fourth level.
- *
- * `flush` drops the padding for a panel whose whole content is a table — a
- * table inside a padded panel reads as a table in a box in a box (§5, "avoid
- * cards inside cards").
- */
+/** A raised surface on the page. */
 export function Panel({
   title,
   note,
@@ -253,14 +168,7 @@ export function Panel({
   className,
 }: {
   title?: string;
-  /**
-   * The explanation, as something you can **ask** for.
-   *
-   * Not drawn under the title — it becomes an `InfoTip` beside it. Same change
-   * and same reason as `SectionHeader`: the owner, 2026-08-22, *"it makes the
-   * app look cluttered and un professional… make it a kind of popup text, when
-   * hovered."*
-   */
+  /** The explanation, as something you can ask for. */
   note?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
@@ -285,10 +193,7 @@ export function Panel({
   );
 }
 
-/**
- * A run of sections down a page, with the section gap between them. Use it
- * rather than stacking `Panel`s directly, so the gap is decided once.
- */
+/** A run of sections down a page, with the section gap between them. */
 export function Sections({ children }: { children: ReactNode }) {
   return <div className="mb-sections">{children}</div>;
 }
@@ -354,12 +259,8 @@ export function Stack({
 }
 
 /**
- * A message about the state of the page, in a sentence, with the form signal
- * as well as the colour (§2 rule 2).
- *
- * One place turns a machine state into words (§6), and this is the shape those
- * words arrive in — so the licence line, the no-PIN banner and the till-queue
- * banner stop being three hand-written strips that happen to look similar.
+ * A message about the state of the page, in a sentence, with the form signal as well as the
+ * colour.
  */
 export function Notice({
   tone = 'info',
@@ -373,15 +274,8 @@ export function Notice({
   children: ReactNode;
   action?: ReactNode;
   /**
-   * **True for a banner that is always there** — the licence line, the no-PIN
-   * warning, the held-bills line. It is a status strip rather than a card: one
-   * line, tight above and below, centred on its icon.
-   *
-   * P30.5, and the owner's fresh install is why. A shop with no licence key sees
-   * the licence line on every screen for as long as it takes them to buy one,
-   * and a shop with no PIN sees that one too — so on a new install two cards
-   * with card-sized padding sat between the top bar and the till, on a 768-pixel
-   * screen, for ever. The words are the same; the box stops shouting.
+   * True for a banner that is always there — the licence line, the no-PIN warning, the
+   * held-bills line.
    */
   standing?: boolean;
 }) {

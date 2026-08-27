@@ -1,32 +1,4 @@
-//! **A whole trading day, and everything has to reconcile** — P30.
-//!
-//! Every other test in this product proves one rule. This one drives a day
-//! through the real commands and then asks the question the rules cannot ask
-//! individually:
-//!
-//! > **where two figures are computed by different code, are they equal?**
-//!
-//! That is the entire class of bug this product was rebuilt to kill. Not one
-//! of v1's sixty-two findings was a crash. They were a report that bucketed by
-//! UTC while its filter used local time, a credit balance stored beside the
-//! ledger that made it, a backup that only held bills. Every one of them was
-//! invisible from the counter and obvious in a spreadsheet six months later —
-//! because two pieces of code answered the same question differently and
-//! nothing ever compared them.
-//!
-//! So this file compares them. The day below is deliberately awkward: mixed
-//! rates, a void, a refund, a discount, split payments, a credit sale and a
-//! repayment, an expense, a delivery with cash on a bike, an unconfirmed UPI
-//! payment and a tip. Then:
-//!
-//! | this figure | must equal | why it could differ |
-//! |---|---|---|
-//! | the day's takings | the sum of the bills | `day_totals` and `sales_by` are different SQL |
-//! | cash in the drawer | float + cash bills − cash out | `cash_position` is seven queries |
-//! | tax by rate | the tax on the bills that made it | the summary is its own table (audit B11) |
-//! | the customer's balance | their ledger | v1 stored it beside the ledger (audit A3) |
-//! | what a rider carries | collected − handed back | D151, and it is never stored |
-//! | the audit chain | itself | D43 — a broken link has a `seq` |
+//! A whole trading day, and everything has to reconcile.
 
 #![allow(
     clippy::expect_used,
@@ -43,14 +15,12 @@ use crate::reports::PeriodArg;
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
 
-// ---------------------------------------------------------------------------
-// The shop
-// ---------------------------------------------------------------------------
+// The shop.
 
-/// Four items at three different tax rates, including one the law says carries
-/// no GST at all — a bar cannot be billed for without it (requirement 2).
+/// Four items at three different tax rates, including one the law says carries no GST at all —
+/// a bar cannot be billed for without it.
 const MENU: &[(&str, &str, i64, Option<u32>)] = &[
-    // id, name, rupees, tax basis points (None = outside GST, i.e. liquor)
+    // Id, name, rupees, tax basis points (None = outside GST, i.e. liquor)
     ("itm_dosa", "Masala Dosa", 120, Some(500)),
     ("itm_biryani", "Chicken Biryani", 280, Some(500)),
     ("itm_cake", "Chocolate Pastry", 90, Some(1_800)),
@@ -62,8 +32,8 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
     a_shop_at(scratch, &path)
 }
 
-/// The same shop, at a path the caller keeps — so a test can drop the whole
-///  and open the same file again, which is what a restart is.
+/// The same shop, at a path the caller keeps — so a test can drop the whole and open the same
+/// file again, which is what a restart is.
 fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
     let path = path.to_path_buf();
     let db = Db::open(&DbConfig::new(path.clone())).expect("open");
@@ -106,7 +76,6 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
         90,
     ));
 
-    // The owner, signed in and on the staff list.
     save_staff_member_on(
         &app,
         StaffEdit {
@@ -134,7 +103,7 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
     app
 }
 
-/// One bill, through the real commands. Returns its number and its total.
+/// One bill, through the real commands.
 fn bill(app: &App, items: &[(&str, &str)], mode: &str) -> (String, Money) {
     crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
@@ -177,23 +146,25 @@ fn cash(app: &App) -> mb_db::repo::money::CashPosition {
 fn totals(app: &App) -> mb_db::repo::DayTotals {
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).corrections().day_totals(OUTLET, today()))
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .corrections()
+                    .day_totals(OUTLET, today())
+            })
             .map_err(|e| crate::words::from_db(&e))
     })
     .expect("the day's totals")
 }
 
-// ---------------------------------------------------------------------------
-// The day
-// ---------------------------------------------------------------------------
+// The day.
 
-/// **A trading day, and every figure that can be computed twice.**
+/// A trading day, and every figure that can be computed twice.
 #[test]
 fn a_whole_day_reconciles_against_itself() {
     let scratch = Scratch::new("acceptance_day");
     let app = a_shop(&scratch, "day");
 
-    // --- the float ---------------------------------------------------------
+    // The float.
     crate::expenses::save_movement_on(
         &app,
         "float".to_owned(),
@@ -202,7 +173,7 @@ fn a_whole_day_reconciles_against_itself() {
     )
     .expect("the float");
 
-    // --- the service -------------------------------------------------------
+    // The service.
     let mut cash_bills = Money::ZERO;
     let mut every_bill = Money::ZERO;
 
@@ -226,8 +197,7 @@ fn a_whole_day_reconciles_against_itself() {
         }
     }
 
-    // A mixed-rate bill: food at 5%, a pastry at 18%, and beer outside GST
-    // altogether. This is requirement 2 in one line.
+    // A mixed-rate bill: food at 5%, a pastry at 18%, and beer outside GST altogether.
     let (mixed_number, mixed_total) = bill(
         &app,
         &[("itm_dosa", "1"), ("itm_cake", "1"), ("itm_beer", "1")],
@@ -236,7 +206,7 @@ fn a_whole_day_reconciles_against_itself() {
     every_bill = every_bill.add(mixed_total).expect("in range");
     cash_bills = cash_bills.add(mixed_total).expect("in range");
 
-    // --- 1. the takings, two ways -----------------------------------------
+    // 1. the takings, two ways.
     let day = totals(&app);
     assert_eq!(
         day.gross, every_bill,
@@ -248,12 +218,14 @@ fn a_whole_day_reconciles_against_itself() {
         .expect("the sales report");
     let printed: Vec<&String> = sales.rows.iter().flat_map(|r| r.iter()).collect();
     assert!(
-        printed.iter().any(|c| c.contains(&every_bill.to_plain_string())),
+        printed
+            .iter()
+            .any(|c| c.contains(&every_bill.to_plain_string())),
         "the sales report and the day's totals are different SQL and must \
          agree: {printed:?}"
     );
 
-    // --- 2. the drawer -----------------------------------------------------
+    // 2. the drawer.
     let drawer = cash(&app);
     assert_eq!(drawer.opening_float, Money::from_paise(300_000));
     assert_eq!(drawer.cash_sales, cash_bills, "cash bills");
@@ -265,7 +237,7 @@ fn a_whole_day_reconciles_against_itself() {
         "float plus cash bills IS the drawer, before anything goes out"
     );
 
-    // --- 3. money out ------------------------------------------------------
+    // 3. money out.
     crate::expenses::save_expense_on(
         &app,
         crate::expenses::ExpenseEdit {
@@ -294,7 +266,7 @@ fn a_whole_day_reconciles_against_itself() {
         "a cash expense comes out of the drawer exactly once"
     );
 
-    // --- 4. a void ---------------------------------------------------------
+    // 4. a void.
     let voided = crate::corrections::list_bills_on(&app)
         .expect("the bills")
         .into_iter()
@@ -316,8 +288,7 @@ fn a_whole_day_reconciles_against_itself() {
         every_bill.sub(mixed_total).expect("in range"),
         "net takings is gross less voids, computed once"
     );
-    // **And the drawer follows.** A voided cash bill is money that left the
-    // drawer again — the single most expensive thing to get wrong here.
+    // And the drawer follows.
     let drawer = cash(&app);
     assert_eq!(
         drawer.cash_sales,
@@ -325,9 +296,9 @@ fn a_whole_day_reconciles_against_itself() {
         "a voided cash bill is no longer cash the drawer holds"
     );
 
-    // --- 5. the tax summary ------------------------------------------------
-    let tax = crate::reports::report_on(&app, "tax_rate".to_owned(), period())
-        .expect("the tax report");
+    // 5. the tax summary.
+    let tax =
+        crate::reports::report_on(&app, "tax_rate".to_owned(), period()).expect("the tax report");
     let rates: Vec<&String> = tax.rows.iter().filter_map(|r| r.first()).collect();
     assert!(
         rates.iter().any(|r| r.contains('5')),
@@ -337,14 +308,13 @@ fn a_whole_day_reconciles_against_itself() {
         rates.iter().any(|r| r.contains("18")),
         "18% has to be its own row, never lumped in with the 5%: {rates:?}"
     );
-    // The beer. **A bar cannot be billed for legally without this row.**
+    // The beer. A bar cannot be billed for legally without this row.
     assert!(
         tax.rows.len() >= 2,
         "a mixed-rate day is at least two rows: {:?}",
         tax.rows
     );
 
-    // --- 6. the audit trail ------------------------------------------------
     let history = crate::ipc::audit_trail_on(&app, None, None, None).expect("the history");
     assert!(
         history.entries.iter().any(|e| e.what.contains("Voided")),
@@ -357,16 +327,9 @@ fn a_whole_day_reconciles_against_itself() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// The one that could bill twice
-// ---------------------------------------------------------------------------
+// The one that could bill twice.
 
-/// **A double Enter must never bill twice.**
-///
-/// The cashier presses Complete Bill, nothing visibly happens for 200 ms, and
-/// they press it again. On v1 that was a real second bill. Here the second
-/// call has nothing to settle, and it must say so rather than producing a
-/// number.
+/// A double Enter must never bill twice.
 #[test]
 fn settling_the_same_cart_twice_bills_once() {
     let scratch = Scratch::new("acceptance_twice");
@@ -395,16 +358,9 @@ fn settling_the_same_cart_twice_bills_once() {
     assert_eq!(totals(&app).bills, 1, "one press, one bill");
 }
 
-// ---------------------------------------------------------------------------
-// The day boundary
-// ---------------------------------------------------------------------------
+// The day boundary.
 
-/// **One business day, everywhere** — requirement 8, and audit B1.
-///
-/// v1 stored UTC, filtered by local time and grouped reports by the UTC date,
-/// so a bill at 00:15 landed on two different days on two different screens.
-/// The day is STAMPED once (D5) and nothing re-derives it, which is what this
-/// asserts: the order, its payment and the report all say the same day.
+/// One business day, everywhere.
 #[test]
 fn a_bill_after_midnight_belongs_to_one_day_on_every_screen() {
     let scratch = Scratch::new("acceptance_day_edge");
@@ -413,8 +369,8 @@ fn a_bill_after_midnight_belongs_to_one_day_on_every_screen() {
     let (_, total) = bill(&app, &[("itm_dosa", "1")], "Cash");
     let stamped = today();
 
-    // The order's day, the payment's day and the report's day are three
-    // different columns written by three different code paths.
+    // The order's day, the payment's day and the report's day are three different columns
+    // written by three different code paths.
     let day_of_payment = app
         .with_shop(|shop| {
             shop.db
@@ -438,25 +394,14 @@ fn a_bill_after_midnight_belongs_to_one_day_on_every_screen() {
     assert_eq!(day.gross, total, "and the report finds it on that day");
 }
 
-// ---------------------------------------------------------------------------
-// The money that is not a bill
-// ---------------------------------------------------------------------------
+// The money that is not a bill.
 
-/// **Credit, a rider's cash and a tip — three figures that are computed twice
-/// each, and every one of them was wrong somewhere in v1.**
-///
-/// * a customer's balance is a SUM over the ledger and was a stored column
-///   beside it (audit A3);
-/// * what a rider is carrying is a sum over rows and is deliberately not
-///   stored (D151);
-/// * a tip is in the drawer and is not a sale (scope 8.5) — it appears in one
-///   figure and must not appear in the other.
+/// Credit, a rider's cash and a tip.
 #[test]
 fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
     let scratch = Scratch::new("acceptance_money");
     let app = a_shop(&scratch, "money");
 
-    // --- credit ------------------------------------------------------------
     crate::credit::save_customer_on(
         &app,
         crate::credit::CustomerEdit {
@@ -498,9 +443,6 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
     );
 
     // Half of it back, in cash.
-    // Half of it, to the paise. A remainder here would only make the
-    // assertion below harder to read; the arithmetic under test is the
-    // ledger's, not this line's.
     #[allow(clippy::integer_division, reason = "half a balance, in a test")]
     let half = Money::from_paise(owed.paise() / 2);
     crate::credit::record_repayment_on(
@@ -522,16 +464,14 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
         owed.sub(half).expect("in range").paise(),
         "a repayment moves the balance by exactly what was handed over"
     );
-    // **And a credit sale is not cash.** The drawer only sees the repayment.
+    // And a credit sale is not cash.
     assert_eq!(
         cash(&app).cash_sales,
         Money::ZERO,
         "a bill put on account is not money in the drawer"
     );
 
-    // --- a tip -------------------------------------------------------------
-    // The day already has the credit sale on it, so what is asserted is the
-    // DELTA: a tip adds nothing at all to the takings.
+    // A tip.
     let before_the_tip = totals(&app).gross;
     crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
@@ -572,7 +512,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
         "…and it is NOT a sale. The day's takings grew by the food, and only          by the food."
     );
 
-    // --- a rider ------------------------------------------------------------
+    // A rider.
     crate::delivery::set_rider_on(&app, "staff_boss".to_owned(), true).expect("a rider");
     crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
@@ -636,16 +576,9 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// A restart
-// ---------------------------------------------------------------------------
+// A restart.
 
-/// **Kill it mid-service. Nothing is lost and nothing is duplicated.**
-///
-/// The open order is on disk before the kitchen ever sees it (D4), so a
-/// counter that loses power between the ticket and the bill still has the
-/// table's food. This drops the whole `App` — every in-memory cart with it —
-/// and opens the same file again, which is what a restart is.
+/// Kill it mid-service. Nothing is lost and nothing is duplicated.
 #[test]
 fn a_restart_mid_service_keeps_the_open_orders() {
     let scratch = Scratch::new("acceptance_restart");
@@ -664,7 +597,9 @@ fn a_restart_mid_service_keeps_the_open_orders() {
         crate::ipc::cart_add_on(&app, "itm_cake".to_owned(), Some("1".to_owned()), None)
             .expect("added");
         crate::flows::park_open_order(&app).expect("held");
-        let cart = app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config())).expect("the cart");
+        let cart = app
+            .with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
+            .expect("the cart");
         (
             app.with_cart(|state| Ok(state.order_id.clone()))
                 .expect("an order id")
@@ -687,7 +622,9 @@ fn a_restart_mid_service_keeps_the_open_orders() {
     );
 
     crate::ipc::open_table_on(&app, found.id.clone()).expect("reopened");
-    let cart = app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config())).expect("the cart");
+    let cart = app
+        .with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
+        .expect("the cart");
     assert_eq!(cart.lines.len(), lines, "…and with all of its lines");
 
     // And it is ONE order, not two.
@@ -700,28 +637,15 @@ fn a_restart_mid_service_keeps_the_open_orders() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Every report in the catalogue
-// ---------------------------------------------------------------------------
+// Every report in the catalogue.
 
-/// **Every report the product offers is asked for, on a real day.**
-///
-/// P18's shape is that a report is a line in the catalogue plus a function in
-/// mb-db — which is what let P26 add nine of them without touching a screen.
-/// The risk in that shape is a catalogue entry whose query was never run: it
-/// looks finished on the settings screen and fails the first time an owner
-/// presses it, months later, on a busy evening.
-///
-/// So this presses all of them. It asserts only that each one ANSWERS —
-/// the arithmetic of each is its own test — because the failure this catches
-/// is a broken column name, not a wrong figure.
+/// Every report the product offers is asked for, on a real day.
 #[test]
 fn every_report_in_the_catalogue_answers_for_a_real_day() {
     let scratch = Scratch::new("acceptance_reports");
     let app = a_shop(&scratch, "reports");
 
-    // A day with something in it, so an empty table cannot pass for a working
-    // query.
+    // A day with something in it, so an empty table cannot pass for a working query.
     bill(&app, &[("itm_dosa", "2"), ("itm_cake", "1")], "Cash");
     bill(&app, &[("itm_beer", "1")], "Card");
     crate::expenses::save_movement_on(
@@ -750,22 +674,16 @@ fn every_report_in_the_catalogue_answers_for_a_real_day() {
         refused.is_empty(),
         "these reports are on the screen and cannot be run:
   {}",
-        refused.join("
-  ")
+        refused.join(
+            "
+  "
+        )
     );
 }
 
-// ---------------------------------------------------------------------------
-// The environment turning hostile
-// ---------------------------------------------------------------------------
+// The environment turning hostile.
 
-/// **A corrupted shop file fails LOUDLY, and never half-opens.**
-///
-/// The shape that would be dangerous is a database that opens, answers some
-/// queries and silently loses others — a shop billing onto a file that is
-/// already broken. SQLite refuses a file whose header is not a database, and
-/// this is the test that says the product lets that refusal through rather
-/// than swallowing it into an empty shop.
+/// A corrupted shop file fails LOUDLY, and never half-opens.
 #[test]
 fn a_corrupted_shop_file_is_refused_rather_than_half_opened() {
     let scratch = Scratch::new("acceptance_corrupt");
@@ -779,25 +697,19 @@ fn a_corrupted_shop_file_is_refused_rather_than_half_opened() {
         "a file that is not a database opened anyway, which is worse than          failing: the shop would bill onto it"
     );
 
-    // And the counter is still usable — a broken file for ONE shop is not a
-    // broken program. A fresh path opens normally.
+    // And the counter is still usable — a broken file for ONE shop is not a broken program.
     let fresh = a_shop_at(&scratch, &scratch.dir().join("fresh.db"));
     assert!(!bill(&fresh, &[("itm_dosa", "1")], "Cash").0.is_empty());
 }
 
-/// **A day that has been closed and locked refuses to be billed into.**
-///
-/// The adversarial version of requirement 9: it is not enough that the close
-/// writes a row, the lock has to actually stop the next thing.
+/// A day that has been closed and locked refuses to be billed into.
 #[test]
 fn a_locked_day_refuses_the_corrections_that_would_change_it() {
     let scratch = Scratch::new("acceptance_locked");
     let app = a_shop(&scratch, "locked");
     let (number, total) = bill(&app, &[("itm_dosa", "1")], "Cash");
 
-    // Counted in ₹500 notes. How many is a division, and the remainder is
-    // deliberately dropped: this test is about the LOCK, and the drawer being
-    // a few rupees out is what the reason box is for.
+    // Counted in ₹500 notes.
     #[allow(clippy::integer_division, reason = "counting notes, in a test")]
     let notes = u32::try_from(total.paise() / 50_000).unwrap_or(0);
     crate::dayclose::close_on(
@@ -834,21 +746,7 @@ fn a_locked_day_refuses_the_corrections_that_would_change_it() {
     );
 }
 
-/// **A settled order can never be settled a second time** — FIX PLAN 1, A2.
-///
-/// `settling_the_same_cart_twice_bills_once` above covers the ordinary double
-/// press: the cart is cleared by the first settle, so the second finds nothing
-/// and stops. That is the whole defence, and it is one line of state.
-///
-/// This is the case that got past it. Settling reads the cart, releases it,
-/// writes the order, prints, and only then clears — so a second press that
-/// arrives inside that window still holds a cart pointing at the order that
-/// has just been settled. It looked the order up, did not match `Open`, and
-/// fell through to "open a new one", which **claims a fresh bill number and
-/// upserts the settled row away**. One sale, two bill numbers, and a GST book
-/// with a hole in it.
-///
-/// `park_open_order` had answered this properly all along. Settling had not.
+/// A settled order can never be settled a second time.
 #[test]
 fn a_settled_order_is_never_given_a_second_bill_number() {
     let scratch = Scratch::new("acceptance_resettle");
@@ -910,22 +808,9 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // FIX PLAN 1 — one counter action at a time.
-//
-// The cart lock is taken and released per call, so its promise holds inside one
-// call and not across a flow. Settling reads the cart, releases it, writes the
-// order, prints, and only then clears — and a second press landing inside that
-// window read a cart that was still full. `settling_the_same_cart_twice_bills_once`
-// could not catch it, because pressing twice in a test is two calls in a row,
-// and in a row is exactly the case that already worked.
-// ---------------------------------------------------------------------------
 
-/// **A second action waits for the first to finish.**
-///
-/// Deterministic, and about the mechanism rather than the symptom: the counter
-/// is held, a second action is started on another thread, and it must still be
-/// waiting. Everything else in this round rests on this being true.
+/// A second action waits for the first to finish.
 #[test]
 fn a_second_action_waits_while_the_counter_is_busy() {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -969,12 +854,7 @@ fn a_second_action_waits_while_the_counter_is_busy() {
     );
 }
 
-/// **Two settles at the same instant produce one bill.**
-///
-/// This is the press-twice-quickly case as it actually happens: not one call
-/// after another, but two at once. Before the counter was serialised both
-/// threads read a full cart, and the loser went on to claim a second bill
-/// number for the same sale.
+/// Two settles at the same instant produce one bill.
 #[test]
 fn two_settles_at_the_same_instant_make_one_bill() {
     let scratch = Scratch::new("acceptance_race_settle");

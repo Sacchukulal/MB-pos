@@ -1,28 +1,8 @@
-//! What a setting's value is, what shapes it may take, and the one place a bad
-//! one is refused.
-//!
-//! # Refused, never coerced
-//!
-//! R3, and P17's item 11. A padding width of 40 is not "clamped to 8"; it is
-//! wrong, and the person who typed it must be told. Coercion is how a shop ends
-//! up with a bill number it did not choose and no memory of choosing it.
-//!
-//! # Why the type lives beside the value and not in the caller
-//!
-//! Audit **E6** was 41 positional slots, and the fix at the storage layer (P04)
-//! was one row per setting with its type beside it. The fix at *this* layer is
-//! that the limits, the words and the default live beside the key too — in
-//! `catalog.rs` — rather than being re-typed at every call site. Three copies of
-//! "the maximum logo width is 100" is E6 again with better syntax.
+//! What a setting's value is, what shapes it may take, and the one place a bad one is refused.
 
 use mb_core::Money;
 
 /// A setting's value, in the four shapes the storage layer can hold.
-///
-/// There is no `Choice` variant: a choice is [`Value::Text`] whose content is
-/// checked against [`Kind::Choice`]'s list. One fewer variant, one fewer place
-/// for the two lists to disagree, and the stored row is readable in a SQLite
-/// browser — `"dotted"` rather than `3`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Bool(bool),
@@ -72,12 +52,7 @@ impl Value {
     }
 }
 
-/// One option in a [`Kind::Choice`].
-///
-/// `value` is what is stored and `label` is what the screen shows. Stored
-/// separately because the stored word must survive the label being reworded —
-/// a shop that chose "Dotted" must not lose its choice because somebody wrote
-/// "Dotted line" on the screen next year.
+/// One option in a `Kind::Choice`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Choice {
     pub value: &'static str,
@@ -85,21 +60,16 @@ pub struct Choice {
 }
 
 /// The extra shape a piece of text has to hold, beyond a length.
-///
-/// Each of these is a real rejected-return or a real support call, which is why
-/// they are checked here rather than being left to the screen (D45's argument,
-/// applied to values: the screen is a courtesy, this is the control).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
     Free,
     /// Ten digits. India, no country code — the bill has 32 columns.
     Phone,
-    /// Fifteen characters, and the **state code has to match the shop's own
-    /// state**, which is the check nobody does and everybody needs.
+    /// Fifteen characters, and the state code has to match the shop's own state, which is the
+    /// check nobody does and everybody needs.
     Gstin,
     /// Fourteen digits.
     Fssai,
-    /// `name@handle`.
     UpiId,
     /// A folder that may be empty (meaning "the usual place").
     Folder,
@@ -112,8 +82,8 @@ pub enum Kind {
     Int {
         min: i64,
         max: i64,
-        /// "minutes", "%", "characters" — printed in the refusal and shown
-        /// beside the field, so a number never appears without its unit.
+        /// "minutes", "%", "characters" — printed in the refusal and shown beside the field, so
+        /// a number never appears without its unit.
         unit: &'static str,
     },
     Money {
@@ -128,10 +98,9 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// **The one gate.** Everything that reaches a setting comes through here
-    /// first, including an import and including a value this program wrote
-    /// itself — the second one matters, because a build that changes a limit
-    /// must fail loudly on the old value rather than printing it.
+    /// The one gate. Everything that reaches a setting comes through here first, including an
+    /// import and including a value this program wrote itself — the second one matters, because
+    /// a build that changes a limit must fail loudly on the old value rather than printing it.
     pub fn check(self, value: &Value) -> Result<(), Invalid> {
         match self {
             Kind::Bool => {
@@ -190,31 +159,14 @@ impl Kind {
     }
 }
 
-/// The shape checks, and every one of them says what is wrong rather than
-/// "invalid format" (UI_GUIDELINES §6, audit F8).
-///
-/// **Empty is always allowed here.** "Not filled in yet" is the state every
-/// shop is in on its first day, and a settings screen that refuses to save
-/// because the FSSAI number is blank is a screen a new shop cannot get past.
-/// Whether a field is *required* is a question about the bill, and the bill
-/// already answers it by omitting the line.
+/// The shape checks, and every one of them says what is wrong rather than "invalid format".
 fn check_shape(shape: Shape, text: &str) -> Result<(), Invalid> {
     if text.is_empty() {
         return Ok(());
     }
     match shape {
         Shape::Free | Shape::Folder => Ok(()),
-        // **What is STORED is ten bare digits, and this says so.**
-        //
-        // `mb_core::Phone` is the rule for what a person may TYPE — it forgives
-        // "+91", a trunk zero and spacing, because that is how a number arrives
-        // from a contact list. Forgiving it *here* would mean the forgiven form
-        // going onto disk, so the normalising happens on the way in
-        // (`settings::ipc::off_the_wire`) and this checks the result.
-        //
-        // A check and a parse are two different jobs. Conflating them is how a
-        // setting ends up holding "+919880012345" while every other phone in
-        // the product holds ten digits.
+        // What is STORED is ten bare digits, and this says so.
         Shape::Phone => {
             if text.len() == mb_core::PHONE_DIGITS && text.chars().all(|c| c.is_ascii_digit()) {
                 Ok(())
@@ -224,40 +176,18 @@ fn check_shape(shape: Shape, text: &str) -> Result<(), Invalid> {
                 ))
             }
         }
-        // **Whatever the shop types is what the shop meant** — the owner,
-        // 2026-08-16: *"U FORCING unnessorily put correct GST number, whatever
-        // they enter that is ok, dont make any rules for fssi and GST".*
-        //
-        // Both of these used to REFUSE, which stopped the settings screen
-        // saving anything else on the page with it. A licence number is a
-        // string a shop copies off a certificate; a counter that argues with
-        // the certificate is a counter that is wrong more often than the shop
-        // is. `check_gstin` is still here and still correct — nothing calls it
-        // to refuse a person any more.
+        // Whatever the shop types is what the shop meant.
         Shape::Fssai | Shape::Gstin => Ok(()),
-        Shape::UpiId => {
-            match text.split_once('@') {
-                Some((name, handle)) if !name.is_empty() && !handle.is_empty() => Ok(()),
-                _ => Err(Invalid::new(
-                    "A UPI id looks like name@bank — for example 9880012345@okhdfcbank.",
-                )),
-            }
-        }
+        Shape::UpiId => match text.split_once('@') {
+            Some((name, handle)) if !name.is_empty() && !handle.is_empty() => Ok(()),
+            _ => Err(Invalid::new(
+                "A UPI id looks like name@bank — for example 9880012345@okhdfcbank.",
+            )),
+        },
     }
 }
 
 /// A GSTIN, checked properly.
-///
-/// Fifteen characters: two digits of state code, ten of PAN, one entity digit,
-/// a literal `Z`, and a check character. The check character is the Luhn-mod-36
-/// the GST portal uses, and computing it here is the difference between finding
-/// a typo now and finding it when a return is rejected.
-///
-/// The **state code is not checked here** — it is checked against the shop's
-/// own state in `catalog.rs`, because only there is the other half known.
-/// **P26 made this `pub(crate)`, and that is the point of it.** A supplier's
-/// GSTIN goes on an input-credit claim, so it needs exactly the check the
-/// shop's own number gets. Writing a second one is how the two drift.
 pub(crate) fn check_gstin(text: &str) -> Result<(), Invalid> {
     if text.chars().count() != 15 {
         return Err(Invalid::new(format!(
@@ -299,21 +229,19 @@ fn gstin_check_character(first_fourteen: &str) -> Option<char> {
     let mut sum = 0_u32;
     for (index, ch) in first_fourteen.chars().enumerate() {
         let position = u32::try_from(ALPHABET.iter().position(|c| *c == ch as u8)?).ok()?;
-        // Every second character counts double, from the left, because the
-        // string is a fixed fifteen and the portal counts it that way.
+        // Every second character counts double, from the left, because the string is a fixed
+        // fifteen and the portal counts it that way.
         let factor = if index % 2 == 0 { 1 } else { 2 };
         let product = position * factor;
         sum += (product / 36) + (product % 36);
     }
     let remainder = sum % 36;
     let check = (36 - remainder) % 36;
-    ALPHABET.get(usize::try_from(check).ok()?).map(|b| *b as char)
+    ALPHABET
+        .get(usize::try_from(check).ok()?)
+        .map(|b| *b as char)
 }
 
-/// Why a value was refused, in words the owner reads.
-///
-/// The key is filled in by whoever knew it — the caller — so this type can be
-/// produced deep inside a `write` closure that does not know its own key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invalid {
     pub key: Option<&'static str>,
@@ -364,9 +292,12 @@ mod tests {
             unit: "characters",
         };
         let error = kind.check(&Value::Int(40)).expect_err("40 was allowed");
-        assert!(error.message.contains("between 0 and 8"), "{}", error.message);
-        // And it is refused, not clamped. There is deliberately no path here
-        // that returns a corrected value.
+        assert!(
+            error.message.contains("between 0 and 8"),
+            "{}",
+            error.message
+        );
+        // And it is refused, not clamped.
         assert!(kind.check(&Value::Int(8)).is_ok());
     }
 
@@ -385,32 +316,23 @@ mod tests {
         let error = Kind::Choice(OPTIONS)
             .check(&Value::Text("wavy".to_owned()))
             .expect_err("wavy was allowed");
-        assert!(error.message.contains("Dashed, Dotted"), "{}", error.message);
+        assert!(
+            error.message.contains("Dashed, Dotted"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
     fn the_wrong_shape_entirely_is_refused_rather_than_parsed() {
-        // A `"1"` is not a tick. Reading it as one is exactly the silent
-        // coercion D7 forbids.
+        // A `"1"` is not a tick.
         let error = Kind::Bool
             .check(&Value::Text("1".to_owned()))
             .expect_err("a string was taken as a tick");
         assert!(error.message.contains("a tick"), "{}", error.message);
     }
 
-    /// **Real GST numbers, and they are the whole evidence for this checksum.**
-    ///
-    /// The algorithm is the portal's documented Luhn mod 36, but "documented"
-    /// is not "checked": if this were wrong, a shop would type its own correct
-    /// GST number and be told it was a typo, which is a worse bug than not
-    /// checking at all. So the test uses **published, real** numbers rather
-    /// than invented ones — an invented number would only prove that this
-    /// function agrees with itself.
-    ///
-    /// Note for whoever reads this next: the fixture number the mb-print tests
-    /// use, `29ABCDE1234F1Z5`, is **not** a valid GSTIN — its check character
-    /// is `W`. That is fine for a print fixture, which never validates it, and
-    /// it is worth knowing before somebody "fixes" this test with it.
+    /// Real GST numbers, and they are the whole evidence for this checksum.
     #[test]
     fn a_real_gstin_passes_and_a_typo_does_not() {
         for real in ["27AAPFU0939F1ZV", "24AAACC1206D1ZM", "29ABCDE1234F1ZW"] {
@@ -418,7 +340,11 @@ mod tests {
         }
         // One character changed, the rest identical.
         let error = check_gstin("29ABCDE1234F1Z6").expect_err("a bad checksum passed");
-        assert!(error.message.contains("does not match"), "{}", error.message);
+        assert!(
+            error.message.contains("does not match"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
@@ -454,7 +380,10 @@ mod tests {
             Shape::Folder,
             Shape::Free,
         ] {
-            assert!(check_shape(shape, "").is_ok(), "{shape:?} refused an empty value");
+            assert!(
+                check_shape(shape, "").is_ok(),
+                "{shape:?} refused an empty value"
+            );
         }
     }
 
@@ -482,8 +411,6 @@ mod tests {
         let error = kind
             .check(&Value::Money(Money::from_paise(500_000)))
             .expect_err("allowed");
-        // The owner reads rupees. A refusal that says "500000" about a ₹5,000
-        // entry is audit F8.
         assert!(error.message.contains("5000.00"), "{}", error.message);
         assert!(error.message.contains("1000.00"), "{}", error.message);
         assert!(!error.message.contains("100000"), "{}", error.message);

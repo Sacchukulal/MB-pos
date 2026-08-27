@@ -1,24 +1,4 @@
-/**
- * **The kitchen display** — P24, scope 3.3 to 3.7.
- *
- * Rust proves the rules; `kitchen_tests.rs` drives the real commands against a
- * real database. This proves what the SCREEN does, and everything here is
- * something only a screen can get wrong:
- *
- * 1. the ack says **drawn**, not **arrived** — the whole paper fallback rests
- *    on this, and a screen that acks on receive lies exactly when the tab has
- *    frozen;
- * 2. every state is told apart **without colour** (UI_GUIDELINES §2) — this
- *    screen is read across a bright room and a colour-blind cook is not rare;
- * 3. the number keys work, because plenty of kitchens mount a numpad rather
- *    than a touchscreen (T9: both ways in, always);
- * 4. a cancelled card cannot be cleared by accident — it has one button and it
- *    is not "Done" (D107);
- * 5. the undo is **reachable**: the card is gone the instant it is cleared, so
- *    the way back has to be somewhere still on screen;
- * 6. **no card owns a clock** (M3) — one tick for the screen, however many
- *    cards are on it.
- */
+/** The kitchen display. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -117,14 +97,7 @@ describe('the kitchen display', () => {
     expect(screen.getByText('3 min')).toBeTruthy();
   });
 
-  /**
-   * **The ack means DRAWN.**
-   *
-   * If this ever becomes "the reply arrived", the paper fallback stops working
-   * in the exact case it exists for: a tablet whose power saver froze the tab
-   * still answers the network, so the counter would believe a screen nobody
-   * can read is showing the ticket.
-   */
+  /** The ack means DRAWN. */
   it('tells the counter it drew a new ticket, and only a new one', async () => {
     serve(view({ tickets: [ticket({ tone: 'new' }), ticket({ id: 'kds_2', tone: 'cooking' })] }));
     show();
@@ -136,11 +109,6 @@ describe('the kitchen display', () => {
     expect(call).not.toHaveBeenCalledWith('kitchen_shown', { id: 'kds_2' });
   });
 
-  /**
-   * **UI_GUIDELINES §2 rule 2, and here it is not a nicety.** The screen is
-   * across a hot bright room. Every state carries a word, so the four are told
-   * apart with the colour switched off.
-   */
   it('says every state in words, not only in colour', async () => {
     serve(
       view({
@@ -159,15 +127,9 @@ describe('the kitchen display', () => {
     }
   });
 
-  /**
-   * **T9 — both ways in, always.** Plenty of kitchens mount a numpad or a
-   * cheap keyboard instead of a touchscreen, because a screen behind a tandoor
-   * gets grease on it.
-   */
-  // Given longer than the default five seconds for the reason the shell's
-  // sign-in test is: it runs in about half a second on an idle machine, and
-  // vitest runs twenty-five files at once. A test that fails on a busy machine
-  // teaches whoever sees it to re-run the suite instead of reading it.
+  /** Both ways in, always. */
+  // Given longer than the default five seconds for the reason the shell's sign-in test is: it
+  // runs in about half a second on an idle machine, and vitest runs twenty-five files at once.
   it('clears a card from the number key as well as the button', { timeout: 20_000 }, async () => {
     serve(view({ tickets: [ticket({ id: 'first' }), ticket({ id: 'second' })] }));
     show();
@@ -186,11 +148,7 @@ describe('the kitchen display', () => {
     });
   });
 
-  /**
-   * **D107.** Food already cooking is thrown away; food not started is cooked
-   * for nobody. So the cancelled card does not offer "Done" at all — pressing
-   * the same place out of habit must not silently clear a cancellation.
-   */
+  /** Food already cooking is thrown away; food not started is cooked for nobody. */
   it('a cancelled card can only be acknowledged, never cleared', async () => {
     serve(view({ tickets: [ticket({ isCancelled: true, says: 'CANCELLED', tone: 'cancelled' })] }));
     show();
@@ -218,7 +176,7 @@ describe('the kitchen display', () => {
     expect(call).not.toHaveBeenCalledWith('kitchen_bump', expect.anything());
   });
 
-  /** Tapping one dish as it comes off the pass — the owner asked for both. */
+  /** Tapping one dish as it comes off the pass. */
   it('ticks one dish off without touching the others', async () => {
     serve(view({ tickets: [ticket({ lines: [line(), line({ key: 'k2', name: 'Paneer Tikka' })] })] }));
     show();
@@ -229,11 +187,7 @@ describe('the kitchen display', () => {
     });
   });
 
-  /**
-   * **The undo has to be reachable.** A cleared card leaves the grid at once,
-   * so an undo drawn on the card is an undo nobody can press. It names the
-   * card too, because bringing back the wrong one is the same mistake again.
-   */
+  /** The undo has to be reachable. */
   it('offers the last cleared card back, by name', async () => {
     serve(view({ lastCleared: { id: 'kds_9', what: 'Table 5 #12' } }));
     show();
@@ -253,7 +207,7 @@ describe('the kitchen display', () => {
     expect(screen.queryByRole('button', { name: /Bring back/ })).toBeNull();
   });
 
-  /** Scope 3.5, and the shops that do not use courses never see any of it. */
+  /** 5, and the shops that do not use courses never see any of it. */
   it('fires the next course, and hides the whole idea from a shop without one', async () => {
     serve(view());
     const plain = show();
@@ -296,11 +250,6 @@ describe('the kitchen display', () => {
     expect(await screen.findByText(/Nothing waiting. The kitchen is clear./)).toBeTruthy();
   });
 
-  /**
-   * **M3, and PERFORMANCE §5 rule 10.** *"v1's KDS-style timer screens are
-   * exactly where a re-render storm hides."* One tick for the screen — twelve
-   * cards must not mean twelve timers.
-   */
   it('runs one clock for the whole screen, however many cards', async () => {
     vi.useFakeTimers();
 
@@ -314,18 +263,13 @@ describe('the kitchen display', () => {
     show();
     await vi.advanceTimersByTimeAsync(0);
 
-    // **The number does not grow with the grid.** Twelve cards must cost the
-    // same clock as one — a timer per card is exactly the leak M3 names.
+    // The number does not grow with the grid.
     expect(vi.getTimerCount()).toBe(withOneCard);
 
     vi.useRealTimers();
   });
 
-  /**
-   * **A kitchen screen that goes blank is the failure this feature exists to
-   * prevent.** If a read fails it keeps what it had, and the counter is
-   * meanwhile printing anything nobody drew.
-   */
+  /** A kitchen screen that goes blank is the failure this feature exists to prevent. */
   it('keeps the last cards on screen when a read fails', async () => {
     serve(view());
     show();

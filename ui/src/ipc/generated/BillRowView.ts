@@ -4,18 +4,13 @@ import type { MoneyView } from "./MoneyView";
 /**
  * One of today's bills, as the Bills list shows it.
  */
-export type BillRowView = { orderId: string, number: string, 
-/**
- * Already formatted. R8 — TypeScript does no arithmetic, on money or time.
- */
-at: string, table: string | null, orderType: string, total: MoneyView, cashier: string | null, 
+export type BillRowView = { orderId: string, number: string, at: string, table: string | null, orderType: string, total: MoneyView, cashier: string | null, 
 /**
  * "settled", "voided", "cancelled".
  */
 state: string, 
 /**
- * Present on a voided bill, and shown. A void without its reason on screen
- * is the same silence audit B5 complains about.
+ * Present on a voided bill, and shown.
  */
 voidReason: string | null, refunded: MoneyView | null, 
 /**

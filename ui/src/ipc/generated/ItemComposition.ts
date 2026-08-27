@@ -4,8 +4,7 @@ import type { VariantView } from "./VariantView";
 
 export type ItemComposition = { itemId: string, itemName: string, variants: Array<VariantView>, 
 /**
- * **Every group the shop has**, each flagged with whether this item offers
- * it — so attaching one is a tick rather than a retyping. A shop has
- * "Spice level" once, not once per curry.
+ * Every group the shop has, each flagged with whether this item offers it — so attaching
+ * one is a tick rather than a retyping.
  */
 groups: Array<ModifierGroupView>, };

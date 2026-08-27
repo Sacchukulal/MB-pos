@@ -4,7 +4,6 @@ import type { MoneyView } from "./MoneyView";
 
 export type ComboView = { id: string, name: string, price: MoneyView, isActive: boolean, parts: Array<ComboPartView>, 
 /**
- * What the parts cost bought separately — so an owner can see what the
- * deal gives away without doing the arithmetic on paper.
+ * What the parts cost bought separately.
  */
 separately: MoneyView, };

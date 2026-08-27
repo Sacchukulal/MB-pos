@@ -3,8 +3,8 @@ import type { DisplayLine } from "./DisplayLine";
 import type { PrintJobView } from "./PrintJobView";
 
 /**
- * Everything Rust pushes. One enum, because one channel is easier to reason
- * about than five, and because a screen that has just attached wants the lot.
+ * Everything Rust pushes. One enum, because one channel is easier to reason about than five,
+ * and because a screen that has just attached wants the lot.
  */
 export type Pushed = { "kind": "printQueue", jobs: Array<PrintJobView>, } | { "kind": "session", 
 /**
@@ -24,16 +24,15 @@ waiting: number, } | { "kind": "floorChanged", waiting: number, } | { "kind": "t
  */
 waiting: number, 
 /**
- * The whole sentence, empty when there is nothing to say (R8).
+ * The whole sentence, empty when there is nothing to say.
  */
 says: string, } | { "kind": "customerBill", 
 /**
- * Every line, already priced and formatted (R8).
+ * Every line, already priced and formatted.
  */
 lines: Array<DisplayLine>, total: string, 
 /**
- * The heading: the shop's name, or what the shop typed for an idle
- * display.
+ * The heading: the shop's name, or what the shop typed for an idle display.
  */
 title: string, 
 /**
@@ -41,7 +40,7 @@ title: string,
  */
 qr: string, 
 /**
- * True when there is nothing on the bill, so the display shows the
- * shop's name instead of an empty table.
+ * True when there is nothing on the bill, so the display shows the shop's name instead
+ * of an empty table.
  */
 idle: boolean, };

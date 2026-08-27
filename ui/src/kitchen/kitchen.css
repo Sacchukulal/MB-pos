@@ -1,15 +1,7 @@
-/*
- * The kitchen display — P24. Read from two metres, in a bright hot room.
- * Every value is a token (D21).
- *
- * The type here is deliberately larger than anywhere else in the product. A
- * counter screen is 60 cm from a cashier's eyes; this one is across a kitchen.
- */
+/* The kitchen display. */
 
 .mb-kds {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -18,7 +10,7 @@
   background: var(--surface-1);
 }
 
-/* --- the bar ------------------------------------------------------------- */
+/* The bar. */
 
 .mb-kds__bar {
   display: flex;
@@ -64,7 +56,7 @@
   border-color: var(--accent);
 }
 
-/* --- firing a course ----------------------------------------------------- */
+/* Firing a course. */
 
 .mb-kds__fire {
   display: flex;
@@ -84,7 +76,7 @@
   color: var(--text-muted);
 }
 
-/* --- the cards ----------------------------------------------------------- */
+/* The cards. */
 
 .mb-kds__empty {
   margin: auto;
@@ -92,14 +84,13 @@
   color: var(--text-muted);
 }
 
-/* A wall screen is wide. Cards fill it and wrap, so four fit on a monitor and
-   two on a tablet without anybody choosing a layout. */
+/* A wall screen is wide. */
 .mb-kds__grid {
   display: grid;
-  /* Four columns on a wall monitor, two on a tablet, one on a phone — decided
-     by the screen rather than by a breakpoint anybody has to maintain. The
-     minimum is a token, because a raw size here is what the token guard
-     rejects and rightly (D21). */
+  /*
+   * Four columns on a wall monitor, two on a tablet, one on a phone — decided by the screen
+   * rather than by a breakpoint anybody has to maintain.
+   */
   grid-template-columns: repeat(auto-fill, minmax(var(--kds-card-min), 1fr));
   gap: var(--space-3);
   align-content: start;
@@ -112,8 +103,10 @@
   gap: var(--space-2);
   padding: var(--space-3);
   border: var(--border-width) solid var(--border);
-  /* **The state is a thick left edge as well as a colour** — §2. A card is
-     recognisable across a room by its shape before its colour is read. */
+  /*
+   * The state is a thick left edge as well as a colour — §2. A card is recognisable across a
+   * room by its shape before its colour is read.
+   */
   border-left-width: var(--space-2);
   border-radius: var(--radius-md);
   background: var(--surface-2);
@@ -132,14 +125,16 @@
   background: var(--danger-soft);
 }
 
-/* Already on paper: present so a cook can see what is on the rail, and quiet
-   so it is not mistaken for new work. */
+/*
+ * Already on paper: present so a cook can see what is on the rail, and quiet so it is not
+ * mistaken for new work.
+ */
 .mb-kds__card--printed {
   border-left-color: var(--text-muted);
   opacity: 0.72;
 }
 
-/* **The one thing on this screen allowed to shout** (D107). */
+/* The one thing on this screen allowed to shout. */
 .mb-kds__card--cancelled {
   border-color: var(--danger);
   border-left-color: var(--danger);
@@ -197,7 +192,7 @@
   color: var(--text-muted);
 }
 
-/* --- the dishes ---------------------------------------------------------- */
+/* The dishes. */
 
 .mb-kds__lines {
   list-style: none;
@@ -214,8 +209,9 @@
   flex-direction: column;
 }
 
-/* A ticked dish stays legible — a cook needs to see what has been done as much
-   as what has not. Struck through, not hidden. */
+/*
+ * A ticked dish stays legible — a cook needs to see what has been done as much as what has not.
+ */
 .mb-kds__line--done .mb-kds__name {
   text-decoration: line-through;
   color: var(--text-muted);
@@ -248,8 +244,7 @@
   font-size: var(--text-xl);
 }
 
-/* **An addition a cook must not miss.** It comes from the kitchen ledger, not
-   from comparing timestamps. */
+/* An addition a cook must not miss. */
 .mb-kds__new {
   margin-left: var(--space-2);
   padding: 0 var(--space-2);
@@ -269,7 +264,7 @@
   color: var(--warn);
 }
 
-/* --- what a cook presses ------------------------------------------------- */
+/* What a cook presses. */
 
 .mb-kds__actions {
   display: flex;
@@ -278,9 +273,10 @@
   margin-top: auto;
 }
 
-/* The undo, on the bar rather than on a card — the card is gone by the time
-   anybody wants it back. Quiet, because it is used a few times a service, but
-   a real touch target: a cook is pressing it with the back of a knuckle. */
+/*
+ * The undo, on the bar rather than on a card — the card is gone by the time anybody wants it
+ * back.
+ */
 .mb-kds__recall {
   margin-left: auto;
   border: var(--border-width) solid var(--border);

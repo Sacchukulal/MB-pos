@@ -1,42 +1,7 @@
-//! **Applying a phone's intent** — P20, decision D9.
-//!
-//! # The counter is the authority
-//!
-//! The phone asks; this file decides. Every number, every rupee, every
-//! decision about what the kitchen has been told is made here, on the counter,
-//! against the stored order — never on the phone and never from a figure a
-//! phone sent.
-//!
-//! `mb-lan` carries the message and knows nothing about any of it (its
-//! `Counter` trait is the seam). This is the other side.
-//!
-//! # Idempotency, and why the order of operations is load-bearing
-//!
-//! A waiter on a flaky connection retries. A phone that loses a reply cannot
-//! know whether its intent landed. So every intent carries a client-generated
-//! id, and:
-//!
-//! 1. the id is checked, the effect applied, the outcome recorded and the
-//!    audit row written **inside ONE transaction**;
-//! 2. a repeat returns the **original outcome**, byte for byte — not "already
-//!    done", because the phone is going to show it to a waiter;
-//! 3. the broadcast to other phones happens **after** the commit, because a
-//!    broadcast inside the transaction holds the writer open for as long as
-//!    the slowest socket, and the writer belongs to the till.
-//!
-//! Recording the id before the effect would swallow an intent on a crash;
-//! recording it after would apply one twice. That is R11's rule — the row goes
-//! in the same transaction as the thing it records — applied to the network.
-//!
-//! # And the cashier is never clobbered
-//!
-//! If a phone changes the order the cashier has open on screen, this file does
-//! **not** touch the cashier's cart. It records what the floor did, and the
-//! screen offers to take it in. v1 learned that the hard way; see
-//! [`FloorChange`] and D83.
+//! Applying a phone's intent.
 
-use mb_auth::audit::{AuditEntry, action};
 use mb_auth::Permission;
+use mb_auth::audit::{AuditEntry, action};
 use mb_core::{AnyOrder, Money, OrderId, Qty, StaffId, Timestamp};
 use mb_lan::intent::{Intent, LineView, Outcome, What};
 use serde::Serialize;
@@ -48,24 +13,14 @@ use crate::state::{App, OUTLET};
 use crate::words::{self, UiResult};
 
 /// How old a queued intent may be before a person has to release it.
-///
-/// **Twelve hours, and the reason is v1's 7 a.m. problem**: a phone that was
-/// offline all evening reconnecting when the shop opens would silently print
-/// yesterday's tickets into a kitchen that is making breakfast. Twelve hours
-/// spans one service and not two.
 pub const HOLD_AFTER_HOURS: i64 = 12;
 
 /// What the floor did to an order the cashier has open.
-///
-/// Kept beside the cart rather than merged into it: **the cashier's unsaved
-/// typing is theirs**, and a phone that adds a dosa must not silently rewrite
-/// what somebody is halfway through settling. The screen shows this and offers
-/// to take it in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct FloorChange {
-    /// The whole sentence: "Ravi added 2 Masala Dosa from the floor."
+    /// The whole sentence: "Ravi added 2 Masala Dosa from the floor.".
     pub says: String,
     pub item_id: String,
     pub name: String,
@@ -73,23 +28,15 @@ pub struct FloorChange {
     pub note: Option<String>,
 }
 
-/// The result of applying one intent, plus what has to happen after the
-/// transaction commits.
+/// The result of applying one intent, plus what has to happen after the transaction commits.
 #[derive(Debug)]
 pub struct Applied {
     pub outcome: Outcome,
-    /// Set when the cashier has this order open and must be told rather than
-    /// overwritten.
+    /// Set when the cashier has this order open and must be told rather than overwritten.
     pub tell_the_cashier: Option<FloorChange>,
 }
 
-/// **Apply one intent.**
-///
-/// # Errors
-///
-/// Only when the database itself will not answer. A business refusal is an
-/// [`Outcome::Refused`] with a sentence, not an error — the phone shows it to
-/// a waiter and does not retry.
+/// Apply one intent.
 pub fn apply(
     app: &App,
     device_id: &str,
@@ -100,16 +47,7 @@ pub fn apply(
     let at = now();
     let day = today(at);
 
-    // **The permission, server-side, before anything else.** D45 said it for
-    // the counter's own commands and it is truer here: a phone that hides a
-    // button is a courtesy, this is the control.
-    //
-    // Note what this means for §6's "the same answer every time": a permission
-    // refusal is decided BEFORE the transaction and so is never written to the
-    // idempotency ledger. That is deliberate and it is still honest — the
-    // answer is a pure function of who is asking and what they asked, so a
-    // retry gets the same sentence anyway — and it keeps the ledger from
-    // filling up with rows for a phone that is repeatedly told no.
+    // The permission, server-side, before anything else.
     if let Some(need) = needs(&intent.what)
         && !permissions.has(need)
     {
@@ -124,8 +62,7 @@ pub fn apply(
         });
     }
 
-    // **Too old to apply without asking a person.** Checked before the
-    // transaction because a held intent changes nothing at all.
+    // Too old to apply without asking a person.
     if is_stale(intent.at, at) {
         return Ok(Applied {
             outcome: Outcome::Held {
@@ -149,10 +86,7 @@ pub fn apply(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
 
-                // **Idempotency, in the same transaction as the effect.** A
-                // repeat gets the ORIGINAL answer — the phone is going to show
-                // it to a waiter, so "already applied" would be a different
-                // sentence for the same event.
+                // Idempotency, in the same transaction as the effect.
                 if let Some(before) = repos.events().recall(&intent.id)? {
                     return Ok(Applied {
                         outcome: serde_json::from_str(&before).unwrap_or(Outcome::Refused {
@@ -179,18 +113,21 @@ pub fn apply(
                     .events()
                     .remember(OUTLET, &intent.id, device_id, &recorded, at)?;
 
-                // R11 — the audit row, in the same transaction, so "who
-                // cancelled that item?" is answerable a month later. v1 kept
-                // two days.
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(staff.clone()), action::INTENT_APPLIED, "order")
-                        .about(intent.order_id.clone().unwrap_or_default())
-                        .with_after(serde_json::json!({
-                            "device": device_id,
-                            "did": intent.what.name(),
-                            "outcome": applied.outcome.message(),
-                        })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(staff.clone()),
+                        action::INTENT_APPLIED,
+                        "order",
+                    )
+                    .about(intent.order_id.clone().unwrap_or_default())
+                    .with_after(serde_json::json!({
+                        "device": device_id,
+                        "did": intent.what.name(),
+                        "outcome": applied.outcome.message(),
+                    })),
                 )?;
                 Ok(applied)
             })
@@ -203,13 +140,13 @@ pub fn apply(
 /// True when an intent has been sitting in a phone's pocket too long.
 #[must_use]
 pub fn is_stale(typed_at_ms: i64, now: Timestamp) -> bool {
-    // A phone's clock can be ahead of the counter's; that is not staleness and
-    // must not be treated as it. Only the past counts.
+    // A phone's clock can be ahead of the counter's; that is not staleness and must not be
+    // treated as it.
     let age_ms = now.millis().saturating_sub(typed_at_ms);
     age_ms > HOLD_AFTER_HOURS.saturating_mul(60 * 60 * 1_000)
 }
 
-/// What each operation needs. `None` means "being paired is enough".
+/// What each operation needs.
 const fn needs(what: &What) -> Option<Permission> {
     match what {
         What::OpenOrder { .. }
@@ -219,8 +156,8 @@ const fn needs(what: &What) -> Option<Permission> {
         | What::SetCovers { .. }
         | What::SendToKitchen
         | What::RequestBill => Some(Permission::BillCreate),
-        // Taking something back is the permission the counter uses for the
-        // same act, and for the same reason (audit B5/B6).
+        // Taking something back is the permission the counter uses for the same act, and for
+        // the same reason.
         What::VoidItem { .. } => Some(Permission::OrderItemVoid),
         What::CancelOrder { .. } => Some(Permission::OrderCancel),
         What::RequestDiscount { line: Some(_), .. } => Some(Permission::BillDiscountLine),
@@ -239,16 +176,7 @@ fn refused(message: impl Into<String>) -> Applied {
     }
 }
 
-/// **Which till this order is on, when there is more than one** (P27, D137).
-///
-/// One shop, one till: this is `None` and every sentence below reads exactly as
-/// it did before P27 — *"at the counter"*, which is where it happened. A shop
-/// with two tills gets the name instead, because *"already open at the
-/// counter"* is not an answer when there are two counters and the person is
-/// standing at one of them.
-///
-/// Never a decision, only a word. A failure to read it costs a vaguer sentence
-/// and nothing else, which is why it swallows its errors.
+/// Which till this order is on, when there is more than one.
 fn on_which_till(repos: &mb_db::Repos<'_>, order: &OrderId) -> Option<String> {
     if repos.terminals().count(OUTLET).ok()? < 2 {
         return None;
@@ -271,12 +199,7 @@ fn where_words(till: Option<&str>) -> String {
     reason = "everything applying an intent needs, and threading it through a \
               struct would only move the list somewhere less obvious"
 )]
-/// **This deliberately does NOT take `&App`.**
-///
-/// It runs inside `App::with_shop`, so reaching back through `App` would take
-/// the shop mutex a second time on the same thread — which is not a slow path,
-/// it is a hang. The first version did exactly that to look a menu item up and
-/// the test suite stopped dead. Everything it needs comes through `repos`.
+/// This deliberately does NOT take `&App`.
 fn do_it(
     repos: &mb_db::Repos<'_>,
     intent: &Intent,
@@ -284,9 +207,7 @@ fn do_it(
     at: Timestamp,
     day: mb_core::BusinessDay,
     cashier_has: Option<&str>,
-    // **Which till this order belongs to** (P27, D135). The master applies a
-    // phone's intent, so an order opened from the floor belongs to the machine
-    // running this code, and its numbers come out of that machine's series.
+    // Which till this order belongs to.
     till: &str,
 ) -> Result<Applied, mb_db::DbError> {
     // Opening an order is the one intent with no order to load.
@@ -296,7 +217,16 @@ fn do_it(
         covers,
     } = &intent.what
     {
-        return open_order(repos, order_type, table_id.as_deref(), *covers, staff, at, day, till);
+        return open_order(
+            repos,
+            order_type,
+            table_id.as_deref(),
+            *covers,
+            staff,
+            at,
+            day,
+            till,
+        );
     }
 
     let Some(order_id) = intent.order_id.as_deref() else {
@@ -306,14 +236,7 @@ fn do_it(
     };
     let found = repos.orders().find(&OrderId::new(order_id))?;
 
-    // **Conflict (e): the counter has already finished with it.** Said in the
-    // words a waiter needs — whether to write it down or not.
-    //
-    // **D137's second conflict, and the till it names.** A settle always beats
-    // an addition, on a phone and between two tills alike: the reverse takes
-    // money for food nobody agreed to. Only the words change when a shop has
-    // two counters, and they change because "at the counter" stops being an
-    // answer when the person asking is standing at one.
+    // Conflict (e): the counter has already finished with it.
     let mut open = match found {
         Some(AnyOrder::Open(open)) => open,
         Some(AnyOrder::Settled(_)) => {
@@ -357,14 +280,7 @@ fn do_it(
             note: line_note,
             ..
         } => {
-            // **Read through THIS transaction, not through `App`.**
-            //
-            // `App::find_menu_item` opens its own `with_shop`, and this code
-            // already runs inside one — which takes the shop's mutex a second
-            // time on the same thread and hangs the counter. That is the exact
-            // deadlock P18 found in `closed_words`, and it hung the test suite
-            // here too. Reading through `repos` also means the item is the one
-            // this transaction sees, which is the correct answer anyway.
+            // Read through THIS transaction, not through `App`.
             let Some(item) = repos
                 .menu()
                 .list_items(OUTLET, true)?
@@ -384,9 +300,7 @@ fn do_it(
             let Ok(qty) = Qty::parse(qty) else {
                 return Ok(refused("That quantity could not be read. Try 1, 2 or 0.5."));
             };
-            // **The counter's own price, frozen here.** A phone holding a
-            // stale catalogue cannot sell yesterday's price (P13's
-            // `ItemSnapshot`), and the phone never sent one anyway.
+            // The counter's own price, frozen here.
             if open
                 .core
                 .cart
@@ -415,8 +329,7 @@ fn do_it(
             let Ok(qty) = Qty::parse(qty) else {
                 return Ok(refused("That quantity could not be read."));
             };
-            // **Conflict (c): the kitchen has already cooked some of it.**
-            // The ledger is the authority and it says how much was told.
+            // Conflict (c): the kitchen has already cooked some of it.
             if let Some(cart_line) = open.core.cart.lines().get(*line) {
                 let told = open.core.kitchen.quantity_told(&cart_line.identity());
                 if qty < told {
@@ -438,9 +351,9 @@ fn do_it(
             let Some(cart_line) = open.core.cart.lines().get(*line).cloned() else {
                 return Ok(refused("That line is not on the order any more."));
             };
-            // Conflict (c) again, and this is the important half: voiding
-            // something the kitchen COOKED is a decision with a cost, so it
-            // goes to the counter rather than being done from the floor.
+            // Conflict (c) again, and this is the important half: voiding something the kitchen
+            // COOKED is a decision with a cost, so it goes to the counter rather than being
+            // done from the floor.
             if !open
                 .core
                 .kitchen
@@ -468,20 +381,13 @@ fn do_it(
         }
 
         What::RequestDiscount { .. } => {
-            // The seam is named rather than half-built: a discount is money,
-            // the counter owns money, and the staff limit lives in P11's role.
-            // Until a phone genuinely needs it this refuses in words instead of
-            // shipping a second discount path.
             return Ok(refused(
                 "Discounts are given at the counter. Ask the cashier.",
             ));
         }
 
         What::SendToKitchen => {
-            // **The counter decides the delta.** `pending` is the only thing
-            // allowed to, and a phone that computed its own would double-print
-            // on a retry — which is the exact failure crown jewel 2 exists to
-            // prevent.
+            // The counter decides the delta.
             let pending = open
                 .core
                 .kitchen
@@ -503,8 +409,7 @@ fn do_it(
         }
 
         What::MoveTable { table_id } => {
-            // **Conflict (d): the cashier moved it first.** The counter's
-            // table is the truth; the phone is told where it went.
+            // Conflict (d): the cashier moved it first.
             open.core.table = Some(mb_core::TableId::new(table_id.clone()));
         }
 
@@ -516,11 +421,9 @@ fn do_it(
                 .clone()
                 .cancel(reason, staff.clone(), at)
                 .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
-            repos.orders().save(
-                OUTLET,
-                till,
-                &AnyOrder::Cancelled(cancelled),
-            )?;
+            repos
+                .orders()
+                .save(OUTLET, till, &AnyOrder::Cancelled(cancelled))?;
             return Ok(Applied {
                 outcome: Outcome::Ok {
                     order_id: order_id.to_owned(),
@@ -567,13 +470,7 @@ fn open_order(
         return Ok(refused("That is not an order type this counter knows."));
     };
 
-    // **A table this shop does not have.**
-    //
-    // Checked here rather than left to the foreign key, because a constraint
-    // violation reaches the waiter as *"The shop's data could not be read"* —
-    // audit F8, on a phone, with a customer waiting. A phone holding a stale
-    // catalogue after the counter deleted a table is an ordinary Tuesday.
-    // Found by a test that opened `tbl_7` on a shop with no tables.
+    // A table this shop does not have.
     if let Some(table) = table_id
         && !repos
             .floor()
@@ -587,33 +484,14 @@ fn open_order(
         ));
     }
 
-    // **Conflict (a): two waiters open the same table at once.** The FIRST one
-    // wins and the second joins it — which is what a shop wants: two waiters at
-    // one table are serving one party, and two orders on one table is a bill
-    // that gets split by accident.
+    // Conflict (a): two waiters open the same table at once.
     if let Some(table) = table_id {
-        let existing = repos.orders().list_open(OUTLET)?.into_iter().find(|o| {
-            o.core()
-                .table
-                .as_ref()
-                .is_some_and(|t| t.as_str() == table)
-        });
+        let existing = repos
+            .orders()
+            .list_open(OUTLET)?
+            .into_iter()
+            .find(|o| o.core().table.as_ref().is_some_and(|t| t.as_str() == table));
         if let Some(AnyOrder::Open(open)) = existing {
-            // **D137's first conflict, and it is answered by joining rather
-            // than refusing — on purpose, and this is the correction.**
-            //
-            // P27's draft said the second till is REFUSED with "Table 5 is
-            // already open on Counter 2". Refusing is the wrong answer and the
-            // code that was already here had it right: a party that has
-            // half-ordered on one till and is now standing at another must be
-            // servable, and a refusal leaves the cashier with a customer and no
-            // way to take their money. Two orders on one table is the failure —
-            // one order reached from two tills is not.
-            //
-            // What P27 adds is the NAME. "Somebody had already opened this
-            // table" is a fine sentence in a one-till shop and a useless one in
-            // a two-till shop, where the cashier's next question is *which
-            // counter*.
             let till = on_which_till(repos, &open.core.id);
             let says = match till {
                 Some(name) => format!(
@@ -645,10 +523,7 @@ fn open_order(
         draft = draft.with_covers(covers);
     }
 
-    // **The counter claims the numbers, atomically, in THIS transaction** (D6,
-    // audit B4: v1 read the number and increased it in a separate command, so
-    // a phone order arriving at the moment the cashier pressed Complete Bill
-    // could get the same one).
+    // The counter claims the numbers, atomically, in THIS transaction.
     let token = mb_db::numbering::claim(
         repos.tx(),
         OUTLET,
@@ -691,10 +566,6 @@ fn view_of(open: &mb_core::OpenOrder, note: Option<String>) -> Outcome {
 
     Outcome::Ok {
         order_id: open.core.id.as_str().to_owned(),
-        // **Formatted here.** R8 and D39: the phone shows this string and
-        // never does arithmetic on money. It is the running total of the
-        // lines, not the bill — the BILL is computed by `compute_bill` at the
-        // counter when it is settled, and there is only ever one of those.
         total: total.to_plain_string(),
         lines: open
             .core
@@ -720,24 +591,9 @@ fn view_of(open: &mb_core::OpenOrder, note: Option<String>) -> Outcome {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Offline: a batch of intents a phone queued while it could not reach us.
-// ---------------------------------------------------------------------------
 
-/// Apply a whole batch, **in order**.
-///
-/// Idempotency is applied across the batch rather than per message, which
-/// falls out of doing it per intent inside its own transaction: a phone that
-/// retries a batch after getting half an answer gets the original outcome for
-/// the half that landed and a fresh one for the rest.
-///
-/// **The report is per intent.** A batch that reports one overall status is a
-/// batch whose failures are invisible — the waiter would see "sent" and never
-/// learn that four of forty were refused.
-///
-/// # Errors
-///
-/// Only when the database itself will not answer.
+/// Apply a whole batch, in order.
 pub fn apply_batch(
     app: &App,
     device_id: &str,
@@ -761,8 +617,8 @@ pub fn apply_batch(
         outcomes.push((intent.id.clone(), applied.outcome));
     }
 
-    // The whole thing in one sentence, written here (§6) because the phone
-    // shows it and must not assemble it.
+    // The whole thing in one sentence, written here (§6) because the phone shows it and must
+    // not assemble it.
     let total = ok + refused_count + held;
     let mut says = format!(
         "{} of {} went through.",
@@ -785,36 +641,16 @@ pub fn apply_batch(
     Ok(mb_lan::BatchResult { outcomes, says })
 }
 
-// ---------------------------------------------------------------------------
 // The catalogue.
-// ---------------------------------------------------------------------------
 
 /// What a phone needs to take an order, with a version.
-///
-/// **The version is the whole point.** A phone asks with what it holds and is
-/// told "unchanged" rather than being sent the menu again: 400 items to fifteen
-/// phones on every reconnect is a shop whose WiFi is the bottleneck.
-///
-/// The version is a hash of what a phone would actually SEE — names, prices and
-/// availability — so a shop that edits a cost price (which no phone shows)
-/// does not push 400 items to the floor.
-///
-/// # Errors
-///
-/// When the shop's menu cannot be read.
 pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
     let (items, sections, tables) = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 Ok((
-                    // **Every item, including the ones that ran out** —
-                    // `false` and not `true`. A phone that is simply not sent
-                    // a sold-out dish shows a menu with a hole in it and a
-                    // waiter who cannot tell "gone" from "never existed".
-                    // Scope 3.9: it arrives marked unavailable and the phone
-                    // greys it out. Found by a test that sold out a dosa and
-                    // watched it vanish.
+                    // Every item, including the ones that ran out — `false` and not `true`.
                     repos.menu().list_items(OUTLET, false)?,
                     repos.floor().list_sections(OUTLET)?,
                     repos.floor().list_tables(OUTLET)?,
@@ -859,9 +695,8 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
                 .map(|s| s.name.clone())
                 .unwrap_or_default(),
             seats: u32::try_from(table.seats).unwrap_or(0),
-            // The floor screen owns what a table IS doing; the catalogue only
-            // says what tables EXIST. A phone learns the state from the live
-            // stream, which is the thing that changes every minute.
+            // The floor screen owns what a table IS doing; the catalogue only says what tables
+            // EXIST.
             state: "free".to_owned(),
         });
     }
@@ -876,32 +711,18 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
     })
 }
 
-// ---------------------------------------------------------------------------
 // The cashier's side of a floor change.
-// ---------------------------------------------------------------------------
 
-/// **Take the floor's items into the cart the cashier is typing.**
-///
-/// This is the "merge", and it is deliberately over LINES only. A phone can
-/// add or change lines and nothing else — it cannot take a payment, it cannot
-/// give a discount — so the cashier's `settlement` and `bill_discount` are not
-/// part of the merge and are never touched. Writing that down is the point:
-/// "merge the order" would be an invitation to overwrite the half-typed
-/// payment somebody is standing there counting out.
-///
-/// # Errors
-///
-/// When an item has since left the menu.
+/// Take the floor's items into the cart the cashier is typing.
 pub fn take_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView> {
-    // One counter action at a time — see `App::begin_action`. Held for the
-    // whole flow, so a second press cannot land between the read and the write.
+    // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
     let changes = app.with_cart(|state| Ok(state.from_the_floor.clone()))?;
 
-    // Every menu lookup FIRST, outside the cart lock — `find_menu_item` takes
-    // the shop lock, and taking two locks in two orders in one product is how
-    // a till freezes at eight o'clock on a Saturday.
+    // Every menu lookup FIRST, outside the cart lock — `find_menu_item` takes the shop lock,
+    // and taking two locks in two orders in one product is how a till freezes at eight o'clock
+    // on a Saturday.
     let mut resolved = Vec::new();
     for change in &changes {
         let item = app.find_menu_item(&change.item_id)?;
@@ -928,10 +749,6 @@ pub fn take_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView>
 }
 
 /// The cashier looked and decided not to take them.
-///
-/// **The order on disk still has them** — the counter took the phone's change
-/// because the counter is the authority. This only clears the note on the
-/// screen, and the sentence on the button says so.
 pub fn dismiss_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView> {
     guard::require(app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
@@ -941,16 +758,12 @@ pub fn dismiss_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartVi
 }
 
 #[tauri::command]
-pub fn take_the_floors_items(
-    app: tauri::State<'_, App>,
-) -> UiResult<crate::billing::CartView> {
+pub fn take_the_floors_items(app: tauri::State<'_, App>) -> UiResult<crate::billing::CartView> {
     take_the_floors_items_on(&app)
 }
 
 #[tauri::command]
-pub fn dismiss_the_floors_items(
-    app: tauri::State<'_, App>,
-) -> UiResult<crate::billing::CartView> {
+pub fn dismiss_the_floors_items(app: tauri::State<'_, App>) -> UiResult<crate::billing::CartView> {
     dismiss_the_floors_items_on(&app)
 }
 
@@ -958,8 +771,6 @@ pub fn dismiss_the_floors_items(
 mod tests {
     use super::*;
 
-    /// **T7's first half.** A phone that was in somebody's apron all evening
-    /// must not print yesterday's tickets when the shop opens.
     #[test]
     fn an_intent_from_yesterday_is_held_and_one_from_now_is_not() {
         let now = Timestamp::from_millis(50 * 60 * 60 * 1_000);
@@ -969,29 +780,54 @@ mod tests {
         assert!(!is_stale(now.millis() - 11 * hour, now));
         assert!(is_stale(now.millis() - 13 * hour, now));
 
-        // **A phone whose clock is AHEAD is not stale.** Two devices on a shop
-        // WiFi disagree about the time by minutes as a matter of routine, and
-        // treating that as staleness would hold a waiter's live order.
+        // A phone whose clock is AHEAD is not stale.
         assert!(!is_stale(now.millis() + 5 * hour, now));
     }
 
-    /// Every operation has had its permission decided — the same rule
-    /// `guard::COMMAND_ACCESS` enforces for the counter's own commands (D45).
+    /// Every operation has had its permission decided — the same rule `guard::COMMAND_ACCESS`
+    /// enforces for the counter's own commands.
     #[test]
     fn every_operation_has_a_permission_decided() {
         let all = [
-            What::OpenOrder { order_type: "dine_in".to_owned(), table_id: None, covers: None },
-            What::AddItem { item_id: "i".to_owned(), qty: "1".to_owned(), note: None, modifiers: vec![] },
-            What::SetQty { line: 0, qty: "1".to_owned() },
-            What::VoidItem { line: 0, reason: "r".to_owned() },
+            What::OpenOrder {
+                order_type: "dine_in".to_owned(),
+                table_id: None,
+                covers: None,
+            },
+            What::AddItem {
+                item_id: "i".to_owned(),
+                qty: "1".to_owned(),
+                note: None,
+                modifiers: vec![],
+            },
+            What::SetQty {
+                line: 0,
+                qty: "1".to_owned(),
+            },
+            What::VoidItem {
+                line: 0,
+                reason: "r".to_owned(),
+            },
             What::SetOrderNote { note: None },
             What::SetCustomer { customer_id: None },
             What::SetCovers { covers: None },
-            What::RequestDiscount { line: Some(0), percent_bp: 1000, reason: "r".to_owned() },
-            What::RequestDiscount { line: None, percent_bp: 1000, reason: "r".to_owned() },
+            What::RequestDiscount {
+                line: Some(0),
+                percent_bp: 1000,
+                reason: "r".to_owned(),
+            },
+            What::RequestDiscount {
+                line: None,
+                percent_bp: 1000,
+                reason: "r".to_owned(),
+            },
             What::SendToKitchen,
-            What::MoveTable { table_id: "t".to_owned() },
-            What::CancelOrder { reason: "r".to_owned() },
+            What::MoveTable {
+                table_id: "t".to_owned(),
+            },
+            What::CancelOrder {
+                reason: "r".to_owned(),
+            },
             What::RequestBill,
         ];
         for what in &all {
@@ -1001,14 +837,19 @@ mod tests {
                 what.name()
             );
         }
-        // And taking something back needs the same permission the counter's
-        // own screen asks for.
+        // And taking something back needs the same permission the counter's own screen asks
+        // for.
         assert_eq!(
-            needs(&What::VoidItem { line: 0, reason: String::new() }),
+            needs(&What::VoidItem {
+                line: 0,
+                reason: String::new()
+            }),
             Some(Permission::OrderItemVoid)
         );
         assert_eq!(
-            needs(&What::CancelOrder { reason: String::new() }),
+            needs(&What::CancelOrder {
+                reason: String::new()
+            }),
             Some(Permission::OrderCancel)
         );
     }

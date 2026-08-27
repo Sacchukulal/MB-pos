@@ -1,23 +1,4 @@
-/**
- * **The customer display** — P29, scope 7.8, and T6.
- *
- * One thing matters on this screen and it is not what it looks like:
- *
- * > **IT MUST NEVER STEAL FOCUS FROM THE BILLING WINDOW. EVER.**
- *
- * A cashier who has to click back into the search box after every item will
- * unplug the display by Friday, so this is the condition on the feature
- * existing at all.
- *
- * The promise is kept in two places and asserted in both. Rust builds the
- * window unfocused and never asks for focus — `device_tests.rs` reads the
- * source and says so. This half is the other one: **the page has nothing
- * focusable on it**, so it could not take the keyboard even if it were shown
- * inside the billing window.
- *
- * The rest is what a customer actually needs to see: their lines, and their
- * total, in figures somebody else formatted (R8).
- */
+/** The customer display. */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -62,9 +43,7 @@ describe('the customer display', () => {
       idle: false,
     }));
 
-    // **T6.** Not "we remembered not to call focus" — there is nothing here to
-    // focus. A later session adding a "clear" button to this page fails right
-    // here, which is the point.
+    // Not "we remembered not to call focus" — there is nothing here to focus.
     expect(container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
   });
 
@@ -104,8 +83,7 @@ describe('the customer display', () => {
       listener?.({ kind: 'session', who: 'Ravi', role: 'Cashier', stand_in: false }),
     );
 
-    // Still the idle screen, and — the part that matters — still nothing
-    // focusable.
+    // Still the idle screen, and — the part that matters — still nothing focusable.
     expect(screen.getByText('Welcome')).toBeTruthy();
   });
 });

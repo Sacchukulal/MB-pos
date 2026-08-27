@@ -1,33 +1,7 @@
-//! The PDF sink — scope 7.10, the B2B A4 invoice, and the file P18 will export
-//! reports through.
-//!
-//! # Why there is no PDF crate (R6)
-//!
-//! A text-only PDF 1.4 over one of the base-14 fonts is a header, five objects,
-//! a content stream of `Td`/`Tj`, and an xref table. That is what this file is,
-//! and it opens in every reader that exists. A crate would be several hundred
-//! kilobytes and a build-time cost for something a shop uses when a B2B
-//! customer asks for an invoice.
-//!
-//! **The calculation changes the moment an embedded font or an image is
-//! needed** — a logo on the invoice, or Kannada text — because both mean font
-//! embedding and image compression, and neither is 150 lines. When that day
-//! comes, a crate is the right answer and this module is the thing it replaces.
-//! Say so here rather than discovering it as a surprise.
-//!
-//! # And the honest limitation
-//!
-//! Courier on a 96-column grid is **correct, filable and ugly**. A proper tax
-//! invoice wants a proportional face and real table rules. This is a stated
-//! compromise, not a design — see [`crate::paper::PaperKind::A4`].
+//! The PDF sink.
 
-// PDF's user space is points, and points are real numbers — there is no
-// integer formulation of "10 pt Courier is 6 pt per character". D7's ban on
-// floating point is about the MONEY path, and no money is computed here: an
-// amount arrives as a string that `Money::to_plain_string` already produced,
-// and this file only decides where to put it. `t9` asserts that every number
-// which reaches paper round-trips through `Money::parse`, so if anything ever
-// did arithmetic on an amount, that test is where it would surface.
+// PDF's user space is points, and points are real numbers — there is no integer formulation of
+// "10 pt Courier is 6 pt per character".
 #![allow(
     clippy::float_arithmetic,
     reason = "page coordinates in points, not money — see the note above"
@@ -37,7 +11,6 @@ use crate::doc::{Align, Pattern};
 use crate::layout::{BandText, Laid, LaidContent, LaidLine};
 use crate::render::{BandImage, Sink, render};
 
-/// A4 at 72 dpi, which is what PDF's default user space is.
 const PAGE_WIDTH: f64 = 595.0;
 const PAGE_HEIGHT: f64 = 842.0;
 const MARGIN: f64 = 36.0;
@@ -46,16 +19,7 @@ const FONT_SIZE: f64 = 10.0;
 const CHAR_WIDTH: f64 = FONT_SIZE * 0.6;
 const LINE_HEIGHT: f64 = FONT_SIZE * 1.25;
 
-/// Render a laid-out document as a PDF, **across as many pages as it needs.**
-///
-/// Until P18 this dropped everything past the first page, with a note saying
-/// the day reports arrived was the day pagination had to be real. That day is
-/// this one: a month of item sales is four hundred rows, and a report that
-/// silently stops at row sixty-two is worse than no export at all — nothing on
-/// the page says it is incomplete.
-///
-/// Every page carries "Page n of m" at the foot, so a printed stack that gets
-/// dropped can be put back in order.
+/// Render a laid-out document as a PDF, across as many pages as it needs.
 #[must_use]
 pub fn to_pdf(laid: &Laid) -> Vec<u8> {
     let mut sink = PdfSink {
@@ -79,12 +43,10 @@ struct Placed {
 #[derive(Debug)]
 struct PdfSink {
     placed: Vec<Placed>,
-    /// One character of the body size, in dots — what the layout counts an
-    /// indent in, and what this sink divides by to get back to columns (P32).
+    /// One character of the body size, in dots — what the layout counts an indent in, and what
+    /// this sink divides by to get back to columns.
     advance: u32,
-    /// Points down from the top margin **of the current page**. A cursor rather
-    /// than a row index, because a 2× line is twice as tall and a row index
-    /// cannot say that.
+    /// Points down from the top margin of the current page.
     cursor: f64,
     page: usize,
 }
@@ -100,21 +62,18 @@ impl Default for PdfSink {
     }
 }
 
-/// How much of a page a line may occupy — the foot is kept clear for the page
-/// number.
+/// How much of a page a line may occupy — the foot is kept clear for the page number.
 const BODY_HEIGHT: f64 = PAGE_HEIGHT - MARGIN - MARGIN - LINE_HEIGHT * 2.0;
 
 impl PdfSink {
-    /// **Scale is honoured here**, and the first version of this file did not
-    /// honour it — a 2× heading came out the same size as the item lines while
-    /// the text sink gave it twice the width. That is exactly the drift this
-    /// crate exists to prevent, and it survived long enough to be caught by a
-    /// test rather than by review, which is the argument for the test.
+    /// Scale is honoured here, and the first version of this file did not honour it — a 2×
+    /// heading came out the same size as the item lines while the text sink gave it twice the
+    /// width.
     fn place(&mut self, indent: usize, text: &str, scale: u8) {
         let scale = f64::from(scale.clamp(1, 3));
         let size = FONT_SIZE * scale;
-        // The break happens BEFORE the line is placed, so a line is never cut in
-        // half by the page edge.
+        // The break happens BEFORE the line is placed, so a line is never cut in half by the
+        // page edge.
         if self.cursor + LINE_HEIGHT * scale > BODY_HEIGHT {
             self.page += 1;
             self.cursor = 0.0;
@@ -152,8 +111,8 @@ impl PdfSink {
                 escape(&line.text)
             ));
         }
-        // The foot. Only when there is more than one page: a single-sheet
-        // receipt with "Page 1 of 1" on it looks like a form.
+        // The foot. Only when there is more than one page: a single-sheet receipt with "Page 1
+        // of 1" on it looks like a form.
         if of > 1 {
             let label = format!("Page {} of {of}", page + 1);
             #[allow(
@@ -172,23 +131,24 @@ impl PdfSink {
 
     fn finish_document(&self) -> Vec<u8> {
         let pages = self.page + 1;
-        // Object numbering, and it has to be laid out before anything is
-        // written: 1 catalog, 2 the page tree, 3 the font, then one page object
-        // and one content object per page, interleaved so a page and its stream
-        // are next to each other in the file.
+        // Object numbering, and it has to be laid out before anything is written: 1 catalog, 2
+        // the page tree, 3 the font, then one page object and one content object per page,
+        // interleaved so a page and its stream are next to each other in the file.
         const FONT: usize = 3;
         let page_object = |i: usize| FONT + 1 + i * 2;
         let content_object = |i: usize| FONT + 2 + i * 2;
 
-        let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", page_object(i))).collect();
+        let kids: Vec<String> = (0..pages)
+            .map(|i| format!("{} 0 R", page_object(i)))
+            .collect();
         let mut objects: Vec<String> = vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
             format!(
                 "<< /Type /Pages /Kids [{}] /Count {pages} >>",
                 kids.join(" ")
             ),
-            // Courier is one of the base-14 fonts every reader carries, so
-            // nothing has to be embedded.
+            // Courier is one of the base-14 fonts every reader carries, so nothing has to be
+            // embedded.
             "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>"
                 .to_owned(),
         ];
@@ -235,9 +195,9 @@ fn escape(text: &str) -> String {
             '\\' => out.push_str("\\\\"),
             '(' => out.push_str("\\("),
             ')' => out.push_str("\\)"),
-            // WinAnsi covers Latin-1. Anything else — a rupee sign, Kannada —
-            // is dropped here rather than written as mojibake, and that is one
-            // of the reasons this module gets replaced when a font is embedded.
+            // WinAnsi covers Latin-1. Anything else — a rupee sign, Kannada — is dropped here
+            // rather than written as mojibake, and that is one of the reasons this module gets
+            // replaced when a font is embedded.
             c if (c as u32) < 256 => out.push(c),
             _ => out.push('?'),
         }
@@ -268,9 +228,7 @@ impl Sink for PdfSink {
     }
 
     fn rule(&mut self, line: &LaidLine, pattern: Pattern, width: u32, _index: usize) {
-        // **A real line, like the raster sink draws** — P32. A row of hyphens
-        // in Courier has a visible gap between every one of them, and this page
-        // is what a shop emails to a customer.
+        // A real line, like the raster sink draws.
         let indent = PdfSink::columns_of(line.indent_dots, self.advance);
         let across = PdfSink::columns_of(width, self.advance).max(1);
         let rule = crate::layout::Rule::of(pattern);
@@ -287,9 +245,8 @@ impl Sink for PdfSink {
         _align: Align,
         _index: usize,
     ) {
-        // An image needs an XObject and a compressed stream, which is where the
-        // no-crate calculation stops working. Deliberately nothing, and the
-        // module doc says why.
+        // An image needs an XObject and a compressed stream, which is where the no-crate
+        // calculation stops working.
     }
 
     fn band(
@@ -299,8 +256,7 @@ impl Sink for PdfSink {
         lines: &[BandText],
         _index: usize,
     ) {
-        // The picture cannot be drawn here either; the letterhead still must
-        // be. Same decision as the text sink, for the same reason.
+        // The picture cannot be drawn here either; the letterhead still must be.
         for text in lines {
             self.place(0, text.text.trim(), text.style.scale());
         }
@@ -361,10 +317,8 @@ mod tests {
 
     #[test]
     fn a_bigger_heading_really_is_bigger() {
-        // The first version of this sink ignored `scale` entirely: a 2x heading
-        // came out the same size as the item lines while the text sink gave it
-        // twice the width. That is the drift this crate exists to prevent, and
-        // it survived until a test looked.
+        // The first version of this sink ignored `scale` entirely: a 2x heading came out the
+        // same size as the item lines while the text sink gave it twice the width.
         let mut doc = Document::new(Paper::new(PaperKind::A4));
         doc.text("BIG", Style::new(2, true), Align::Left)
             .text("small", Style::NORMAL, Align::Left);
@@ -375,8 +329,7 @@ mod tests {
         assert!(text.contains("/F1 10.0 Tf"), "the normal line is not 10pt");
     }
 
-    /// **P18.** A month of item sales is four hundred rows. Before this, row
-    /// sixty-three onwards was silently dropped and nothing on the page said so.
+    /// A month of item sales is four hundred rows.
     #[test]
     fn a_long_report_gets_more_pages_rather_than_a_shorter_report() {
         let mut doc = Document::new(Paper::new(PaperKind::A4));
@@ -386,7 +339,6 @@ mod tests {
         let pdf = to_pdf(&layout(&doc).expect("lays out"));
         let text = String::from_utf8_lossy(&pdf);
 
-        // Roughly 62 lines fit on A4 at 10pt, so 400 rows is seven pages.
         assert!(text.contains("/Count 7"), "the page count is wrong");
         assert_eq!(text.matches("/Type /Page\n").count(), 0);
         assert_eq!(
@@ -399,8 +351,7 @@ mod tests {
         // Each sheet says where it belongs in the stack.
         assert!(text.contains("Page 1 of 7"));
         assert!(text.contains("Page 7 of 7"));
-        // Every object the xref promises must actually be there, or a reader
-        // rejects the file. 3 fixed + 2 per page.
+        // Every object the xref promises must actually be there, or a reader rejects the file.
         assert!(text.contains(&format!("xref\n0 {}\n", 3 + 7 * 2 + 1)));
     }
 
@@ -411,13 +362,16 @@ mod tests {
         doc.line("Masala Dosa");
         let text = String::from_utf8_lossy(&to_pdf(&layout(&doc).expect("lays out"))).into_owned();
         assert!(text.contains("/Count 1"));
-        assert!(!text.contains("Page 1 of"), "a one-page slip got a page number");
+        assert!(
+            !text.contains("Page 1 of"),
+            "a one-page slip got a page number"
+        );
     }
 
     #[test]
     fn parentheses_in_a_shop_name_do_not_break_the_file() {
-        // "Anna Kuteera (Jayanagar)" is an entirely ordinary shop name, and an
-        // unescaped bracket ends the PDF string early and corrupts the page.
+        // "Anna Kuteera (Jayanagar)" is an entirely ordinary shop name, and an unescaped
+        // bracket ends the PDF string early and corrupts the page.
         let mut doc = Document::new(Paper::new(PaperKind::A4));
         doc.line("Anna Kuteera (Jayanagar) \\ Branch");
         let pdf = to_pdf(&layout(&doc).expect("lays out"));

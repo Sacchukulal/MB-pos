@@ -1,72 +1,9 @@
-//! **How the owner gets back in, and why a waiter cannot walk the same path.**
-//!
-//! # First, what a PIN is for
-//!
-//! It defends against the person behind the counter and the person who wanders
-//! behind it. It does **not** defend against somebody who takes the computer or
-//! copies the database file — nothing on an offline counter can, because the
-//! shop's machine must be able to read the shop's data. That paragraph is in
-//! `docs/DECISIONS.md` too, because a security claim nobody wrote down is a
-//! security claim nobody can check.
-//!
-//! # The code
-//!
-//! Ten characters from an alphabet with no `O`/`0` and no `I`/`1`/`l`, because
-//! this gets read off a printed slip by somebody in a hurry, and a code that
-//! cannot be transcribed is a code that gets photographed and left on a phone.
-//!
-//! Generated when the first PIN is set on a `staff.manage` role. **Shown once,
-//! and printed on the shop's own printer** — there is a printer, and paper in a
-//! drawer is a better place for this than a screenshot. Only its Argon2 hash is
-//! stored.
-//!
-//! # That sentence was not true until 2026-08-22
-//!
-//! It was written here when this file was, and nothing ever printed anything.
-//! The code was handed to the screen, shown once in a dialog, and that was the
-//! whole of it — so a shop that pressed *I have written it down* without a pen
-//! to hand had lost the only thing that gets it back into its own counter,
-//! while `recovery.issued` in the audit log read back to them as **"New
-//! recovery code printed"**. Found going through the sign-in path after the
-//! owner asked for it to be gone through properly.
-//!
-//! It is `mb_print::template::recovery` and `JobKind::Recovery` now, queued by
-//! `ipc::print_the_recovery_slip` from both places a code is issued, with
-//! `signin_tests::issuing_a_recovery_code_actually_queues_the_slip` standing
-//! guard over it. **A claim in a doc comment is not a feature**, and this
-//! paragraph is here so the next one is easier to spot.
-//!
-//! Using it sets a new PIN for one `staff.manage` staff member, kills the old
-//! code, issues and prints a new one, and writes an audit row.
-//!
-//! # Why staff cannot abuse it
-//!
-//! * They never see it. It is shown once, at setup, to whoever set the shop up.
-//! * It is not recoverable from the database — the same Argon2 as a PIN.
-//! * 32^10 is about 2^50, so guessing is not a strategy, and each guess costs a
-//!   full Argon2 verification.
-//! * Every use is **loud**: a slip prints, an audit row is written, and P33
-//!   syncs it to the owner's phone.
-//!
-//! # Why it is deliberately NOT rate-limited
-//!
-//! [`crate::lockout`] is per staff member so that a malicious waiter cannot
-//! lock the owner out with five wrong guesses. That protection is worth nothing
-//! if the recovery path can be locked instead — so it is not. The defence there
-//! is the entropy and the Argon2 cost, not a counter.
-//!
-//! # If the code is lost as well
-//!
-//! Support, against the licence — and P21 owns the licence, so that path does
-//! not exist yet. **The seam is named, not built.** Until P21 the honest answer
-//! is a restored backup or a support visit, and the summary says so.
-
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 
 use crate::error::AuthError;
 use crate::pin::PinHash;
 
-/// No `O`, `0`, `I`, `1` or `l`. Read off paper, typed by somebody in a hurry.
+/// No `O`, `0`, `I`, `1` or `l`.
 const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 /// Ten characters, in two groups of five, so it can be read aloud.
@@ -74,23 +11,17 @@ pub const CODE_LENGTH: usize = 10;
 const GROUP: usize = 5;
 
 /// A recovery code, in the one moment it exists in plain text.
-///
-/// It has no `Debug`, on purpose. The one way it may leave this process is
-/// [`RecoveryCode::to_print`], which is called by the code that puts it on
-/// paper and on the screen — and being forced to name that call is the point.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RecoveryCode(String);
 
 impl RecoveryCode {
-    /// For the slip and for the one-time screen. Nowhere else.
+    /// For the slip and for the one-time screen.
     #[must_use]
     pub fn to_print(&self) -> String {
         let (left, right) = self.0.split_at(GROUP);
         format!("{left}-{right}")
     }
 
-    /// What the owner types back in, in any shape they type it: lower case,
-    /// with or without the dash, with stray spaces.
     #[must_use]
     pub fn normalise(typed: &str) -> String {
         typed
@@ -107,17 +38,12 @@ impl RecoveryCode {
 }
 
 /// A fresh code and the hash to store.
-///
-/// Returns both because the plain text must not be recoverable afterwards: the
-/// caller prints one and stores the other, and there is no third option.
 pub fn new_recovery_code() -> Result<(RecoveryCode, PinHash), AuthError> {
     let mut bytes = [0u8; CODE_LENGTH];
     OsRng.fill_bytes(&mut bytes);
 
-    // Modulo bias: the alphabet is 31 characters and a byte is 256 values, so
-    // the first eleven characters are very slightly likelier than the rest.
-    // Rejection sampling instead — it costs a loop that almost never repeats,
-    // and "almost" is not a word to use about the shop owner's last way in.
+    // Modulo bias: the alphabet is 31 characters and a byte is 256 values, so the first eleven
+    // characters are very slightly likelier than the rest.
     let mut code = String::with_capacity(CODE_LENGTH);
     let limit = 256 - (256 % ALPHABET.len());
     while code.len() < CODE_LENGTH {
@@ -135,8 +61,8 @@ pub fn new_recovery_code() -> Result<(RecoveryCode, PinHash), AuthError> {
     }
 
     let code = RecoveryCode(code);
-    // Hashed exactly like a PIN, and for the same reason: the stored form must
-    // be useless to whoever reads the table.
+    // Hashed exactly like a PIN, and for the same reason: the stored form must be useless to
+    // whoever reads the table.
     let hash = crate::pin::hash_recovery(&code)?;
     Ok((code, hash))
 }
@@ -155,7 +81,10 @@ mod tests {
     fn a_code_round_trips_however_it_is_typed() {
         let (code, hash) = new_recovery_code().expect("generated");
         assert!(verify_recovery_code(code.as_typed(), &hash));
-        assert!(verify_recovery_code(&code.to_print(), &hash), "with the dash");
+        assert!(
+            verify_recovery_code(&code.to_print(), &hash),
+            "with the dash"
+        );
         assert!(
             verify_recovery_code(&code.to_print().to_lowercase(), &hash),
             "typed in lower case"
@@ -174,8 +103,8 @@ mod tests {
 
     #[test]
     fn the_alphabet_cannot_be_misread() {
-        // The whole reason for a custom alphabet: this is read off a printed
-        // slip, by somebody who is annoyed.
+        // The whole reason for a custom alphabet: this is read off a printed slip, by somebody
+        // who is annoyed.
         for confusable in ['O', '0', 'I', '1', 'L'] {
             assert!(
                 !ALPHABET.contains(&(confusable as u8)),
@@ -203,10 +132,8 @@ mod tests {
 
     #[test]
     fn guessing_is_not_a_strategy() {
-        // 31^10 ≈ 2^49.5. With an Argon2 verification per guess this is not a
-        // number anybody attacks; it is a number they steal the laptop instead.
-        // In integers, because D7 forbids floating point in this workspace and
-        // a security claim is not the place to make an exception.
+        // 31^10 ≈ 2^49.5. With an Argon2 verification per guess this is not a number anybody
+        // attacks; it is a number they steal the laptop instead.
         let space = u128::try_from(ALPHABET.len())
             .expect("small")
             .pow(u32::try_from(CODE_LENGTH).expect("small"));

@@ -1,24 +1,4 @@
 //! What the process holds for its whole life, and the channel it pushes down.
-//!
-//! # Two things live here and nothing else does
-//!
-//! The **database** and the **print queue**. Both are expensive to build, both
-//! must outlive any one screen, and both are the kind of thing that gets
-//! rebuilt per-request by accident if there is nowhere obvious to put them.
-//!
-//! Audit **E1** is the reason the shape matters: *"everything runs on a single
-//! thread inside one window — the billing keyboard, the charts, the report
-//! queries and the cloud bridge all share it. A heavy report on a slow PC can
-//! make the search box stutter mid-rush."* The answer is structural: the
-//! database has one writer and four readers (P04's `conn.rs`), the print queue
-//! has a thread per printer (P07), and the UI thread does neither.
-//!
-//! # Rust pushes, React subscribes — budget M4
-//!
-//! `PERFORMANCE.md` §5 rule 6: *"no polling. Rust pushes state; React
-//! subscribes. A 250 ms poll loop is M4 gone before a single feature is
-//! written."* [`Push`] is that channel, and it is the only way state reaches a
-//! screen without being asked for.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -37,102 +17,36 @@ use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
 /// The outlet every query is scoped to.
-///
-/// One outlet until P27 builds the screens for more; the *column* has existed
-/// since P04, because D22 says a dimension found late has to be back-filled
-/// across every table at once with a value nobody can verify.
 pub const OUTLET: &str = "outlet_default";
 
 /// Everything the process holds.
 #[derive(Debug)]
 pub struct App {
-    /// `None` on a first run, and that is a state rather than a failure: the
-    /// window opens, and it offers to create a shop or restore a backup.
+    /// `None` on a first run, and that is a state rather than a failure: the window opens, and
+    /// it offers to create a shop or restore a backup.
     shop: Mutex<Option<Shop>>,
     config: Mutex<AppConfig>,
-    /// **The cart lives in Rust** (P09). One counter, one cart, recomputed from
-    /// scratch on every change — see billing.rs for why it is not in React.
+    /// The cart lives in Rust.
     cart: Mutex<CartState>,
-    /// **One counter action at a time** — see [`App::begin_action`].
+    /// One counter action at a time — see `App::begin_action`.
     action: Mutex<()>,
-    /// **The faces this counter can print in**, loaded once each (P07/D33,
-    /// P31). Rasterising a receipt is 2 ms with a warm glyph cache and rather
-    /// more with a cold one, so a face is parsed once and shared by every
-    /// printer worker.
-    ///
-    /// Was a single `Arc<Font>` until P31, when the owner asked for a choice
-    /// of typeface for the bill and the kitchen ticket.
+    /// The faces this counter can print in, loaded once each.
     faces: Arc<crate::typefaces::SystemFaces>,
-    /// **Who is at the counter** (P11). Deliberately beside the cart rather
-    /// than inside it: locking the screen must not be able to touch an order,
-    /// and two separate locks is the cheapest way to make that structural
-    /// instead of remembered.
+    /// Who is at the counter.
     sessions: Sessions,
-    /// **The shop's settings, loaded once** (P17).
-    ///
-    /// Every one of these used to be `ReceiptSettings::default()` written at
-    /// the point of use, which meant a shop could change none of them. It is
-    /// held here rather than read per print because a kitchen ticket has 50 ms
-    /// (budget B6) and a database round trip inside it would be spent on a
-    /// dozen rows that change once a month.
-    ///
-    /// Replaced **wholesale** on save, so nothing on the printing path can ever
-    /// see half of a change.
+    /// The shop's settings, loaded once.
     shop_config: Mutex<crate::settings::ShopConfig>,
-    /// **Who answers "did the money arrive?"** (P29, scope 8.3).
-    ///
-    /// [] on every shop today, because nothing in
-    /// this product can check a bank and it will not pretend to. It is a field
-    /// rather than a constant so that a real aggregator — chosen by the shop's
-    /// owner, which is a commercial decision (FEATURE_SCOPE §15) — drops in
-    /// here and **nothing on the billing path changes**. That claim is proved
-    /// by the tests, which put a stand-in in this exact field.
+    /// Who answers "did the money arrive?".
     provider: std::sync::RwLock<Arc<dyn mb_core::provider::Provider>>,
-    /// **The counter as a server** (P19, D9). `None` until the network is
-    /// started, which is a state and not a failure: a single-till shop with no
-    /// phones never starts it and loses nothing.
-    ///
-    /// Dropping it stops the server and withdraws the mDNS advertisement, so
-    /// closing the window really does take the counter off the network.
+    /// The counter as a server.
     network: Mutex<Option<Arc<crate::lan::Network>>>,
-    /// **The licence, and everything that talks to the cloud about it** (P21).
-    ///
-    /// Behind its own lock, and **never taken while the shop lock is held**.
-    /// P18 and P20 each spent a session on the same deadlock — `with_shop`
-    /// inside `with_shop`, on one thread, and a suite that hung instead of
-    /// failing. `crate::licensing` takes this one and the shop's one at a time,
-    /// in that order, and never nested.
+    /// The licence, and everything that talks to the cloud about it.
     licensing: Mutex<mb_license::Licensing>,
-    /// **The decided entitlement, held.**
-    ///
-    /// PERFORMANCE §2.2: *"nothing in this table may ever be blocked by a
-    /// report, a sync, a print job, **a licence check** or a backup."* The
-    /// cheapest way to keep that promise is for the billing path to have
-    /// nothing to call — so the decision is made on a timer and read from here,
-    /// and `the_billing_path_does_not_ask_about_the_licence` reads the sources
-    /// and proves nothing on that path does.
-    ///
-    /// An `RwLock` and not a `Mutex`: this is read by the network panel, the
-    /// shell banner and every gated command, and written about once an hour.
+    /// The decided entitlement, held.
     entitlement: std::sync::RwLock<mb_license::Entitlement>,
-    /// **What the counter knows about updates** (P22).
-    ///
-    /// Held rather than asked for, like the entitlement and for the same
-    /// reason: the health panel and the shell both read it, and neither is
-    /// allowed to make a network call to draw a row.
+    /// What the counter knows about updates.
     updates: Mutex<crate::updates::UpdateState>,
-    /// **Which till this machine is** (P27, D135).
-    ///
-    /// Decided once, at start-up, from `terminal.json` beside the config — and
-    /// held, because it is read on the settle path. Every bill number this
-    /// machine issues comes out of a series keyed on it, so a stale or wrong
-    /// answer here is two tills sharing a number, which is the collision the
-    /// whole session exists to prevent.
-    ///
-    /// It is not behind a lock and it does not change while the app runs.
-    /// Joining a shop rewrites the file and says the till must be restarted —
-    /// a value that could change under a bill being written is a value the
-    /// billing path cannot trust.
+    /// Which till this machine is.
     terminal_id: String,
 }
 
@@ -148,32 +62,14 @@ impl App {
     pub fn new(config: AppConfig) -> Result<App, UiError> {
         let faces = crate::typefaces::SystemFaces::new().map_err(|e| words::from_print(&e))?;
         let sessions = Sessions::new();
-        // **A shop that does not exist yet has nothing to lock.**
-        //
-        // Found by running it: after P11 a first run opened straight onto the
-        // lock screen, with an empty staff list and no way past it — because
-        // `open_or_lock` is only reached through `open_shop`, and a first run
-        // never opens one. Nobody could create the shop that would hold the PIN
-        // that would let them in.
-        //
-        // Starting as the stand-in is the same rule item 9 already states, one
-        // step earlier: a shop with no PIN does not lock, and a shop with no
-        // *database* certainly has none. `open_shop` re-decides the moment
-        // there is something to decide about.
+        // A shop that does not exist yet has nothing to lock.
         sessions.begin(
             stand_in_actor("Counter", DEFAULT_STAFF),
             crate::flows::now(),
             true,
         );
         let now = crate::flows::now();
-        // **A test must not read the licence of whoever is running it.**
-        //
-        // `licensing::start()` reads `%APPDATA%\MagicBill\licence.json`, which
-        // on a developer's machine is a real activated licence — so without
-        // this every test in the crate would behave differently depending on
-        // who ran it, and the P21 tests would pass on one laptop and fail on
-        // another. `for_tests` is the same type on a scratch folder;
-        // `use_licensing` is how a test then installs the state it wants.
+        // A test must not read the licence of whoever is running it.
         #[cfg(test)]
         let licensing = crate::licensing::for_tests();
         #[cfg(not(test))]
@@ -200,28 +96,23 @@ impl App {
         })
     }
 
-    /// **Which till this machine is** (P27, D135). `terminal_default` on the
-    /// shop that has only ever had one, which is the id migration 0001 seeded
-    /// and the one every bill it has already written points at.
+    /// Which till this machine is.
     #[must_use]
     pub fn terminal_id(&self) -> &str {
         &self.terminal_id
     }
 
-    /// Who to ask about a payment. Cloned out, so nothing holds the lock
-    /// while a provider is talking to a network.
+    /// Who to ask about a payment.
     #[must_use]
     pub fn provider(&self) -> Arc<dyn mb_core::provider::Provider> {
         match self.provider.read() {
             Ok(guard) => Arc::clone(&guard),
-            // A poisoned lock must not stop a sale (requirement 3). The manual
-            // provider is the honest fallback: it confirms nothing.
+            // A poisoned lock must not stop a sale.
             Err(poisoned) => Arc::clone(&poisoned.into_inner()),
         }
     }
 
-    /// Put a different provider in place — a real one at start-up, a stand-in
-    /// in a test.
+    /// Put a different provider in place — a real one at start-up, a stand-in in a test.
     pub fn use_provider(&self, provider: Arc<dyn mb_core::provider::Provider>) {
         match self.provider.write() {
             Ok(mut guard) => *guard = provider,
@@ -229,11 +120,7 @@ impl App {
         }
     }
 
-    /// Make this `App` a different till — **before it opens a shop**.
-    ///
-    /// A test only, and deliberately consuming: the running program decides
-    /// this once from `terminal.json`, and a setter that could be called later
-    /// would be a value the billing path cannot trust.
+    /// Make this `App` a different till — before it opens a shop.
     #[cfg(test)]
     #[must_use]
     pub fn becoming_till(mut self, id: &str) -> App {
@@ -241,7 +128,7 @@ impl App {
         self
     }
 
-    /// What the counter knows about updates (P22). A copy of a held value.
+    /// What the counter knows about updates.
     #[must_use]
     pub fn updates(&self) -> crate::updates::UpdateState {
         lock(&self.updates).clone()
@@ -252,39 +139,24 @@ impl App {
         *lock(&self.updates) = state;
     }
 
-    /// **Where releases come from.** There is no release server until Phase 8,
-    /// and `NoReleaseServerYet` says so rather than pretending to have looked
-    /// — the same treatment P21 gave the cloud.
+    /// Where releases come from.
     #[must_use]
     pub fn releases(&self) -> &dyn crate::updates::Releases {
         &crate::updates::NoReleaseServerYet
     }
 
-    /// **What this shop is entitled to, right now.**
-    ///
-    /// Reads a value. No network, no database, no shop lock — this is what
-    /// budget L1 measures, and it is why a gate can be put in front of a
-    /// command without anybody having to think about whether it is on the
-    /// billing path.
+    /// What this shop is entitled to, right now.
     #[must_use]
     pub fn entitlement(&self) -> mb_license::Entitlement {
         match self.entitlement.read() {
             Ok(held) => held.clone(),
             // A poisoned lock means another thread panicked while holding it.
-            // The shop still has to work, and an unactivated entitlement still
-            // bills — requirement 3 does not have an exception for our bugs.
             Err(poisoned) => poisoned.into_inner().clone(),
         }
     }
 
     /// Do something with the licence, and re-decide afterwards.
-    ///
-    /// Every licensing command goes through here, so there is exactly one place
-    /// that can leave the held entitlement disagreeing with the file on disk.
-    pub fn with_licensing<T>(
-        &self,
-        f: impl FnOnce(&mut mb_license::Licensing) -> T,
-    ) -> T {
+    pub fn with_licensing<T>(&self, f: impl FnOnce(&mut mb_license::Licensing) -> T) -> T {
         let outcome = {
             let mut held = lock(&self.licensing);
             f(&mut held)
@@ -293,7 +165,7 @@ impl App {
         outcome
     }
 
-    /// Put a licensing subsystem in, and decide again. **Tests only.**
+    /// Put a licensing subsystem in, and decide again.
     #[cfg(test)]
     pub fn use_licensing(&self, licensing: mb_license::Licensing) {
         *lock(&self.licensing) = licensing;
@@ -319,10 +191,6 @@ impl App {
     }
 
     /// Remember that the floor changed the order the cashier has open.
-    ///
-    /// **It does not touch the lines.** That is the whole rule (D83): the
-    /// cashier's unsaved typing is theirs, and this only puts a note beside
-    /// it for the screen to offer.
     pub fn note_floor_change(&self, change: crate::orders::FloorChange) {
         let _ = self.with_cart_mut(|state| {
             state.from_the_floor.push(change);
@@ -333,14 +201,11 @@ impl App {
     /// How many floor changes the cashier has not looked at.
     #[must_use]
     pub fn floor_changes_waiting(&self) -> u32 {
-        self.with_cart(|state| {
-            Ok(u32::try_from(state.from_the_floor.len()).unwrap_or(u32::MAX))
-        })
-        .unwrap_or(0)
+        self.with_cart(|state| Ok(u32::try_from(state.from_the_floor.len()).unwrap_or(u32::MAX)))
+            .unwrap_or(0)
     }
 
-    /// The counter as a server, if it is on. A clone of the `Arc`, so nothing
-    /// holds this lock while a phone is being served.
+    /// The counter as a server, if it is on.
     #[must_use]
     pub fn network(&self) -> Option<Arc<crate::lan::Network>> {
         lock(&self.network).clone()
@@ -350,8 +215,8 @@ impl App {
         *lock(&self.network) = network;
     }
 
-    /// This counter's stable identity, for a phone that has to recognise it
-    /// again after a DHCP move. Empty when the network has never started.
+    /// This counter's stable identity, for a phone that has to recognise it again after a DHCP
+    /// move.
     #[must_use]
     pub fn lan_server_id(&self) -> String {
         lock(&self.network)
@@ -360,39 +225,21 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// What this shop has chosen. A clone, because the caller holds it across a
-    /// render and the lock must not be.
+    /// What this shop has chosen.
     #[must_use]
     pub fn shop_config(&self) -> crate::settings::ShopConfig {
         lock(&self.shop_config).clone()
     }
 
-    /// **Every job this counter prints goes through here** — P31.
-    ///
-    /// # Why there is a choke point at all
-    ///
-    /// The shop chooses a typeface for its bills and another for its kitchen
-    /// tickets, so every job has to be stamped with one. Ten call sites each
-    /// remembering to do that is ten chances for the eleventh to forget, and
-    /// the way you find out is a shop saying *"the kitchen ticket ignores my
-    /// font"* on a Saturday.
-    ///
-    /// So the stamp happens once, here, decided from the job's own kind — and
-    /// `hygiene_tests` fails the build if anything outside this file calls
-    /// `enqueue` directly. That is D40: the rules that erode are enforced by a
-    /// test, not by agreement.
-    ///
-    /// The queue is still what owns durability, retries and parking; this adds
-    /// one field and hands the job straight over.
+    /// Every job this counter prints goes through here.
     pub fn print(&self, job: mb_print::queue::Job) -> UiResult<String> {
         let face = self.face_for(job.kind);
         let job = job.in_face(face);
         self.with_shop(|shop| shop.queue.enqueue(job).map_err(|e| words::from_print(&e)))
     }
 
-    /// The same answer as [`App::face_for`], for the test that proves the
-    /// settings screen reaches the printer. Not reachable outside tests: the
-    /// only honest caller is [`App::print`].
+    /// The same answer as `App::face_for`, for the test that proves the settings screen reaches
+    /// the printer.
     #[cfg(test)]
     #[must_use]
     pub fn face_for_test(&self, kind: mb_print::queue::JobKind) -> Option<String> {
@@ -400,11 +247,6 @@ impl App {
     }
 
     /// Which typeface a kind of document is printed in.
-    ///
-    /// A kitchen ticket is read across a hot room at speed and a bill is read
-    /// at arm's length, so the shop gets to answer twice. Everything else —
-    /// a test print, a label, a Z-report, a rider's slip — is paper the shop
-    /// itself reads, and follows the bill.
     #[must_use]
     fn face_for(&self, kind: mb_print::queue::JobKind) -> Option<String> {
         let config = self.shop_config();
@@ -416,12 +258,6 @@ impl App {
     }
 
     /// Read the configuration from the open shop and publish it.
-    ///
-    /// **A shop whose settings will not read keeps the defaults and says so.**
-    /// D7 forbids a silent default for a value that IS there and is the wrong
-    /// type — `settings::load` returns an error for exactly that — but refusing
-    /// to open the shop at all would mean one bad row stops a restaurant
-    /// billing, and requirement 3 says it must not.
     pub fn reload_shop_config(&self) {
         let read = self.with_shop(|shop| {
             shop.db
@@ -431,10 +267,7 @@ impl App {
         match read {
             Ok(config) => self.publish_shop_config(config),
             Err(e) if e.code == "shop.none" => {}
-            // **With the detail**, which is the half a support call needs.
-            // Without it this said only "the shop's data could not be read",
-            // and finding out WHICH setting meant adding a print statement and
-            // rebuilding — which is exactly what it cost on 2026-08-17.
+            // With the detail, which is the half a support call needs.
             Err(e) => log_warn!(
                 "this shop's settings could not be read ({e}{}); the counter is \
                  using the standard ones until that is fixed",
@@ -446,8 +279,7 @@ impl App {
         }
     }
 
-    /// Put a configuration in place, including the one number that lives
-    /// outside this struct (D70).
+    /// Put a configuration in place, including the one number that lives outside this struct.
     pub fn publish_shop_config(&self, config: crate::settings::ShopConfig) {
         crate::flows::set_day_rule(config.day.rule());
         *lock(&self.shop_config) = config;
@@ -458,9 +290,7 @@ impl App {
         &self.sessions
     }
 
-    /// Take ownership of an open database and start everything that hangs off
-    /// it. Called once by start-up, and again if the owner creates or adopts a
-    /// shop while the app is running.
+    /// Take ownership of an open database and start everything that hangs off it.
     pub fn open_shop(&self, db: Db, path: std::path::PathBuf) {
         let db = Arc::new(db);
         ensure_someone_can_bill(&db);
@@ -472,41 +302,22 @@ impl App {
             path: path.clone(),
             queue,
         });
-        // Shutting the old queue down after the new one is in place, so there
-        // is never a window with no queue at all.
+        // Shutting the old queue down after the new one is in place, so there is never a window
+        // with no queue at all.
         if let Some(old) = previous {
             old.queue.shutdown();
         }
-        // **After the shop is in place**, because reading the settings needs a
-        // shop to read them from. Before this line the counter is on the
-        // standard settings, which is the right state for the seconds a first
-        // run spends with no database.
+        // After the shop is in place, because reading the settings needs a shop to read them
+        // from.
         self.reload_shop_config();
         log_info!("the shop at {} is open", path.display());
     }
 
-    /// **Rebuild the queue after the printer list changes** — P30.6.
-    ///
-    /// The queue runs a thread per printer it was STARTED with, so a printer
-    /// added while the app is running had no thread and every job addressed to
-    /// it was refused with *"there is no printer prn_…"*. That is exactly what
-    /// the owner hit: they added their TVSE, pressed **Print a sample bill**,
-    /// and were told nothing had been sent.
-    ///
-    /// It was a known gap — `save_printer_on` logged "it will be used after the
-    /// next restart" — and a log line is not an answer. Setting a printer up is
-    /// the one moment somebody is certain to test it.
-    ///
-    /// Jobs already on the spool are not lost: the store is the database, the
-    /// new queue reads the same rows, and the old queue is shut down only after
-    /// the new one is in place.
     pub fn rebuild_queue(&self) {
         let db = {
             let shop = lock(&self.shop);
             match shop.as_ref() {
                 Some(shop) => Arc::clone(&shop.db),
-                // No shop, no queue to rebuild. The transient queue a first run
-                // uses is built per call and never outlives it.
                 None => return,
             }
         };
@@ -524,14 +335,9 @@ impl App {
     }
 
     /// Build the print queue from the printers the shop has configured.
-    ///
-    /// **This is the other half of audit D4.** P07 built a queue that remembers
-    /// a failed print; without something to construct it, feed it the printers
-    /// and show what it knows, the shop is still in the position the finding
-    /// describes — *"nothing remembers it"*.
     fn build_queue(&self, db: &Arc<Db>) -> Queue {
-        // **Before anything else, take the default off the placeholder** if a
-        // real printer is sitting behind it. See `retire_the_stand_in`.
+        // Before anything else, take the default off the placeholder if a real printer is
+        // sitting behind it.
         retire_the_stand_in(db);
 
         let mut printers = db
@@ -544,11 +350,7 @@ impl App {
             .map(printer_config_for)
             .collect::<Vec<_>>();
 
-        // **A shop with no printer set up must still be able to bill** —
-        // requirement 3 of the ten, and the state every shop is in on its first
-        // day. See `fallback_row`: it is saved, not invented, so the queue's
-        // threads and the spool's foreign key agree with the settings screen
-        // about which printers exist.
+        // A shop with no printer set up must still be able to bill.
         if printers.is_empty() {
             log_warn!("no printer is set up; jobs will be spooled and printed nowhere");
             let row = fallback_row();
@@ -558,13 +360,16 @@ impl App {
                     .save_printer(OUTLET, &row, crate::flows::now())
             }) {
                 Ok(()) => printers.push(printer_config_for(&row)),
-                // Billing still works; printing does not, and the reason is
-                // written down where an owner's support call can find it.
+                // Billing still works; printing does not, and the reason is written down where
+                // an owner's support call can find it.
                 Err(e) => log_warn!("the stand-in printer could not be saved ({e})"),
             }
         }
 
-        log_info!("starting the print queue with {} printer(s)", printers.len());
+        log_info!(
+            "starting the print queue with {} printer(s)",
+            printers.len()
+        );
 
         let store: Arc<dyn JobStore> = Arc::new(SqliteStore::new(Arc::clone(db), OUTLET));
         Queue::start(
@@ -575,13 +380,8 @@ impl App {
         )
     }
 
-    /// A queue with nowhere to store anything, for the moments there is no
-    /// shop: a first run, and the minutes after a restore was requested.
-    ///
-    /// **This is why P07 made durability a port** (D32): a test print during
-    /// setup, and any print while the database is being replaced, both happen
-    /// with nothing open. A queue that required storage could not help the
-    /// person whose storage is what went wrong.
+    /// A queue with nowhere to store anything, for the moments there is no shop: a first run,
+    /// and the minutes after a restore was requested.
     pub fn transient_queue(&self, printers: Vec<PrinterConfig>) -> Queue {
         Queue::start(
             printers,
@@ -610,16 +410,7 @@ impl App {
         self.faces.builtin()
     }
 
-    /// **The metrics a job of this kind will actually be drawn with** — P32.
-    ///
-    /// The queue picks the face from the job's kind ([`App::face_for`]) and the
-    /// engine from the printer, and the template has to know both **before** it
-    /// builds the document: how many characters fit decides whether the item
-    /// table is one line or two. Asking the same two questions here is what
-    /// keeps the document that was built and the document that gets drawn in
-    /// agreement.
-    /// Returns the engine's name beside it, because every screen that shows a
-    /// preview has to say which of the two it is drawing.
+    /// The metrics a job of this kind will actually be drawn with.
     #[must_use]
     pub fn metrics_for(
         &self,
@@ -642,13 +433,7 @@ impl App {
         }
     }
 
-    /// **The face a key names, the same way the queue resolves it** — P32.
-    ///
-    /// The preview used to draw in the built-in face whatever the shop had
-    /// chosen, on the grounds that "the queue is what draws a job". That is
-    /// true and it is exactly why the preview has to ask the same question: a
-    /// shop on Times New Roman was being shown a bill in IBM Plex Mono, and
-    /// the two do not wrap in the same places.
+    /// The face a key names, the same way the queue resolves it.
     #[must_use]
     pub fn face_named(&self, key: &str) -> Arc<Font> {
         use mb_print::font::Typefaces;
@@ -664,8 +449,7 @@ impl App {
         let mut config = lock(&self.config);
         f(&mut config);
         if let Err(e) = config.save() {
-            // A window size that could not be saved is a small thing. Saying
-            // nothing about it is not.
+            // A window size that could not be saved is a small thing.
             log_warn!("the app configuration could not be saved: {e}");
         }
     }
@@ -680,24 +464,9 @@ impl App {
 }
 
 /// Who a bill is created by before anybody has logged in.
-///
-/// P11 owns staff, roles and PINs, and will replace this with whoever is at the
-/// counter. Until then every order is `created_by` this id — and `orders` has
-/// `created_by TEXT NOT NULL REFERENCES staff (id)`, so the row has to be there
-/// or nothing can be billed at all.
 pub const DEFAULT_STAFF: &str = "staff_default";
 
 /// Make sure the shop has somebody to bill as.
-///
-/// The migration seeds the outlet and the terminal an order points at; it does
-/// **not** seed staff, because people are P11's and inventing a shop's staff
-/// list is a product decision this is not entitled to make. One row, named for
-/// what it is, is the smallest thing that keeps requirement 3 true — *a shop
-/// must be able to bill on its first day.*
-///
-/// Found by settling a bill: "FOREIGN KEY constraint failed", from `created_by`
-/// pointing at a person who did not exist. The bill's money had already been
-/// taken on screen.
 fn ensure_someone_can_bill(db: &Arc<Db>) {
     use mb_db::repo::people::{StaffMember, StaffStatus};
 
@@ -721,12 +490,7 @@ fn ensure_someone_can_bill(db: &Arc<Db>) {
                 role_name: None,
                 pin_hash: None,
                 status: StaffStatus::Active,
-                // **No role, on purpose.** The stand-in's authority lives in
-                // the in-memory session (`session::stand_in_actor`) and only
-                // while no PIN exists anywhere. Giving this row the Owner role
-                // would make `active_administrators` count a person who can
-                // never log in, and the "last administrator" rule would then be
-                // satisfied by nobody.
+                // No role, on purpose.
                 permissions: mb_auth::PermissionSet::new(),
                 max_discount_bp: None,
                 max_discount: None,
@@ -739,16 +503,13 @@ fn ensure_someone_can_bill(db: &Arc<Db>) {
     match result {
         Ok(true) => log_info!("added the default counter user so bills can be created"),
         Ok(false) => {}
-        // Not fatal here: the failure will be reported in the cashier's own
-        // words at the moment they try to bill, which is where it belongs.
+        // Not fatal here: the failure will be reported in the cashier's own words at the moment
+        // they try to bill, which is where it belongs.
         Err(e) => log_warn!("the default counter user could not be added ({e})"),
     }
 }
 
 /// The four roles a shop starts with.
-///
-/// Seeded only when there are none: a shop that has renamed "Waiter" to
-/// "Steward" and taken a permission off it must not find them back tomorrow.
 fn ensure_the_roles_exist(db: &Arc<Db>) {
     let result = db.transaction(|tx| {
         let repos = mb_db::Repos::new(tx);
@@ -771,12 +532,7 @@ fn ensure_the_roles_exist(db: &Arc<Db>) {
 }
 
 impl App {
-    /// **Open unlocked, or open locked** — P11 item 9, and the first decision
-    /// this app makes about a shop.
-    ///
-    /// If nobody has a PIN, there is nothing to unlock with, so the counter
-    /// opens as the stand-in user and the shell nags. The moment one PIN
-    /// exists, the app opens locked.
+    /// Open unlocked, or open locked.
     fn open_or_lock(&self, db: &Arc<Db>) {
         match anybody_has_a_pin(db) {
             Ok(true) => {
@@ -791,9 +547,8 @@ impl App {
                 );
                 log_warn!("nobody has a PIN; anybody at this machine can do anything");
             }
-            // A shop whose staff list will not read is a shop that must not
-            // silently open unlocked. Locked is the safe direction to be wrong
-            // in, and the lock screen will show the same failure.
+            // A shop whose staff list will not read is a shop that must not silently open
+            // unlocked.
             Err(e) => {
                 self.sessions.end();
                 log_warn!("the staff list could not be read ({e}); locking the counter");
@@ -802,28 +557,14 @@ impl App {
     }
 
     /// Does anybody in this shop have a PIN?
-    ///
-    /// `false` on a shop that will not answer, which is the same direction
-    /// [`App::open_or_lock`] is wrong in: the caller uses this to decide
-    /// whether to lock, and locking is safe.
     #[must_use]
     pub fn shop_has_a_pin(&self) -> bool {
         self.with_shop(|shop| Ok(anybody_has_a_pin(&shop.db).unwrap_or(false)))
             .unwrap_or(false)
     }
 
-    /// **Setting the FIRST PIN locks the app immediately** — proving it works
-    /// while that person is still standing there is worth four seconds.
-    ///
-    /// `had_a_pin` is what the shop looked like *before* the change, and it is
-    /// the whole of the rule.
-    ///
-    /// Found by driving a shop's first day end to end: the first version
-    /// re-evaluated on every PIN change, so an owner setting PINs for four
-    /// staff was thrown out to the lock screen after each one — and after
-    /// setting their OWN first, they could not set anybody else's until they
-    /// had signed back in. That is not "prove it works", it is a shop that
-    /// fights the person setting it up.
+    /// Setting the FIRST PIN locks the app immediately — proving it works while that person is
+    /// still standing there is worth four seconds.
     pub fn relock_if_this_was_the_first_pin(&self, had_a_pin: bool) {
         if had_a_pin || !self.shop_has_a_pin() {
             return;
@@ -838,13 +579,6 @@ impl App {
 
 impl App {
     /// Write one line of history.
-    ///
-    /// **Best effort, and deliberately so, for this one caller shape.** An
-    /// audit row that describes something which has already happened — a lock,
-    /// a logout, a refusal — must not be able to fail the thing it describes.
-    /// Where the row is evidence *of a change*, it goes in the same transaction
-    /// as the change instead, and there is no version of that path which uses
-    /// this function (see `flows::complete_bill` and `ipc::save_staff_member`).
     pub fn record(&self, entry: &mb_auth::AuditEntry) {
         let written = self.with_shop(|shop| {
             shop.db
@@ -852,7 +586,10 @@ impl App {
                 .map_err(|e| words::from_db(&e))
         });
         if let Err(e) = written {
-            log_warn!("\"{}\" could not be written to the history: {e}", entry.action);
+            log_warn!(
+                "\"{}\" could not be written to the history: {e}",
+                entry.action
+            );
         }
     }
 
@@ -878,45 +615,7 @@ pub fn anybody_has_a_pin(db: &Arc<Db>) -> Result<bool, mb_db::DbError> {
 /// The id of the printer that exists when no printer exists.
 pub const NO_PRINTER: &str = "prn_none";
 
-/// The printer a shop has before it has a printer — **a real row.**
-///
-/// Requirement 3 of the ten: a shop must be able to bill on its first day, and
-/// on that day nobody has set a printer up. `kind = 'none'` is the case the
-/// schema already wrote down for this — *"it accepts jobs and prints nothing"* —
-/// and P17 turns it into a real one by editing this row.
-///
-/// # It is a row, and that is the point
-///
-/// Two attempts at this got it wrong by inventing a `PrinterConfig` at job
-/// time instead, and each failed differently and only when run:
-///
-/// 1. the queue runs a thread per printer it was **started** with and refuses a
-///    job addressed to any other — *"there is no printer prn_none"*;
-/// 2. the spool row has `printer_id REFERENCES printers (id)`, so even once the
-///    thread existed the durable write was refused — *"FOREIGN KEY constraint
-///    failed"*.
-///
-/// Both are the same mistake: a printer that some of the system believes in.
-/// Saving the row means there is one answer to "what printers are there?", and
-/// the queue, the spool and the settings screen all read it.
-/// **A shop that is already printing nothing repairs itself on the way up.**
-///
-/// `save_printer_on` stops this happening from now on — a real printer saved
-/// where the only default is the placeholder takes the default with it. That
-/// does nothing for a shop already in the broken state, and the owner's is:
-/// they added their TVSE, it saved, the stand-in kept `is_default`, and every
-/// bill since has been rendered, queued, marked printed and thrown away. On
-/// their counter the symptom is *"even if we added a printer again its not
-/// printig real bill"*, with no error to go on.
-///
-/// Waiting for them to find the new dropdown is not a fix, it is a workaround
-/// with instructions. So the counter checks on every start: **if the default
-/// is the placeholder and a real printer exists, the real one takes it.**
-///
-/// It is safe to run every time, which is why it sits in `build_queue` rather
-/// than in a migration — it fires only when the default is the stand-in, so a
-/// shop that has chosen anything at all is never touched, and a shop with only
-/// the stand-in is left exactly as it was.
+/// The printer a shop has before it has a printer — a real row.
 fn retire_the_stand_in(db: &Arc<Db>) {
     let outcome = db.transaction(|tx| {
         let repos = mb_db::Repos::new(tx);
@@ -929,8 +628,8 @@ fn retire_the_stand_in(db: &Arc<Db>) {
         if !placeholder_holds_it {
             return Ok(None);
         }
-        // Prefer one that can print a bill — moving the default onto a
-        // kitchen-only printer would trade one silent failure for another.
+        // Prefer one that can print a bill — moving the default onto a kitchen-only printer
+        // would trade one silent failure for another.
         let Some(real) = printers
             .iter()
             .filter(|p| p.id != NO_PRINTER && p.kind != "none")
@@ -941,8 +640,7 @@ fn retire_the_stand_in(db: &Arc<Db>) {
                     .find(|p| p.id != NO_PRINTER && p.kind != "none")
             })
         else {
-            // No real printer yet. The stand-in is correct, and this shop is
-            // on its first day.
+            // No real printer yet.
             return Ok(None);
         };
 
@@ -969,8 +667,8 @@ fn retire_the_stand_in(db: &Arc<Db>) {
              they go to \"{name}\" now"
         ),
         Ok(None) => {}
-        // Not fatal. The shop opens, and the settings screen now says in words
-        // that nothing is printing.
+        // Not fatal. The shop opens, and the settings screen now says in words that nothing is
+        // printing.
         Err(e) => log_warn!("the default printer could not be checked ({e})"),
     }
 }
@@ -992,11 +690,7 @@ fn fallback_row() -> mb_db::repo::settings::Printer {
     }
 }
 
-/// mb-db stores a printer as a row of strings; mb-print wants a typed
-/// configuration. **This is the only place the two vocabularies meet**, and it
-/// is deliberately here rather than in either crate: P07's D32 keeps mb-print's
-/// knowledge of the database down to one module, and mb-db must not learn what
-/// a `Target` is.
+/// Mb-db stores a printer as a row of strings; mb-print wants a typed configuration.
 pub fn printer_config_for(row: &mb_db::repo::settings::Printer) -> PrinterConfig {
     let target = match row.kind.as_str() {
         "spooler" => Target::Spooler {
@@ -1018,9 +712,7 @@ pub fn printer_config_for(row: &mb_db::repo::settings::Printer) -> PrinterConfig
             port: row.address.clone().unwrap_or_default(),
             baud: 9600,
         },
-        // "none", and anything a newer build wrote that this one does not
-        // know. A printer we cannot understand must not stop the shop billing
-        // (requirement 3), so it accepts jobs and prints nothing.
+        // "none", and anything a newer build wrote that this one does not know.
         _ => Target::None,
     };
 
@@ -1031,7 +723,6 @@ pub fn printer_config_for(row: &mb_db::repo::settings::Printer) -> PrinterConfig
             100 => mb_print::paper::PaperKind::Mm100,
             _ => mb_print::paper::PaperKind::Mm80,
         },
-        // Scope 7.11 — the correction the owner nudged in from the test print.
         offset: mb_print::paper::Offset::new(
             i32::try_from(row.offset_x_mm).unwrap_or(0),
             i32::try_from(row.offset_y_mm).unwrap_or(0),
@@ -1054,22 +745,19 @@ pub fn printer_config_for(row: &mb_db::repo::settings::Printer) -> PrinterConfig
     printer
 }
 
-// ---------------------------------------------------------------------------
 // What the screens are told, without asking.
-// ---------------------------------------------------------------------------
 
-/// Everything Rust pushes. One enum, because one channel is easier to reason
-/// about than five, and because a screen that has just attached wants the lot.
+/// Everything Rust pushes. One enum, because one channel is easier to reason about than five,
+/// and because a screen that has just attached wants the lot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Pushed {
-    /// The print queue changed. Carries the whole snapshot rather than a delta:
-    /// it is a handful of rows, and a delta is a thing that can be missed.
-    PrintQueue { jobs: Vec<PrintJobView> },
-    /// The screen locked itself, or somebody signed in or out. Pushed rather
-    /// than polled: the idle timer is Rust's (P11), so React learns about it
-    /// the same way it learns about a print job.
+    /// The print queue changed.
+    PrintQueue {
+        jobs: Vec<PrintJobView>,
+    },
+    /// The screen locked itself, or somebody signed in or out.
     Session {
         /// `None` when the screen is locked.
         who: Option<String>,
@@ -1077,62 +765,44 @@ pub enum Pushed {
         /// True while nobody has a PIN — the shell's undismissable banner.
         stand_in: bool,
     },
-    /// A stub with the right shape, so P21 fills it in rather than reshaping
-    /// the UI (R10 — there is no licence code in this session).
-    Licence { state: String },
-    /// Likewise, for P33.
-    Sync { state: String },
-    /// **A phone is asking to join** (P19). Pushed rather than polled, which is
-    /// budget M4: the panel must not run a timer, and the person holding the
-    /// phone is standing at the counter waiting for the name to appear.
+    Licence {
+        state: String,
+    },
+    Sync {
+        state: String,
+    },
+    /// A phone is asking to join.
     Pairing {
         /// How many phones are waiting for somebody to press Allow.
         waiting: u32,
     },
-    /// **The floor changed the order the cashier has open** (P20, D83).
-    ///
-    /// Pushed, because the alternative is the cashier finding out when they
-    /// happen to press something — and the thing they are most likely to press
-    /// next is Complete bill. Found by looking: the note was there and the
-    /// screen had not asked for it.
+    /// The floor changed the order the cashier has open.
     FloorChanged {
         waiting: u32,
     },
-    /// **This till is holding bills the main till has not taken yet** (P27,
-    /// D138). Pushed for the same reason as the print queue: *a shop must be
-    /// able to see that the tills are apart*, and a banner that only refreshes
-    /// when somebody opens a screen is a banner that lies.
+    /// This till is holding bills the main till has not taken yet.
     Tills {
         /// How many bills are queued here.
         waiting: u32,
-        /// The whole sentence, empty when there is nothing to say (R8).
+        /// The whole sentence, empty when there is nothing to say.
         says: String,
     },
-    /// **What the customer is being shown** (P29, scope 7.8).
-    ///
-    /// Sent only while the display is switched on, and only when the cart
-    /// actually changes — a handful of messages per bill, not one per
-    /// keystroke. The second window listens on the same channel as everything
-    /// else, so the display is a SCREEN of this app rather than a second
-    /// program with its own idea of what the bill says.
+    /// What the customer is being shown.
     CustomerBill {
-        /// Every line, already priced and formatted (R8).
+        /// Every line, already priced and formatted.
         lines: Vec<DisplayLine>,
         total: String,
-        /// The heading: the shop's name, or what the shop typed for an idle
-        /// display.
+        /// The heading: the shop's name, or what the shop typed for an idle display.
         title: String,
         /// The UPI QR's payload, when there is one to show at payment.
         qr: String,
-        /// True when there is nothing on the bill, so the display shows the
-        /// shop's name instead of an empty table.
+        /// True when there is nothing on the bill, so the display shows the shop's name instead
+        /// of an empty table.
         idle: bool,
     },
 }
 
-/// One line, as the customer sees it. **Formatted in Rust** — the display is
-/// a screen like any other and R8 is not suspended because it faces the other
-/// way.
+/// One line, as the customer sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -1143,17 +813,13 @@ pub struct DisplayLine {
 }
 
 /// A print job, as a screen shows it.
-///
-/// Deliberately not mb-print's `JobStatus`: that type is the queue's own
-/// vocabulary, and the shell shows a sentence and a colour. Converting here
-/// means P07's types can change without a screen changing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobView {
     pub id: String,
     pub printer: String,
-    /// "Bill", "Kitchen ticket" — words, not tags (UI_GUIDELINES §6).
+    /// "Bill", "Kitchen ticket" — words, not tags.
     pub what: String,
     /// "Waiting", "Printing", "Failed — will try again", "Not printed".
     pub state: String,
@@ -1168,50 +834,27 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl App {
-    /// A receiver of everything the print queue does, for [`crate::push`].
-    ///
-    /// `None` when there is no shop — a first run has no queue to listen to,
-    /// and that is a state rather than a failure.
-    pub fn subscribe_to_queue(&self) -> Option<std::sync::mpsc::Receiver<mb_print::queue::QueueEvent>> {
+    /// A receiver of everything the print queue does, for `crate::push`.
+    pub fn subscribe_to_queue(
+        &self,
+    ) -> Option<std::sync::mpsc::Receiver<mb_print::queue::QueueEvent>> {
         lock(&self.shop).as_ref().map(|shop| shop.queue.subscribe())
     }
 
     /// Everything unfinished, in the words a screen shows.
-    ///
-    /// From `snapshot()` rather than from the event stream, which is P07's own
-    /// reasoning: *"a screen that attached after the `Parked` event would
-    /// otherwise be blind to the one thing it exists to show."*
     pub fn print_queue_snapshot(&self) -> Vec<PrintJobView> {
         lock(&self.shop).as_ref().map_or_else(Vec::new, |shop| {
-            shop.queue.snapshot().iter().map(crate::ipc::to_view).collect()
+            shop.queue
+                .snapshot()
+                .iter()
+                .map(crate::ipc::to_view)
+                .collect()
         })
     }
 }
 
 impl App {
-    /// Read the cart.
-    /// **The counter does one thing at a time.** Hold this for a whole flow.
-    ///
-    /// The cart lock below is taken and released *per call*, so its promise —
-    /// "two commands arriving together can never interleave" — holds inside one
-    /// call and not across a sequence of them. Every flow that matters is such
-    /// a sequence: settling reads the cart, releases it, writes the order,
-    /// prints, and only then clears. Two presses landing inside that window
-    /// both read a cart that is still full, and both go on to bill it.
-    ///
-    /// That is how one press of Settle could claim a second bill number, how a
-    /// payment could be added twice, and how five taps on the kitchen button
-    /// became five tickets. A cashier at a counter presses again when nothing
-    /// has happened yet; the app has to be the one that says no.
-    ///
-    /// Held from the top of each flow and released when it returns — including
-    /// on the `?` that leaves early, because the guard is dropped either way.
-    /// It goes in the flows and never in their helpers: `park_open_order` runs
-    /// *inside* the kitchen flow, and a lock in both would be a counter that
-    /// stops dead on its first kitchen ticket.
-    ///
-    /// The background threads take it too, so the twenty-second kitchen
-    /// reprint cannot cut into a sale that is halfway written.
+    /// Read the cart. The counter does one thing at a time.
     pub fn begin_action(&self) -> MutexGuard<'_, ()> {
         lock(&self.action)
     }
@@ -1221,20 +864,11 @@ impl App {
     }
 
     /// Change the cart, and get the new view back.
-    ///
-    /// One lock for the whole change **and** the recompute, so two commands
-    /// arriving together can never interleave into a bill that reflects half of
-    /// each. The cart is one counter's work in progress; there is no contention
-    /// to optimise for.
     pub fn with_cart_mut<T>(&self, f: impl FnOnce(&mut CartState) -> UiResult<T>) -> UiResult<T> {
         f(&mut lock(&self.cart))
     }
 
     /// One menu row, by id.
-    ///
-    /// Read at the moment of adding, so the cart line is frozen from what the
-    /// menu says *now* — crown jewel 4: *"frozen item snapshots on every order;
-    /// old bills never change when you change a price."*
     pub fn find_menu_item(&self, id: &str) -> UiResult<mb_db::repo::menu::MenuItem> {
         self.with_shop(|shop| {
             let items = shop

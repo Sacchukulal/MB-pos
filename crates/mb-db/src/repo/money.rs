@@ -1,14 +1,4 @@
-//! Money that happens outside a bill: customers and their credit, expenses, and
-//! the day close.
-//!
-//! # The column that is not here
-//!
-//! There is no customer balance column, and [`MoneyRepo::customer_balance`] is
-//! a `SUM` every single time. v1 kept `credit_balance REAL` on the customers
-//! table, beside the payments that make it — two sources of truth for what a
-//! customer owes, one of them a floating-point number. A stored balance is a
-//! balance that can disagree with its own ledger, and the day it does, nobody
-//! can tell which one is right.
+//! Money that happens outside a bill: customers and their credit, expenses, and the day close.
 
 use mb_core::credit::{Ageing, Movement, MovementKind};
 use mb_core::expense::Every;
@@ -26,19 +16,17 @@ pub struct Customer {
     pub phone: Option<String>,
     pub gstin: Option<String>,
     pub address: Option<String>,
-    /// Scope 5.2. `None` means no limit, which is not a limit of zero.
+    /// `None` means no limit, which is not a limit of zero.
     pub credit_limit: Option<Money>,
     pub is_active: bool,
 }
 
-/// A credit repayment. Audit A3: in v1 these were *never* sent to the cloud, so
-/// the udhaar ledger could not be rebuilt from a backup at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreditPayment {
     pub id: String,
     pub customer_id: CustomerId,
     pub amount: Money,
-    /// The real mode (audit B12) — never the string "Full Settlement".
+    /// The real mode — never the string "Full Settlement".
     pub mode: String,
     pub reference: Option<String>,
     pub received_at: Timestamp,
@@ -46,8 +34,7 @@ pub struct CreditPayment {
     pub business_day: BusinessDay,
 }
 
-
-/// An opening balance, a write-off, or a correction — scope 5.1.
+/// An opening balance, a write-off, or a correction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreditAdjustment {
     pub id: String,
@@ -70,10 +57,6 @@ pub struct Owing {
     pub last_movement: BusinessDay,
 }
 
-
-
-/// A category, and it is DATA (audit B14): v1's six were in the source, so a
-/// shop that spent money on anything else recorded it as "Other" forever.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpenseCategory {
     pub id: String,
@@ -83,14 +66,10 @@ pub struct ExpenseCategory {
 }
 
 /// What moved in or out of the DRAWER that is not a sale and not an expense.
-///
-/// A cash expense deliberately has no row here — see the schema comment on
-/// `cash_movements`. Two rows for one fact can disagree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CashMovement {
     pub id: String,
-    /// `float`, `top_up`, `payout` or `bank_drop`. The direction belongs to
-    /// the kind; the amount is always positive.
+    /// `float`, `top_up`, `payout` or `bank_drop`.
     pub kind: String,
     pub amount: Money,
     pub reason: String,
@@ -99,8 +78,7 @@ pub struct CashMovement {
     pub moved_by: Option<StaffId>,
 }
 
-/// Rent, salary, the internet bill. **A template and a reminder — never an
-/// automatic posting.**
+/// Rent, salary, the internet bill.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recurring {
     pub id: String,
@@ -123,34 +101,13 @@ pub struct CashPosition {
     pub cash_expenses: Money,
     pub payouts: Money,
     pub bank_drops: Money,
-    /// **P26, D120.** Cash handed to suppliers at the door. Before this term
-    /// existed the day close told a shop to expect money it had already paid the
-    /// vegetable man.
     pub suppliers_paid: Money,
-    /// **P29, scope 8.5 — how much of `cash_sales` is somebody's tip.**
-    ///
-    /// Not subtracted from anything: a cash tip really is in the drawer. It is
-    /// split out so the day close can show it on its own line, because a
-    /// takings figure that silently includes tips is a figure that will never
-    /// agree with the sales report — and the gap between them is exactly the
-    /// money that belongs to the staff.
     pub cash_tips: Money,
-    /// **P29, scope 14.5 — cash a rider is carrying, and it is not here yet.**
-    ///
-    /// A delivery paid in cash is settled when the rider hands the food over,
-    /// so the sale is real and the money is in somebody's pocket three
-    /// kilometres away. Every other cash payment in this product is in the
-    /// drawer the moment it is taken; these are not.
-    ///
-    /// Counting them is a drawer that is short all evening for a reason nobody
-    /// can name — and the shortfall walks back in at nine o'clock, which makes
-    /// it look like a theft that resolved itself.
     pub with_riders: Money,
-    /// float + sales + top-ups − expenses − payouts − drops − suppliers paid
-    /// − what riders are still carrying.
+    /// Float + sales + top-ups − expenses − payouts − drops − suppliers paid − what riders are
+    /// still carrying.
     pub expected: Money,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expense {
@@ -158,16 +115,11 @@ pub struct Expense {
     pub category_id: Option<String>,
     pub description: String,
     pub amount: Money,
-    /// `cash`, `bank`, `upi` or `card`. **Cash decides the day close's
-    /// expected drawer**; the other three are only telling a shop which
-    /// statement to reconcile against, which is why one boolean was not
-    /// enough (P16).
+    /// `cash`, `bank`, `upi` or `card`.
     pub mode: String,
-    /// A NAME. Suppliers and their ledger are P26.
     pub paid_to: Option<String>,
     pub reference: Option<String>,
-    /// Input credit (scope 2.9): the rate, and the tax inside what was paid.
-    /// Both or neither — the schema says so too.
+    /// Input credit: the rate, and the tax inside what was paid.
     pub gst_rate_bp: Option<i64>,
     pub gst_amount: Option<Money>,
     pub paid_at: Timestamp,
@@ -176,7 +128,7 @@ pub struct Expense {
     pub note: Option<String>,
 }
 
-/// Scope 10.8 and requirement 9 of the ten.
+/// 8 and requirement 9 of the ten.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DayClose {
     pub id: String,
@@ -184,31 +136,21 @@ pub struct DayClose {
     pub opening_float: Money,
     pub expected_cash: Money,
     pub counted_cash: Money,
-    /// Stored, not derived, so the Z-report reprints identically years later
-    /// even if a bill is voided afterwards.
+    /// Stored, not derived, so the Z-report reprints identically years later even if a bill is
+    /// voided afterwards.
     pub variance: Money,
     pub is_locked: bool,
     pub closed_at: Timestamp,
     pub closed_by: Option<StaffId>,
-    /// Why the drawer was out, when it was out by more than the shop's
-    /// threshold. **The reason is the feature**: "₹340 short" tells an owner
-    /// nothing, and "₹340 short — paid the vegetable man from the drawer" tells
-    /// them everything. Audit B15.
+    /// Why the drawer was out, when it was out by more than the shop's threshold.
     pub note: Option<String>,
-    /// **D140 — which drawer this is.** `None` is the shop's roll-up, written
-    /// when the last till closes, and it is the row that locks the day. A cash
-    /// drawer is a box under one till, and "we were ₹340 short" is
-    /// unanswerable until you know which box.
+    /// Which drawer this is.
     pub terminal: Option<String>,
-    /// Scope 9.8's boundary half: one till can count its drawer several times
-    /// in a day. 0 on the shop's row.
+    /// 8's boundary half: one till can count its drawer several times in a day.
     pub shift_no: i64,
 }
 
 /// How many of each note and coin were counted.
-///
-/// A child table rather than a JSON column, because "we are always short of
-/// tens" is a report an owner really asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Denomination {
     /// Paise, so a ₹500 note is 50000.
@@ -226,8 +168,6 @@ impl<'a> MoneyRepo<'a> {
     pub(crate) fn new(tx: &'a Transaction<'a>) -> Self {
         MoneyRepo { tx }
     }
-
-    // -- customers ----------------------------------------------------------
 
     pub fn save_customer(
         &self,
@@ -257,10 +197,11 @@ impl<'a> MoneyRepo<'a> {
                 customer.credit_limit.map(encode::money_to_sql),
                 encode::bool_to_sql(customer.is_active),
                 encode::timestamp_to_sql(at),
-                // The derived copy, with ONE writer — this line (D56's rule
-                // again). The UNIQUE INDEX on it is what makes "one phone is
-                // one customer" structural rather than remembered.
-                customer.phone.as_deref().and_then(mb_core::credit::phone_key),
+                // The derived copy, with ONE writer — this line.
+                customer
+                    .phone
+                    .as_deref()
+                    .and_then(mb_core::credit::phone_key),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "customers", customer.id.as_str(), Op::Upsert, at)
@@ -299,10 +240,6 @@ impl<'a> MoneyRepo<'a> {
     }
 
     /// What the customer owes, right now, from the ledger.
-    ///
-    /// Credit taken on bills, less repayments. **Computed, never stored** — see
-    /// the module header for why v1's `credit_balance REAL` was the wrong
-    /// shape twice over.
     pub fn customer_balance(&self, id: &CustomerId) -> Result<Money, DbError> {
         let taken: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(p.amount), 0)
@@ -319,12 +256,7 @@ impl<'a> MoneyRepo<'a> {
         Ok(encode::money_from_sql(taken - repaid))
     }
 
-
-    /// Who owns this phone number, if anybody — scope 5.4.
-    ///
-    /// **The lookup a duplicate must go through.** "That number is already
-    /// Rekha's — open her?" is the only acceptable answer to a second row for
-    /// one number, and it needs the existing customer, not a boolean.
+    /// Who owns this phone number, if anybody.
     pub fn customer_by_phone(
         &self,
         outlet: &str,
@@ -340,19 +272,7 @@ impl<'a> MoneyRepo<'a> {
         Ok(found)
     }
 
-    /// Everything that has ever moved this account — scope 5.1.
-    ///
-    /// Three sources, one shape:
-    ///
-    /// * **sales** are `payments` rows in credit mode on a SETTLED order. A
-    ///   voided bill drops out here, which is why voiding one returns the
-    ///   balance exactly to what it was without any reversing row: the sale
-    ///   simply stops being a settled sale (D47 — a correction is a state).
-    /// * **repayments** are `customer_payments`.
-    /// * **adjustments** are `credit_adjustments`, with their reason.
-    ///
-    /// Ordered oldest first, because that is the order the ageing applies them
-    /// in and a statement prints them in.
+    /// Everything that has ever moved this account.
     pub fn credit_movements(&self, customer: &CustomerId) -> Result<Vec<Movement>, DbError> {
         let mut out = Vec::new();
 
@@ -362,7 +282,11 @@ impl<'a> MoneyRepo<'a> {
               WHERE p.customer_id = ?1 AND p.mode = 'credit' AND o.state = 'settled'",
         )?;
         for row in sales.query_map([customer.as_str()], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })? {
             let (day, amount, note) = row?;
             out.push(Movement {
@@ -378,7 +302,11 @@ impl<'a> MoneyRepo<'a> {
                FROM customer_payments WHERE customer_id = ?1",
         )?;
         for row in repayments.query_map([customer.as_str()], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })? {
             let (day, amount, note) = row?;
             out.push(Movement {
@@ -417,10 +345,6 @@ impl<'a> MoneyRepo<'a> {
     }
 
     /// An opening balance, a write-off, or a correction.
-    ///
-    /// The reason is required by the schema as well as by the type, because
-    /// this is the one door in the credit account somebody could use to make
-    /// money disappear.
     pub fn save_credit_adjustment(
         &self,
         outlet: &str,
@@ -459,11 +383,7 @@ impl<'a> MoneyRepo<'a> {
         )
     }
 
-    /// **Who owes me money** — the screen an owner actually opens.
-    ///
-    /// One pass over every customer with a movement, so the list and the
-    /// customer screen cannot disagree: both are built from
-    /// [`MoneyRepo::credit_movements`].
+    /// Who owes me money.
     pub fn who_owes(&self, outlet: &str, today: BusinessDay) -> Result<Vec<Owing>, DbError> {
         let mut out = Vec::new();
         for customer in self.list_customers(outlet)? {
@@ -475,13 +395,16 @@ impl<'a> MoneyRepo<'a> {
                 .map_err(|e| DbError::invariant(e.to_string()))?;
             let ageing = mb_core::credit::ageing(&movements, today)
                 .map_err(|e| DbError::invariant(e.to_string()))?;
-            let last = movements
-                .last()
-                .map_or(today, |m| m.day);
-            out.push(Owing { customer, balance, ageing, last_movement: last });
+            let last = movements.last().map_or(today, |m| m.day);
+            out.push(Owing {
+                customer,
+                balance,
+                ageing,
+                last_movement: last,
+            });
         }
-        // Oldest debt first: the point of the screen is what has been owed
-        // longest, not who is alphabetically first.
+        // Oldest debt first: the point of the screen is what has been owed longest, not who is
+        // alphabetically first.
         out.sort_by(|a, b| {
             b.ageing
                 .oldest_days
@@ -552,21 +475,12 @@ impl<'a> MoneyRepo<'a> {
                 reference,
                 received_at: encode::timestamp_from_sql(received_at),
                 received_by: received_by.map(StaffId::new),
-                business_day: encode::business_day_from_sql(
-                    day,
-                    "customer_payments.business_day",
-                )?,
+                business_day: encode::business_day_from_sql(day, "customer_payments.business_day")?,
             });
         }
         Ok(out)
     }
 
-    // -- expenses -----------------------------------------------------------
-
-    /// Audit A2: v1's counter never sent expenses, so the owner's phone showed
-    /// ₹0 and an inflated net profit forever. Here it is the same table, the
-    /// same outbox and the same treatment as a bill.
-    /// Save or edit an expense — scope 10.6, audit B15 (v1 could do neither).
     pub fn save_expense(&self, outlet: &str, expense: &Expense) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO expenses (id, outlet_id, category_id, description, amount, mode,
@@ -698,26 +612,19 @@ impl<'a> MoneyRepo<'a> {
         Ok(out)
     }
 
-    /// **An expense really is deleted** — and it is the only money row in this
-    /// product that is.
-    ///
-    /// A bill is voided rather than deleted because a customer has a copy of
-    /// it and the number must never be reused. An expense has neither
-    /// property: a ₹40 milk purchase typed twice is a typing mistake, not a
-    /// transaction, and leaving it as a "voided expense" would mean a shop's
-    /// expense list is full of things that did not happen. The audit row (R11)
-    /// is what makes it accountable, and it carries the whole row as `before`.
+    /// An expense really is deleted — and it is the only money row in this product that is.
     pub fn delete_expense(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
-        let gone = self
-            .tx
-            .execute("DELETE FROM expenses WHERE outlet_id = ?1 AND id = ?2", rusqlite::params![outlet, id])?;
+        let gone = self.tx.execute(
+            "DELETE FROM expenses WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id],
+        )?;
         if gone == 0 {
             return Err(DbError::invariant("that expense is not here any more"));
         }
         OutboxRepo::new(self.tx).enqueue(outlet, "expenses", id, Op::Delete, at)
     }
 
-    // -- categories, which are DATA (audit B14) ------------------------------
+    // Categories, which are DATA.
 
     pub fn save_expense_category(
         &self,
@@ -771,8 +678,8 @@ impl<'a> MoneyRepo<'a> {
         Ok(out)
     }
 
-    /// A category with money against it cannot be deleted — the same rule and
-    /// the same sentence shape as a table with bills against it (P14).
+    /// A category with money against it cannot be deleted — the same rule and the same sentence
+    /// shape as a table with bills against it.
     pub fn delete_expense_category(
         &self,
         outlet: &str,
@@ -797,13 +704,9 @@ impl<'a> MoneyRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "expense_categories", id, Op::Delete, at)
     }
 
-    // -- the drawer ----------------------------------------------------------
+    // The drawer.
 
-    pub fn save_cash_movement(
-        &self,
-        outlet: &str,
-        movement: &CashMovement,
-    ) -> Result<(), DbError> {
+    pub fn save_cash_movement(&self, outlet: &str, movement: &CashMovement) -> Result<(), DbError> {
         if movement.reason.trim().is_empty() {
             return Err(DbError::invariant("a cash movement needs a reason"));
         }
@@ -830,7 +733,13 @@ impl<'a> MoneyRepo<'a> {
                 movement.moved_by.as_ref().map(StaffId::as_str),
             ],
         )?;
-        OutboxRepo::new(self.tx).enqueue(outlet, "cash_movements", &movement.id, Op::Upsert, movement.at)
+        OutboxRepo::new(self.tx).enqueue(
+            outlet,
+            "cash_movements",
+            &movement.id,
+            Op::Upsert,
+            movement.at,
+        )
     }
 
     pub fn list_cash_movements(
@@ -885,9 +794,14 @@ impl<'a> MoneyRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "cash_movements", id, Op::Delete, at)
     }
 
-    // -- recurring templates -------------------------------------------------
+    // Recurring templates.
 
-    pub fn save_recurring(&self, outlet: &str, template: &Recurring, at: Timestamp) -> Result<(), DbError> {
+    pub fn save_recurring(
+        &self,
+        outlet: &str,
+        template: &Recurring,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO recurring_expenses (id, outlet_id, category_id, description, amount,
                                              mode, paid_to, every, next_due, is_active)
@@ -949,7 +863,11 @@ impl<'a> MoneyRepo<'a> {
                 amount: encode::money_from_sql(amount),
                 mode,
                 paid_to,
-                every: if every == "week" { Every::Week } else { Every::Month },
+                every: if every == "week" {
+                    Every::Week
+                } else {
+                    Every::Month
+                },
                 next_due: encode::business_day_from_sql(next_due, "recurring_expenses.next_due")?,
                 is_active: encode::bool_from_sql(is_active, "recurring_expenses.is_active")?,
             });
@@ -957,30 +875,12 @@ impl<'a> MoneyRepo<'a> {
         Ok(out)
     }
 
-    /// **The cash position** — scope 10.6, and the number a drawer is counted
-    /// against.
-    ///
-    /// `float + cash taken on bills + top-ups − cash expenses − payouts − bank
-    /// drops`, computed in one place because P18's day close reads this
-    /// function rather than writing a second one that can disagree with it.
-    ///
-    /// **A cash expense is not double-counted**, and cannot be: it is an
-    /// expense row and nothing else. The movements table deliberately holds no
-    /// row for it (see the schema comment).
-    /// **The whole shop's drawer.** Every till's box added together.
+    /// The cash position — scope 10.6, and the number a drawer is counted against.
     pub fn cash_position(&self, outlet: &str, day: BusinessDay) -> Result<CashPosition, DbError> {
         self.cash_position_of(outlet, day, None)
     }
 
-    /// **One till's drawer** — D140, and the reason it exists: a cash drawer is
-    /// a box under one till, and "we were ₹340 short" is unanswerable until you
-    /// know which box.
-    ///
-    /// **The per-till figures sum EXACTLY to the shop's**, and that is a
-    /// property of this one function rather than of two that could drift: rows
-    /// written before this shop had a second till carry no terminal, and every
-    /// term below attributes those to the master. `None` here means the shop,
-    /// and it is the same SQL with the filter removed.
+    /// One till's drawer.
     #[allow(
         clippy::too_many_lines,
         reason = "one query per term of one sum; splitting them would put the \
@@ -993,9 +893,8 @@ impl<'a> MoneyRepo<'a> {
         terminal: Option<&str>,
     ) -> Result<CashPosition, DbError> {
         let day_sql = encode::business_day_to_sql(day);
-        // **The master owns every row written before this shop had a second
-        // till**, which is what makes the per-drawer figures add up to the
-        // shop's exactly rather than nearly.
+        // The master owns every row written before this shop had a second till, which is what
+        // makes the per-drawer figures add up to the shop's exactly rather than nearly.
         let master: Option<String> = self
             .tx
             .query_row(
@@ -1005,9 +904,8 @@ impl<'a> MoneyRepo<'a> {
             )
             .ok();
         let master = master.as_deref();
-        // `?3` is the till being asked about (NULL = the whole shop) and `?4`
-        // is the master, which owns every row written before this shop had a
-        // second till.
+        // `?3` is the till being asked about (NULL = the whole shop) and `?4` is the master,
+        // which owns every row written before this shop had a second till.
         let taken: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(p.amount + p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
@@ -1017,13 +915,6 @@ impl<'a> MoneyRepo<'a> {
             rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
-        // **P29, scope 8.5. How much of that was a tip.**
-        //
-        // Cash tips ARE in the drawer, so they are not subtracted from
-        // anything — the same query, split out, so the day close can show them
-        // on their own line. A drawer whose 'cash from bills' figure quietly
-        // includes tips is a drawer that never quite matches the sales report,
-        // and the difference is exactly the money that belongs to the staff.
         let tips: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
@@ -1061,21 +952,7 @@ impl<'a> MoneyRepo<'a> {
             |r| r.get(0),
         )?;
 
-        // **P29 — what the riders are still carrying.**
-        //
-        // Cash taken on delivery orders that are with a rider, minus what has
-        // been handed back. Both halves are sums over rows; nothing is stored,
-        // so this cannot drift away from the handbacks that made it (D120).
-        //
-        // **On the road counts, not just arrived.** Plenty of shops settle a
-        // COD bill the moment they type it — the cash is with the rider from
-        // the second the bike leaves, not from the second the food changes
-        // hands — so an order that is `out` counts exactly like a `delivered`
-        // one. A `failed` one never counts: nobody paid.
-        //
-        // A rider is required, so a shop that does not use this feature
-        // assigns nobody, subtracts nothing, and its drawer is what it always
-        // was.
+        // What the riders are still carrying.
         let collected: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(p.amount + p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
@@ -1094,9 +971,9 @@ impl<'a> MoneyRepo<'a> {
             rusqlite::params![outlet, day_sql],
             |r| r.get(0),
         )?;
-        // Never negative: a rider who hands back more than they collected has
-        // made an arithmetic mistake somebody must look at, and it must not
-        // quietly ADD to the expected drawer.
+        // Never negative: a rider who hands back more than they collected has made an
+        // arithmetic mistake somebody must look at, and it must not quietly ADD to the expected
+        // drawer.
         let with_riders = (collected - handed_back).max(0);
 
         Ok(CashPosition {
@@ -1115,19 +992,9 @@ impl<'a> MoneyRepo<'a> {
         })
     }
 
-    // -- the day close ------------------------------------------------------
-    /// **Superseded by [`MoneyRepo::cash_position`], and kept as one line of
-    /// delegation rather than a second answer.**
-    ///
-    /// P05 wrote this before cash movements existed, so it took the opening
-    /// float as an argument and knew nothing about payouts or bank drops. P16
-    /// gave the drawer its own table; a shop that pays out ₹300 and drops
-    /// ₹1,000 at the bank would have been told to expect ₹1,300 it does not
-    /// have.
-    ///
-    /// The float argument is now only used when the day has no float movement
-    /// recorded — which is a shop that has not opened its drawer through the
-    /// product yet.
+    // The day close.
+    /// Superseded by `MoneyRepo::cash_position`, and kept as one line of delegation rather than
+    /// a second answer.
     pub fn expected_cash(
         &self,
         outlet: &str,
@@ -1144,15 +1011,7 @@ impl<'a> MoneyRepo<'a> {
         Ok(position.expected)
     }
 
-    /// **D140 — a close is one drawer, or it is the shop's roll-up.**
-    ///
-    /// `close.terminal` says which: `Some` is a till's own counted box for one
-    /// shift, `None` is the shop's total, written when the last till closes and
-    /// **the row that locks the day** (D77).
-    ///
-    /// Two conflict targets rather than one, because the shop row's terminal is
-    /// NULL and SQLite treats NULLs as distinct — the same reason P25's recipes
-    /// need three partial indexes.
+    /// A close is one drawer, or it is the shop's roll-up.
     pub fn save_day_close(&self, outlet: &str, close: &DayClose) -> Result<(), DbError> {
         let conflict = if close.terminal.is_some() {
             "(outlet_id, business_day, terminal_id, shift_no) WHERE terminal_id IS NOT NULL"
@@ -1200,14 +1059,7 @@ impl<'a> MoneyRepo<'a> {
     }
 
     /// Every drawer close for a day, in the order they were counted.
-    ///
-    /// **The shop's total is the SUM of these and never an independent query**
-    /// — two ways to compute one number is two numbers.
-    pub fn drawer_closes(
-        &self,
-        outlet: &str,
-        day: BusinessDay,
-    ) -> Result<Vec<DayClose>, DbError> {
+    pub fn drawer_closes(&self, outlet: &str, day: BusinessDay) -> Result<Vec<DayClose>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT id, business_day, opening_float, expected_cash, counted_cash, variance,
                     is_locked, closed_at, closed_by, note, terminal_id, shift_no
@@ -1223,14 +1075,7 @@ impl<'a> MoneyRepo<'a> {
     }
 
     /// Which tills have not counted their drawer for this day yet.
-    ///
-    /// **The shop's day cannot close while this is not empty** (D140), and the
-    /// Z-report names them rather than quietly totalling what it has.
-    pub fn tills_still_open(
-        &self,
-        outlet: &str,
-        day: BusinessDay,
-    ) -> Result<Vec<String>, DbError> {
+    pub fn tills_still_open(&self, outlet: &str, day: BusinessDay) -> Result<Vec<String>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT t.name FROM terminals t
               WHERE t.outlet_id = ?1
@@ -1239,10 +1084,7 @@ impl<'a> MoneyRepo<'a> {
                                    AND d.terminal_id = t.id)
               ORDER BY t.created_at",
         )?;
-        let mut cursor = stmt.query(rusqlite::params![
-            outlet,
-            encode::business_day_to_sql(day)
-        ])?;
+        let mut cursor = stmt.query(rusqlite::params![outlet, encode::business_day_to_sql(day)])?;
         let mut out = Vec::new();
         while let Some(row) = cursor.next()? {
             out.push(row.get::<_, String>(0)?);
@@ -1251,9 +1093,6 @@ impl<'a> MoneyRepo<'a> {
     }
 
     /// The next shift number for a till on a day — 1 on the first close.
-    ///
-    /// Scope 9.8's boundary half: one till can count its drawer several times
-    /// in a day, and the till's day total is the sum of its shifts.
     pub fn next_shift(
         &self,
         outlet: &str,
@@ -1269,9 +1108,7 @@ impl<'a> MoneyRepo<'a> {
         Ok(n)
     }
 
-    /// **The SHOP's close for a day** — the roll-up row, which is the one that
-    /// locks the day (D77, D140). A till's own drawer close is
-    /// [`MoneyRepo::drawer_closes`].
+    /// The SHOP's close for a day — the roll-up row, which is the one that locks the day.
     pub fn find_day_close(
         &self,
         outlet: &str,
@@ -1306,23 +1143,13 @@ impl<'a> MoneyRepo<'a> {
                 AND shift_no = ?4",
         )?;
         let mut rows = stmt.query_map(
-            rusqlite::params![
-                outlet,
-                encode::business_day_to_sql(day),
-                terminal,
-                shift_no
-            ],
+            rusqlite::params![outlet, encode::business_day_to_sql(day), terminal, shift_no],
             read_day_close,
         )?;
         rows.next().transpose().map_err(DbError::from)
     }
 
-    /// **The counted notes and coins**, replacing whatever was there.
-    ///
-    /// A recount is a correction of the count, not a second count — two rows
-    /// for the same denomination on the same day would make the mix report a
-    /// lie. `DELETE` then insert, in the caller's transaction, so a half-written
-    /// count cannot exist.
+    /// The counted notes and coins, replacing whatever was there.
     pub fn save_denominations(
         &self,
         close_id: &str,
@@ -1337,9 +1164,9 @@ impl<'a> MoneyRepo<'a> {
              VALUES (?1, ?2, ?3)",
         )?;
         for note in counted {
-            // A zero count is not stored: "no five-hundreds" and "we did not
-            // record five-hundreds" are the same thing to a shop, and a table
-            // full of zeroes makes the mix report harder to read for nothing.
+            // A zero count is not stored: "no five-hundreds" and "we did not record
+            // five-hundreds" are the same thing to a shop, and a table full of zeroes makes the
+            // mix report harder to read for nothing.
             if note.count == 0 {
                 continue;
             }
@@ -1370,17 +1197,12 @@ impl<'a> MoneyRepo<'a> {
         Ok(out)
     }
 
-    /// **Unlock a day that was closed** — see the audit row the caller writes.
-    ///
-    /// Not a delete. The close row stays, with its count and its reason, and
-    /// only the lock comes off: a day that was closed at 11 pm, reopened at
-    /// 11:20 and closed again is three facts, and deleting the first one loses
-    /// two of them.
+    /// Unlock a day that was closed.
     pub fn unlock_day(&self, outlet: &str, day: BusinessDay) -> Result<bool, DbError> {
         let changed = self.tx.execute(
-            // The SHOP's row is the only locked one (D140), so this touches it
-            // and leaves every drawer's count exactly as it was counted —
-            // reopening a day must not look like somebody recounted a box.
+            // The SHOP's row is the only locked one, so this touches it and leaves every
+            // drawer's count exactly as it was counted — reopening a day must not look like
+            // somebody recounted a box.
             "UPDATE day_closes SET is_locked = 0
               WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id IS NULL
                 AND is_locked = 1",
@@ -1391,10 +1213,6 @@ impl<'a> MoneyRepo<'a> {
 }
 
 /// One `day_closes` row, read back.
-///
-/// One reader for the shop's roll-up, a till's drawer and the list — three
-/// copies of this would be three chances for the terminal column to be dropped
-/// from one of them.
 fn read_day_close(row: &rusqlite::Row<'_>) -> rusqlite::Result<DayClose> {
     Ok(DayClose {
         id: row.get(0)?,

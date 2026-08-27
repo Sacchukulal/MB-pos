@@ -1,12 +1,3 @@
-/**
- * **T4 and T12 — the guards, and the proof that they fail.**
- *
- * A guard nobody has watched fail is a guard nobody knows is switched off. v1's
- * inline styles came back *after* a rebuild that was meant to remove them
- * (audit E11), so these run the real scripts against fixtures that must be
- * rejected, and against the real source, which must be clean.
- */
-
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -57,25 +48,9 @@ describe('the money lint (R8)', () => {
   });
 });
 
-/**
- * T12. **Nothing polls** — budget M4, and `PERFORMANCE.md` §5 rule 6: *"a
- * 250 ms poll loop is M4 gone before a single feature is written."*
- *
- * Rust pushes and React subscribes. A `setInterval` anywhere in the screens is
- * either a poll or a second clock, and §5 rule 10 forbids the second one too:
- * *"timers are one clock — table timers, KDS timers and elapsed displays share
- * a single ticking source, not one interval per tile."*
- */
+/** Nothing polls. */
 describe('nothing polls (M4)', () => {
-  /**
-   * **The one file allowed to tick, and it is allowed by name.**
-   *
-   * `src/clock.ts` is the single shared ticking source §5 rule 10 requires:
-   * *"table timers, KDS timers and elapsed displays share a single ticking
-   * source, not one interval per tile."* Adding a second entry to this list is
-   * the moment to stop and ask whether it is a poll (M4) or a second clock
-   * (B8) — because it will be one of the two.
-   */
+  /** The one file allowed to tick, and it is allowed by name. */
   const MAY_TICK = ['src/clock.ts'];
 
   it('has no setInterval in any screen', () => {
@@ -107,19 +82,7 @@ describe('nothing polls (M4)', () => {
   });
 });
 
-/**
- * **Every class a screen names must exist in a stylesheet.**
- *
- * `.mb-row--end` was written in sixteen components and defined in none, so the
- * primary action of every dialog in the app sat on the left for three
- * sessions. No test could see it: the markup was right, the tokens were clean,
- * and the rule simply was not there. This is the cheapest guard that would
- * have caught it.
- *
- * Only literal class names are checked. A name built at run time
- * (`mb-tile--${state}`) contributes its stem, which is enough to catch a whole
- * block going missing without pretending to know the states.
- */
+/** Every class a screen names must exist in a stylesheet. */
 describe('the classes a screen asks for (P13)', () => {
   const cssText = (() => {
     const found: string[] = [];
@@ -142,8 +105,7 @@ describe('the classes a screen asks for (P13)', () => {
         if (statSync(full).isDirectory()) walk(full);
         else if (entry.endsWith('.tsx')) {
           const source = readFileSync(full, 'utf8');
-          // Only what is actually a class. A crate named in a comment and an
-          // element id that starts "mb-" are neither.
+          // Only what is actually a class.
           for (const attribute of source.matchAll(
             /className\s*=\s*(?:"([^"]*)"|\{([^}]*)\})/g,
           )) {
@@ -171,18 +133,7 @@ describe('the classes a screen asks for (P13)', () => {
   });
 });
 
-/**
- * **Nothing crossing INTO Rust may be a `bigint`.**
- *
- * `invoke` serialises arguments with `JSON.stringify`, which throws on a
- * BigInt — so a command whose argument type says `bigint` is a command a screen
- * cannot honestly call. P13 shipped one for about an hour: a modifier group's
- * "choose one" was an `i64` in Rust, which `ts-rs` renders as `bigint`, and
- * saving the group died with "Do not know how to serialize a BigInt".
- *
- * Return types are fine — an i64 arrives as a JSON number and `bigint` is what
- * Rust means. It is only the outbound half that breaks.
- */
+/** Nothing crossing INTO Rust may be a `bigint`. */
 describe('the IPC boundary (P13)', () => {
   it('declares no bigint in any command argument', () => {
     const source = readFileSync('src/ipc/call.ts', 'utf8');
@@ -192,8 +143,7 @@ describe('the IPC boundary (P13)', () => {
     );
     expect(commands.length).toBeGreaterThan(500);
 
-    // `args:` runs to the matching `returns:`, which is where every entry in
-    // the table puts it.
+    // `args:` runs to the matching `returns:`, which is where every entry in the table puts it.
     const offenders: string[] = [];
     for (const entry of commands.matchAll(/args:([\s\S]*?)returns:/g)) {
       const args = entry[1] ?? '';

@@ -2,7 +2,6 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * A label and an amount. The takings summary and the drawer summary are both
- * lists of these, so the screen draws one kind of row and not two.
+ * A label and an amount.
  */
 export type SlipLineView = { label: string, amount: MoneyView, };

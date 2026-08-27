@@ -1,9 +1,4 @@
 //! The cart: the lines the cashier has typed, before anything is computed.
-//!
-//! The cart holds *what was ordered*. It does no money arithmetic beyond
-//! carrying the discount the cashier asked for — computing a bill from it is
-//! [`crate::bill::compute_bill`]'s job, and keeping that split is what stops
-//! the totals from being calculated in two places that can disagree.
 
 use crate::discount::DiscountEntry;
 use crate::ids::{ItemId, ModifierId};
@@ -29,24 +24,22 @@ pub struct CartLine {
     pub qty: Qty,
     pub note: Option<String>,
     pub modifiers: Vec<Modifier>,
-    /// The discount as given, with its reason and who authorised it (P02,
-    /// scope 1.12). The cart carries it; `compute_bill` applies it.
+    /// The discount as given, with its reason and who authorised it.
     pub line_discount: Option<DiscountEntry>,
 }
 
 impl CartLine {
-    /// The rule that decides whether adding an item makes a new line or
-    /// increases an existing one: **item, note, and the set of modifiers**.
-    ///
-    /// It exists in exactly one place on purpose. Two copies of a merge rule is
-    /// how a duplicate-line bug is born — which is also why the kitchen ledger
-    /// (P03) keys off this same type rather than a lookalike of its own.
+    /// The rule that decides whether adding an item makes a new line or increases an existing
+    /// one: item, note, and the set of modifiers.
     #[must_use]
     pub fn identity(&self) -> LineIdentity {
-        let mut modifier_ids: Vec<ModifierId> =
-            self.modifiers.iter().map(|m| m.modifier_id.clone()).collect();
-        // Sorted, so the order the waiter tapped the modifiers in cannot create
-        // a second line for the same dish.
+        let mut modifier_ids: Vec<ModifierId> = self
+            .modifiers
+            .iter()
+            .map(|m| m.modifier_id.clone())
+            .collect();
+        // Sorted, so the order the waiter tapped the modifiers in cannot create a second line
+        // for the same dish.
         modifier_ids.sort_unstable();
         LineIdentity {
             item_id: self.snapshot.item_id.clone(),
@@ -57,29 +50,16 @@ impl CartLine {
 }
 
 /// What makes two lines "the same thing".
-///
-/// Owned and serialisable because the kitchen ledger stores it — audit crown
-/// jewel 2: what the kitchen was told is remembered *in the database*, not in
-/// the screen's memory.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LineIdentity {
     pub item_id: ItemId,
     pub note: Option<String>,
-    /// Sorted ascending, always. Built by [`CartLine::identity`], which is the
-    /// only thing that should build one.
+    /// Sorted ascending, always. Built by `CartLine::identity`, which is the only thing that
+    /// should build one.
     pub modifier_ids: Vec<ModifierId>,
 }
 
 /// Normalise a note the way line identity expects it.
-///
-/// **Trimmed, but not case-folded.** Trimmed because `" no onion"` and
-/// `"no onion"` are the same instruction typed twice and splitting the line
-/// would confuse the kitchen. Not case-folded because the note is printed
-/// verbatim — quietly turning `"NO ONION"` into `"no onion"` would change what
-/// the cook reads.
-///
-/// An empty or whitespace-only note becomes `None`, never `Some("")`, or the
-/// same line splits in two for no reason a cashier could see.
 fn normalise_note(note: Option<String>) -> Option<String> {
     note.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty())
 }
@@ -97,12 +77,6 @@ impl Cart {
     }
 
     /// Add an item, merging into an existing line of the same identity.
-    ///
-    /// Returns the index of the line that ended up holding it.
-    ///
-    /// A merge does **not** move the line to the end. The kitchen ticket has to
-    /// read in the order the waiter called the items out, because that is the
-    /// order a cook works down it.
     pub fn add(
         &mut self,
         snapshot: ItemSnapshot,
@@ -124,9 +98,7 @@ impl Cart {
 
         let key = candidate.identity();
         if let Some(index) = self.lines.iter().position(|line| line.identity() == key) {
-            // Adding the same thing again increases the quantity. An overflow
-            // here means an absurd quantity was typed; refuse it rather than
-            // wrap the line into a negative (D7).
+            // Adding the same thing again increases the quantity.
             let merged = self.lines[index]
                 .qty
                 .add(candidate.qty)
@@ -139,10 +111,7 @@ impl Cart {
         Ok(self.lines.len() - 1)
     }
 
-    /// Change a line's quantity. **Zero removes the line.**
-    ///
-    /// That is the cashier holding backspace until the number is gone, and it
-    /// must not leave a zero-quantity ghost on the kitchen ticket.
+    /// Change a line's quantity.
     pub fn set_qty(&mut self, index: usize, qty: Qty) -> Result<()> {
         self.check(index)?;
         if qty.is_negative() {
@@ -156,18 +125,17 @@ impl Cart {
         Ok(())
     }
 
-    pub fn set_line_discount(&mut self, index: usize, discount: Option<DiscountEntry>) -> Result<()> {
+    pub fn set_line_discount(
+        &mut self,
+        index: usize,
+        discount: Option<DiscountEntry>,
+    ) -> Result<()> {
         self.check(index)?;
         self.lines[index].line_discount = discount;
         Ok(())
     }
 
     /// Change a line's note.
-    ///
-    /// **A note is part of the line's identity**, so changing one can make this
-    /// line identical to another. When that happens the two are merged and the
-    /// surviving index is returned — otherwise the bill would show the same
-    /// dish, with the same note, on two lines.
     pub fn set_note(&mut self, index: usize, note: Option<String>) -> Result<usize> {
         self.check(index)?;
         self.lines[index].note = normalise_note(note);
@@ -195,15 +163,8 @@ impl Cart {
         }
     }
 
-    /// Put a whole line on, merging it into an existing one where that is
-    /// honest — the arrival half of a merge or a split (P14, `transfer`).
-    ///
-    /// **Identity is not enough here, and that is the difference from
-    /// [`Cart::add`].** Two lines of the same dish where one carries a 50%
-    /// staff discount and the other does not are not the same line: merging
-    /// them would silently discount food nobody authorised a discount on, or
-    /// throw one away. So a line merges only into a line with the same
-    /// identity **and the same discount**, and otherwise sits beside it.
+    /// Put a whole line on, merging it into an existing one where that is honest — the arrival
+    /// half of a merge or a split.
     pub fn push(&mut self, line: CartLine) -> Result<usize> {
         if !line.qty.is_positive() {
             return Err(CartError::NonPositiveQty);
@@ -253,20 +214,7 @@ impl Cart {
         &self.lines
     }
 
-    /// **How many lines make a ticket somebody should look at** — audit I6.
-    ///
-    /// > *"No limit on how many items a single order can hold, and no warning
-    /// > when one order's KOT will run to several feet of paper."*
-    ///
-    /// Forty lines on 80 mm paper is roughly half a metre of ticket, which is
-    /// the point at which a kitchen printer becomes the slowest thing in the
-    /// shop and a cook loses their place. It is also, almost always, a bill
-    /// that should have been split.
-    ///
-    /// **It is a warning and never a limit.** A wedding party really does order
-    /// sixty dishes on one table, and a counter that refused would be a counter
-    /// that stops a sale — requirement 3, and there is no version of that trade
-    /// worth making.
+    /// How many lines make a ticket somebody should look at.
     pub const LONG_ORDER: usize = 40;
 
     /// True when this order is long enough to be worth mentioning.
@@ -275,8 +223,7 @@ impl Cart {
         self.lines.len() >= Cart::LONG_ORDER
     }
 
-    /// The sentence, or nothing. Written here so the counter and the kitchen
-    /// screen cannot word it differently (UI_GUIDELINES §6).
+    /// The sentence, or nothing.
     #[must_use]
     #[allow(
         clippy::integer_division,
@@ -288,19 +235,19 @@ impl Cart {
                 "{} lines on this bill. The kitchen ticket will be about {} cm \
                  of paper — worth splitting the table if it is two parties.",
                 self.lines.len(),
-                // Roughly 8 lines to 10 cm on 80 mm paper at the standard row
-                // height. Deliberately rough: it is a nudge, not a measurement.
+                // Roughly 8 lines to 10 cm on 80 mm paper at the standard row height.
                 self.lines.len().saturating_mul(10) / 8
             )
         })
     }
 
-
-    /// A bad index is an error the caller must handle, never a silent no-op and
-    /// never a panic.
+    /// A bad index is an error the caller must handle, never a silent no-op and never a panic.
     fn check(&self, index: usize) -> Result<()> {
         if index >= self.lines.len() {
-            return Err(CartError::NoSuchLine { index, len: self.lines.len() });
+            return Err(CartError::NoSuchLine {
+                index,
+                len: self.lines.len(),
+            });
         }
         Ok(())
     }
@@ -314,7 +261,12 @@ mod tests {
     use crate::tax::TaxRate;
 
     fn item(id: &str, name: &str, paise: i64) -> ItemSnapshot {
-        ItemSnapshot::new(ItemId::new(id), name, Money::from_paise(paise), TaxRate::from_percent(5).expect("5%"))
+        ItemSnapshot::new(
+            ItemId::new(id),
+            name,
+            Money::from_paise(paise),
+            TaxRate::from_percent(5).expect("5%"),
+        )
     }
 
     fn modifier(id: &str) -> Modifier {
@@ -333,14 +285,7 @@ mod tests {
         cart
     }
 
-    /// **Audit I6 — a very long order is mentioned, never refused.**
-    ///
-    /// > *"No limit on how many items a single order can hold, and no warning
-    /// > when one order's KOT will run to several feet of paper."*
-    ///
-    /// A wedding party really does order sixty dishes on one table, so the
-    /// counter says something and carries on. A refusal here would be a
-    /// counter that stops a sale, which requirement 3 forbids.
+    /// A very long order is mentioned, never refused.
     #[test]
     fn a_very_long_order_is_mentioned_and_never_refused() {
         let mut cart = Cart::new();
@@ -358,8 +303,8 @@ mod tests {
         assert!(says.contains("40 lines"), "{says}");
         assert!(says.contains("cm of paper"), "{says}");
 
-        // One under the line says nothing at all — a warning on every ordinary
-        // bill is a warning nobody reads.
+        // One under the line says nothing at all — a warning on every ordinary bill is a
+        // warning nobody reads.
         let mut ordinary = Cart::new();
         for n in 0..(Cart::LONG_ORDER - 1) {
             ordinary
@@ -396,8 +341,13 @@ mod tests {
     fn the_same_dish_with_a_different_note_does_not_merge() {
         // The kitchen must see "extra spicy" as its own line.
         let mut cart = cart_with_one(Some("extra spicy"), vec![]);
-        cart.add(item("itm_1", "Paneer Tikka", 22_000), Qty::ONE, None, vec![])
-            .expect("adds");
+        cart.add(
+            item("itm_1", "Paneer Tikka", 22_000),
+            Qty::ONE,
+            None,
+            vec![],
+        )
+        .expect("adds");
         assert_eq!(cart.len(), 2);
     }
 
@@ -462,15 +412,23 @@ mod tests {
     #[test]
     fn insertion_order_survives_add_merge_and_remove() {
         let mut cart = Cart::new();
-        cart.add(item("itm_a", "A", 100), Qty::ONE, None, vec![]).expect("adds");
-        cart.add(item("itm_b", "B", 200), Qty::ONE, None, vec![]).expect("adds");
-        cart.add(item("itm_c", "C", 300), Qty::ONE, None, vec![]).expect("adds");
+        cart.add(item("itm_a", "A", 100), Qty::ONE, None, vec![])
+            .expect("adds");
+        cart.add(item("itm_b", "B", 200), Qty::ONE, None, vec![])
+            .expect("adds");
+        cart.add(item("itm_c", "C", 300), Qty::ONE, None, vec![])
+            .expect("adds");
 
         // Re-adding A must increase A in place, not move it to the end.
-        cart.add(item("itm_a", "A", 100), Qty::ONE, None, vec![]).expect("adds");
+        cart.add(item("itm_a", "A", 100), Qty::ONE, None, vec![])
+            .expect("adds");
         cart.remove(1).expect("removes B");
 
-        let names: Vec<&str> = cart.lines().iter().map(|l| l.snapshot.name.as_str()).collect();
+        let names: Vec<&str> = cart
+            .lines()
+            .iter()
+            .map(|l| l.snapshot.name.as_str())
+            .collect();
         assert_eq!(names, ["A", "C"]);
         assert_eq!(cart.lines()[0].qty, Qty::from_whole(2).expect("in range"));
     }
@@ -479,13 +437,17 @@ mod tests {
     fn a_quantity_of_zero_removes_the_line() {
         let mut cart = cart_with_one(None, vec![]);
         cart.set_qty(0, Qty::ZERO).expect("sets");
-        assert!(cart.is_empty(), "a zero-quantity ghost must not reach the kitchen");
+        assert!(
+            cart.is_empty(),
+            "a zero-quantity ghost must not reach the kitchen"
+        );
     }
 
     #[test]
     fn changing_a_note_into_a_twin_merges_the_two_lines() {
         let mut cart = Cart::new();
-        cart.add(item("itm_1", "Dosa", 8_000), Qty::ONE, None, vec![]).expect("adds");
+        cart.add(item("itm_1", "Dosa", 8_000), Qty::ONE, None, vec![])
+            .expect("adds");
         cart.add(
             item("itm_1", "Dosa", 8_000),
             Qty::from_whole(2).expect("in range"),
@@ -510,7 +472,10 @@ mod tests {
             Err(CartError::NoSuchLine { index: 5, len: 1 })
         );
         assert!(matches!(cart.remove(9), Err(CartError::NoSuchLine { .. })));
-        assert!(matches!(cart.set_note(9, None), Err(CartError::NoSuchLine { .. })));
+        assert!(matches!(
+            cart.set_note(9, None),
+            Err(CartError::NoSuchLine { .. })
+        ));
         assert!(matches!(
             cart.set_line_discount(9, None),
             Err(CartError::NoSuchLine { .. })

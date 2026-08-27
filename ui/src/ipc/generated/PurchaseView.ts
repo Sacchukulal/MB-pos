@@ -12,11 +12,11 @@ kind: string, isReturn: boolean, parentId: string | null, invoiceNo: string | nu
  */
 date: string, due: string, lines: Array<PurchaseLineView>, goods: MoneyView, discount: MoneyView, charges: MoneyView, tax: MoneyView, total: MoneyView, 
 /**
- * **D124** — what may actually be claimed back, and the sentence that says
- * why it is nothing for a 5%-scheme shop.
+ * What may actually be claimed back, and the sentence that says why it is nothing for a
+ * 5%-scheme shop.
  */
 creditable: MoneyView, paid: MoneyView, outstanding: MoneyView, 
 /**
- * "Cancelled on 12 Aug — entered twice", or empty (D125).
+ * "Cancelled on 12 Aug — entered twice", or empty.
  */
 cancelled: string, hasPhoto: boolean, note: string | null, };

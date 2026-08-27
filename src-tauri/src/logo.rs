@@ -1,39 +1,4 @@
-//! **The shop's logo** — P31, and the hole D37 left open for four sessions.
-//!
-//! # What was wrong
-//!
-//! `mb-print` has drawn a logo since P07: [`mb_print::image`] is the one-bit
-//! format, [`mb_print::raster`] blits it, the bill template places it, and
-//! `receipt.logo` / `receipt.logo_width_pct` have been on the settings screen
-//! the whole time. **And `BillContext.logo` was `None` at every call site in
-//! the product**, so the settings pointed at a feature nothing could feed. The
-//! owner asked for the missing half: *"Logo: browse and pick a PNG."*
-//!
-//! # Where the conversion happens, and why not here
-//!
-//! D37 decided this and it still holds:
-//!
-//! > *"A PNG decoder is a dependency, an inflate implementation and a parser
-//! > being fed a file a shopkeeper uploaded, all to answer a question with two
-//! > possible answers per dot."*
-//!
-//! So the split is:
-//!
-//! | | |
-//! |---|---|
-//! | pick the file | here — a webview cannot give anyone a real path ([`pick_a_logo`]) |
-//! | decode the PNG, threshold it, show the result | the browser, which does all three for free |
-//! | store the dots, and hand them to the printer | here ([`save_logo`], [`stored`]) |
-//!
-//! **The shop sees exactly what will print, at the moment it chooses**, which
-//! is what D37 wanted and what a threshold done at print time could never give.
-//!
-//! # Where it is kept
-//!
-//! `attachments/logo.mb1`, beside the database — the same folder purchase
-//! photographs go in. **It travels with the shop**: a restore brings the logo
-//! back, and moving the data file to another machine moves the letterhead with
-//! it. In the config folder it would have been left behind by both.
+//! The shop's logo.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -42,11 +7,6 @@ use crate::state::App;
 use crate::words::{UiError, UiResult};
 
 /// The most dots a logo may be, and it is generous on purpose.
-///
-/// 832 is the widest thermal head this product knows about, and a metre of
-/// paper is 1200-odd dots tall. Anything past that is not a logo somebody
-/// meant to choose — and `mb_print::image` refuses it at decode anyway, so this
-/// is only here to say so in words while the person is still looking at it.
 const MAX_DOTS: usize = 832 * 1200;
 
 /// What the screen shows about the logo this shop has.
@@ -55,14 +15,10 @@ const MAX_DOTS: usize = 832 * 1200;
 #[serde(rename_all = "camelCase")]
 pub struct LogoView {
     pub has_one: bool,
-    /// "220 × 80 dots — about 30 mm wide on 80 mm paper". Written here, because
-    /// dots per millimetre is a fact about the paper and not about the screen.
+    /// "220 × 80 dots — about 30 mm wide on 80 mm paper".
     pub says: String,
-    /// The dots, so the screen can draw exactly what will print rather than a
-    /// second rendering of the original file. `null` when there is none.
-    ///
-    /// Sent as the picture itself and not as a path: the webview cannot read a
-    /// file, and this is a few kilobytes.
+    /// The dots, so the screen can draw exactly what will print rather than a second rendering
+    /// of the original file.
     pub dots: Option<Dots>,
 }
 
@@ -73,8 +29,7 @@ pub struct LogoView {
 pub struct Dots {
     pub width: u32,
     pub height: u32,
-    /// One byte per dot, row by row: 1 is ink. Fat compared with the packed
-    /// form and far simpler to draw, and a logo is small.
+    /// One byte per dot, row by row: 1 is ink.
     pub ink: Vec<u8>,
 }
 
@@ -95,16 +50,13 @@ fn path_for(app: &App) -> UiResult<std::path::PathBuf> {
     Ok(dir.join("logo.mb1"))
 }
 
-/// **The bytes the bill template wants**, or nothing.
-///
-/// Never an error. A logo that will not read is a logo that does not print;
-/// it is not a bill that does not print (D37, and requirement 3 of the ten).
+/// The bytes the bill template wants, or nothing.
 #[must_use]
 pub fn stored(app: &App) -> Option<Vec<u8>> {
     let path = path_for(app).ok()?;
     let bytes = std::fs::read(&path).ok()?;
-    // Checked here rather than trusted, so a corrupt file is one log line now
-    // instead of a note on every bill for the rest of the day.
+    // Checked here rather than trusted, so a corrupt file is one log line now instead of a note
+    // on every bill for the rest of the day.
     match mb_print::image::Monochrome::decode(&bytes) {
         Ok(_) => Some(bytes),
         Err(e) => {
@@ -123,19 +75,11 @@ fn look(app: &App) -> UiResult<LogoView> {
         });
     };
     let picture = mb_print::image::Monochrome::decode(&bytes).map_err(|e| {
-        UiError::new("logo.read", "This shop's logo could not be read.")
-            .with_detail(e.to_string())
+        UiError::new("logo.read", "This shop's logo could not be read.").with_detail(e.to_string())
     })?;
 
-    // **Said in millimetres, because that is the unit on the roll in the
-    // shop's hand** — nobody buys paper by the dot.
-    //
-    // 80 mm paper is 576 dots across (`PaperKind::Mm80`), so the conversion is
-    // `dots × 80 ÷ 576`. Integers, not a float: the workspace denies
-    // floating-point arithmetic outright (D7), and while nothing here is money
-    // the rule is worth keeping whole — a division that truncates to the
-    // nearest millimetre is exactly right for a sentence that already says
-    // "about".
+    // Said in millimetres, because that is the unit on the roll in the shop's hand — nobody
+    // buys paper by the dot.
     #[allow(
         clippy::integer_division,
         reason = "dots into whole millimetres for a sentence that says \"about\""
@@ -164,12 +108,7 @@ fn look(app: &App) -> UiResult<LogoView> {
     })
 }
 
-/// **Browse for a picture.**
-///
-/// Returns the file as a data URL rather than a path, because the next thing
-/// that happens to it is `<img src=…>` in the webview — and a webview cannot
-/// open a path even when it has one. `None` means the person pressed Cancel,
-/// which is not a failure and must not raise anything.
+/// Browse for a picture.
 pub fn pick_a_logo_on(app: &App, window: &tauri::Window) -> UiResult<Option<PickedFile>> {
     guard_it(app)?;
     use tauri_plugin_dialog::DialogExt;
@@ -181,17 +120,17 @@ pub fn pick_a_logo_on(app: &App, window: &tauri::Window) -> UiResult<Option<Pick
         .set_title("Choose your logo")
         .blocking_pick_file();
 
-    let Some(picked) = picked else { return Ok(None) };
-    let path = picked
-        .into_path()
-        .map_err(|e| UiError::new("logo.path", "That file could not be opened.").with_detail(e.to_string()))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| {
+        UiError::new("logo.path", "That file could not be opened.").with_detail(e.to_string())
+    })?;
 
-    let bytes = std::fs::read(&path)
-        .map_err(|e| crate::words::from_io("Reading that picture", &e))?;
+    let bytes =
+        std::fs::read(&path).map_err(|e| crate::words::from_io("Reading that picture", &e))?;
 
     // A picture bigger than this is a photograph somebody chose by mistake.
-    // Said now, while they are still in the dialog's frame of mind, rather
-    // than after the browser has spent ten seconds decoding it.
     const MAX_FILE: usize = 8 * 1024 * 1024;
     if bytes.len() > MAX_FILE {
         return Err(UiError::new(
@@ -223,11 +162,7 @@ pub fn pick_a_logo_on(app: &App, window: &tauri::Window) -> UiResult<Option<Pick
     }))
 }
 
-/// **Keep the dots the browser made.**
-///
-/// The argument is the encoded `MB1` picture, base64'd — the same shape
-/// `attach_photo` takes a photograph in, and for the same reason: the webview
-/// has bytes and JSON has no way to carry them.
+/// Keep the dots the browser made.
 pub fn save_logo_on(app: &App, encoded: String) -> UiResult<LogoView> {
     guard_it(app)?;
 
@@ -237,9 +172,8 @@ pub fn save_logo_on(app: &App, encoded: String) -> UiResult<LogoView> {
     let bytes = crate::buying::base64_decode(payload)
         .ok_or_else(|| UiError::new("logo.data", "That logo could not be read."))?;
 
-    // **Decoded before it is written**, so a picture that would be skipped at
-    // print time is refused now, in front of the person who chose it. A logo
-    // that silently does not print is the worst version of this feature.
+    // Decoded before it is written, so a picture that would be skipped at print time is refused
+    // now, in front of the person who chose it.
     let picture = mb_print::image::Monochrome::decode(&bytes).map_err(|e| {
         UiError::new(
             "logo.format",
@@ -256,7 +190,8 @@ pub fn save_logo_on(app: &App, encoded: String) -> UiResult<LogoView> {
 
     let path = path_for(app)?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| crate::words::from_io("Making the logo folder", &e))?;
+        std::fs::create_dir_all(dir)
+            .map_err(|e| crate::words::from_io("Making the logo folder", &e))?;
     }
     std::fs::write(&path, &bytes).map_err(|e| crate::words::from_io("Saving the logo", &e))?;
     crate::log_info!(
@@ -267,9 +202,9 @@ pub fn save_logo_on(app: &App, encoded: String) -> UiResult<LogoView> {
     look(app)
 }
 
-/// Take it off. The file goes; the `receipt.logo` position setting does not,
-/// because a shop that removes one picture to choose another should not have to
-/// switch the setting back on afterwards.
+/// Take it off. The file goes; the `receipt.logo` position setting does not, because a shop
+/// that removes one picture to choose another should not have to switch the setting back on
+/// afterwards.
 pub fn remove_logo_on(app: &App) -> UiResult<LogoView> {
     guard_it(app)?;
     let path = path_for(app)?;
@@ -282,8 +217,8 @@ pub fn remove_logo_on(app: &App) -> UiResult<LogoView> {
     look(app)
 }
 
-/// The logo is part of what a bill looks like, so it is the printer permission
-/// — the same one that owns the paper size and the offsets.
+/// The logo is part of what a bill looks like, so it is the printer permission — the same one
+/// that owns the paper size and the offsets.
 fn guard_it(app: &App) -> UiResult<()> {
     crate::guard::require(app, mb_auth::Permission::SettingsPrinter)?;
     Ok(())
@@ -294,9 +229,7 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-// ---------------------------------------------------------------------------
 // The commands.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn logo(app: tauri::State<'_, App>) -> UiResult<LogoView> {
@@ -322,13 +255,7 @@ pub fn remove_logo(app: tauri::State<'_, App>) -> UiResult<LogoView> {
     remove_logo_on(&app)
 }
 
-/// **Browse for a folder** — the first run's half of the same problem.
-///
-/// `Access::FirstRun`, the same as `create_shop`: on a machine with no shop
-/// there is nobody to hold a permission, and the moment there IS one, pointing
-/// this till at a different folder stops being set-up and becomes a
-/// backup-level decision. `only_before_set_up` is that rule, and it is shared
-/// with the three commands next to it in the table rather than written twice.
+/// Browse for a folder — the first run's half of the same problem.
 #[tauri::command]
 pub fn pick_a_folder(
     app: tauri::State<'_, App>,
@@ -338,12 +265,19 @@ pub fn pick_a_folder(
     crate::firstrun::only_before_set_up(&app)?;
     use tauri_plugin_dialog::DialogExt;
 
-    let mut dialog = window.dialog().file().set_title("Where should your shop's data be kept?");
-    // Opening in the folder they are being offered means the common answer is
-    // one click away, and an unusual one starts from somewhere familiar.
+    let mut dialog = window
+        .dialog()
+        .file()
+        .set_title("Where should your shop's data be kept?");
+    // Opening in the folder they are being offered means the common answer is one click away,
+    // and an unusual one starts from somewhere familiar.
     if let Some(start) = start.as_deref().filter(|s| !s.trim().is_empty()) {
         let at = std::path::Path::new(start.trim());
-        let at = if at.is_dir() { at } else { at.parent().unwrap_or(at) };
+        let at = if at.is_dir() {
+            at
+        } else {
+            at.parent().unwrap_or(at)
+        };
         if at.is_dir() {
             dialog = dialog.set_directory(at);
         }

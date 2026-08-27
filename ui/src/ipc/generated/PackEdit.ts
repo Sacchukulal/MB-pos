@@ -2,7 +2,7 @@
 
 export type PackEdit = { name: string, 
 /**
- * How many of the material's base unit one of these holds — "25000" for a
- * 25 kg bag of rice measured in grams, or "25" with `unit` = "kg".
+ * How many of the material's base unit one of these holds — "25000" for a 25 kg bag of
+ * rice measured in grams, or "25" with `unit` = "kg".
  */
 size: string, unit: string, };

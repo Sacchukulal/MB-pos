@@ -12,29 +12,20 @@ indent: number,
  */
 row: number, 
 /**
- * **The height of a capital letter, in dots** — what the shop chose
- * and what the printer will draw. The screen scales it by the same
- * one factor it scales everything else by.
+ * The height of a capital letter, in dots — what the shop chose and what the printer
+ * will draw.
  */
 cap: number, 
 /**
- * One character's advance, in dots. What a box's width is counted in.
+ * One character's advance, in dots.
  */
 advance: number, 
 /**
- * 1, 2 or 3 — what the TEXT print engine will emit. Kept beside `cap`
- * because a preview that showed 15 dots while a shop on that engine
- * got the printer's own font would be a preview that lies about which
- * of the two it is drawing.
+ * 1, 2 or 3 — what the TEXT print engine will emit.
  */
 scale: number, bold: boolean, 
 /**
- * **The aligned boxes on this line**, in characters.
- *
- * Empty for a plain line. A proportional face cannot be aligned by
- * counting the spaces the layout padded with — the screen lays each
- * box out at its own width and aligns the text inside it, which is
- * exactly what the raster sink does with the same numbers.
+ * The aligned boxes on this line, in characters.
  */
 segments: Array<PreviewSegment>, } | { "kind": "rule", 
 /**
@@ -58,9 +49,8 @@ thickness: number,
  */
 strokes: number, 
 /**
- * Dots between them. One word, so `serde` and `ts-rs` produce the same
- * name on both sides without a rename attribute nobody would notice
- * was missing.
+ * Dots between them. One word, so `serde` and `ts-rs` produce the same name on both
+ * sides without a rename attribute nobody would notice was missing.
  */
 gap: number, 
 /**
@@ -76,7 +66,6 @@ size: number, } | { "kind": "barcode", payload: string, indent: number, row: num
  */
 height: number, } | { "kind": "logo", indent: number, row: number, left: number, width: number, height: number, 
 /**
- * One byte per dot, row by row, 1 is ink. `null` when the logo could
- * not be read — the paper prints nothing there either (D37).
+ * One byte per dot, row by row, 1 is ink.
  */
 ink: Array<number> | null, } | { "kind": "band", row: number, image: PreviewLine, lines: Array<PreviewBandLine>, } | { "kind": "blank", row: number, };

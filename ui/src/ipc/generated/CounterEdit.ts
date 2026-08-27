@@ -2,6 +2,6 @@
 
 export type CounterEdit = { kind: string, prefix: string, padWidth: number, resetDaily: boolean, start: number, 
 /**
- * The next number to hand out. **The dangerous one.**
+ * The next number to hand out.
  */
 nextValue: number, };

@@ -1,51 +1,12 @@
-//! **What a person is owed, and how much leave they have left.**
-//!
-//! Scope 9.7, 9.9, 9.10, 9.11. P28.
-//!
-//! # Nothing here touches a database or a clock
-//!
-//! Same shape as [`crate::credit`], and for the same reason: the arithmetic an
-//! owner will argue with is the arithmetic that has to be provable. A payroll
-//! figure somebody cannot check by hand is a payroll figure they will not
-//! trust, and payroll they do not trust is payroll they keep doing in a
-//! notebook — which is the notebook this product exists to replace.
-//!
-//! So every function in this file is pure. The database supplies the rows, the
-//! caller supplies the day, and this decides what the numbers are.
-//!
-//! # Days are counted in HALVES
-//!
-//! [`HalfDays`] is an integer count of half-days: a full day is 2, a half day
-//! is 1, and those are the only two units a restaurant actually grants. It is
-//! the same argument as paise (D2) — a fraction stored as a float is a
-//! fraction that will not add up, and `0.5 + 0.5 + 0.5 = 1.4999999` in a leave
-//! balance is an argument with an employee that nobody can win.
-//!
-//! # The three balances are all sums of ledgers
-//!
-//! Leave, advances, and what a run owes. Not one of them is stored anywhere.
-//! The schema has no `leave_balance` column and no `outstanding` column,
-//! because a stored total is a number that will one day disagree with its own
-//! history and there will be nothing to check it against. Same rule as credit
-//! (D120) and stock (D127).
+//! What a person is owed, and how much leave they have left.
 
 use serde::{Deserialize, Serialize};
 
 use crate::businessday::BusinessDay;
 use crate::money::{Money, MoneyError};
 
-// ---------------------------------------------------------------------------
-// Half-days
-// ---------------------------------------------------------------------------
-
-/// A count of half-days. A full day is 2.
-///
-/// A newtype rather than a bare `i32` for the same reason [`Money`] is one: the
-/// unit is the thing that gets forgotten, and "12" meaning six days is exactly
-/// the kind of quiet halving that survives review.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize,
-)]
+/// A count of half-days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct HalfDays(i32);
 
@@ -68,11 +29,6 @@ impl HalfDays {
     }
 
     /// Whole days, rounded DOWN, plus whether there is a half left over.
-    ///
-    /// Returned together rather than as two functions, because every caller
-    /// that wants one wants the other in the next line — and a caller that
-    /// takes only the whole days has silently thrown away half a day of
-    /// somebody's leave.
     #[must_use]
     #[allow(
         clippy::integer_division,
@@ -93,11 +49,6 @@ impl HalfDays {
     }
 
     /// "3 days", "3½ days", "half a day".
-    ///
-    /// Written here rather than in React, because it is the SAME sentence on
-    /// the screen, on a payslip and in a refusal — and three copies of a
-    /// sentence is three chances for one of them to say something different
-    /// (§6: one place turns a machine state into words).
     #[must_use]
     pub fn say(self) -> String {
         let negative = self.0 < 0;
@@ -138,21 +89,13 @@ impl std::iter::Sum for HalfDays {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Leave
-// ---------------------------------------------------------------------------
-
 /// One row of the leave ledger.
-///
-/// Four kinds, and the sign is the kind's business — see [`LeaveKind`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeaveEntry {
     pub day: BusinessDay,
     pub kind: LeaveKind,
-    /// **Signed**, and this is the one place in the module where that is true:
-    /// the sign is what makes the balance a `sum` rather than a case analysis.
-    /// The database CHECKs tie each kind to its direction, so a row that
-    /// arrives here with the wrong sign never existed.
+    /// Signed, and this is the one place in the module where that is true: the sign is what
+    /// makes the balance a `sum` rather than a case analysis.
     pub half_days: HalfDays,
     pub note: String,
 }
@@ -162,11 +105,11 @@ pub struct LeaveEntry {
 pub enum LeaveKind {
     /// The entitlement, granted. Positive.
     Accrued,
-    /// A day off that was approved. Negative.
+    /// A day off that was approved.
     Taken,
-    /// A correction, with a reason and a name. Either direction.
+    /// A correction, with a reason and a name.
     Adjusted,
-    /// What was not used by the end of the year. Negative.
+    /// What was not used by the end of the year.
     Lapsed,
 }
 
@@ -177,13 +120,11 @@ pub struct LeaveBalance {
     pub taken: HalfDays,
     pub adjusted: HalfDays,
     pub lapsed: HalfDays,
-    /// The sum of the four. **Never stored anywhere** — computed here, every
-    /// time, from the rows.
+    /// The sum of the four.
     pub left: HalfDays,
 }
 
-/// **The balance is the sum of the ledger.** That is the whole function, and
-/// the fact that it is this short is the point of the design.
+/// The balance is the sum of the ledger.
 #[must_use]
 pub fn leave_balance(entries: &[LeaveEntry]) -> LeaveBalance {
     let of = |want: LeaveKind| -> HalfDays {
@@ -207,33 +148,25 @@ pub fn leave_balance(entries: &[LeaveEntry]) -> LeaveBalance {
 }
 
 /// Whether two leave requests cover any of the same days.
-///
-/// Inclusive at both ends, because a shop that says "14th to 16th" means three
-/// days including the 16th, and every off-by-one in a leave system is this one.
 #[must_use]
 pub fn overlaps(a: (BusinessDay, BusinessDay), b: (BusinessDay, BusinessDay)) -> bool {
     a.0 <= b.1 && b.0 <= a.1
 }
 
-// ---------------------------------------------------------------------------
-// Salary
-// ---------------------------------------------------------------------------
-
 /// How somebody is paid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Basis {
-    /// A fixed amount per month, whatever the days — the ordinary arrangement
-    /// for a manager or a cook on the payroll.
+    /// A fixed amount per month, whatever the days — the ordinary arrangement for a manager or
+    /// a cook on the payroll.
     Monthly,
-    /// So much per day worked. A helper who comes in when the shop is busy.
+    /// So much per day worked.
     Daily,
-    /// So much per hour worked. Part-time and casual staff.
+    /// So much per hour worked.
     Hourly,
 }
 
-/// What a person was paid under, from when. Effective-dated (D52's argument,
-/// applied to a salary rather than to a price).
+/// What a person was paid under, from when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Structure {
     pub effective_from: BusinessDay,
@@ -258,16 +191,7 @@ pub enum ComponentKind {
     Deduction,
 }
 
-/// **The structure that applied on a day.**
-///
-/// The LATEST one whose `effective_from` is on or before that day. This one
-/// function is what makes T5 true: a raise dated the 1st of this month cannot
-/// reach last month's run, because last month's run asks this question with
-/// last month's days and gets the old row.
-///
-/// Returns `None` when the person had no salary structure at all on that day —
-/// which is not an error. Somebody who joined on the 15th has no structure on
-/// the 14th, and a run over that month must simply not pay them for it.
+/// The structure that applied on a day.
 #[must_use]
 pub fn structure_on(structures: &[Structure], day: BusinessDay) -> Option<&Structure> {
     structures
@@ -277,34 +201,20 @@ pub fn structure_on(structures: &[Structure], day: BusinessDay) -> Option<&Struc
 }
 
 /// What one person worked, and was away, over one payroll period.
-///
-/// Gathered by the caller from `attendance` and the leave ledger, because
-/// deciding WHICH rows belong to the period is a database question and
-/// deciding what they are WORTH is this module's.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Worked {
-    /// Days present, in halves. A half-day's attendance is a half-day's pay on
-    /// a daily basis.
+    /// Days present, in halves.
     pub days: HalfDays,
-    /// Total minutes clocked, for an hourly basis. Breaks already subtracted.
+    /// Total minutes clocked, for an hourly basis.
     pub minutes: i64,
-    /// Approved leave on a type whose `is_paid` is false. Deducted.
+    /// Approved leave on a type whose `is_paid` is false.
     pub unpaid: HalfDays,
-    /// **The days the period contains** — the denominator for a monthly
-    /// basis's unpaid-leave deduction.
-    ///
-    /// Passed in rather than computed, because "how many days is a month" has
-    /// three defensible answers (calendar days, working days, a fixed 30) and
-    /// the shop has to be the one that picks. Calendar days is what this
-    /// product uses and D148 says why.
+    /// The days the period contains — the denominator for a monthly basis's unpaid-leave
+    /// deduction.
     pub period_days: i32,
 }
 
 /// One person's line in a run, with every step of the arithmetic kept.
-///
-/// Every figure is a column so a payslip can print it and an owner can add it
-/// up by hand. That is not decoration: it is the difference between payroll
-/// somebody trusts and payroll they redo in a notebook to check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PayLine {
     pub basis: Basis,
@@ -322,38 +232,7 @@ pub struct PayLine {
     pub net: Money,
 }
 
-/// **Compute one person's line.**
-///
-/// The arithmetic, in the order a payslip prints it:
-///
-/// | basis | earned |
-/// |---|---|
-/// | monthly | the full amount, then a deduction for unpaid days |
-/// | daily | amount × days worked |
-/// | hourly | amount × minutes ÷ 60 |
-///
-/// then `+ allowances − deductions − advance recovered`, floored at zero.
-///
-/// # Why unpaid leave is a DEDUCTION and not a smaller `earned`
-///
-/// On a monthly basis it could be either, and the two produce the same net. It
-/// is a deduction because that is what the payslip has to show: an employee
-/// asked to accept less than their agreed salary is owed the sentence "your
-/// salary is ₹18,000 and two days were unpaid", not a smaller number with no
-/// explanation. The line items are the explanation.
-///
-/// On a daily or hourly basis it is **not deducted at all**, and that is not an
-/// oversight: a day not worked was never earned, so deducting it would take the
-/// day off twice. The test that would catch a change here is
-/// `an_unpaid_day_is_taken_off_a_monthly_salary_once_and_a_daily_one_never`.
-///
-/// # Why the floor is zero
-///
-/// An advance bigger than the month's pay would otherwise produce a negative
-/// net, and a payslip that says −₹400 is a payslip that gets argued about at
-/// the counter. What is not recovered stays outstanding on the advance and
-/// comes off the next run — which is what the caller does with
-/// [`recover_advances`].
+/// Compute one person's line.
 pub fn pay_line(
     structure: &Structure,
     worked: &Worked,
@@ -361,23 +240,17 @@ pub fn pay_line(
 ) -> Result<PayLine, MoneyError> {
     let earned = match structure.basis {
         Basis::Monthly => structure.amount,
-        // ONE `mul_ratio`, not a multiply followed by a divide. `days` is in
-        // HALVES, so the ratio is halves-over-two and the rounding happens
-        // once — two operations round twice and lose a paisa on half the
-        // shifts in the shop.
-        Basis::Daily => structure.amount.mul_ratio(i64::from(worked.days.halves()), 2)?,
+        // ONE `mul_ratio`, not a multiply followed by a divide.
+        Basis::Daily => structure
+            .amount
+            .mul_ratio(i64::from(worked.days.halves()), 2)?,
         Basis::Hourly => structure.amount.mul_ratio(worked.minutes, 60)?,
     };
 
     let allowances = sum_components(structure, ComponentKind::Allowance)?;
     let deductions = sum_components(structure, ComponentKind::Deduction)?;
 
-    // **Only a monthly salary has unpaid days deducted.** See the note above.
-    //
-    // Again ONE ratio: the month over (period days × 2), times the unpaid
-    // halves. Computing a day rate first and then multiplying would round
-    // twice, and on a 31-day month the two answers differ — which is the kind
-    // of discrepancy an employee notices and nobody can explain.
+    // Only a monthly salary has unpaid days deducted.
     let unpaid_leave_deduction = match structure.basis {
         Basis::Monthly if worked.period_days > 0 => structure.amount.mul_ratio(
             i64::from(worked.unpaid.halves()),
@@ -421,22 +294,15 @@ fn sum_components(structure: &Structure, want: ComponentKind) -> Result<Money, M
     )
 }
 
-// ---------------------------------------------------------------------------
-// Advances
-// ---------------------------------------------------------------------------
-
 /// An advance, and what has already been taken back off it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Advance {
     pub id: String,
     pub day: BusinessDay,
     pub amount: Money,
-    /// Over how many runs it is meant to come back. 1 is "all of it next
-    /// month", which is the common case.
+    /// Over how many runs it is meant to come back.
     pub instalments: i32,
-    /// The sum of `advance_recoveries` for this advance. **Passed in, not
-    /// stored on the advance** — for the third time in this module, a stored
-    /// total is a total that will one day be wrong.
+    /// The sum of `advance_recoveries` for this advance.
     pub recovered: Money,
 }
 
@@ -457,7 +323,11 @@ impl Advance {
             return Ok(outstanding);
         }
         let share = self.amount.mul_ratio(1, i64::from(self.instalments))?;
-        Ok(if share > outstanding { outstanding } else { share })
+        Ok(if share > outstanding {
+            outstanding
+        } else {
+            share
+        })
     }
 }
 
@@ -468,15 +338,7 @@ pub struct Recovery {
     pub amount: Money,
 }
 
-/// **Decide what this run recovers, oldest advance first.**
-///
-/// Capped at `available` — a run can never recover more than the person earned,
-/// because the alternative is a payslip with a negative net and a conversation
-/// at the counter. What is not recovered stays outstanding and comes off the
-/// next run, which is exactly what an instalment arrangement means anyway.
-///
-/// Oldest first for the same reason [`crate::credit`] ages FIFO: it is what a
-/// shopkeeper means, and any other order needs explaining.
+/// Decide what this run recovers, oldest advance first.
 pub fn recover_advances(
     advances: &[Advance],
     available: Money,
@@ -504,14 +366,7 @@ pub fn recover_advances(
     Ok(out)
 }
 
-// ---------------------------------------------------------------------------
-// Attendance
-// ---------------------------------------------------------------------------
-
 /// How a person's day compares to what was expected of them.
-///
-/// The whole point of a roster: without one, attendance is a list of times with
-/// nothing to measure against, which is what v1's staff screen amounted to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DayVerdict {
@@ -521,25 +376,15 @@ pub enum DayVerdict {
     Late { by_minutes: i64 },
     /// Left before the shift ended, by more than the grace period.
     LeftEarly { by_minutes: i64 },
-    /// Rostered, did not come, and has no approved leave. **The one a shop
-    /// acts on.**
+    /// Rostered, did not come, and has no approved leave.
     Absent,
-    /// Rostered off, or on approved leave. Not an absence.
+    /// Rostered off, or on approved leave.
     Away,
-    /// Worked without being rostered. Not a problem — it is the ordinary case
-    /// in a shop that has not built a roster — but it is not "on time" either,
-    /// because there was nothing to be on time for.
+    /// Worked without being rostered.
     Unrostered,
 }
 
 /// Judge one person's one day.
-///
-/// `expected_start` and `expected_end` are minutes from midnight; `actual_*`
-/// are the same, derived by the caller from the stamps. `None` for an actual
-/// means they did not clock that end.
-///
-/// **Late beats left-early** when a day is both, because a shop chases the
-/// first one and the second is usually a consequence of it.
 #[must_use]
 pub fn judge_day(
     expected: Option<(i64, i64)>,
@@ -552,9 +397,7 @@ pub fn judge_day(
         return if actual_start.is_some() {
             DayVerdict::Unrostered
         } else {
-            // Not rostered and did not come. Nobody said either way, so there
-            // is nothing to report — a shop with no roster must not wake up to
-            // a screen full of absences it never asked about.
+            // Not rostered and did not come.
             DayVerdict::Away
         };
     };
@@ -567,8 +410,8 @@ pub fn judge_day(
         };
     };
 
-    // On leave AND present is not a contradiction worth an error — somebody
-    // came in on their day off. It is simply not an absence.
+    // On leave AND present is not a contradiction worth an error — somebody came in on their
+    // day off.
     let late_by = start - expected_start;
     if late_by > grace_minutes {
         return DayVerdict::Late {
@@ -588,12 +431,7 @@ pub fn judge_day(
     DayVerdict::Present
 }
 
-/// Minutes between two stamps on the clock face, **allowing for a wrap past
-/// midnight**.
-///
-/// A night shift is `start_minute > end_minute` in `shift_patterns`, and the
-/// arithmetic that forgets it produces a shift of minus six hours — which
-/// would then be worth minus six hours of pay to an hourly employee.
+/// Minutes between two stamps on the clock face, allowing for a wrap past midnight.
 #[must_use]
 pub fn minutes_between(start_minute: i64, end_minute: i64) -> i64 {
     if end_minute >= start_minute {
@@ -615,8 +453,6 @@ mod tests {
         Money::from_paise(n * 100)
     }
 
-    // -- half-days ---------------------------------------------------------
-
     #[test]
     fn a_half_day_is_half_a_day_and_says_so() {
         assert_eq!(HalfDays::from_days(3).halves(), 6);
@@ -628,11 +464,7 @@ mod tests {
         assert_eq!(HalfDays::new(-3).say(), "−1½ days");
     }
 
-    /// **Three halves add up to exactly one and a half days.**
-    ///
-    /// The whole reason this is an integer type: the float version of this
-    /// assertion is the one that fails in the fourth decimal place and turns
-    /// into an argument with an employee about a quarter of an hour.
+    /// Three halves add up to exactly one and a half days.
     #[test]
     fn halves_add_up_exactly() {
         let total: HalfDays = [HalfDays::new(1), HalfDays::new(1), HalfDays::new(1)]
@@ -641,8 +473,6 @@ mod tests {
         assert_eq!(total, HalfDays::new(3));
         assert_eq!(total.say(), "1½ days");
     }
-
-    // -- leave -------------------------------------------------------------
 
     fn entry(kind: LeaveKind, halves: i32) -> LeaveEntry {
         LeaveEntry {
@@ -672,10 +502,7 @@ mod tests {
         assert_eq!(balance.left.say(), "7½ days");
     }
 
-    /// **The property, not an example.** A year of rows in any order sums to
-    /// the same balance, and the balance equals the four parts added up — so
-    /// there is no arrangement of a ledger that makes the total disagree with
-    /// itself.
+    /// The property, not an example.
     #[test]
     fn the_balance_never_disagrees_with_its_own_parts() {
         let mut ledger = Vec::new();
@@ -716,9 +543,7 @@ mod tests {
 
     #[test]
     fn a_balance_can_go_negative_and_says_so() {
-        // Somebody took more than they had. That is a real state — a shop
-        // grants it and recovers it later — and hiding it behind a floor of
-        // zero would be the software lying about what it knows.
+        // Somebody took more than they had.
         let ledger = vec![entry(LeaveKind::Accrued, 2), entry(LeaveKind::Taken, -6)];
         let balance = leave_balance(&ledger);
         assert_eq!(balance.left, HalfDays::new(-4));
@@ -736,7 +561,7 @@ mod tests {
         assert!(!overlaps((day(14), day(16)), (day(12), day(13))));
     }
 
-    // -- the effective-dated structure -------------------------------------
+    // The effective-dated structure.
 
     fn structure(from: i32, basis: Basis, amount: i64) -> Structure {
         Structure {
@@ -765,7 +590,7 @@ mod tests {
         assert!(structure_on(&history, day(-1)).is_none());
     }
 
-    // -- the payroll arithmetic --------------------------------------------
+    // The payroll arithmetic.
 
     fn worked(days: i32, unpaid: i32, period_days: i32) -> Worked {
         Worked {
@@ -776,14 +601,7 @@ mod tests {
         }
     }
 
-    /// **A monthly salary, worked by hand.**
-    ///
-    /// ₹18,000 a month, two unpaid days in a 30-day period, a ₹1,000 food
-    /// allowance, a ₹500 room deduction, ₹2,000 of advance recovered.
-    ///
-    ///   day rate            18000 ÷ 30            =   600.00
-    ///   unpaid deduction    600 × 2               =  1200.00
-    ///   net    18000 + 1000 − 500 − 1200 − 2000   = 15300.00
+    /// A monthly salary, worked by hand.
     #[test]
     fn a_monthly_salary_adds_up_by_hand() {
         let mut s = structure(0, Basis::Monthly, 18_000);
@@ -810,9 +628,7 @@ mod tests {
         assert_eq!(line.net, rupees(15_300));
     }
 
-    /// **A daily wage, worked by hand.** ₹700 a day, 24½ days worked.
-    ///   700 × 24.5 = 17150.00, and no unpaid deduction because a day not
-    ///   worked was never earned.
+    /// A daily wage, worked by hand.
     #[test]
     fn a_daily_wage_adds_up_by_hand() {
         let s = structure(0, Basis::Daily, 700);
@@ -828,8 +644,7 @@ mod tests {
         assert_eq!(line.net, rupees(17_150));
     }
 
-    /// **An hourly wage, worked by hand.** ₹90 an hour, 7,410 minutes.
-    ///   9000 paise × 7410 ÷ 60 = 1,111,500 paise = ₹11,115.00
+    /// An hourly wage, worked by hand.
     #[test]
     fn an_hourly_wage_adds_up_by_hand() {
         let s = structure(0, Basis::Hourly, 90);
@@ -844,10 +659,7 @@ mod tests {
         assert_eq!(line.net, rupees(11_115));
     }
 
-    /// **An unpaid day comes off a monthly salary once, and off a daily wage
-    /// never.** The second half is the one that looks like a bug and is not:
-    /// a day not worked was never earned on a daily basis, so deducting it
-    /// would take the day off twice.
+    /// An unpaid day comes off a monthly salary once, and off a daily wage never.
     #[test]
     fn an_unpaid_day_is_taken_off_a_monthly_salary_once_and_a_daily_one_never() {
         let monthly = structure(0, Basis::Monthly, 30_000);
@@ -865,16 +677,13 @@ mod tests {
         assert_eq!(a.net, b.net, "a daily wage must not pay for a day twice");
     }
 
-    /// **A net is never negative**, however big the advance. What is not
-    /// recovered stays outstanding.
+    /// A net is never negative, however big the advance.
     #[test]
     fn an_advance_bigger_than_the_month_does_not_make_a_negative_payslip() {
         let s = structure(0, Basis::Monthly, 10_000);
         let line = pay_line(&s, &worked(30, 0, 30), rupees(25_000)).expect("computes");
         assert_eq!(line.net, Money::ZERO);
     }
-
-    // -- advances ----------------------------------------------------------
 
     fn advance(id: &str, on: i32, amount: i64, instalments: i32, recovered: i64) -> Advance {
         Advance {
@@ -899,7 +708,6 @@ mod tests {
         assert_eq!(full[0].amount, rupees(4_000));
         assert_eq!(full[1].amount, rupees(3_000));
 
-        // Only ₹5,000 earned: the old one in full, then what is left.
         let partial = recover_advances(&advances, rupees(5_000)).expect("recovers");
         assert_eq!(partial[0].amount, rupees(4_000));
         assert_eq!(partial[1].amount, rupees(1_000));
@@ -917,8 +725,8 @@ mod tests {
 
         // Two taken already: the third takes the last ₹2,000 and no more.
         let third = advance("adv", 0, 6_000, 3, 4_000);
-        let taken = recover_advances(std::slice::from_ref(&third), rupees(50_000))
-            .expect("recovers");
+        let taken =
+            recover_advances(std::slice::from_ref(&third), rupees(50_000)).expect("recovers");
         assert_eq!(taken[0].amount, rupees(2_000));
 
         // Fully recovered: nothing at all, not a zero row.
@@ -930,12 +738,9 @@ mod tests {
         );
     }
 
-    // -- attendance --------------------------------------------------------
-
     #[test]
     fn a_night_shift_is_not_minus_six_hours() {
-        // 22:00 to 06:00 is eight hours, not −960 minutes. The version of this
-        // that forgets the wrap pays an hourly employee a negative wage.
+        // 22:00 to 06:00 is eight hours, not −960 minutes.
         assert_eq!(minutes_between(1_320, 360), 480);
         assert_eq!(minutes_between(420, 900), 480);
         // A shift that is exactly a day.
@@ -960,8 +765,11 @@ mod tests {
             DayVerdict::LeftEarly { by_minutes: 120 }
         );
         // Rostered, no leave, did not come.
-        assert_eq!(judge_day(shift, None, None, false, grace), DayVerdict::Absent);
-        // Rostered, but on approved leave. NOT an absence — T2.
+        assert_eq!(
+            judge_day(shift, None, None, false, grace),
+            DayVerdict::Absent
+        );
+        // Rostered, but on approved leave.
         assert_eq!(judge_day(shift, None, None, true, grace), DayVerdict::Away);
         // Not rostered at all: neither present nor absent, because nobody said.
         assert_eq!(judge_day(None, None, None, false, grace), DayVerdict::Away);

@@ -1,22 +1,7 @@
-/*
- * The menu screen — two panes (UI_GUIDELINES §4's structure, applied to a
- * setup screen rather than to billing).
- *
- * Not one raw value: every colour, size and space is a token, and the lint
- * fails the build if that stops being true.
- */
+/* The menu screen — two panes. */
 
 .mb-menu {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it.
-
-     **This was a two-column grid until P30.5, and P27.5 left it that way when it
-     put a PageHeader above the body.** The header then landed in column one —
-     14 rem wide — so the word "Menu" and its whole description wrapped one
-     word per line down the left edge, with the toolbar overlapping beside it.
-     The two columns belong to `.mb-menu__body`, which has them; this is a
-     page, and a page is a column. */
+  /* The page margin is the SHELL's. */
   min-height: 0;
   height: 100%;
   overflow: hidden;
@@ -29,8 +14,10 @@
   min-height: 0;
 }
 
-/* The item pane scrolls; the search row above it does not, because looking for
-   an item is what you do when the list is too long to see. */
+/*
+ * The item pane scrolls; the search row above it does not, because looking for an item is what
+ * you do when the list is too long to see.
+ */
 .mb-menu__items {
   display: flex;
   flex-direction: column;
@@ -63,7 +50,7 @@
   border-radius: var(--radius-md);
 }
 
-/* --- Importing a spreadsheet (P13 item 7) -------------------------------- */
+/* Importing a spreadsheet. */
 
 .mb-import__box {
   width: 100%;
@@ -89,8 +76,7 @@
   border-radius: var(--radius-md);
 }
 
-/* Every refused line, by number. An owner fixes one cell rather than hunting
-   for which four of four hundred are missing. */
+/* Every refused line, by number. */
 .mb-import__refused {
   margin: 0;
   padding-left: var(--space-5);
@@ -98,7 +84,7 @@
   font-size: var(--text-sm);
 }
 
-/* --- What an item is made of (scope 6.1-6.3) ----------------------------- */
+/* What an item is made of. */
 
 .mb-comp__list {
   display: flex;
@@ -132,10 +118,7 @@
   margin-top: var(--space-2);
 }
 
-/* The fields share the width they have. Without this a `<select>` holds itself
-   as wide as its longest option — "Paneer Butter Masala (Half) - Extra Spicy —
-   315.00" — and pushes Remove off the edge behind a horizontal scrollbar,
-   which is exactly what a combo of two long-named items did (P13). */
+/* The fields share the width they have. */
 .mb-comp__choice > * {
   flex: 1 1 0;
   min-width: 0;
@@ -150,11 +133,8 @@
   text-overflow: ellipsis;
 }
 
-/* The two columns, under the page header. They used to BE the screen, which is
-   why the Menu had no title — there was nowhere to put one. */
-/* The rail gives way first. `minmax(0, …)` rather than a fixed width, because
-   the side panel takes 18rem when it opens: with a fixed rail the table
-   absorbed the whole loss and "Tax added on top" came out five lines tall. */
+/* The two columns, under the page header. */
+/* The rail gives way first. */
 .mb-menu__body {
   display: grid;
   grid-template-columns: minmax(0, var(--menu-categories-width)) minmax(0, 1fr);
@@ -164,9 +144,10 @@
   overflow: hidden;
 }
 
-/* With no groups there is no rail, and without this the first column is still
-   reserved — the items would start a quarter of the way across the screen with
-   nothing to their left. P30.5. */
+/*
+ * With no groups there is no rail, and without this the first column is still reserved — the
+ * items would start a quarter of the way across the screen with nothing to their left.
+ */
 .mb-menu__body--nogroups {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -175,17 +156,7 @@
   width: var(--find-width);
 }
 
-/* --- Groups: what the menu is arranged into, and where each one is cooked --
-
-   **This block was rewritten after looking at it.** The first version was a
-   rigid three-column grid — name, printer, buttons — with the printer column
-   fixed. Inside a modal it did not fit, so the name column was squeezed to
-   nothing, the wrap rule did what it was told, and "Drinks" came out as five
-   lines of one letter with the dialog scrolling sideways.
-   UI_GUIDELINES §1 forbids that outright.
-
-   Flex with wrapping instead: every part states the width it WANTS and gives
-   way in order, and a narrow window stacks the row rather than shredding it.  */
+/* Groups: what the menu is arranged into, and where each one is cooked. */
 
 .mb-groups__add {
   display: grid;
@@ -195,11 +166,7 @@
   margin-bottom: var(--gap-group);
 }
 
-/* **The category field inside the item dialog** (2026-08-17). A field and the
-   button that makes a new one, on one line: `end` so the button's bottom edge
-   sits on the select's, rather than floating level with the label above it.
-   `auto` twice in the naming state, because Add and Cancel are both as wide as
-   their words and neither should stretch. */
+/* The category field inside the item dialog. */
 .mb-catadd {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -226,9 +193,7 @@
   background: var(--surface-2);
 }
 
-/* The name takes what is left and never less than it can read. The zero
-   min-width is the half that matters: without it a flex item refuses to shrink
-   at all, which is what pushed the row past the dialog in the first place. */
+/* The name takes what is left and never less than it can read. */
 .mb-groups__what {
   display: flex;
   flex-direction: column;
@@ -242,23 +207,25 @@
   overflow-wrap: anywhere;
 }
 
-/* Wants its own width, gives way before the name does, and drops to its own
-   line before either of them is unreadable. */
+/*
+ * Wants its own width, gives way before the name does, and drops to its own line before either
+ * of them is unreadable.
+ */
 .mb-groups__route {
   flex: 0 1 var(--group-route-width);
   min-width: 0;
 }
 
-/* The two buttons are the one part that must never wrap onto its own line:
-   they are what the row is FOR, and a row three lines tall for two words is
-   how a list of six groups stops fitting on the screen. */
+/*
+ * The two buttons are the one part that must never wrap onto its own line: they are what the
+ * row is FOR, and a row three lines tall for two words is how a list of six groups stops
+ * fitting on the screen.
+ */
 .mb-groups__row .mb-row {
   flex: 0 0 auto;
 }
 
-/* **The item form, in the folding side panel** (owner, 2026-08-24). The panel
-   itself — its width, its border, the fold button — is the kit's `SideFold`;
-   this is only how the fields stack inside it. */
+/* The item form, in the folding side panel. */
 .mb-menu__form {
   display: flex;
   flex-direction: column;

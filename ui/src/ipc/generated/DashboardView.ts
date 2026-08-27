@@ -4,20 +4,14 @@ import type { CompareView } from "./CompareView";
 import type { StatView } from "./StatView";
 
 /**
- * **The first thing an owner sees**, and the reason it is first.
- *
- * Audit **G1**: *"the owner's questions — how did today go, what is unusual,
- * what needs me — are answered by opening four screens and doing arithmetic in
- * your head."* Thirteen reports do not answer "what needs me" either; they
- * answer questions you already knew to ask. This answers the one you did not.
+ * The first thing an owner sees, and the reason it is first.
  */
 export type DashboardView = { 
 /**
- * "Today, so far — 2026-08-09".
+ * "Today, so far.
  */
 title: string, stats: Array<StatView>, compare: CompareView | null, 
 /**
- * **Things that need a person.** Empty is the good case and the screen
- * says so out loud rather than showing a blank panel.
+ * Things that need a person.
  */
 attention: Array<AttentionView>, quiet: string, };

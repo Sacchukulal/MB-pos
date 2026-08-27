@@ -1,18 +1,3 @@
-/**
- * The shell every screen from P09 to P29 lives inside.
- *
- * Four regions, and they never move (UI_GUIDELINES §4): a title bar we draw
- * ourselves (audit F7), a left rail, the screen, and — the piece audit **D4**
- * demands — a **persistent** print-queue indicator.
- *
- * # Adding a screen touches one file
- *
- * `SCREENS` below. A route is `{ id, label, icon, render }`; there is no
- * router, no barrel to update and no rail to edit. P09 adds a line. If that
- * ever stops being true, the shell is wrong and the next twenty sessions each
- * pay for it.
- */
-
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -53,74 +38,30 @@ const WORST: Record<Alert['tone'], number> = { danger: 3, warn: 2, accent: 1, in
 export interface Screen {
   id: string;
   label: string;
-  /**
-   * A name from the kit's icon set, not a character. **P27.5 changed this from
-   * `string`** — it used to hold a Unicode glyph (`▦`, `☰`, `⌁`), so which
-   * picture a shop actually saw depended on which font Windows substituted,
-   * and they arrived at three different weights. A union type means a mistyped
-   * name is now a compile error rather than a hole in the navigation.
-   */
+  /** A name from the kit's icon set, not a character. */
   icon: IconName;
-  /**
-   * **True for a screen the counter uses every day.** Those get a place in the
-   * top bar; everything else lives behind "More".
-   *
-   * Thirteen destinations do not fit across 1366px with a readable label on
-   * each, and §5 forbids the usual escape — *"icon-only is fast for a daily
-   * user and hostile to a new one"*. So the split is by how often a shop opens
-   * the screen rather than by what fits: billing, the floor, the day's bills,
-   * credit, spends and reports are the counter's day; stock, buying, the menu,
-   * staff, history, settings and the account are things somebody sits down to
-   * do. Both halves keep their words.
-   */
+  /** True for a screen the counter uses every day. */
   daily?: boolean;
-  /**
-   * `go` opens another screen — P22's set-up list and health panel both send
-   * somebody to the screen that does the job, rather than being a seventh
-   * editor (D102).
-   */
+  /** `go` opens another screen. */
   render: (go: (screen: string) => void) => ReactNode;
-  /**
-   * The permission this screen's commands check in Rust.
-   *
-   * **Hiding the rail item is a courtesy, not the control** — every command
-   * behind it calls `guard::require`, and there is a Rust test that calls them
-   * directly without permission. This only stops a cashier walking into a
-   * screen that would refuse everything it tried to load.
-   */
+  /** The permission this screen's commands check in Rust. */
   needs?: string;
-  /**
-   * **Any one of these opens it** — P17's settings screen, which is four
-   * permissions in a trench coat (the shop's details, tax, printers, backup).
-   * A shop that gives one person the printers and another the tax rates is
-   * doing the normal thing, and neither of them should find the rail item
-   * missing. `guard::Access::NeedsAny` is the Rust half, and the sections a
-   * person may not change arrive marked read-only rather than absent.
-   */
+  /** Any one of these opens it. */
   needsAny?: readonly string[];
 }
 
-/**
- * Every screen in the product.
- *
- * P09 adds `{ id: 'billing', label: 'Billing', icon: 'receipt', render: … }`
- * and is finished. Lazily rendered — nothing that is not on screen is built,
- * which is budget S1 and scope 16.14.
- */
+/** Every screen in the product. */
 export const SHIPPED_SCREENS: readonly Screen[] = [
   {
     id: "billing",
     daily: true,
     label: "Billing",
     icon: 'receipt',
-    // No `go`: the set-up list moved to the alerts bell at P30.6, and this
-    // screen is the till and nothing else again.
     render: () => <Billing />,
   },
   {
-    // The floor answers a different question from the billing grid: not
-    // "which table am I putting this dosa on" but "which table needs me".
-    // Audit F5 is the second one going unanswered.
+    // The floor answers a different question from the billing grid: not "which table am I
+    // putting this dosa on" but "which table needs me".
     id: 'floor',
     daily: true,
     label: 'Floor',
@@ -128,9 +69,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     render: () => <Floor />,
   },
   {
-    // Not "Khata" — the owner renamed it on 2026-08-08. The screen answers
-    // "who owes me money", which is why that is its default view rather than
-    // an alphabetical list nobody opens.
     id: 'credit',
     daily: true,
     label: 'Credit',
@@ -139,8 +77,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'customers.manage',
   },
   {
-    // "Spends", not "Expenses": the rail is read at a glance and the shorter
-    // word is the one a shopkeeper uses.
+    // "Spends", not "Expenses": the rail is read at a glance and the shorter word is the one a
+    // shopkeeper uses.
     id: 'expenses',
     daily: true,
     label: 'Spends',
@@ -149,9 +87,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'expenses.manage',
   },
   {
-    // Next to Spends, because they are the same question from two sides: what
-    // left as money, and what left as food. MARKET_GAP_ANALYSIS calls this
-    // "the biggest single hole" in the product.
+    // Next to Spends, because they are the same question from two sides: what left as money,
+    // and what left as food.
     id: 'stock',
     label: 'Stock',
     icon: 'boxes',
@@ -159,10 +96,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'inventory.view',
   },
   {
-    // Next to Stock, because they are the same shelf from two ends: what came
-    // in, and what is on it. Buying holds deliveries, suppliers and orders;
-    // the COUNT is a tab on Stock, because a count is a question about the
-    // shelf and that is where the person already is.
+    // Next to Stock, because they are the same shelf from two ends: what came in, and what is
+    // on it.
     id: 'buying',
     label: 'Buying',
     icon: 'truck',
@@ -170,15 +105,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'purchases.manage',
   },
   {
-    // **P29.** Beside the floor, because it is the same question asked about
-    // the food that has left the building: which orders are still out, and who
-    // is carrying the cash for them.
-    //
-    // **Not `daily`, and that is a decision rather than an oversight.** The bar
-    // is a fixed six because seven words do not fit across 1366px, and none of
-    // the six is droppable for a shop that does no deliveries at all. So this
-    // sits under More, where Stock and Buying already are — every screen a
-    // particular shop lives in and a different shop never opens.
+    // Beside the floor, because it is the same question asked about the food that has left the
+    // building: which orders are still out, and who is carrying the cash for them.
     id: 'delivery',
     label: 'Delivery',
     icon: 'bike',
@@ -193,14 +121,14 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'reports.view',
   },
   {
-    // Directly under Bills, because the two answer the same person's
-    // questions: "what did that customer pay?" and "how did the month go?"
+    // Directly under Bills, because the two answer the same person's questions: "what did that
+    // customer pay?" and "how did the month go?".
     id: 'reports',
     daily: true,
     label: 'Reports',
     icon: 'chart',
-    // `go` so a licence refusal can hand somebody straight to the Account
-    // screen instead of leaving them to find it (P30.5).
+    // `go` so a licence refusal can hand somebody straight to the Account screen instead of
+    // leaving them to find it.
     render: (go) => <Reports onGoTo={go} />,
     needs: 'reports.view',
   },
@@ -220,16 +148,14 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
   },
   {
     id: 'history',
-    // Not "Audit". The owner must be able to answer "who voided that bill?"
-    // without knowing our word for it (UI_GUIDELINES §6).
     label: 'History',
     icon: 'clock',
     render: () => <Audit />,
     needs: 'audit.view',
   },
   {
-    // Last but one, and below Menu: settings are what an owner opens once a
-    // month, so they must not sit where a cashier's hand goes.
+    // Last but one, and below Menu: settings are what an owner opens once a month, so they must
+    // not sit where a cashier's hand goes.
     id: 'settings',
     label: 'Settings',
     icon: 'settings',
@@ -237,8 +163,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
   },
   {
-    // Below Settings, because it is opened once a year — and above the Kit,
-    // because the Kit is not a screen a shop has any use for.
+    // Below Settings, because it is opened once a year — and above the Kit, because the Kit is
+    // not a screen a shop has any use for.
     id: 'account',
     label: 'Account',
     icon: 'badge',
@@ -246,9 +172,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'reports.view',
   },
   {
-    // **P24.** On the counter it is a screen like any other, so a shop with one
-    // machine can run the kitchen from it. On a wall tablet it is the whole
-    // window — same page, same code.
+    // On the counter it is a screen like any other, so a shop with one machine can run the
+    // kitchen from it.
     id: 'kitchen',
     label: 'Kitchen',
     icon: 'flame',
@@ -256,10 +181,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'bill.create',
   },
   {
-    // **P29.** Beside Health, because they are the same question about the two
-    // halves of one counter: is the software all right, and is the hardware. A
-    // dealer setting a shop up lives on this screen for an hour and never
-    // opens it again.
+    // Beside Health, because they are the same question about the two halves of one counter: is
+    // the software all right, and is the hardware.
     id: 'devices',
     label: 'Devices',
     icon: 'plug',
@@ -267,8 +190,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'settings.printer',
   },
   {
-    // Beside Account, because the two answer "is my counter all right?" from
-    // the two directions an owner asks it.
+    // Beside Account, because the two answer "is my counter all right?" from the two directions
+    // an owner asks it.
     id: 'health',
     label: 'Health',
     icon: 'pulse',
@@ -277,14 +200,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
   },
 ];
 
-/**
- * **The component gallery is not a screen a shop has any use for.**
- *
- * It was in the rail from P08 because there was nothing else to look at. A
- * released counter shows twelve rail items on a 1366x768 screen and this is the
- * one a shopkeeper would open once, by accident, and never understand — so it
- * goes where it belongs, which is a development build. P22.
- */
+/** The component gallery is not a screen a shop has any use for. */
 const SCREENS: readonly Screen[] = import.meta.env.DEV
   ? [
       ...SHIPPED_SCREENS,
@@ -300,40 +216,23 @@ const SCREENS: readonly Screen[] = import.meta.env.DEV
 export function Shell() {
   const [screen, setScreen] = useState<string>('billing');
   const [status, setStatus] = useState<AppStatus | null>(null);
-  /**
-   * **Is this counter set up?** `null` while we do not know yet, so nothing
-   * flashes. P30.5: the answer decides whether the shell shows the counter or
-   * the set-up flow, and it is Rust's answer rather than a guess from whether
-   * a call failed.
-   */
+  /** Is this counter set up? */
   const [setUp, setSetUp] = useState<boolean | null>(null);
   const [jobs, setJobs] = useState<readonly PrintJobView[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
   const [lock, setLock] = useState<LockState | null>(null);
   /**
-   * **What this till is holding for the main one** (P27, D138) — the whole
-   * sentence, written in Rust, empty when there is nothing to say.
-   *
-   * It lives in the shell for the same reason the print queue does (audit D4):
-   * a shop must be able to SEE that its tills are apart, and a state that is
-   * only visible on the screen nobody has open is a state that is hidden.
+   * What this till is holding for the main one — the whole sentence, written in Rust, empty
+   * when there is nothing to say.
    */
   const [tillsSay, setTillsSay] = useState('');
-  /**
-   * **What the set-up list still wants** — P30.6.
-   *
-   * It used to be a strip on the billing screen (D102). The owner installed the
-   * counter and found it, plus three standing banners, taking a third of the
-   * page: *"instead of showing like this big line notification/error, just make
-   * a small bell button near sun moon button."* So the steps are alerts now,
-   * and the billing screen is the billing screen.
-   */
+  /** What the set-up list still wants. */
   const [setup, setSetup] = useState<SetupView | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const { theme, toggle } = useTheme();
   const toast = useToast();
 
-  // What the app is, once. Not polled — see below.
+  // What the app is, once.
   useEffect(() => {
     if (!inApp()) return;
     call('app_status')
@@ -343,16 +242,7 @@ export function Shell() {
       });
   }, []);
 
-  /**
-   * **The set-up steps, re-read whenever the counter is signed into or the
-   * screen changes** (P30.6).
-   *
-   * `setup_list` is derived from what is actually in the shop (D102), so it is
-   * always right and never remembers a position. Asking again on a screen
-   * change is how a step ticks itself off a moment after somebody does it —
-   * they add their tables on the Floor screen and come back to a bell with one
-   * fewer on it. It needs a signed-in person, so it waits for one.
-   */
+  /** The set-up steps, re-read whenever the counter is signed into or the screen changes. */
   useEffect(() => {
     if (!inApp() || lock === null || lock.signedInAs === null) return;
     call('setup_list')
@@ -362,18 +252,7 @@ export function Shell() {
       });
   }, [lock, screen]);
 
-  /**
-   * **Is this counter set up?** (P30.5.)
-   *
-   * Asked once, before anything else renders. `first_run` is one of the three
-   * commands in the product that work with no shop at all — it has to be,
-   * because on a fresh install there is no database for a permission to live
-   * in.
-   *
-   * A failure here counts as SET UP, deliberately: an existing shop whose
-   * counter is having a bad morning must not be shown a set-up wizard over the
-   * top of its own data.
-   */
+  /** Is this counter set up? */
   useEffect(() => {
     if (!inApp()) return;
     call('first_run')
@@ -386,20 +265,16 @@ export function Shell() {
     call('lock_state')
       .then(setLock)
       .catch(() => {
-        /* A shop that will not answer opens LOCKED — `state::open_or_lock`
-           takes the same view, and locked is the safe direction to be wrong
-           in. `lock` stays null, which renders the lock screen. */
+        /*
+         * A shop that will not answer opens LOCKED — `state::open_or_lock` takes the same view,
+         * and locked is the safe direction to be wrong in.
+         */
       });
   }, []);
 
   useEffect(reloadLock, [reloadLock]);
 
-  // **Rust pushes; React subscribes.** Budget M4, and PERFORMANCE.md §5 rule 6:
-  // "a 250 ms poll loop is M4 gone before a single feature is written."
-  //
-  // The idle lock arrives this way too: the timer that decides it lives in
-  // Rust (P11), because a React timer would be a poll AND would be bypassed by
-  // any screen that is not open.
+  // Rust pushes; React subscribes.
   useEffect(() => {
     if (!inApp()) return undefined;
     let stop: (() => void) | undefined;
@@ -415,36 +290,20 @@ export function Shell() {
     return () => stop?.();
   }, [reloadLock]);
 
-  /**
-   * **The queue as it is right now, once, when the shell mounts.**
-   *
-   * Everything else about the queue arrives pushed (M4), and that is right —
-   * but a push only tells you what CHANGED. Rust emits the queue at start-up,
-   * and if the webview reloads after that (a dev reload, a crashed renderer,
-   * a second window) the shell comes back with an empty list and a parked
-   * kitchen ticket that nothing on screen mentions. D4 is precisely that the
-   * cashier must be able to SEE a print that did not happen.
-   *
-   * `list_print_jobs` is what answers "what is in the queue right now", and it
-   * had never been called. One call, on mount, and no polling.
-   */
+  /** The queue as it is right now, once, when the shell mounts. */
   useEffect(() => {
     if (!inApp()) return;
     call('list_print_jobs')
-      // **Checked, not trusted.** The queue is the one thing on this screen
-      // that is allowed not to answer — a shop mid-restore has no queue at
-      // all — and an empty list is the honest reading of that. Assigning
-      // whatever came back put a `null` where an array goes and took the whole
-      // shell down with it.
+      // Checked, not trusted. The queue is the one thing on this screen that is allowed not to
+      // answer — a shop mid-restore has no queue at all — and an empty list is the honest
+      // reading of that.
       .then((fresh) => setJobs(Array.isArray(fresh) ? fresh : []))
-      // Silent: a queue that will not read must not put an error over a
-      // counter somebody is billing on. The push will correct it.
+      // Silent: a queue that will not read must not put an error over a counter somebody is
+      // billing on.
       .catch(() => undefined);
   }, []);
 
-  // **Ctrl+L locks the counter.** Registered in the billing screen's SHORTCUTS
-  // table as well, because the help sheet is generated from that table (audit
-  // F4) and a key documented nowhere is a key nobody learns.
+  // Ctrl+L locks the counter.
   useEffect(() => {
     if (!inApp()) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -482,7 +341,7 @@ export function Shell() {
     [toast],
   );
 
-  // Everything this person may open. A screen with no `needs` is everybody's.
+  // Everything this person may open.
   const held = lock?.permissions ?? [];
   const allowed = SCREENS.filter((item) => {
     if (item.needs && !held.includes(item.needs)) return false;
@@ -491,22 +350,10 @@ export function Shell() {
   });
   const active = allowed.find((s) => s.id === screen) ?? allowed[0];
 
-  // **Locked = there is nobody signed in.** Not a flag: the same fact Rust
-  // holds, asked for rather than mirrored.
+  // Locked = there is nobody signed in.
   const locked = inApp() && lock !== null && lock.signedInAs === null;
 
-  /**
-   * **Everything the shop should know, in one list** — P30.6.
-   *
-   * Four sources, and every sentence in it was written in Rust (§6): the
-   * licence line, the no-PIN warning, what this till is holding for the main
-   * one, and whatever the set-up list still wants. A message pushed from the
-   * backend will be a fifth case here and nothing else — that is the shape the
-   * owner asked for when they said this is where super-admin notices should
-   * land.
-   *
-   * Ordered worst-first, because the panel is read top down.
-   */
+  /** Everything the shop should know, in one list. */
   const alerts: Alert[] = [];
   if (status?.licence) {
     alerts.push({
@@ -558,25 +405,16 @@ export function Shell() {
   alerts.sort((a, b) => WORST[b.tone] - WORST[a.tone]);
 
   if (inApp() && lock === null) {
-    // Before the first answer. Deliberately nothing rather than the billing
-    // screen: a flash of somebody else's till is worse than a blank moment.
+    // Before the first answer.
     return <div className="mb-shell" />;
   }
 
-  // **Nothing renders until we know whether there is a shop** (P30.5). The same
-  // argument as the line above: a flash of a counter that does not exist is
-  // worse than a blank moment.
+  // Nothing renders until we know whether there is a shop.
   if (inApp() && setUp === null) {
     return <div className="mb-shell" />;
   }
 
-  // **A shop that is not set up does not show the counter at all.**
-  //
-  // Until P30.5 a fresh install landed on the billing screen with no shop behind
-  // it: every screen's first call failed, the failures stacked up as toasts, a
-  // six-item checklist ate the page, and nothing anywhere in the product could
-  // create a shop. The set-up IS the screen now, and it goes away for good
-  // when the three compulsory steps are done.
+  // A shop that is not set up does not show the counter at all.
   if (inApp() && setUp === false) {
     return (
       <div className="mb-shell">
@@ -584,8 +422,8 @@ export function Shell() {
         <FirstRun
           onDone={() => {
             setSetUp(true);
-            // Everything the shell holds was read against a shop that did not
-            // exist a minute ago. Ask again rather than trusting any of it.
+            // Everything the shell holds was read against a shop that did not exist a minute
+            // ago.
             call('app_status').then(setStatus).catch(() => undefined);
             reloadLock();
           }}
@@ -619,29 +457,7 @@ export function Shell() {
 
       <div className="mb-body">
         <main className="mb-main">
-          {/*
-            **Nothing is rendered behind the lock** — P30.5, and this is the
-            worst bug the fresh install turned up.
-
-            The screen used to mount underneath the lock overlay. Every one of
-            its first commands was then refused with `auth.locked`, which is
-            correct — and the refusals were invisible, because the overlay
-            covers the toasts on purpose. Then the person signed in, `locked`
-            went false, and **the screen did not remount**: its `useEffect`
-            had already run and would never run again. So a shop that starts
-            the app, types its PIN and lands on the counter got an empty menu
-            and no cart, every single morning, until it navigated away and
-            back.
-
-            It was invisible for thirty sessions because the demo shop nobody
-            gave a PIN to never locks. The first run makes a PIN compulsory,
-            so from P30.5 onwards EVERY shop would have hit it on day one.
-
-            Not rendering is also the right answer on its own terms: a locked
-            counter has no business firing a dozen commands it knows will be
-            refused, and mounting `active` the moment the lock clears is how a
-            screen gets its data with a session behind it.
-          */}
+          {/* Nothing is rendered behind the lock. */}
           {locked ? null : active?.render(setScreen)}
         </main>
       </div>
@@ -662,19 +478,14 @@ export function Shell() {
         onDismiss={onDismiss}
       />
 
-      {/* Over everything, including the print queue panel and any toast — a
-          toast floating above a locked screen is information leaking past the
-          lock. The queue INDICATOR stays visible in the title bar, which is
-          audit D4: paper coming out wrong is still the shop's problem while
-          the screen is locked. */}
+      {/*
+        Over everything, including the print queue panel and any toast — a toast floating above
+        a locked screen is information leaking past the lock.
+      */}
       {locked ? (
         <Lock
           people={lock?.people ?? []}
-          // Two lists, because they are two questions. `people` is who can sign
-          // in; `recoverable` is who the recovery code may set a PIN for, and a
-          // manager with no PIN is on the second and not the first. See
-          // `LockState::recoverable` for the lockout that comes of conflating
-          // them.
+          // Two lists, because they are two questions.
           recoverable={lock?.recoverable ?? []}
           canRecover={lock?.canRecover ?? false}
           onSignedIn={reloadLock}
@@ -683,60 +494,8 @@ export function Shell() {
     </div>
   );
 }
-/**
- * **The top bar** — P27.5, and it replaces the left rail entirely.
- *
- * The owner, 2026-08-15: *"the verticll left menu bars i didnt like, i wish to
- * see that in horizontal top side"*.
- *
- * # Why it is ONE strip and not two
- *
- * A navigation bar across the top normally costs a row of vertical space, and
- * at 1366x768 — the reference machine, D12 — vertical space is the scarce
- * dimension: it is what the cart, the table grid and every report are fighting
- * over. So the navigation does not get a row of its own. It shares the title
- * bar we already draw ourselves (audit F7): the wordmark at one end, the window
- * buttons at the other, and the screens along the middle. Against the old rail
- * this costs nothing vertically and gives the billing screen back 76px of
- * width.
- *
- * # Why six screens and then "More"
- *
- * Thirteen destinations do not fit across 1366px with a readable word under
- * each, and UI_GUIDELINES §5 rules out the usual escape: *"icon-only is fast
- * for a daily user and hostile to a new one. Solve it — do not just ship bare
- * icons."* Hiding the labels would have been shipping bare icons with extra
- * steps.
- *
- * So the split is by **how often a shop opens the screen**, and both halves
- * keep their words. Billing, Floor, Bills, Credit, Spends and Reports are the
- * counter's day and sit in the bar. Stock, Buying, Menu, Staff, History,
- * Settings and Account are things somebody sits down to do, and live one click
- * away behind More — which shows them as a proper labelled list, not a row of
- * mystery glyphs.
- *
- * The current screen is always visible with its label, even when it came from
- * More: a navigation that cannot show you where you are is worse than no
- * navigation.
- */
-/**
- * **How the thirteen screens divide between the bar and the More sheet.**
- *
- * Pure, exported and tested (`tests/look.test.tsx`), because it is a rule
- * rather than a rendering detail — and because the first version of it was
- * wrong in a way only a running app showed.
- *
- * That first version added the current screen to the bar when it came from
- * More, so the bar always said where you were. Opening Stock proved it: eight
- * items plus the More button plus the tools is wider than 1366px, and "More"
- * ran straight over the signed-in name in the corner. **A navigation that
- * breaks the moment you use it is worse than one that is merely long.**
- *
- * So the bar is a FIXED six — the screens a counter opens every day — and the
- * More button itself carries the answer: inside Stock it reads "Stock", with
- * Stock's icon, marked as the current page. Nothing moves, nothing overflows,
- * and "where am I" still has an answer on screen.
- */
+/** The top bar. */
+/** How the thirteen screens divide between the bar and the More sheet. */
 export function splitScreens(
   screens: readonly Screen[],
   current: string,
@@ -746,18 +505,7 @@ export function splitScreens(
   return { inBar, inMore, elsewhere: inMore.find((s) => s.id === current) ?? null };
 }
 
-/**
- * **The window buttons, and nothing else** — P30.5.
- *
- * The set-up flow renders instead of the shell, and the shell is where the
- * title bar lives. Without this the window has no minimise, no maximise and
- * **no close**: `decorations: false` means we draw those ourselves, so a
- * first-run screen with no bar is a window somebody has to kill from Task
- * Manager. Found by looking at it.
- *
- * Deliberately not the real `TopBar`: there is nowhere to navigate to yet, and
- * a row of screens somebody cannot open is worse than no row at all.
- */
+/** The window buttons, and nothing else. */
 function BareBar() {
   const window = inApp() ? getCurrentWindow() : null;
   return (
@@ -832,7 +580,7 @@ function TopBar({
   who: string | null;
   role: string | null;
   onLock: () => void;
-  /** How many alerts are waiting — P30.6. Zero draws no badge at all. */
+  /** How many alerts are waiting. */
   alertCount: number;
   /** The worst of them, so the badge is not one colour for everything. */
   alertTone: Alert['tone'] | null;
@@ -846,8 +594,7 @@ function TopBar({
 
   const { inBar, inMore, elsewhere } = splitScreens(screens, current);
 
-  // Close More on Escape and on going somewhere. A popover that outlives its
-  // purpose is the thing that ends up covering the Complete Bill button.
+  // Close More on Escape and on going somewhere.
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -864,10 +611,6 @@ function TopBar({
 
   return (
     <header className="mb-topbar" data-tauri-drag-region>
-      {/* The wordmark. **Not the database path** — that used to be printed
-          across the title bar in full, which is developer output on a
-          shopkeeper's screen. It is still reachable for a support call: it is
-          the tooltip here, and it is on the Health screen in words. */}
       <div className="mb-topbar__brand" data-tauri-drag-region title={shopPath ?? undefined}>
         <span className="mb-topbar__mark" aria-hidden="true">
           <Icon name="receipt" size="sm" />
@@ -907,9 +650,11 @@ function TopBar({
 
             {moreOpen ? (
               <>
-                {/* Clicking anywhere else closes it, including on the screen
-                    behind — without this the only way out is the button, and
-                    that is the popover people learn to dread. */}
+                {/*
+                  Clicking anywhere else closes it, including on the screen behind — without
+                  this the only way out is the button, and that is the popover people learn to
+                  dread.
+                */}
                 <button
                   type="button"
                   className="mb-nav__scrim"
@@ -938,8 +683,7 @@ function TopBar({
       </nav>
 
       <div className="mb-topbar__tools">
-        {/* Whose till this is, right now. Audit C3's other half: the name on
-            the bill and the name on the screen are one fact. */}
+        {/* Whose till this is, right now. */}
         {who ? (
           <button
             type="button"
@@ -955,8 +699,7 @@ function TopBar({
           </button>
         ) : null}
 
-        {/* The print queue. PERSISTENT — audit D4: a toast that has faded is
-            not "the cashier can see it". */}
+        {/* The print queue. PERSISTENT. */}
         <button
           type="button"
           className={['mb-queue', needsAttention ? 'mb-queue--attention' : '']
@@ -970,11 +713,11 @@ function TopBar({
           }
         >
           <Icon name={needsAttention ? 'warning' : 'printer'} size="sm" />
-          {/* The word goes below 1120px so the navigation keeps its own — the
-              `aria-label` above carries the whole sentence either way, and a
-              printer icon beside a count is not a thing anybody has to learn.
-              P30.5: at 1024, which is the window minimum, "Reports" was sitting
-              on top of the cashier's name. */}
+          {/*
+            The word goes below 1120px so the navigation keeps its own — the `aria-label` above
+            carries the whole sentence either way, and a printer icon beside a count is not a
+            thing anybody has to learn.
+          */}
           <span className="mb-queue__word">
             {needsAttention
               ? 'NOT PRINTED'
@@ -984,10 +727,6 @@ function TopBar({
           </span>
         </button>
 
-        {/* **The alerts bell** (P30.6), beside the sun/moon exactly where the
-            owner asked for it. Everything that used to be a strip above a
-            screen is behind this, and a message pushed from the backend will
-            arrive here too when there is a backend to push one. */}
         <button
           type="button"
           className={['mb-bell', alertTone ? `mb-bell--${alertTone}` : ''].filter(Boolean).join(' ')}
@@ -1003,7 +742,6 @@ function TopBar({
           {alertCount > 0 ? <span className="mb-bell__count">{alertCount}</span> : null}
         </button>
 
-        {/* The sun/moon toggle the owner asked for by name. */}
         <button
           type="button"
           className="mb-topbar__button"
@@ -1014,9 +752,6 @@ function TopBar({
           <Icon name={face} size="md" />
         </button>
 
-        {/* The window buttons, drawn on the same grid as every other icon —
-            they used to be "–", "□" and "✕" typed as characters, from three
-            different fonts, and they never lined up with each other. */}
         <span className="mb-topbar__windows">
           <button
             type="button"
@@ -1048,13 +783,7 @@ function TopBar({
   );
 }
 
-/**
- * Escape, on the document.
- *
- * A pair of one-line helpers rather than `document.addEventListener` inline,
- * because `window` is shadowed in `TopBar` by the Tauri window handle — and a
- * listener registered on the wrong object is a popover that never closes.
- */
+/** Escape, on the document. */
 function window_addEscape(handler: (event: KeyboardEvent) => void) {
   document.addEventListener('keydown', handler);
 }

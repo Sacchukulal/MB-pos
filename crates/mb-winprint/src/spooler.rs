@@ -1,16 +1,11 @@
 //! Enumerating Windows printers, and printing RAW bytes to one.
 
-
 use std::ptr;
 
 use crate::sys::{self, Dword, FALSE, Handle};
 use crate::{PrinterInfo, WinPrintError};
 
 /// A printer handle that closes itself, on every path including an unwind.
-///
-/// A leaked printer handle outlives the process on Windows and holds the queue
-/// open, so this is not tidiness — it is the difference between "the print
-/// failed" and "the printer is now stuck until a reboot".
 #[derive(Debug)]
 struct Printer(Handle);
 
@@ -50,10 +45,8 @@ pub fn list() -> Result<Vec<PrinterInfo>, WinPrintError> {
     let flags = sys::PRINTER_ENUM_LOCAL | sys::PRINTER_ENUM_CONNECTIONS;
     let level = 4;
 
-    // Two calls, which is how every EnumPrinters example is written: the first
-    // one is expected to fail with ERROR_INSUFFICIENT_BUFFER and to say how
-    // many bytes are needed. Guessing a size instead is how this ends up
-    // truncating somebody's printer list at eight.
+    // Two calls, which is how every EnumPrinters example is written: the first one is expected
+    // to fail with ERROR_INSUFFICIENT_BUFFER and to say how many bytes are needed.
     let mut needed: Dword = 0;
     let mut returned: Dword = 0;
     // SAFETY: a zero-length buffer with a zero length is the documented way to
@@ -83,9 +76,8 @@ pub fn list() -> Result<Vec<PrinterInfo>, WinPrintError> {
         return Ok(Vec::new());
     }
 
-    // The buffer holds an array of PRINTER_INFO_4W at the front and the strings
-    // they point at behind it, so it must stay alive until every name has been
-    // copied out. Aligned to the structure, not to bytes.
+    // The buffer holds an array of PRINTER_INFO_4W at the front and the strings they point at
+    // behind it, so it must stay alive until every name has been copied out.
     let count = (needed as usize).div_ceil(size_of::<sys::PrinterInfo4W>());
     let mut buffer: Vec<sys::PrinterInfo4W> = vec![
         sys::PrinterInfo4W {
@@ -125,8 +117,7 @@ pub fn list() -> Result<Vec<PrinterInfo>, WinPrintError> {
             continue;
         }
         out.push(PrinterInfo {
-            is_default: name == default
-                || info.attributes & sys::PRINTER_ATTRIBUTE_DEFAULT != 0,
+            is_default: name == default || info.attributes & sys::PRINTER_ATTRIBUTE_DEFAULT != 0,
             is_network: info.attributes & sys::PRINTER_ATTRIBUTE_NETWORK != 0,
             name,
         });
@@ -146,8 +137,8 @@ pub fn default_name() -> Result<Option<String>, WinPrintError> {
     // call asked for.
     let ok = unsafe { sys::GetDefaultPrinterW(buffer.as_mut_ptr(), &raw mut size) };
     if ok == FALSE {
-        // A machine with no printers at all has no default, and that is not an
-        // error — it is a shop that has not plugged one in yet.
+        // A machine with no printers at all has no default, and that is not an error — it is a
+        // shop that has not plugged one in yet.
         return Ok(None);
     }
     // SAFETY: `buffer` is NUL-terminated by the call above and is still alive.
@@ -162,9 +153,8 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     let doc_name = sys::wide(document).ok_or_else(|| WinPrintError::BadName {
         name: document.to_owned(),
     })?;
-    // "RAW" is the whole point: it tells the driver these bytes are already the
-    // printer's own language and must be passed through untouched. Any other
-    // datatype renders a page and prints ESC/POS as gibberish.
+    // "RAW" is the whole point: it tells the driver these bytes are already the printer's own
+    // language and must be passed through untouched.
     let raw = sys::wide("RAW").ok_or_else(|| WinPrintError::BadName {
         name: "RAW".to_owned(),
     })?;
@@ -176,8 +166,8 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     if ok == FALSE || handle.is_null() {
         // SAFETY: no arguments.
         let code = unsafe { sys::GetLastError() };
-        // 1801 is ERROR_INVALID_PRINTER_NAME, and it is the one a shop will
-        // actually hit — somebody renamed the printer in Windows.
+        // 1801 is ERROR_INVALID_PRINTER_NAME, and it is the one a shop will actually hit —
+        // somebody renamed the printer in Windows.
         return Err(if code == 1801 {
             WinPrintError::NoSuchPrinter {
                 name: printer.to_owned(),
@@ -202,8 +192,8 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     if job == 0 {
         return Err(last_error("StartDocPrinter"));
     }
-    // From here on the document must be ended however this function leaves, so
-    // it is a guard rather than a pair of calls somebody can return between.
+    // From here on the document must be ended however this function leaves, so it is a guard
+    // rather than a pair of calls somebody can return between.
     let mut open = Document {
         printer: &printer_handle,
         page_open: false,
@@ -215,28 +205,20 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     }
     open.page_open = true;
 
-    // WritePrinter is allowed to accept fewer bytes than it was given, so this
-    // loops. A partial write treated as a whole one is half a kitchen ticket.
+    // WritePrinter is allowed to accept fewer bytes than it was given, so this loops.
     let mut sent = 0_usize;
     while sent < bytes.len() {
         let chunk = &bytes[sent..];
         let len = Dword::try_from(chunk.len()).unwrap_or(Dword::MAX);
         let mut written: Dword = 0;
         // SAFETY: `chunk` is valid for `len` bytes and `written` is writable.
-        let ok = unsafe {
-            sys::WritePrinter(
-                printer_handle.0,
-                chunk.as_ptr(),
-                len,
-                &raw mut written,
-            )
-        };
+        let ok =
+            unsafe { sys::WritePrinter(printer_handle.0, chunk.as_ptr(), len, &raw mut written) };
         if ok == FALSE {
             return Err(last_error("WritePrinter"));
         }
         if written == 0 {
-            // Not an error code, but no progress either. Refusing to spin is
-            // the difference between a failed job and a pinned CPU core.
+            // Not an error code, but no progress either.
             return Err(WinPrintError::Api {
                 what: "WritePrinter (accepted no bytes)",
                 code: 0,
@@ -249,4 +231,3 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     drop(printer_handle);
     Ok(())
 }
-

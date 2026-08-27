@@ -1,18 +1,13 @@
 //! A scratch database per test, and the fixtures the behaviour tests need.
-//!
-//! No `tempfile` dependency. A unique directory under the OS temp folder is
-//! twenty lines here, and every dependency — even a dev one — is a line someone
-//! has to justify (R6, scope 16.15).
 
 // Shared by four test binaries, each of which uses a different subset.
-#![allow(dead_code, reason = "shared by four test binaries, each using a different subset")]
-// The clippy.toml exemption only reaches `#[test]` functions, and everything
-// here is a plain helper. In a fixture `expect` IS the assertion: a scratch
-// directory that cannot be created is the test failing, not a shop losing data.
 #![allow(
-    clippy::expect_used,
-    reason = "test fixtures: expect is the assertion"
+    dead_code,
+    reason = "shared by four test binaries, each using a different subset"
 )]
+// The clippy.toml exemption only reaches `#[test]` functions, and everything here is a plain
+// helper.
+#![allow(clippy::expect_used, reason = "test fixtures: expect is the assertion")]
 
 pub mod shop;
 
@@ -31,10 +26,7 @@ pub struct Scratch {
 impl Scratch {
     pub fn new(label: &str) -> Scratch {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "mb-db-{label}-{}-{n}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("mb-db-{label}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch directory");
         Scratch { dir }
     }

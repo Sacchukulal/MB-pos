@@ -1,57 +1,11 @@
-/**
- * **The lock screen's keyboard, as a pure reducer.**
- *
- * Same shape as P10's billing keyboard: `(state, event) -> [state, commands]`,
- * no React, no IPC, no DOM. It can be driven exhaustively in a test, and it is.
- *
- * # A reducer must not have side effects
- *
- * P10 learned this expensively: StrictMode double-invokes reducers, every
- * command ran twice, and one beer came out as 440.00. Commands ride **in the
- * state**, keyed on `seq`, and the screen performs the ones it has not seen.
- * Keep it that way.
- *
- * # Why a state machine for four keys
- *
- * Because it is not four keys. Choosing a person by tap or by typing a staff
- * code, four digits with no auto-submit, a countdown that must not be typed
- * through, and a recovery flow that sets a PIN — that is the shape of thing
- * that becomes scattered handlers and then becomes focus bugs.
- *
- * # Two events that both look like "back"
- *
- * The owner found this one on a real install, 2026-08-22: *"When i press
- * somebody else in the login screen, it deletes typed pin one by one and then
- * goes to selecting user."*
- *
- * There was one `back` event doing two unrelated jobs. On the keyboard,
- * Backspace means **rub out the last digit**, and rubbing out the last digit of
- * an empty pad sensibly drops back to the list. A button labelled *Somebody
- * else* means **I am not this person** — one whole decision, with nothing
- * gradual about it. Sharing an event made the button behave like four presses
- * of Backspace, so it took four taps to do the thing written on it.
- *
- * They are `back` (the rubber) and `cancel` (the decision) now, and every
- * button that means "leave" sends `cancel`.
- */
+/** The lock screen's keyboard, as a pure reducer. */
 
 import type { PersonView } from '../ipc/generated/PersonView';
 
-/**
- * **How long a PIN is. Not a minimum, not a maximum — the length.**
- *
- * `mb_auth::pin::PIN_DIGITS` is the authority and holds the same number; this
- * is what lets the pad ignore the fifth keypress instead of sending it to Rust
- * to be refused.
- *
- * It was `MIN_PIN = 4` with `MAX_PIN = 8`, and the gap between them was the bug
- * the owner hit: eight circles drawn on a four-digit pad, and a keypad that
- * kept taking digits after the PIN was finished. See `mb_auth::pin::PIN_DIGITS`
- * for the whole argument.
- */
+/** How long a PIN is. */
 export const PIN_DIGITS = 4;
 
-/** Which part of the recovery flow is on screen. See `Mode`. */
+/** Which part of the recovery flow is on screen. */
 export type RecoverStep = 'code' | 'who' | 'pin' | 'again';
 
 export type Mode =
@@ -59,26 +13,7 @@ export type Mode =
   | { kind: 'who'; typed: string }
   /** Typing the PIN. */
   | { kind: 'pin'; person: PersonView; digits: string }
-  /**
-   * **The recovery flow, as four steps rather than one screen.**
-   *
-   * The owner, 2026-08-22: *"Forgotton pin also not working, i typed recovery
-   * code, but cant even type new pin."* That was exact, and the cause was
-   * structural: this mode held the code, the person and the new PIN all at
-   * once, and the screen drew them all at once. The recovery-code box took
-   * focus, so every digit typed went into the box; the new PIN had no field and
-   * no keypad, only a row of bullets reporting a number there was no way to
-   * enter. The flow could be started and could never be finished.
-   *
-   * One thing at a time fixes that rather than patching it: while `step` is
-   * `'pin'` or `'again'` there is no text box on screen at all, so a digit has
-   * nowhere to go except here.
-   *
-   * `again` is the new PIN typed a second time. A PIN goes in as dots and is
-   * stored scrambled, so one slipped finger is otherwise discovered by somebody
-   * who then cannot sign in — which is the exact situation this flow exists to
-   * get out of. Set-up already asks twice (`FirstRun`); so does this.
-   */
+  /** The recovery flow, as four steps rather than one screen. */
   | {
       kind: 'recover';
       step: RecoverStep;
@@ -93,12 +28,7 @@ export interface State {
   mode: Mode;
   /** Who can sign in — everybody active who has a PIN. */
   people: readonly PersonView[];
-  /**
-   * **Who the recovery code may set a PIN for.** Rust's list, not a filter of
-   * `people` — see `LockState::recoverable`. A manager who has no PIN is on
-   * this list and not on that one, and they are exactly the person who needs
-   * the recovery code most.
-   */
+  /** Who the recovery code may set a PIN for. */
   recoverable: readonly PersonView[];
   /** Whether this shop has a recovery code to offer at all. */
   canRecover: boolean;
@@ -106,7 +36,7 @@ export interface State {
   problem: string | null;
   /** True while a command is in flight — the pad stops accepting digits. */
   busy: boolean;
-  /** Commands the screen has not performed yet. See the note above. */
+  /** Commands the screen has not performed yet. */
   pending: readonly Queued[];
   seq: number;
 }
@@ -133,7 +63,7 @@ export type Event =
   | { kind: 'typed'; text: string }
   /** Backspace. One digit, or one character of a staff code. */
   | { kind: 'back' }
-  /** *Somebody else*, *Back*. Leaves the step whole — never a digit at a time. */
+  /** Somebody else, Back. Leaves the step whole — never a digit at a time. */
   | { kind: 'cancel' }
   | { kind: 'submit' }
   | { kind: 'start-recovery' }
@@ -154,20 +84,7 @@ export function initial(): State {
   };
 }
 
-/*
- * **Who the recovery code is allowed to set a PIN for is not decided here.**
- *
- * There was a `canBeRecovered(people)` in this file that filtered on
- * `staff.manage`. It was deleted rather than kept, because a second copy of a
- * permission rule in TypeScript is how the two halves of a product end up
- * disagreeing and nobody notices the looser one — and this one was already
- * wrong in a way that mattered: it filtered `people`, which is the sign-in
- * list, so a manager with no PIN was invisible to the flow that exists to give
- * them one.
- *
- * Rust computes `LockState::recoverable` from the same rule
- * `recover_with_code_on` enforces, and it arrives as `State.recoverable`.
- */
+/* Who the recovery code is allowed to set a PIN for is not decided here. */
 
 function queue(state: State, command: Command): State {
   const seq = state.seq + 1;
@@ -195,10 +112,6 @@ function recovery(): Mode {
 export function reduce(state: State, event: Event): State {
   switch (event.kind) {
     case 'people': {
-      // **T3, on the lock screen.** Somebody who was chosen and has since been
-      // suspended must not be left standing in front of a pad that can never
-      // succeed — deactivating takes effect on the next action, not the next
-      // shift.
       const mode = state.mode;
       const carried = {
         ...state,
@@ -206,16 +119,16 @@ export function reduce(state: State, event: Event): State {
         recoverable: event.recoverable,
         canRecover: event.canRecover,
       };
-      // Which list somebody has to still be on depends on what they are in the
-      // middle of: signing in, or having a PIN set for them.
+      // Which list somebody has to still be on depends on what they are in the middle of:
+      // signing in, or having a PIN set for them.
       const gone = (id: string, from: readonly PersonView[]) =>
         !from.some((p) => p.id === id);
 
       if (mode.kind === 'pin' && gone(mode.person.id, event.people)) {
         return { ...carried, mode: { kind: 'who', typed: '' } };
       }
-      // The same fact inside the recovery flow: somebody suspended halfway
-      // through a reset must not still be the person a new PIN is written to.
+      // The same fact inside the recovery flow: somebody suspended halfway through a reset must
+      // not still be the person a new PIN is written to.
       if (mode.kind === 'recover' && mode.person && gone(mode.person.id, event.recoverable)) {
         return {
           ...carried,
@@ -227,10 +140,8 @@ export function reduce(state: State, event: Event): State {
     }
 
     case 'choose':
-      // **In the recovery flow, choosing a person means "this new PIN is
-      // theirs"** — not "open the pad for them". Getting this wrong threw the
-      // recovery flow back to the sign-in pad the moment somebody picked who
-      // they were resetting, which is a dead end with a code already typed.
+      // In the recovery flow, choosing a person means "this new PIN is theirs" — not "open the
+      // pad for them".
       if (state.mode.kind === 'recover') {
         return {
           ...state,
@@ -244,8 +155,7 @@ export function reduce(state: State, event: Event): State {
           },
         };
       }
-      // Locked out: the pad does not open at all. Typing a PIN and only then
-      // being told to wait is the version that makes people press harder.
+      // Locked out: the pad does not open at all.
       if (event.person.lockedOut) {
         return { ...state, problem: event.person.lockedOut };
       }
@@ -260,10 +170,7 @@ export function reduce(state: State, event: Event): State {
       if (!/^[0-9]$/.test(event.digit)) return state;
 
       if (state.mode.kind === 'pin') {
-        // **The fifth keypress does nothing.** The owner, 2026-08-22: *"if i
-        // keep pressing number it goes beyond 4 numbers and i could type upto
-        // 8."* The ceiling here used to be `MAX_PIN`, which was eight. It is
-        // the length of a PIN now, so there is no fifth digit to hold.
+        // The fifth keypress does nothing.
         if (state.mode.digits.length >= PIN_DIGITS) return state;
         return {
           ...state,
@@ -298,12 +205,11 @@ export function reduce(state: State, event: Event): State {
       return state;
 
     case 'back': {
-      // Backspace, and only Backspace. One character. See the note at the top
-      // of this file for why no button sends this.
+      // Backspace, and only Backspace.
       if (state.mode.kind === 'pin') {
         if (state.mode.digits === '') {
-          // Backspace on an empty pad goes back to the list, which is how
-          // somebody who tapped the wrong name gets out without the mouse.
+          // Backspace on an empty pad goes back to the list, which is how somebody who tapped
+          // the wrong name gets out without the mouse.
           return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
         }
         return {
@@ -326,16 +232,15 @@ export function reduce(state: State, event: Event): State {
           if (current === '') return reduce(state, { kind: 'cancel' });
           return { ...state, mode: { ...mode, [field]: current.slice(0, -1) } };
         }
-        // On the code box the browser is already editing the text itself, and
-        // on the list there is nothing to rub out.
+        // On the code box the browser is already editing the text itself, and on the list there
+        // is nothing to rub out.
         return state;
       }
       return state;
     }
 
     case 'cancel': {
-      // **One tap leaves, whatever has been typed.** The whole reason this is
-      // not `back`.
+      // One tap leaves, whatever has been typed.
       if (state.busy) return state;
 
       if (state.mode.kind === 'recover') {
@@ -350,13 +255,7 @@ export function reduce(state: State, event: Event): State {
         if (step === null) {
           return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
         }
-        // **Stepping back clears both pads, always.** A half-typed PIN sitting
-        // behind a Back button is the same hazard the sign-in pad clears on a
-        // failure — and going back to the list means the PIN may be about to
-        // belong to somebody else entirely, so keeping it is worse than idle.
-        // The code survives, because walking back to it is how a mistyped
-        // character gets fixed and throwing it away would be the dead end this
-        // flow was in to begin with.
+        // Stepping back clears both pads, always.
         return {
           ...state,
           problem: null,
@@ -371,9 +270,9 @@ export function reduce(state: State, event: Event): State {
     case 'submit': {
       if (state.busy) return state;
       if (state.mode.kind === 'who') {
-        // **Type a staff code and press Enter** — the same trick as the
-        // billing screen's table numbers, and for the same reason: a keyboard
-        // person should never have to reach for the list.
+        // Type a staff code and press Enter — the same trick as the billing screen's table
+        // numbers, and for the same reason: a keyboard person should never have to reach for
+        // the list.
         const wanted = state.mode.typed.trim().toLowerCase();
         if (wanted === '') return state;
         const person = state.people.find(
@@ -387,9 +286,8 @@ export function reduce(state: State, event: Event): State {
 
       if (state.mode.kind === 'pin') {
         if (state.mode.digits.length !== PIN_DIGITS) {
-          // Said here rather than after a round trip, because it is a fact
-          // about the shape and not about the PIN. The refusal that matters —
-          // "wrong PIN" — is always Rust's.
+          // Said here rather than after a round trip, because it is a fact about the shape and
+          // not about the PIN.
           return { ...state, problem: `A PIN is ${PIN_DIGITS} digits.` };
         }
         return queue(state, {
@@ -423,12 +321,7 @@ export function reduce(state: State, event: Event): State {
         busy: false,
         pending: [],
         problem: event.message,
-        // The digits are cleared on a failure. Leaving them would let somebody
-        // walk up to a pad with three of four digits already typed.
-        //
-        // A failed recovery goes back to the code box rather than to the pad:
-        // what Rust refused is nearly always the code, and the code is the one
-        // thing in this flow somebody can get wrong off a printed slip.
+        // The digits are cleared on a failure.
         mode:
           state.mode.kind === 'pin'
             ? { ...state.mode, digits: '' }
@@ -450,21 +343,14 @@ export function reduce(state: State, event: Event): State {
   }
 }
 
-/**
- * **The recovery flow's Next button**, which asks a different question at every
- * step. Split out because four steps' worth of checks inside the `submit` arm is
- * how the old single-screen version got unreadable enough to hide the fact that
- * it could not be completed at all.
- */
+/** The recovery flow's Next button, which asks a different question at every step. */
 function submitRecovery(state: State, mode: Extract<Mode, { kind: 'recover' }>): State {
   switch (mode.step) {
     case 'code': {
       if (mode.code.trim() === '') {
         return { ...state, problem: 'Type the recovery code from the printed slip.' };
       }
-      // The code itself is NOT checked here. Only Rust holds the hash, and a
-      // screen that could decide a code was wrong is a screen that could decide
-      // one was right.
+      // The code itself is NOT checked here.
       if (state.recoverable.length === 0) {
         return {
           ...state,
@@ -492,8 +378,8 @@ function submitRecovery(state: State, mode: Extract<Mode, { kind: 'recover' }>):
         return { ...state, problem: `A PIN is ${PIN_DIGITS} digits.` };
       }
       if (mode.again !== mode.newPin) {
-        // Back to the first pad with both cleared, rather than leaving one of
-        // two disagreeing PINs standing for the next attempt to agree with.
+        // Back to the first pad with both cleared, rather than leaving one of two disagreeing
+        // PINs standing for the next attempt to agree with.
         return {
           ...state,
           problem: 'The two PINs are not the same. Type the new one again.',
@@ -519,9 +405,7 @@ function key(state: State, pressed: string): State {
       return reduce(state, { kind: 'digit', digit: pressed });
     }
     if (state.mode.kind === 'recover') {
-      // Only the two pads take loose digits. On the code step the box has focus
-      // and the browser is already typing into it; on the list a digit means
-      // nothing.
+      // Only the two pads take loose digits.
       if (state.mode.step === 'pin' || state.mode.step === 'again') {
         return reduce(state, { kind: 'digit', digit: pressed });
       }
@@ -536,14 +420,12 @@ function key(state: State, pressed: string): State {
   if (pressed === 'Enter') return reduce(state, { kind: 'submit' });
   if (pressed === 'Backspace') return reduce(state, { kind: 'back' });
   if (pressed === 'Escape') {
-    // Escape clears what has been typed. It does NOT close the lock screen:
-    // there is nothing behind it, and a lock somebody can press Escape past is
-    // not a lock.
+    // Escape clears what has been typed.
     if (state.mode.kind === 'pin') {
       return { ...state, mode: { ...state.mode, digits: '' }, problem: null };
     }
-    // Out of the recovery flow, not one step back — Escape has always meant
-    // "clear what I typed", and a half-finished reset is not a thing to keep.
+    // Out of the recovery flow, not one step back — Escape has always meant "clear what I
+    // typed", and a half-finished reset is not a thing to keep.
     return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
   }
   return state;

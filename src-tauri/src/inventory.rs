@@ -1,27 +1,11 @@
-//! **The stock book, as a screen sees it** — P25, scope 4.2 to 4.9.
-//!
-//! Bodies over `&App` (D46). Nothing here computes: every figure, every unit
-//! conversion and every sentence is made in Rust and crosses as a string (R8,
-//! D39). A screen that divided a quantity by a pack size would be a second
-//! answer to D108, and the two would disagree the first time a shop corrected a
-//! bag.
-//!
-//! # What is gated and what is not
-//!
-//! `Feature::Inventory` guards the SCREENS. It is never consulted on the settle
-//! path — a shop whose licence lapsed on Tuesday must not have Wednesday's
-//! stock quietly stop moving, because the day they pay again the book would be
-//! a week wrong with nothing saying so. Deducting costs nothing; looking is
-//! what is sold.
+//! The stock book, as a screen sees it.
 
 use std::collections::BTreeMap;
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
 use mb_core::recipe::{Recipe, RecipeLine, RecipeOwner};
-use mb_core::{
-    Dimension, ItemId, MaterialId, Money, ModifierId, Qty, Timestamp, UnitCost, Units,
-};
+use mb_core::{Dimension, ItemId, MaterialId, ModifierId, Money, Qty, Timestamp, UnitCost, Units};
 use mb_db::repo::stock::{Material, Movement, MovementKind};
 use mb_license::Feature;
 use serde::{Deserialize, Serialize};
@@ -34,9 +18,7 @@ use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // What the screen sees.
-// ---------------------------------------------------------------------------
 
 /// One unit a material can be spoken about in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -44,8 +26,8 @@ use crate::words::{self, UiError, UiResult};
 #[serde(rename_all = "camelCase")]
 pub struct UnitView {
     pub name: String,
-    /// Thousandths of the base unit, as a string the screen never does
-    /// arithmetic on — it round-trips back when the shop saves.
+    /// Thousandths of the base unit, as a string the screen never does arithmetic on — it
+    /// round-trips back when the shop saves.
     pub base_per_unit: String,
     /// A kilo is not the shop's to redefine.
     pub is_standard: bool,
@@ -60,15 +42,14 @@ pub struct MaterialView {
     pub name: String,
     /// `weight`, `volume` or `count`.
     pub dimension: String,
-    /// "Weight".
     pub dimension_label: String,
     /// "g", "ml", "piece".
     pub base_unit: String,
     pub category: String,
-    /// D116 — where you buy it. The buy list groups by this.
+    /// Where you buy it.
     pub buy_from: String,
-    /// **"1.712 bag"** — the balance in the biggest unit one of it fits into,
-    /// which is what a person would say (D108).
+    /// "1.712 bag" — the balance in the biggest unit one of it fits into, which is what a
+    /// person would say.
     pub on_hand: String,
     /// The same figure in base units, for a screen that wants to sort.
     pub on_hand_base: String,
@@ -78,7 +59,7 @@ pub struct MaterialView {
     pub cost: String,
     /// "changed 3 days ago", or "never priced" — half of whether to believe it.
     pub cost_when: String,
-    /// D115 — **"never counted"** when nobody has.
+    /// "never counted" when nobody has.
     pub last_counted: String,
     pub is_low: bool,
     /// "Buy 2 bag" — the shortfall in the pack the shop buys in.
@@ -87,10 +68,10 @@ pub struct MaterialView {
     pub reorder_qty: String,
     pub is_perishable: bool,
     pub shelf_life_days: Option<u32>,
-    /// "has not moved in 6 days" — D117's warning, empty when there is none.
+    /// "has not moved in 6 days".
     pub warning: String,
     pub is_active: bool,
-    /// True when this is a made material: it has a recipe of its own (D111).
+    /// True when this is a made material: it has a recipe of its own.
     pub is_made: bool,
     pub units: Vec<UnitView>,
     pub purchase_unit: String,
@@ -106,17 +87,17 @@ pub struct MaterialView {
 pub struct RecipeLineView {
     pub material_id: String,
     pub material: String,
-    /// **D109** — what the person typed, shown back exactly as typed.
+    /// What the person typed, shown back exactly as typed.
     pub qty: String,
     pub unit: String,
     pub units: Vec<UnitView>,
-    /// D110 — how much of it survives. 100 is the everyday value.
+    /// How much of it survives.
     pub yield_percent: u32,
     /// "222 g" — what actually leaves the shelf, once the yield is applied.
     pub issued: String,
     pub cost: MoneyView,
-    /// True when this material has never been priced, so the cost is a lie by
-    /// omission and the screen says so on the line.
+    /// True when this material has never been priced, so the cost is a lie by omission and the
+    /// screen says so on the line.
     pub is_unpriced: bool,
 }
 
@@ -135,8 +116,6 @@ pub struct RecipeView {
     pub batch_unit: String,
     pub lines: Vec<RecipeLineView>,
     pub cost: MoneyView,
-    /// **What P13's typed cost price says**, beside what the recipe says. D119
-    /// — the gap between the two is itself the finding, so both are shown.
     pub typed_cost: Option<MoneyView>,
     pub sells_for: Option<MoneyView>,
     /// "62% margin", or empty when there is no price to compare with.
@@ -164,8 +143,7 @@ pub struct StockMovementView {
     pub who: String,
     pub reason: String,
     pub note: String,
-    /// D111 — this happened because a sale needed it and nobody had recorded
-    /// making any.
+    /// This happened because a sale needed it and nobody had recorded making any.
     pub was_automatic: bool,
 }
 
@@ -176,7 +154,7 @@ pub struct StockMovementView {
 pub struct ProblemView {
     pub id: String,
     pub kind: String,
-    /// **The whole sentence** — D100: an unhealthy row carries its own fix.
+    /// The whole sentence.
     pub sentence: String,
     pub times: u32,
     pub when: String,
@@ -195,20 +173,13 @@ pub struct VarianceView {
     pub percent: String,
     pub value: MoneyView,
     pub is_over: bool,
-    /// **D115** — "never counted", and the screen says it rather than implying
-    /// the figure has been checked against a shelf.
+    /// "never counted", and the screen says it rather than implying the figure has been checked
+    /// against a shelf.
     pub counted: String,
     pub is_unchecked: bool,
 }
 
-/// **What a dish costs to make, and what it earns** — scope 4.9.
-///
-/// **D119 — both cost figures are here on purpose.** Scope 4.1 shipped at P13:
-/// an item carries a typed cost price and reports use it. This session produces
-/// a second, better answer to the same question, and quietly replacing the
-/// first would hide the most valuable thing in the module: **the gap between
-/// what an owner thinks a dish costs and what its recipe says it costs is
-/// itself the finding.**
+/// What a dish costs to make, and what it earns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -217,18 +188,17 @@ pub struct DishCostView {
     pub name: String,
     pub sells_for: MoneyView,
     pub has_recipe: bool,
-    /// What the recipe says, or ₹0.00 when there is no recipe — and
-    /// `has_recipe` is how a screen tells the two apart, because a dish nobody
-    /// has costed is not a dish that costs nothing.
+    /// What the recipe says, or ₹0.00 when there is no recipe — and `has_recipe` is how a
+    /// screen tells the two apart, because a dish nobody has costed is not a dish that costs
+    /// nothing.
     pub recipe_cost: MoneyView,
-    /// What P13's typed cost price says.
     pub typed_cost: Option<MoneyView>,
     /// "62.5% margin", or empty.
     pub margin: String,
-    /// **"₹8.20 more than you thought"** — the gap, said out loud, or empty.
+    /// "₹8.20 more than you thought" — the gap, said out loud, or empty.
     pub gap: String,
-    /// Some material in this recipe has never been priced, so the cost is short
-    /// by an unknown amount and the screen must not present it as final.
+    /// Some material in this recipe has never been priced, so the cost is short by an unknown
+    /// amount and the screen must not present it as final.
     pub is_incomplete: bool,
 }
 
@@ -238,9 +208,9 @@ pub struct DishCostView {
 #[serde(rename_all = "camelCase")]
 pub struct InventoryView {
     pub materials: Vec<MaterialView>,
-    /// Scope 4.9 — every dish on the menu, costed from its recipe.
+    /// Every dish on the menu, costed from its recipe.
     pub dishes: Vec<DishCostView>,
-    /// Scope 4.6 — grouped by where you buy it (D116).
+    /// Grouped by where you buy it.
     pub buy_list: Vec<BuyGroupView>,
     pub problems: Vec<ProblemView>,
     pub movements: Vec<StockMovementView>,
@@ -249,9 +219,7 @@ pub struct InventoryView {
     pub total_value: MoneyView,
     /// "12 materials · 3 low · 1 problem" — the summary, made here.
     pub summary: String,
-    /// Empty when the balance cache agrees with the ledger, which it should
-    /// always. D114: a cache nobody verifies is a stored balance with extra
-    /// words.
+    /// Empty when the balance cache agrees with the ledger, which it should always.
     pub cache_warning: String,
     pub may_manage: bool,
     pub may_waste: bool,
@@ -262,8 +230,8 @@ pub struct InventoryView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct BuyGroupView {
-    /// "Metro", "The milk van", or "Not said" when the shop has not filled it
-    /// in — which is a real answer and not an empty heading.
+    /// "Metro", "The milk van", or "Not said" when the shop has not filled it in — which is a
+    /// real answer and not an empty heading.
     pub buy_from: String,
     pub lines: Vec<BuyLineView>,
 }
@@ -290,9 +258,7 @@ pub struct WastageReasonView {
     pub text: String,
 }
 
-// ---------------------------------------------------------------------------
 // What a screen sends back.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -303,8 +269,7 @@ pub struct MaterialEdit {
     pub dimension: String,
     pub category: String,
     pub buy_from: String,
-    /// Typed in the shop's own pack, with the unit beside it. Converted here,
-    /// never in the screen (R8, D109).
+    /// Typed in the shop's own pack, with the unit beside it.
     pub reorder_level: String,
     pub reorder_qty: String,
     pub reorder_unit: String,
@@ -321,8 +286,8 @@ pub struct MaterialEdit {
 #[serde(rename_all = "camelCase")]
 pub struct PackEdit {
     pub name: String,
-    /// How many of the material's base unit one of these holds — "25000" for a
-    /// 25 kg bag of rice measured in grams, or "25" with `unit` = "kg".
+    /// How many of the material's base unit one of these holds — "25000" for a 25 kg bag of
+    /// rice measured in grams, or "25" with `unit` = "kg".
     pub size: String,
     pub unit: String,
 }
@@ -335,14 +300,13 @@ pub struct MovementEdit {
     pub material_id: String,
     /// `opening`, `purchase`, `wastage`, `adjustment`, `production_in`.
     pub kind: String,
-    /// Typed in `unit`. A leading minus takes stock away, which is what an
-    /// adjustment downwards is; a wastage is always negative whatever is typed.
+    /// Typed in `unit`. A leading minus takes stock away, which is what an adjustment downwards
+    /// is; a wastage is always negative whatever is typed.
     pub qty: String,
     pub unit: String,
     pub reason_id: Option<String>,
     pub note: Option<String>,
-    /// **The price per PACK**, because that is what a shop knows: "a bag is
-    /// ₹1,500". Converted to a cost per base unit here (D118).
+    /// The price per PACK, because that is what a shop knows: "a bag is ₹1,500".
     pub cost: Option<String>,
 }
 
@@ -367,17 +331,15 @@ pub struct RecipeLineEdit {
     pub yield_percent: u32,
 }
 
-// ---------------------------------------------------------------------------
 // Reading it.
-// ---------------------------------------------------------------------------
 
 pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryView> {
     let who = guard::require(app, Permission::InventoryView)?;
     crate::licensing::gate(app, Feature::Inventory)?;
     let at = now();
 
-    let (on_hand, movements, problems, reasons, recipes, drift, items, costs) = app
-        .with_shop(|shop| {
+    let (on_hand, movements, problems, reasons, recipes, drift, items, costs) =
+        app.with_shop(|shop| {
             shop.db
                 .transaction(|tx| {
                     let repos = mb_db::Repos::new(tx);
@@ -388,13 +350,12 @@ pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryVi
                     let problems = stock.problems(OUTLET)?;
                     let reasons = repos.corrections().reasons(OUTLET, "wastage")?;
                     let recipes = stock.recipes(OUTLET)?;
-                    // **D114's check, on every open.** Summing the ledger for a
-                    // handful of materials is cheap; being wrong about stock for
-                    // a year is not.
                     let drift = stock.drifted(OUTLET)?;
                     let items = repos.menu().list_items(OUTLET, false)?;
                     let costs = stock.costs(OUTLET)?;
-                    Ok((on_hand, movements, problems, reasons, recipes, drift, items, costs))
+                    Ok((
+                        on_hand, movements, problems, reasons, recipes, drift, items, costs,
+                    ))
                 })
                 .map_err(|e| words::from_db(&e))
         })?;
@@ -429,9 +390,10 @@ pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryVi
         ));
     }
 
-    // Scope 4.9 — every dish, costed from its recipe, with D119's gap beside it.
-    let names: BTreeMap<MaterialId, String> =
-        on_hand.iter().map(|h| (h.material.id.clone(), h.material.name.clone())).collect();
+    let names: BTreeMap<MaterialId, String> = on_hand
+        .iter()
+        .map(|h| (h.material.id.clone(), h.material.name.clone()))
+        .collect();
     let dishes: Vec<DishCostView> = items
         .iter()
         .map(|item| {
@@ -456,9 +418,17 @@ pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryVi
         dishes,
         summary: format!(
             "{} · {} · {}",
-            words::count(i64::from(crate::ipc::count(materials.len() as i64)), "material", "materials"),
+            words::count(
+                i64::from(crate::ipc::count(materials.len() as i64)),
+                "material",
+                "materials"
+            ),
             words::count(i64::from(low), "low", "low"),
-            words::count(i64::from(crate::ipc::count(problems.len() as i64)), "problem", "problems"),
+            words::count(
+                i64::from(crate::ipc::count(problems.len() as i64)),
+                "problem",
+                "problems"
+            ),
         ),
         materials,
         problems: problems
@@ -474,7 +444,10 @@ pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryVi
         movements: movements.iter().map(movement_view).collect(),
         wastage_reasons: reasons
             .iter()
-            .map(|r| WastageReasonView { id: r.id.clone(), text: r.text.clone() })
+            .map(|r| WastageReasonView {
+                id: r.id.clone(),
+                text: r.text.clone(),
+            })
             .collect(),
         total_value: total.into(),
         cache_warning: if drift.is_empty() {
@@ -482,7 +455,11 @@ pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryVi
         } else {
             format!(
                 "{} do not match the movement list. Press Rebuild to work them out again from the movements.",
-                words::count(i64::from(crate::ipc::count(drift.len() as i64)), "material", "materials"),
+                words::count(
+                    i64::from(crate::ipc::count(drift.len() as i64)),
+                    "material",
+                    "materials"
+                ),
             )
         },
         may_manage: who.can(Permission::InventoryManage),
@@ -490,7 +467,6 @@ pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryVi
         may_adjust: who.can(Permission::StockAdjust),
     })
 }
-
 
 fn material_view(
     held: &mb_db::repo::stock::OnHand,
@@ -513,14 +489,14 @@ fn material_view(
         on_hand_base: held.base_qty.to_string(),
         is_negative: held.base_qty.is_negative(),
         value: held.value().into(),
-        // **Priced in the unit a shopkeeper says out loud** — the pack they buy
-        // it in when they have named one, and otherwise the dimension's price
-        // unit. Not the base unit: "₹0.04 per g" is what the base unit produces
-        // and it is not a sentence anybody uses.
+        // Priced in the unit a shopkeeper says out loud — the pack they buy it in when they
+        // have named one, and otherwise the dimension's price unit.
         cost: cost_sentence(
             m.avg_cost,
             &units,
-            m.purchase_unit.as_deref().unwrap_or_else(|| m.dimension.price_unit()),
+            m.purchase_unit
+                .as_deref()
+                .unwrap_or_else(|| m.dimension.price_unit()),
         ),
         cost_when: match m.cost_changed_at {
             Some(when) => format!("changed {}", words::when(when)),
@@ -528,8 +504,7 @@ fn material_view(
         },
         last_counted: match m.last_counted_at {
             Some(when) => words::when(when),
-            // **D115.** A blank here would read as "recently"; this reads as
-            // what it is.
+            // A blank here would read as "recently"; this reads as what it is.
             None => "never counted".to_owned(),
         },
         is_low: held.is_low(),
@@ -559,9 +534,7 @@ fn material_view(
     }
 }
 
-/// **D117 — a property that warns.** Not batch tracking: a perishable material
-/// that has not moved for longer than it keeps is a sentence an owner can act
-/// on, and it needs nothing a small kitchen will not actually record.
+/// A property that warns.
 #[allow(
     clippy::integer_division,
     reason = "milliseconds into whole days — a remainder is not a loss on a clock"
@@ -603,25 +576,24 @@ fn cost_sentence(cost: UnitCost, units: &Units, unit: &str) -> String {
     }
 }
 
-/// **What to say when a quantity is shown**, and it is never the base unit
-/// unless the base unit is what a person would say.
-///
-/// A shop that has named a pack is counted in it — "2 bag". A shop that has not
-/// gets the biggest unit one of it fits into — "5 kg", never "5000 g". Found by
-/// looking at the buy list, which was telling somebody going to the market to
-/// bring five thousand grams of paneer.
+/// What to say when a quantity is shown, and it is never the base unit unless the base unit is
+/// what a person would say.
 fn in_purchase_unit(base: Qty, material: &Material, units: &Units) -> String {
-    match material.purchase_unit.as_deref().and_then(|name| units.find(name)) {
-        Some(pack) => minus(&pack.from_base(base).map_or_else(|_| base.to_string(), |q| pack.say(q))),
+    match material
+        .purchase_unit
+        .as_deref()
+        .and_then(|name| units.find(name))
+    {
+        Some(pack) => minus(
+            &pack
+                .from_base(base)
+                .map_or_else(|_| base.to_string(), |q| pack.say(q)),
+        ),
         None => minus(&units.say(base)),
     }
 }
 
-/// **A minus sign, not a hyphen** (UI_GUIDELINES §6).
-///
-/// Done here and not in `Qty`'s `Display`, because that same `Display` prints a
-/// quantity on a thermal receipt through `mb-print`, whose font is an ASCII
-/// bitmap. A `−` there would come out as a blank on real paper.
+/// A minus sign, not a hyphen.
 fn minus(said: &str) -> String {
     match said.strip_prefix('-') {
         Some(rest) => format!("−{rest}"),
@@ -629,16 +601,19 @@ fn minus(said: &str) -> String {
     }
 }
 
-/// Scope 4.6 — grouped by where you buy it, counted in the pack you buy in.
+/// Grouped by where you buy it, counted in the pack you buy in.
 fn buy_list(on_hand: &[mb_db::repo::stock::OnHand]) -> Vec<BuyGroupView> {
     let mut groups: BTreeMap<String, Vec<BuyLineView>> = BTreeMap::new();
-    for held in on_hand.iter().filter(|h| h.is_low() && h.material.is_active) {
+    for held in on_hand
+        .iter()
+        .filter(|h| h.is_low() && h.material.is_active)
+    {
         let m = &held.material;
         let units = m.units();
         let have = minus(&units.say(held.base_qty));
         let buy = in_purchase_unit(m.reorder_qty, m, &units);
-        // "Not said" rather than an empty heading, because a shop that has not
-        // filled this in still has to be able to read its own list.
+        // "Not said" rather than an empty heading, because a shop that has not filled this in
+        // still has to be able to read its own list.
         let key = if m.buy_from.trim().is_empty() {
             "Not said".to_owned()
         } else {
@@ -652,16 +627,17 @@ fn buy_list(on_hand: &[mb_db::repo::stock::OnHand]) -> Vec<BuyGroupView> {
             buy,
         });
     }
-    groups.into_iter().map(|(buy_from, lines)| BuyGroupView { buy_from, lines }).collect()
+    groups
+        .into_iter()
+        .map(|(buy_from, lines)| BuyGroupView { buy_from, lines })
+        .collect()
 }
 
 fn movement_view(row: &mb_db::repo::stock::MovementRow) -> StockMovementView {
     StockMovementView {
         id: row.id.clone(),
         material: row.material_name.clone(),
-        // **Name what it fed.** "Used to make something" leaves the reader to
-        // work out why the tomato moved, which is the whole reason
-        // `produced_for` is a column.
+        // Name what it fed.
         kind: match (row.kind, row.produced_for.as_deref()) {
             (MovementKind::ProductionOut, Some(made)) => format!("Used to make {made}"),
             _ => row.kind.label().to_owned(),
@@ -671,26 +647,30 @@ fn movement_view(row: &mb_db::repo::stock::MovementRow) -> StockMovementView {
         takes_out: row.base_qty.is_negative(),
         value: row.total_cost.abs().into(),
         when: words::when(row.at),
-        who: row.staff.as_ref().map(ToString::to_string).unwrap_or_default(),
+        who: row
+            .staff
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
         reason: row.reason.clone().unwrap_or_default(),
         note: row.note.clone().unwrap_or_default(),
         was_automatic: row.was_automatic,
     }
 }
 
-/// "+2 bag", "−180 g". A minus sign, not a hyphen (UI_GUIDELINES §6).
+/// "+2 bag", "−180 g".
 fn signed(qty: Qty, unit: &str) -> String {
-    let unit = if unit.is_empty() { String::new() } else { format!(" {unit}") };
+    let unit = if unit.is_empty() {
+        String::new()
+    } else {
+        format!(" {unit}")
+    };
     if qty.is_negative() {
         format!("−{}{unit}", qty.abs())
     } else {
         format!("+{qty}{unit}")
     }
 }
-
-// ---------------------------------------------------------------------------
-// Recipes.
-// ---------------------------------------------------------------------------
 
 pub fn recipe_on(app: &App, owner_kind: String, owner_id: String) -> UiResult<RecipeView> {
     guard::require(app, Permission::InventoryView)?;
@@ -705,8 +685,10 @@ pub fn recipe_on(app: &App, owner_kind: String, owner_id: String) -> UiResult<Re
                 let recipes = stock.recipes(OUTLET)?;
                 let costs = stock.costs(OUTLET)?;
                 let materials = stock.materials(OUTLET, true)?;
-                let names: BTreeMap<MaterialId, String> =
-                    materials.iter().map(|m| (m.id.clone(), m.name.clone())).collect();
+                let names: BTreeMap<MaterialId, String> = materials
+                    .iter()
+                    .map(|m| (m.id.clone(), m.name.clone()))
+                    .collect();
                 let costed = mb_core::cost_of(&owner, &recipes, &costs, &names);
 
                 let (typed_cost, sells_for, owner_name) = match &owner {
@@ -755,17 +737,13 @@ fn build_recipe_view(
     typed_cost: Option<Money>,
     sells_for: Option<Money>,
 ) -> RecipeView {
-    let by_id: BTreeMap<&str, &Material> =
-        materials.iter().map(|m| (m.id.as_str(), m)).collect();
+    let by_id: BTreeMap<&str, &Material> = materials.iter().map(|m| (m.id.as_str(), m)).collect();
 
     let mut lines = Vec::new();
     if let Some(recipe) = recipe {
         for (n, line) in recipe.lines.iter().enumerate() {
             let material = by_id.get(line.material.as_str());
-            let units = material.map_or_else(
-                || Units::standard(Dimension::Weight),
-                |m| m.units(),
-            );
+            let units = material.map_or_else(|| Units::standard(Dimension::Weight), |m| m.units());
             let costed_line = costed.lines.get(n);
             lines.push(RecipeLineView {
                 material_id: line.material.to_string(),
@@ -832,7 +810,9 @@ fn build_recipe_view(
             .map(|id| {
                 format!(
                     "{} has never been priced, so it counts as free here.",
-                    by_id.get(id.as_str()).map_or_else(|| id.to_string(), |m| m.name.clone())
+                    by_id
+                        .get(id.as_str())
+                        .map_or_else(|| id.to_string(), |m| m.name.clone())
                 )
             })
             .collect(),
@@ -853,9 +833,7 @@ fn owner_from(kind: &str, id: &str) -> UiResult<RecipeOwner> {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Writing it.
-// ---------------------------------------------------------------------------
 
 pub fn save_material_on(app: &App, edit: MaterialEdit) -> UiResult<InventoryView> {
     let who = guard::require(app, Permission::InventoryManage)?;
@@ -864,7 +842,10 @@ pub fn save_material_on(app: &App, edit: MaterialEdit) -> UiResult<InventoryView
     let day = today(at);
 
     let dimension = Dimension::from_tag(&edit.dimension).ok_or_else(|| {
-        UiError::new("material.dimension", "Choose whether it is weighed, poured or counted.")
+        UiError::new(
+            "material.dimension",
+            "Choose whether it is weighed, poured or counted.",
+        )
     })?;
     if edit.name.trim().is_empty() {
         return Err(UiError::new("material.name", "Give the material a name."));
@@ -881,16 +862,24 @@ pub fn save_material_on(app: &App, edit: MaterialEdit) -> UiResult<InventoryView
             UiError::new("material.pack", format!("`{}` is not a size.", pack.size))
                 .with_detail(e.to_string())
         })?;
-        // A pack may be described in another unit — "a bag is 25 kg" — so the
-        // conversion happens here and the stored number is base units (D108).
-        let base = units.to_base(typed, unit_or_base(&pack.unit, dimension)).map_err(|e| {
-            UiError::new("material.pack", format!("`{}` is not a unit.", pack.unit))
+        // A pack may be described in another unit — "a bag is 25 kg" — so the conversion
+        // happens here and the stored number is base units.
+        let base = units
+            .to_base(typed, unit_or_base(&pack.unit, dimension))
+            .map_err(|e| {
+                UiError::new("material.pack", format!("`{}` is not a unit.", pack.unit))
+                    .with_detail(e.to_string())
+            })?;
+        units = units
+            .clone()
+            .with_pack(pack.name.trim(), base)
+            .map_err(|e| {
+                UiError::new(
+                    "material.pack",
+                    format!("`{}` is already a unit here.", pack.name),
+                )
                 .with_detail(e.to_string())
-        })?;
-        units = units.clone().with_pack(pack.name.trim(), base).map_err(|e| {
-            UiError::new("material.pack", format!("`{}` is already a unit here.", pack.name))
-                .with_detail(e.to_string())
-        })?;
+            })?;
         packs.push((pack.name.trim().to_owned(), base));
     }
 
@@ -901,12 +890,18 @@ pub fn save_material_on(app: &App, edit: MaterialEdit) -> UiResult<InventoryView
     let existing = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                mb_db::Repos::new(tx).stock().material(OUTLET, &MaterialId::new(edit.id.clone()))
+                mb_db::Repos::new(tx)
+                    .stock()
+                    .material(OUTLET, &MaterialId::new(edit.id.clone()))
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    let mut material = Material::new(MaterialId::new(edit.id.clone()), edit.name.trim(), dimension);
+    let mut material = Material::new(
+        MaterialId::new(edit.id.clone()),
+        edit.name.trim(),
+        dimension,
+    );
     material.category = edit.category.trim().to_owned();
     material.buy_from = edit.buy_from.trim().to_owned();
     material.reorder_level = level;
@@ -917,8 +912,8 @@ pub fn save_material_on(app: &App, edit: MaterialEdit) -> UiResult<InventoryView
     material.packs = packs;
     material.purchase_unit = non_empty(&edit.purchase_unit);
     material.recipe_unit = non_empty(&edit.recipe_unit);
-    // **The average cost is the ledger's answer (D118)** and is carried over
-    // untouched, never taken from the screen.
+    // The average cost is the ledger's answer and is carried over untouched, never taken from
+    // the screen.
     if let Some(before) = &existing {
         material.avg_cost = before.avg_cost;
         material.cost_changed_at = before.cost_changed_at;
@@ -931,16 +926,22 @@ pub fn save_material_on(app: &App, edit: MaterialEdit) -> UiResult<InventoryView
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 repos.stock().save_material(OUTLET, &material, at)?;
-                // **R11** — in the same transaction as the thing it records.
+                // In the same transaction as the thing it records.
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::MATERIAL_SAVED, "material")
-                        .about(material.id.to_string())
-                        .with_after(serde_json::json!({
-                            "name": material.name,
-                            "dimension": material.dimension.tag(),
-                            "is_active": material.is_active,
-                        })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::MATERIAL_SAVED,
+                        "material",
+                    )
+                    .about(material.id.to_string())
+                    .with_after(serde_json::json!({
+                        "name": material.name,
+                        "dimension": material.dimension.tag(),
+                        "is_active": material.is_active,
+                    })),
                 )?;
                 Ok(())
             })
@@ -965,9 +966,6 @@ fn margin_of(price: Money, cost: Money, no_recipe: bool) -> String {
     format!("{}.{}% margin", tenths / 10, (tenths % 10).abs())
 }
 
-/// **D119's finding, as a sentence.** The gap between what an owner had a dish
-/// down as and what its recipe actually says — which is the number they bought
-/// this module to see.
 fn gap_of(typed: Option<Money>, cost: Money, no_recipe: bool) -> String {
     if no_recipe {
         return String::new();
@@ -982,17 +980,28 @@ fn gap_of(typed: Option<Money>, cost: Money, no_recipe: bool) -> String {
     if difference.is_positive() {
         format!("{} more than you thought", difference.to_indian_string())
     } else {
-        format!("{} less than you thought", difference.abs().to_indian_string())
+        format!(
+            "{} less than you thought",
+            difference.abs().to_indian_string()
+        )
     }
 }
 
 fn non_empty(s: &str) -> Option<String> {
     let trimmed = s.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }
 
 fn unit_or_base(unit: &str, dimension: Dimension) -> &str {
-    if unit.trim().is_empty() { dimension.base_unit() } else { unit.trim() }
+    if unit.trim().is_empty() {
+        dimension.base_unit()
+    } else {
+        unit.trim()
+    }
 }
 
 fn parse_in(text: &str, units: &Units, unit: &str, what: &str) -> UiResult<Qty> {
@@ -1004,8 +1013,11 @@ fn parse_in(text: &str, units: &Units, unit: &str, what: &str) -> UiResult<Qty> 
             .with_detail(e.to_string())
     })?;
     units.to_base(typed, unit).map_err(|e| {
-        UiError::new("material.unit", format!("`{unit}` is not a unit of this material."))
-            .with_detail(e.to_string())
+        UiError::new(
+            "material.unit",
+            format!("`{unit}` is not a unit of this material."),
+        )
+        .with_detail(e.to_string())
     })
 }
 
@@ -1029,7 +1041,10 @@ pub fn save_recipe_on(app: &App, edit: RecipeEdit) -> UiResult<RecipeView> {
             continue;
         }
         let material = by_id.get(line.material_id.as_str()).ok_or_else(|| {
-            UiError::new("recipe.material", "That material is not in the list any more.")
+            UiError::new(
+                "recipe.material",
+                "That material is not in the list any more.",
+            )
         })?;
         let units = material.units();
         let unit = unit_or_base(&line.unit, material.dimension);
@@ -1041,13 +1056,19 @@ pub fn save_recipe_on(app: &App, edit: RecipeEdit) -> UiResult<RecipeView> {
             .with_detail(e.to_string())
         })?;
         let base = units.to_base(typed, unit).map_err(|e| {
-            UiError::new("recipe.unit", format!("`{unit}` is not a unit of {}.", material.name))
-                .with_detail(e.to_string())
+            UiError::new(
+                "recipe.unit",
+                format!("`{unit}` is not a unit of {}.", material.name),
+            )
+            .with_detail(e.to_string())
         })?;
         if !base.is_positive() {
             return Err(UiError::new(
                 "recipe.qty",
-                format!("A recipe has to use some {}. Type an amount, or remove the line.", material.name),
+                format!(
+                    "A recipe has to use some {}. Type an amount, or remove the line.",
+                    material.name
+                ),
             ));
         }
         if line.yield_percent == 0 || line.yield_percent > 100 {
@@ -1095,21 +1116,31 @@ pub fn save_recipe_on(app: &App, edit: RecipeEdit) -> UiResult<RecipeView> {
         ));
     }
 
-    let recipe = Recipe { owner: owner.clone(), batch_yield: batch, lines };
+    let recipe = Recipe {
+        owner: owner.clone(),
+        batch_yield: batch,
+        lines,
+    };
 
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                // **D75** — a refusal a person must act on is returned as a
-                // value, so the cycle message reaches the screen as itself
-                // rather than as "The shop's data could not be read".
+                // A refusal a person must act on is returned as a value, so the cycle message
+                // reaches the screen as itself rather than as "The shop's data could not be
+                // read".
                 repos.stock().save_recipe(OUTLET, &recipe, at)?;
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::RECIPE_SAVED, "recipe")
-                        .about(format!("{}:{}", recipe.owner.tag(), recipe.owner.subject()))
-                        .with_after(serde_json::json!({ "lines": recipe.lines.len() })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::RECIPE_SAVED,
+                        "recipe",
+                    )
+                    .about(format!("{}:{}", recipe.owner.tag(), recipe.owner.subject()))
+                    .with_after(serde_json::json!({ "lines": recipe.lines.len() })),
                 )?;
                 Ok(())
             })
@@ -1120,11 +1151,7 @@ pub fn save_recipe_on(app: &App, edit: RecipeEdit) -> UiResult<RecipeView> {
     recipe_on(app, edit.owner_kind, edit.owner_id)
 }
 
-/// **D75** — a rule a person must act on becomes the message they read.
-///
-/// `words::from_db` rewrites a storage error into "The shop's data could not be
-/// read", which is right for a corrupt row and wrong for *"this recipe goes
-/// round in circles: Powder → Paste → Masala → Powder"*.
+/// A rule a person must act on becomes the message they read.
 fn refusal(e: &mb_db::DbError) -> UiError {
     match e {
         mb_db::DbError::Invariant(said) => UiError::new("recipe.refused", said.clone()),
@@ -1146,9 +1173,15 @@ pub fn delete_recipe_on(app: &App, owner_kind: String, owner_id: String) -> UiRe
                 repos.stock().delete_recipe(OUTLET, &owner)?;
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::RECIPE_SAVED, "recipe")
-                        .about(format!("{}:{}", owner.tag(), owner.subject()))
-                        .with_after(serde_json::json!({ "deleted": true })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::RECIPE_SAVED,
+                        "recipe",
+                    )
+                    .about(format!("{}:{}", owner.tag(), owner.subject()))
+                    .with_after(serde_json::json!({ "deleted": true })),
                 )?;
                 Ok(())
             })
@@ -1157,19 +1190,23 @@ pub fn delete_recipe_on(app: &App, owner_kind: String, owner_id: String) -> UiRe
     recipe_on(app, owner_kind, owner_id)
 }
 
-/// One movement a person typed: an opening balance, a purchase before P26, a
-/// wastage entry or an adjustment.
 pub fn record_movement_on(app: &App, edit: MovementEdit) -> UiResult<InventoryView> {
-    let MovementEdit { material_id, kind, qty, unit, reason_id, note, cost } = edit;
+    let MovementEdit {
+        material_id,
+        kind,
+        qty,
+        unit,
+        reason_id,
+        note,
+        cost,
+    } = edit;
     let wanted = MovementKind::ALL
         .iter()
         .copied()
         .find(|k| k.tag() == kind)
         .ok_or_else(|| UiError::new("stock.kind", "That is not a kind of stock movement."))?;
 
-    // **Wastage is a lower bar than an adjustment on purpose.** Writing down
-    // that a pan was burnt is a normal evening, and a shop where only the owner
-    // may record it is a shop where nobody does.
+    // Wastage is a lower bar than an adjustment on purpose.
     let permission = match wanted {
         MovementKind::Wastage => Permission::StockWaste,
         _ => Permission::StockAdjust,
@@ -1191,23 +1228,36 @@ pub fn record_movement_on(app: &App, edit: MovementEdit) -> UiResult<InventoryVi
     let units = material.units();
     let unit = unit_or_base(&unit, material.dimension).to_owned();
     let typed = Qty::parse(qty.trim().trim_start_matches('-')).map_err(|e| {
-        UiError::new("stock.qty", format!("`{qty}` is not an amount."))
-            .with_detail(e.to_string())
+        UiError::new("stock.qty", format!("`{qty}` is not an amount.")).with_detail(e.to_string())
     })?;
     if typed.is_zero() {
-        return Err(UiError::new("stock.qty", "A movement of nothing is not a movement."));
+        return Err(UiError::new(
+            "stock.qty",
+            "A movement of nothing is not a movement.",
+        ));
     }
     let base = units.to_base(typed, &unit).map_err(|e| {
-        UiError::new("stock.unit", format!("`{unit}` is not a unit of {}.", material.name))
-            .with_detail(e.to_string())
+        UiError::new(
+            "stock.unit",
+            format!("`{unit}` is not a unit of {}.", material.name),
+        )
+        .with_detail(e.to_string())
     })?;
 
-    // A wastage always takes away; an adjustment goes whichever way the person
-    // typed; everything else adds.
+    // A wastage always takes away; an adjustment goes whichever way the person typed;
+    // everything else adds.
     let negative = matches!(wanted, MovementKind::Wastage | MovementKind::ProductionOut)
         || qty.trim().starts_with('-');
-    let signed_base = if negative { Qty::from_thousandths(-base.thousandths()) } else { base };
-    let signed_typed = if negative { Qty::from_thousandths(-typed.thousandths()) } else { typed };
+    let signed_base = if negative {
+        Qty::from_thousandths(-base.thousandths())
+    } else {
+        base
+    };
+    let signed_typed = if negative {
+        Qty::from_thousandths(-typed.thousandths())
+    } else {
+        typed
+    };
 
     // A price is per PACK, because that is what a shop knows: "a bag is ₹1,500".
     let unit_cost = match cost.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
@@ -1228,9 +1278,8 @@ pub fn record_movement_on(app: &App, edit: MovementEdit) -> UiResult<InventoryVi
     };
 
     let mut movement = Movement::new(
-        // The material is in the id so a movement is recognisable in a log;
-        // the tail is what stops two movements of the SAME material in one
-        // millisecond being one movement.
+        // The material is in the id so a movement is recognisable in a log; the tail is what
+        // stops two movements of the SAME material in one millisecond being one movement.
         format!("{}_{id}", crate::newid::fresh_at("stk", at)),
         id.clone(),
         wanted,
@@ -1257,12 +1306,18 @@ pub fn record_movement_on(app: &App, edit: MovementEdit) -> UiResult<InventoryVi
                 repos.stock().record(OUTLET, &movement)?;
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), audit_action, "material")
-                        .about(id.to_string())
-                        .with_after(serde_json::json!({
-                            "kind": wanted.tag(),
-                            "base_qty": signed_base.thousandths(),
-                        })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        audit_action,
+                        "material",
+                    )
+                    .about(id.to_string())
+                    .with_after(serde_json::json!({
+                        "kind": wanted.tag(),
+                        "base_qty": signed_base.thousandths(),
+                    })),
                 )?;
                 Ok(())
             })
@@ -1273,7 +1328,7 @@ pub fn record_movement_on(app: &App, edit: MovementEdit) -> UiResult<InventoryVi
     inventory_on(app, None)
 }
 
-/// **D114** — work the balances out again from the movements.
+/// Work the balances out again from the movements.
 pub fn rebuild_balances_on(app: &App) -> UiResult<InventoryView> {
     let who = guard::require(app, Permission::StockAdjust)?;
     crate::licensing::gate(app, Feature::Inventory)?;
@@ -1287,15 +1342,24 @@ pub fn rebuild_balances_on(app: &App) -> UiResult<InventoryView> {
                 let corrected = repos.stock().rebuild_balances(OUTLET, at)?;
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::STOCK_REBUILT, "stock")
-                        .with_after(serde_json::json!({ "corrected": corrected })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::STOCK_REBUILT,
+                        "stock",
+                    )
+                    .with_after(serde_json::json!({ "corrected": corrected })),
                 )?;
                 Ok(corrected)
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    log_info!("stock balances rebuilt by {} — {corrected} corrected", who.name);
+    log_info!(
+        "stock balances rebuilt by {} — {corrected} corrected",
+        who.name
+    );
     inventory_on(app, None)
 }
 
@@ -1305,13 +1369,16 @@ pub fn resolve_problem_on(app: &App, id: String) -> UiResult<InventoryView> {
     let at = now();
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).stock().resolve_problem(OUTLET, &id, at))
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .stock()
+                    .resolve_problem(OUTLET, &id, at)
+            })
             .map_err(|e| words::from_db(&e))
     })?;
     inventory_on(app, None)
 }
 
-/// Scope 4.9, D115 — theoretical against actual, for a period.
 #[allow(
     clippy::integer_division,
     reason = "basis points into a percentage with one decimal; the `None` arm is \
@@ -1320,17 +1387,20 @@ pub fn resolve_problem_on(app: &App, id: String) -> UiResult<InventoryView> {
 pub fn variance_on(app: &App, from: String, to: String) -> UiResult<Vec<VarianceView>> {
     guard::require(app, Permission::InventoryView)?;
     crate::licensing::gate(app, Feature::Inventory)?;
-    // `<input type="date">` gives `YYYY-MM-DD`, and `BusinessDay: FromStr` is
-    // what P18 added so that no TypeScript does date arithmetic on the value
-    // every report is keyed by.
     let bad = |which: &str, text: &str| {
-        UiError::new("stock.period", format!("The {which} date could not be read. Pick it again."))
-            .with_detail(format!("{which} = {text:?}"))
+        UiError::new(
+            "stock.period",
+            format!("The {which} date could not be read. Pick it again."),
+        )
+        .with_detail(format!("{which} = {text:?}"))
     };
     let from: mb_core::BusinessDay = from.parse().map_err(|_| bad("start", &from))?;
     let to: mb_core::BusinessDay = to.parse().map_err(|_| bad("end", &to))?;
     if from.days_until(to) < 0 {
-        return Err(UiError::new("stock.period", "The end date is before the start date."));
+        return Err(UiError::new(
+            "stock.period",
+            "The end date is before the start date.",
+        ));
     }
 
     let rows = app.with_shop(|shop| {
@@ -1361,7 +1431,7 @@ pub fn variance_on(app: &App, from: String, to: String) -> UiResult<Vec<Variance
         .collect())
 }
 
-/// The buy list as text a person can send on WhatsApp (scope 4.6).
+/// The buy list as text a person can send on WhatsApp.
 pub fn buy_list_text_on(app: &App) -> UiResult<String> {
     guard::require(app, Permission::InventoryView)?;
     crate::licensing::gate(app, Feature::Inventory)?;
@@ -1379,9 +1449,7 @@ pub fn buy_list_text_on(app: &App) -> UiResult<String> {
     Ok(out)
 }
 
-// ---------------------------------------------------------------------------
-// The seats (D46).
-// ---------------------------------------------------------------------------
+// The seats.
 
 #[tauri::command]
 pub fn inventory(app: tauri::State<'_, App>, material: Option<String>) -> UiResult<InventoryView> {

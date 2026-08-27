@@ -1,11 +1,4 @@
-//! **Customers and what they owe** — scope 5.1, 5.2, 5.3, 5.4.
-//!
-//! The owner renamed this from "khata" on 2026-08-08.
-//!
-//! Bodies over `&App` (D46). The rules are mb-core's (`credit.rs`), the rows
-//! are mb-db's, and this is the boundary: view models with the money already
-//! formatted (D39) and the ageing already bucketed, so no screen divides
-//! anything by thirty.
+//! Customers and what they owe.
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
@@ -22,9 +15,7 @@ use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // What the screens see.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -35,8 +26,7 @@ pub struct CustomerEdit {
     pub phone: String,
     pub gstin: String,
     pub address: String,
-    /// Typed by a person, and **blank means no limit** — which is not a limit
-    /// of zero. Parsed in Rust (D39).
+    /// Typed by a person, and blank means no limit — which is not a limit of zero.
     pub credit_limit: String,
     pub is_active: bool,
 }
@@ -53,8 +43,7 @@ pub struct CustomerView {
     pub credit_limit: Option<MoneyView>,
     pub is_active: bool,
     pub balance: MoneyView,
-    /// "74 days" or "—". Preformatted, because a screen that does date
-    /// arithmetic is a screen with a second answer.
+    /// "74 days" or "—".
     pub oldest: String,
 }
 
@@ -78,8 +67,8 @@ pub struct MovementView {
     /// "Bill", "Repayment", "Opening balance", "Adjustment".
     pub kind: String,
     pub note: String,
-    /// What it did to the account, with its sign shown as a direction: `debit`
-    /// adds to what is owed, `credit` reduces it.
+    /// What it did to the account, with its sign shown as a direction: `debit` adds to what is
+    /// owed, `credit` reduces it.
     pub amount: MoneyView,
     pub adds: bool,
     /// The balance after this movement — what a statement column shows.
@@ -97,10 +86,6 @@ pub struct AccountView {
     pub statement: String,
 }
 
-// ---------------------------------------------------------------------------
-// Reading.
-// ---------------------------------------------------------------------------
-
 fn to_view(customer: &Customer, balance: Money, oldest: Option<i32>) -> CustomerView {
     CustomerView {
         id: customer.id.as_str().to_owned(),
@@ -115,14 +100,12 @@ fn to_view(customer: &Customer, balance: Money, oldest: Option<i32>) -> Customer
     }
 }
 
-/// "2026-08-12". The one place a business day becomes text in this module,
-/// because a screen that formats a date has a second answer to what day it is.
 fn day_words(day: BusinessDay) -> String {
     let (year, month, d) = day.to_ymd();
     format!("{year:04}-{month:02}-{d:02}")
 }
 
-/// "74 days", "1 day", "—". UI_GUIDELINES §6: the screen reads a sentence.
+/// "74 days", "1 day", "—".
 fn days_words(days: Option<i32>) -> String {
     match days {
         None => "—".to_owned(),
@@ -142,8 +125,7 @@ fn kind_words(kind: MovementKind) -> &'static str {
     }
 }
 
-/// **Who owes me money**, oldest first — scope 5.1, and the screen an owner
-/// actually opens.
+/// Who owes me money, oldest first.
 pub fn who_owes_on(app: &App) -> UiResult<Vec<CustomerView>> {
     guard::require(app, Permission::CustomersManage)?;
     let day = today(now());
@@ -162,8 +144,8 @@ pub fn who_owes_on(app: &App) -> UiResult<Vec<CustomerView>> {
     })
 }
 
-/// Everybody, whether they owe anything or not — the picker on the billing
-/// screen needs this one.
+/// Everybody, whether they owe anything or not — the picker on the billing screen needs this
+/// one.
 pub fn customers_on(app: &App) -> UiResult<Vec<CustomerView>> {
     guard::require(app, Permission::CustomersManage)?;
     let day = today(now());
@@ -187,8 +169,7 @@ pub fn customers_on(app: &App) -> UiResult<Vec<CustomerView>> {
     })
 }
 
-/// One account in full: the balance, the ageing, every movement, and the
-/// statement text.
+/// One account in full: the balance, the ageing, every movement, and the statement text.
 pub fn account_on(app: &App, customer_id: String) -> UiResult<AccountView> {
     guard::require(app, Permission::CustomersManage)?;
     let day = today(now());
@@ -211,9 +192,9 @@ pub fn account_on(app: &App, customer_id: String) -> UiResult<AccountView> {
                 let ageing = credit::ageing(&movements, day)
                     .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
 
-                // The running balance, computed once here rather than in the
-                // screen: a statement whose column does not add up is the one
-                // thing a statement may not do.
+                // The running balance, computed once here rather than in the screen: a
+                // statement whose column does not add up is the one thing a statement may not
+                // do.
                 let mut running = Money::ZERO;
                 let mut rows = Vec::with_capacity(movements.len());
                 for movement in &movements {
@@ -224,8 +205,8 @@ pub fn account_on(app: &App, customer_id: String) -> UiResult<AccountView> {
                     }
                     .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
                     rows.push(MovementView {
-                        // The date as a person writes it, from mb-core — the screen
-                        // never formats one (R8).
+                        // The date as a person writes it, from mb-core — the screen never
+                        // formats one.
                         date: day_words(movement.day),
                         kind: kind_words(movement.kind).to_owned(),
                         note: movement.note.clone(),
@@ -254,14 +235,7 @@ pub fn account_on(app: &App, customer_id: String) -> UiResult<AccountView> {
     })
 }
 
-/// The statement, as text — scope 5.3.
-///
-/// **Plain text rather than a PDF, and that is a decision.** A PDF needs a
-/// dependency (R6), a font embedded a second time, and a page model this
-/// product does not otherwise have. What a shop actually does with a statement
-/// is print it on the thermal roll or send the numbers on WhatsApp, and both
-/// of those are text. If a PDF is ever really wanted, P22's notification port
-/// is where it belongs, not here.
+/// The statement, as text.
 fn statement_text(
     customer: &Customer,
     rows: &[MovementView],
@@ -301,15 +275,7 @@ fn statement_text(
     out
 }
 
-// ---------------------------------------------------------------------------
-// Writing.
-// ---------------------------------------------------------------------------
-
 /// Add or edit a customer.
-///
-/// **A duplicate phone offers the existing customer** rather than refusing or
-/// creating a second row — the error carries the id, so the screen can say
-/// "that number is already Rekha's — open her?".
 pub fn save_customer_on(app: &App, edit: CustomerEdit) -> UiResult<Vec<CustomerView>> {
     let who = guard::require(app, Permission::CustomersManage)?;
     let at = now();
@@ -317,35 +283,28 @@ pub fn save_customer_on(app: &App, edit: CustomerEdit) -> UiResult<Vec<CustomerV
     if edit.name.trim().is_empty() {
         return Err(UiError::new("credit.name", "A customer needs a name."));
     }
-    // **`Phone::parse`, and what it returns is what is stored.**
-    //
-    // This used to check `credit::phone_key(..).is_none()`, which asks a
-    // different question: that function takes the LAST ten digits of anything
-    // with ten or more, because it exists to decide whether two spellings of a
-    // number are one customer. As a gate it let a thirteen-digit number through
-    // and stored it as typed — so the shop had one customer whose number could
-    // not be dialled and one whose number was matched on its tail.
-    //
-    // The ten digits go in, so the row and the key agree by construction. See
-    // `mb_core::phone` (owner, 2026-08-22).
+    // `Phone::parse`, and what it returns is what is stored.
     let phone = mb_core::Phone::parse_optional(&edit.phone)
         .map_err(|e| UiError::new("credit.phone", e.to_string()))?
         .map_or_else(String::new, |p| p.as_str().to_owned());
     let limit = if edit.credit_limit.trim().is_empty() {
-        // Blank is NO LIMIT, not a limit of zero. A shop that types nothing
-        // has not said "this customer may owe nothing".
+        // Blank is NO LIMIT, not a limit of zero.
         None
     } else {
         Some(crate::menu::parse_money_public(&edit.credit_limit)?)
     };
 
-    // The duplicate check, before the write, with words of its own — an
-    // Invariant from the index would reach the shopkeeper as "the shop's data
-    // could not be read" (words.rs says why).
+    // The duplicate check, before the write, with words of its own — an Invariant from the
+    // index would reach the shopkeeper as "the shop's data could not be read" (words.rs says
+    // why).
     if !phone.is_empty() {
         let existing = app.with_shop(|shop| {
             shop.db
-                .transaction(|tx| mb_db::Repos::new(tx).money().customer_by_phone(OUTLET, &phone))
+                .transaction(|tx| {
+                    mb_db::Repos::new(tx)
+                        .money()
+                        .customer_by_phone(OUTLET, &phone)
+                })
                 .map_err(|e| words::from_db(&e))
         })?;
         if let Some(found) = existing
@@ -353,10 +312,13 @@ pub fn save_customer_on(app: &App, edit: CustomerEdit) -> UiResult<Vec<CustomerV
         {
             return Err(UiError::new(
                 "credit.duplicate_phone",
-                format!("That number is already {}'s. Open them instead?", found.name),
+                format!(
+                    "That number is already {}'s. Open them instead?",
+                    found.name
+                ),
             )
-            // The id rides in the detail so the screen can OPEN them rather
-            // than just refusing — which is the whole point.
+            // The id rides in the detail so the screen can OPEN them rather than just refusing
+            // — which is the whole point.
             .with_detail(found.id.as_str().to_owned()));
         }
     }
@@ -390,11 +352,7 @@ fn some_trimmed(text: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-/// Money handed over against the account — scope 5.1.
-///
-/// **In a real payment mode.** Audit B12: v1 recorded a settlement with the
-/// mode "Full Settlement", which is not a payment mode, and every payment-split
-/// report was wrong for it.
+/// Money handed over against the account.
 pub fn record_repayment_on(
     app: &App,
     customer_id: String,
@@ -407,7 +365,10 @@ pub fn record_repayment_on(
     let day = today(at);
     let amount = crate::menu::parse_money_public(&amount)?;
     if !amount.is_positive() {
-        return Err(UiError::new("credit.amount", "A repayment is more than nothing."));
+        return Err(UiError::new(
+            "credit.amount",
+            "A repayment is more than nothing.",
+        ));
     }
     let mode = match mode.as_str() {
         "cash" | "card" | "upi" => mode,
@@ -438,19 +399,29 @@ pub fn record_repayment_on(
                 )?;
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::CREDIT_TAKEN, "customer")
-                        .about(customer_id.clone())
-                        .with_after(serde_json::json!({
-                            "amount_paise": amount.paise(),
-                            "mode": mode,
-                        })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::CREDIT_TAKEN,
+                        "customer",
+                    )
+                    .about(customer_id.clone())
+                    .with_after(serde_json::json!({
+                        "amount_paise": amount.paise(),
+                        "mode": mode,
+                    })),
                 )?;
                 Ok(())
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    log_info!("{} took a credit repayment of {}", who.name, amount.to_plain_string());
+    log_info!(
+        "{} took a credit repayment of {}",
+        who.name,
+        amount.to_plain_string()
+    );
     account_on(app, customer_id)
 }
 
@@ -462,9 +433,6 @@ pub fn save_adjustment_on(
     increases: bool,
     reason: String,
 ) -> UiResult<AccountView> {
-    // **Not `credit.collect`.** Taking money in is a cashier's job; changing
-    // what somebody owes without money moving is the owner's, and it is the
-    // one door in this account that could make money disappear.
     let who = guard::require(app, Permission::CustomersManage)?;
     let at = now();
     let day = today(at);
@@ -517,9 +485,7 @@ pub fn save_adjustment_on(
     account_on(app, customer_id)
 }
 
-// ---------------------------------------------------------------------------
-// Putting a bill on the account — scope 5.2.
-// ---------------------------------------------------------------------------
+// Putting a bill on the account.
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -531,8 +497,8 @@ pub struct HeadroomView {
     pub limit: Option<MoneyView>,
     /// `fine`, `close` or `over` — decided in Rust.
     pub verdict: String,
-    /// The whole sentence: *"Rekha owes 4,200.00 and her limit is 5,000.00.
-    /// This bill takes her to 5,340.00."*
+    /// The whole sentence: "Rekha owes 4,200.00 and her limit is 5,000.00. This bill takes her
+    /// to 5,340.00.".
     pub says: String,
 }
 
@@ -595,17 +561,12 @@ pub fn headroom_on(app: &App, customer_id: String) -> UiResult<HeadroomView> {
 }
 
 /// Put the balance of this bill on a customer's account.
-///
-/// **Over the limit is refused unless somebody with the permission overrides
-/// it**, and an override writes an audit row. D18's shape: the policy is
-/// checked by the caller, and the caller is here.
 pub fn put_on_account_on(
     app: &App,
     customer_id: String,
     override_limit: bool,
 ) -> UiResult<crate::billing::CartView> {
-    // One counter action at a time — see `App::begin_action`. Held for the
-    // whole flow, so a second press cannot land between the read and the write.
+    // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
@@ -641,11 +602,14 @@ pub fn put_on_account_on(
                 })
                 .map_err(|e| words::from_db(&e))
         })?;
-        log_info!("{} put a bill over the credit limit on an account", who.name);
+        log_info!(
+            "{} put a bill over the credit limit on an account",
+            who.name
+        );
     }
 
-    // What is LEFT after any cash or card already taken — a split where the
-    // rest goes on the account is an ordinary thing for a regular to ask for.
+    // What is LEFT after any cash or card already taken — a split where the rest goes on the
+    // account is an ordinary thing for a regular to ask for.
     let balance = app.with_cart(|state| {
         let bill = state.bill(&app.shop_config())?;
         state.settlement.balance(bill.grand_total).map_err(|e| {
@@ -670,13 +634,10 @@ pub fn put_on_account_on(
             UiError::new("credit.payment", "That could not go on the account.")
                 .with_detail(e.to_string())
         })?;
-        state
-            .settlement
-            .add(payment)
-            .map_err(|e| {
-                UiError::new("credit.payment", "That could not go on the account.")
-                    .with_detail(e.to_string())
-            })?;
+        state.settlement.add(payment).map_err(|e| {
+            UiError::new("credit.payment", "That could not go on the account.")
+                .with_detail(e.to_string())
+        })?;
         state.customer = Some(customer_id.clone());
         Ok(())
     })?;
@@ -684,13 +645,7 @@ pub fn put_on_account_on(
     app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
 }
 
-// --- the seats -------------------------------------------------------------
-
-// `who_owes` was a command here until 2026-08-24. The credit screen had two
-// views — who owes me, and everybody — and the owner found the hole in that:
-// *"when i add a credit customer, it seemed like it disappeared but the thing
-// was it was in everybody section."* One list now, so this had no caller.
-// `who_owes_on` stays, because the reports screen's alerts ask it.
+// The seats.
 
 #[tauri::command]
 pub fn customers(app: tauri::State<'_, App>) -> UiResult<Vec<CustomerView>> {
@@ -733,10 +688,7 @@ pub fn save_credit_adjustment(
 }
 
 #[tauri::command]
-pub fn credit_headroom(
-    app: tauri::State<'_, App>,
-    customer_id: String,
-) -> UiResult<HeadroomView> {
+pub fn credit_headroom(app: tauri::State<'_, App>, customer_id: String) -> UiResult<HeadroomView> {
     headroom_on(&app, customer_id)
 }
 
@@ -749,15 +701,11 @@ pub fn put_on_account(
     put_on_account_on(&app, customer_id, override_limit)
 }
 
-/// Unused until P18's day close reads it; here so the ageing day is asked for
-/// in one place.
 #[allow(dead_code, reason = "P18 reads the ageing day from here")]
 fn ageing_day() -> BusinessDay {
     today(now())
 }
 
-/// Unused today. Kept so a later session does not invent a second way of
-/// naming who took the money.
 #[allow(dead_code, reason = "P18's report wants the collector")]
 fn collector(who: &StaffId) -> String {
     who.as_str().to_owned()

@@ -1,16 +1,4 @@
-/**
- * The things that show rather than collect: surfaces, tables, badges, states.
- *
- * Two rules run through all of them.
- *
- * **Digits align wherever they are compared** (§3). `Money` and `Numeric` exist
- * so that never depends on somebody remembering a class name — *"a column of
- * rupees that doesn't line up looks broken to a shopkeeper."*
- *
- * **Colour is never the only signal** (§2 rule 2). A `Badge` has a border and a
- * label as well as a fill; grey-scale the screen and every state is still
- * legible.
- */
+/** The things that show rather than collect: surfaces, tables, badges, states. */
 
 import type { ReactNode } from 'react';
 
@@ -33,15 +21,7 @@ export function Card({
   );
 }
 
-
-/**
- * A heading for a block within a screen.
- *
- * `note` is **not drawn**; it becomes an [`InfoTip`] beside the title. That is
- * one change rather than thirty: every screen that already passed a note gets
- * the hover behaviour without being touched, and a screen that wants to explain
- * something has nowhere to put a paragraph.
- */
+/** A heading for a block within a screen. */
 export function SectionHeader({
   title,
   note,
@@ -63,20 +43,13 @@ export function SectionHeader({
   );
 }
 
-/**
- * An amount, exactly as Rust formatted it.
- *
- * **This component cannot compute anything, and that is the point.** It takes a
- * `MoneyView` — integer paise plus the string `Money::to_plain_string`
- * produced — and renders the string. R8, and D2: JavaScript has no integers,
- * so a rupee that TypeScript touched is a rupee that might be wrong.
- */
+/** An amount, exactly as Rust formatted it. */
 export function Money({
   value,
   symbol = false,
 }: {
   value: MoneyView;
-  /** Show the ₹ beside the figure. For a figure standing on its own. */
+  /** Show the ₹ beside the figure. */
   symbol?: boolean;
 }) {
   return (
@@ -99,17 +72,7 @@ export function StatCard({
 }: {
   label: string;
   value: ReactNode;
-  /**
-   * The sentence under the figure — *"What the till expects, before
-   * counting."*
-   *
-   * **A parameter of its own, and P27.5 is why.** The dashboard used to pass
-   * its note inside `value`, which is the element that carries
-   * `font-family: var(--font-mono)` so that a column of rupees lines up (§3).
-   * So every explanatory sentence on the reports screen rendered in a
-   * monospace face — prose set like a terminal, on the screen an owner reads
-   * most carefully. Found by opening the screen and looking at it (D55).
-   */
+  /** The sentence under the figure — "What the till expects, before counting.". */
   note?: ReactNode;
 }) {
   return (
@@ -131,13 +94,7 @@ export type BadgeTone =
   | 'info'
   | 'accent';
 
-/**
- * A state, in a shape and a colour and a word.
- *
- * Note there is an `accent` tone and it is **never** used for a semantic state
- * (§2 rule 1): changing a shop's accent must not make "paid" and "void" look
- * alike, so "paid" is `ok` and stays `ok` whatever the owner picks.
- */
+/** A state, in a shape and a colour and a word. */
 export function Badge({
   tone = 'neutral',
   children,
@@ -153,15 +110,7 @@ export interface Column<Row> {
   header: string;
   /** Right-aligned and tabular. Money and counts, always. */
   numeric?: boolean;
-  /**
-   * **The column disappears when no row has one.**
-   *
-   * A shop with no short codes and no HSN numbers was given two columns of
-   * twelve em-dashes, taking a fifth of the table's width to say nothing,
-   * while the item names squeezed. Return `null` for a row that has no value
-   * and the table draws the dash — so the placeholder has one author instead
-   * of a `?? '—'` in thirty render functions.
-   */
+  /** The column disappears when no row has one. */
   optional?: boolean;
   render: (row: Row) => ReactNode;
 }
@@ -182,21 +131,13 @@ export function Table<Row>({
   rows: readonly Row[];
   rowKey: (row: Row) => string;
   empty?: ReactNode;
-  /**
-   * **The totals row, and it belongs to the table.**
-   *
-   * P18 first drew it as a second `<table>` underneath, and the columns did
-   * not line up — two tables cannot agree on a column width. §3: *"a column of
-   * rupees that doesn't line up looks broken to a shopkeeper."* One cell per
-   * column, or nothing.
-   */
+  /** The totals row, and it belongs to the table. */
   footer?: readonly ReactNode[];
 }) {
   if (rows.length === 0 && empty) return <>{empty}</>;
 
-  // Render once, here: an `optional` column has to be looked at to know
-  // whether it survives, and calling `render` twice for that would be a second
-  // pass over every row.
+  // Render once, here: an `optional` column has to be looked at to know whether it survives,
+  // and calling `render` twice for that would be a second pass over every row.
   const cells = rows.map((row) => columns.map((column) => column.render(row)));
   const shown = columns.filter(
     (column, index) =>
@@ -205,9 +146,8 @@ export function Table<Row>({
   const keep = columns.map((column) => shown.includes(column));
 
   return (
-    // The wrapper is what stops a squeezed table shredding: below the floor
-    // width it scrolls sideways in its own box instead of wrapping a cell to
-    // one word per line. The page itself still never scrolls sideways (§1).
+    // The wrapper is what stops a squeezed table shredding: below the floor width it scrolls
+    // sideways in its own box instead of wrapping a cell to one word per line.
     <div className="mb-table__wrap">
     <table className="mb-table">
       <thead>
@@ -288,13 +228,7 @@ export function Tabs({
   );
 }
 
-/**
- * Nothing here yet — and it says what to do about it.
- *
- * UI_GUIDELINES §6: a message written from the cashier's side of the screen. An
- * empty state that only says "No data" has wasted the one moment somebody was
- * looking for guidance.
- */
+/** Nothing here yet — and it says what to do about it. */
 export function EmptyState({
   title,
   body,
@@ -304,15 +238,7 @@ export function EmptyState({
   title: string;
   body?: string;
   action?: ReactNode;
-  /**
-   * **True inside a panel rather than a page** — the cart, a drawer, a column.
-   *
-   * The full size is built for the middle of an empty screen and is 150 pixels
-   * tall. The cart's line area is allowed to shrink to `--cart-lines-min`, so
-   * on an empty bill the full-size version overflowed and the totals block cut
-   * "Press an item to add it" through the middle of the words. Found by looking
-   * at a fresh install; it has been sliced like that since P09.
-   */
+  /** True inside a panel rather than a page — the cart, a drawer, a column. */
   small?: boolean;
 }) {
   return (
@@ -324,21 +250,7 @@ export function EmptyState({
   );
 }
 
-/**
- * **A screen the licence does not open, said on the screen itself** — P30.5.
- *
- * Reports and the stock book are behind the licence (D86: the licence gates
- * features, never billing). Until P30.5 a shop without one opened Reports and
- * got a spinner that never stopped, plus a red toast that slid away after four
- * seconds — so the screen was permanently blank and the only explanation had
- * already gone. Found on a fresh install, and it is the same failure D75
- * names: *a refusal must arrive as an answer, not as "the data could not be
- * read".*
- *
- * The sentence is Rust's (§6, one place turns a machine state into words) and
- * it is the same one the banner uses, because saying it the same way twice is
- * what makes a person believe it.
- */
+/** A screen the licence does not open, said on the screen itself. */
 export function Locked({
   says,
   onOpenAccount,
@@ -370,14 +282,7 @@ export function Spinner({ label = 'Working' }: { label?: string }) {
   );
 }
 
-/**
- * The unsaved-changes guard — Save / Discard / Cancel, v1's behaviour with new
- * code.
- *
- * It is a component rather than a pattern because the alternative is what audit
- * F10 describes happening to confirmations: every screen inventing its own, and
- * one of them forgetting.
- */
+/** The unsaved-changes guard. */
 export function SaveBar({
   dirty,
   onSave,
@@ -402,9 +307,8 @@ export function SaveBar({
   );
 }
 
-// Kept separate so `display.tsx` does not import `controls.tsx` at module
-// scope, which would make the two files a cycle the moment a control wants a
-// badge.
+// Kept separate so `display.tsx` does not import `controls.tsx` at module scope, which would
+// make the two files a cycle the moment a control wants a badge.
 function ButtonImport({
   onDiscard,
   onSave,
@@ -431,12 +335,6 @@ function ButtonImport({
   );
 }
 
-/**
- * A date range. P18's reports live on this; here it is the control, not the
- * calendar — the native picker is keyboard-reachable, touch-friendly and
- * already translated by the operating system, which a hand-built calendar
- * would not be until P23.
- */
 export function DateRangePicker({
   from,
   to,

@@ -1,9 +1,4 @@
-//! **Customers and credit, driven end to end** — P15.
-//!
-//! The rules are proven in mb-core and the rows in mb-db. What is proved here
-//! is the sequence a shop actually performs: bill a regular on the account,
-//! take money back later, and have the statement add up — plus the two
-//! refusals that protect the ledger.
+//! Customers and credit, driven end to end.
 
 #![allow(
     clippy::expect_used,
@@ -64,52 +59,51 @@ fn edit(id: &str, name: &str, phone: &str, limit: &str) -> CustomerEdit {
     }
 }
 
-/// **T7 — a duplicate phone offers the existing customer**, and however the
-/// number was typed.
+/// A duplicate phone offers the existing customer, and however the number was typed.
 #[test]
 fn one_phone_number_is_one_customer_and_the_second_try_says_whose() {
     let scratch = Scratch::new("one_phone");
     let app = a_shop(&scratch);
 
-    save_customer_on(&app, edit("cus_rekha", "Rekha", "+91 98765 43210", "5000"))
-        .expect("saved");
+    save_customer_on(&app, edit("cus_rekha", "Rekha", "+91 98765 43210", "5000")).expect("saved");
 
-    let refused = save_customer_on(&app, edit("cus_new", "Somebody", "9876543210", ""))
-        .expect_err("refused");
+    let refused =
+        save_customer_on(&app, edit("cus_new", "Somebody", "9876543210", "")).expect_err("refused");
     assert_eq!(refused.code, "credit.duplicate_phone");
     assert!(refused.message.contains("Rekha"), "{}", refused.message);
     // The id rides in the detail so the screen can OPEN them.
     assert_eq!(refused.detail.as_deref(), Some("cus_rekha"));
 
     // Editing the SAME customer is not a duplicate.
-    save_customer_on(&app, edit("cus_rekha", "Rekha M", "+91 98765 43210", "6000"))
-        .expect("her own number is not somebody else's");
+    save_customer_on(
+        &app,
+        edit("cus_rekha", "Rekha M", "+91 98765 43210", "6000"),
+    )
+    .expect("her own number is not somebody else's");
 }
 
-/// Blank is **no limit**, which is not a limit of zero — the difference
-/// between "may owe anything" and "may owe nothing".
+/// Blank is no limit, which is not a limit of zero — the difference between "may owe anything"
+/// and "may owe nothing".
 #[test]
 fn no_limit_is_not_a_limit_of_zero() {
     let scratch = Scratch::new("no_limit");
     let app = a_shop(&scratch);
-    let people = save_customer_on(&app, edit("cus_free", "Anand", "9000000009", ""))
-        .expect("saved");
+    let people =
+        save_customer_on(&app, edit("cus_free", "Anand", "9000000009", "")).expect("saved");
 
     let anand = people.iter().find(|c| c.id == "cus_free").expect("there");
     assert!(anand.credit_limit.is_none(), "blank means no limit");
 }
 
-/// **The sequence a shop performs**: a bill on the account, a repayment later,
-/// and the statement adds up at every step.
+/// The sequence a shop performs: a bill on the account, a repayment later, and the statement
+/// adds up at every step.
 #[test]
 fn a_bill_goes_on_the_account_and_money_comes_back_later() {
     let scratch = Scratch::new("account_flow");
     let app = a_shop(&scratch);
-    save_customer_on(&app, edit("cus_regular", "Suresh", "9000000010", "5000"))
-        .expect("saved");
+    save_customer_on(&app, edit("cus_regular", "Suresh", "9000000010", "5000")).expect("saved");
 
-    // A bill in the cart. Parcel, so the test is about the account rather than
-    // about audit 2.3's "a dine-in order needs a table".
+    // A bill in the cart.
     app.with_cart_mut(|state| {
         state.order_type = mb_core::OrderType::Parcel;
         Ok(())
@@ -118,11 +112,15 @@ fn a_bill_goes_on_the_account_and_money_comes_back_later() {
     crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("2".to_owned()), None)
         .expect("added");
 
-    // What would this do to the account? Said out loud, before it happens.
+    // What would this do to the account?
     let room = headroom_on(&app, "cus_regular".to_owned()).expect("headroom");
     assert_eq!(room.verdict, "fine");
     assert!(room.says.contains("Suresh"), "{}", room.says);
-    assert!(room.says.contains("5,000.00") || room.says.contains("5000.00"), "{}", room.says);
+    assert!(
+        room.says.contains("5,000.00") || room.says.contains("5000.00"),
+        "{}",
+        room.says
+    );
 
     let cart = put_on_account_on(&app, "cus_regular".to_owned(), false).expect("on the account");
     assert_eq!(cart.balance.paise, 0, "the bill is covered by the account");
@@ -136,7 +134,7 @@ fn a_bill_goes_on_the_account_and_money_comes_back_later() {
     assert!(account.customer.balance.paise > 0, "he owes for the dosas");
     let owed = account.customer.balance.paise;
 
-    // Money comes back, in a REAL payment mode (audit B12).
+    // Money comes back, in a REAL payment mode.
     let after = record_repayment_on(
         &app,
         "cus_regular".to_owned(),
@@ -150,8 +148,8 @@ fn a_bill_goes_on_the_account_and_money_comes_back_later() {
     assert_eq!(after.movements[1].kind, "Repayment");
     assert_eq!(after.customer.balance.paise, owed - 10_000);
 
-    // The statement's running column ends at the balance — the property that
-    // makes it a statement.
+    // The statement's running column ends at the balance — the property that makes it a
+    // statement.
     let last = after.movements.last().expect("a row");
     assert_eq!(last.running.paise, after.customer.balance.paise);
     assert!(after.statement.contains("Suresh"));
@@ -162,7 +160,7 @@ fn a_bill_goes_on_the_account_and_money_comes_back_later() {
     assert!(owing.iter().any(|c| c.id == "cus_regular"));
 }
 
-/// **T3 — a repayment is real money arriving**, so it carries a real mode.
+/// A repayment is real money arriving, so it carries a real mode.
 #[test]
 fn a_repayment_will_not_take_a_mode_that_is_not_a_payment_mode() {
     let scratch = Scratch::new("real_mode");
@@ -180,12 +178,18 @@ fn a_repayment_will_not_take_a_mode_that_is_not_a_payment_mode() {
     assert_eq!(refused.code, "credit.mode");
 
     for mode in ["cash", "card", "upi"] {
-        record_repayment_on(&app, "cus_a".to_owned(), "10".to_owned(), mode.to_owned(), String::new())
-            .expect("a real mode is taken");
+        record_repayment_on(
+            &app,
+            "cus_a".to_owned(),
+            "10".to_owned(),
+            mode.to_owned(),
+            String::new(),
+        )
+        .expect("a real mode is taken");
     }
 }
 
-/// **T6 — the limit blocks, and says the numbers.**
+/// The limit blocks, and says the numbers.
 #[test]
 fn a_bill_past_the_limit_is_refused_until_somebody_approves_it() {
     let scratch = Scratch::new("limit");
@@ -197,11 +201,19 @@ fn a_bill_past_the_limit_is_refused_until_somebody_approves_it() {
 
     let room = headroom_on(&app, "cus_tight".to_owned()).expect("headroom");
     assert_eq!(room.verdict, "over");
-    assert!(room.says.contains("100.00"), "the message says the limit: {}", room.says);
+    assert!(
+        room.says.contains("100.00"),
+        "the message says the limit: {}",
+        room.says
+    );
 
     let refused = put_on_account_on(&app, "cus_tight".to_owned(), false).expect_err("refused");
     assert_eq!(refused.code, "credit.over_limit");
-    assert!(refused.message.contains("Ask somebody"), "{}", refused.message);
+    assert!(
+        refused.message.contains("Ask somebody"),
+        "{}",
+        refused.message
+    );
 
     // Approved, it goes on — and the approval leaves a row.
     put_on_account_on(&app, "cus_tight".to_owned(), true).expect("approved");
@@ -216,8 +228,8 @@ fn a_bill_past_the_limit_is_refused_until_somebody_approves_it() {
     );
 }
 
-/// An adjustment needs a reason, because it is the one door that could make
-/// money disappear — and both directions are real.
+/// An adjustment needs a reason, because it is the one door that could make money disappear —
+/// and both directions are real.
 #[test]
 fn an_adjustment_needs_a_reason_and_moves_the_balance_both_ways() {
     let scratch = Scratch::new("adjust");
@@ -256,15 +268,21 @@ fn an_adjustment_needs_a_reason_and_moves_the_balance_both_ways() {
     assert_eq!(written_off.movements.len(), 2);
 }
 
-/// Everything a screen shows about an account comes from the movements, so the
-/// list and the account cannot disagree.
+/// Everything a screen shows about an account comes from the movements, so the list and the
+/// account cannot disagree.
 #[test]
 fn the_list_and_the_account_never_disagree() {
     let scratch = Scratch::new("agree");
     let app = a_shop(&scratch);
     save_customer_on(&app, edit("cus_x", "X", "9000000014", "")).expect("saved");
-    save_adjustment_on(&app, "cus_x".to_owned(), "750".to_owned(), true, "opening".to_owned())
-        .expect("opening");
+    save_adjustment_on(
+        &app,
+        "cus_x".to_owned(),
+        "750".to_owned(),
+        true,
+        "opening".to_owned(),
+    )
+    .expect("opening");
 
     let listed = customers_on(&app).expect("list");
     let one = listed.iter().find(|c| c.id == "cus_x").expect("there");
@@ -274,21 +292,7 @@ fn the_list_and_the_account_never_disagree() {
     assert_eq!(one.oldest, account.ageing.oldest);
 }
 
-/// **A phone number is ten digits, and the phone box is not a notes field.**
-///
-/// The owner, 2026-08-22, adding a credit customer on a real install: *"i can
-/// enter alphabets, more than 10 numbers, fix it, this app is india only so
-/// only 10 digits needed."*
-///
-/// The screen refuses these now, character by character (`PhoneInput`, and
-/// `check-fields.mjs` proves every phone box in the product is one). This is
-/// the other half: **the command refuses them too**, so the rule survives a
-/// screen somebody writes next year.
-///
-/// The gate here used to be `credit::phone_key(..).is_none()`, which asks a
-/// different question — it takes the LAST ten digits of anything with ten or
-/// more, because it exists to decide whether two spellings of one number are
-/// one customer. As a gate it let thirteen digits through and stored them.
+/// A phone number is ten digits, and the phone box is not a notes field.
 #[test]
 fn a_customer_phone_is_ten_digits_or_it_is_refused() {
     let scratch = Scratch::new("cus_phone");
@@ -300,16 +304,16 @@ fn a_customer_phone_is_ten_digits_or_it_is_refused() {
         ("98765", "too few"),
         ("98765432100123", "too many"),
     ] {
-        let refused = save_customer_on(&app, edit("cus_bad", "Somebody", typed, ""))
-            .expect_err(why);
+        let refused =
+            save_customer_on(&app, edit("cus_bad", "Somebody", typed, "")).expect_err(why);
         assert_eq!(refused.code, "credit.phone", "{why}: {typed:?}");
     }
 
-    // **And what IS stored is the ten digits**, however they were typed — so
-    // the row and `phone_key` agree by construction rather than by luck.
+    // And what IS stored is the ten digits, however they were typed — so the row and
+    // `phone_key` agree by construction rather than by luck.
     for typed in ["+91 98765 43210", "098765-43210", "9876543210"] {
-        let people = save_customer_on(&app, edit("cus_ok", "Rekha", typed, ""))
-            .expect("a real number");
+        let people =
+            save_customer_on(&app, edit("cus_ok", "Rekha", typed, "")).expect("a real number");
         let stored = people
             .iter()
             .find(|c| c.id == "cus_ok")
@@ -318,19 +322,7 @@ fn a_customer_phone_is_ten_digits_or_it_is_refused() {
     }
 }
 
-/// **Two records saved in the same instant are two records.**
-///
-/// This is the bug that made the suite flake twice — `UNIQUE constraint failed:
-/// credit_adjustments.id`, then `purchases.id`. Ids were built out of the
-/// clock, so two rows written in the same thousandth of a second asked for the
-/// same id.
-///
-/// A person on one till almost never manages it. **A computer does**, which is
-/// why the tests found it, and two tills in one shop would — `mb_core::ids`
-/// chose text ids for exactly that reason and then the ids were filled in from
-/// the clock anyway.
-///
-/// Driven through the real command, in a loop, as fast as the machine goes.
+/// Two records saved in the same instant are two records.
 #[test]
 fn a_hundred_adjustments_in_a_row_are_a_hundred_adjustments() {
     let scratch = Scratch::new("adj_race");
@@ -354,5 +346,8 @@ fn a_hundred_adjustments_in_a_row_are_a_hundred_adjustments() {
         .find(|c| c.id == "cus_race")
         .expect("the customer");
     // A hundred adjustments of ten rupees each, and not one of them lost.
-    assert_eq!(rekha.balance.paise, 100_000, "some adjustments went missing");
+    assert_eq!(
+        rekha.balance.paise, 100_000,
+        "some adjustments went missing"
+    );
 }

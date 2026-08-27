@@ -1,30 +1,4 @@
-/**
- * **The version this counter runs, and the way back off it** — P31.
- *
- * # What was missing
- *
- * P22 built all of this in Rust: `look_for_an_update`, `dismiss_update`,
- * `go_back_a_version`, the D98 start counter that notices a release which will
- * not start, and the kept installer. Nothing ever called any of it.
- *
- * `main.rs` even logs, on a machine that has failed to start twice on the same
- * version:
- *
- * > *"version 2.4.5 has failed to start repeatedly — the previous version
- * > should be restored (**Settings > Go back**)"*
- *
- * and Settings had no Go back. This is that page — audit **E9**, **I1** and
- * **ANDROID-G2/G4**, which are all one sentence: *a shop must be able to get
- * off a bad version tonight, without us.*
- *
- * # Why "Go back" asks twice and does not do it itself
- *
- * `go_back_a_version` returns **words**, not an action: it finds the installer
- * that was kept, and says where it is. Launching a process that replaces the
- * running one is deliberately not Rust's job here — see `updates.rs`. So the
- * shop gets a sentence with a path in it, which is what a person on the phone
- * to support can act on and what a test can assert.
- */
+/** The version this counter runs, and the way back off it. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -49,9 +23,7 @@ export function Updates() {
 
   useEffect(() => {
     if (!inApp()) return;
-    // **On open, not on a timer.** A counter does not poll for updates while
-    // somebody is billing on it (M4); this asks once, when an owner is on the
-    // settings screen and has time for the answer.
+    // On open, not on a timer.
     call('look_for_an_update').then(setView).catch(complain);
   }, [complain]);
 
@@ -114,9 +86,7 @@ export function Updates() {
           Check for an update
         </Button>
 
-        {/* **A dismissal lasts until tomorrow and no longer** — I1, and Rust
-            is what enforces that. The button says the shorter thing it means
-            rather than "Dismiss for ever", which it is not. */}
+        {/* A dismissal lasts until tomorrow and no longer. */}
         {view.available && view.dismissedOn === null ? (
           <Button
             variant="quiet"
@@ -173,9 +143,7 @@ export function Updates() {
         </Notice>
       ) : null}
 
-      {/* The sentence Rust wrote, with the installer's path in it. Shown and
-          left on screen rather than flashed as a toast: it is an instruction
-          somebody has to follow, and a toast that has faded is not one. */}
+      {/* The sentence Rust wrote, with the installer's path in it. */}
       {goingBack ? (
         <Notice tone="info">
           <p>{goingBack}</p>

@@ -6,7 +6,6 @@ export type LeaveBalanceView = { leaveTypeId: string, leaveType: string, isPaid:
  */
 leftHalves: number, 
 /**
- * The same thing in words: "7½ days". Written in Rust so the screen, the
- * payslip and a refusal cannot disagree (§6).
+ * The same thing in words: "7½ days".
  */
 leftSays: string, accruedSays: string, takenSays: string, };

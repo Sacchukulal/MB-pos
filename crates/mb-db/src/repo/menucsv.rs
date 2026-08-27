@@ -1,31 +1,4 @@
-//! **The menu, in and out of a spreadsheet** — P13 item 7.
-//!
-//! > *"A shop with 400 items will not type them in, and a setup nobody
-//! > finishes is a sale nobody keeps."*
-//!
-//! This is the difference between an owner who goes live on Tuesday and one who
-//! gives up on Thursday, which makes it the most commercially important twenty
-//! minutes of work in the session.
-//!
-//! # The dry run is the feature
-//!
-//! [`plan`] reads the file and reports exactly what *would* happen — *"312 new,
-//! 88 updated, 4 refused"* — and writes nothing at all. [`apply`] then does
-//! precisely that and nothing else, from the same plan.
-//!
-//! # An import that half succeeds is worse than one that refuses
-//!
-//! One transaction: **every row or none**. A shop that imports 400 items and
-//! gets 396 has no way to know which four are missing, and will find out from a
-//! customer. So a single bad row refuses the whole file, **by line number**, and
-//! the owner fixes one cell and tries again.
-//!
-//! # It does not write its own CSV
-//!
-//! `export.rs` already has a correct writer and parser — quoting, doubled
-//! quotes, CRLF, and NULL kept distinct from the empty string, which is audit
-//! G7's *"an item name containing a comma will break the columns of that row"*.
-//! A second one here would be a second set of those four bugs.
+//! The menu, in and out of a spreadsheet.
 
 use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxSpec, Timestamp};
 use rusqlite::Transaction;
@@ -34,8 +7,7 @@ use crate::error::DbError;
 use crate::export::{parse_csv, write_row};
 use crate::repo::menu::{MenuItem, MenuRepo};
 
-/// The columns, in order. **The header is the contract**, so an owner can open
-/// an export, add rows, and import it back.
+/// The columns, in order.
 const COLUMNS: &[&str] = &[
     "id",
     "name",
@@ -53,8 +25,7 @@ const COLUMNS: &[&str] = &[
 pub struct ImportPlan {
     pub new_items: Vec<MenuItem>,
     pub updated_items: Vec<MenuItem>,
-    /// `(line number, why)` — the line number is the one in the owner's
-    /// spreadsheet, counting the header as line 1.
+    /// `(line number, why)`.
     pub refused: Vec<(usize, String)>,
 }
 
@@ -97,10 +68,6 @@ impl<'a> MenuCsvRepo<'a> {
     }
 
     /// The whole menu as a spreadsheet.
-    ///
-    /// **Money is integer paise, and the header says so.** A spreadsheet will
-    /// reinterpret `123.45` as a float and hand it back rounded, which is D2
-    /// undone by Excel — `export.rs` made that rule and this obeys it.
     pub fn export(&self, outlet: &str) -> Result<String, DbError> {
         let repo = MenuRepo::new(self.tx);
         let categories = repo.list_categories(outlet)?;
@@ -138,7 +105,7 @@ impl<'a> MenuCsvRepo<'a> {
         Ok(out)
     }
 
-    /// **The dry run.** Reads the file, decides everything, writes nothing.
+    /// The dry run. Reads the file, decides everything, writes nothing.
     pub fn plan(&self, outlet: &str, csv: &str) -> Result<ImportPlan, DbError> {
         let repo = MenuRepo::new(self.tx);
         let existing = repo.list_items(outlet, false)?;
@@ -151,8 +118,8 @@ impl<'a> MenuCsvRepo<'a> {
         let Some(header) = rows.first() else {
             return Ok(plan);
         };
-        // The header is checked once, by name, so a file with the columns in a
-        // different order still works — an owner WILL move a column.
+        // The header is checked once, by name, so a file with the columns in a different order
+        // still works.
         let index_of = |wanted: &str| {
             header
                 .iter()
@@ -169,9 +136,11 @@ impl<'a> MenuCsvRepo<'a> {
         };
 
         for (offset, row) in rows.iter().skip(1).enumerate() {
-            // The owner's line number: the header is line 1.
             let line = offset + 2;
-            if row.iter().all(|cell| cell.as_deref().unwrap_or("").trim().is_empty()) {
+            if row
+                .iter()
+                .all(|cell| cell.as_deref().unwrap_or("").trim().is_empty())
+            {
                 continue; // a blank line at the end of a spreadsheet is normal
             }
 
@@ -188,15 +157,12 @@ impl<'a> MenuCsvRepo<'a> {
                 continue;
             };
 
-            // An id matches an existing item; without one, the NAME does, so an
-            // owner can send a plain two-column list and have it update rather
-            // than duplicate.
+            // An id matches an existing item; without one, the NAME does, so an owner can send
+            // a plain two-column list and have it update rather than duplicate.
             let id = cell(index_of("id"));
             let found = match &id {
                 Some(id) => existing.iter().find(|i| i.id.as_str() == id),
-                None => existing
-                    .iter()
-                    .find(|i| i.name.eq_ignore_ascii_case(&name)),
+                None => existing.iter().find(|i| i.name.eq_ignore_ascii_case(&name)),
             };
 
             let price = match cell(index_of("price_paise")) {
@@ -205,9 +171,7 @@ impl<'a> MenuCsvRepo<'a> {
                     _ => {
                         plan.refused.push((
                             line,
-                            format!(
-                                "\"{text}\" is not a price in paise. ₹120 is 12000."
-                            ),
+                            format!("\"{text}\" is not a price in paise. ₹120 is 12000."),
                         ));
                         continue;
                     }
@@ -215,8 +179,7 @@ impl<'a> MenuCsvRepo<'a> {
                 None => match found {
                     Some(item) => item.unit_price,
                     None => {
-                        plan.refused
-                            .push((line, format!("{name} has no price")));
+                        plan.refused.push((line, format!("{name} has no price")));
                         continue;
                     }
                 },
@@ -226,18 +189,15 @@ impl<'a> MenuCsvRepo<'a> {
                 Some(text) => match text.parse::<i64>() {
                     Ok(paise) if paise >= 0 => Some(Money::from_paise(paise)),
                     _ => {
-                        plan.refused.push((
-                            line,
-                            format!("\"{text}\" is not a cost in paise"),
-                        ));
+                        plan.refused
+                            .push((line, format!("\"{text}\" is not a cost in paise")));
                         continue;
                     }
                 },
                 None => found.and_then(|i| i.cost_price),
             };
 
-            // A tax class by id or by name — an owner types "Restaurant food 5%",
-            // not "tax_food_5".
+            // A tax class by id or by name.
             let wanted_class = cell(index_of("tax_class"));
             let class = match &wanted_class {
                 Some(text) => {
@@ -249,9 +209,7 @@ impl<'a> MenuCsvRepo<'a> {
                         None => {
                             plan.refused.push((
                                 line,
-                                format!(
-                                    "\"{text}\" is not one of this shop's tax classes"
-                                ),
+                                format!("\"{text}\" is not one of this shop's tax classes"),
                             ));
                             continue;
                         }
@@ -260,27 +218,26 @@ impl<'a> MenuCsvRepo<'a> {
                 None => None,
             };
 
-            // The class named in the CSV wins; failing that the item keeps the
-            // tax it already had; failing that it is plain GST at nil, which is
-            // what `TaxSpec::default()` is and the same answer the old
-            // `(TaxRate::ZERO, Exclusive)` pair gave.
+            // The class named in the CSV wins; failing that the item keeps the tax it already
+            // had; failing that it is plain GST at nil, which is what `TaxSpec::default()` is
+            // and the same answer the old `(TaxRate::ZERO, Exclusive)` pair gave.
             let tax = match class {
                 Some(class) => class.tax,
                 None => found.map_or_else(TaxSpec::default, |i| i.tax),
             };
 
-            // A category by name, and an unknown one is refused rather than
-            // silently dropped — an item that lands in "no category" is an item
-            // nobody finds again.
+            // A category by name, and an unknown one is refused rather than silently dropped —
+            // an item that lands in "no category" is an item nobody finds again.
             let category = match cell(index_of("category")) {
                 Some(text) => {
-                    match categories.iter().find(|c| c.name.eq_ignore_ascii_case(&text)) {
+                    match categories
+                        .iter()
+                        .find(|c| c.name.eq_ignore_ascii_case(&text))
+                    {
                         Some(category) => Some(category.id.clone()),
                         None => {
-                            plan.refused.push((
-                                line,
-                                format!("there is no category called \"{text}\""),
-                            ));
+                            plan.refused
+                                .push((line, format!("there is no category called \"{text}\"")));
                             continue;
                         }
                     }
@@ -311,11 +268,7 @@ impl<'a> MenuCsvRepo<'a> {
                 short_code: cell(index_of("short_code"))
                     .or_else(|| found.and_then(|i| i.short_code.clone())),
                 prep_minutes: found.and_then(|i| i.prep_minutes),
-                // **Kept from the existing item, not taken from the CSV.**
-                // The import's columns are the ones a shopkeeper types in a
-                // spreadsheet — name, price, tax. A course is set on the menu
-                // screen, and an import that blanked it would quietly undo the
-                // kitchen's set-up every time somebody re-imported prices.
+                // Kept from the existing item, not taken from the CSV.
                 course: found.and_then(|i| i.course.clone()),
                 is_open_price: found.is_some_and(|i| i.is_open_price),
                 is_available: available,
@@ -332,12 +285,7 @@ impl<'a> MenuCsvRepo<'a> {
         Ok(plan)
     }
 
-    /// **Do exactly what the plan said.**
-    ///
-    /// Refuses outright if the plan has any refusal — the caller has already
-    /// been shown them, and an import that half succeeds is worse than one that
-    /// refuses. The whole thing is one transaction because the caller owns it
-    /// (`repo/mod.rs`), so a failure part way leaves nothing behind.
+    /// Do exactly what the plan said.
     pub fn apply(&self, outlet: &str, plan: &ImportPlan, at: Timestamp) -> Result<usize, DbError> {
         if !plan.is_clean() {
             return Err(DbError::invariant(format!(
@@ -354,10 +302,6 @@ impl<'a> MenuCsvRepo<'a> {
 }
 
 /// An id for an item the file did not name one for.
-///
-/// Derived from the name and the line so two imports of the same file update
-/// rather than duplicate — the property an owner assumes and nobody tells them
-/// about.
 fn slug(name: &str, line: usize) -> String {
     let cleaned: String = name
         .chars()

@@ -1,20 +1,4 @@
-/**
- * **Today, and what needs you** — audit G1.
- *
- * > *"The owner's questions — how did today go, what is unusual, what needs me
- * > — are answered by opening four screens and doing arithmetic in your head."*
- *
- * Thirteen reports do not answer the third question, because you have to know
- * to ask them. This is the panel that speaks first.
- *
- * # Nothing here is worked out on this screen
- *
- * The figures are formatted, the comparison is a sentence, and **every line of
- * the attention list comes from the thing that already knows** — the backup
- * screen's own headline, the print queue's own snapshot, the Spends screen's
- * own reminders. A dashboard that recomputed any of them would be a fifth place
- * for a figure to disagree, which is G1 with more steps.
- */
+/** Today, and what needs you. */
 
 import { useEffect, useState } from 'react';
 
@@ -82,8 +66,7 @@ export function Dashboard() {
 
       <SectionHeader title="What needs you" />
       {view.attention.length === 0 ? (
-        // **Empty is the good case and it says so.** A blank panel reads as
-        // broken; this reads as "nothing is wrong", which is the news.
+        // Empty is the good case and it says so.
         <Card className="mb-dash__quiet">{view.quiet}</Card>
       ) : (
         <div className="mb-dash__list">

@@ -3,27 +3,19 @@ import type { MoneyView } from "./MoneyView";
 
 export type MenuRowView = { id: string, name: string, categoryId: string | null, price: MoneyView, taxClassId: string | null, 
 /**
- * What the item is actually charged at today — "5%", and the treatment in
- * words, so a screen never has to work it out.
+ * What the item is actually charged at today — "5%", and the treatment in words, so a
+ * screen never has to work it out.
  */
-rate: string, hsn: string | null, shortCode: string | null, 
+rate: string, hsn: string | null, shortCode: string | null, cost: MoneyView | null, 
 /**
- * **Absent without `reports.view`.** Scope 4.1 is the owner's margin, not
- * the counter's business — and this is refused in Rust rather than hidden.
- */
-cost: MoneyView | null, 
-/**
- * Only when the cost is known and visible. Preformatted (R8).
+ * Only when the cost is known and visible.
  */
 margin: string | null, isOpenPrice: boolean, isAvailable: boolean, 
 /**
- * Scope 3.5 — which course this dish belongs to, for the kitchen screen.
- * Blank means no course, and a menu where every dish is blank fires the
- * whole order at once (P24).
+ * Which course this dish belongs to, for the kitchen screen.
  */
 course: string | null, 
 /**
- * Scope 3.6 — how many minutes the kitchen is expected to take. Blank
- * means no target, and a ticket with no target never turns late.
+ * How many minutes the kitchen is expected to take.
  */
 prepMinutes: string | null, variants: bigint, };

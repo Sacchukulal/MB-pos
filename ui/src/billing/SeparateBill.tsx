@@ -1,16 +1,4 @@
-/**
- * **"Put some of this on its own bill."**
- *
- * One job. The old `Split` dialog did three at once — how much each person
- * owes, how many people are sitting there, and moving food onto a second bill
- * — and the owner's verdict on 2026-08-23 was that it is *"a complete rocket
- * science for the hotel cashier"*. The other two are not dialogs at all now;
- * they are a stepper in the cart's fold. This is what is left, and it is the
- * only part that genuinely needs a screen: somebody has to say which food goes.
- *
- * Nothing here divides anything. The quantities go across as typed and
- * `Qty::parse` in Rust decides whether "0.5" is a quantity.
- */
+/** "Put some of this on its own bill.". */
 
 import { useState } from 'react';
 
@@ -91,10 +79,8 @@ export function SeparateBill({
                     seat: null,
                   },
                 })
-                  // Rust clears the cart when the order it was holding has been
-                  // split — there are two orders now and it must not guess
-                  // which one the cashier meant. Without this sentence the
-                  // screen simply empties, which reads as the bill being lost.
+                  // Rust clears the cart when the order it was holding has been split — there
+                  // are two orders now and it must not guess which one the cashier meant.
                   .then(() =>
                     onSplit(
                       'Done. There are two bills on that table now — open the one you are settling from the floor.',

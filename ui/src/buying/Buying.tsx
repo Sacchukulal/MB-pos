@@ -1,21 +1,3 @@
-/**
- * **Buying** — P26, scope 4.5. Suppliers, the paper, what the shop owes.
- *
- * # The purchase entry is the screen an owner abandons
- *
- * It is used standing beside a delivery man who wants to leave. So a line is
- * material → quantity → rate → Enter, the running total never moves off the
- * screen, and nothing is modal in the middle of a line. That is P10's billing
- * keyboard applied to a different paper.
- *
- * # Nothing here is arithmetic (R8)
- *
- * The landed cost per line, the invoice totals, the ageing, the overdue
- * sentence and the tax note all arrive as strings composed in Rust. This file
- * has no `*`, no `/` and no money in it — **including the photograph**, whose
- * only computation is the canvas downscale D132 deliberately put on this side.
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -66,18 +48,12 @@ export function Buying() {
   const [view, setView] = useState<BuyingView | null>(null);
   const [tab, setTab] = useState('deliveries');
   const [entering, setEntering] = useState(false);
-  /** P31 — raising a purchase order, which nothing could do. */
+  /** Raising a purchase order, which nothing could do. */
   const [ordering, setOrdering] = useState(false);
   const [account, setAccount] = useState<SupplierAccountView | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<SupplierView | null>(null);
   const [looking, setLooking] = useState<PurchaseView | null>(null);
-  /**
-   * **Why the screen could not load — and it is on the page, not only in a
-   * toast.** Found by running it: an unlicensed counter opened Buying to a
-   * completely blank panel with two toasts sliding away in the corner, and
-   * thirty seconds later there was nothing at all to read. A screen that cannot
-   * load has to say so where the screen is.
-   */
+  /** Why the screen could not load — and it is on the page, not only in a toast. */
   const [refused, setRefused] = useState<string | null>(null);
   const toast = useToast();
 
@@ -218,8 +194,10 @@ export function Buying() {
           </Card>
         </div>
         <div className="mb-row">
-          {/* P31. A purchase order could be advanced and closed and never
-              CREATED — `save_purchase_order` had no caller. */}
+          {/*
+            A purchase order could be advanced and closed and never CREATED —
+            `save_purchase_order` had no caller.
+          */}
           <Button variant="secondary" onClick={() => setOrdering(true)}>
             Raise an order
           </Button>
@@ -227,8 +205,7 @@ export function Buying() {
         </div>
       </div>
 
-      {/* D100 — an unhealthy row carries its own fix, and these are sentences
-          written in Rust. */}
+      {/* An unhealthy row carries its own fix, and these are sentences written in Rust. */}
       {view.attention.map((line) => (
         <div key={line} className="mb-buying__attention">
           {line}
@@ -417,9 +394,7 @@ export function Buying() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Entering a delivery.
-// ---------------------------------------------------------------------------
 
 function PurchaseEntry({
   view,
@@ -471,12 +446,7 @@ function PurchaseEntry({
       .catch(onError);
   };
 
-  /**
-   * **D132 — the downscale lives here, and that is the whole reason Rust has no
-   * image library.** Longest side 1600 px, JPEG 0.7: a 4 MB camera picture
-   * becomes about 200 KB, which is what makes keeping it beside the database
-   * (and inside the backup) affordable at all.
-   */
+  /** The downscale lives here, and that is the whole reason Rust has no image library. */
   const attach = (chosen: File) => {
     const image = new Image();
     const reader = new FileReader();
@@ -538,14 +508,13 @@ function PurchaseEntry({
                         const picked = materials.find((m) => m.id === id);
                         setLine(index, {
                           materialId: id,
-                          // The pack the shop BUYS in, which is not the one it
-                          // cooks in (D108): rice arrives in bags.
+                          // The pack the shop BUYS in, which is not the one it cooks in: rice
+                          // arrives in bags.
                           unit: picked?.purchaseUnit ?? '',
                           rate: line.rate,
                         });
-                        // A blank line appears as soon as the last one is used,
-                        // so a delivery of nine things is never nine presses of
-                        // "add a line".
+                        // A blank line appears as soon as the last one is used, so a delivery
+                        // of nine things is never nine presses of "add a line".
                         if (index === lines.length - 1) {
                           setLines((all) => [...all, { ...BLANK_LINE }]);
                         }
@@ -600,8 +569,10 @@ function PurchaseEntry({
           </tbody>
         </table>
 
-        {/* What the last delivery of each material cost, so a rise is visible
-            while somebody can still phone about it. Composed in Rust. */}
+        {/*
+          What the last delivery of each material cost, so a rise is visible while somebody can
+          still phone about it.
+        */}
         {lines
           .map((line) => materials.find((m) => m.id === line.materialId))
           .filter((m): m is BuyMaterialView => m !== undefined && m.cost !== '')
@@ -654,9 +625,7 @@ function PurchaseEntry({
   );
 }
 
-// ---------------------------------------------------------------------------
 // The rest.
-// ---------------------------------------------------------------------------
 
 function SupplierEditor({
   supplier,
@@ -732,15 +701,7 @@ function SupplierAccount({
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState('cash');
   const [reference, setReference] = useState('');
-  /**
-   * P31 — correcting the ledger, which had no button.
-   *
-   * `save_supplier_adjustment` existed from P26 and nothing called it, so a
-   * supplier's balance could only ever move by an invoice or a payment. A
-   * credit note for returned stock, an invoice entered twice, ten rupees of
-   * rounding somebody argued about — none of them had a way in, and the
-   * shop's answer was to enter a fake payment.
-   */
+  /** Correcting the ledger, which had no button. */
   const [fixing, setFixing] = useState(false);
   const [adjust, setAdjust] = useState('');
   const [increases, setIncreases] = useState(false);
@@ -784,11 +745,7 @@ function SupplierAccount({
         </Button>
       </div>
 
-      {/* **A correction is a LINE, not an edit.** It joins the movements below
-          with its reason on it, so what the balance is and how it got there
-          are still the same story. That is why there is no "change the
-          balance to" box: a figure with no line behind it is a figure nobody
-          can explain to the supplier on the phone. */}
+      {/* A correction is a LINE, not an edit. */}
       {fixing ? (
         <div className="mb-row">
           <Input
@@ -901,10 +858,6 @@ function PurchasePaper({
             numeric: true,
             render: (l) => <span className="mb-mono">{l.value.text}</span>,
           },
-          /* **D123's number**, and the reason the module exists. The heading
-             was "Which is" and said nothing — a person is comparing this
-             against the RATE three columns to the left, so it has to say that
-             is what it is. Found by looking at it. */
           { key: 'landed', header: 'What it really cost', render: (l) => l.landed },
         ]}
         rowKey={(l) => String(l.seq)}
@@ -935,11 +888,7 @@ function PurchasePaper({
         </div>
       ) : null}
 
-      {/* **The cancel is two presses, and that is a finding from looking at
-          it.** The first version put a red "Cancel it" button and an empty
-          reason box directly under the total — so somebody who opened a
-          delivery just to READ it was one stray click from unwinding five
-          materials' costs. Now the row a person meets is Close. */}
+      {/* The cancel is two presses, and that is a finding from looking at it. */}
       {purchase.cancelled === '' ? (
         cancelling ? (
           <div className="mb-buying__form">
@@ -985,28 +934,7 @@ function PurchasePaper({
   );
 }
 
-/**
- * **Raising a purchase order** — `save_purchase_order`, P26's command that
- * nothing called until P31.
- *
- * The Orders tab could mark an order sent and close it, and could not make
- * one, so the whole tab was a list that could only ever be empty.
- *
- * # It stays optional, and the words say so
- *
- * The empty state on that tab is right: *"A purchase order is optional. You
- * never have to raise one — enter what arrives and nothing here will ever ask
- * about it."* Most shops in this market ring the supplier. This is for the ones
- * whose supplier wants paper, and it must not become a step in front of
- * entering a delivery.
- *
- * # No total, and that is deliberate
- *
- * An order is what you asked for; a delivery is what turned up and what it
- * cost. Rust works the value out from the lines — a total typed here would be
- * a second answer, and it would be the one that is wrong when the rate changes
- * between ordering and delivery.
- */
+/** Raising a purchase order. */
 function RaiseOrder({
   view,
   onClose,

@@ -1,7 +1,4 @@
-//! What the paper says about who the shop is — P33 Phase 6.
-//!
-//! Audit 3.2: `is_composition` changed only the title, so a bill of supply
-//! printed CGST lines under it. That is a contradiction in law.
+//! What the paper says about who the shop is.
 
 #![allow(
     clippy::expect_used,
@@ -34,7 +31,8 @@ fn cart_of(specs: &[(&str, i64, TaxSpec)]) -> Cart {
             tax.rate,
         )
         .with_tax(*tax);
-        cart.add(snapshot, Qty::ONE, None, Vec::new()).expect("adds");
+        cart.add(snapshot, Qty::ONE, None, Vec::new())
+            .expect("adds");
     }
     cart
 }
@@ -61,8 +59,8 @@ fn paper_for(
         bill: &fixture.bill,
         ..fixture.context(Copy::Original)
     };
-    let doc = mb_print::template::bill_document(&common::metrics(PaperKind::Mm80), &ctx)
-        .expect("builds");
+    let doc =
+        mb_print::template::bill_document(&common::metrics(PaperKind::Mm80), &ctx).expect("builds");
     let laid = layout(&doc).expect("lays out");
     laid.lines
         .iter()
@@ -71,13 +69,13 @@ fn paper_for(
             _ => None,
         })
         .collect::<Vec<_>>()
-        .join("
-")
+        .join(
+            "
+",
+        )
 }
 
-/// **The illegal document, as a guard.**
-///
-/// A composition dealer may not collect or show GST.
+/// The illegal document, as a guard.
 #[test]
 fn a_bill_of_supply_can_never_contain_the_word_cgst() {
     let shapes: [&[(&str, i64, TaxSpec)]; 4] = [
@@ -86,14 +84,23 @@ fn a_bill_of_supply_can_never_contain_the_word_cgst() {
             ("Dosa", 10_000, TaxSpec::gst(pc(5))),
             ("Water", 2_000, TaxSpec::gst_inclusive(pc(18))),
         ],
-        &[("Rice", 9_000, TaxSpec::gst(pc(5))), ("Papad", 2_000, TaxSpec::exempt())],
-        &[("Dosa", 10_000, TaxSpec::gst(pc(5))), ("Coffee", 3_000, TaxSpec::gst(pc(18)))],
+        &[
+            ("Rice", 9_000, TaxSpec::gst(pc(5))),
+            ("Papad", 2_000, TaxSpec::exempt()),
+        ],
+        &[
+            ("Dosa", 10_000, TaxSpec::gst(pc(5))),
+            ("Coffee", 3_000, TaxSpec::gst(pc(18))),
+        ],
     ];
     for shape in shapes {
         let paper = paper_for(Registration::Composition, StateTax::Sgst, shape);
         assert!(paper.contains("BILL OF SUPPLY"), "wrong title:\n{paper}");
         for word in ["CGST", "SGST", "IGST", "UTGST"] {
-            assert!(!paper.contains(word), "a bill of supply printed {word}:\n{paper}");
+            assert!(
+                !paper.contains(word),
+                "a bill of supply printed {word}:\n{paper}"
+            );
         }
     }
 }
@@ -109,7 +116,10 @@ fn an_unregistered_bill_has_no_title_and_no_tax() {
     assert!(!paper.contains("TAX INVOICE"), "{paper}");
     assert!(!paper.contains("BILL OF SUPPLY"), "{paper}");
     for word in ["CGST", "SGST", "IGST"] {
-        assert!(!paper.contains(word), "an unregistered bill printed {word}:\n{paper}");
+        assert!(
+            !paper.contains(word),
+            "an unregistered bill printed {word}:\n{paper}"
+        );
     }
 }
 
@@ -135,10 +145,13 @@ fn a_union_territory_prints_utgst() {
         &[("Dosa", 10_000, TaxSpec::gst(pc(5)))],
     );
     assert!(paper.contains("UTGST"), "{paper}");
-    assert!(paper.contains("CGST"), "the central half is unchanged:\n{paper}");
+    assert!(
+        paper.contains("CGST"),
+        "the central half is unchanged:\n{paper}"
+    );
 }
 
-/// **The bar bill.** Liquor VAT prints, and never inside a GST figure.
+/// The bar bill. Liquor VAT prints, and never inside a GST figure.
 #[test]
 fn a_bar_bill_prints_its_vat_separately() {
     let paper = paper_for(
@@ -149,8 +162,14 @@ fn a_bar_bill_prints_its_vat_separately() {
             ("Beer", 25_000, TaxSpec::liquor(pc(20))),
         ],
     );
-    assert!(paper.contains("VAT"), "the VAT never reached the paper:\n{paper}");
-    assert!(paper.contains("CGST"), "the food's GST is still there:\n{paper}");
+    assert!(
+        paper.contains("VAT"),
+        "the VAT never reached the paper:\n{paper}"
+    );
+    assert!(
+        paper.contains("CGST"),
+        "the food's GST is still there:\n{paper}"
+    );
     // It printed twice once, and `contains` could not see it.
     assert_eq!(
         paper.matches("(includes VAT").count(),

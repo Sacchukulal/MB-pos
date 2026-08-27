@@ -1,59 +1,14 @@
 #!/usr/bin/env node
 /**
- * **Drive the real counter** — P31, and the reason this round found what it
- * found.
+ * Drive the real counter.
  *
- * # Why this exists
- *
- * Every session up to P30.5 proved its work with `cargo test`. All those tests
- * pass. And the owner installed the build, used it for ten minutes, and found
- * six things wrong — because **nothing had ever run the actual window**: not
- * the vite dev server in a browser, where `invoke` does not exist, but the
- * Tauri app, against a real database, with the real IPC boundary in between.
- *
- * WebView2 is Chromium, so it has Chromium's remote-debugging endpoint. Start
- * the counter with it open:
- *
- * ```sh
- * APPDATA=/some/scratch/folder \
- *   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 \
- *   cargo run -p magic-bill
- * ```
- *
- * **Point `APPDATA` somewhere empty.** That is what makes it a genuinely fresh
- * install — D55 and D156: *a session must look at what a SHOP would see, not a
- * seeded demo shop.* Every bug in `NOT_WIRED.md` was found this way.
- *
- * Then:
- *
- * ```sh
- * node scripts/drive.mjs invoke first_run '{}'
- * node scripts/drive.mjs text                       # what is on the screen
- * node scripts/drive.mjs click "text=Start a new shop"
- * node scripts/drive.mjs file scripts/some-scenario.js
- * ```
- *
- * `invoke` goes through `window.__TAURI_INTERNALS__.invoke`, so it is the same
- * road a button takes: the same serialisation, the same guard, the same
- * database. A command that answers here is a command that works.
- *
- * # What it cannot do
- *
- * It cannot see. A screenshot is a separate thing — on Windows,
- * `Get-Process magic-bill`, `GetWindowRect`, `CopyFromScreen` — and the look is
- * still a person's judgement (UI_AFTER.md). This proves behaviour.
- *
- * It also must not open a native modal: a file dialog blocks the command it was
- * called from until somebody dismisses it.
- *
- * NO DEPENDENCIES. Node's built-in `fetch` and `WebSocket` are the whole of it.
- *
+ * Usage:
  *   node drive.mjs eval "<js expression>"
  *   node drive.mjs invoke <command> '<json args>'
- *   node drive.mjs text                       # visible text of the page
- *   node drive.mjs html "<css selector>"      # one element's markup
- *   node drive.mjs click "<css selector>"     # or click "text=Some Label"
- *   node drive.mjs file <path.js>             # run a script file, print its result
+ *   node drive.mjs text
+ *   node drive.mjs html "<css selector>"
+ *   node drive.mjs click "<css selector>"
+ *   node drive.mjs file <path.js>
  */
 
 const PORT = process.env.CDP_PORT || 9222;
@@ -148,11 +103,7 @@ async function main() {
     const r = await evaluate(`(async () => { ${src} })()`);
     console.log(typeof r.value === 'string' ? r.value : JSON.stringify(r.value ?? r, null, 2));
   } else if (verb === 'shot') {
-    // **It can see now.** The note above said a screenshot was a separate
-    // thing needing GetWindowRect and CopyFromScreen — it is not: WebView2 is
-    // Chromium, and Chromium screenshots itself. The look has been the thing
-    // sent back twice from a real install, so the one tool that drives the
-    // real window should be able to look at it.
+    // It can see now.
     const fs = await import('node:fs');
     const cdp = await connect();
     const r = await cdp.send('Page.captureScreenshot', { format: 'png' });

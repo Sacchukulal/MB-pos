@@ -2,7 +2,6 @@
 
 export type CustomerEdit = { id: string, name: string, phone: string, gstin: string, address: string, 
 /**
- * Typed by a person, and **blank means no limit** — which is not a limit
- * of zero. Parsed in Rust (D39).
+ * Typed by a person, and blank means no limit — which is not a limit of zero.
  */
 creditLimit: string, isActive: boolean, };

@@ -1,23 +1,4 @@
-//! **The printer setup** — audit Part 3's "Printer Settings", every row.
-//!
-//! A printer is a **record**, not a scalar, which is why it is here and not in
-//! the catalogue: a shop has none, one, or six of them, and keys like
-//! `printer.3.paper_mm` would be audit E6 wearing a different hat.
-//!
-//! # The one paper size
-//!
-//! v1 had two, in two places, and they could disagree. There is one here, on
-//! the printer, because paper is a property of a printer and not of a shop: a
-//! counter with an 80 mm bill printer and a 58 mm kitchen printer is an
-//! ordinary shop, and one shop-wide setting cannot describe it.
-//!
-//! # The test print is a BILL
-//!
-//! P07's slip proves the wire works. It does not answer *"is my bill centred,
-//! is the logo the right size, does the total fit?"* — which is what somebody
-//! standing at the printer is actually asking. So the test print is
-//! `settings::sample`'s bill, the same document the preview shows, on this
-//! shop's real settings.
+//! The printer setup.
 
 use mb_auth::Permission;
 use mb_core::Timestamp;
@@ -30,20 +11,16 @@ use crate::state::{App, OUTLET, printer_config_for};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
-// ---------------------------------------------------------------------------
 // What the screen sees.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct PrintersView {
     pub printers: Vec<PrinterRowView>,
-    /// **The real printers Windows knows about**, for the "which one?" list.
-    /// Empty is a state, not a failure: a counter with no printer installed
-    /// still has to be able to open this screen.
+    /// The real printers Windows knows about, for the "which one?" list.
     pub windows: Vec<String>,
-    /// Scope 3.1 — which printer each category's kitchen tickets go to.
+    /// Which printer each category's kitchen tickets go to.
     pub routes: Vec<RouteView>,
 }
 
@@ -57,7 +34,6 @@ pub struct PrinterRowView {
     pub kind: String,
     /// The Windows name, the `host:port`, or the COM port.
     pub address: String,
-    /// In words: "Windows: EPSON TM-T82", "Not connected yet".
     pub connection: String,
     pub paper_mm: u32,
     pub is_default: bool,
@@ -67,12 +43,9 @@ pub struct PrinterRowView {
     pub engine: String,
     pub is_bold_dark: bool,
     pub can_kick_drawer: bool,
-    /// Scope 7.11, in the millimetres the owner nudges in.
     pub offset_x_mm: i32,
     pub offset_y_mm: i32,
-    /// True for the stand-in row a shop has before it sets a printer up. It
-    /// can be edited into a real one; it cannot be deleted, because the queue
-    /// and the spool both hold a foreign key to it.
+    /// True for the stand-in row a shop has before it sets a printer up.
     pub is_stand_in: bool,
 }
 
@@ -104,10 +77,6 @@ pub struct PrinterEdit {
     pub can_kick_drawer: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Reading.
-// ---------------------------------------------------------------------------
-
 fn connection_words(kind: &str, address: &str) -> String {
     match (kind, address) {
         ("spooler", "") => "Windows: not chosen yet".to_owned(),
@@ -128,7 +97,7 @@ fn row_view(printer: &Printer) -> PrinterRowView {
         name: printer.name.clone(),
         kind: printer.kind.clone(),
         address: printer.address.clone().unwrap_or_default(),
-        // D58: counts and small numbers cross as u32/i32, never i64.
+        // Counts and small numbers cross as u32/i32, never i64.
         paper_mm: u32::try_from(printer.paper_mm).unwrap_or(80),
         is_default: printer.is_default,
         role: printer.role.clone(),
@@ -143,9 +112,7 @@ fn row_view(printer: &Printer) -> PrinterRowView {
 pub fn printers_on(app: &App) -> UiResult<PrintersView> {
     guard::require(app, Permission::SettingsPrinter)?;
 
-    // **Asked of Windows, not remembered.** A printer installed five minutes
-    // ago has to appear, and one that was uninstalled has to stop appearing —
-    // v1's "Refresh List" button existed because its list was a cache.
+    // Asked of Windows, not remembered.
     let windows = mb_winprint::list_printers().map_or_else(
         |e| {
             log_warn!("Windows would not list its printers ({e}); the list is empty");
@@ -186,12 +153,8 @@ pub fn printers_on(app: &App) -> UiResult<PrintersView> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Writing.
-// ---------------------------------------------------------------------------
-
-/// The three paper widths this product supports, and the reason a fourth is a
-/// decision rather than a number: `mb_print::paper` knows the column counts.
+/// The three paper widths this product supports, and the reason a fourth is a decision rather
+/// than a number: `mb_print::paper` knows the column counts.
 const PAPERS: [u32; 3] = [58, 80, 100];
 
 pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
@@ -223,7 +186,7 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
             "A printer prints bills, kitchen tickets, or both.",
         ));
     }
-    // **A network printer with no address prints nowhere and says it is fine.**
+    // A network printer with no address prints nowhere and says it is fine.
     if edit.kind == "network" && !edit.address.contains(':') {
         return Err(UiError::new(
             "printer.address",
@@ -251,9 +214,7 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
         paper_mm: i64::from(edit.paper_mm),
         is_default: edit.is_default,
         can_kick_drawer: edit.can_kick_drawer,
-        // **The offset is NOT edited here.** It is nudged from the test print
-        // (7.11), where the owner can see what they are correcting, and typing
-        // a number into a box you cannot check is how it gets worse.
+        // The offset is NOT edited here.
         offset_x_mm: 0,
         offset_y_mm: 0,
         role: edit.role.clone(),
@@ -313,9 +274,7 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
                 };
                 repos.settings().save_printer(OUTLET, &row, at)?;
 
-                // **One default, and it is the shop's answer to "where does a
-                // bill go?".** Two would make that question ambiguous and
-                // `flows::default_printer` would answer it by row order.
+                // One default, and it is the shop's answer to "where does a bill go?".
                 if row.is_default {
                     for other in existing.iter().filter(|p| p.id != id && p.is_default) {
                         repos.settings().save_printer(
@@ -349,32 +308,15 @@ pub fn save_printer_on(app: &App, edit: PrinterEdit) -> UiResult<PrintersView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // **The queue runs a thread per printer it was STARTED with**, so a
-    // printer saved now has nowhere to send anything until the queue is built
-    // again. This used to say so in the log and leave it there — and the owner
-    // added their TVSE, pressed **Print a sample bill**, and was told "there is
-    // no printer prn_…". Setting a printer up is the one moment somebody is
-    // certain to test it, so it has to work then. P30.6.
+    // The queue runs a thread per printer it was STARTED with, so a printer saved now has
+    // nowhere to send anything until the queue is built again.
     app.rebuild_queue();
     log_info!("{} saved the printer \"{}\"", who.name, row.name);
 
     printers_on(app)
 }
 
-/// **Choose where bills print** — one dropdown, and it is the owner's ask of
-/// 2026-08-17: *"no default printer selection option… just show option to
-/// select a default printer using drop down."*
-///
-/// It existed only as a checkbox at the bottom of the add-a-printer dialog,
-/// worded *"Bills go here unless something says otherwise"* — which is what
-/// being the default means but not what it is called, so nobody found it, and
-/// the shop kept printing to the stand-in. A setting that decides whether the
-/// shop prints at all belongs at the top of the screen in the words the owner
-/// used.
-///
-/// **One statement, not two.** This does not toggle a flag on one row and hope
-/// the others were cleared; it writes the whole list, so "exactly one default"
-/// is true after it by construction rather than by care.
+/// Choose where bills print.
 pub fn set_default_printer_on(app: &App, printer_id: String) -> UiResult<PrintersView> {
     let who = guard::require(app, Permission::SettingsPrinter)?;
     let at = crate::flows::now();
@@ -413,24 +355,7 @@ pub fn set_default_printer_on(app: &App, printer_id: String) -> UiResult<Printer
     printers_on(app)
 }
 
-/// **Which paper this shop's bills print on** — 58 mm (2 inch), 80 mm (3 inch)
-/// or 100 mm (4 inch).
-///
-/// # Why it is reachable from the bill designer as well as from Printers
-///
-/// The owner, 2026-08-17: *"the paper size selection in top, it should 2 inch
-/// 3 inch 4 inch."* They were on the screen where the bill is designed, and
-/// they are right that it belongs there: **paper width is the single setting
-/// that changes what every other setting on that screen does.** A heading that
-/// fits on 80 mm is capped on 58; the item table goes two-line below a width
-/// that has no room for four columns. Tuning a receipt without being able to
-/// see it on the right paper is tuning the wrong receipt.
-///
-/// **It is still one value, on the printer.** Paper belongs to a printer and
-/// not to a shop — a counter with an 80 mm bill printer and a 58 mm kitchen
-/// printer is an ordinary shop, and `save_printer` is where that is set per
-/// device. This changes the paper on the printer bills go to, which is the one
-/// the preview draws, so the two screens can never disagree about it.
+/// Which paper this shop's bills print on — 58 mm (2 inch), 80 mm (3 inch) or 100 mm (4 inch).
 pub fn set_paper_on(app: &App, mm: u32) -> UiResult<PrintersView> {
     let who = guard::require(app, Permission::SettingsPrinter)?;
     if !PAPERS.contains(&mm) {
@@ -441,9 +366,9 @@ pub fn set_paper_on(app: &App, mm: u32) -> UiResult<PrintersView> {
     }
     let at = crate::flows::now();
 
-    // The printer bills actually go to — the same answer `flows::default_printer`
-    // gives, so changing "the paper" here changes the paper of the roll a
-    // customer's bill comes out on rather than of whichever row is first.
+    // The printer bills actually go to — the same answer `flows::default_printer` gives, so
+    // changing "the paper" here changes the paper of the roll a customer's bill comes out on
+    // rather than of whichever row is first.
     let target = crate::flows::default_printer(app)?.id;
 
     app.with_shop(|shop| {
@@ -491,10 +416,7 @@ pub fn delete_printer_on(app: &App, id: String) -> UiResult<PrintersView> {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                // **A printer with paper in the spool cannot go.** `print_jobs`
-                // holds a foreign key to it, and the refusal says how many
-                // rather than showing a constraint name (audit F8) — the same
-                // sentence shape as a table with bills against it (P14).
+                // A printer with paper in the spool cannot go.
                 let waiting = repos.print_jobs().count_for_printer(&id)?;
                 if waiting > 0 {
                     return Err(mb_db::DbError::invariant(format!(
@@ -504,18 +426,20 @@ pub fn delete_printer_on(app: &App, id: String) -> UiResult<PrintersView> {
                         if waiting == 1 { "" } else { "s" }
                     )));
                 }
-                repos.settings().delete_printer(OUTLET, &id, crate::flows::now())
+                repos
+                    .settings()
+                    .delete_printer(OUTLET, &id, crate::flows::now())
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // Same as saving one: the queue is the printer list made real. P30.6.
+    // Same as saving one: the queue is the printer list made real.
     app.rebuild_queue();
     log_info!("{} removed a printer", who.name);
     printers_on(app)
 }
 
-/// Scope 3.1 — which printer this category's kitchen tickets go to.
+/// Which printer this category's kitchen tickets go to.
 pub fn route_category_on(
     app: &App,
     category_id: String,
@@ -541,12 +465,7 @@ pub fn route_category_on(
     printers_on(app)
 }
 
-/// **The test print, and it is a whole bill.**
-///
-/// P07's slip answers "does the wire work?". This answers the question
-/// somebody standing at the printer is actually asking — is my bill centred,
-/// is the logo the right size, does the total fit? — because it is the same
-/// document the preview shows and the same one a customer will get.
+/// The test print, and it is a whole bill.
 pub fn print_sample_on(app: &App, printer_id: String) -> UiResult<String> {
     let who = guard::require(app, Permission::SettingsPrinter)?;
     let config = app.shop_config();
@@ -582,35 +501,34 @@ pub fn print_sample_on(app: &App, printer_id: String) -> UiResult<String> {
             settings: &config.receipt,
             customer: None,
             cashier: Some(who.name.as_str()),
-            // **The same values a real bill resolves** — P32. A test print
-            // that showed a table the real path could not produce is a test
-            // print that cannot find the bug it exists to find.
+            // The same values a real bill resolves.
             table: table.as_deref(),
             time: Some(time.as_str()),
             waiter: Some(who.name.as_str()),
             copy: mb_print::template::Copy::Original,
             einvoice: mb_print::template::EInvoice::default(),
-            // P31 — the same letterhead a real bill will carry.
+            // The same letterhead a real bill will carry.
             logo: crate::logo::stored(app),
         },
     )
     .map_err(|e| words::from_print(&e))?;
 
     let at = crate::flows::now();
-    app.print(mb_print::queue::Job::new(
-                    mb_print::queue::JobKind::Test,
-                    &printer.id,
-                    document,
-                    crate::flows::today(at),
-                )
-                .because("sample bill".to_owned()),)
+    app.print(
+        mb_print::queue::Job::new(
+            mb_print::queue::JobKind::Test,
+            &printer.id,
+            document,
+            crate::flows::today(at),
+        )
+        .because("sample bill".to_owned()),
+    )
 }
 
-/// Scope 7.11 — print, look at the paper, nudge, print again.
+/// Print, look at the paper, nudge, print again.
 pub fn nudge_on(app: &App, printer_id: String, dx_mm: i32, dy_mm: i32) -> UiResult<PrintersView> {
-    // The existing `ipc::nudge_print_offset` does the arithmetic and the
-    // clamping; this is the settings screen's door to it, so there is one rule
-    // and not two.
+    // The existing `ipc::nudge_print_offset` does the arithmetic and the clamping; this is the
+    // settings screen's door to it, so there is one rule and not two.
     crate::ipc::nudge_offset_on(app, printer_id, dx_mm, dy_mm)?;
     printers_on(app)
 }
@@ -618,9 +536,7 @@ pub fn nudge_on(app: &App, printer_id: String, dx_mm: i32, dy_mm: i32) -> UiResu
 /// A timestamp, for the generated printer id.
 const _: Option<Timestamp> = None;
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn printer_setup(app: tauri::State<'_, App>) -> UiResult<PrintersView> {

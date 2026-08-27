@@ -1,23 +1,4 @@
-/**
- * **What an item is made of** — scope 6.1 sizes, 6.2 choices, 6.3 combos.
- *
- * The rules and the storage were built earlier in P13 and are tested on their
- * own; this is the way in. Three ideas, kept apart on purpose because a
- * shopkeeper keeps them apart:
- *
- * * a **size** is its own price (a half plate is not a discounted full plate);
- * * a **group of choices** is made once and offered on many items — a shop has
- *   one "Spice level", not one per curry;
- * * a **combo** is a price that gets shared across what is in it, which is the
- *   only way a dosa at 5% and a bottle of water at 18% can be sold as one deal
- *   and still produce a correct rate summary.
- *
- * # Nothing here decides anything
- *
- * Every number is parsed in Rust and comes back preformatted (R8, D39). The
- * shares under a combo are recomputed from today's prices on every read (D53),
- * so this screen never holds arithmetic that could go stale.
- */
+/** What an item is made of. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -43,20 +24,9 @@ import type { ModifierEdit } from '../ipc/generated/ModifierEdit';
 import type { ModifierGroupView } from '../ipc/generated/ModifierGroupView';
 import type { VariantView } from '../ipc/generated/VariantView';
 
-/* **This screen had its own `freshId` and it was nearly right.**
+/* This screen had its own `freshId` and it was nearly right. */
 
-   It was `Date.now() + Math.floor(Math.random() * 1000)` — the only id in the
-   product with any randomness at all, which is why sizes and choices never hit
-   the collision the rest of the app did. A thousand values is not enough
-   though: by the birthday rule you would expect a repeat inside one
-   millisecond after about forty of them, and `Math.random` is not a source
-   anybody should be counting on.
-
-   It is the kit's `freshId` now, like everything else. */
-
-// ---------------------------------------------------------------------------
 // One item: its sizes, and which groups it offers.
-// ---------------------------------------------------------------------------
 
 export function Composition({
   row,
@@ -234,9 +204,7 @@ function EditSize({
   );
 }
 
-// ---------------------------------------------------------------------------
 // The shop's groups of choices.
-// ---------------------------------------------------------------------------
 
 export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => void }) {
   const [groups, setGroups] = useState<readonly ModifierGroupView[]>([]);
@@ -323,9 +291,9 @@ function EditGroup({
   onFailed: (cause: unknown) => void;
 }) {
   const [name, setName] = useState(group.name);
-  // "How many may they pick" as one choice rather than two numbers, because
-  // min and max as separate boxes is how you end up with "at least 3 of 2" —
-  // which Rust refuses, but nobody should have been able to type.
+  // "How many may they pick" as one choice rather than two numbers, because min and max as
+  // separate boxes is how you end up with "at least 3 of 2" — which Rust refuses, but nobody
+  // should have been able to type.
   const [shape, setShape] = useState(() => {
     if (group.minSelect === 1 && group.maxSelect === 1) return 'one';
     if (group.maxSelect === 1) return 'atMostOne';
@@ -440,10 +408,6 @@ function EditGroup({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Combos.
-// ---------------------------------------------------------------------------
-
 export function Combos({
   rows,
   onFailed,
@@ -463,8 +427,8 @@ export function Combos({
     {
       key: 'parts',
       header: "What's in it",
-      // The share and the rate on every part, because a combo across two rates
-      // is the whole reason apportioning exists.
+      // The share and the rate on every part, because a combo across two rates is the whole
+      // reason apportioning exists.
       render: (c) => (
         <span className="mb-comp__rule">
           {c.parts

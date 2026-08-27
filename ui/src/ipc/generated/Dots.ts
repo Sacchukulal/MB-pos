@@ -5,7 +5,6 @@
  */
 export type Dots = { width: number, height: number, 
 /**
- * One byte per dot, row by row: 1 is ink. Fat compared with the packed
- * form and far simpler to draw, and a logo is small.
+ * One byte per dot, row by row: 1 is ink.
  */
 ink: Array<number>, };

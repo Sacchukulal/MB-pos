@@ -1,23 +1,3 @@
-//! **B2 and B7 — the two of P10's five that can be measured without a screen.**
-//!
-//! The debt has been owed since P10 and the master plan asked P12 to clear it
-//! or re-assign it *in writing*. This is the clearing half:
-//!
-//! * **B2** (2,000 items ranked, 20 ms) is a Rust budget wearing a UI name —
-//!   the ranking is `search.rs`, and the round trip is well under a
-//!   millisecond.
-//! * **B7** (open an existing table's order into the cart, 80 ms) is IPC plus
-//!   SQLite plus mb-core, all of it measurable here.
-//!
-//! **B1, B3 and B8 are re-assigned to P22**, and the reason is in
-//! `PERFORMANCE.md` §4: they are *paint* budgets. They need a window, a real
-//! keystroke and a frame — the same clean machine M1/M2/M4/S1/S2/S3 already
-//! wait for. Measuring them on a laptop that runs seven other WebView2
-//! processes is how P08 produced a number it had to retract.
-//!
-//! §3.1's rules, obeyed: assertions in release only; every run prints the
-//! number; the assert is against the CEILING; `std::time` only.
-//!
 //! ```text
 //! cargo test -p magic-bill --release perf_ -- --nocapture
 //! ```
@@ -35,8 +15,7 @@ use mb_db::Repos;
 
 use crate::state::{App, OUTLET};
 
-/// Three readings, middle one. Master-plan discipline: a single B4 run straight
-/// after a build once read 23.3 µs and looked like a 55% regression.
+/// Three readings, middle one.
 fn three(mut f: impl FnMut()) -> Duration {
     let mut readings: Vec<Duration> = (0..3)
         .map(|_| {
@@ -61,8 +40,8 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
                         &mb_db::repo::menu::MenuItem {
                             id: mb_core::ItemId::new(format!("itm_{n}")),
                             category_id: None,
-                            // Names that actually rank against each other:
-                            // some start with the word, some contain it.
+                            // Names that actually rank against each other: some start with the
+                            // word, some contain it.
                             name: if n % 3 == 0 {
                                 format!("Masala Dosa {n}")
                             } else if n % 3 == 1 {
@@ -94,7 +73,7 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
     .expect("a menu");
 }
 
-/// **B2** — 2,000 items, ranked, in 20 ms (ceiling 50).
+/// 2,000 items, ranked, in 20 ms (ceiling 50).
 #[test]
 fn perf_b2_two_thousand_items_ranked() {
     let scratch = crate::signin_tests::scratch("b2");
@@ -102,8 +81,7 @@ fn perf_b2_two_thousand_items_ranked() {
     a_shop_with_a_menu(&app, 2_000);
 
     let elapsed = three(|| {
-        let hits = crate::ipc::search_items_on(&app, "masala".to_owned(), None)
-            .expect("a search");
+        let hits = crate::ipc::search_items_on(&app, "masala".to_owned(), None).expect("a search");
         assert!(!hits.is_empty(), "the search found nothing to rank");
     });
 
@@ -116,8 +94,7 @@ fn perf_b2_two_thousand_items_ranked() {
     );
 }
 
-/// **B7** — open an existing table's order into the cart, in 80 ms (ceiling
-/// 200).
+/// Open an existing table's order into the cart, in 80 ms (ceiling 200).
 #[test]
 fn perf_b7_open_an_existing_table() {
     let scratch = crate::signin_tests::scratch("b7");
@@ -128,7 +105,11 @@ fn perf_b7_open_an_existing_table() {
         shop.db
             .transaction(|tx| {
                 let repos = Repos::new(tx);
-                repos.people().save_role(OUTLET, &RolePreset::Owner.shape(), crate::flows::now())?;
+                repos.people().save_role(
+                    OUTLET,
+                    &RolePreset::Owner.shape(),
+                    crate::flows::now(),
+                )?;
                 repos.floor().save_section(
                     OUTLET,
                     &mb_db::repo::floor::Section {

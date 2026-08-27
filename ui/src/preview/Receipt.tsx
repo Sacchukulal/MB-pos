@@ -1,43 +1,4 @@
-/**
- * **The fourth sink.**
- *
- * text (P06) · PDF (P06) · raster (P07) · **screen (P08)** — all four render
- * the same laid-out document, which is decision **D29**:
- *
- * > *"There is exactly one function that walks a laid-out document, and every
- * > renderer is a `Sink` it calls. A sink cannot forget: it is handed
- * > everything, in order."*
- *
- * # It renders. It does not lay out.
- *
- * Every line, every wrap, every column, every size and the print offset were
- * decided in Rust before this component saw anything. **The moment TypeScript
- * measures text and decides where to break it, there are two layout engines and
- * audit D1 is back:**
- *
- * > *"The same bill is drawn three separate times, by hand, in three places…
- * > every design change is triple work, and the three **will** drift apart.
- * > This is the single biggest source of 'the preview does not match the
- * > paper'."*
- *
- * # It draws in printer dots — P32
- *
- * This used to lay text out in `ch` units and scale a size against 24 in CSS,
- * while the raster sink drew whatever fitted a twelve-dot column. Two size
- * models: the screen said 24 and the paper drew 13, and the owner found it on a
- * photograph of real paper.
- *
- * So **one number scales the whole page** — `--dot`, how many screen pixels one
- * printer dot is worth — and every position, every width and every height comes
- * from Rust in dots. A box is at `start × advance` dots because that is where
- * `raster.rs` puts it. Change `--dot` and the preview zooms; nothing else about
- * it can move.
- *
- * The one thing the screen cannot copy is the printer's own typeface, so the
- * text inside each box is aligned **by the box**, exactly as the raster sink
- * aligns a proportional face — which is what makes a column of amounts land on
- * the same right edge in both.
- */
+/** The fourth sink. */
 
 import { useEffect, useRef } from 'react';
 
@@ -47,13 +8,7 @@ import type { PreviewBandLine } from '../ipc/generated/PreviewBandLine';
 
 import './receipt.css';
 
-// **How tall a capital is, as a fraction of the font size.**
-//
-// A browser sizes text by em and the layout sizes it by cap height, so one
-// conversion is unavoidable. It is done in `receipt.css` — 0.72, the cap ratio
-// of every face this product offers to within a few per cent (IBM Plex Mono is
-// 0.698, Arial 0.716, Times 0.662, Verdana 0.727). Being a few per cent out on
-// screen is a different order of thing from the 2x the old model was out by.
+// How tall a capital is, as a fraction of the font size.
 
 export function Receipt({
   doc,
@@ -61,24 +16,18 @@ export function Receipt({
 }: {
   doc: PreviewDoc;
   /**
-   * **The typeface the printer will use**, as a Windows family name — so the
-   * preview is in the face the paper will be. Empty for the built-in one,
-   * which the screen draws in its own monospace stack.
+   * The typeface the printer will use, as a Windows family name — so the preview is in the face
+   * the paper will be.
    */
   font?: string;
 }) {
   return (
-    // **No monospace/proportional branch any more** (P32). Both are drawn box
-    // by box at the dots the layout gave, which is what `raster.rs` does — so
-    // the class that used to switch between them changed nothing, and it has
-    // gone with it.
+    // No monospace/proportional branch any more.
     <div className="mb-receipt">
       <div
         className="mb-receipt__paper"
         aria-label="Preview of the printed bill"
         // The two numbers the whole page is drawn from, both out of Rust.
-        // `--dot` is derived from them in the stylesheet, so a narrow panel
-        // shrinks the paper instead of scrolling it.
         style={{ /* mb-tokens-allow: the paper's own dot count and the shop's chosen face, both named by Rust */
           ['--receipt-dots' as string]: doc.dots,
           ...(font ? { fontFamily: `${font}, monospace` } : {}),
@@ -104,9 +53,7 @@ export function Receipt({
 }
 
 function Line({ line }: { line: PreviewLine }) {
-  // One arm per variant. An arm that quietly did nothing would be a sink
-  // forgetting a block — the exact thing D29 exists to prevent — so every
-  // variant is handled and the ones with nothing to draw say so out loud.
+  // One arm per variant.
   switch (line.kind) {
     case 'text':
       return (
@@ -121,8 +68,7 @@ function Line({ line }: { line: PreviewLine }) {
               ]
                 .filter(Boolean)
                 .join(' ')}
-              // Every one of these is a dot count Rust computed. The screen
-              // turns dots into pixels and does nothing else.
+              // Every one of these is a dot count Rust computed.
               style={{ /* mb-tokens-allow: positions and sizes computed by Rust, not design values */
                 ['--at' as string]: line.indent + segmentStart(line, segment.width, index),
                 ['--wide' as string]: segment.width * line.advance,
@@ -136,10 +82,7 @@ function Line({ line }: { line: PreviewLine }) {
       );
 
     case 'rule':
-      /* **A drawn line, like the paper draws.** It was `glyph.repeat(width)`
-         in a CSS monospace font, which came out nearly solid on screen while
-         the paper printed five dots of ink in every twelve-dot cell — a row of
-         spaced ticks. Both draw a rule from the same numbers now. */
+      /* A drawn line, like the paper draws. */
       return (
         <div className="mb-receipt__row" style={rows(line.row)}>
           {Array.from({ length: line.strokes }, (_, stroke) => (
@@ -171,8 +114,7 @@ function Line({ line }: { line: PreviewLine }) {
       );
 
     case 'band':
-      /* **The letterhead** — a logo and the shop's name side by side (P32).
-         Every position is already decided; this places two things. */
+      /* The letterhead — a logo and the shop's name side by side. */
       return (
         <div className="mb-receipt__row" style={rows(line.row)}>
           {line.image.kind === 'logo' ? <Dots line={line.image} /> : null}
@@ -183,11 +125,7 @@ function Line({ line }: { line: PreviewLine }) {
       );
 
     case 'qr':
-      /* **The square at the size the printer will make it.**
-         The screen does not encode a QR — the printer's own encoder does that
-         (D36) and there is no encoder in this product to copy. What a shop
-         tuning its letterhead actually needs to know is how much paper the
-         square costs and whether the payload is right, and both are here. */
+      /* The square at the size the printer will make it. */
       return (
         <div className="mb-receipt__row" style={rows(line.row)}>
           <span
@@ -223,11 +161,7 @@ function Line({ line }: { line: PreviewLine }) {
       return <div className="mb-receipt__row" style={rows(line.row)} />;
 
     default:
-      // **The compiler fails the build if a variant is added and not drawn.**
-      // `line` narrows to `never` only when every arm above exists; the moment
-      // one does not, this assignment is a type error at the line that caused
-      // it. That is the guard the missing barcode arm needed at P31, and it
-      // costs three lines.
+      // The compiler fails the build if a variant is added and not drawn.
       return assertDrawn(line);
   }
 }
@@ -251,8 +185,8 @@ function Dots({
     for (let i = 0; i < line.ink.length; i += 1) {
       const on = line.ink[i] === 1;
       const at = i * 4;
-      // Ink is black on white — the paper's colours, not the theme's, because
-      // this is a picture of paper.
+      // Ink is black on white — the paper's colours, not the theme's, because this is a picture
+      // of paper.
       image.data[at] = on ? 0 : 255;
       image.data[at + 1] = on ? 0 : 255;
       image.data[at + 2] = on ? 0 : 255;
@@ -262,8 +196,10 @@ function Dots({
   }, [line.ink, line.width, line.height]);
 
   if (!line.ink) {
-    /* D37: a logo that will not read does not print, and the preview says the
-       same thing rather than drawing a picture that is not there. */
+    /*
+     * A logo that will not read does not print, and the preview says the same thing rather than
+     * drawing a picture that is not there.
+     */
     return (
       <span
         className="mb-receipt__nologo"
@@ -311,14 +247,7 @@ function BandText({ line }: { line: PreviewBandLine }) {
   );
 }
 
-/**
- * Where a box starts, in dots.
- *
- * The layout gives a box its start in **characters** of that line's own size,
- * and the widths that came before it are the same characters — so the sum is
- * the same arithmetic `raster.rs` does, and it is done here rather than in the
- * view model for the same reason: one number crosses the wire, not two.
- */
+/** Where a box starts, in dots. */
 function segmentStart(
   line: Extract<PreviewLine, { kind: 'text' }>,
   _width: number,

@@ -1,11 +1,3 @@
-//! **T1 (extended), T13 and T19 — the third sink.**
-//!
-//! P06 shipped two sinks and left a seat for this one (D31). The claim it has to
-//! join is D29's: *"a sink cannot forget: it is handed everything, in order."*
-//! A bitmap has no text to search, so the claim is made where it is true —
-//! every line the traversal handed over produced dots, and a line it called
-//! blank produced none.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -33,10 +25,7 @@ fn metrics(paper: Paper) -> mb_print::metrics::Metrics {
     mb_print::metrics::Metrics::face(paper, std::sync::Arc::new(font()))
 }
 
-/// T1. **THE ANTI-DRIFT TEST GAINS ITS THIRD SINK.**
-///
-/// Every block of a bill with everything on it reaches the raster sink, and
-/// every one that has something to say produces ink.
+/// THE ANTI-DRIFT TEST GAINS ITS THIRD SINK.
 #[test]
 fn t1_the_raster_sink_cannot_drop_anything_either() {
     let fixture = Fixture::new();
@@ -93,24 +82,16 @@ fn t1_the_raster_sink_cannot_drop_anything_either() {
     );
 }
 
-/// T13. **RASTER AND TEXT AGREE ABOUT THE GRID.**
-///
-/// D29's claim, extended from characters to dots. If the two sinks ever
-/// disagree about which column a character sits in, "the preview does not match
-/// the paper" is back by a different route.
+/// RASTER AND TEXT AGREE ABOUT THE GRID.
 #[test]
 fn t13_the_two_sinks_put_the_same_character_in_the_same_column() {
     let paper = Paper::new(PaperKind::Mm80);
     let mut doc = Document::new(paper);
-    // Spaces in the middle on purpose: the columns that must be blank are the
-    // half of the claim that catches an off-by-one.
+    // Spaces in the middle on purpose: the columns that must be blank are the half of the claim
+    // that catches an off-by-one.
     doc.text("AB  CD  240.00", Style::NORMAL, Align::Left);
 
-    // **One `Metrics` for both sinks**, and the column is that face's own
-    // advance — not the printer grid's 12. P32: a character's width is
-    // measured now, so "the same column" means the same multiple of the
-    // measured advance. Comparing the raster's dots against the printer's grid
-    // was comparing two different rulers, and it only ever agreed by accident.
+    // One `Metrics` for both sinks, and the column is that face's own advance.
     let m = metrics(paper);
     let laid = mb_print::layout::layout_for(&doc, &m).expect("lays out");
     let text = to_text(&laid);
@@ -122,16 +103,17 @@ fn t13_the_two_sinks_put_the_same_character_in_the_same_column() {
     let image = first_ink(&raster);
     for (column, ch) in line.iter().enumerate() {
         let start = u32::try_from(column).expect("small") * per_column;
-        let inked = (start..start + per_column)
-            .any(|x| (0..image.height).any(|y| image.ink(x, y)));
+        let inked = (start..start + per_column).any(|x| (0..image.height).any(|y| image.ink(x, y)));
 
         if *ch == ' ' {
-            // Checked over the middle of the cell rather than all of it, so a
-            // glyph whose stroke reaches the edge of its own column does not
-            // fail this. What must be true is that nothing was *drawn* here.
+            // Checked over the middle of the cell rather than all of it, so a glyph whose
+            // stroke reaches the edge of its own column does not fail this.
             let middle = (start + 2..start + per_column - 2)
                 .any(|x| (0..image.height).any(|y| image.ink(x, y)));
-            assert!(!middle, "column {column} is a space in the text and ink in the picture");
+            assert!(
+                !middle,
+                "column {column} is a space in the text and ink in the picture"
+            );
         } else {
             assert!(
                 inked,
@@ -141,10 +123,7 @@ fn t13_the_two_sinks_put_the_same_character_in_the_same_column() {
     }
 }
 
-/// T19. **A BROKEN LOGO DOES NOT BREAK A BILL** (D37).
-///
-/// The shared fixture's "logo" is eight fake PNG bytes, so this is not
-/// hypothetical: it is what a shop that uploaded the wrong thing has.
+/// A BROKEN LOGO DOES NOT BREAK A BILL.
 #[test]
 fn t19_a_logo_that_cannot_be_read_is_skipped_and_the_bill_still_prints() {
     let fixture = Fixture::new();
@@ -200,8 +179,7 @@ fn a_real_logo_is_drawn_at_the_width_it_asked_for() {
     assert_eq!(inked, 288, "the logo is not half the width of the paper");
 }
 
-/// The QR goes to the printer's own encoder when it has one, and becomes text
-/// when it does not (D36).
+/// The QR goes to the printer's own encoder when it has one, and becomes text when it does not.
 #[test]
 fn the_qr_is_the_printers_when_it_has_one_and_text_when_it_does_not() {
     let mut doc = Document::new(Paper::new(PaperKind::Mm80));
@@ -246,7 +224,8 @@ fn each_paper_size_rasterises_to_its_own_width() {
         let mut doc = Document::new(Paper::new(kind));
         doc.line("TOTAL 646.00");
         let laid = layout(&doc).expect("lays out");
-        let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
+        let raster =
+            to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
         assert_eq!(first_ink(&raster).width, dots, "{kind:?}");
     }
 }
@@ -262,9 +241,8 @@ fn first_ink(raster: &mb_print::raster::Raster) -> &Monochrome {
         .expect("something was drawn")
 }
 
-/// Not a test of the raster sink so much as of the claim in its module docs:
-/// laying a document out never changes it, so two sinks over one `Laid` cannot
-/// be looking at different documents.
+/// Not a test of the raster sink so much as of the claim in its module docs: laying a document
+/// out never changes it, so two sinks over one `Laid` cannot be looking at different documents.
 #[test]
 fn laying_out_twice_gives_the_same_answer() {
     let fixture = Fixture::new();
@@ -278,22 +256,20 @@ fn laying_out_twice_gives_the_same_answer() {
     assert_eq!(first, second);
 }
 
-// ---------------------------------------------------------------------------
-// Sizes between the printer's own three — 2026-08-17.
-//
-// > *"size of fonts now showing 24px, 48px, 72px only 3 and its completly
-// > wrong, i want like small changes also like 2px increasing."*
-//
-// The multiplier was the only thing that could divide the paper, so those were
-// the only three sizes that existed. These prove the in-between ones are real
-// on the engine that prints them.
-// ---------------------------------------------------------------------------
+// Sizes between the printer's own three.
 
-/// Lay one line out at a size and report how tall the picture came out and how
-/// many characters the layout let onto the line.
+/// Lay one line out at a size and report how tall the picture came out and how many characters
+/// the layout let onto the line.
 fn at_size(cap: u16, text: &str) -> (u32, usize) {
     let mut doc = Document::new(Paper::new(PaperKind::Mm80));
-    doc.text(text, Style { size: cap, bold: false }, Align::Left);
+    doc.text(
+        text,
+        Style {
+            size: cap,
+            bold: false,
+        },
+        Align::Left,
+    );
     let laid = layout(&doc).expect("lays out");
     let raster = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
     let longest = laid
@@ -308,11 +284,7 @@ fn at_size(cap: u16, text: &str) -> (u32, usize) {
     (raster.height(), longest)
 }
 
-/// **A size between the multiples draws between the multiples.**
-///
-/// 18 px has to be taller than 12 and shorter than 24 — on the paper, not just
-/// in the settings row. A size that saved and printed the same as the one
-/// below it is exactly the "completly wrong" the owner reported.
+/// A size between the multiples draws between the multiples.
 #[test]
 fn every_size_draws_a_different_height() {
     let mut last = 0;
@@ -326,23 +298,12 @@ fn every_size_draws_a_different_height() {
     }
 }
 
-/// **Words that wrap, so nothing is capped.**
-///
-/// `cap_scale` drops the size of a single word too long to fit at all — a
-/// two-hundred-letter word cannot be printed at 2× on 48 columns, so it is
-/// printed at 1×. That is correct and long-standing behaviour, and it is not
-/// what these tests are about, so they measure a line of ordinary short words.
+/// Words that wrap, so nothing is capped.
 fn wrappable() -> String {
     "AAA ".repeat(60)
 }
 
-/// **And a smaller size fits more on a line.**
-///
-/// This is the half that lives in the layout rather than in the renderer: a
-/// 12 px line is half the height of a 24 px one, so twice as many characters
-/// fit across the same roll. If this ever stops being true, the sink and the
-/// layout have stopped agreeing about where a line breaks — the drift this
-/// crate exists to prevent.
+/// And a smaller size fits more on a line.
 #[test]
 fn a_smaller_size_fits_more_characters_across() {
     let (_, wide) = at_size(Style::LADDER[3], &wrappable());
@@ -353,37 +314,31 @@ fn a_smaller_size_fits_more_characters_across() {
         "12 px fitted {narrow} characters and 24 px fitted {wide} — the smaller \
          size did not fit more"
     );
-    // Rung 1 is a 9-dot capital against rung 4's 15, so about half the width
-    // and about half again as many characters. "About", because a line breaks
-    // on a word boundary and the last word rarely lands exactly on the edge.
+    // Rung 1 is a 9-dot capital against rung 4's 15, so about half the width and about half
+    // again as many characters.
     assert!(
         narrow * 3 >= wide * 4,
         "the small size fitted {narrow}, which is not meaningfully more than {wide}"
     );
 }
 
-/// **A size a shop tuned before P32 still means what it meant.**
-///
-/// The whole risk of this change is a shop that had tuned its receipt finding
-/// it different on a Tuesday. A stored 24, 48 or 72 was the third, eighth and
-/// tenth rung of the old list; it reads back as the third, eighth and tenth
-/// rung of the new one, and still emits the multiplier it always did on the
-/// text engine.
 #[test]
 fn the_old_three_sizes_are_unchanged() {
     for (stored, rung, scale) in [(24_u16, 2_usize, 1_u8), (48, 7, 2), (72, 9, 3)] {
         let cap = Style::from_stored(stored);
         assert_eq!(cap, Style::LADDER[rung], "{stored} moved off its rung");
         assert_eq!(
-            Style { size: cap, bold: false }.scale(),
+            Style {
+                size: cap,
+                bold: false
+            }
+            .scale(),
             scale,
             "{stored} stopped being {scale}x for the text engine"
         );
     }
-    // And the layout still gives them the widths they always had: 48 columns
-    // on 80 mm paper at the body size, and fewer as the letter grows. Measured
-    // as "the longest line that came out", so a line that broke early on a word
-    // boundary is within a word of the limit rather than exactly on it.
+    // And the layout still gives them the widths they always had: 48 columns on 80 mm paper at
+    // the body size, and fewer as the letter grows.
     for (stored, limit) in [(24_u16, 52_usize), (48, 26), (72, 16)] {
         let longest = at_size(Style::from_stored(stored), &wrappable()).1;
         assert!(
@@ -393,19 +348,9 @@ fn the_old_three_sizes_are_unchanged() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Proportional faces — 2026-08-17, the owner's *"i want some fonts like it was
-// in previous mb pos app (time new roman etc)"*.
-//
-// The engine laid a receipt out on a character grid, so a face whose letters
-// are different widths could only be squeezed into equal cells. The layout says
-// where each column's BOX is now, and the raster puts measured text against
-// those edges — which is how an invoice has always aligned.
-// ---------------------------------------------------------------------------
+// Proportional faces.
 
-/// Times New Roman, or `None` on a machine that does not have it. Skipping is
-/// right: this asserts what the code does with a proportional face, and a
-/// stripped Windows image would otherwise fail a test about the code.
+/// Times New Roman, or `None` on a machine that does not have it.
 fn proportional() -> Option<Font> {
     let path = std::path::PathBuf::from(
         std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()),
@@ -416,13 +361,7 @@ fn proportional() -> Option<Font> {
     Font::load(&bytes, "Times New Roman").ok()
 }
 
-/// **The amount still ends where the paper ends.**
-///
-/// This is the whole risk of a proportional face on a bill. Padded with spaces
-/// and drawn by advance, an amount would land a long way left of the right
-/// edge — because a space in Times New Roman is about a third of a digit — and
-/// a column of rupees that does not line up is the one thing a shopkeeper
-/// checks a bill for.
+/// The amount still ends where the paper ends.
 #[test]
 fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
     let Some(font) = proportional() else { return };
@@ -431,9 +370,7 @@ fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
     let mut doc = Document::new(paper);
     doc.row("Subtotal", "920.00", Style::NORMAL)
         .row("Grand Total", "1,240.00", Style::NORMAL);
-    // **One `Metrics` for the layout AND the sink.** Laying out with the
-    // built-in face and drawing with Times is exactly the drift P32 exists to
-    // remove, and this test did it.
+    // One `Metrics` for the layout AND the sink.
     let metrics = mb_print::metrics::Metrics::face(paper, std::sync::Arc::new(font));
     let laid = mb_print::layout::layout_for(&doc, &metrics).expect("lays out");
     let raster = to_raster(&laid, &metrics, RasterOptions::default()).expect("rasters");
@@ -447,9 +384,7 @@ fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
             Band::Qr { .. } => None,
         })
         .flat_map(|image| {
-            (0..image.height).filter_map(move |y| {
-                (0..image.width).rev().find(|x| image.ink(*x, y))
-            })
+            (0..image.height).filter_map(move |y| (0..image.width).rev().find(|x| image.ink(*x, y)))
         })
         .collect();
 
@@ -461,11 +396,7 @@ fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
     );
 }
 
-/// **And it really is proportional**, rather than the grid wearing a new face.
-///
-/// Six 'i's must take less room than six 'M's. If they take the same, the
-/// segments are being ignored and every glyph is back in an equal cell — which
-/// prints, and looks like the thing the old comment in `font.rs` warned about.
+/// And it really is proportional, rather than the grid wearing a new face.
 #[test]
 fn a_proportional_face_is_drawn_proportionally() {
     let Some(font) = proportional() else { return };
@@ -485,9 +416,8 @@ fn a_proportional_face_is_drawn_proportionally() {
                 Band::Qr { .. } => None,
             })
             .flat_map(|image| {
-                (0..image.height).filter_map(move |y| {
-                    (0..image.width).rev().find(|x| image.ink(*x, y))
-                })
+                (0..image.height)
+                    .filter_map(move |y| (0..image.width).rev().find(|x| image.ink(*x, y)))
             })
             .max()
             .unwrap_or(0)
@@ -500,14 +430,17 @@ fn a_proportional_face_is_drawn_proportionally() {
     );
 }
 
-/// **A typewriter face is untouched.** The two paths are told apart by the
-/// FACE, not by a setting, and every shop that has not changed its font must
-/// get byte-for-byte what it got yesterday — which the golden ESC/POS files
-/// assert, and this says out loud.
+/// A typewriter face is untouched.
 #[test]
 fn the_shipped_face_still_takes_the_grid_path() {
-    assert!(font().is_monospace(), "the built-in face stopped being a typewriter one");
+    assert!(
+        font().is_monospace(),
+        "the built-in face stopped being a typewriter one"
+    );
     if let Some(times) = proportional() {
-        assert!(!times.is_monospace(), "Times New Roman was taken for a typewriter face");
+        assert!(
+            !times.is_monospace(),
+            "Times New Roman was taken for a typewriter face"
+        );
     }
 }

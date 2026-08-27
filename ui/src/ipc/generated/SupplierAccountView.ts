@@ -4,11 +4,10 @@ import type { MovementView } from "./MovementView";
 import type { SupplierView } from "./SupplierView";
 
 /**
- * One supplier's account — **D131**, which is the customer ageing fed the due
- * date rather than a second algorithm.
+ * One supplier's account.
  */
 export type SupplierAccountView = { supplier: SupplierView, movements: Array<MovementView>, ageing: AgeingView, 
 /**
- * The account as one sentence, composed in Rust (R8).
+ * The account as one sentence, composed in Rust.
  */
 says: string, };

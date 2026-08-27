@@ -1,40 +1,4 @@
-//! **The code support reads out over the phone when a shop's PC has died.**
-//!
-//! > **POS-A4:** *"If the PC dies, the shop cannot bill until support unlocks
-//! > the key ... There is no self-service way to move it, and no emergency
-//! > mode."* Fix: *"...plus a 72-hour offline emergency unlock code that
-//! > support can read out over the phone."*
-//!
-//! Transfer (`cloud::transfer`) is the everyday answer and it needs the
-//! internet. This is the answer when there is no internet — a new PC, a dead
-//! router, a Saturday, and a queue of people waiting to pay.
-//!
-//! # Everything about the design comes from "read out over a bad phone line"
-//!
-//! * **Twenty characters, in four groups of five.** Long enough to be
-//!   unguessable, short enough that a support agent says it twice and the owner
-//!   has it. A 64-byte Ed25519 signature is 103 base32 characters and is
-//!   therefore not a thing a person can be told.
-//! * **Crockford base32**, which drops `I`, `L`, `O` and `U`. `0`/`O` and
-//!   `1`/`I`/`l` are the two mistakes everybody makes reading characters aloud,
-//!   and this alphabet makes them unmakeable — [`normalise`] maps them anyway.
-//! * **Verified with no network at all**, so it is an HMAC and not a signature:
-//!   the counter has to be able to check it while holding no connection to
-//!   anything.
-//! * **Case and spacing do not matter.** An owner types what they heard.
-//!
-//! # The honest limit, because this codebase states them
-//!
-//! [`SUPPORT_SECRET`] is compiled into the counter. Anybody who extracts it can
-//! mint codes for their own machine, for free, forever. That is real and it is
-//! written here rather than hidden.
-//!
-//! The alternative is a shop that cannot bill when its PC dies on a Saturday
-//! night, and **that trade is not close** — a system that holds a restaurant
-//! hostage is worse than one that a determined person can unlock. The other
-//! defences stay: the code is single use, it is time limited, it names the
-//! machine it was minted for, it is audited with the person who typed it, and
-//! wrong attempts are rate limited (POS-C10's local half).
+//! The code support reads out over the phone when a shop's PC has died.
 
 use std::time::Duration;
 
@@ -43,8 +7,7 @@ use ring::hmac;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// **The shared secret. See the module note about what this does not
-/// protect.** P34 rotates it; until then it is a constant with a comment.
+/// The shared secret. See the module note about what this does not protect.
 const SUPPORT_SECRET: [u8; 32] = [
     0x6d, 0x62, 0x2d, 0x65, 0x6d, 0x65, 0x72, 0x67, 0x65, 0x6e, 0x63, 0x79, 0x2d, 0x75, 0x6e, 0x6c,
     0x6f, 0x63, 0x6b, 0x2d, 0x50, 0x32, 0x31, 0x2d, 0x64, 0x65, 0x76, 0x2d, 0x6b, 0x65, 0x79, 0x21,
@@ -75,9 +38,9 @@ impl Code {
             .join("-")
     }
 
-    /// The single-use record. **A hash, not the code**: `licence.json` sits in
-    /// a folder a support engineer may be looking at, and a used code is still
-    /// a valid code for its machine until it expires.
+    /// The single-use record. A hash, not the code: `licence.json` sits in a folder a support
+    /// engineer may be looking at, and a used code is still a valid code for its machine until
+    /// it expires.
     #[must_use]
     pub fn fingerprint(&self) -> String {
         let digest = ring::digest::digest(&ring::digest::SHA256, self.0.as_bytes());
@@ -92,30 +55,24 @@ impl Code {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EmergencyError {
-    /// Wrong code, or a code for another computer. **Deliberately one error**:
-    /// both fail the same HMAC and the counter genuinely cannot tell them
-    /// apart, so claiming to would be a lie of the kind BACKEND-C7 is about.
+    /// Wrong code, or a code for another computer.
     #[error("that code is not right for this computer")]
     NotRecognised,
     #[error("that code has already been used on this computer")]
     AlreadyUsed,
     #[error("that code has run out")]
     Expired,
-    /// POS-C10's local half.
     #[error("too many tries")]
     TooManyTries { wait: Duration },
 }
 
-/// Five, then a wait. The same shape as `mb-lan`'s pairing bucket, and for the
-/// same reason: this is the only unauthenticated door on the counter that a
-/// person types into.
+/// Five, then a wait.
 pub const MAX_TRIES: u32 = 5;
-/// Fifteen minutes. A support call lasts longer than that, so an owner who has
-/// genuinely mistyped five times and is still on the phone waits once.
+/// Fifteen minutes. A support call lasts longer than that, so an owner who has genuinely
+/// mistyped five times and is still on the phone waits once.
 pub const LOCKOUT: Duration = Duration::from_secs(15 * 60);
 
-/// **Mint one. Support's side, and the tests'.** A counter never calls this in
-/// anger — it is here so that what is verified and what is issued cannot drift.
+/// Mint one. Support's side, and the tests'.
 #[must_use]
 pub fn mint(machine: &crate::MachineId, issue_day: i32, hours: u8) -> Code {
     let payload = pack(issue_day, hours);
@@ -125,13 +82,7 @@ pub fn mint(machine: &crate::MachineId, issue_day: i32, hours: u8) -> Code {
     Code(render(bits))
 }
 
-/// **Check one, and say when it runs out.**
-///
-/// `used` is every fingerprint this machine has already redeemed.
-///
-/// # Errors
-///
-/// [`EmergencyError`], each of which is a sentence a person can act on.
+/// Check one, and say when it runs out.
 pub fn redeem(
     typed: &str,
     machine: &crate::MachineId,
@@ -147,12 +98,8 @@ pub fn redeem(
     let payload = u32::try_from(bits >> TAG_BITS).unwrap_or(0);
     let tag = bits & ((1_u128 << TAG_BITS) - 1);
 
-    // **Constant time**, and not `hmac::verify`: that compares against the
-    // FULL 32-byte digest and this tag is deliberately truncated to 76 bits, so
-    // it would refuse every real code. The comparison is still constant-time,
-    // because BACKEND-E2 is the same finding one system along — *"the signature
-    // check is not constant-time. It compares the two values character by
-    // character, which in principle leaks information about the correct"* one.
+    // Constant time, and not `hmac::verify`: that compares against the FULL 32-byte digest and
+    // this tag is deliberately truncated to 76 bits, so it would refuse every real code.
     let expected = tag_for(machine, payload);
     if !same_tag(tag, expected) {
         return Err(EmergencyError::NotRecognised);
@@ -163,10 +110,7 @@ pub fn redeem(
     }
 
     let (issue_day, hours) = unpack(payload);
-    // Valid from the START of its issue day, UTC. That gives between (hours −
-    // 24) and hours of real life, which for 72 is between two and three days —
-    // and the alternative, minting against a wall-clock instant, means support
-    // and the shop have to agree about a timezone over the phone.
+    // Valid from the START of its issue day, UTC.
     let until = Timestamp::from_millis(
         i64::from(issue_day)
             .saturating_mul(86_400_000)
@@ -178,14 +122,12 @@ pub fn redeem(
     Ok((code, until))
 }
 
-// ---------------------------------------------------------------------------
 // The bit work. Small, and every piece of it has a test.
-// ---------------------------------------------------------------------------
 
 /// Eight of the payload's bits are the hours; the rest are the day.
 const HOUR_BITS: u32 = 8;
-/// The issue day gets whatever is left — 16 bits, so 65,536 days, which is 179
-/// years and therefore not a limit anybody will meet.
+/// The issue day gets whatever is left — 16 bits, so 65,536 days, which is 179 years and
+/// therefore not a limit anybody will meet.
 const DAY_BITS: u32 = PAYLOAD_BITS - HOUR_BITS;
 
 fn pack(issue_day: i32, hours: u8) -> u32 {
@@ -200,8 +142,7 @@ fn unpack(payload: u32) -> (i32, u8) {
     (day, hours)
 }
 
-/// What the HMAC is over. **The machine id is in here**, which is what makes a
-/// code useless on any other computer.
+/// What the HMAC is over.
 fn message(machine: &crate::MachineId, payload: u32) -> Vec<u8> {
     let mut message = Vec::with_capacity(machine.value().len() + 4);
     message.extend_from_slice(machine.value().as_bytes());
@@ -214,29 +155,11 @@ fn tag_for(machine: &crate::MachineId, payload: u32) -> u128 {
     let full = hmac::sign(&key, &message(machine, payload));
     let mut top = [0_u8; 16];
     top.copy_from_slice(&full.as_ref()[..16]);
-    // The top 76 bits of the digest. 76 is what is left after the payload, and
-    // 76 bits is 7.5 x 10^22 guesses — against a bucket that stops at five.
+    // The top 76 bits of the digest.
     u128::from_be_bytes(top) >> (128 - TAG_BITS)
 }
 
-/// **Constant-time comparison of two tags.**
-///
-/// Not `==`, and not `ring::constant_time` either — that function is deprecated
-/// as of ring 0.17 with the note *"internal function not intended for external
-/// use with no promises regarding side channels"*, and a deprecated
-/// almost-promise is worth less than four lines of our own.
-///
-/// > **BACKEND-E2**, one system along: *"The signature check is not
-/// > constant-time. It compares the two values character by character, which in
-/// > principle leaks information about the correct"* one.
-///
-/// The XOR-fold is the standard idiom: every byte is examined whatever the
-/// first one said. `black_box` keeps a future optimiser from noticing that the
-/// result is a boolean and short-circuiting back to the thing we are avoiding.
-///
-/// Honest scale: the realistic attack here is somebody typing codes into a box
-/// that stops at five tries, not measuring nanoseconds. This is cheap enough
-/// that not doing it would be the odd choice.
+/// Constant-time comparison of two tags.
 fn same_tag(a: u128, b: u128) -> bool {
     let (left, right) = (a.to_be_bytes(), b.to_be_bytes());
     let mut differences = 0_u8;
@@ -268,12 +191,7 @@ fn parse(cleaned: &str) -> Option<u128> {
     Some(bits)
 }
 
-/// **What an owner typed, turned into what support said.**
-///
-/// Hyphens and spaces go; case goes; and the four characters Crockford leaves
-/// out are mapped to what they were misheard as. `O` is a zero, `I` and `L` are
-/// ones. `U` is not mapped — there is nothing it is reliably confused with, and
-/// guessing would turn a typo into a different valid code.
+/// What an owner typed, turned into what support said.
 #[must_use]
 pub fn normalise(typed: &str) -> String {
     typed
@@ -335,8 +253,6 @@ mod tests {
         }
     }
 
-    /// **T6's core.** A real code, for this machine, works — and says when it
-    /// runs out.
     #[test]
     fn a_good_code_is_redeemed_and_carries_its_own_expiry() {
         let code = mint(&a_machine(), TODAY, 72);
@@ -345,8 +261,7 @@ mod tests {
         assert_eq!(until, now_on(TODAY, 72));
     }
 
-    /// **A code minted for another machine is refused.** This is the property
-    /// that stops one code unlocking a chain of shops.
+    /// A code minted for another machine is refused.
     #[test]
     fn a_code_for_another_computer_is_refused() {
         let theirs = mint(&another_machine(), TODAY, 72);
@@ -356,12 +271,12 @@ mod tests {
         );
     }
 
-    /// **Single use.** A replay is refused (T6).
+    /// Single use. A replay is refused.
     #[test]
     fn a_replay_is_refused() {
         let code = mint(&a_machine(), TODAY, 72);
-        let (redeemed, _) = redeem(&code.to_read_out(), &a_machine(), now_on(TODAY, 1), &[])
-            .expect("first use");
+        let (redeemed, _) =
+            redeem(&code.to_read_out(), &a_machine(), now_on(TODAY, 1), &[]).expect("first use");
         let used = vec![redeemed.fingerprint()];
         assert_eq!(
             redeem(&code.to_read_out(), &a_machine(), now_on(TODAY, 2), &used),
@@ -369,18 +284,26 @@ mod tests {
         );
     }
 
-    /// **Time limited.** 72 hours from the start of its issue day.
+    /// Time limited. 72 hours from the start of its issue day.
     #[test]
     fn a_code_runs_out() {
         let code = mint(&a_machine(), TODAY, 72);
-        assert!(redeem(&code.to_read_out(), &a_machine(), now_on(TODAY + 2, 23), &[]).is_ok());
+        assert!(
+            redeem(
+                &code.to_read_out(),
+                &a_machine(),
+                now_on(TODAY + 2, 23),
+                &[]
+            )
+            .is_ok()
+        );
         assert_eq!(
             redeem(&code.to_read_out(), &a_machine(), now_on(TODAY + 3, 1), &[]),
             Err(EmergencyError::Expired)
         );
     }
 
-    /// **An owner types what they heard**, in whatever shape.
+    /// An owner types what they heard, in whatever shape.
     #[test]
     fn spacing_case_and_the_two_classic_mishearings_are_forgiven() {
         let code = mint(&a_machine(), TODAY, 72);
@@ -390,7 +313,6 @@ mod tests {
             spoken.replace('-', " "),
             spoken.replace('-', ""),
             format!("  {spoken}  "),
-            // The owner heard "oh" and typed the letter.
             spoken.replace('0', "O"),
             // ...and "one", and typed an l.
             spoken.replace('1', "l"),
@@ -404,7 +326,13 @@ mod tests {
 
     #[test]
     fn nonsense_is_refused_rather_than_crashing() {
-        for junk in ["", "hello", "K7M2Q-9XR4T", &"Z".repeat(200), "!!!!!!!!!!!!!!!!!!!!"] {
+        for junk in [
+            "",
+            "hello",
+            "K7M2Q-9XR4T",
+            &"Z".repeat(200),
+            "!!!!!!!!!!!!!!!!!!!!",
+        ] {
             assert_eq!(
                 redeem(junk, &a_machine(), now_on(TODAY, 1), &[]),
                 Err(EmergencyError::NotRecognised),
@@ -427,8 +355,6 @@ mod tests {
         );
     }
 
-    /// **POS-C10's local half.** Five tries, then a wait, and the wait is a
-    /// number the sentence can carry.
     #[test]
     fn the_sixth_try_in_a_row_is_made_to_wait() {
         assert_eq!(wait_after(0), None);
@@ -452,8 +378,8 @@ mod tests {
         }
     }
 
-    /// The bit budget. Twenty characters of five bits each, split between the
-    /// payload and the tag with nothing left over and nothing borrowed.
+    /// The bit budget. Twenty characters of five bits each, split between the payload and the
+    /// tag with nothing left over and nothing borrowed.
     #[test]
     fn the_bit_budget_adds_up() {
         assert_eq!(PAYLOAD_BITS + TAG_BITS, 100);

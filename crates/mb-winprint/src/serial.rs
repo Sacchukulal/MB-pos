@@ -1,10 +1,4 @@
 //! A COM port, opened and configured 8-N-1.
-//!
-//! Most USB thermal printers appear as a virtual COM port, and the port's
-//! stored settings are whatever Device Manager was last told — which is not
-//! necessarily what the printer wants. Configuring the line here means a shop
-//! that changes the baud rate in Magic Bill's settings does not also have to
-//! change it in Windows.
 
 use std::io::{self, Read, Write};
 use std::ptr;
@@ -12,7 +6,7 @@ use std::ptr;
 use crate::WinPrintError;
 use crate::sys::{self, Dword, FALSE, Handle};
 
-/// An open serial port. Closes its handle on drop, including on an unwind.
+/// An open serial port.
 #[derive(Debug)]
 pub struct SerialPort {
     handle: Handle,
@@ -75,11 +69,7 @@ impl Write for SerialPort {
 }
 
 impl Read for SerialPort {
-    /// **P29 — the scale, which is the one serial device that talks back.**
-    ///
-    /// Returns `Ok(0)` when the port had nothing to say inside its timeout,
-    /// and that is not an error: a scale with nothing on it sends nothing, and
-    /// an idle counter must not be a stream of failures in the log.
+    /// The scale, which is the one serial device that talks back.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let len = Dword::try_from(buf.len()).unwrap_or(Dword::MAX);
         let mut read: Dword = 0;
@@ -107,9 +97,7 @@ impl Read for SerialPort {
 }
 
 pub fn open(port: &str, baud: u32) -> Result<SerialPort, WinPrintError> {
-    // COM10 and above need the `\\.\` prefix; COM1–COM9 work either way, so
-    // everything gets it. This is the single most common serial bug on Windows
-    // and it only shows up on the tenth port a shop plugs in.
+    // COM10 and above need the `\\.\` prefix; COM1–COM9 work either way, so everything gets it.
     let path = if port.starts_with(r"\\.\") {
         port.to_owned()
     } else {
@@ -147,9 +135,7 @@ pub fn open(port: &str, baud: u32) -> Result<SerialPort, WinPrintError> {
         name: port.to_owned(),
     };
 
-    // Read the current settings and change only what we mean to. Building a
-    // DCB from zero silently resets flow control, and a printer that was
-    // working on hardware handshaking stops.
+    // Read the current settings and change only what we mean to.
     let mut dcb = sys::Dcb {
         dcb_length: Dword::try_from(size_of::<sys::Dcb>()).unwrap_or(0),
         ..sys::Dcb::default()
@@ -180,14 +166,7 @@ pub fn open(port: &str, baud: u32) -> Result<SerialPort, WinPrintError> {
         });
     }
 
-    // A write that cannot finish must give up rather than hold the worker
-    // thread for ever. Five seconds plus a millisecond per byte is generous for
-    // any printer and finite for a dead one — this is one of the timeouts P07
-    // item 7.3 says can actually be honoured.
-    // The read timeouts are P29's, and they are deliberately short: a scale is
-    // polled from a screen a person is looking at, so 'nothing yet' has to come
-    // back fast enough to poll again. 200 ms total, and no waiting between
-    // bytes once something has started arriving.
+    // A write that cannot finish must give up rather than hold the worker thread for ever.
     let timeouts = sys::CommTimeouts {
         read_interval_timeout: 50,
         read_total_timeout_constant: 200,

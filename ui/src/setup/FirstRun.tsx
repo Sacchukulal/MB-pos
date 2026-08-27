@@ -1,31 +1,4 @@
-/**
- * **The first five minutes** — P30.5.
- *
- * # What this replaces
- *
- * A fresh install used to open straight onto the billing screen with no shop
- * behind it. Every screen's first call failed, each failure raised a toast, the
- * toasts stacked three deep, a six-item checklist ate the page, and there was
- * no way to create a shop at all. The owner installed the build on a second
- * computer and hit every bit of that inside ten seconds.
- *
- * # The rules this screen follows
- *
- * 1. **One thing on screen at a time.** Not six at once with a progress count.
- * 2. **The compulsory steps cannot be skipped, and there are only three** — a
- *    shop to put the data in, a name to print on the bill, and a PIN so that
- *    not everybody who walks behind the counter owns the till. Everything else
- *    a shop can decide after it has taken some money.
- * 3. **The skippable steps say so plainly.** "I will do this later" is a
- *    button, not a hidden escape.
- * 4. **Nothing nags.** No banner, no toast, no checklist. This screen IS the
- *    set-up, and when it is done it goes away for good.
- *
- * # Nothing here is arithmetic, and nothing here is a second copy
- *
- * Every step calls the same command the Settings screen calls. This file owns
- * the ORDER and the words, and not one rule (R8).
- */
+/** The first five minutes. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -37,15 +10,7 @@ import type { TaxClassView } from '../ipc/generated/TaxClassView';
 
 import './firstrun.css';
 
-/**
- * The steps, in the order somebody actually does them.
- *
- * `label` is what the row of dots says, and it is SHORT on purpose. The first
- * draft used the heading — "Where your shop lives", "Who is in charge" — and
- * four of those across one narrow panel came out as "Where yo…", "Who is in …",
- * which tells a person nothing at all. The heading is the sentence; the dot is
- * a place name.
- */
+/** The steps, in the order somebody actually does them. */
 const STEPS = [
   { id: 'shop', label: 'Shop file', must: true },
   { id: 'details', label: 'Shop name', must: true },
@@ -54,16 +19,7 @@ const STEPS = [
   { id: 'done', label: 'Ready', must: false },
 ] as const;
 
-/**
- * `code` is a screen without a dot, and that is deliberate.
- *
- * It shows the recovery code, and it belongs to the PIN step — it is the second
- * half of "you now have a way in". The first draft printed the code in a box
- * above the item form on the next step, which put the one line in the whole
- * flow that is never shown again at the top of a page somebody is busy typing
- * into, and made that page too tall for a 768-pixel screen. A page with one
- * thing on it is read.
- */
+/** `code` is a screen without a dot, and that is deliberate. */
 type StepId = (typeof STEPS)[number]['id'] | 'code';
 
 export function FirstRun({ onDone }: { onDone: () => void }) {
@@ -83,21 +39,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [pin, setPin] = useState('');
   const [pinAgain, setPinAgain] = useState('');
   const [recovery, setRecovery] = useState('');
-  /**
-   * **The recovery code is shown once and never again.** So the way out of this
-   * step is closed until somebody says they have it on paper. It is the only
-   * tick-box in the whole flow, and it earns its place: without the code, a
-   * forgotten PIN is a shop locked out of its own till.
-   */
+  /** The recovery code is shown once and never again. */
   const [wroteItDown, setWroteItDown] = useState(false);
   /**
-   * The row we made for whoever is in charge, kept so a SECOND press of Next
-   * edits that person rather than hiring another one.
-   *
-   * Found by looking: the first attempt typed a four-digit PIN, `save_staff_member`
-   * succeeded, `set_staff_pin` refused, and the id was a fresh `Date.now()` on
-   * every press — so a shop that mistyped its PIN once would have opened with
-   * two owners in the staff list and no idea where the second came from.
+   * The row we made for whoever is in charge, kept so a SECOND press of Next edits that person
+   * rather than hiring another one.
    */
   const [personId, setPersonId] = useState('');
 
@@ -106,23 +52,16 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [itemPrice, setItemPrice] = useState('');
   const [itemClass, setItemClass] = useState('');
   const [added, setAdded] = useState<string[]>([]);
-  // **The shop's own classes, not a fourth copy of the slab list** (P33 §5.6).
+  // The shop's own classes, not a fourth copy of the slab list.
   const [classes, setClasses] = useState<readonly TaxClassView[]>([]);
 
-  /**
-   * Where the shop's data will go. Empty means "the usual place", which is
-   * what `create_shop` already understood and what nearly everybody uses — so
-   * the common case is still one button and no decision.
-   */
+  /** Where the shop's data will go. */
   const [folder, setFolder] = useState('');
-
 
   const complain = useCallback((cause: unknown) => {
     const said = isUiError(cause) ? cause.message : String(cause);
-    // Rust writes its refusals as fragments — "a PIN is 6 to 8 digits" — because
-    // most of them are read inside a longer sentence. Here one IS the sentence,
-    // and a red box that opens in lower case reads like a crash rather than an
-    // answer. The words stay Rust's; only the first letter is ours.
+    // Rust writes its refusals as fragments — "a PIN is 6 to 8 digits" — because most of them
+    // are read inside a longer sentence.
     setProblem(said.charAt(0).toUpperCase() + said.slice(1));
   }, []);
 
@@ -130,8 +69,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     call('first_run')
       .then((fresh) => {
         setView(fresh);
-        // Somebody who already has a shop and a name lands where they left
-        // off rather than being asked again.
+        // Somebody who already has a shop and a name lands where they left off rather than
+        // being asked again.
         if (fresh.hasShop && fresh.hasDetails && fresh.hasPin) setStep('menu');
         else if (fresh.hasShop && fresh.hasDetails) setStep('pin');
         else if (fresh.hasShop) setStep('details');
@@ -139,8 +78,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .catch(complain);
   }, [complain]);
 
-  // The tax classes are read when the items step opens — there is a shop and a
-  // signed-in owner by then. If it fails, an item can still be added with none.
+  // The tax classes are read when the items step opens.
   useEffect(() => {
     if (step !== 'menu') return;
     call('menu_tax_classes')
@@ -169,13 +107,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   };
 
   /**
-   * **Adopt a database that is already on this computer** — a reinstall, or a
-   * drive letter that changed.
-   *
-   * `use_existing_shop` rather than `create_shop`: the two do the same thing
-   * in Rust today, and they do not mean the same thing. One says "make me a
-   * shop", the other says "that one is mine". A log line that says which is
-   * worth a command name, and this one had never been called.
+   * Adopt a database that is already on this computer — a reinstall, or a drive letter that
+   * changed.
    */
   const openExisting = (path: string) => {
     setBusy(true);
@@ -189,16 +122,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .finally(() => setBusy(false));
   };
 
-  /**
-   * **Browse for a folder** — the owner's fifth item.
-   *
-   * The screen offered one path and no way to change it, so a shop that keeps
-   * its data on D: had nowhere to say so. A webview cannot open a folder
-   * picker at all, which is why this is a command: Rust opens the operating
-   * system's own dialog, parented to this window, and hands back the path.
-   *
-   * Pressing Cancel returns nothing, and nothing is not an error.
-   */
+  /** Browse for a folder. */
   const browseForFolder = () => {
     setBusy(true);
     setProblem('');
@@ -235,16 +159,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       setProblem('Type your name, so the bills say who took the money.');
       return;
     }
-    // **The same rule Rust holds** — `mb_auth::pin::PIN_DIGITS`.
-    //
-    // The first draft said four here while Rust wanted six, which meant the
-    // screen invited a PIN the program then refused. A form that asks for
-    // something impossible is worse than one that asks for nothing.
-    //
-    // It is one constant on each side now rather than a pair. This screen was
-    // already right — `length !== 4` — and the lock screen next door was not,
-    // because it read the *minimum* of a range and let a PIN grow past it. Two
-    // numbers is what made "the same rule" a thing you had to check by hand.
+    // The same rule Rust holds — `mb_auth::pin::PIN_DIGITS`.
     if (pin.length !== PIN_DIGITS) {
       setProblem(`A PIN is ${PIN_DIGITS} digits.`);
       return;
@@ -269,13 +184,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .then(() => call('set_staff_pin', { staffId: id, pin }))
       .then((code) => {
         if (code) setRecovery(code);
-        // **Sign them in with the PIN they just chose.**
-        //
-        // Without this, finishing set-up drops somebody on the lock screen and
-        // asks for the PIN they typed twenty seconds ago — which reads as the
-        // program having lost it. Creating the owner account IS proving who you
-        // are. If it fails the lock screen is still there and still works, so
-        // this never stops the flow.
+        // Sign them in with the PIN they just chose.
         return call('login', { staffId: id, pin })
           .catch(() => undefined)
           .then(() => setStep(code ? 'code' : 'menu'));
@@ -294,8 +203,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         name: itemName.trim(),
         categoryId: null,
         price: itemPrice.trim(),
-        // **A tax CLASS, not a rate** (P13): one place decides what 5% means,
-        // so changing the rate later changes every item on it.
+        // A tax CLASS, not a rate: one place decides what 5% means, so changing the rate later
+        // changes every item on it.
         taxClassId: itemClass === '' ? null : itemClass,
         hsn: null,
         shortCode: null,
@@ -310,11 +219,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         setAdded((was) => [...was, `${itemName.trim()} — ${itemPrice.trim()}`]);
         setItemName('');
         setItemPrice('');
-        // **Back to the Item box.** Adding five things should be five names,
-        // five prices and five Enters — and Enter is pressed in the PRICE box,
-        // so without this the caret stays there and the sixth name is typed
-        // into the price of the fifth. Found by adding two items and watching
-        // the second one land in the wrong field.
+        // Back to the Item box.
         document
           .querySelector<HTMLInputElement>('input[name="firstrun-item"]')
           ?.focus();
@@ -326,8 +231,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   return (
     <Scroller inset className="mb-firstrun">
       <div className="mb-firstrun__panel">
-        {/* Where you are, and how much is left. Four dots, not a percentage:
-            a percentage on a five-step form is a number nobody believes. */}
+        {/* Where you are, and how much is left. */}
         <ol className="mb-firstrun__steps" aria-label="Setting up">
           {STEPS.slice(0, 4).map((s, n) => (
             <li
@@ -362,13 +266,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               internet — your shop&rsquo;s data stays on this computer.
             </p>
 
-            {/* **The folder, and a way to change it.**
-
-                It used to be a path and nothing else, which read as an
-                instruction rather than a choice — so a shop that keeps its
-                data on a second drive had no way to say so and no sign that it
-                was allowed to. The Browse button is Rust's, because a webview
-                cannot open a folder picker at all. */}
+            {/* The folder, and a way to change it. */}
             <div className="mb-firstrun__where">
               <span className="mb-firstrun__label">Your data will be kept in</span>
               <code className="mb-firstrun__path">
@@ -415,10 +313,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               </div>
             ) : null}
 
-            {/* **A database somewhere this counter did not look.** `find_shops`
-                searches the usual places; an owner whose backup lives on a USB
-                stick or a mapped drive is not in the usual places, and until
-                now had no way in at all. */}
+            {/* A database somewhere this counter did not look. */}
             <div className="mb-firstrun__found">
               <Button
                 variant="quiet"
@@ -537,11 +432,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         {step === 'code' ? (
           <section className="mb-firstrun__body">
             <h1 className="mb-firstrun__title">Write this down</h1>
-            {/* **"and it is printing" is true as of 2026-08-22.** The slip was
-                promised by `mb_auth::recovery` and by the audit log and was
-                never put on a printer — see `ipc::print_the_recovery_slip`. It
-                is said here because this is the screen where somebody decides
-                whether they need a pen. */}
             {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">
               If the PIN is ever forgotten, this code is the only way back into
@@ -594,8 +484,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 placeholder="Masala Dosa"
                 onChange={(e) => setItemName(e.target.value)}
                 onKeyDown={(e) => {
-                  // Enter goes to the price rather than doing nothing. Name,
-                  // Enter, price, Enter — the rhythm somebody types a menu in.
+                  // Enter goes to the price rather than doing nothing.
                   if (e.key !== 'Enter') return;
                   e.preventDefault();
                   document
@@ -638,11 +527,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               </ul>
             ) : null}
 
-            {/* **One button, because there is only one outcome.** The first
-                draft had "I will do this later" beside "Skip and start
-                billing", which are two ways of writing the same click — a
-                person reads two buttons as two choices and stops to work out
-                which. The label carries the difference instead. */}
+            {/* One button, because there is only one outcome. */}
             <div className="mb-firstrun__actions">
               <Button variant="primary" onClick={onDone}>
                 {added.length > 0 ? 'Start billing' : 'Skip this — start billing'}

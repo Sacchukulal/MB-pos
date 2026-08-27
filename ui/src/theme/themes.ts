@@ -1,39 +1,21 @@
-/**
- * The theme registry — and it is deliberately almost empty.
- *
- * A theme is **data**: a block of values in `tokens.css` and one line here.
- * This file holds the id, the name a shop sees, and which icon the sun/moon
- * toggle shows. It holds no colour, because a colour here would be a colour
- * outside `tokens.css`, which is the one thing the whole system forbids.
- *
- * The owner's ruling, 2026-08-04:
- *
- * > *"Design a central theme system so that in future it can be changed easily
- * > with my suggestion without touching any functionality of the app."*
- *
- * Adding a theme is therefore: copy a block in `tokens.css`, add a line below.
- * `kit/__tests__/theme.test.tsx` adds a throwaway theme that way and asserts
- * it renders — so if this ever stops being true, the build says so.
- */
+/** The theme registry — and it is deliberately almost empty. */
 
 export type ThemeId = string;
 
 export interface Theme {
   readonly id: ThemeId;
-  /** What the shop sees in the settings list. Translated at P23. */
+  /** What the shop sees in the settings list. */
   readonly name: string;
   /** Which face the toggle shows while this theme is active. */
   readonly icon: 'sun' | 'moon' | 'contrast';
-  /**
-   * Whether this theme counts as the dark one for the sun/moon toggle.
-   * The toggle flips between the first light and the first dark theme;
-   * anything else is chosen from settings (P17).
-   */
+  /** Whether this theme counts as the dark one for the sun/moon toggle. */
   readonly appearance: 'light' | 'dark';
 }
 
-/** The one theme that is guaranteed to exist, so nothing has to handle the
-    case where the registry is empty. */
+/**
+ * The one theme that is guaranteed to exist, so nothing has to handle the case where the
+ * registry is empty.
+ */
 export const LIGHT: Theme = {
   id: 'light',
   name: 'Light',
@@ -61,10 +43,7 @@ export interface TextSize {
   readonly scale: number;
 }
 
-/**
- * Audit F9: *"no font scaling for older owners"*. UI_GUIDELINES §3: *"many
- * owners are 50+ and the counter screen is across a desk."*
- */
+/** "no font scaling for older owners". */
 /** The default, as a value rather than an index. */
 export const NORMAL_TEXT: TextSize = { id: 'normal', name: 'Normal', scale: 1 };
 
@@ -81,13 +60,7 @@ export function themeById(id: ThemeId): Theme | undefined {
   return THEMES.find((t) => t.id === id);
 }
 
-/**
- * What the sun/moon button switches to.
- *
- * From a light theme it goes to the first dark one and back again; from
- * anything else (high contrast, or whatever the owner adds later) it returns
- * to the default rather than guessing.
- */
+/** What the sun/moon button switches to. */
 export function toggleTarget(current: ThemeId): ThemeId {
   const theme = themeById(current);
   if (!theme) return DEFAULT_THEME;

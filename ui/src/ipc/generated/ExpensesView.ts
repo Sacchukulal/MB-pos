@@ -8,11 +8,10 @@ import type { MovementRowView } from "./MovementRowView";
 
 export type ExpensesView = { rows: Array<ExpenseRowView>, categories: Array<CategoryTotalView>, allCategories: Array<CategoryTotalView>, movements: Array<MovementRowView>, cash: CashPositionView, total: MoneyView, 
 /**
- * Scope 10.6's "this month against last".
+ * 6's "this month against last".
  */
 thisMonth: MoneyView, lastMonth: MoneyView, 
 /**
- * Templates that are due and have not been confirmed. **Nothing posts
- * itself** — these are reminders.
+ * Templates that are due and have not been confirmed.
  */
 due: Array<DueView>, };

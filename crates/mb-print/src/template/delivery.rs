@@ -1,26 +1,10 @@
-//! **The slip that goes out on the bike** — P29, scope 14.5.
-//!
-//! Not a bill and not a kitchen ticket. It is the piece of paper the rider
-//! reads at a gate in the dark, so it is the address, the phone and the one
-//! figure that matters:
-//!
-//! > **COLLECT ₹640** — or **PAID — COLLECT NOTHING**.
-//!
-//! That line is the whole reason this template exists rather than reusing the
-//! bill. A rider who cannot tell a prepaid order from a cash one either asks
-//! for money that has already been paid, or hands over food and comes back
-//! empty. Both happen constantly, and both are a print-layout problem before
-//! they are a training problem.
-//!
-//! Everything else is deliberately plain: no logo, no tax summary, no terms.
-//! The customer gets the bill; the rider gets this.
+//! The slip that goes out on the bike.
 
 use crate::doc::{Align, Document, Pattern, Style};
 use crate::paper::Paper;
 
-/// One line of food, already priced and formatted by the caller — this crate
-/// owns no money type on the page (D2 lives in mb-core, and every figure
-/// arrives here as the string it will print).
+/// One line of food, already priced and formatted by the caller — this crate owns no money type
+/// on the page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlipLine {
     pub name: String,
@@ -33,7 +17,7 @@ pub struct DeliveryContext<'a> {
     pub shop: &'a str,
     /// The bill number if there is one, otherwise the token.
     pub reference: &'a str,
-    /// Already formatted by the caller. This crate owns no clock (D5, D19).
+    /// Already formatted by the caller.
     pub time: Option<&'a str>,
     pub customer: Option<&'a str>,
     pub phone: Option<&'a str>,
@@ -44,15 +28,12 @@ pub struct DeliveryContext<'a> {
     pub lines: &'a [SlipLine],
     /// The bill total, formatted.
     pub total: String,
-    /// **What to collect at the door, formatted** — or `None` when the order
-    /// is already paid, which prints a different line entirely.
+    /// What to collect at the door, formatted — or `None` when the order is already paid, which
+    /// prints a different line entirely.
     pub collect: Option<String>,
 }
 
 /// The slip.
-///
-/// Never fails: a delivery with no lines is still a delivery that a rider is
-/// standing there waiting for, unlike a kitchen ticket with no delta.
 #[must_use]
 pub fn delivery_document(paper: Paper, ctx: &DeliveryContext<'_>) -> Document {
     let mut doc = Document::new(paper);
@@ -71,9 +52,8 @@ pub fn delivery_document(paper: Paper, ctx: &DeliveryContext<'_>) -> Document {
 
     doc.separator(Pattern::Dashed);
 
-    // **The address is the point of the paper**, so it is the biggest thing on
-    // it after the amount, and it wraps rather than truncating (D30). A rider
-    // reading "Flat 3B, Sriniva…" is a delivery that comes back.
+    // The address is the point of the paper, so it is the biggest thing on it after the amount,
+    // and it wraps rather than truncating.
     if let Some(name) = ctx.customer {
         doc.text(name, Style::new(1, true), Align::Left);
     }
@@ -101,8 +81,7 @@ pub fn delivery_document(paper: Paper, ctx: &DeliveryContext<'_>) -> Document {
     doc.separator(Pattern::Solid);
     doc.row("Bill total", &ctx.total, Style::NORMAL);
 
-    // The line the rider actually looks for, at the size they can read it from
-    // a scooter seat.
+    // The line the rider actually looks for, at the size they can read it from a scooter seat.
     match &ctx.collect {
         Some(amount) => {
             doc.text(
@@ -164,8 +143,8 @@ mod tests {
 
     #[test]
     fn a_prepaid_slip_says_collect_nothing_and_never_shows_an_amount_to_collect() {
-        // The mistake this test exists for: a rider asking for money that has
-        // already been paid, because the slip showed a total and nothing else.
+        // The mistake this test exists for: a rider asking for money that has already been
+        // paid, because the slip showed a total and nothing else.
         let mut c = ctx();
         c.collect = None;
         let doc = delivery_document(Paper::new(crate::paper::PaperKind::Mm80), &c);
@@ -182,9 +161,8 @@ mod tests {
             matches!(b, Block::Text { content, style, .. }
                 if content.contains("Kamaraj") && style.scale() > 1)
         });
-        // Scale 1 with emphasis is what a printer gives for "bigger than the
-        // body text" on 80 mm paper; the assertion is that it is not the plain
-        // body style.
+        // Scale 1 with emphasis is what a printer gives for "bigger than the body text" on 80
+        // mm paper; the assertion is that it is not the plain body style.
         let emphatic = doc.blocks.iter().any(|b| {
             matches!(b, Block::Text { content, style, .. }
                 if content.contains("Kamaraj") && style.bold)

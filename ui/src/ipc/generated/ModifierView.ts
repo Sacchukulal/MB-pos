@@ -3,7 +3,6 @@ import type { MoneyView } from "./MoneyView";
 
 export type ModifierView = { id: string, name: string, 
 /**
- * Preformatted, and it may be negative — "No onion, −10.00" is a real line
- * on a real menu. R8: TypeScript formats nothing.
+ * Preformatted, and it may be negative — "No onion, −10.00" is a real line on a real menu.
  */
 priceDelta: MoneyView, isActive: boolean, };

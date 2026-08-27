@@ -5,6 +5,6 @@
  */
 export type ProblemView = { id: string, kind: string, 
 /**
- * **The whole sentence** — D100: an unhealthy row carries its own fix.
+ * The whole sentence.
  */
 sentence: string, times: number, when: string, };

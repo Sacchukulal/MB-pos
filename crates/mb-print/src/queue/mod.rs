@@ -1,51 +1,4 @@
-//! **The print queue — the reason this session exists.**
-//!
-//! Two audit findings, and both of them lose food:
-//!
-//! > **D3.** *"Printing to several printers happens one after another, and
-//! > blocks. If the tandoor printer is off, the app waits its full 15-second
-//! > timeout **before** the kitchen printer gets anything. In a rush that is a
-//! > lost order."*
-//!
-//! > **D4.** *"A failed print is only a red message on screen. Nothing
-//! > remembers it. In a rush the cashier misses the toast and the kitchen simply
-//! > never gets the order."*
-//!
-//! # The four rules that answer them
-//!
-//! **1. Enqueue is all the billing thread does.** It writes one row and returns.
-//! No layout, no rasterising, no socket. That is budget B6, and it is also
-//! requirement 3 of the ten — *billing never stops* — because nothing a printer
-//! does can reach the cashier.
-//!
-//! **2. One worker thread per printer.** A job goes to its printer's channel and
-//! no other, so a printer that never answers blocks its own worker and nothing
-//! else. That is D3, and it is why this is not a thread pool: with a pool of
-//! four and five dead printers, the fifth healthy one waits and D3 is back.
-//!
-//! **3. Retry with backoff, bounded, then park.** Five attempts, doubling from a
-//! second. v1 had *both* failure modes in different places — retrying for ever,
-//! and dropping silently — and this forbids each.
-//!
-//! **4. Nothing disappears.** A parked job stays in the database, stays in
-//! [`Queue::snapshot`], and waits for a person. The cashier must be able to
-//! **see** that the kitchen ticket did not print; a toast that has already faded
-//! is not seeing.
-//!
-//! # Timeouts, honestly
-//!
-//! Where a timeout can be enforced it is: TCP connect, TCP write, serial write.
-//! **A spooler write cannot be cancelled** — there is no safe cancellation point
-//! in `WritePrinter` — so this queue does not claim to time it out. It claims
-//! the thing D3 actually needs, which is that a stuck printer cannot delay a
-//! different printer. A comment promising a timeout the code cannot deliver
-//! would be worse than none.
-//!
-//! # No async runtime
-//!
-//! Four printers, a socket each, idle most of the day. Tokio would be a
-//! dependency, a scheduler and a different mental model, to buy nothing
-//! (R6, `PERFORMANCE.md` §5 rule 8).
+//! The print queue.
 
 pub mod sqlite;
 pub mod store;
@@ -74,7 +27,7 @@ use crate::transport::{RealTransports, TransportError, TransportFactory};
 
 pub use store::{JobStore, MemoryStore, StoreError, StoredJob};
 
-/// What is being printed. Also its default urgency.
+/// What is being printed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobKind {
@@ -82,37 +35,17 @@ pub enum JobKind {
     Kitchen,
     Label,
     Test,
-    /// A drawer pulse with nothing to print — when the drawer hangs off a
-    /// different printer from the one the bill went to.
+    /// A drawer pulse with nothing to print — when the drawer hangs off a different printer
+    /// from the one the bill went to.
     Drawer,
-    /// P18's closing slip — the Z-report. Its own kind rather than a `Test`,
-    /// because the print queue shows a person what each job IS, and "test
-    /// print" against the paper that records a day's cash is audit F8.
     DayClose,
-    /// P29, scope 14.5. The slip that goes out with the rider: the address,
-    /// the phone and what to collect. Its own kind for the same reason the
-    /// Z-report is — the queue tells a person what each job IS, and a rider's
-    /// slip is not a parcel label.
     Delivery,
-    /// **The shop's recovery code, on paper.** `mb_auth::recovery` always said
-    /// this printed, and the audit log has always read back "New recovery code
-    /// printed" — but nothing put it on a printer until 2026-08-22, so a shop
-    /// that closed the dialog without a pen had lost its only way back in.
-    ///
-    /// Its own kind, for the reason the Z-report and the rider's slip are: the
-    /// queue tells a person what each job IS, and a shopkeeper looking at a
-    /// failed job needs to know that *this* is the one to reprint before the
-    /// dialog is gone.
+    /// The shop's recovery code, on paper.
     Recovery,
 }
 
 impl JobKind {
-    /// **Every kind, so a test can walk them.**
-    ///
-    /// Hand-written, because Rust cannot iterate an enum without a
-    /// dependency — the same trade `Permission::ALL` makes, and the same
-    /// test shape guards it: a variant missing from here is a variant no
-    /// test ever tries to write to the database.
+    /// Every kind, so a test can walk them.
     pub const ALL: &'static [JobKind] = &[
         JobKind::Bill,
         JobKind::Kitchen,
@@ -154,28 +87,19 @@ impl JobKind {
     }
 
     /// Lower is sooner.
-    ///
-    /// **A bill beats a kitchen ticket**, because a bill queued behind forty
-    /// tickets is a customer standing at the counter with a card in their hand,
-    /// and a ticket that is thirty seconds late is a ticket.
     #[must_use]
     pub const fn priority(self) -> i64 {
         match self {
             JobKind::Drawer => 5,
             JobKind::Bill => 10,
             JobKind::Kitchen => 20,
-            // Behind a bill: a customer waiting to pay beats the slip that
-            // closes a day which is already over.
+            // Behind a bill: a customer waiting to pay beats the slip that closes a day which
+            // is already over.
             JobKind::DayClose => 30,
-            // With the food, so it goes at kitchen speed and not at label
-            // speed: the rider is standing there.
+            // With the food, so it goes at kitchen speed and not at label speed: the rider is
+            // standing there.
             JobKind::Delivery => 25,
-            // **Ahead of a bill, and it is the only thing that is.** This slip
-            // is printed at the one moment somebody is standing there having
-            // just been shown a code they cannot look up again — see
-            // `JobKind::Recovery`. Everything else in this list can be printed
-            // a second time; this cannot. It is also one job, once in the life
-            // of a shop, so it costs the counter nothing to let it past.
+            // Ahead of a bill, and it is the only thing that is.
             JobKind::Recovery => 6,
             JobKind::Test | JobKind::Label => 50,
         }
@@ -189,20 +113,13 @@ pub struct Job {
     pub printer_id: String,
     pub document: Document,
     pub copies: u8,
-    /// Why, in words the cashier's queue can show: "table 6", "reprint by
-    /// Ravi", "test print".
+    /// Why, in words the cashier's queue can show: "table 6", "reprint by Ravi", "test print".
     pub reason: Option<String>,
-    /// D5 — stamped by whoever created the job, never re-derived here.
+    /// Stamped by whoever created the job, never re-derived here.
     pub business_day: BusinessDay,
-    /// Whether this job should also open the drawer. [`crate::drawer`] decides;
-    /// the queue only carries the answer.
+    /// Whether this job should also open the drawer.
     pub kick_drawer: bool,
-    /// **P31. Which typeface to draw this with**, as a key from
-    /// [`crate::font::FAMILIES`]. `None` is the built-in one.
-    ///
-    /// On the JOB rather than on the printer, because the shop chooses one face
-    /// for the bill and another for the kitchen ticket — and one printer
-    /// commonly prints both.
+    /// Which typeface to draw this with, as a key from `crate::font::FAMILIES`.
     pub font: Option<String>,
 }
 
@@ -232,7 +149,7 @@ impl Job {
         self
     }
 
-    /// P31. The face this shop chose for this kind of document.
+    /// The face this shop chose for this kind of document.
     #[must_use]
     pub fn in_face(mut self, font: Option<String>) -> Job {
         self.font = font;
@@ -246,17 +163,13 @@ impl Job {
     }
 }
 
-/// What a job carries across a power cut. The `payload` column, as a type.
+/// What a job carries across a power cut.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Payload {
     document: Document,
     kick_drawer: bool,
-    /// P31. Which typeface this job is drawn with — the shop chooses one for
-    /// the bill and one for the kitchen ticket.
-    ///
-    /// `#[serde(default)]` because a job parked before this field existed is
-    /// still a job that has to print after the update. It comes out `None`,
-    /// which is the built-in face and exactly what it was queued with.
+    /// Which typeface this job is drawn with — the shop chooses one for the bill and one for
+    /// the kitchen ticket.
     #[serde(default)]
     font: Option<String>,
 }
@@ -268,7 +181,7 @@ pub enum JobState {
     Printing,
     Failed,
     Parked,
-    /// Never stored: a done job has no row (D35).
+    /// Never stored: a done job has no row.
     Done,
 }
 
@@ -285,7 +198,7 @@ impl JobState {
     }
 }
 
-/// What the cashier's screen subscribes to — **the fix for D4.**
+/// What the cashier's screen subscribes to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueEvent {
     Queued {
@@ -307,7 +220,7 @@ pub enum QueueEvent {
         error: String,
         retry_in: Duration,
     },
-    /// Nothing else will be tried. This is the one a person has to see.
+    /// Nothing else will be tried.
     Parked {
         id: String,
         reason: String,
@@ -340,17 +253,16 @@ pub struct QueueConfig {
     pub max_attempts: i64,
     /// The first wait; each retry doubles it.
     pub backoff: Duration,
-    /// How long to wait for a socket. Short — audit D3's whole complaint is a
-    /// fifteen-second one.
+    /// How long to wait for a socket.
     pub connect_timeout: Duration,
 }
 
 impl Default for QueueConfig {
     fn default() -> Self {
         QueueConfig {
-            // Five attempts at 1, 2, 4 and 8 seconds is fifteen seconds of
-            // trying — long enough for somebody to switch the printer on, short
-            // enough that a parked job is news while the order is still hot.
+            // Five attempts at 1, 2, 4 and 8 seconds is fifteen seconds of trying — long enough
+            // for somebody to switch the printer on, short enough that a parked job is news
+            // while the order is still hot.
             max_attempts: 5,
             backoff: Duration::from_secs(1),
             connect_timeout: Duration::from_secs(3),
@@ -385,19 +297,10 @@ enum Message {
 }
 
 /// Job ids are unique within a process and across restarts.
-///
-/// No `uuid` crate for a row that lives for seconds (R6): the millisecond it was
-/// created plus a counter cannot collide on one counter, and a print job never
-/// leaves the machine that made it — unlike D13's business ids, which two
-/// terminals really can collide on.
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 impl Queue {
     /// Start the workers and resume anything the last run left behind.
-    ///
-    /// A job whose printer no longer exists is **parked**, not dropped: somebody
-    /// deleted a printer with work outstanding, and the cashier should be told
-    /// rather than left wondering where the ticket went.
     pub fn start(
         printers: Vec<PrinterConfig>,
         store: Arc<dyn JobStore>,
@@ -408,9 +311,6 @@ impl Queue {
     }
 
     /// The same, with the transports supplied.
-    ///
-    /// How a test gives the queue a printer that never answers — see
-    /// `tests/queue.rs`, which is where audit D3 stops being a claim.
     pub fn start_with_transports(
         printers: Vec<PrinterConfig>,
         store: Arc<dyn JobStore>,
@@ -418,10 +318,8 @@ impl Queue {
         config: QueueConfig,
         transports: Arc<dyn TransportFactory>,
     ) -> Queue {
-        let map: BTreeMap<String, PrinterConfig> = printers
-            .into_iter()
-            .map(|p| (p.id.clone(), p))
-            .collect();
+        let map: BTreeMap<String, PrinterConfig> =
+            printers.into_iter().map(|p| (p.id.clone(), p)).collect();
         let printers = Arc::new(map);
 
         let shared = Arc::new(Shared {
@@ -441,7 +339,7 @@ impl Queue {
             senders.insert(id.clone(), tx);
             let worker_shared = Arc::clone(&shared);
             let printer_id = id.clone();
-            // One thread per printer. This is D3, and it is the whole design.
+            // One thread per printer.
             let handle = std::thread::Builder::new()
                 .name(format!("mb-print-{printer_id}"))
                 .spawn(move || run_worker(&worker_shared, &printer_id, &rx));
@@ -460,29 +358,20 @@ impl Queue {
         queue
     }
 
-    /// **Everything the billing thread does.** One durable write, then return.
+    /// Everything the billing thread does.
     pub fn enqueue(&self, job: Job) -> Result<String, PrintError> {
-        let printer = self
-            .printers
-            .get(&job.printer_id)
-            .ok_or_else(|| PrintError::invalid(format!("there is no printer {}", job.printer_id)))?;
+        let printer = self.printers.get(&job.printer_id).ok_or_else(|| {
+            PrintError::invalid(format!("there is no printer {}", job.printer_id))
+        })?;
 
-        // A kitchen-only printer never receives a bill, and a bill-only printer
-        // never receives a ticket. Checked here as well as in `routing`, because
-        // the queue is the last place it can be caught before paper.
+        // A kitchen-only printer never receives a bill, and a bill-only printer never receives
+        // a ticket.
         let allowed = match job.kind {
             JobKind::Bill => printer.role.accepts_bill(),
             JobKind::Kitchen => printer.role.accepts_kitchen(),
-            // A closing slip goes wherever a bill would, and a shop with only a
-            // kitchen printer must still be able to print one — the alternative
-            // is a day that cannot be closed on paper.
-            // A delivery slip is the same argument: the rider is at the counter
-            // and a shop with one kitchen printer must still be able to send
-            // an address out with them.
-            // The recovery slip goes wherever anything goes, for the
-            // strongest version of that argument: a shop with one kitchen
-            // printer that could not print this would be handed a code it can
-            // only keep by hand-copying it off a dialog.
+            // A closing slip goes wherever a bill would, and a shop with only a kitchen printer
+            // must still be able to print one — the alternative is a day that cannot be closed
+            // on paper.
             JobKind::DayClose
             | JobKind::Label
             | JobKind::Test
@@ -527,8 +416,7 @@ impl Queue {
             created_at,
         };
 
-        // Durable BEFORE the caller is let go. That ordering is D4's fix: a
-        // power cut one instruction later still has the ticket.
+        // Durable BEFORE the caller is let go.
         self.shared
             .store
             .save(&stored)
@@ -544,7 +432,7 @@ impl Queue {
         Ok(id)
     }
 
-    /// A receiver of everything that happens. P08 renders it.
+    /// A receiver of everything that happens.
     #[must_use]
     pub fn subscribe(&self) -> Receiver<QueueEvent> {
         let (tx, rx) = channel();
@@ -552,15 +440,14 @@ impl Queue {
         rx
     }
 
-    /// Every unfinished job, for a screen that attached late — because a
-    /// subscriber that missed the `Parked` event would otherwise be blind to the
-    /// one thing it exists to show.
+    /// Every unfinished job, for a screen that attached late — because a subscriber that missed
+    /// the `Parked` event would otherwise be blind to the one thing it exists to show.
     #[must_use]
     pub fn snapshot(&self) -> Vec<JobStatus> {
         lock(&self.shared.statuses).values().cloned().collect()
     }
 
-    /// Put a parked job back. The button beside the red indicator.
+    /// Put a parked job back.
     pub fn retry(&self, id: &str) -> Result<(), PrintError> {
         let jobs = self
             .shared
@@ -572,14 +459,18 @@ impl Queue {
         };
         job.attempts = 0;
         job.state = JobState::Pending.as_str().to_owned();
-        let _ = self.shared.store.update(id, job.state.as_str(), 0, None, None);
+        let _ = self
+            .shared
+            .store
+            .update(id, job.state.as_str(), 0, None, None);
         self.shared.set_status(&job, JobState::Pending);
-        self.shared.publish(&QueueEvent::Retried { id: id.to_owned() });
+        self.shared
+            .publish(&QueueEvent::Retried { id: id.to_owned() });
         self.dispatch(job);
         Ok(())
     }
 
-    /// Throw a parked job away. **The only other thing that removes one.**
+    /// Throw a parked job away.
     pub fn dismiss(&self, id: &str) -> Result<(), PrintError> {
         self.shared
             .store
@@ -601,7 +492,7 @@ impl Queue {
         }
     }
 
-    /// Carry on where the last run stopped — T6, and a power cut in one line.
+    /// Carry on where the last run stopped.
     fn resume(&self) {
         let Ok(jobs) = self.shared.store.unfinished() else {
             return;
@@ -631,8 +522,8 @@ impl Queue {
 
 impl Shared {
     fn publish(&self, event: &QueueEvent) {
-        // A subscriber whose receiver has been dropped is a screen that closed;
-        // it is removed rather than treated as a failure.
+        // A subscriber whose receiver has been dropped is a screen that closed; it is removed
+        // rather than treated as a failure.
         lock(&self.subscribers).retain(|s| s.send(event.clone()).is_ok());
     }
 
@@ -659,7 +550,7 @@ impl Shared {
         lock(&self.statuses).insert(job.id.clone(), status);
     }
 
-    /// Give up, visibly. **Never silently** — that is half of audit D4.
+    /// Give up, visibly. Never silently.
     fn park(&self, job: &StoredJob, reason: &str) {
         let mut parked = job.clone();
         parked.state = JobState::Parked.as_str().to_owned();
@@ -680,11 +571,6 @@ impl Shared {
 }
 
 /// One printer's worker.
-///
-/// Priority is honoured *here* rather than by the channel: the channel is a
-/// queue and a bill has to be able to overtake forty kitchen tickets already in
-/// it. So everything waiting is drained into a heap and the most urgent is taken
-/// next.
 fn run_worker(shared: &Arc<Shared>, printer_id: &str, rx: &Receiver<Message>) {
     let mut pending: BinaryHeap<Reverse<Queued>> = BinaryHeap::new();
     let mut arrival = 0_u64;
@@ -757,8 +643,6 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
     };
 
     // A payload that will not parse will not parse the fifth time either.
-    // Retrying a corrupt row five times is five times nothing, and it delays the
-    // moment somebody finds out.
     let payload: Payload = match serde_json::from_str(&job.payload) {
         Ok(payload) => payload,
         Err(e) => {
@@ -771,13 +655,9 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
     loop {
         attempt += 1;
         job.attempts = attempt;
-        let _ = shared.store.update(
-            &job.id,
-            JobState::Printing.as_str(),
-            attempt,
-            None,
-            None,
-        );
+        let _ = shared
+            .store
+            .update(&job.id, JobState::Printing.as_str(), attempt, None, None);
         shared.set_status(&job, JobState::Printing);
         shared.publish(&QueueEvent::Started {
             id: job.id.clone(),
@@ -787,7 +667,7 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
         match print_once(shared, printer, &job, &payload) {
             Ok(engine) => {
                 job.engine_used = Some(engine_name(engine).to_owned());
-                // D35: printed means gone. The spool is not a log.
+                // Printed means gone.
                 let _ = shared.store.remove(&job.id);
                 shared.set_status(&job, JobState::Done);
                 shared.publish(&QueueEvent::Printed {
@@ -829,9 +709,8 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
                     error: message,
                     retry_in: wait,
                 });
-                // Sleeping here holds up **this printer only**, which is right:
-                // its jobs must stay in order, and every other printer has its
-                // own thread.
+                // Sleeping here holds up this printer only, which is right: its jobs must stay
+                // in order, and every other printer has its own thread.
                 std::thread::sleep(wait);
             }
         }
@@ -851,29 +730,19 @@ fn print_once(
     job: &StoredJob,
     payload: &Payload,
 ) -> Result<Engine, Failure> {
-    // **The printer decides its own paper and its own offset** (scope 7.11).
-    // One document, two printers, two different corrections.
+    // The printer decides its own paper and its own offset.
     let mut document = payload.document.clone();
     document.paper = printer.paper;
 
-    // **Laid out with the metrics of the engine that will draw it** — P32.
-    //
-    // The graphics engine measures a real typeface; the printer's own font has
-    // three sizes and nothing between. One `Metrics`, made here, is handed to
-    // the layout AND to the sink, so the two cannot answer differently about
-    // how wide a character is — which is exactly how the paper and the preview
-    // used to drift.
+    // Laid out with the metrics of the engine that will draw it.
     let mut engine = printer.effective_engine();
     let metrics = match engine {
         Engine::Text => Metrics::printer_font(printer.paper),
-        Engine::Raster => {
-            Metrics::face(printer.paper, shared.faces.face(payload.font.as_deref()))
-        }
+        Engine::Raster => Metrics::face(printer.paper, shared.faces.face(payload.font.as_deref())),
     };
     let laid = layout_for(&document, &metrics).map_err(|e| Failure {
         message: e.to_string(),
-        // An amount wider than the paper is a template bug, not a printer that
-        // is switched off. Retrying it is theatre.
+        // An amount wider than the paper is a template bug, not a printer that is switched off.
         permanent: true,
     })?;
 
@@ -897,8 +766,8 @@ fn print_once(
             match raster {
                 Ok(raster) => escpos::encode_raster(&raster, &printer.caps, &options),
                 Err(_) => {
-                    // The fallback, and it is a fallback rather than the
-                    // mechanism: a printer set to Text is never "upgraded".
+                    // The fallback, and it is a fallback rather than the mechanism: a printer
+                    // set to Text is never "upgraded".
                     engine = Engine::Text;
                     escpos::encode_text(&laid, &printer.caps, &options)
                 }
@@ -930,8 +799,7 @@ fn to_failure(e: TransportError) -> Failure {
     }
 }
 
-/// The job name a shop sees in the Windows print queue window. "Untitled"
-/// helps nobody at eight in the evening.
+/// The job name a shop sees in the Windows print queue window.
 fn describe_job(job: &StoredJob, printer: &PrinterConfig) -> String {
     match &job.reason {
         Some(reason) => format!("Magic Bill — {} ({reason}) — {}", job.kind, printer.name),
@@ -956,8 +824,7 @@ fn now_millis() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-/// The drawer's own tiny job, for when the drawer hangs off a printer the bill
-/// did not go to.
+/// The drawer's own tiny job, for when the drawer hangs off a printer the bill did not go to.
 #[must_use]
 pub fn drawer_job(
     printer_id: impl Into<String>,
@@ -965,8 +832,8 @@ pub fn drawer_job(
     business_day: BusinessDay,
     _config: DrawerConfig,
 ) -> Job {
-    // An empty document: the bytes that matter are `ESC p`, which `JobOptions`
-    // adds, and there is nothing to print.
+    // An empty document: the bytes that matter are `ESC p`, which `JobOptions` adds, and there
+    // is nothing to print.
     let document = Document::new(paper);
     Job::new(JobKind::Drawer, printer_id, document, business_day)
         .because("open the cash drawer")

@@ -1,32 +1,4 @@
-/**
- * **The lock screen** — audit C1's visible half.
- *
- * It covers the shell completely, and two things stay visible behind it on
- * purpose: the shop's name and the print-queue indicator. A bill that printed
- * wrong while the screen was locked is still the shop's problem (audit D4), and
- * a queue nobody can see is that finding all over again.
- *
- * # Identity first, then the PIN
- *
- * BACKEND-**D1**: v1 tried the typed PIN against *every* active staff row, so
- * with ten staff a random guess was ten times likelier to land. Here the
- * cashier says who they are — by tapping a name or typing their staff code —
- * and only then types a PIN, which is one verification against one row.
- *
- * # One screen for two shapes of shop
- *
- * Two people get two big buttons; thirty get a code box and a filtered list.
- * The same screen does both, because two screens is two things to keep working.
- *
- * # One pad, drawn once
- *
- * Sign-in and the two steps of the recovery flow all draw [`Pad`]. That is not
- * tidiness: the recovery flow's new-PIN step had *no* pad at all, only a row of
- * bullets counting digits there was no way to type, and it stayed that way
- * because nothing forced the two halves of this screen to look like each other.
- * One component means a change to how a PIN is entered cannot reach one flow
- * and miss the other.
- */
+/** The lock screen. */
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 
@@ -48,13 +20,12 @@ export interface LockProps {
   /** Who can sign in: active, and holding a PIN. */
   people: readonly PersonView[];
   /**
-   * Who the recovery code may set a PIN for — Rust's `LockState::recoverable`,
-   * which is **not** a subset of `people`. A manager with no PIN is on this
-   * list and not on that one, and is precisely who the code is for.
+   * Who the recovery code may set a PIN for — Rust's `LockState::recoverable`, which is not a
+   * subset of `people`.
    */
   recoverable: readonly PersonView[];
   canRecover: boolean;
-  /** Called when somebody got in. The shell reloads itself from Rust. */
+  /** Called when somebody got in. */
   onSignedIn: () => void;
 }
 
@@ -66,9 +37,7 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
     dispatch({ kind: 'people', people, recoverable, canRecover });
   }, [people, recoverable, canRecover]);
 
-  // **The commands ride in the state.** StrictMode double-invokes the reducer,
-  // so performing them inside it would sign somebody in twice (P10 found this
-  // the expensive way, with a beer at 440.00).
+  // The commands ride in the state.
   useEffect(() => {
     if (state.pending.length === 0) return;
     const [, commands] = take(state);
@@ -101,17 +70,11 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
     })();
   }, [state, onSignedIn]);
 
-  // The whole window is the keyboard. There is nothing else on screen to focus.
+  // The whole window is the keyboard.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Tab') return;
       // Let the text inputs have their own typing; the reducer takes the rest.
-      //
-      // **This line is why the recovery flow could not be finished.** The
-      // recovery-code box was on screen at the same time as the new PIN, and it
-      // had focus, so every digit went into the box and none of them reached
-      // the reducer. The flow is four steps now and the box shares a step with
-      // nothing — see `keyboard.ts`. The rule itself is right and stays.
       const target = event.target as HTMLElement | null;
       if (target?.tagName === 'INPUT' && event.key !== 'Enter') return;
       dispatch({ kind: 'key', key: event.key });
@@ -168,19 +131,7 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
   );
 }
 
-/**
- * **The PIN itself: four dots and a pad.**
- *
- * Dots, not digits. Somebody is always standing behind the counter.
- *
- * **Four of them, and only ever four.** It drew `MAX_PIN`, which was eight, so
- * a shop typing a four-digit PIN looked at eight circles with four filled —
- * which reads as a half-finished PIN every single time. The first fix drew
- * `Math.max(MIN_PIN, digits.length)`, and that still grew to eight the moment
- * somebody kept pressing, because the *rule* underneath was still a range. The
- * rule is one number now (`PIN_DIGITS`), so this can be written as one number
- * too, and there is no arithmetic left in it to be wrong.
- */
+/** The PIN itself: four dots and a pad. */
 function Pad({
   digits,
   busy,
@@ -208,8 +159,10 @@ function Pad({
         ))}
       </div>
 
-      {/* No decimal point. A PIN has no decimal point, and the key sat exactly
-          where a thumb lands. See `Keypad`. */}
+      {/*
+        No decimal point. A PIN has no decimal point, and the key sat exactly where a thumb
+        lands.
+      */}
       <Keypad onPress={onPad} disabled={busy} dot={false} />
       <span className="mb-visually-hidden">{label}</span>
     </>
@@ -250,11 +203,7 @@ function Who({
       ) : null}
       <Scroller inset className="mb-lock__people">
         {shown.length === 0 ? (
-          /* **Two different emptinesses, and they were saying the same thing**
-             — P30.5. Typing a name that matches nobody used to answer "Nobody
-             here has a PIN yet", which is a claim about the SHOP rather than
-             about what was typed, and it is alarming as well as untrue. Found
-             by typing a PIN into the search box by mistake. */
+          /* Two different emptinesses, and they were saying the same thing. */
           <p className="mb-muted">
             {people.length === 0
               ? 'Nobody here has a PIN yet. Somebody who manages staff can set one.'
@@ -304,10 +253,6 @@ function PinPad({
       <Pad digits={digits} busy={busy} onPad={onPad} label={`${person.name}'s PIN`} />
 
       <div className="mb-lock__actions">
-        {/* **`cancel`, not `back`.** This button used to send the same event as
-            Backspace, so it rubbed out one digit per press and only reached the
-            staff list once the pad was empty — four taps to do what it says.
-            The owner found that on a real install (2026-08-22). */}
         <Button variant="quiet" onClick={onCancel} disabled={busy}>
           Somebody else
         </Button>
@@ -319,21 +264,7 @@ function PinPad({
   );
 }
 
-/**
- * **The way back in, as four screens.**
- *
- * The owner, 2026-08-22: *"Forgotton pin also not working, i typed recovery
- * code, but cant even type new pin."*
- *
- * Everything used to be on one screen — the code box, the staff list and a row
- * of bullets standing in for the new PIN. There was no field and no pad behind
- * those bullets, and the code box held the keyboard focus, so a digit could
- * only ever land in the code box. The flow could be entered and not left.
- *
- * The steps are `code → who → pin → again`, one at a time. On the two pad steps
- * there is no text input on screen at all, which is what makes the digits
- * reachable rather than a rule that has to be remembered.
- */
+/** The way back in, as four screens. */
 function Recover({
   state,
   dispatch,
@@ -388,8 +319,7 @@ function Recover({
         <h1 className="mb-lock__title">Whose PIN?</h1>
         {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
         <p className="mb-muted">
-          {/* Only the people Rust will accept. Offering the whole staff list
-              meant the refusal arrived after the code had been spent. */}
+          {/* Only the people Rust will accept. */}
           The recovery code sets a PIN for somebody who manages staff.
         </p>
         <div className="mb-lock__people">

@@ -1,27 +1,10 @@
 #!/usr/bin/env node
 /**
- * THE LINT THAT MAKES THE OWNER'S RULING TRUE — audit E11, mechanically.
+ * No raw colour, size or inline style outside src/theme/. Fails the build.
  *
- *   "208 hand-written inline styles have crept back across 18 screen files,
- *    fighting the design-token system that was built to prevent exactly that."
- *    > Fix: a rule that fails the build if a screen writes a raw colour or a
- *    > raw size.
- *
- * v1's inline styles came back AFTER a rebuild that was meant to remove them,
- * because nothing stopped them. Agreement is not a mechanism. This is.
- *
- * It fails the build on, anywhere outside src/theme/:
- *   - a raw hex colour, rgb(), hsl(), oklch() or a CSS colour keyword
- *   - a raw px / rem / em size
- *   - a `style={{ … }}` prop
- *
- * NO DEPENDENCIES, and that is deliberate: a dependency inside the thing that
- * guards against unjustified dependencies would be funny once and awkward
- * forever. It is a file scan, and it is forty lines of one.
- *
+ * Usage:
  *   node scripts/check-tokens.mjs            check src/
- *   node scripts/check-tokens.mjs <dir>      check somewhere else (the test
- *                                            fixture uses this)
+ *   node scripts/check-tokens.mjs <dir>      check somewhere else
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -35,7 +18,7 @@ const ALLOWED_DIRS = [join('src', 'theme')];
 const CHECKS = [
   {
     what: 'a raw hex colour',
-    // #abc, #aabbcc, #aabbccdd
+    // #abc, #aabbcc, #aabbccdd.
     re: /#[0-9a-fA-F]{3,8}\b/g,
   },
   {
@@ -71,28 +54,15 @@ const CHECKS = [
 const ESCAPE = 'mb-tokens-allow:';
 
 /**
- * Comments describe these rules constantly — "every control is 44px tall" is
- * documentation, not a hardcoded size. Stripping them is what keeps the lint
- * from punishing the thing that explains it.
+ * Comments describe these rules constantly — "every control is 44px tall" is documentation, not
+ * a hardcoded size.
  */
 function stripComments(text) {
   const block = new RegExp("/\\*[\\s\\S]*?\\*/", "g");
-  // **`[ \t]`, not `\s`, and that was a real bug.**
-  //
-  // `\s` matches a NEWLINE, so `^\s*//` starting at a blank line ate the blank
-  // line, its newline and the indentation of the comment below it — and the
-  // stripped text came out shorter than the file. Every line number after the
-  // first blank-line-then-comment was wrong by one, which meant:
-  //
-  // * reported problems pointed at the wrong line, and
-  // * `mb-tokens-allow` was read off the wrong RAW line, so **the escape hatch
-  //   silently did not work** in any file with a comment after a blank line.
-  //
-  // Found at P31 by writing a legitimate escape and watching the lint ignore
-  // it. `Logo.tsx` was two lines out.
+  // `[ \t]`, not `\s`, and that was a real bug.
   const lineComment = new RegExp("^[ \\t]*//.*$", "gm");
-  // Blanked rather than deleted, so a reported line number still points at
-  // the right line of the real file.
+  // Blanked rather than deleted, so a reported line number still points at the right line of
+  // the real file.
   return text
     .replace(block, (found) => found.replace(new RegExp("[^\\n]", "g"), " "))
     .replace(lineComment, "");

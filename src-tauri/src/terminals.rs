@@ -1,26 +1,9 @@
-//! **The tills** — P27, scope 11.1, 11.2 and 11.3. Bodies over `&App` (D46).
-//!
-//! > Audit **E5**: *"One counter per shop. Full stop."*
-//!
-//! # What this file decides, and what it deliberately does not
-//!
-//! It decides **who this machine is** (its terminal row, its series prefix) and
-//! **who the master is** (D139 — a person's choice, never an election). It does
-//! not decide a single number: D135 gave every till its own series, so the
-//! billing path never asks anything here, and B5 is untouched by construction.
-//!
-//! # Where the identity lives, and why not in the database
-//!
-//! Beside the config, exactly as P19 keeps the TLS key and P21 keeps the licence
-//! (D79, D85). **A backup is restored onto another machine** (D27), and a
-//! restore that resurrected the old machine's terminal id would give a shop two
-//! tills claiming to be one — which is the collision this session exists to
-//! prevent, arriving through the back door.
+//! The tills.
 
 use std::path::{Path, PathBuf};
 
-use mb_auth::audit::{AuditEntry, action};
 use mb_auth::Permission;
+use mb_auth::audit::{AuditEntry, action};
 use mb_db::repo::terminals::Terminal;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -30,16 +13,13 @@ use crate::guard;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // Who this machine is.
-// ---------------------------------------------------------------------------
 
 /// This till's own identity, kept beside the config and never in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Me {
     pub terminal_id: String,
-    /// The master this till joined, when it is a secondary. `None` on the
-    /// master itself.
+    /// The master this till joined, when it is a secondary.
     #[serde(default)]
     pub master: Option<Link>,
 }
@@ -47,10 +27,9 @@ pub struct Me {
 /// How to reach the master, and the proof that we are allowed to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Link {
-    /// `https://192.168.0.104:7331`.
     pub base: String,
-    /// **The pin** (D80). Kept rather than re-fetched, so a stranger answering
-    /// on that address tomorrow is refused without anybody being asked again.
+    /// The pin. Kept rather than re-fetched, so a stranger answering on that address tomorrow
+    /// is refused without anybody being asked again.
     pub certificate_pem: String,
     pub device_id: String,
     pub secret: String,
@@ -61,10 +40,6 @@ fn identity_path(config_dir: &Path) -> PathBuf {
 }
 
 /// Read this machine's identity, or make one.
-///
-/// **The id is generated once and never derived from anything that travels.**
-/// Not from the machine name (two shops buy the same model), not from the
-/// database (a restore would clone it), not from the licence.
 pub fn me(config_dir: &Path) -> Me {
     let path = identity_path(config_dir);
     if let Ok(text) = std::fs::read_to_string(&path)
@@ -73,9 +48,8 @@ pub fn me(config_dir: &Path) -> Me {
         return me;
     }
     // The first run of a shop that has never had a second till: this machine is
-    // `terminal_default`, which is the row migration 0001 seeded and the one
-    // every existing bill already points at. Inventing a new id here would
-    // orphan the shop's whole history from its own till.
+    // `terminal_default`, which is the row migration 0001 seeded and the one every existing
+    // bill already points at.
     let me = Me {
         terminal_id: crate::billing::TERMINAL.to_owned(),
         master: None,
@@ -92,9 +66,7 @@ fn write_me(config_dir: &Path, me: &Me) -> std::io::Result<()> {
     )
 }
 
-// ---------------------------------------------------------------------------
 // What the screen sees.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -102,13 +74,12 @@ fn write_me(config_dir: &Path, me: &Me) -> std::io::Result<()> {
 pub struct TerminalView {
     pub id: String,
     pub name: String,
-    /// **The series this till issues under** (D135) — "A", "B". Empty only
-    /// while a shop has one till.
+    /// The series this till issues under — "A", "B".
     pub prefix: String,
     pub is_master: bool,
     /// True for the machine this screen is running on.
     pub is_this_one: bool,
-    /// "seen 2 minutes ago", "never" — written in Rust (R8).
+    /// "seen 2 minutes ago", "never" — written in Rust.
     pub last_seen: String,
     /// "Bills print as A/0001" — the whole sentence, so no screen assembles it.
     pub numbers_say: String,
@@ -122,12 +93,11 @@ pub struct TillsView {
     /// This machine's row.
     pub me: String,
     pub is_master: bool,
-    /// **D138's sentence**, and it is empty when there is nothing to say.
     pub away_says: String,
-    /// "3 bills waiting to reach the main till."
+    /// "3 bills waiting to reach the main till.".
     pub waiting_says: String,
     pub waiting: u32,
-    /// How many tills the plan allows, and how many there are (D141).
+    /// How many tills the plan allows, and how many there are.
     pub allowed: u32,
     pub limit_says: String,
     pub may_manage: bool,
@@ -142,26 +112,18 @@ pub struct TerminalEdit {
     pub prefix: String,
 }
 
-// ---------------------------------------------------------------------------
-// Reading.
-// ---------------------------------------------------------------------------
-
 pub fn tills_on(app: &App) -> UiResult<TillsView> {
     let who = guard::require(app, Permission::ReportsView)?;
     let at = now();
-    // **The id comes from `App`, not from the file.** They are the same value —
-    // `App` read the file at start-up — but only one of them can be trusted to
-    // still be the id every bill on this machine was written under. Reading the
-    // file again here would let a join half an hour ago make this screen
-    // disagree with the book.
+    // The id comes from `App`, not from the file.
     let mine = Me {
         terminal_id: app.terminal_id().to_owned(),
         ..me(&crate::config::AppConfig::directory())
     };
-    let waiting = crate::forwarding::waiting_on(app).map(|w| w.len()).unwrap_or(0);
+    let waiting = crate::forwarding::waiting_on(app)
+        .map(|w| w.len())
+        .unwrap_or(0);
     let allowed = app.entitlement().limits.terminals;
-    // D139's other half: this machine may have been the master until somebody
-    // moved it while this one was switched off.
     let stood_down = stood_down_says(app).unwrap_or_default();
 
     app.with_shop(|shop| {
@@ -170,8 +132,7 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
                 let repos = mb_db::Repos::new(tx);
                 let rows = repos.terminals().all(OUTLET)?;
                 let master = rows.iter().find(|t| t.is_master).cloned();
-                let is_master =
-                    master.as_ref().is_some_and(|m| m.id == mine.terminal_id);
+                let is_master = master.as_ref().is_some_and(|m| m.id == mine.terminal_id);
 
                 let tills = rows
                     .iter()
@@ -181,12 +142,10 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
                         prefix: t.series_prefix.clone(),
                         is_master: t.is_master,
                         is_this_one: t.id == mine.terminal_id,
-                        // **The machine drawing this screen is here by
-                        // definition**, and saying "never" about it is a lie
-                        // the very first run tells: the heartbeat below runs
-                        // AFTER this read, so a till's own row always said
-                        // never until somebody opened the screen twice. Found
-                        // by looking at it.
+                        // The machine drawing this screen is here by definition, and saying
+                        // "never" about it is a lie the very first run tells: the heartbeat
+                        // below runs AFTER this read, so a till's own row always said never
+                        // until somebody opened the screen twice.
                         last_seen: if t.id == mine.terminal_id {
                             "just now".to_owned()
                         } else {
@@ -203,15 +162,10 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
                     tills,
                     me: mine.terminal_id.clone(),
                     is_master,
-                    // **D138's sentence, and it is said from a fact rather
-                    // than from a guess.** Bills waiting IS the master being
-                    // away — nothing else leaves them queued — so this needs
-                    // no heartbeat, no timeout and no third state that could
-                    // disagree with the queue.
                     away_says: if !stood_down.is_empty() {
-                        // The louder of the two: a till that does not know it
-                        // has been replaced is a till whose book is stranded,
-                        // and that has to be read before "the main till is off".
+                        // The louder of the two: a till that does not know it has been replaced
+                        // is a till whose book is stranded, and that has to be read before "the
+                        // main till is off".
                         stood_down.clone()
                     } else if is_master || waiting == 0 {
                         String::new()
@@ -230,11 +184,7 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
             .map_err(|e| words::from_db(&e))
     })
     .inspect(|view| {
-        // Touch our own row, so a person looking at the roster can see which
-        // tills are alive. Deliberately outside the read above and deliberately
-        // ignored if it fails: **a heartbeat must never sit on the writer
-        // connection a bill needs**, and a missing "last seen" is a cosmetic
-        // loss where a blocked settle is not.
+        // Touch our own row, so a person looking at the roster can see which tills are alive.
         let _ = app.with_shop(|shop| {
             shop.db
                 .transaction(|tx| mb_db::Repos::new(tx).terminals().seen(OUTLET, &view.me, at))
@@ -251,14 +201,7 @@ fn numbers_say(terminal: &Terminal) -> String {
     format!("Bills print as {}0001.", terminal.series_prefix)
 }
 
-/// **D141 — the licence counts tills at the door.**
-///
-/// Three cases and not two, and the third is the one a real shop hits: a plan
-/// that used to allow three tills and now allows one leaves a shop **over** the
-/// limit with every till still billing (D141's other half). Saying "all of them
-/// are in use" there is a sentence that does not describe what the owner is
-/// looking at — found by running two tills against an unlicensed machine, whose
-/// plan allows one.
+/// The licence counts tills at the door.
 fn limit_says(have: usize, allowed: u32) -> String {
     let have = u32::try_from(have).unwrap_or(u32::MAX);
     let plan = words::count(i64::from(allowed), "till", "tills");
@@ -279,14 +222,7 @@ fn limit_says(have: usize, allowed: u32) -> String {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Writing.
-// ---------------------------------------------------------------------------
-
 /// Rename a till or change its series prefix.
-///
-/// **The prefix refusal is the whole of D135's remaining risk**, and it comes
-/// back as a sentence naming the till that already has it.
 pub fn save_till_on(app: &App, edit: TerminalEdit) -> UiResult<TillsView> {
     let who = guard::require(app, Permission::SettingsStore)?;
     let at = now();
@@ -306,9 +242,8 @@ pub fn save_till_on(app: &App, edit: TerminalEdit) -> UiResult<TillsView> {
                     series_prefix: edit.prefix.trim().to_owned(),
                     ..existing
                 };
-                // **D75** — a refusal a person must act on is a VALUE, not a
-                // `DbError` that `words::from_db` would rewrite into "the
-                // shop's data could not be read".
+                // A refusal a person must act on is a VALUE, not a `DbError` that
+                // `words::from_db` would rewrite into "the shop's data could not be read".
                 if let Err(refusal) = repos.terminals().save(OUTLET, &updated, at) {
                     return Ok(Err(UiError::new("till.prefix", refusal.to_string())));
                 }
@@ -334,17 +269,7 @@ pub fn save_till_on(app: &App, edit: TerminalEdit) -> UiResult<TillsView> {
     tills_on(app)
 }
 
-/// **D139 — move the master. A person did this.**
-///
-/// There is no election, and this is why: automatic failover between two
-/// machines on a shop's WiFi is a split-brain generator. The switch reboots,
-/// each till decides the other is dead, both become master, and the shop has
-/// two floors. The failure that would "protect" against is a machine being off,
-/// which a person in the room can already see.
-///
-/// The old master is **not consulted**, and that is the point — the machine that
-/// failed is exactly the one that cannot hand over gracefully. When it comes
-/// back it sees a later `master_since` than its own and stands down.
+/// Move the master.
 pub fn make_master_on(app: &App, id: String) -> UiResult<TillsView> {
     let who = guard::require(app, Permission::SettingsStore)?;
     let at = now();
@@ -374,18 +299,7 @@ pub fn make_master_on(app: &App, id: String) -> UiResult<TillsView> {
     tills_on(app)
 }
 
-/// **Join a shop that already has a till** — P19's pairing, done by a till.
-///
-/// The person is holding the master's QR: it carries the address and the
-/// fingerprint, and the master is showing a single-use token that a person
-/// there presses Allow on. All three are needed, and the fingerprint is what
-/// makes the address trustworthy (D80).
-///
-/// # What it writes, and where
-///
-/// The credential and the pin go **beside the config**, never in the database
-/// (D79/D85): a backup is restored onto other machines, and one that carried a
-/// terminal's identity would give a shop two tills claiming to be one.
+/// Join a shop that already has a till.
 pub fn join_on(
     app: &App,
     address: String,
@@ -397,9 +311,6 @@ pub fn join_on(
     let who = guard::require(app, Permission::SettingsStore)?;
     let at = now();
     if prefix.trim().is_empty() {
-        // **D135's one remaining risk, refused at the door.** A till joining a
-        // shop that already has one must print under its own letter, or the two
-        // series are the same series.
         return Err(UiError::new(
             "join.prefix",
             "Give this till its own short prefix — A, B, C — to go in front of \
@@ -407,28 +318,24 @@ pub fn join_on(
         ));
     }
 
-    // The client is async and this command is not. mb-lan owns the runtime —
-    // the same boundary `server::start` drew — so nothing here mentions tokio.
+    // The client is async and this command is not.
     let master = mb_lan::Master::meet_blocking(&address, &fingerprint)
         .map_err(|e| UiError::new("join.failed", e.to_string()))?;
-    // Two minutes, because a person has to walk to the other counter, read the
-    // name on its screen and press Allow.
+    // Two minutes, because a person has to walk to the other counter, read the name on its
+    // screen and press Allow.
     let credential = master
         .join_blocking(&token, &name, std::time::Duration::from_secs(120))
         .map_err(|e| UiError::new("join.failed", e.to_string()))?;
 
-    // **A new identity for this machine.** Not `terminal_default` — that id
-    // belongs to the shop's first till and is on every bill it has ever
-    // written.
+    // A new identity for this machine.
     let id = crate::newid::fresh_at("term", at);
     let config_dir = crate::config::AppConfig::directory();
     let mine = Me {
         terminal_id: id.clone(),
         master: Some(Link {
             base: address.trim_end_matches('/').to_owned(),
-            // **The certificate the fingerprint proved**, not the one typed and
-            // not one fetched again afterwards — a second fetch is a second
-            // chance for a stranger to answer.
+            // The certificate the fingerprint proved, not the one typed and not one fetched
+            // again afterwards — a second fetch is a second chance for a stranger to answer.
             certificate_pem: master.certificate_pem().to_owned(),
             device_id: credential.device_id,
             secret: credential.secret,
@@ -472,8 +379,7 @@ pub fn join_on(
     tills_on(app)
 }
 
-/// **Send what is waiting, now.** The button beside the queue, and the same
-/// call the background sender makes.
+/// Send what is waiting, now.
 pub fn send_now_on(app: &App) -> UiResult<TillsView> {
     guard::require(app, Permission::BillCreate)?;
     let mine = me(&crate::config::AppConfig::directory());
@@ -494,18 +400,7 @@ pub fn send_now_on(app: &App) -> UiResult<TillsView> {
     tills_on(app)
 }
 
-/// **Stand down if somebody else has been made master since** (D139).
-///
-/// The machine that failed is exactly the one that cannot hand over gracefully,
-/// so nothing in the handover requires it to be reachable — it finds out on its
-/// own, here, the next time it opens.
-///
-/// Returns the sentence a person must read, or nothing when this machine's idea
-/// of itself matches the shop's. **It cannot fix itself**, and saying so is the
-/// honest answer: the shop moved the master while this till was off, and to
-/// forward its book to the new one somebody has to join it — which needs a
-/// person at the other counter to press Allow. Pretending otherwise would be a
-/// till that quietly believes it is still the book of record.
+/// Stand down if somebody else has been made master since.
 pub fn stood_down_says(app: &App) -> UiResult<String> {
     let mine = me(&crate::config::AppConfig::directory());
     let id = app.terminal_id().to_owned();
@@ -519,8 +414,8 @@ pub fn stood_down_says(app: &App) -> UiResult<String> {
         return Ok(String::new()); // A shop with one till and no roles.
     };
     if master.id == id || mine.master.is_some() {
-        // Either this IS the master, or it already knows it is a secondary and
-        // holds the credential to reach one.
+        // Either this IS the master, or it already knows it is a secondary and holds the
+        // credential to reach one.
         return Ok(String::new());
     }
     Ok(format!(
@@ -536,15 +431,12 @@ pub fn check_the_master_at_startup(app: &App) {
     match stood_down_says(app) {
         Ok(says) if !says.is_empty() => crate::log_warn!("{says}"),
         Ok(_) => {}
-        // A shop that will not answer is a shop that has not opened yet. There
-        // is nothing to say and nothing to do about it here.
+        // A shop that will not answer is a shop that has not opened yet.
         Err(e) => crate::log_warn!("the tills could not be read at start-up: {}", e.message),
     }
 }
 
-// ---------------------------------------------------------------------------
-// The commands (D46 — thin, and every body is above).
-// ---------------------------------------------------------------------------
+// The commands.
 
 #[tauri::command]
 pub fn tills(app: tauri::State<'_, App>) -> UiResult<TillsView> {
@@ -561,8 +453,8 @@ pub fn make_master(app: tauri::State<'_, App>, id: String) -> UiResult<TillsView
     make_master_on(&app, id)
 }
 
-/// **Joining waits for a person to press Allow**, so it is `async` — Tauri runs
-/// it off the UI thread and the screen keeps painting its spinner.
+/// Joining waits for a person to press Allow, so it is `async` — Tauri runs it off the UI
+/// thread and the screen keeps painting its spinner.
 #[tauri::command]
 pub async fn join_master(
     app: tauri::State<'_, App>,
@@ -584,11 +476,6 @@ pub async fn send_waiting_bills(app: tauri::State<'_, App>) -> UiResult<TillsVie
 mod tests {
     use super::*;
 
-    /// **D141's sentence, both ways round.**
-    ///
-    /// The refusal has to say what the plan allows and — the half that matters —
-    /// that the tills already working keep working. A shop reading "limit
-    /// reached" with no second sentence assumes its counter is about to stop.
     #[test]
     fn the_licence_sentence_never_threatens_a_till_that_is_already_billing() {
         let room = limit_says(1, 3);
@@ -598,17 +485,13 @@ mod tests {
         let full = limit_says(3, 3);
         assert!(full.contains("keep billing"), "{full}");
 
-        // **And the case a real shop hits: OVER the limit, everything still
-        // billing.** A plan that drops from three tills to one leaves a shop
-        // here, and "all of them are in use" would not describe what the owner
-        // is looking at. Found by running two tills on an unlicensed machine.
+        // And the case a real shop hits: OVER the limit, everything still billing.
         let over = limit_says(2, 1);
         assert!(over.starts_with("You are using 2 tills"), "{over}");
         assert!(over.contains("allows 1 till"), "{over}");
         assert!(over.contains("nothing stops"), "{over}");
     }
 
-    /// D135's sentence, and the empty case a one-till shop actually has.
     #[test]
     fn a_till_says_what_its_numbers_look_like() {
         let at = mb_core::Timestamp::from_millis(0);

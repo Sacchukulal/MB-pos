@@ -1,14 +1,7 @@
-/*
- * The floor — scope 14.1's plan and 14.3's numbers.
- *
- * Not one raw value: every colour, size and space is a token, and the lint
- * fails the build if that stops being true.
- */
+/* The floor — scope 14.1's plan and 14.3's numbers. */
 
 .mb-floor {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -21,33 +14,33 @@
   flex-wrap: wrap;
 }
 
-/* Pushes the filters to the right of the sections without either of them
-   needing to know how many the other has. */
+/*
+ * Pushes the filters to the right of the sections without either of them needing to know how
+ * many the other has.
+ */
 .mb-floor__spacer {
   flex: 1 1 auto;
 }
 
-/* Scope 14.3. Small, one line, glanceable — an owner reads this on the way
-   past, not sitting down. */
-/* **The line an owner glances at** (scope 14.3).
-   A row of facts, not a filled bar. It used to be a grey slab the full width of
-   the screen with four phrases run together inside it, which gave a quiet piece
-   of information the visual weight of a warning. Now the numbers are separated
-   by rules rather than by a box, so the eye can count them. */
+/* Small, one line, glanceable. */
+/* The line an owner glances at (scope 14.3). */
 
 /* A figure inside the sentence reads as a figure. */
 
-/* --- The two halves of the screen --------------------------------------- */
+/* The two halves of the screen. */
 
-/* The two halves of this screen are the kit's `SideFold` now — the panel, the
-   fold button and the folded button all live in `layout.css`, because the
-   credit screen adds a customer with exactly the same shape. `.mb-floor__body`
-   and `.mb-floor__room` are gone with the markup that used them. */
+/*
+ * The two halves of this screen are the kit's `SideFold` now — the panel, the fold button and
+ * the folded button all live in `layout.css`, because the credit screen adds a customer with
+ * exactly the same shape.
+ */
 
-/* --- The room, room by room --------------------------------------------- */
+/* The room, room by room. */
 
-/* **One scroller for the whole floor**, not one per room: a room that scrolls
-   inside its own box hides tables behind a bar nobody looks for. */
+/*
+ * One scroller for the whole floor, not one per room: a room that scrolls inside its own box
+ * hides tables behind a bar nobody looks for.
+ */
 .mb-floor__rooms {
   display: flex;
   flex-direction: column;
@@ -82,7 +75,7 @@
   overflow: visible;
 }
 
-/* --- Arrange: sections, a run of tables, the timers ---------------------- */
+/* Arrange: sections, a run of tables, the timers. */
 
 .mb-arrange {
   display: flex;
@@ -90,8 +83,10 @@
   gap: var(--space-2);
   min-width: 0;
   min-height: 0;
-  /* Down only. Anything that would scroll sideways here is a field that has
-     not been told it may shrink — see the pair below. */
+  /*
+   * Down only. Anything that would scroll sideways here is a field that has not been told it
+   * may shrink — see the pair below.
+   */
 }
 
 /* A name and the button that adds it, on one line. */
@@ -119,11 +114,10 @@
   gap: var(--space-2);
 }
 
-/* **A grid track will not shrink below its content unless it is told to**, and
-   an `<input>` carries an intrinsic width of about twenty characters. Without
-   this the From/To pair pushed the panel wider than its column and the whole
-   thing grew a horizontal scrollbar with "To" hanging off the edge. Found by
-   opening the screen and looking at it. */
+/*
+ * A grid track will not shrink below its content unless it is told to, and an `<input>` carries
+ * an intrinsic width of about twenty characters.
+ */
 .mb-arrange__pair > *,
 .mb-arrange__fields > * {
   min-width: 0;
@@ -179,16 +173,15 @@
   cursor: pointer;
 }
 
-/* Destructive is a semantic colour and never the accent (§2 rule 1). */
+/* Destructive is a semantic colour and never the accent. */
 .mb-arrange__drop:hover {
   color: var(--danger);
   background: var(--danger-soft);
 }
 
-/* --- The ticked bar ------------------------------------------------------ */
+/* The ticked bar. */
 
-/* **It appears because something is ticked.** A bar that is always on screen is
-   furniture; a bar that arrives is an answer to what you just pressed. */
+/* It appears because something is ticked. */
 .mb-picked {
   display: flex;
   flex-wrap: wrap;
@@ -208,8 +201,10 @@
   color: var(--text);
 }
 
-/* The fallback, and it is NOT a degraded mode: a shop that has never drawn a
-   floor plan gets this and everything works. */
+/*
+ * The fallback, and it is NOT a degraded mode: a shop that has never drawn a floor plan gets
+ * this and everything works.
+ */
 .mb-floor__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
@@ -217,9 +212,11 @@
   min-height: 0;
 }
 
-/* The plan itself. A grid of squares, because "two tables in the same place"
-   should be a comparison of two integers rather than a rectangle
-   intersection — and because a dropped tile that snaps looks deliberate. */
+/*
+ * The plan itself. A grid of squares, because "two tables in the same place" should be a
+ * comparison of two integers rather than a rectangle intersection — and because a dropped tile
+ * that snaps looks deliberate.
+ */
 .mb-plan {
   display: grid;
   grid-template-columns: repeat(var(--plan-cells), minmax(0, 1fr));
@@ -240,21 +237,13 @@
   color: var(--text-muted);
 }
 
-/* `.mb-floor__note` and `.mb-floor__heading` were here.
+/* `.mb-floor__note` and `.mb-floor__heading` were here. */
 
-   The owner, 2026-08-22: *"you are adding these explaination texts everywhere
-   in the app, it is not needed, it makes the app look cluttered and un
-   professional… make it a kind of popup text, when hovered on the section
-   heading."* The note is an `InfoTip` on a `SectionHeader` now, and the heading
-   is the kit's. Both classes are deleted rather than left unused: a class with
-   no rule is a second way to write a heading, waiting for somebody to use it. */
-
-/* `.mb-floor__kitchen` was here. It styled the food timer on the Floor
-   screen's own copy of the table tile — and the fact that the tile's second
-   line needed a class from a SCREEN's stylesheet is exactly how the two
-   screens' tiles drifted apart. The tile is one component now
-   (`billing/TableGrid.tsx`) and the timer is `.mb-tile__food` beside the rest
-   of the tile's styling, where a change reaches both screens. */
+/*
+ * `.mb-floor__kitchen` was here. It styled the food timer on the Floor screen's own copy of the
+ * table tile — and the fact that the tile's second line needed a class from a SCREEN's
+ * stylesheet is exactly how the two screens' tiles drifted apart.
+ */
 
 .mb-floor__mergelist {
   display: flex;

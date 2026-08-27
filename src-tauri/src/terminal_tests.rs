@@ -1,24 +1,4 @@
-//! **Two tills in one shop, driven end to end** — P27, T1 to T11.
-//!
-//! # What these tests cut, and where
-//!
-//! Everything below runs against **real databases**, through the real billing
-//! path, with the real numbering, the real forwarding and the real day close.
-//! The one seam they do not cross is the wire: a forwarded batch is handed to
-//! [`crate::forwarding::receive_on`] directly rather than over HTTPS.
-//!
-//! That is deliberate. `mb-lan`'s own suite already drives the socket, the TLS,
-//! the pinning, the credential and the refusals; repeating it here would be
-//! slower tests proving somebody else's claim. What is only provable here is
-//! what happens to a shop's MONEY when two machines write bills at once — so
-//! that is what these are about, and the wire is proved by the two-process run
-//! `WHEN YOU FINISH` demands.
-//!
-//! # The one that matters
-//!
-//! [`a_thirty_minute_partition_loses_nothing_and_doubles_nothing`] — T8. It is
-//! the test a real shop will run by accident, on a Friday, when somebody kicks
-//! the switch.
+//! Two tills in one shop, driven end to end.
 
 #![allow(
     clippy::expect_used,
@@ -38,12 +18,10 @@ use mb_lan::intent::{Intent, Outcome, What};
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
 
-// ---------------------------------------------------------------------------
 // A shop, and a till in it.
-// ---------------------------------------------------------------------------
 
-/// One menu item, so every till in a test sells the same thing for the same
-/// money — which is what makes "the two books agree" mean something.
+/// One menu item, so every till in a test sells the same thing for the same money — which is
+/// what makes "the two books agree" mean something.
 fn seed_menu(db: &Db) {
     db.transaction(|tx| {
         Repos::new(tx).menu().save_item(
@@ -70,11 +48,7 @@ fn seed_menu(db: &Db) {
     .expect("a menu");
 }
 
-/// A till: **its own database**, its own identity and its own series (D135).
-///
-/// Two of these is what a two-counter shop actually is. They share nothing —
-/// no file, no lock, no counter row — which is the whole reason a bill written
-/// on one cannot collide with a bill written on the other.
+/// A till: its own database, its own identity and its own series.
 fn a_till(scratch: &Scratch, file: &str, id: &str, name: &str, prefix: &str) -> App {
     let path = scratch.dir().join(format!("{file}.db"));
     let db = Db::open(&DbConfig::new(path.clone())).expect("open");
@@ -101,8 +75,7 @@ fn a_cash_sale(app: &App) -> String {
         Ok(())
     })
     .expect("parcel");
-    crate::ipc::cart_add_on(app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
-        .expect("added");
+    crate::ipc::cart_add_on(app, "itm_dosa".to_owned(), Some("1".to_owned()), None).expect("added");
     let total = app
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
@@ -160,10 +133,6 @@ fn a_cashier() -> (StaffId, PermissionSet) {
 }
 
 /// Take the money for an open order exactly where it stands.
-///
-/// Deliberately through `mb_core` and `OrderRepo::save` rather than through the
-/// cart: the cart belongs to the machine a person is typing at, and this is the
-/// OTHER till settling — which is the whole shape of the conflict being tested.
 fn settle_where_it_stands(app: &App, order_id: &str, staff: &StaffId) {
     app.with_shop(|shop| {
         shop.db
@@ -193,8 +162,8 @@ fn settle_where_it_stands(app: &App, order_id: &str, staff: &StaffId) {
     .expect("settled at the other counter");
 }
 
-/// Carry whatever a till is holding across to the master, **as the wire would**
-/// — including the sender clearing its queue only on a confirmed apply.
+/// Carry whatever a till is holding across to the master, as the wire would — including the
+/// sender clearing its queue only on a confirmed apply.
 fn hand_over(from: &App, to: &App) -> usize {
     let waiting = crate::forwarding::waiting_on(from).expect("the queue reads");
     if waiting.is_empty() {
@@ -206,22 +175,8 @@ fn hand_over(from: &App, to: &App) -> usize {
     receipt.stored.iter().filter(|(_, ok)| *ok).count()
 }
 
-// ---------------------------------------------------------------------------
-// T1 — no number twice.
-// ---------------------------------------------------------------------------
+// No number twice.
 
-/// **T1. NO NUMBER TWICE**, and this is D135's whole claim.
-///
-/// Two tills, hundreds of bills, hammered concurrently, plus a third joining
-/// **mid-run** — which is the case a reserved-block scheme gets wrong. Every
-/// number unique across the shop, every series dense from its own start, and
-/// the same again for tokens, because two customers holding "token 5" is the
-/// same bug wearing a smaller hat.
-///
-/// It runs on ONE database on purpose. Two databases cannot collide — they
-/// share no row — so a test against two would prove nothing about the counter
-/// table. This is the harder shape, and if the shop's numbering survives three
-/// tills racing on one file it survives them on three files.
 #[test]
 fn no_number_is_ever_issued_twice_even_while_a_third_till_joins() {
     let scratch = Scratch::new("term_numbers");
@@ -233,7 +188,9 @@ fn no_number_is_ever_issued_twice_even_while_a_third_till_joins() {
         db.transaction(|tx| {
             let mut row = Terminal::new(id, name, crate::flows::now());
             row.series_prefix = prefix.to_owned();
-            Repos::new(tx).terminals().save(OUTLET, &row, crate::flows::now())
+            Repos::new(tx)
+                .terminals()
+                .save(OUTLET, &row, crate::flows::now())
         })
         .expect("a till");
     }
@@ -270,14 +227,14 @@ fn no_number_is_ever_issued_twice_even_while_a_third_till_joins() {
         }));
     }
 
-    // **The third till joins while the other two are billing.** Its arrival
-    // must not renumber, reserve, pause or disturb anything — and it cannot,
-    // because a series is a till's own property and nothing is shared.
+    // The third till joins while the other two are billing.
     std::thread::sleep(std::time::Duration::from_millis(5));
     db.transaction(|tx| {
         let mut row = Terminal::new("t_c", "Parcel window", crate::flows::now());
         row.series_prefix = "C/".to_owned();
-        Repos::new(tx).terminals().save(OUTLET, &row, crate::flows::now())
+        Repos::new(tx)
+            .terminals()
+            .save(OUTLET, &row, crate::flows::now())
     })
     .expect("the third till joins mid-service");
 
@@ -294,10 +251,13 @@ fn no_number_is_ever_issued_twice_even_while_a_third_till_joins() {
     let unique: BTreeSet<&str> = bills.iter().map(|b| b.formatted.as_str()).collect();
     assert_eq!(unique.len(), bills.len(), "two bills share a number");
     let unique_tokens: BTreeSet<&str> = tokens.iter().map(|t| t.formatted.as_str()).collect();
-    assert_eq!(unique_tokens.len(), tokens.len(), "two customers share a token");
+    assert_eq!(
+        unique_tokens.len(),
+        tokens.len(),
+        "two customers share a token"
+    );
 
-    // **And DENSE from one**, per series. A gap is what a tax officer asks
-    // about, and it is the thing a reserved block cannot avoid.
+    // And DENSE from one, per series.
     for prefix in ["A/", "B/"] {
         let mut values: Vec<u64> = bills
             .iter()
@@ -311,8 +271,8 @@ fn no_number_is_ever_issued_twice_even_while_a_third_till_joins() {
         }
     }
 
-    // The third till starts at one, under its own letter, with nothing skipped
-    // because two other tills had been running for 500 bills.
+    // The third till starts at one, under its own letter, with nothing skipped because two
+    // other tills had been running for 500 bills.
     let first = db
         .transaction(|tx| {
             mb_db::numbering::claim(tx, OUTLET, "t_c", mb_db::numbering::CounterKind::Bill, day)
@@ -321,24 +281,14 @@ fn no_number_is_ever_issued_twice_even_while_a_third_till_joins() {
     assert_eq!(first.formatted, "C/0001");
 }
 
-// ---------------------------------------------------------------------------
-// T2, T3, T8 — the queue.
-// ---------------------------------------------------------------------------
-
-/// **T2. The master dies mid-service**, and the secondary keeps taking money.
-///
-/// The proof is not that it does not crash. It is that the shop's book ends up
-/// **whole**: every bill the second till wrote while the first was off is in
-/// the first till's database when it comes back, exactly once each, with the
-/// numbers the customer's receipt already has.
+/// The master dies mid-service, and the secondary keeps taking money.
 #[test]
 fn a_secondary_keeps_billing_while_the_master_is_off_and_hands_over_when_it_returns() {
     let scratch = Scratch::new("term_dead");
     let master = a_till(&scratch, "master", "t_a", "Counter 1", "A/");
     let second = a_till(&scratch, "second", "t_b", "Counter 2", "B/");
 
-    // The master is off. Nothing here calls it — that is D135 — so three sales
-    // go through at full speed.
+    // The master is off.
     let printed: Vec<String> = (0..3).map(|_| a_cash_sale(&second)).collect();
     assert_eq!(printed, vec!["B/0001", "B/0002", "B/0003"]);
 
@@ -358,16 +308,15 @@ fn a_secondary_keeps_billing_while_the_master_is_off_and_hands_over_when_it_retu
     landed.sort();
     assert_eq!(landed, vec!["B/0001", "B/0002", "B/0003"]);
     // The queue cleared, and only because the master confirmed.
-    assert!(crate::forwarding::waiting_on(&second).expect("queue").is_empty());
+    assert!(
+        crate::forwarding::waiting_on(&second)
+            .expect("queue")
+            .is_empty()
+    );
     assert_eq!(crate::forwarding::waiting_says(0), "");
 }
 
-/// **T3. Forwarding is idempotent** (D82).
-///
-/// Five sends of the same batch. After the first, nothing changes: no second
-/// row, no second number, and the receipt says the same thing every time —
-/// which is exactly what lets a secondary retry for ever without keeping track
-/// of what it has already sent.
+/// Forwarding is idempotent.
 #[test]
 fn sending_the_same_bills_five_times_changes_nothing_after_the_first() {
     let scratch = Scratch::new("term_idem");
@@ -383,8 +332,7 @@ fn sending_the_same_bills_five_times_changes_nothing_after_the_first() {
     let first = crate::forwarding::receive_on(&master, &batch).expect("stored");
     for _ in 0..4 {
         let again = crate::forwarding::receive_on(&master, &batch).expect("stored again");
-        // **Byte for byte the same answer**, because the sender may be showing
-        // it to a person.
+        // Byte for byte the same answer, because the sender may be showing it to a person.
         assert_eq!(again.stored, first.stored);
         assert_eq!(again.says, first.says);
         assert!(again.refused.is_empty());
@@ -395,21 +343,7 @@ fn sending_the_same_bills_five_times_changes_nothing_after_the_first() {
     assert_eq!(landed, vec!["B/0001", "B/0002"], "a bill was stored twice");
 }
 
-/// **T8. A THIRTY-MINUTE PARTITION, BOTH TILLS BILLING, HEALS WITH NOTHING
-/// LOST AND NOTHING DOUBLED.**
-///
-/// The test that matters most, because it is the one a real shop runs by
-/// accident. Somebody kicks the switch at 8 p.m.; both counters keep taking
-/// money for half an hour; the switch goes back in.
-///
-/// What must be true afterwards:
-///
-/// * **nothing lost** — every bill either till wrote is in the shop's book;
-/// * **nothing doubled** — and each is there once;
-/// * **no number collided** — the two series never touch, so the customer
-///   receipts printed during the split are still the shop's record;
-/// * **and the money adds up** — the master's takings equal what the two tills
-///   actually took, to the paisa.
+/// A THIRTY-MINUTE PARTITION, BOTH TILLS BILLING, HEALS WITH NOTHING LOST AND NOTHING DOUBLED.
 #[test]
 fn a_thirty_minute_partition_loses_nothing_and_doubles_nothing() {
     let scratch = Scratch::new("term_split");
@@ -421,9 +355,7 @@ fn a_thirty_minute_partition_loses_nothing_and_doubles_nothing() {
     a_cash_sale(&second);
     assert_eq!(hand_over(&second, &master), 1);
 
-    // **The split.** Half an hour, both counters serving. The master does not
-    // know the second till exists and the second till cannot reach it, and
-    // neither of them slows down or refuses a customer.
+    // The split. Half an hour, both counters serving.
     let mut on_master = Vec::new();
     let mut on_second = Vec::new();
     for _ in 0..12 {
@@ -435,8 +367,7 @@ fn a_thirty_minute_partition_loses_nothing_and_doubles_nothing() {
     let held = crate::forwarding::waiting_on(&second).expect("queue").len();
     assert_eq!(held, 12);
 
-    // **The switch goes back in.** One hand-over, and a second for luck: a real
-    // sender retries, and a retry must not double anything.
+    // The switch goes back in.
     assert_eq!(hand_over(&second, &master), 12);
     assert_eq!(hand_over(&second, &master), 0, "it re-sent a settled queue");
 
@@ -455,15 +386,17 @@ fn a_thirty_minute_partition_loses_nothing_and_doubles_nothing() {
         assert_eq!(mine.len(), count, "{series} is short");
         for n in 1..=count {
             let want = format!("{series}{n:04}");
-            assert!(mine.contains(want.as_str()), "{want} is missing from the book");
+            assert!(
+                mine.contains(want.as_str()),
+                "{want} is missing from the book"
+            );
         }
     }
     // No collision: the two series share no value, by construction.
     assert!(on_master.iter().all(|n| n.starts_with("A/")));
     assert!(on_second.iter().all(|n| n.starts_with("B/")));
 
-    // **And the money ties.** The master's takings are the sum of what the two
-    // tills actually took — the point of the whole exercise.
+    // And the money ties.
     let day = crate::flows::today(crate::flows::now());
     let takings = |app: &App, till: Option<&str>| -> i64 {
         app.with_shop(|shop| {
@@ -492,33 +425,21 @@ fn a_thirty_minute_partition_loses_nothing_and_doubles_nothing() {
         takings(&master, Some("A/")) + takings(&second, Some("B/")),
         "the shop's takings do not equal the two tills' takings"
     );
-    // And the secondary's own book is untouched — it is still the record of
-    // what happened at that counter.
+    // And the secondary's own book is untouched — it is still the record of what happened at
+    // that counter.
     assert_eq!(numbers_in(&second).len(), 13);
 }
 
-// ---------------------------------------------------------------------------
-// T4 — the conflicts.
-// ---------------------------------------------------------------------------
+// The conflicts.
 
-/// **T4. Every conflict resolves as documented, and the loser gets the
-/// sentence** — with the till's NAME in it, because "at the counter" is not an
-/// answer when there are two counters.
-///
-/// Four cases, and two of them resolve by there being no code:
-///
-/// * *two tills open the same table* — they end up on the ONE order, and the
-///   sentence says which till already had it;
-/// * *one till settles while another adds* — the settle wins;
-/// * *a till goes offline mid-order* — its draft was never the master's, so
-///   there is nothing to reconcile;
-/// * *the master disappears* — D138, tested by T2 and T8 above.
+/// Every conflict resolves as documented, and the loser gets the sentence — with the till's
+/// NAME in it, because "at the counter" is not an answer when there are two counters.
 #[test]
 fn every_conflict_resolves_as_documented_and_names_the_till() {
     let scratch = Scratch::new("term_conflict");
     let master = a_till(&scratch, "master", "t_a", "Counter 1", "A/");
-    // A second till on the master's own file, so the master can see both — it
-    // is the master that answers every intent (D137).
+    // A second till on the master's own file, so the master can see both — it is the master
+    // that answers every intent.
     master
         .with_shop(|shop| {
             shop.db
@@ -527,7 +448,9 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
                     let mut row = Terminal::new("t_b", "Counter 2", crate::flows::now());
                     row.series_prefix = "B/".to_owned();
                     repos.terminals().save(OUTLET, &row, crate::flows::now())?;
-                    repos.floor().save_table(OUTLET, &a_table("tbl_5", "5"), crate::flows::now())
+                    repos
+                        .floor()
+                        .save_table(OUTLET, &a_table("tbl_5", "5"), crate::flows::now())
                 })
                 .map_err(|e| crate::words::from_db(&e))
         })
@@ -545,19 +468,23 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
         },
     };
 
-    // **Conflict one.** Counter 1 opens table 5; Counter 2 opens it a moment
-    // later and JOINS it rather than being turned away — a party half-ordered
-    // on one till must be servable at the other, and two orders on one table is
-    // the failure this avoids.
-    let first = crate::orders::apply(&master, "t_a", &staff, &may, &open_table("i1"))
-        .expect("opened");
+    // Conflict one. Counter 1 opens table 5; Counter 2 opens it a moment later and JOINS it
+    // rather than being turned away — a party half-ordered on one till must be servable at the
+    // other, and two orders on one table is the failure this avoids.
+    let first =
+        crate::orders::apply(&master, "t_a", &staff, &may, &open_table("i1")).expect("opened");
     let Outcome::Ok { order_id, .. } = first.outcome else {
         panic!("the first open was not applied");
     };
 
-    let second = crate::orders::apply(&master, "t_b", &staff, &may, &open_table("i2"))
-        .expect("joined");
-    let Outcome::Ok { order_id: joined, note, .. } = second.outcome else {
+    let second =
+        crate::orders::apply(&master, "t_b", &staff, &may, &open_table("i2")).expect("joined");
+    let Outcome::Ok {
+        order_id: joined,
+        note,
+        ..
+    } = second.outcome
+    else {
         panic!("the second open was not applied");
     };
     assert_eq!(joined, order_id, "two tills opened two orders on one table");
@@ -568,10 +495,7 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
     );
     assert!(note.contains("same order"), "{note}");
 
-    // **Conflict two: the settle wins.** Counter 2 puts a dosa on the shared
-    // order; Counter 1 takes the money for it; Counter 2's NEXT addition is
-    // refused, and the refusal names Counter 1 — because the cashier's next
-    // question is who to go and ask.
+    // Conflict two: the settle wins.
     let add = |id: &str| Intent {
         id: id.to_owned(),
         order_id: Some(order_id.clone()),
@@ -586,8 +510,7 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
     crate::orders::apply(&master, "t_b", &staff, &may, &add("i2b")).expect("a dosa");
     settle_where_it_stands(&master, &order_id, &staff);
 
-    let late = crate::orders::apply(&master, "t_b", &staff, &may, &add("i3"))
-        .expect("answered");
+    let late = crate::orders::apply(&master, "t_b", &staff, &may, &add("i3")).expect("answered");
     let Outcome::Refused { message } = late.outcome else {
         panic!("adding to a settled bill was allowed");
     };
@@ -597,23 +520,19 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
     );
     assert!(message.contains("Start a new order"), "{message}");
 
-    // **Conflict three: a till goes offline mid-order.** Its own typing is a
-    // draft on its own machine and was never a fact (D49/D137), so there is
-    // nothing to reconcile — and nothing unfinished may travel at all.
-    //
-    // Open one and leave it open, which is exactly what an unplugged till looks
-    // like from here. Only what is FINISHED goes on the wire.
+    // Conflict three: a till goes offline mid-order.
     let hanging =
         crate::orders::apply(&master, "t_b", &staff, &may, &open_table("i4")).expect("opened");
-    let Outcome::Ok { order_id: hanging, .. } = hanging.outcome else {
+    let Outcome::Ok {
+        order_id: hanging, ..
+    } = hanging.outcome
+    else {
         panic!("the abandoned order did not open");
     };
     let travelling = crate::forwarding::waiting_on(&master).expect("queue");
     let ids: Vec<String> = travelling
         .iter()
-        .filter_map(|o| {
-            o.get("core")?.get("id")?.as_str().map(ToOwned::to_owned)
-        })
+        .filter_map(|o| o.get("core")?.get("id")?.as_str().map(ToOwned::to_owned))
         .collect();
     assert!(
         !ids.contains(&hanging),
@@ -623,17 +542,9 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
     assert_eq!(ids, vec![order_id], "something other than a fact is queued");
 }
 
-// ---------------------------------------------------------------------------
-// T5 — the live floor.
-// ---------------------------------------------------------------------------
+// The live floor.
 
-/// **T5.** A table opened on one till is on the other's floor immediately.
-///
-/// "Within a second" is a network budget (R7's neighbourhood); what is provable
-/// here is the part that makes it possible — **there is only one floor**. The
-/// order lives in the master's book the moment the intent is applied, so the
-/// other till is not waiting for a copy of anything, only for the stream to
-/// tell it to look.
+/// A table opened on one till is on the other's floor immediately.
 #[test]
 fn a_table_opened_on_one_till_is_on_the_other_tills_floor() {
     let scratch = Scratch::new("term_floor");
@@ -683,18 +594,13 @@ fn a_table_opened_on_one_till_is_on_the_other_tills_floor() {
         .iter()
         .find(|t| t.id == "tbl_9")
         .expect("the table is still on the floor");
-    assert!(table.is_busy, "the other till cannot see the table is taken");
+    assert!(
+        table.is_busy,
+        "the other till cannot see the table is taken"
+    );
 }
 
-// ---------------------------------------------------------------------------
-// T9, T10 — the roster.
-// ---------------------------------------------------------------------------
-
-/// **T9.** Two tills cannot take the same prefix, and the refusal names the one
-/// that has it.
-///
-/// This is the single remaining way D135 could be broken — a person typing "A"
-/// twice — so it is refused at the door with a sentence that says what to do.
+/// Two tills cannot take the same prefix, and the refusal names the one that has it.
 #[test]
 fn two_tills_cannot_share_a_prefix_and_the_refusal_names_the_one_that_has_it() {
     let scratch = Scratch::new("term_prefix");
@@ -727,8 +633,8 @@ fn two_tills_cannot_share_a_prefix_and_the_refusal_names_the_one_that_has_it() {
         clash.message
     );
 
-    // And an EMPTY prefix is refused too, which is the collision people do not
-    // see coming: two tills both printing bare 0001.
+    // And an EMPTY prefix is refused too, which is the collision people do not see coming: two
+    // tills both printing bare 0001.
     let bare = crate::terminals::save_till_on(
         &app,
         crate::terminals::TerminalEdit {
@@ -741,10 +647,7 @@ fn two_tills_cannot_share_a_prefix_and_the_refusal_names_the_one_that_has_it() {
     assert!(bare.message.contains("prefix"), "{}", bare.message);
 }
 
-/// **T10. Moving the master**, and there is never a moment when two answer.
-///
-/// No election (D139), so the machine that failed is not consulted — it finds
-/// out on its own the next time it opens, and stands down.
+/// Moving the master, and there is never a moment when two answer.
 #[test]
 fn moving_the_master_leaves_exactly_one_and_the_old_one_stands_down() {
     let scratch = Scratch::new("term_master");
@@ -755,8 +658,12 @@ fn moving_the_master_leaves_exactly_one_and_the_old_one_stands_down() {
                 let repos = Repos::new(tx);
                 let mut second = Terminal::new("t_b", "Counter 2", crate::flows::now());
                 second.series_prefix = "B/".to_owned();
-                repos.terminals().save(OUTLET, &second, crate::flows::now())?;
-                repos.terminals().make_master(OUTLET, "t_a", crate::flows::now())
+                repos
+                    .terminals()
+                    .save(OUTLET, &second, crate::flows::now())?;
+                repos
+                    .terminals()
+                    .make_master(OUTLET, "t_a", crate::flows::now())
             })
             .map_err(|e| crate::words::from_db(&e))
     })
@@ -769,26 +676,23 @@ fn moving_the_master_leaves_exactly_one_and_the_old_one_stands_down() {
     crate::terminals::make_master_on(&app, "t_b".to_owned()).expect("moved");
 
     let after = crate::terminals::tills_on(&app).expect("the roster again");
-    // **Exactly one**, at every moment: the clear and the set are one
-    // transaction, so there is no instant with two or none.
+    // Exactly one, at every moment: the clear and the set are one transaction, so there is no
+    // instant with two or none.
     assert_eq!(
         after.tills.iter().filter(|t| t.is_master).count(),
         1,
         "the shop has two masters or none"
     );
     assert!(after.tills.iter().any(|t| t.id == "t_b" && t.is_master));
-    assert!(!after.is_master, "the old master still thinks it is the master");
+    assert!(
+        !after.is_master,
+        "the old master still thinks it is the master"
+    );
 }
 
-// ---------------------------------------------------------------------------
-// T6 — the arithmetic.
-// ---------------------------------------------------------------------------
+// The arithmetic.
 
-/// **T6. THE ARITHMETIC TIES.** Per-till day closes sum EXACTLY to the shop's.
-///
-/// Two tills, two shifts on one of them, real cash sales through the real path.
-/// The shop's roll-up is written as the SUM of the drawers rather than as a
-/// second query that could disagree (D140) — this proves the sum is the sum.
+/// THE ARITHMETIC TIES.
 #[test]
 fn per_till_drawers_sum_exactly_to_the_shops_day() {
     let scratch = Scratch::new("term_close");
@@ -805,8 +709,8 @@ fn per_till_drawers_sum_exactly_to_the_shops_day() {
     hand_over(&second, &master);
 
     let day = crate::flows::today(crate::flows::now());
-    // What each till took, read off the master's book by whose series the bill
-    // is in — which is the only thing that identifies a till on a receipt.
+    // What each till took, read off the master's book by whose series the bill is in — which is
+    // the only thing that identifies a till on a receipt.
     for series in ["A/", "B/"] {
         let took = master
             .with_shop(|shop| {
@@ -850,23 +754,12 @@ fn per_till_drawers_sum_exactly_to_the_shops_day() {
                 .map_err(|e| crate::words::from_db(&e))
         })
         .expect("the shop's day");
-    // **Exactly**, to the paisa. Not "within a rupee".
+    // Exactly, to the paisa.
     assert_eq!(whole, expected, "the tills do not sum to the shop");
 }
 
-// ---------------------------------------------------------------------------
-// T11 — the budget that must NOT have moved.
-// ---------------------------------------------------------------------------
+// The budget that must NOT have moved.
 
-/// **T11, the half that cannot be flaky: the settle path names no client.**
-///
-/// The whole of D135 is that billing gains no network call, and the strongest
-/// way to say that is not a stopwatch — it is that the words are not in the
-/// source. Read the billing files and prove none of them can reach the wire.
-///
-/// This is `the_billing_path_does_not_ask_about_the_licence` one module along,
-/// for the same reason PERFORMANCE §2.2 gave: a promise about a hot path is
-/// kept by there being nothing there to call.
 #[test]
 fn the_billing_path_cannot_reach_the_main_till() {
     for (name, source) in [
@@ -889,25 +782,6 @@ fn the_billing_path_cannot_reach_the_main_till() {
     }
 }
 
-/// **T11's other half — budget R9, measured.**
-///
-/// A settle on a secondary, timed with a master and with none. If a network
-/// call ever appears on this path the difference is not subtle: an unreachable
-/// master costs a two-second connect timeout against a bill that takes
-/// milliseconds — so a wall-clock bound here would catch it easily.
-///
-/// **And it is `#[ignore]`d anyway, which is the honest answer.** Two versions
-/// of this shipped as an ordinary test — a ratio, then a 500 ms ceiling — and
-/// both failed on a busy laptop while passing alone. `cargo test --workspace`
-/// runs it in parallel with four hundred others and sometimes against a release
-/// build on the other cores; what it measures then is the laptop.
-/// `PERFORMANCE.md` already says this about every other figure in the product:
-/// take three readings, on a quiet machine, deliberately.
-///
-/// So the CI claim is the one above — the source cannot NAME the client — and
-/// this is the measurement, run by a person:
-///
-///     cargo test -p magic-bill --bin magic-bill r9_ -- --ignored --nocapture
 #[test]
 #[ignore = "a measurement, not an assertion — see the note above"]
 fn r9_a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not() {
@@ -929,23 +803,25 @@ fn r9_a_settle_on_a_secondary_costs_the_same_whether_the_master_is_there_or_not(
         started.elapsed()
     };
 
-    // With the master reachable — and note there is nothing to "connect" to,
-    // which IS the finding: the settle path has no client in it.
+    // With the master reachable — and note there is nothing to "connect" to, which IS the
+    // finding: the settle path has no client in it.
     let with_master = time_ten();
     hand_over(&second, &master);
-    // With it unplugged. Same code, because the sender is a different thread
-    // and the settle never asks it anything.
+    // With it unplugged. Same code, because the sender is a different thread and the settle
+    // never asks it anything.
     let alone = time_ten();
 
     // Printed, because a number a person reads is the point of running this.
     println!("R9: ten bills with the main till up  — {with_master:?}");
     println!("R9: ten bills with the main till off — {alone:?}");
 
-    // The only assertion, and it is enormous on purpose: a single connect
-    // timeout on the settle path adds TWO SECONDS to a run, so five seconds for
-    // ten bills cannot be reached by a slow disk or a busy scheduler. Anything
-    // tighter is measuring the machine.
-    for (what, took) in [("with the main till up", with_master), ("with it off", alone)] {
+    // The only assertion, and it is enormous on purpose: a single connect timeout on the settle
+    // path adds TWO SECONDS to a run, so five seconds for ten bills cannot be reached by a slow
+    // disk or a busy scheduler.
+    for (what, took) in [
+        ("with the main till up", with_master),
+        ("with it off", alone),
+    ] {
         assert!(
             took < std::time::Duration::from_secs(5),
             "ten bills {what} took {took:?} — that is long enough to be waiting \

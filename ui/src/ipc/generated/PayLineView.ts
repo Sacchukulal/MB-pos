@@ -3,7 +3,6 @@ import type { MoneyView } from "./MoneyView";
 
 export type PayLineView = { id: string, staffId: string, staffName: string, basis: string, basisAmount: MoneyView, daysSays: string, unpaidSays: string, earned: MoneyView, allowances: MoneyView, deductions: MoneyView, unpaidLeaveDeduction: MoneyView, advanceRecovered: MoneyView, net: MoneyView, 
 /**
- * Somebody changed a figure by hand. The screen shows it, so a reviewer
- * knows which lines are the computer's.
+ * Somebody changed a figure by hand.
  */
 edited: boolean, };

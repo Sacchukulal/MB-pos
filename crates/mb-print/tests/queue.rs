@@ -1,15 +1,3 @@
-//! **T4–T8 and T14–T17 — the print queue, and the two findings it exists for.**
-//!
-//! > **D3.** *"If the tandoor printer is off, the app waits its full 15-second
-//! > timeout before the kitchen printer gets anything. In a rush that is a lost
-//! > order."*
-//!
-//! > **D4.** *"A failed print is only a red message on screen. Nothing
-//! > remembers it."*
-//!
-//! Everything here runs with **no hardware**: a fake transport for the failures
-//! and the blocking, a real SQLite file for the survival test.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -30,26 +18,23 @@ use mb_print::doc::{Align, Document, Style};
 use mb_print::font::Font;
 use mb_print::paper::{Paper, PaperKind};
 use mb_print::printer::{PrinterConfig, Target};
+use mb_print::queue::JobStore;
 use mb_print::queue::sqlite::SqliteStore;
 use mb_print::queue::{
     Job, JobKind, JobState, MemoryStore, Queue, QueueConfig, QueueEvent, StoredJob,
 };
 use mb_print::transport::{Transport, TransportError, TransportFactory};
-use mb_print::queue::JobStore;
 
-// ---------------------------------------------------------------------------
 // A printer that does whatever the test needs it to.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
 struct Recorder {
     sent: Mutex<Vec<Vec<u8>>>,
     attempts: AtomicU32,
-    /// Fail this many attempts before succeeding. `u32::MAX` never succeeds.
+    /// Fail this many attempts before succeeding.
     fail_first: AtomicU32,
     permanent: Mutex<bool>,
-    /// When set, `send` blocks until released — a printer that is switched on
-    /// but has stopped answering, which is the D3 case.
+    /// When set, `send` blocks until released.
     gate: Option<Arc<Gate>>,
 }
 
@@ -95,8 +80,8 @@ impl TransportFactory for FakeTransports {
         target: &Target,
         _timeout: Duration,
     ) -> Result<Box<dyn Transport>, TransportError> {
-        // The tests key a fake off the target's file path, which is the one
-        // field a `Target::File` carries.
+        // The tests key a fake off the target's file path, which is the one field a
+        // `Target::File` carries.
         let key = match target {
             Target::File { path } => path.display().to_string(),
             other => format!("{other:?}"),
@@ -159,23 +144,13 @@ impl Transport for FakeTransport {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Fixtures.
-// ---------------------------------------------------------------------------
-
 fn font() -> Arc<dyn mb_print::font::Typefaces> {
     Arc::new(mb_print::font::OneFace(Arc::new(
         Font::builtin().expect("the shipped face loads"),
     )))
 }
 
-/// **A `Typefaces` that writes down what it was asked for** — P31.
-///
-/// The face a job prints in cannot be seen in the bytes without a second face
-/// installed on the machine running the test, and "is Consolas on this
-/// computer?" is not a thing a test may depend on. What CAN be asserted, and is
-/// the whole of the wiring, is that the key the job carried is the key the
-/// queue asked for.
+/// A `Typefaces` that writes down what it was asked for.
 #[derive(Debug, Default)]
 struct Watching {
     asked: Mutex<Vec<Option<String>>>,
@@ -194,18 +169,20 @@ impl mb_print::font::Typefaces for Watching {
 fn quick() -> QueueConfig {
     QueueConfig {
         max_attempts: 5,
-        // Milliseconds instead of seconds. The *shape* of the backoff is what
-        // matters — doubling, bounded — and a test that took fifteen seconds to
-        // prove it would be a test people skip.
+        // Milliseconds instead of seconds.
         backoff: Duration::from_millis(2),
         connect_timeout: Duration::from_millis(50),
     }
 }
 
 fn printer(id: &str) -> PrinterConfig {
-    PrinterConfig::new(id, id, Target::File {
-        path: std::path::PathBuf::from(format!("./{id}.bin")),
-    })
+    PrinterConfig::new(
+        id,
+        id,
+        Target::File {
+            path: std::path::PathBuf::from(format!("./{id}.bin")),
+        },
+    )
 }
 
 fn ticket(printer_id: &str) -> Job {
@@ -221,9 +198,7 @@ fn ticket(printer_id: &str) -> Job {
     .because("table 6")
 }
 
-/// Wait for a condition, polling briefly. Threads are involved; a bare assert
-/// straight after `enqueue` would be a race, and a `sleep(500)` would be a slow
-/// test that still races.
+/// Wait for a condition, polling briefly.
 fn until(mut check: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -235,12 +210,6 @@ fn until(mut check: impl FnMut() -> bool) -> bool {
     false
 }
 
-// ---------------------------------------------------------------------------
-
-/// T4. **PARALLELISM — audit D3, proved.**
-///
-/// Two printers, one of which never answers. The healthy one must finish while
-/// the other is still stuck, not after it.
 #[test]
 fn t4_a_dead_printer_does_not_delay_a_healthy_one() {
     let gate = Arc::new(Gate::default());
@@ -263,8 +232,7 @@ fn t4_a_dead_printer_does_not_delay_a_healthy_one() {
         transports,
     );
 
-    // The tandoor first, so that a queue which printed in order would have to
-    // wait for it.
+    // The tandoor first, so that a queue which printed in order would have to wait for it.
     queue.enqueue(ticket("tandoor")).expect("queued");
     queue.enqueue(ticket("kitchen")).expect("queued");
 
@@ -288,7 +256,7 @@ fn t4_a_dead_printer_does_not_delay_a_healthy_one() {
     queue.shutdown();
 }
 
-/// T5. Retry with backoff, bounded, then parked — with an exact count.
+/// Retry with backoff, bounded, then parked — with an exact count.
 #[test]
 fn t5_a_failing_job_is_retried_five_times_and_then_parked() {
     let printer_fake = Arc::new(Recorder::default());
@@ -316,7 +284,11 @@ fn t5_a_failing_job_is_retried_five_times_and_then_parked() {
             break;
         }
     }
-    assert_eq!(parked.as_deref(), Some(id.as_str()), "the job was never parked");
+    assert_eq!(
+        parked.as_deref(),
+        Some(id.as_str()),
+        "the job was never parked"
+    );
     assert_eq!(
         printer_fake.attempts.load(Ordering::SeqCst),
         5,
@@ -327,7 +299,7 @@ fn t5_a_failing_job_is_retried_five_times_and_then_parked() {
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(printer_fake.attempts.load(Ordering::SeqCst), 5);
 
-    // A parked job stays in the store. Nothing is ever silently dropped.
+    // A parked job stays in the store.
     let left = store.unfinished().expect("reads");
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].state, JobState::Parked.as_str());
@@ -351,12 +323,14 @@ fn t5_a_job_that_fails_twice_and_then_works_is_not_parked() {
     queue.enqueue(ticket("kitchen")).expect("queued");
     assert!(until(|| flaky.sent.lock().unwrap().len() == 1));
     assert_eq!(flaky.attempts.load(Ordering::SeqCst), 3);
-    assert!(until(|| store.is_empty()), "a printed job left a row behind");
+    assert!(
+        until(|| store.is_empty()),
+        "a printed job left a row behind"
+    );
     queue.shutdown();
 }
 
-/// A failure that retrying cannot fix is parked at once. Five attempts at a
-/// printer that does not exist is fifteen seconds of pretending.
+/// A failure that retrying cannot fix is parked at once.
 #[test]
 fn t5_a_permanent_failure_is_parked_without_retrying() {
     let gone = Arc::new(Recorder::default());
@@ -384,8 +358,7 @@ fn t5_a_permanent_failure_is_parked_without_retrying() {
     queue.shutdown();
 }
 
-/// T6. **THE QUEUE SURVIVES A RESTART** — a power cut, in one test, against a
-/// real database file.
+/// THE QUEUE SURVIVES A RESTART — a power cut, in one test, against a real database file.
 #[test]
 fn t6_a_queued_ticket_survives_the_process_that_queued_it() {
     let scratch = common::Scratch::new("queue-restart");
@@ -415,7 +388,7 @@ fn t6_a_queued_ticket_survives_the_process_that_queued_it() {
 
     first.shutdown();
 
-    // The counter comes back up. The printer is on this time.
+    // The counter comes back up.
     let on = Arc::new(Recorder::default());
     let second = Queue::start_with_transports(
         vec![printer("kitchen")],
@@ -432,14 +405,14 @@ fn t6_a_queued_ticket_survives_the_process_that_queued_it() {
     );
     second.shutdown();
 
-    // T16: and it left nothing behind (D35).
+    // And it left nothing behind.
     let left = db
         .transaction(|tx| Repos::new(tx).print_jobs().count(common::OUTLET))
         .expect("counts");
     assert_eq!(left, 0, "the spool is not a log");
 }
 
-/// T7. A printer that cannot raster prints as text, and the job says so.
+/// A printer that cannot raster prints as text, and the job says so.
 #[test]
 fn t7_raster_falls_back_to_text_and_records_which_path_was_used() {
     let fake = Arc::new(Recorder::default());
@@ -482,8 +455,8 @@ fn t7_raster_falls_back_to_text_and_records_which_path_was_used() {
     queue.shutdown();
 }
 
-/// T8. A parked job is visible, can be retried, and can be dismissed — and
-/// nothing else removes one.
+/// A parked job is visible, can be retried, and can be dismissed — and nothing else removes
+/// one.
 #[test]
 fn t8_a_parked_job_is_visible_and_a_person_decides_what_happens_to_it() {
     let fake = Arc::new(Recorder::default());
@@ -506,10 +479,16 @@ fn t8_a_parked_job_is_visible_and_a_person_decides_what_happens_to_it() {
 
     // The cashier can see it, with its reason and which printer it was for.
     let snapshot = queue.snapshot();
-    let job = snapshot.iter().find(|s| s.id == id).expect("in the snapshot");
+    let job = snapshot
+        .iter()
+        .find(|s| s.id == id)
+        .expect("in the snapshot");
     assert_eq!(job.printer_name, "kitchen");
     assert_eq!(job.reason.as_deref(), Some("table 6"));
-    assert!(job.last_error.is_some(), "a parked job with no reason is a shrug");
+    assert!(
+        job.last_error.is_some(),
+        "a parked job with no reason is a shrug"
+    );
 
     // Retry: the printer is on now.
     fake.fail_first.store(0, Ordering::SeqCst);
@@ -517,13 +496,6 @@ fn t8_a_parked_job_is_visible_and_a_person_decides_what_happens_to_it() {
     assert!(until(|| fake.sent.lock().unwrap().len() == 1));
 
     // Dismiss removes a job, and it is the only other thing that does.
-    //
-    // **The job is parked first, deliberately.** The first version enqueued
-    // one onto a printer that was now working and dismissed it in the very
-    // next statement — a race with the worker thread that had already picked
-    // it up, which passed on its own and failed once in a full `--workspace`
-    // run under load. Parking it also matches the only dismissal a cashier can
-    // actually perform: the button lives on the parked row.
     fake.fail_first.store(u32::MAX, Ordering::SeqCst);
     let second = queue.enqueue(ticket("kitchen")).expect("queued");
     assert!(until(|| queue
@@ -535,7 +507,7 @@ fn t8_a_parked_job_is_visible_and_a_person_decides_what_happens_to_it() {
     queue.shutdown();
 }
 
-/// T14. A payload that cannot be understood is parked, not retried.
+/// A payload that cannot be understood is parked, not retried.
 #[test]
 fn t14_a_job_that_cannot_be_read_back_is_parked_at_once() {
     let fake = Arc::new(Recorder::default());
@@ -580,7 +552,7 @@ fn t14_a_job_that_cannot_be_read_back_is_parked_at_once() {
     queue.shutdown();
 }
 
-/// T15. Enqueue does not wait for a printer — with every worker stuck.
+/// Enqueue does not wait for a printer — with every worker stuck.
 #[test]
 fn t15_enqueue_returns_while_every_printer_is_stuck() {
     let gate = Arc::new(Gate::default());
@@ -615,7 +587,7 @@ fn t15_enqueue_returns_while_every_printer_is_stuck() {
     queue.shutdown();
 }
 
-/// T16. A bill overtakes a queue full of kitchen tickets.
+/// A bill overtakes a queue full of kitchen tickets.
 #[test]
 fn t16_a_bill_does_not_wait_behind_forty_kitchen_tickets() {
     let gate = Arc::new(Gate::default());
@@ -650,8 +622,8 @@ fn t16_a_bill_does_not_wait_behind_forty_kitchen_tickets() {
 
     gate.release();
 
-    // The first job was already in hand when the bill arrived, so the bill is
-    // second at worst — the claim is that it does not wait for the other 39.
+    // The first job was already in hand when the bill arrived, so the bill is second at worst —
+    // the claim is that it does not wait for the other 39.
     let mut printed = Vec::new();
     while printed.len() < 3 {
         match events.recv_timeout(Duration::from_secs(5)) {
@@ -667,7 +639,7 @@ fn t16_a_bill_does_not_wait_behind_forty_kitchen_tickets() {
     queue.shutdown();
 }
 
-/// T17. Capabilities are obeyed: no blade, no cut command.
+/// Capabilities are obeyed: no blade, no cut command.
 #[test]
 fn t17_a_printer_that_cannot_cut_is_never_sent_a_cut() {
     let with_blade = Arc::new(Recorder::default());
@@ -692,8 +664,9 @@ fn t17_a_printer_that_cannot_cut_is_never_sent_a_cut() {
 
     queue.enqueue(ticket("cutter")).expect("queued");
     queue.enqueue(ticket("blunt")).expect("queued");
-    assert!(until(|| with_blade.sent.lock().unwrap().len() == 1
-        && without.sent.lock().unwrap().len() == 1));
+    assert!(until(
+        || with_blade.sent.lock().unwrap().len() == 1 && without.sent.lock().unwrap().len() == 1
+    ));
 
     let cut = [0x1D, b'V'];
     assert!(
@@ -703,9 +676,7 @@ fn t17_a_printer_that_cannot_cut_is_never_sent_a_cut() {
         "a printer with a blade was never told to cut"
     );
     assert!(
-        !without.sent.lock().unwrap()[0]
-            .windows(2)
-            .any(|w| w == cut),
+        !without.sent.lock().unwrap()[0].windows(2).any(|w| w == cut),
         "a printer with no blade was sent a cut"
     );
     queue.shutdown();
@@ -794,19 +765,7 @@ fn a_kitchen_printer_refuses_a_bill() {
     queue.shutdown();
 }
 
-/// **Every kind of job this queue can make is a kind the database accepts** —
-/// P30, and it is here because P30 found two that were not.
-///
-/// `print_jobs.kind` carries a CHECK listing the kinds, exactly as
-/// `permissions` carries the vocabulary of "no": a typo becomes a constraint
-/// violation instead of a silent unknown row. The cost of that is two lists,
-/// and the two lists drifted — `day_close` arrived at P18 and `delivery` at
-/// P29, and neither was ever added to the schema. **Printing a Z-report was
-/// refused by the database**, on the one path where a shop most needs paper,
-/// and nothing noticed for twelve sessions.
-///
-/// So it is a test now (D40). It walks `JobKind::ALL` rather than a list
-/// written here, so adding a kind and forgetting the schema fails at once.
+/// Every kind of job this queue can make is a kind the database accepts.
 #[test]
 fn every_job_kind_the_queue_can_make_is_allowed_by_the_schema() {
     let scratch = common::Scratch::new("queue-kinds");
@@ -843,17 +802,7 @@ fn every_job_kind_the_queue_can_make_is_allowed_by_the_schema() {
     }
 }
 
-/// **P31. The face on the job is the face the queue draws with.**
-///
-/// The shop chooses one typeface for its bills and another for its kitchen
-/// tickets, and that choice has to survive being written to a database, parked
-/// through a power cut and picked up again by a worker thread. Between the
-/// settings screen and the printer there is a lot of room to lose a string.
-///
-/// Asserted on the KEY rather than on the dots, deliberately: seeing the
-/// difference in the bytes needs a second face installed on whatever machine is
-/// running this, and "does this computer have Consolas?" is not something a
-/// test may be true or false because of.
+/// The face on the job is the face the queue draws with.
 #[test]
 fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
     let printer_fake = Arc::new(Recorder::default());
@@ -899,10 +848,6 @@ fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
 }
 
 /// The other half: it survives the database.
-///
-/// A ticket parked at 11 p.m. by a printer that was switched off has to come
-/// back at 8 a.m. in the face the shop chose, not in the default — and the only
-/// thing that carries it across is the `payload` column.
 #[test]
 fn the_typeface_survives_being_parked_and_picked_up_again() {
     let scratch = common::Scratch::new("queue-typeface-restart");
@@ -910,8 +855,8 @@ fn the_typeface_survives_being_parked_and_picked_up_again() {
     common::seed_printer(&db, "kitchen");
     let store = Arc::new(SqliteStore::new(Arc::clone(&db), common::OUTLET));
 
-    // Round one: the printer is switched off for the whole of it, so the job is
-    // still in the database when the counter goes down.
+    // Round one: the printer is switched off for the whole of it, so the job is still in the
+    // database when the counter goes down.
     let off = Arc::new(Recorder::default());
     off.fail_first.store(u32::MAX, Ordering::SeqCst);
     let first = Queue::start_with_transports(

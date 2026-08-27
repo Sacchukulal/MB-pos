@@ -1,27 +1,4 @@
-/**
- * **T8 — anti-drift, across the IPC boundary.**
- *
- * P06's T1 proved no *sink* can drop anything. This proves the same across the
- * wire: everything the layout produced reaches the screen, in order, unchanged,
- * **and at the size and the place the paper will put it**.
- *
- * > Audit D1: *"the same bill is drawn three separate times, by hand, in three
- * > places… this is the single biggest source of 'the preview does not match
- * > the paper'."*
- *
- * The fixture is the shape Rust really sends. `src-tauri/src/preview.rs` tests
- * the other half — that its conversion carries every line of a real `Laid`
- * through character for character, in the same dots the raster sink draws from.
- * Between that test and this one, the chain from `mb_print::layout` to a pixel
- * has no gap in it.
- *
- * # What P32 changed here
- *
- * Every assertion about a size or a position used to be about characters and
- * `ch` units, because the preview drew in a character grid while the printer
- * scaled a face to fit a twelve-dot column. It is all dots now, and the dots
- * are Rust's.
- */
+/** Anti-drift, across the IPC boundary. */
 
 import { readFileSync } from 'node:fs';
 
@@ -133,10 +110,6 @@ describe('the receipt preview is a sink, not a renderer', () => {
   });
 
   it('draws every box at the dots the layout put it at', () => {
-    // **This is the assertion P32 exists for.** The amount's box starts at
-    // character 38 of a 13-dot advance — 494 dots — which is exactly where
-    // `raster.rs` starts it. A preview that placed it by counting spaces in a
-    // browser font would land it somewhere else, and did.
     const { container } = render(<Receipt doc={BILL} />);
     const boxes = [...container.querySelectorAll('.mb-receipt__box')];
     const amount = boxes.find((b) => b.textContent === '240.00');
@@ -164,9 +137,6 @@ describe('the receipt preview is a sink, not a renderer', () => {
   });
 
   it('draws a rule as a rule, not as a row of characters', () => {
-    // A `-` is five dots of ink in a twelve-dot cell on real paper, so the old
-    // preview — which repeated the character in a CSS monospace font — showed
-    // a near-solid line where the roll printed spaced ticks.
     const { container } = render(<Receipt doc={BILL} />);
     const rules = [...container.querySelectorAll('.mb-receipt__rule')];
     // Two strokes for the double rule, one for the dashed.
@@ -200,13 +170,7 @@ describe('the receipt preview is a sink, not a renderer', () => {
   });
 
   it('draws one thing per line, for every kind there is', () => {
-    // **The claim the fixture makes, checked instead of asserted.**
-    //
-    // `SAMPLES` is keyed by `PreviewLine['kind']`, so it is the TYPE CHECKER
-    // that enforces the "every kind" part: add a variant in Rust, regenerate,
-    // and this object stops compiling until somebody has decided what it looks
-    // like on screen. A fixture nobody updated is what let the barcode through
-    // at P31.
+    // The claim the fixture makes, checked instead of asserted.
     const SAMPLES: Record<PreviewLine['kind'], PreviewLine> = {
       text: text('Masala Dosa'),
       rule: {
@@ -255,8 +219,8 @@ describe('the receipt preview is a sink, not a renderer', () => {
       const { container } = render(<Receipt doc={doc} />);
       const paper = container.querySelector('.mb-receipt__paper');
       expect(paper, `${kind} did not render`).not.toBeNull();
-      // A blank line is a gap and nothing else; every other kind must put
-      // something on the paper — ink, a rule, or a picture.
+      // A blank line is a gap and nothing else; every other kind must put something on the
+      // paper — ink, a rule, or a picture.
       if (kind !== 'blank') {
         const drew =
           (paper?.textContent ?? '').trim().length > 0 ||
@@ -306,27 +270,12 @@ describe('the receipt preview is a sink, not a renderer', () => {
     };
     const { container } = render(<Receipt doc={doc} />);
     expect(container.textContent).toContain('SADGURU');
-    // The text starts where the logo's 30 % ends, which is the owner's ruling.
     const box = container.querySelector('.mb-receipt__box');
     expect(box?.getAttribute('style')).toContain('--at: 173');
   });
 });
 
-/**
- * **The paper is white and the ink is black, whatever the theme is** — the
- * owner, 2026-08-24: *"print preview should always be in white no matter the
- * theme. that is the only exception in no hardcoding rule."*
- *
- * A picture of a thermal roll is not a surface of the app. The roll is white
- * and the printer only makes black, so a bill drawn in the dark theme's
- * colours is a picture of something no printer can produce.
- *
- * This reads the stylesheet, the same way `contrast.test.ts` reads the tokens,
- * because the rule is about which TOKEN was used and jsdom does not resolve a
- * custom property to a colour. `--print-paper` and `--print-ink` are defined
- * once on `:root` and never inside a theme block — which is the other half of
- * the promise, and `theme.test.tsx` guards the general form of it.
- */
+/** The paper is white and the ink is black, whatever the theme is. */
 describe('the preview draws on paper, not on the theme', () => {
   const CSS = readFileSync('src/preview/receipt.css', 'utf8');
 
@@ -347,10 +296,8 @@ describe('the preview draws on paper, not on the theme', () => {
   });
 
   /**
-   * Nothing drawn ON the paper may take a themed colour either — a QR in
-   * `--text` is a QR that goes white-on-white the moment the app is dark.
-   * Everything on the roll draws in `currentColor`, which the rule above
-   * pins, or names a print token itself.
+   * Nothing drawn ON the paper may take a themed colour either — a QR in `--text` is a QR that
+   * goes white-on-white the moment the app is dark.
    */
   it('leaves no themed colour anywhere on the roll', () => {
     for (const selector of [
@@ -359,15 +306,15 @@ describe('the preview draws on paper, not on the theme', () => {
       '.mb-receipt__code',
     ]) {
       const body = ruleFor(selector);
-      // Only what PAINTS. `font-size: var(--text-sm)` is a size and the text
-      // scale still applies to a preview — the rule is about colour.
+      // Only what PAINTS. `font-size: var(--text-sm)` is a size and the text scale still
+      // applies to a preview — the rule is about colour.
       expect(body, `${selector} follows the theme`).not.toMatch(
         /(?:^|[\s;])(?:color|background(?:-color)?)\s*:\s*[^;]*var\(--(?:surface|text)[-)]/,
       );
     }
   });
 
-  /** They are tokens, and they live where every value lives (D21). */
+  /** They are tokens, and they live where every value lives. */
   it('defines the two print colours once, outside every theme block', () => {
     const tokens = readFileSync('src/theme/tokens.css', 'utf8');
     for (const name of ['--print-paper', '--print-ink']) {

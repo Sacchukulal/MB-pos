@@ -1,15 +1,3 @@
-//! T1 and the tests that go with it: the sinks cannot disagree.
-//!
-//! > Audit D1: *"the same bill is drawn three separate times, by hand, in three
-//! > places… every design change is triple work, and the three **will** drift
-//! > apart. This is the single biggest source of 'the preview does not match
-//! > the paper'."*
-//!
-//! The shared description was necessary and not sufficient — v1 had one and
-//! drifted anyway. What makes drift impossible is that there is one traversal
-//! and the renderers are sinks. This file is where that stops being an
-//! assertion in a comment.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -27,13 +15,7 @@ use mb_print::settings::QrMode;
 use mb_print::template::{Copy, bill_document};
 use mb_print::{pdf, text};
 
-/// T1. **THE ANTI-DRIFT TEST — the reason this session exists.**
-///
-/// Render one bill that has everything on it through the recorder, through the
-/// text sink and through the PDF sink, and assert that **every material value
-/// the recorder saw appears in both outputs**.
-///
-/// When P07 adds the raster sink it joins this test and nothing else changes.
+/// THE ANTI-DRIFT TEST.
 #[test]
 fn t1_no_sink_can_drop_anything() {
     let fixture = Fixture::new();
@@ -51,10 +33,7 @@ fn t1_no_sink_can_drop_anything() {
     let seen = recorder.texts();
     assert!(seen.len() > 20, "the fixture is too thin to prove anything");
 
-    // Compared with the line breaks removed. The claim is "nothing was
-    // DROPPED", not "nothing was re-wrapped" — a sink is allowed to break a
-    // 54-character UPI URI across 32-column paper, and indeed must, because an
-    // overflow is the one thing R3 forbids.
+    // Compared with the line breaks removed.
     let flat_text = flatten(&as_text);
     for piece in &seen {
         assert!(
@@ -63,36 +42,39 @@ fn t1_no_sink_can_drop_anything() {
         );
     }
 
-    // The PDF escapes brackets and backslashes, so compare against the escaped
-    // form rather than pretending it does not.
+    // The PDF escapes brackets and backslashes, so compare against the escaped form rather than
+    // pretending it does not.
     let flat_pdf = flatten(&as_pdf);
     for piece in &seen {
         let escaped = flatten(piece)
             .replace('\\', "\\\\")
             .replace('(', "\\(")
             .replace(')', "\\)");
-        assert!(flat_pdf.contains(&escaped), "the PDF sink dropped {piece:?}");
+        assert!(
+            flat_pdf.contains(&escaped),
+            "the PDF sink dropped {piece:?}"
+        );
     }
 
-    // And the values that matter most, named explicitly, so a fixture that
-    // silently stops containing one of them cannot make this test vacuous.
+    // And the values that matter most, named explicitly, so a fixture that silently stops
+    // containing one of them cannot make this test vacuous.
     for must in [
-        "BIR/1207",                     // the bill number
-        "Paneer",                       // an item name (wrapped)
-        "Water 1L",                     // another
-        "Beer",                         // the non-GST line
-        "2201",                         // an HSN code
-        "29ZYXWV9876K1Z2",              // the customer's GSTIN (2.6)
-        "29ABCDE1234F1ZW",              // the shop's
-        "DUPLICATE",                    // audit D7
+        "BIR/1207",        // the bill number
+        "Paneer",          // an item name (wrapped)
+        "Water 1L",        // another
+        "Beer",            // the non-GST line
+        "2201",            // an HSN code
+        "29ZYXWV9876K1Z2", // the customer's GSTIN (2.6)
+        "29ABCDE1234F1ZW", // the shop's
+        "DUPLICATE",       // audit D7
         "TOTAL",
-        "Non-GST value",                // scope 2.3 — the bar line
-        "Tax summary",                  // scope 2.7
-        "Card",                         // split payment (1.15)
+        "Non-GST value", // scope 2.3 — the bar line
+        "Tax summary",   // scope 2.7
+        "Card",          // split payment (1.15)
         "Credit",
         "Sodexo",
         "Tip",
-        "upi://pay",                    // the QR payload (8.2)
+        "upi://pay", // the QR payload (8.2)
         "Thank you, visit again",
     ] {
         assert!(
@@ -101,14 +83,12 @@ fn t1_no_sink_can_drop_anything() {
         );
     }
 
-    // The grand total, exactly as Money formats it (R2).
+    // The grand total, exactly as Money formats it.
     let total = fixture.bill.grand_total.to_plain_string();
     assert!(as_text.contains(&total), "the printed total is missing");
     assert!(as_pdf.contains(&total), "the PDF total is missing");
 
     // The image reached the traversal even though neither sink can draw it.
-    // That is the point of a sink: ignoring a block is a visible decision in
-    // one file, not an omission nobody notices for a year.
     assert!(
         recorder
             .calls
@@ -127,14 +107,9 @@ fn flatten(s: &str) -> String {
     s.replace(['\n', '\r'], "")
 }
 
-/// One change to a settings block, for T11.
 type Mutation = Box<dyn Fn(&mut mb_print::settings::ReceiptSettings)>;
 
-/// T9. Amounts on paper are exactly `Money::to_plain_string`.
-///
-/// R2: a renderer that formats a number has become a second money path. This
-/// scans the output for anything shaped like an amount and asserts it parses
-/// back to the same paise.
+/// Amounts on paper are exactly `Money::to_plain_string`.
 #[test]
 fn t9_every_amount_on_paper_round_trips_through_money() {
     let fixture = Fixture::new();
@@ -171,23 +146,35 @@ fn t9_every_amount_on_paper_round_trips_through_money() {
         );
         checked += 1;
     }
-    assert!(checked > 8, "only found {checked} amounts — the scan is broken");
+    assert!(
+        checked > 8,
+        "only found {checked} amounts — the scan is broken"
+    );
 }
 
-/// T10. A reprint is visibly marked and an original is not. Both in one test,
-/// so the assertion is a difference rather than a hope. Audit D7.
+/// A reprint is visibly marked and an original is not.
 #[test]
 fn t10_a_reprint_is_marked_and_an_original_is_not() {
     let fixture = Fixture::new();
     let paper = Paper::new(PaperKind::Mm80);
 
     let original = text::to_text(
-        &layout(&bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds"))
-            .expect("lays out"),
+        &layout(
+            &bill_document(
+                &common::metrics(paper.kind),
+                &fixture.context(Copy::Original),
+            )
+            .expect("builds"),
+        )
+        .expect("lays out"),
     );
     let reprint = text::to_text(
         &layout(
-            &bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Duplicate { number: 3 })).expect("builds"),
+            &bill_document(
+                &common::metrics(paper.kind),
+                &fixture.context(Copy::Duplicate { number: 3 }),
+            )
+            .expect("builds"),
         )
         .expect("lays out"),
     );
@@ -214,28 +201,37 @@ fn t10_a_reprint_is_marked_and_an_original_is_not() {
     assert!(voided.contains("wrong table"), "the reason is not printed");
 }
 
-/// **The bill a waiter carries to the table says it has not been paid.**
-///
-/// It is the same argument as T10 and the stakes are higher. An open order has
-/// no payment lines *because there are none*, so without a mark this paper is
-/// an ordinary bill with one section missing — something a customer could hold
-/// up as proof of payment and a shop could file as a settled sale. The mark is
-/// the whole reason [`Copy::NotPaid`] exists rather than reusing `Original`.
+/// The bill a waiter carries to the table says it has not been paid.
 #[test]
 fn a_bill_carried_to_the_table_says_it_is_not_paid() {
     let fixture = Fixture::new();
     let paper = Paper::new(PaperKind::Mm80);
 
     let carried = text::to_text(
-        &layout(&bill_document(&common::metrics(paper.kind), &fixture.context(Copy::NotPaid)).expect("builds"))
-            .expect("lays out"),
+        &layout(
+            &bill_document(
+                &common::metrics(paper.kind),
+                &fixture.context(Copy::NotPaid),
+            )
+            .expect("builds"),
+        )
+        .expect("lays out"),
     );
     let original = text::to_text(
-        &layout(&bill_document(&common::metrics(paper.kind), &fixture.context(Copy::Original)).expect("builds"))
-            .expect("lays out"),
+        &layout(
+            &bill_document(
+                &common::metrics(paper.kind),
+                &fixture.context(Copy::Original),
+            )
+            .expect("builds"),
+        )
+        .expect("lays out"),
     );
 
-    assert!(carried.contains("NOT PAID"), "the bill is not marked:\n{carried}");
+    assert!(
+        carried.contains("NOT PAID"),
+        "the bill is not marked:\n{carried}"
+    );
     assert!(
         carried.contains("pay at the counter"),
         "it does not say what to do next:\n{carried}"
@@ -247,10 +243,7 @@ fn a_bill_carried_to_the_table_says_it_is_not_paid() {
     assert!(!original.contains("NOT PAID"));
 }
 
-/// T11. Every receipt setting changes the output.
-///
-/// A setting that changes nothing is either dead or broken, and v1 shipped one
-/// of each — audit D5: *"a setting exists that you cannot change."*
+/// Every receipt setting changes the output.
 #[test]
 fn t11_every_setting_changes_the_output() {
     let fixture = Fixture::new();
@@ -261,47 +254,115 @@ fn t11_every_setting_changes_the_output() {
             settings: &settings,
             ..fixture.context(Copy::Original)
         };
-        text::to_text(&layout(&bill_document(&common::metrics(paper.kind), &ctx).expect("builds")).expect("lays out"))
+        text::to_text(
+            &layout(&bill_document(&common::metrics(paper.kind), &ctx).expect("builds"))
+                .expect("lays out"),
+        )
     };
 
     let base = render_with(fixture.settings.clone());
 
-    // Each of these is a toggle from audit Part 3 or from the new tax engine.
     let mutations: Vec<(&str, Mutation)> = vec![
-        ("show.token", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.token))),
-        ("show.gstin", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.gstin))),
-        ("show.fssai", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.fssai))),
-        ("show.address", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.address))),
-        ("show.phone", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.phone))),
-        ("show.cashier", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.cashier))),
-        ("show.hsn", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.hsn))),
-        ("show.tax_summary", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.tax_summary))),
-        ("show.payment_lines", Box::new(|s: &mut _| toggle(s, |s| &mut s.show.payment_lines))),
-        ("sep.store_header", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_store_header))),
-        ("sep.meta", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_meta))),
-        ("sep.token", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_token))),
-        ("sep.column_names", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_column_names))),
-        ("sep.items", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_items))),
-        ("sep.subtotals", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_subtotals))),
-        ("sep.grand_total", Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_grand_total))),
-        ("pattern", Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
-            s.pattern = mb_print::Pattern::Dotted;
-        })),
-        ("footer", Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
-            s.footer = "Come back soon".to_owned();
-        })),
-        ("qr", Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
-            s.qr = QrMode::Static;
-        })),
-        ("sections.store_name", Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
-            s.sections.store_name = mb_print::Style::new(1, false);
-        })),
-        ("sections.token", Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
-            s.sections.token = mb_print::Style::new(1, false);
-        })),
-        ("row_height", Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
-            s.row_height = mb_print::settings::RowHeight::Relaxed;
-        })),
+        (
+            "show.token",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.token)),
+        ),
+        (
+            "show.gstin",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.gstin)),
+        ),
+        (
+            "show.fssai",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.fssai)),
+        ),
+        (
+            "show.address",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.address)),
+        ),
+        (
+            "show.phone",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.phone)),
+        ),
+        (
+            "show.cashier",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.cashier)),
+        ),
+        (
+            "show.hsn",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.hsn)),
+        ),
+        (
+            "show.tax_summary",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.tax_summary)),
+        ),
+        (
+            "show.payment_lines",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.show.payment_lines)),
+        ),
+        (
+            "sep.store_header",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_store_header)),
+        ),
+        (
+            "sep.meta",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_meta)),
+        ),
+        (
+            "sep.token",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_token)),
+        ),
+        (
+            "sep.column_names",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_column_names)),
+        ),
+        (
+            "sep.items",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_items)),
+        ),
+        (
+            "sep.subtotals",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_subtotals)),
+        ),
+        (
+            "sep.grand_total",
+            Box::new(|s: &mut _| toggle(s, |s| &mut s.separators.below_grand_total)),
+        ),
+        (
+            "pattern",
+            Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
+                s.pattern = mb_print::Pattern::Dotted;
+            }),
+        ),
+        (
+            "footer",
+            Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
+                s.footer = "Come back soon".to_owned();
+            }),
+        ),
+        (
+            "qr",
+            Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
+                s.qr = QrMode::Static;
+            }),
+        ),
+        (
+            "sections.store_name",
+            Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
+                s.sections.store_name = mb_print::Style::new(1, false);
+            }),
+        ),
+        (
+            "sections.token",
+            Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
+                s.sections.token = mb_print::Style::new(1, false);
+            }),
+        ),
+        (
+            "row_height",
+            Box::new(|s: &mut mb_print::settings::ReceiptSettings| {
+                s.row_height = mb_print::settings::RowHeight::Relaxed;
+            }),
+        ),
     ];
 
     for (name, mutate) in mutations {
@@ -323,11 +384,7 @@ fn toggle(
     *field = !*field;
 }
 
-/// T14. The document survives JSON.
-///
-/// P08's preview is a sink on the other side of IPC, and D20 says nothing an
-/// order can contain may serialise with a non-string map key. Prove the
-/// document does not either.
+/// The document survives JSON.
 #[test]
 fn t14_the_document_crosses_ipc_unchanged() {
     let fixture = Fixture::new();
@@ -341,9 +398,8 @@ fn t14_the_document_crosses_ipc_unchanged() {
     let back: mb_print::Document = serde_json::from_str(&json).expect("deserialises");
     assert_eq!(doc, back);
 
-    // And the laid-out form too, since a preview may reasonably want that
-    // rather than re-laying it out in JavaScript — which would be a second
-    // layout engine, which is audit D1 again.
+    // And the laid-out form too, since a preview may reasonably want that rather than re-laying
+    // it out in JavaScript.
     let laid = layout(&doc).expect("lays out");
     let json = serde_json::to_string(&laid).expect("serialises");
     let back: mb_print::Laid = serde_json::from_str(&json).expect("deserialises");

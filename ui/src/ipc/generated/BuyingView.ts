@@ -18,12 +18,11 @@ owed: MoneyView, overdue: MoneyView,
  */
 bought: MoneyView, 
 /**
- * **D124** — false when the shop bills under the 5% scheme, and the screen
- * says the tax is a cost rather than showing an empty credit column.
+ * False when the shop bills under the 5% scheme, and the screen says the tax is a cost
+ * rather than showing an empty credit column.
  */
 claimsInputTax: boolean, taxNote: string, 
 /**
- * What needs somebody: overdue suppliers, and a shop that has never
- * counted its store.
+ * What needs somebody: overdue suppliers, and a shop that has never counted its store.
  */
 attention: Array<string>, mayManageSuppliers: boolean, mayEnterPurchases: boolean, };

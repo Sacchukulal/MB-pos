@@ -1,31 +1,4 @@
-//! **The faces a shop may print in** — P31, and the owner's fourth item:
-//! *"Fonts for bill and KOT: 5-6 choices."*
-//!
-//! # Why the faces are not in the installer
-//!
-//! Five more `.ttf` files in `mb-print/assets/` is about 700 KB against S4's
-//! 20 MB installer, and five more licences to check. Every family in
-//! [`mb_print::font::FAMILIES`] ships with Windows 10 and 11, `Font::load`
-//! already takes bytes from anywhere — the seam crown jewel 17 needs for a
-//! Kannada face — and this reads them out of `%SystemRoot%\Fonts`. It costs
-//! nothing in the download.
-//!
-//! # Why this is here and not in `mb-print`
-//!
-//! Two things resolving a face needs that a layout library must not have: a
-//! file system with an opinion about where Windows keeps typefaces, and
-//! somewhere to say *"Cascadia Mono is not installed on this computer"*. D31
-//! put the operating system in `mb-winprint`; the log lives in this crate. So
-//! `mb-print` keeps the list of families — a fact about typefaces — and asks
-//! for the rest through [`mb_print::font::Typefaces`], exactly as it already
-//! asks for its transports and its storage.
-//!
-//! # It cannot fail
-//!
-//! A shop whose chosen face has been uninstalled between one Tuesday and the
-//! next gets the built-in one and a line in the log. Requirement 3 of the ten:
-//! **billing does not stop**, and the only thing worse than the wrong typeface
-//! is no bill.
+//! The faces a shop may print in.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -35,14 +8,6 @@ use mb_print::font::{Font, Typefaces};
 use crate::{log_info, log_warn};
 
 /// Every face this counter has loaded, by key, loaded once.
-///
-/// One of these lives for the life of the process and is shared by every
-/// printer's worker thread — the same bargain `Font` makes about its glyph
-/// cache. Parsing a face is a few milliseconds, and doing it forty times a
-/// lunch rush would be forty times too many.
-///
-/// **A failure is remembered too** (`None` in the map), so a font somebody
-/// uninstalled is one line in the log and not one per ticket.
 #[derive(Debug)]
 pub struct SystemFaces {
     builtin: Arc<Font>,
@@ -50,8 +15,8 @@ pub struct SystemFaces {
 }
 
 impl SystemFaces {
-    /// Fails only if the built-in face will not load, which means the install
-    /// is corrupt — and `App::new` already treats that as "cannot start".
+    /// Fails only if the built-in face will not load, which means the install is corrupt — and
+    /// `App::new` already treats that as "cannot start".
     pub fn new() -> Result<SystemFaces, mb_print::PrintError> {
         Ok(SystemFaces {
             builtin: Arc::new(Font::builtin()?),
@@ -76,11 +41,12 @@ impl SystemFaces {
 
     fn load(key: &str) -> Option<Arc<Font>> {
         let Some(family) = mb_print::font::family(key) else {
-            log_warn!("\"{key}\" is not a typeface this build knows; printing with the built-in one");
+            log_warn!(
+                "\"{key}\" is not a typeface this build knows; printing with the built-in one"
+            );
             return None;
         };
-        // The built-in has no file, and asking for it by name is not a problem
-        // to report.
+        // The built-in has no file, and asking for it by name is not a problem to report.
         let file = family.file?;
 
         let path = SystemFaces::font_dir().join(file);
@@ -116,11 +82,9 @@ impl Typefaces for SystemFaces {
             return self.builtin();
         };
 
-        // Two locks rather than one held across the file read: a face being
-        // loaded for the first time must not hold up a second printer's worker
-        // drawing a bill in a face that is already warm. The worst case is two
-        // threads parsing the same file once each on the same second, which
-        // costs milliseconds and cannot be wrong.
+        // Two locks rather than one held across the file read: a face being loaded for the
+        // first time must not hold up a second printer's worker drawing a bill in a face that
+        // is already warm.
         if let Some(found) = lock(&self.loaded).get(key) {
             return found.clone().unwrap_or_else(|| self.builtin());
         }
@@ -130,8 +94,8 @@ impl Typefaces for SystemFaces {
     }
 }
 
-/// The same trade the glyph cache makes: a panicking worker thread must not
-/// stop the counter printing for the rest of the shift.
+/// The same trade the glyph cache makes: a panicking worker thread must not stop the counter
+/// printing for the rest of the shift.
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -158,11 +122,7 @@ mod tests {
 
     #[test]
     fn every_family_on_the_list_resolves_to_something_printable() {
-        // **Not "every family loads".** Windows Server has no Cascadia Mono and
-        // a stripped image may have no Consolas, so asserting the file is there
-        // would be asserting something about the machine running the test. What
-        // must be true is that ASKING is always safe and always answers with a
-        // face — which is the property a shop depends on.
+        // Not "every family loads".
         let faces = SystemFaces::new().expect("the built-in face loads");
         for family in mb_print::font::FAMILIES {
             let font = faces.face(Some(family.key));

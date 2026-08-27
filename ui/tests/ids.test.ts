@@ -1,19 +1,4 @@
-/**
- * **Where a new row's id comes from** — 2026-08-22.
- *
- * Seventeen screens built an id out of the clock —
- * ``id: `cus_${Date.now().toString(36)}` `` — so two rows created in the same
- * thousandth of a second got the same id.
- *
- * Most screens then got a refusal and the shopkeeper read *"The shop's data
- * could not be read."* **The Spends screen was worse**: `expenses` is an
- * upsert, because saving an edited spend reuses its id, so the second spend
- * silently **replaced** the first. Money gone from a day's list with nothing on
- * screen to say why.
- *
- * `check-ids.mjs` proves no screen reads the clock for an id any more. This
- * proves the thing they call instead actually works.
- */
+/** Where a new row's id comes from. */
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -24,19 +9,15 @@ describe('a fresh id', () => {
     expect(freshId('cus')).toMatch(/^cus_/);
   });
 
-  /**
-   * **The bug, as a test.** Ten thousand at once is far faster than a shop and
-   * is exactly the condition that made the Rust suite flake — a computer is
-   * fast enough to land two inside one millisecond, and so are two tills.
-   */
+  /** The bug, as a test. */
   it('never repeats, however fast they are asked for', () => {
     const made = new Set(Array.from({ length: 10_000 }, () => freshId('exp')));
     expect(made.size, 'two ids collided').toBe(10_000);
   });
 
   it('is only lower-case letters, digits and underscores', () => {
-    // An id ends up in log lines and support screenshots, so it has to be a
-    // thing somebody can read out over a phone without ambiguity.
+    // An id ends up in log lines and support screenshots, so it has to be a thing somebody can
+    // read out over a phone without ambiguity.
     for (let n = 0; n < 500; n += 1) {
       const id = freshId('itm');
       expect(id, id).toMatch(/^[a-z0-9_]+$/);
@@ -44,14 +25,8 @@ describe('a fresh id', () => {
   });
 
   /**
-   * Sorting by id is what made the clock attractive in the first place, and it
-   * is worth keeping — the clock is still in there, it is just no longer alone.
-   *
-   * **The clock is faked rather than raced.** The first version of this made
-   * two ids and asserted one sorted before the other, which is a coin toss when
-   * both land in the same millisecond: the random tails decide, and the test
-   * failed about one run in four. A flaky test is worse than no test, and this
-   * one was mine.
+   * Sorting by id is what made the clock attractive in the first place, and it is worth keeping
+   * — the clock is still in there, it is just no longer alone.
    */
   it('sorts into the order the rows were made', () => {
     vi.useFakeTimers();
@@ -66,8 +41,10 @@ describe('a fresh id', () => {
     }
   });
 
-  /** And within one millisecond the clock half is identical, so only the tail
-   *  is doing the work — which is the whole point of it being there. */
+  /**
+   * And within one millisecond the clock half is identical, so only the tail is doing the work
+   * — which is the whole point of it being there.
+   */
   it('keeps the clock half steady inside one millisecond', () => {
     vi.useFakeTimers();
     try {
@@ -82,8 +59,8 @@ describe('a fresh id', () => {
   });
 
   it('has a random half that is actually random', () => {
-    // The one screen that already had a tail used `Math.random() * 1000`, and a
-    // thousand values is a repeat inside one millisecond after about forty rows.
+    // The one screen that already had a tail used `Math.random() * 1000`, and a thousand values
+    // is a repeat inside one millisecond after about forty rows.
     const tails = new Set(
       Array.from({ length: 2_000 }, () => freshId('x').split('_')[2]),
     );

@@ -1,29 +1,4 @@
-/**
- * **The stock book** — P25, scope 4.2, 4.3, 4.4, 4.6, 4.7 and 4.9.
- *
- * # Nothing here is arithmetic, and units are why
- *
- * Every quantity arrives already said: "1.712 bag", "−180 g", "Buy 2 bag".
- * A screen that divided a balance by a pack size would be a second answer to
- * D108, and the two would disagree the first minute a shop corrected a bag
- * from 25 kg to 26. The one thing this file sends back is **what the person
- * typed and which unit they typed it in** (D109); Rust converts.
- *
- * # The recipe editor is the screen an owner abandons
- *
- * Fifty dishes is fifty forms, at night, after service. So: material search
- * that behaves like the billing screen's, the unit already set to the one this
- * material is cooked in, the cost updating as you type, and **copy from an
- * existing recipe** — because half plate is full plate scaled and a shop has
- * thirty of those.
- *
- * # What is on the shelf is the sum of rows, and the screen says when it is not
- *
- * D114: `material_balances` is a cache. Rust checks it against the ledger every
- * time this screen opens and hands back a sentence when they disagree, with the
- * button that fixes it. A cache nobody verifies is a stored balance with extra
- * words.
- */
+/** The stock book. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -64,15 +39,14 @@ import type { UnitView } from '../ipc/generated/UnitView';
 
 import './stock.css';
 
-/** What a material is measured in. Three, and the base unit follows (D108). */
+/** What a material is measured in. */
 const DIMENSIONS = [
   { value: 'weight', label: 'Weight — grams and kilos' },
   { value: 'volume', label: 'Volume — millilitres and litres' },
   { value: 'count', label: 'Count — pieces' },
 ];
 
-/** The movements a person types. A sale and a reversal are the bill's, never
- *  a person's, so they are not offered. */
+/** The movements a person types. */
 const KINDS = [
   { value: 'purchase', label: 'Bought' },
   { value: 'opening', label: 'Opening stock' },
@@ -85,12 +59,7 @@ type Editing = { material: MaterialView | null; isNew: boolean };
 
 export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const [view, setView] = useState<InventoryView | null>(null);
-  /**
-   * **The licence saying no, held rather than flashed** (P30.5). The stock book
-   * is gated (D86, and `licensing.rs` says why the DEDUCTION still runs); this
-   * screen used to answer a shop without a licence with a blank page and a
-   * toast that slid away. See `Locked`.
-   */
+  /** The licence saying no, held rather than flashed. */
   const [locked, setLocked] = useState<string>('');
   const [tab, setTab] = useState('shelf');
   const [search, setSearch] = useState('');
@@ -225,8 +194,9 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         </div>
       </Toolbar>
 
-      {/* **D114.** The cache disagreed with the ledger, and the sentence carries
-          the button that fixes it (D100). */}
+      {/*
+        The cache disagreed with the ledger, and the sentence carries the button that fixes it.
+      */}
       {view.cacheWarning !== '' ? (
         <div className="mb-stock__drift">
           <span>{view.cacheWarning}</span>
@@ -257,12 +227,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           { id: 'buy', label: 'What to buy' },
           { id: 'moves', label: 'Movements' },
           { id: 'problems', label: `Needs a look${view.problems.length > 0 ? ` (${view.problems.length})` : ''}` },
-          // **P31. The number that finds theft**, and it had no screen at all:
-          // `stock_variance` was written at P25 and never called.
           { id: 'variance', label: 'What went missing' },
-          // **P26, scope 4.8.** The count belongs here and not on Buying: it is
-          // a question about the shelf, and this is where the person already is
-          // when they ask it.
           { id: 'count', label: 'Count' },
         ]}
       />
@@ -351,15 +316,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   );
 }
 
-/**
- * **What each dish costs to make** — scope 4.9, and the reason an owner pays
- * for this module.
- *
- * **D119 — both cost figures are shown.** P13 already asked the owner to type a
- * cost price; this shows what the recipe actually says beside it, and the gap
- * between the two as a sentence. Replacing one with the other would hide the
- * most valuable number here.
- */
+/** What each dish costs to make. */
 function Dishes({
   view,
   onOpen,
@@ -382,8 +339,8 @@ function Dishes({
       key: 'cost',
       header: 'The recipe says',
       numeric: true,
-      // A dish nobody has costed is not a dish that costs nothing, so the two
-      // cases must not look the same.
+      // A dish nobody has costed is not a dish that costs nothing, so the two cases must not
+      // look the same.
       render: (d) =>
         d.hasRecipe ? <span className="mb-mono">{d.recipeCost.text}</span> : <span>—</span>,
     },
@@ -413,7 +370,7 @@ function Dishes({
   return <Table rows={view.dishes} columns={columns} rowKey={(d) => d.itemId} />;
 }
 
-/** Scope 4.6 — grouped by where you buy it (D116), and sendable as text. */
+/** Grouped by where you buy it, and sendable as text. */
 function BuyList({ view, onReport }: { view: InventoryView; onReport: (cause: unknown) => void }) {
   const toast = useToast();
   if (view.buyList.length === 0) {
@@ -473,7 +430,7 @@ function Movements({ rows }: { rows: StockMovementView[] }) {
       render: (m) => (
         <div className="mb-stock__name">
           <span>{m.kind}</span>
-          {/* D111 — never hidden. */}
+          {/* Never hidden. */}
           {m.wasAutomatic ? <Badge tone="info">Automatic</Badge> : null}
         </div>
       ),
@@ -497,12 +454,7 @@ function Movements({ rows }: { rows: StockMovementView[] }) {
   return <Table rows={rows} columns={columns} rowKey={(m) => m.id} />;
 }
 
-/**
- * What the stock book could not do, which did not stop a sale (D112).
- *
- * Every row is a whole sentence written in Rust (D100), so this component has
- * nothing to compose and cannot compose it differently.
- */
+/** What the stock book could not do, which did not stop a sale. */
 function Problems({
   view,
   onChange,
@@ -547,7 +499,7 @@ function Problems({
   );
 }
 
-/** Add or change a material, and the packs the shop buys it in (D108). */
+/** Add or change a material, and the packs the shop buys it in. */
 function MaterialForm({
   editing,
   onClose,
@@ -574,8 +526,8 @@ function MaterialForm({
   const [shelfLife, setShelfLife] = useState(m?.shelfLifeDays ? String(m.shelfLifeDays) : '');
   const [active, setActive] = useState(m?.isActive ?? true);
 
-  // Every unit the reorder figure can be typed in: the base, the dimension's
-  // standard, and whatever packs are on the form right now.
+  // Every unit the reorder figure can be typed in: the base, the dimension's standard, and
+  // whatever packs are on the form right now.
   const units = [
     baseOf(dimension),
     ...standardOf(dimension),
@@ -637,7 +589,7 @@ function MaterialForm({
           hint="The buy list is grouped by this. A place is fine: the vegetable market, the milk van."
         />
 
-        {/* **D108.** The shop's own packs. kg and litre come free. */}
+        {/* The shop's own packs. */}
         <div className="mb-stack">
           <div className="mb-row">
             <strong>How you buy it</strong>
@@ -802,12 +754,7 @@ function MoveForm({
   );
 }
 
-/**
- * **What a dish is made of, with the cost as you type.**
- *
- * Reachable from the menu screen for a dish and from the stock screen for a
- * made material — the same editor, because they are the same thing (D111).
- */
+/** What a dish is made of, with the cost as you type. */
 export function RecipeEditor({
   ownerKind,
   ownerId,
@@ -902,8 +849,10 @@ export function RecipeEditor({
       }
     >
       <div className="mb-stack">
-        {/* Copy from an existing recipe: half plate is full plate scaled, and a
-            shop has thirty of those. */}
+        {/*
+          Copy from an existing recipe: half plate is full plate scaled, and a shop has thirty
+          of those.
+        */}
         <div className="mb-stock__pack">
           <Select
             label="Copy an existing recipe"
@@ -1001,8 +950,7 @@ export function RecipeEditor({
           </Button>
         </div>
 
-        {/* The cost, and — D119 — the gap between what the owner thought and
-            what the recipe says. That gap IS the finding. */}
+        {/* The cost, and. */}
         <div className="mb-stock__cost">
           <div>
             <span className="mb-muted">This recipe costs</span>{' '}
@@ -1033,10 +981,8 @@ export function RecipeEditor({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Small readers. **None of these is arithmetic** — they split a phrase Rust
-// already wrote ("1 bag" → "1", "bag") so a form can show it back in two boxes.
-// ---------------------------------------------------------------------------
+// Small readers. None of these is arithmetic — they split a phrase Rust already wrote ("1 bag"
+// → "1", "bag") so a form can show it back in two boxes.
 
 function numberOf(said: string | undefined): string {
   const first = (said ?? '').split(' ')[0] ?? '';
@@ -1059,24 +1005,7 @@ function standardOf(dimension: string): string[] {
   return ['kg'];
 }
 
-/**
- * **What should be on the shelf, against what is** — `stock_variance`, scope
- * 4.7, written at P25 and never given a screen until P31.
- *
- * # This is the number that finds theft
- *
- * The recipes say how much rice ninety biryanis used. The count says how much
- * rice is actually there. The difference is waste, over-portioning, a supplier
- * short-weighing, or somebody carrying it out of the back door — and a shop
- * with no way to see it never learns which.
- *
- * # The honest row is the one with no count on it
- *
- * D115: a material nobody has counted is marked `isUnchecked`, and the screen
- * says so in words. A variance computed against a shelf nobody looked at is a
- * figure that reads like a measurement and is not one — that is the mistake
- * this column exists to refuse.
- */
+/** What should be on the shelf, against what is. */
 function Variance({ onReport }: { onReport: (cause: unknown) => void }) {
   const [rows, setRows] = useState<readonly VarianceView[] | null>(null);
   const [from, setFrom] = useState(() => {

@@ -7,7 +7,7 @@ export type MovementRowView = { id: string,
  */
 kind: string, kindTag: string, amount: MoneyView, reason: string, 
 /**
- * True when it takes money OUT of the drawer, so a screen shows the
- * direction without knowing the vocabulary.
+ * True when it takes money OUT of the drawer, so a screen shows the direction without
+ * knowing the vocabulary.
  */
 takesOut: boolean, };

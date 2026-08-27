@@ -1,30 +1,9 @@
-/* =========================================================================
-   THE LAYOUT PRIMITIVES — P27.5.
-   =========================================================================
-   The shape of a page, decided ONCE. Every value here names a job from the
-   spacing contract in tokens.css (--gap-inline, --gap-field, --gap-group,
-   --gap-section, --page-pad-*), never a step off the raw scale — because
-   reaching for `--space-4` here would be repeating the exact mistake this
-   file exists to end.
-   ========================================================================= */
+/* THE LAYOUT PRIMITIVES. */
 
-/* --- Page ---------------------------------------------------------------
-   THE STRUCTURE of a page: a column, with the section gap between its parts.
-
-   **It does not own the margin.** `.mb-main` in shell.css does, once, for
-   every screen — including the ones that predate this file and do not use
-   `Page` at all. That was the deciding argument: a primitive only the screens
-   that adopt it obey is a primitive that leaves the other twelve crooked, and
-   the owner opens all of them.
-
-   So there is exactly one page margin in the product, it is in the shell, and
-   `check-layout.mjs` fails the build if a feature CSS file sets one of its
-   own — which is how seventeen screens ended up with seventeen different left
-   edges in the first place.                                                */
-
-/* The GROUP gap, not the section gap: a page's header, its toolbar and its
-   content are one apparatus, not three sections. `Sections` is what puts the
-   bigger gap between actual sections of content, and it does it INSIDE this. */
+/*
+ * The GROUP gap, not the section gap: a page's header, its toolbar and its content are one
+ * apparatus, not three sections.
+ */
 .mb-page {
   display: flex;
   flex-direction: column;
@@ -33,15 +12,7 @@
   min-height: 0;
 }
 
-/* --- Scrolling: the one place that decides how ---------------------------
-   Down only. Anything that would scroll sideways is a child that has not been
-   told it may shrink.
-
-   `scrollbar-gutter: stable` reserves the bar's width whether or not it is
-   showing, so content does not shift when a list grows past the window. The
-   header and toolbar below step back by the same width, and that is what makes
-   a scrolling table end on the same line as the buttons above it — it used to
-   stop 12px short of them, on every screen.                                  */
+/* Scrolling: the one place that decides how. */
 
 .mb-page--scroll,
 .mb-scroll {
@@ -52,17 +23,18 @@
   scrollbar-gutter: stable;
 }
 
-/* A scroller inside something else — a rail, a side panel, a dialog body. It
-   has no page edge to line up with, so it gives the width back. */
+/* A scroller inside something else — a rail, a side panel, a dialog body. */
 .mb-scroll--inset {
   scrollbar-gutter: auto;
 }
 
-/* --- Page header --------------------------------------------------------- */
+/* Page header. */
 
-/* The `padding-right` is the scrollbar's width: the body under this reserves a
-   gutter for it, so without the same step back the header's buttons sit 12px
-   further right than the table they sit over. */
+/*
+ * The `padding-right` is the scrollbar's width: the body under this reserves a gutter for it,
+ * so without the same step back the header's buttons sit 12px further right than the table they
+ * sit over.
+ */
 .mb-pagehead {
   display: flex;
   align-items: flex-start;
@@ -90,14 +62,17 @@
   font-size: var(--type-page);
   font-weight: var(--type-page-weight);
   line-height: var(--line-tight);
-  /* Tightened, because a page title at this size and weight looks loose on the
-     OS UI font otherwise. Optical, not mathematical (§5). */
+  /*
+   * Tightened, because a page title at this size and weight looks loose on the OS UI font
+   * otherwise.
+   */
   letter-spacing: var(--tracking-title);
 }
 
-/* The count is set APART from the title, not glued into it: "Menu (43)" is a
-   string a translator cannot move and a number the eye has to dig out of a
-   word. */
+/*
+ * The count is set APART from the title, not glued into it: "Menu (43)" is a string a
+ * translator cannot move and a number the eye has to dig out of a word.
+ */
 .mb-pagehead__count {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -122,8 +97,6 @@
   flex-shrink: 0;
 }
 
-/* --- Toolbar ------------------------------------------------------------- */
-
 /* Same gutter as the page header — see the note there. */
 .mb-toolbar {
   display: flex;
@@ -135,15 +108,7 @@
   flex-wrap: wrap;
 }
 
-/* **There is no negative margin here, and there was.**
-   The first version pulled the toolbar up against the header by a fixed
-   amount, on the reasoning that they are one apparatus. Fixed is the word that
-   was wrong: a header with a subtitle is taller than one without, so on the
-   Credit screen the search box was hoisted straight through the sentence
-   underneath the title. Two elements overlapping because one of them guessed
-   the other's height is the kind of thing that only ever shows up when you
-   look at the screen (D55). The gap is now the page's own, once, for
-   everything in it. */
+/* There is no negative margin here, and there was. */
 
 .mb-toolbar__start,
 .mb-toolbar__end {
@@ -153,7 +118,7 @@
   min-width: 0;
 }
 
-/* --- Panel: the ONE raised surface --------------------------------------- */
+/* Panel: the ONE raised surface. */
 
 .mb-panel {
   display: flex;
@@ -165,8 +130,7 @@
   box-shadow: var(--level-raised);
 }
 
-/* A panel inside a panel is not raised again — it is a group. Nothing in this
-   product is elevated twice (§5: avoid cards inside cards). */
+/* A panel inside a panel is not raised again — it is a group. */
 .mb-panel .mb-panel {
   background: transparent;
   border: none;
@@ -219,13 +183,13 @@
   min-width: 0;
 }
 
-/* A panel whose whole content is a table: the table draws its own rows right
-   to the edge, and padding would put it in a box inside a box. */
+/*
+ * A panel whose whole content is a table: the table draws its own rows right to the edge, and
+ * padding would put it in a box inside a box.
+ */
 .mb-panel--flush > .mb-panel__body {
   padding: 0;
 }
-
-/* --- Runs ---------------------------------------------------------------- */
 
 .mb-sections {
   display: flex;
@@ -247,10 +211,11 @@
   gap: var(--gap-field) var(--gap-group);
 }
 
-/* The default gap is on the base class, not only on the modifier: `mb-row` and
-   `mb-stack` are used bare in dozens of places that predate this file, and a
-   base class with no gap would have collapsed every one of them into a
-   run-on. The modifiers below override it. */
+/*
+ * The default gap is on the base class, not only on the modifier: `mb-row` and `mb-stack` are
+ * used bare in dozens of places that predate this file, and a base class with no gap would have
+ * collapsed every one of them into a run-on.
+ */
 .mb-row {
   display: flex;
   align-items: center;
@@ -296,10 +261,7 @@
   gap: var(--gap-section);
 }
 
-/* --- Foot: the Save that never scrolls away ------------------------------
-   Sticky rather than a slot on each container, so one rule pins it in a side
-   panel, a dialog body and a settings pane alike. The bleed is what stops the
-   content showing through the padding beside it as it scrolls under.        */
+/* Foot: the Save that never scrolls away. */
 
 .mb-foot {
   position: sticky;
@@ -316,7 +278,7 @@
   border-top: var(--border-width) solid var(--border);
 }
 
-/* --- Notice: a machine state, in a sentence ------------------------------ */
+/* Notice: a machine state, in a sentence. */
 
 .mb-notice {
   display: flex;
@@ -324,8 +286,10 @@
   gap: var(--gap-field);
   padding: var(--gap-field) var(--gap-group);
   border: var(--border-width) solid var(--border);
-  /* The stripe is the FORM half of the signal, so this still reads on a bad
-     monitor and in grey-scale (§2 rule 2). */
+  /*
+   * The stripe is the FORM half of the signal, so this still reads on a bad monitor and in
+   * grey-scale.
+   */
   border-left-width: var(--space-1);
   border-radius: var(--radius-md);
   font-size: var(--type-label);
@@ -399,13 +363,12 @@
   color: var(--accent);
 }
 
-/* --- Icons --------------------------------------------------------------- */
-
 .mb-icon {
   flex-shrink: 0;
-  /* Aligned to the TEXT baseline rather than to the box (§5) — this one
-     declaration is most of the difference between icons that sit with their
-     words and icons that float above them. */
+  /*
+   * Aligned to the TEXT baseline rather than to the box (§5) — this one declaration is most of
+   * the difference between icons that sit with their words and icons that float above them.
+   */
   vertical-align: var(--icon-baseline);
 }
 
@@ -422,10 +385,9 @@
   height: var(--icon-lg);
 }
 
-/* --- The side panel ------------------------------------------------------ */
+/* The side panel. */
 
-/* A column beside the screen. Folded, the column is just the strip that
-   opens it. */
+/* A column beside the screen. */
 .mb-sidefold {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -478,15 +440,16 @@
   line-height: var(--line-tight);
 }
 
-/* Small right pad: the scrollbar sits inside it, so a big one leaves a gap
-   between the fields and the bar. */
+/*
+ * Small right pad: the scrollbar sits inside it, so a big one leaves a gap between the fields
+ * and the bar.
+ */
 .mb-sidefold__body {
   flex: 1;
   padding: var(--gap-group) var(--space-1) var(--gap-group) var(--gap-group);
 }
 
-/* The way in when folded: a small button at the top of the column the panel
-   opens into. */
+/* The way in when folded: a small button at the top of the column the panel opens into. */
 .mb-sidefold__strip {
   display: flex;
   align-items: center;

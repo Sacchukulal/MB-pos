@@ -22,16 +22,15 @@ stateSays: string,
  */
 failure: string, total: MoneyView, 
 /**
- * What the rider has to collect at the door. Zero when it is paid.
+ * What the rider has to collect at the door.
  */
 collect: MoneyView, 
 /**
- * True when the bill is settled — **and this is not the same as
- * delivered**, which is the whole point of the two columns.
+ * True when the bill is settled — and this is not the same as delivered, which is the
+ * whole point of the two columns.
  */
 paid: boolean, 
 /**
- * What the board actually prints in the money column: "Collect ₹640.00",
- * or "Paid".
+ * What the board actually prints in the money column: "Collect ₹640.00", or "Paid".
  */
 moneySays: string, };

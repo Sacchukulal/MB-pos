@@ -1,19 +1,5 @@
-/* The shell: title bar, rail, and the print-queue indicator.
-   Tokens only, like everything else. */
+/* The shell: title bar, rail, and the print-queue indicator. */
 
-/*
- * **A COLUMN, NOT A TWO-ROW GRID**, and P11's banner is why.
- *
- * This was `grid-template-rows: var(--titlebar-height) 1fr` — correct for
- * exactly two children. P11 added a third (the "nobody has a PIN" strip), so
- * the BANNER took the `1fr` row and grew to a quarter of a 768 px screen,
- * while the body was pushed into an implicit auto row. Every test was green;
- * it took four seconds of looking at the window.
- *
- * A flex column says what is actually meant — *the body takes what is left* —
- * and stays true however many strips a later session adds above it. A grid with
- * a counted number of rows is a bug waiting for the next feature.
- */
 .mb-shell {
   display: flex;
   flex-direction: column;
@@ -25,33 +11,30 @@
   flex: 0 0 auto;
 }
 
-/* The standing banners (no PIN, held bills, the licence line). All three are
-   `Notice` from the kit at P27.5; this only decides where they sit. */
+/* The standing banners (no PIN, held bills, the licence line). */
 .mb-shell__banner {
   flex: 0 0 auto;
   padding: var(--gap-field) var(--page-pad-x) 0;
 }
 
-/* The licence line rides INSIDE the screen rather than above it, so it scrolls
-   away with the page instead of permanently eating a strip of a 768px window. */
+/*
+ * The licence line rides INSIDE the screen rather than above it, so it scrolls away with the
+ * page instead of permanently eating a strip of a 768px window.
+ */
 .mb-shell__banner--inmain {
   padding: 0 0 var(--gap-field);
 }
 
 .mb-shell > .mb-body {
   flex: 1 1 auto;
-  /* Without this a tall child stretches the body instead of scrolling inside
-     it — the same reason `--cart-lines-min` exists. */
+  /*
+   * Without this a tall child stretches the body instead of scrolling inside it — the same
+   * reason `--cart-lines-min` exists.
+   */
   min-height: 0;
 }
 
-/* --- The top bar — audit F7 (we draw it ourselves) and P27.5 (it is also
-       the navigation now).
-
-   ONE strip, 48px, holding three things: the wordmark, the screens, and the
-   window buttons. It is one strip and not two because at 1366x768 the scarce
-   dimension is vertical, and a navigation row of its own would have taken 48px
-   away from the cart and the table grid for ever.                          */
+/* The top bar. */
 
 .mb-topbar {
   display: flex;
@@ -70,8 +53,10 @@
   align-items: center;
   gap: var(--gap-inline);
   flex-shrink: 0;
-  /* The wordmark is the first thing to give up room when the window is
-     narrow — it is decoration, and the navigation is not. */
+  /*
+   * The wordmark is the first thing to give up room when the window is narrow — it is
+   * decoration, and the navigation is not.
+   */
   min-width: 0;
 }
 
@@ -88,8 +73,7 @@
 }
 
 .mb-topbar__name {
-  /* The first thing to give up room, and then to go entirely. The product name
-     is on the taskbar and in the window title; the navigation is not. */
+  /* The first thing to give up room, and then to go entirely. */
   flex-shrink: 1;
   min-width: 0;
   font-size: var(--type-label);
@@ -100,7 +84,7 @@
   text-overflow: ellipsis;
 }
 
-/* --- The navigation ----------------------------------------------------- */
+/* The navigation. */
 
 .mb-nav {
   display: flex;
@@ -116,8 +100,10 @@
   align-items: center;
   gap: var(--gap-inline);
   height: var(--topbar-control-height);
-  /* Shorter than --target-min on purpose: it sits in the top strip, and the
-     touch target is the width plus the full height of the bar. */
+  /*
+   * Shorter than --target-min on purpose: it sits in the top strip, and the touch target is the
+   * width plus the full height of the bar.
+   */
   padding: 0 var(--gap-inline);
   background: transparent;
   color: var(--text-muted);
@@ -139,10 +125,11 @@
   color: var(--text);
 }
 
-/* **Where you are.** Carried by the fill, the weight AND the underline — three
-   signals, because this is the single most important piece of state on the
-   screen and it has to survive a bad monitor and a colour-blind cashier (§2
-   rule 2). Grey-scale it: the fill and the rule are both still there. */
+/*
+ * Where you are. Carried by the fill, the weight AND the underline — three signals, because
+ * this is the single most important piece of state on the screen and it has to survive a bad
+ * monitor and a colour-blind cashier.
+ */
 .mb-nav__item[aria-current='page'] {
   background: var(--accent-soft);
   color: var(--accent);
@@ -155,7 +142,7 @@
   text-overflow: ellipsis;
 }
 
-/* --- More: the screens a shop opens sitting down ------------------------- */
+/* More: the screens a shop opens sitting down. */
 
 .mb-nav__more {
   position: relative;
@@ -167,8 +154,7 @@
   color: var(--text-muted);
 }
 
-/* Anywhere else closes it. Without this the only way out is the button again,
-   which is the popover people learn to dread. */
+/* Anywhere else closes it. */
 .mb-nav__scrim {
   position: fixed;
   inset: 0;
@@ -192,8 +178,10 @@
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
-  /* POP, per the elevation contract: it is over the page and the page cannot
-     be used until you deal with it. */
+  /*
+   * POP, per the elevation contract: it is over the page and the page cannot be used until you
+   * deal with it.
+   */
   box-shadow: var(--level-pop);
 }
 
@@ -222,14 +210,15 @@
   color: var(--text-muted);
 }
 
-/* P30.5. On the set-up screen there is no navigation to fill the middle, so
-   something has to — and it has to stay draggable, or the window can only be
-   moved by a 200-pixel strip on the left. */
+/*
+ * On the set-up screen there is no navigation to fill the middle, so something has to — and it
+ * has to stay draggable, or the window can only be moved by a 200-pixel strip on the left.
+ */
 .mb-topbar__spacer {
   flex: 1;
 }
 
-/* --- The tools at the right end ----------------------------------------- */
+/* The tools at the right end. */
 
 .mb-topbar__tools {
   display: flex;
@@ -258,8 +247,10 @@
   color: var(--text);
 }
 
-/* The window buttons are square, tight to each other and hard against the
-   corner — that is where Windows puts them and where a hand goes for them. */
+/*
+ * The window buttons are square, tight to each other and hard against the corner — that is
+ * where Windows puts them and where a hand goes for them.
+ */
 .mb-topbar__windows {
   display: flex;
   align-items: center;
@@ -276,8 +267,7 @@
   color: var(--accent-ink);
 }
 
-/* Whose till this is. A button, because pressing it locks the counter — the
-   name and the lock are one thing, not a label next to a mystery icon. */
+/* Whose till this is. */
 .mb-who {
   display: flex;
   align-items: center;
@@ -313,19 +303,12 @@
   color: var(--text-faint);
 }
 
-/* --- Body --------------------------------------------------------------- */
-
 .mb-body {
   display: flex;
   min-height: 0;
 }
 
-/* **THE PAGE MARGIN LIVES HERE, AND NOWHERE ELSE.**
-   One declaration, for every screen in the product — the ones that use `Page`
-   and the ones that have not been converted to it. That is the whole point:
-   before P27.5 this was `padding: var(--space-5)` and screens added their own
-   on top of it, so the left edge moved as you walked through the app. Now it
-   cannot. `check-layout.mjs` fails the build on a feature file that tries. */
+/* THE PAGE MARGIN LIVES HERE, AND NOWHERE ELSE. */
 .mb-main {
   flex: 1;
   min-width: 0;
@@ -336,34 +319,20 @@
   overflow: hidden;
 }
 
-/* Every screen's own root fills what it is given and scrolls inside it, rather
-   than each one deciding for itself whether it is `height: 100%` (billing) or
-   a document that grows (reports). The shell is the thing that knows how tall
-   the window is. */
+/*
+ * Every screen's own root fills what it is given and scrolls inside it, rather than each one
+ * deciding for itself whether it is `height: 100%` (billing) or a document that grows
+ * (reports).
+ */
 .mb-main > * {
   flex: 1;
   min-height: 0;
 }
 
-/* **The licence line is not a screen.**
-
-   It lives inside `main` so it scrolls with the page instead of permanently
-   eating a strip of a 768px window — but the rule above is a universal child
-   selector at the same specificity as `.mb-shell__banner`, and it comes later,
-   so the banner won `flex: 1` and STRETCHED. On a fresh install, where the
-   licence line always shows, that left a 230-pixel hole between the banner and
-   the screen. Every screen. Reported by the owner on 2026-08-16 with four
-   screenshots, and invisible to every session before it because a seeded demo
-   shop has a healthy licence and never renders this banner at all. */
+/* The licence line is not a screen. */
 .mb-main > .mb-shell__banner {
   flex: 0 0 auto;
 }
-
-/* --- The print-queue indicator -----------------------------------------
-   Audit D4: "a failed print is only a red message on screen. Nothing
-   remembers it. In a rush the cashier misses the toast."
-   So this is PERSISTENT. It does not fade, and it does not go away until
-   somebody deals with the job.                                            */
 
 .mb-queue {
   position: relative;
@@ -385,8 +354,7 @@
   background: var(--surface-2);
 }
 
-/* The one that matters: a job nobody can print. Border, fill AND the word,
-   because colour alone would fail exactly the cashier this is aimed at. */
+/* The one that matters: a job nobody can print. */
 .mb-queue--attention {
   background: var(--danger-soft);
   color: var(--danger);
@@ -425,23 +393,11 @@
   color: var(--text-muted);
 }
 
-/* --- First run ----------------------------------------------------------
+/* First run. */
 
-   **Deleted at P30.5, and the deletion is the note.** Two rules for
-    lived here with nothing rendering them — a leftover from a
-   screen that was never built — and when P30.5 finally built the real first-run
-   flow in , these won: same specificity, later in the
-   cascade, so every heading and every line of the wizard came out centred.
+/* The licence banner. */
 
-   The same collision P27.5 found with , and the same lesson: CSS
-   for a component belongs beside the component, and a rule nothing renders is
-   a trap rather than dead weight. */
-
-/* --- The licence banner (P21) -------------------------------------------- */
-
-/* A quiet line above the screen, never a modal. A dialog a cashier has to
-   dismiss before every bill is how a licence system stops a restaurant
-   trading without meaning to. */
+/* A quiet line above the screen, never a modal. */
 .mb-licence-note {
   display: flex;
   position: sticky;
@@ -460,8 +416,10 @@
   color: var(--text);
 }
 
-/* Colour is never the only carrier (§2): the sentence already says it, and
-   this is a stripe rather than a fill so it cannot swallow the words. */
+/*
+ * Colour is never the only carrier (§2): the sentence already says it, and this is a stripe
+ * rather than a fill so it cannot swallow the words.
+ */
 .mb-licence-note--warn {
   border-left: var(--space-1) solid var(--warn);
 }
@@ -492,75 +450,39 @@
   color: var(--accent);
 }
 
-/* **The nav never pushes the tools off the bar.** It may give up room; the
-   signed-in name, the print queue and the window buttons may not. Found by
-   opening a screen from More and watching "More" run over "Counter".
-
-   NOT with "overflow: hidden" on the nav, which was the first attempt and
-   clipped the More sheet out of existence — the sheet is absolutely positioned
-   INSIDE the nav, so hiding the nav's overflow hides the menu. Found in four
-   seconds by pressing More and looking at the screen (D55).
-
-   The honest fix is "min-width: 0" on the items: a flex item with
-   "white-space: nowrap" will not shrink below its own text unless it is told
-   it may, and once it may, the label ellipsises and the tools keep their
-   room. */
+/* The nav never pushes the tools off the bar. */
 .mb-nav__item {
-  /* **A navigation label never truncates.** §5 is explicit that bare icons are
-     hostile to a new cashier, and "Setti…" is a bare icon with extra steps.
-     So these do not shrink; the WORDMARK does, and below 1200px it goes
-     entirely (see the media query at the foot of this file). Measured at 1366:
-     six items, the More button, the brand and the tools come to about 1300px,
-     so the ordinary case has room to spare — this is the guard for the
-     1024px minimum the window allows. */
+  /* A navigation label never truncates. */
   flex-shrink: 0;
 }
 
-/* Below the reference machine, the wordmark goes so the navigation keeps its
-   words. 1024px is the window minimum in tauri.conf.json, and this is what
-   stops the bar breaking there. */
-/* A media query cannot read a custom property: the condition is evaluated
-   before the cascade, so `max-width: var(--x)` is invalid CSS in every
-   browser. This is the one place in the product where a raw size is not a
-   choice. The escape sits on the line itself, because that is where the lint
-   looks. */
+/* Below the reference machine, the wordmark goes so the navigation keeps its words. */
+/*
+ * A media query cannot read a custom property: the condition is evaluated before the cascade,
+ * so `max-width: var(--x)` is invalid CSS in every browser.
+ */
 @media (max-width: 1200px) { /* mb-tokens-allow: media queries cannot use var() */
   .mb-topbar__name {
     display: none;
   }
 
-  /* The role beside the name goes too. "Meena" is who to ask; "Owner" is
-     something they already know about themselves. P30.5. */
+  /* The role beside the name goes too. */
   .mb-who__role {
     display: none;
   }
 }
 
-/* **And at the window's own minimum, the print queue keeps only its icon.**
-   Hiding the wordmark and the role was not enough at 1024: the navigation ran
-   under the cashier's name, which is the one thing on this bar that must never
-   happen — every word of it is a place somebody is trying to go. The queue's
-   `aria-label` is a whole sentence, so nothing is lost but four characters.
-   P30.5, found by resizing to `minWidth` and looking. */
+/* And at the window's own minimum, the print queue keeps only its icon. */
 @media (max-width: 1120px) { /* mb-tokens-allow: media queries cannot use var() */
   .mb-queue__word {
     display: none;
   }
 
-  /* And the cashier's own name. It is the last thing to go and it still hurts
-     least: the button keeps its person icon, its lock icon and an `aria-label`
-     that reads "Signed in as Meena. Lock the counter" — and the one person who
-     does not need to be told who is signed in is the person signed in. Every
-     word left on this bar is now a place somebody is trying to go. */
+  /* And the cashier's own name. */
   .mb-who__name {
     display: none;
   }
 }
-
-/* --- The alerts bell ----------------------------------------------------
-   P30.6. Everything that used to be a standing strip above a screen lives
-   behind one button now — the owner's instruction, and the reason is that
-   three banners and a checklist took a third of a 720-pixel counter.       */
 
 .mb-bell {
   position: relative;
@@ -583,9 +505,10 @@
   color: var(--text);
 }
 
-/* The count. A dot with a number in it, in the tone of the WORST thing
-   waiting — a licence that has ended and a table list nobody has filled in do
-   not deserve the same colour (§2 rule 2: the number carries it as well). */
+/*
+ * The count. A dot with a number in it, in the tone of the WORST thing waiting — a licence that
+ * has ended and a table list nobody has filled in do not deserve the same colour.
+ */
 .mb-bell__count {
   position: absolute;
   top: 0;
@@ -615,8 +538,10 @@
   color: var(--accent-ink);
 }
 
-/* The panel hangs off the title bar rather than covering the screen: it is
-   something to glance at between customers, not a page. */
+/*
+ * The panel hangs off the title bar rather than covering the screen: it is something to glance
+ * at between customers, not a page.
+ */
 .mb-alerts__away {
   position: fixed;
   inset: 0;

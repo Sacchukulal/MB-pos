@@ -1,14 +1,4 @@
-/**
- * **T1 — the keyboard state machine. The most important test file in the UI.**
- *
- * > Crown jewel 1: *"the billing keyboard flow… **this is why your counter is
- * > fast.** Copy it line by line and test it line by line."*
- *
- * No DOM, no IPC, no React. A reducer, a table of events, and assertions on the
- * state and on the commands it asked for — which is the whole reason
- * `keyboard.ts` was written as a pure function. v1's focus bugs were
- * unreasonable-about precisely because there was nothing like this file.
- */
+/** The keyboard state machine. */
 
 import { describe, expect, it } from 'vitest';
 
@@ -25,8 +15,6 @@ import {
 } from '../src/billing/keyboard';
 import type { MenuItemView } from '../src/ipc/generated/MenuItemView';
 import type { TableView } from '../src/ipc/generated/TableView';
-
-// --- fixtures ---------------------------------------------------------------
 
 function item(id: string, name: string): MenuItemView {
   return {
@@ -80,12 +68,10 @@ const cart = (hasItems: boolean, kitchenUpToDate = true): Event => ({
   kitchenUpToDate,
 });
 
-// ---------------------------------------------------------------------------
-
 describe('searching', () => {
   it('typing searches, and the first result is highlighted', () => {
-    // Highlighted immediately, so Enter is always one keystroke away — that
-    // is what makes "name, Enter, Enter" the whole interaction.
+    // Highlighted immediately, so Enter is always one keystroke away — that is what makes
+    // "name, Enter, Enter" the whole interaction.
     const [state, commands] = run(
       initial(),
       type('dos'),
@@ -99,8 +85,8 @@ describe('searching', () => {
   });
 
   it('never offers more than ten suggestions', () => {
-    // Not a performance limit: a list you can choose from without reading is
-    // faster than a list that is complete.
+    // Not a performance limit: a list you can choose from without reading is faster than a list
+    // that is complete.
     const many = Array.from({ length: 40 }, (_, n) => item(`i${n}`, `Item ${n}`));
     const [state] = run(initial(), suggest(...many));
     expect(state.suggestions).toHaveLength(MAX_SUGGESTIONS);
@@ -142,7 +128,7 @@ describe('the quantity popup', () => {
   });
 
   it('takes a typed quantity, including a fractional one', () => {
-    // Scope 1.10: 0.5 kg of sweets is a real sale.
+    // 0.5 kg of sweets is a real sale.
     const [, commands] = run(
       initial(),
       type('kaju'),
@@ -167,8 +153,7 @@ describe('the quantity popup', () => {
   });
 
   it('swallows everything else while it is open', () => {
-    // The popup owns the keyboard; an arrow key must not move a suggestion
-    // behind it.
+    // The popup owns the keyboard; an arrow key must not move a suggestion behind it.
     const [state] = run(
       initial(),
       type('dos'),
@@ -193,8 +178,8 @@ describe('T2 — Enter on an empty box, all four cases (audit 2.3)', () => {
   });
 
   it('opens the first running order when the cart is empty', () => {
-    // The case that matters more than it looks: it is how a cashier gets back
-    // to work without touching the mouse.
+    // The case that matters more than it looks: it is how a cashier gets back to work without
+    // touching the mouse.
     const [, commands] = run(
       initial(),
       cart(false),
@@ -233,8 +218,8 @@ describe('T3 — a table name loads its order; anything else falls through', () 
   });
 
   it('matches a table EXACTLY, so "1" is not table 12', () => {
-    // A prefix match here would make "1" ambiguous on a busy floor, and the
-    // cashier who typed it meant table one.
+    // A prefix match here would make "1" ambiguous on a busy floor, and the cashier who typed
+    // it meant table one.
     const [, commands] = run(
       initial(),
       floor(table('1'), table('12', true)),
@@ -260,8 +245,8 @@ describe('the order type, and the lock (crown jewel 1)', () => {
   });
 
   it('the LOCK stops them, which is the entire point of it', () => {
-    // A parcel counter should not be re-selecting the type forty times an
-    // hour, and should not lose it to a stray arrow key either.
+    // A parcel counter should not be re-selecting the type forty times an hour, and should not
+    // lose it to a stray arrow key either.
     const [state, commands] = run(
       initial(),
       { kind: 'toggle-lock' },
@@ -272,8 +257,8 @@ describe('the order type, and the lock (crown jewel 1)', () => {
   });
 
   it('arrows belong to the suggestions when there are any', () => {
-    // Correction (a): the surface is decided by what is on screen, not by
-    // where a caret happens to be.
+    // Correction (a): the surface is decided by what is on screen, not by where a caret happens
+    // to be.
     const [state] = run(
       initial(),
       type('a'),
@@ -329,8 +314,8 @@ describe('T5 — the grid is reachable and nothing is a dead end', () => {
   });
 
   it('reaches EVERY tile, across sections and into "No table"', () => {
-    // Walked rather than reasoned about: if any tile is unreachable, a
-    // cashier cannot get to that table without the mouse.
+    // Walked rather than reasoned about: if any tile is unreachable, a cashier cannot get to
+    // that table without the mouse.
     const mixed = [
       ...many,
       { ...table('Parcel', true), section: null, id: 'ord_p' },
@@ -382,8 +367,8 @@ describe('T6 — a busy table offers merge or a sub-table letter (scope 1.6)', (
   });
 
   it('the letters B to H open a second party on the same table', () => {
-    // Crown jewel 3: "this solves a real problem — two parties on one table —
-    // that most POS systems handle badly."
+    // "this solves a real problem — two parties on one table — that most POS systems handle
+    // badly.".
     const [, commands] = run(
       initial(),
       cart(true),
@@ -500,8 +485,8 @@ describe('the help sheet (audit F4)', () => {
   });
 
   it('documents every group the state machine actually implements', () => {
-    // The sheet is generated from this table, so an undocumented key is
-    // impossible rather than unlikely.
+    // The sheet is generated from this table, so an undocumented key is impossible rather than
+    // unlikely.
     const groups = new Set(SHORTCUTS.map((s) => s.group));
     for (const group of ['Searching', 'Quantity', 'The order', 'The floor']) {
       expect(groups.has(group), `nothing documented for "${group}"`).toBe(true);
@@ -512,8 +497,6 @@ describe('the help sheet (audit F4)', () => {
 
 describe('the whole thing, end to end, by keyboard alone', () => {
   it('types an item, adds it, and completes the bill without a mouse', () => {
-    // The acceptance test in miniature: if a cashier who used v1 has to think
-    // about any of this, the rebuild has failed.
     let state = initial();
     let commands: Command[];
 

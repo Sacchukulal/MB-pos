@@ -1,15 +1,3 @@
-//! **P21's T1 and T10, against a real database and the real command bodies.**
-//!
-//! The two claims this session makes that a unit test in `mb-license` cannot
-//! check, because both are about what the whole counter does:
-//!
-//! * **T1 — the shop bills.** Five states of the licence, five bills, five rows
-//!   on disk. This is requirement 3 of the ten and it is the reason the session
-//!   exists in the shape it does.
-//! * **T10 — a gated feature is refused IN RUST**, not merely hidden. The same
-//!   shape as `guard`'s own test: the command is CALLED, from a body that takes
-//!   `&App` (D46), with no screen involved.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -27,9 +15,7 @@ use mb_license::{Cloud, Feature, LicenceFile, Licensing, MachineId, Standing, St
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
 
-// ---------------------------------------------------------------------------
 // A shop, and a licence in whatever state the test needs.
-// ---------------------------------------------------------------------------
 
 pub(crate) fn machine() -> MachineId {
     MachineId::for_tests("4c4c4544-0043-4a10-8033-b8c04f4d3132")
@@ -71,8 +57,13 @@ fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
     app
 }
 
-/// Install a licence in a given state, through the **real** activate path.
-pub(crate) fn licence_in(scratch: &Scratch, label: &str, status: Status, renews_in_days: i32) -> Licensing {
+/// Install a licence in a given state, through the real activate path.
+pub(crate) fn licence_in(
+    scratch: &Scratch,
+    label: &str,
+    status: Status,
+    renews_in_days: i32,
+) -> Licensing {
     let dir = scratch.dir().join(label);
     let _ = std::fs::create_dir_all(&dir);
     let at = crate::flows::now();
@@ -82,14 +73,14 @@ pub(crate) fn licence_in(scratch: &Scratch, label: &str, status: Status, renews_
         BusinessDay::from_days_since_epoch(today.days_since_epoch() + renews_in_days),
         at,
     ));
-    let mut licensing = Licensing::new(
-        dir,
-        machine(),
-        Arc::clone(&stub) as Arc<dyn Cloud>,
-        "test",
-    );
+    let mut licensing = Licensing::new(dir, machine(), Arc::clone(&stub) as Arc<dyn Cloud>, "test");
     licensing
-        .activate("MB-STUB-0001", "123456", at, std::time::Duration::from_secs(2))
+        .activate(
+            "MB-STUB-0001",
+            "123456",
+            at,
+            std::time::Duration::from_secs(2),
+        )
         .expect("the stub activates");
     if status != Status::Active {
         stub.set_status(status);
@@ -101,10 +92,6 @@ pub(crate) fn licence_in(scratch: &Scratch, label: &str, status: Status, renews_
 }
 
 /// Put a tea in the cart and settle it, the way the billing screen does.
-///
-/// **This is the assertion.** It goes all the way to a row on disk, because the
-/// screen saying "settled" is the thing being tested and is therefore not
-/// evidence — the master plan's own rule.
 fn a_bill_is_taken(app: &App) -> String {
     let item = app.find_menu_item("itm_tea").expect("on the menu");
     app.with_cart_mut(|state| {
@@ -153,11 +140,9 @@ fn a_bill_is_taken(app: &App) -> String {
     number
 }
 
-// ---------------------------------------------------------------------------
-// T1 — BILLING NEVER STOPS. Five separate tests, and all five must pass.
-// ---------------------------------------------------------------------------
+// BILLING NEVER STOPS.
 
-/// **1 of 5 — no internet.**
+/// 1 of 5 — no internet.
 #[test]
 fn a_shop_bills_with_no_internet() {
     let scratch = Scratch::new("bills_offline");
@@ -182,7 +167,7 @@ fn a_shop_bills_with_no_internet() {
     a_bill_is_taken(&app);
 }
 
-/// **2 of 5 — an expired plan.**
+/// 2 of 5 — an expired plan.
 #[test]
 fn a_shop_bills_with_an_expired_plan() {
     let scratch = Scratch::new("bills_expired");
@@ -195,20 +180,19 @@ fn a_shop_bills_with_an_expired_plan() {
     a_bill_is_taken(&app);
 }
 
-/// **3 of 5 — a suspended licence.** BACKEND-C1's shop, still trading.
+/// 3 of 5 — a suspended licence.
 #[test]
 fn a_shop_bills_while_suspended() {
     let scratch = Scratch::new("bills_suspended");
     let app = a_trading_shop(&scratch, "suspended");
-    // A billing date a year away, and suspended anyway — the exact v1 bug,
-    // inverted: the status now bites, and billing still does not stop.
+    // A billing date a year away, and suspended anyway.
     app.use_licensing(licence_in(&scratch, "suspended", Status::Suspended, 365));
 
     assert_eq!(app.entitlement().standing, Standing::Suspended);
     a_bill_is_taken(&app);
 }
 
-/// **4 of 5 — a revoked licence.**
+/// 4 of 5 — a revoked licence.
 #[test]
 fn a_shop_bills_while_revoked() {
     let scratch = Scratch::new("bills_revoked");
@@ -219,7 +203,7 @@ fn a_shop_bills_while_revoked() {
     a_bill_is_taken(&app);
 }
 
-/// **5 of 5 — a corrupt cache.** The file is not JSON at all.
+/// 5 of 5 — a corrupt cache.
 #[test]
 fn a_shop_bills_with_a_corrupt_licence_file() {
     let scratch = Scratch::new("bills_corrupt");
@@ -243,19 +227,16 @@ fn a_shop_bills_with_a_corrupt_licence_file() {
     assert_eq!(app.entitlement().standing, Standing::NeverActivated);
     a_bill_is_taken(&app);
     // And the broken file was kept, because it is evidence.
-    assert!(LicenceFile::path(&dir).with_extension("broken.json").exists());
+    assert!(
+        LicenceFile::path(&dir)
+            .with_extension("broken.json")
+            .exists()
+    );
 }
 
-// ---------------------------------------------------------------------------
-// T10 — refused in the core, not merely hidden.
-// ---------------------------------------------------------------------------
+// Refused in the core, not merely hidden.
 
-/// **Every gated command, called directly, with a licence that does not
-/// entitle the shop.**
-///
-/// The screen is not involved. `guard`'s own T1 is the same shape and for the
-/// same reason: `window.__TAURI__.invoke` is two lines away in a dev console,
-/// so a check in TypeScript is decoration.
+/// Every gated command, called directly, with a licence that does not entitle the shop.
 #[test]
 fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
     let scratch = Scratch::new("gated");
@@ -300,9 +281,7 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
             refusal.code, "licence.not_operating",
             "{command} refused for the wrong reason: {refusal:?}"
         );
-        // **And the sentence says what still works.** The commonest support
-        // call a licence gate produces is an owner who thinks they have been
-        // cut off entirely.
+        // And the sentence says what still works.
         assert!(
             refusal.message.contains("bill"),
             "{command}'s refusal does not say billing is unaffected: {}",
@@ -310,23 +289,24 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
         );
     }
 
-    // **The table and the reality agree.** A command added to `GATED` with no
-    // gate in its body, or a gate with no entry, is the hole this closes.
-    let listed: Vec<&str> = crate::licensing::GATED.iter().map(|(name, _)| *name).collect();
+    // The table and the reality agree.
+    let listed: Vec<&str> = crate::licensing::GATED
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
     for (command, _) in &refusals {
-        assert!(listed.contains(command), "{command} is gated and not listed");
+        assert!(
+            listed.contains(command),
+            "{command} is gated and not listed"
+        );
     }
-    // `report_csv` and `report_pdf` go through `report_on`, so they are listed
-    // and covered by that one refusal rather than by their own.
+    // `report_csv` and `report_pdf` go through `report_on`, so they are listed and covered by
+    // that one refusal rather than by their own.
     assert!(listed.contains(&"report_csv"));
     assert!(listed.contains(&"report_pdf"));
 }
 
-/// **The day close is NOT gated**, and this is the test that keeps it that way.
-///
-/// It reads like a report and it is not one: it is how a shop reconciles the
-/// cash in its drawer. A shop locked out of it at 11 pm has money it cannot
-/// account for. See `Feature::REPORTS_DOES_NOT_MEAN_THE_DAY_CLOSE`.
+/// The day close is NOT gated, and this is the test that keeps it that way.
 #[test]
 fn closing_the_day_is_not_behind_the_licence() {
     let scratch = Scratch::new("dayclose_gate");
@@ -334,8 +314,8 @@ fn closing_the_day_is_not_behind_the_licence() {
     app.use_licensing(licence_in(&scratch, "dayclose", Status::Suspended, 365));
     assert!(!app.entitlement().operating());
 
-    // It answers. What it says about the day is `dayclose`'s own business; the
-    // claim here is only that the LICENCE did not stop it.
+    // It answers. What it says about the day is `dayclose`'s own business; the claim here is
+    // only that the LICENCE did not stop it.
     match crate::dayclose::view_on(&app, None) {
         Ok(_) => {}
         Err(e) => assert_ne!(
@@ -354,8 +334,8 @@ fn closing_the_day_is_not_behind_the_licence() {
     }
 }
 
-/// A shop that IS entitled is not refused — otherwise the test above would pass
-/// on a gate that refused everybody.
+/// A shop that IS entitled is not refused — otherwise the test above would pass on a gate that
+/// refused everybody.
 #[test]
 fn an_entitled_shop_is_not_refused() {
     let scratch = Scratch::new("entitled");
@@ -368,18 +348,10 @@ fn an_entitled_shop_is_not_refused() {
     assert!(crate::reports::list_on(&app).is_ok());
 }
 
-// ---------------------------------------------------------------------------
 // The licence is not allowed anywhere near the billing path.
-// ---------------------------------------------------------------------------
 
-/// > **PERFORMANCE §2.2:** *"Nothing in this table may ever be blocked by a
-/// > report, a sync, a print job, **a licence check** or a backup. If any of
-/// > those can delay any row here, the architecture is wrong, not the number."*
-///
-/// The entitlement is decided on a timer and held, so the billing path has
-/// nothing to call. **This test is what keeps that true** — a future session
-/// that adds `licensing::gate(app, ...)` to `complete_bill` because it seemed
-/// tidy gets a red build rather than a shop that cannot trade.
+/// PERFORMANCE §2.2: "Nothing in this table may ever be blocked by a > report, a sync, a print
+/// job, a licence check or a backup.
 #[test]
 fn the_billing_path_does_not_ask_about_the_licence() {
     for (name, source) in [
@@ -403,12 +375,6 @@ fn the_billing_path_does_not_ask_about_the_licence() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The account screen, and the audit rows.
-// ---------------------------------------------------------------------------
-
-/// **BACKEND-C5's sentence, on the screen.** Deactivate offline, and the view
-/// says the licence is still held rather than "done".
 #[test]
 fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
     let scratch = Scratch::new("still_held");
@@ -418,14 +384,14 @@ fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
     let _ = std::fs::create_dir_all(&dir);
     let at = crate::flows::now();
     let stub = Arc::new(Stub::active(&machine(), crate::flows::today(at), at));
-    let mut licensing = Licensing::new(
-        dir,
-        machine(),
-        Arc::clone(&stub) as Arc<dyn Cloud>,
-        "test",
-    );
+    let mut licensing = Licensing::new(dir, machine(), Arc::clone(&stub) as Arc<dyn Cloud>, "test");
     licensing
-        .activate("MB-STUB-0001", "123456", at, std::time::Duration::from_secs(2))
+        .activate(
+            "MB-STUB-0001",
+            "123456",
+            at,
+            std::time::Duration::from_secs(2),
+        )
         .expect("activates");
     stub.behave(Behaviour::Unreachable);
     app.use_licensing(licensing);
@@ -463,8 +429,7 @@ fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
     );
 }
 
-/// The account screen draws on a counter with no licence and no shop — which is
-/// the state an owner is in when they open it to type their key.
+/// The account screen draws on a counter with no licence and no shop.
 #[test]
 fn the_account_screen_draws_on_a_first_run() {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
@@ -472,21 +437,14 @@ fn the_account_screen_draws_on_a_first_run() {
     assert_eq!(view.standing, "never-activated");
     assert_eq!(view.chip, "Not activated");
     assert!(!view.is_activated);
-    assert!(!view.machine.is_empty(), "no machine id to read out to support");
+    assert!(
+        !view.machine.is_empty(),
+        "no machine id to read out to support"
+    );
     assert!(!view.headline.is_empty());
-    // A first run can still pair the owner's own phone to try it out.
     assert!(view.phones_allowed > 0);
 }
 
-/// **WEBSITE-C5.** The plan's phone limit is what `mb_lan::Counter` answers
-/// with, and it is **asked for on every attempt** rather than remembered from
-/// enrolment.
-///
-/// `Bridge` needs a `tauri::AppHandle`, which cannot be constructed in a test —
-/// that is D46's own observation, one file along. So this is two assertions
-/// rather than one call: the number really does move with the plan, and
-/// `lan.rs` really does read it from the entitlement rather than from a
-/// constant. The second half is a source check, and it is named as one.
 #[test]
 fn the_plans_phone_limit_reaches_the_network_layer() {
     let scratch = Scratch::new("device_limit");
@@ -496,9 +454,6 @@ fn the_plans_phone_limit_reaches_the_network_layer() {
     let on_a_live_plan = app.entitlement().limits.devices;
     assert!(on_a_live_plan > 0);
 
-    // The whole of C5: the number is a property of the CURRENT plan, so a plan
-    // that changes changes it — nothing is carried over from when a phone
-    // first joined.
     app.use_licensing(licence_in(&scratch, "limit2", Status::Suspended, 365));
     let suspended = app.entitlement();
     assert!(!suspended.operating());
@@ -517,8 +472,6 @@ fn the_plans_phone_limit_reaches_the_network_layer() {
     );
 }
 
-/// **Budget L1.** The entitlement decision, from the held value, on the path a
-/// gate takes. Three readings, per the benchmark discipline.
 #[test]
 fn l1_the_gate_is_cheap_enough_to_put_anywhere() {
     let scratch = Scratch::new("l1");
@@ -533,14 +486,13 @@ fn l1_the_gate_is_cheap_enough_to_put_anywhere() {
         }
         best = best.min(started.elapsed().as_nanos());
     }
-    // A benchmark's average is the one place a remainder is not a loss — the
-    // workspace denies `integer_division` because of D7, which is about money.
+    // A benchmark's average is the one place a remainder is not a loss.
     #[allow(
         clippy::integer_division,
         reason = "an average of a thousand timings, not a rupee"
     )]
     let each_ns = best / 1_000;
-    // 50 µs budget, 200 µs ceiling. It should be nowhere near either.
+    // 50 µs budget, 200 µs ceiling.
     assert!(
         each_ns < 200_000,
         "the gate costs {each_ns} ns, past its 200 µs ceiling"

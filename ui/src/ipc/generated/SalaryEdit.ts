@@ -3,11 +3,10 @@ import type { ComponentEdit } from "./ComponentEdit";
 
 export type SalaryEdit = { staffId: string, 
 /**
- * The date the new figure starts from. **A raise is a NEW ROW**, never an
- * edit — that is what lets last month recompute to what it printed.
+ * The date the new figure starts from.
  */
 effectiveFrom: string, basis: string, 
 /**
- * Typed by a person, parsed in Rust (D39).
+ * Typed by a person, parsed in Rust.
  */
 amount: string, components: Array<ComponentEdit>, };

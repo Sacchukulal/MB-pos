@@ -1,14 +1,4 @@
-//! **The floor, driven end to end against a real database** — P14.
-//!
-//! `signin_tests` gives the argument in full and it applies here twice over:
-//! moving, merging and splitting an order are *sequences*, they are on the
-//! money path, and they move the kitchen ledger between orders. A wrong answer
-//! is not a wrong number on a screen — it is three more dosas on the pass.
-//!
-//! mb-core proves the arithmetic (`transfer.rs`) and mb-db proves the master
-//! data (`tests/floor.rs`). What is proved here is the wiring: that the real
-//! command bodies, against a real SQLite file, leave the disk saying what the
-//! screen says.
+//! The floor, driven end to end against a real database.
 
 #![allow(
     clippy::expect_used,
@@ -111,8 +101,7 @@ fn a_shop_with_a_room(scratch: &Scratch) -> App {
     app
 }
 
-/// Put an open order on a table, with `told` of the first line already sent to
-/// the kitchen.
+/// Put an open order on a table, with `told` of the first line already sent to the kitchen.
 fn seat(
     app: &App,
     id: &str,
@@ -199,8 +188,6 @@ fn read(app: &App, id: &OrderId) -> AnyOrder {
     .expect("the order")
 }
 
-/// **T5 and T6 — MOVE.** The party changed seats, and that is all that
-/// changed: same order, same bill number, same food, same ledger.
 #[test]
 fn moving_an_order_changes_the_table_and_nothing_else() {
     let scratch = Scratch::new("move");
@@ -257,9 +244,9 @@ fn moving_an_order_changes_the_table_and_nothing_else() {
     assert_eq!(refused.code, "floor.table_busy");
 }
 
-/// **T7 — MERGE.** Two tables told the kitchen about dosas separately; the
-/// merged order was told about all of them, and one bill number survives while
-/// the other order is recorded rather than deleted.
+/// MERGE. Two tables told the kitchen about dosas separately; the merged order was told about
+/// all of them, and one bill number survives while the other order is recorded rather than
+/// deleted.
 #[test]
 fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
     let scratch = Scratch::new("merge");
@@ -297,7 +284,7 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
         "the kitchen was told about all three already — this is the three-dosa bug",
     );
 
-    // The absorbed order is CANCELLED with a link, not deleted (D47).
+    // The absorbed order is CANCELLED with a link, not deleted.
     let absorbed = read(&app, &five);
     assert!(
         matches!(absorbed, AnyOrder::Cancelled(_)),
@@ -334,15 +321,12 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
     assert!(two.order_id.is_none());
 }
 
-/// **T8 and T10 — SPLIT.** Part of a table leaves for a bill of its own, and
-/// the exact told-quantity case from `transfer.rs` survives the round trip to
-/// disk and back.
 #[test]
 fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
     let scratch = Scratch::new("split");
     let app = a_shop_with_a_room(&scratch);
-    // Three dosas, two of them already told to the kitchen, plus a tea so the
-    // origin is not emptied.
+    // Three dosas, two of them already told to the kitchen, plus a tea so the origin is not
+    // emptied.
     let order = seat(
         &app,
         "ord_split",
@@ -413,9 +397,8 @@ fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
     assert_eq!(pending[0].1, Qty::from_whole(1).expect("one"));
 }
 
-/// Splitting everything off is a MOVE, and is refused as one — the message
-/// says what to do instead rather than minting a bill number and abandoning
-/// one.
+/// Splitting everything off is a MOVE, and is refused as one — the message says what to do
+/// instead rather than minting a bill number and abandoning one.
 #[test]
 fn splitting_the_whole_order_is_refused() {
     let scratch = Scratch::new("split_all");
@@ -439,8 +422,8 @@ fn splitting_the_whole_order_is_refused() {
     );
 }
 
-/// **T17 — sub-tables.** 6A and 6B are two orders at one table, both visible,
-/// and the second is created by splitting the first without leaving the table.
+/// Sub-tables. 6A and 6B are two orders at one table, both visible, and the second is created
+/// by splitting the first without leaving the table.
 #[test]
 fn two_parties_can_share_one_table() {
     let scratch = Scratch::new("sub_table");
@@ -485,16 +468,15 @@ fn two_parties_can_share_one_table() {
     assert_eq!(seats, ["B"], "the new party is seat B, upper-cased");
 }
 
-/// **T11 — the thresholds are settings, not a constant**, and both states are
-/// reachable.
+/// The thresholds are settings, not a constant, and both states are reachable.
 #[test]
 fn the_two_timers_come_from_settings() {
     let scratch = Scratch::new("timers");
     let app = a_shop_with_a_room(&scratch);
     seat(&app, "ord_old", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
 
-    // The order was created an hour ago in fixture time, which is the past
-    // relative to a real clock, so it is comfortably "late" at any threshold.
+    // The order was created an hour ago in fixture time, which is the past relative to a real
+    // clock, so it is comfortably "late" at any threshold.
     let before = floor_on(&app).expect("the floor");
     assert_eq!(
         i64::from(before.warn_minutes),
@@ -509,19 +491,19 @@ fn the_two_timers_come_from_settings() {
     assert_eq!(after.warn_minutes, 5);
     assert_eq!(after.late_minutes, 10);
 
-    // And a pair that would make the amber state unreachable is refused rather
-    // than stored and quietly repaired every read.
+    // And a pair that would make the amber state unreachable is refused rather than stored and
+    // quietly repaired every read.
     assert!(save_thresholds_on(&app, 30, 30).is_err());
     assert!(save_thresholds_on(&app, 0, 10).is_err());
 }
 
-/// **T9 — an even split assigns every paisa**, and says so out loud.
+/// An even split assigns every paisa, and says so out loud.
 #[test]
 fn an_even_split_says_who_pays_the_extra_paisa() {
     let scratch = Scratch::new("even");
     let app = a_shop_with_a_room(&scratch);
 
-    // A bill in the cart. 100.01 three ways is the case that has a remainder.
+    // A bill in the cart.
     app.with_cart_mut(|state| {
         state
             .cart
@@ -548,8 +530,7 @@ fn an_even_split_says_who_pays_the_extra_paisa() {
     assert!(even_split_on(&app, 1).is_err(), "one way is not a split");
 }
 
-/// **T15 — the fallback is not a degraded mode.** A shop with no floor plan
-/// gets the section grid and everything works.
+/// The fallback is not a degraded mode.
 #[test]
 fn a_shop_with_no_floor_plan_still_has_a_floor() {
     let scratch = Scratch::new("no_plan");
@@ -570,17 +551,9 @@ fn a_shop_with_no_floor_plan_still_has_a_floor() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Carrying the bill to the table — the print mark on a tile, 2026-08-17.
-// ---------------------------------------------------------------------------
+// Carrying the bill to the table.
 
-/// **The bill goes to the table and the table stays open.**
-///
-/// This is the whole claim of `print_open_bill`, and it is the half that makes
-/// it safe to put on a tile a cashier's thumb passes over forty times a shift:
-/// pressing it produces paper and *no other consequence*. The order is still
-/// open, still on its table, still carrying its own bill number, and the money
-/// has not been taken.
+/// The bill goes to the table and the table stays open.
 #[test]
 fn the_bill_can_go_to_the_table_without_settling_it() {
     let scratch = Scratch::new("bill_to_table");
@@ -597,19 +570,14 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     let said = crate::flows::print_open_bill_on(&app, order.as_str().to_owned())
         .expect("the bill printed");
 
-    // **What the SHOP calls the table** — audit F8, and this assertion exists
-    // because the first version failed it. `TableId` is `tbl_3` here and is a
-    // whole sentence longer on a real shop, so the toast read "The bill for
-    // table tbl_outlet_default_sec_ac_2_ is printing." Asserting `contains("3")`
-    // alone would have passed on the broken version, which is why the second
-    // half of this is the one that matters.
+    // What the SHOP calls the table.
     assert_eq!(said, "The bill for table 3 is printing.", "{said}");
     assert!(
         !said.contains("tbl_"),
         "the toast shows a database id: {said}"
     );
 
-    // 1. **Paper.** And marked, so it can never be mistaken for a paid bill.
+    // Paper. And marked, so it can never be mistaken for a paid bill.
     let jobs = app.print_queue_snapshot();
     assert!(
         jobs.iter()
@@ -617,9 +585,9 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
         "nothing reached the printer: {jobs:?}"
     );
 
-    // 2. **And nothing else.** Same state, same table, same bill number — a
-    //    settled order here would mean the button closed a table that had not
-    //    paid, which is the failure worth having a test for.
+    // And nothing else. Same state, same table, same bill number — a settled order here would
+    // mean the button closed a table that had not paid, which is the failure worth having a
+    // test for.
     let after = read(&app, &order);
     assert!(
         matches!(after, AnyOrder::Open(_)),
@@ -641,15 +609,15 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
         after.core.cart.lines().len()
     );
 
-    // 3. **Twice is two pieces of paper and nothing else** — a waiter who lost
-    //    the first one presses it again, and that has to be free.
+    // Twice is two pieces of paper and nothing else — a waiter who lost the first one presses
+    // it again, and that has to be free.
     crate::flows::print_open_bill_on(&app, order.as_str().to_owned()).expect("and again");
     assert!(matches!(read(&app, &order), AnyOrder::Open(_)));
 }
 
-/// A table with nothing on it, and a bill that has already been paid, are the
-/// two ways this can be pressed on something it cannot print — and both say so
-/// in words a shopkeeper can act on rather than failing silently.
+/// A table with nothing on it, and a bill that has already been paid, are the two ways this can
+/// be pressed on something it cannot print — and both say so in words a shopkeeper can act on
+/// rather than failing silently.
 #[test]
 fn there_is_no_bill_to_carry_for_an_order_that_is_not_open() {
     let scratch = Scratch::new("bill_to_nobody");
@@ -659,35 +627,20 @@ fn there_is_no_bill_to_carry_for_an_order_that_is_not_open() {
         .expect_err("printed a bill for an order that does not exist");
     assert_eq!(missing.code, "bill.not_open", "{missing:?}");
 
-    // An order that exists and has nothing on it. The tile would not show the
-    // button — a tile with no order has none — but the command is the control,
-    // not the button.
+    // An order that exists and has nothing on it.
     seat(&app, "ord_empty", "tbl_4", &[], None);
     let empty = crate::flows::print_open_bill_on(&app, "ord_empty".to_owned())
         .expect_err("printed an empty bill");
     assert_eq!(empty.code, "bill.empty", "{empty:?}");
 }
 
-/// **The table the cashier is on is marked, even when nothing is on it yet.**
-///
-/// The owner, 2026-08-22, from a real install: *"In billing page, selected
-/// table is not highlighted. user should know which table he selected right?"*
-///
-/// This is the whole bug in one test. "Which tile am I on" was a fifth
-/// `TableState`, `Loaded`, decided by matching the cart's **order id** against
-/// the tile's — and an order does not exist until the first line is typed. So
-/// tapping an empty table opened the cart for it and left every tile on the
-/// floor looking identical. The screen knew; the view it was handed did not.
-///
-/// It is `TableView::selected` now, matched on the **table**, which is set the
-/// moment one is tapped.
+/// The table the cashier is on is marked, even when nothing is on it yet.
 #[test]
 fn an_empty_table_is_marked_the_moment_it_is_opened() {
     let scratch = Scratch::new("selected_empty");
     let app = a_shop_with_a_room(&scratch);
 
-    // Nothing is open, so nothing is selected. If this passed on an untouched
-    // floor the test below would prove nothing.
+    // Nothing is open, so nothing is selected.
     let before = crate::ipc::open_orders_on(&app).expect("the floor");
     assert!(
         before.iter().all(|tile| !tile.selected),
@@ -715,25 +668,19 @@ fn an_empty_table_is_marked_the_moment_it_is_opened() {
         "the tapped table is the one that is marked"
     );
 
-    // And it is still FREE. Being looked at is not a condition the table is in
-    // — which is the other half of why this was not a state.
+    // And it is still FREE.
     let two = after.iter().find(|t| t.label == "2").expect("table 2");
     assert_eq!(two.state, crate::billing::TableState::Free);
     assert!(two.order_id.is_none());
 }
 
-/// **Selecting a table costs it none of its own signal.**
-///
-/// `TableState::Loaded` overrode `Late`, so opening a late table in the cart
-/// turned off the one thing UI_GUIDELINES §4 calls *"the single most useful
-/// thing a floor view can show… not optional."* Nobody would have found that
-/// from a screenshot; it falls out of the same fix.
+/// Selecting a table costs it none of its own signal.
 #[test]
 fn a_late_table_that_is_open_in_the_cart_still_looks_late() {
     let scratch = Scratch::new("selected_late");
     let app = a_shop_with_a_room(&scratch);
-    // `seat` stamps the order an hour into fixture time, which is the past
-    // against a real clock — comfortably late at any threshold.
+    // `seat` stamps the order an hour into fixture time, which is the past against a real clock
+    // — comfortably late at any threshold.
     seat(&app, "ord_late", "tbl_3", &[("itm_dosa", 12_000, 1)], None);
 
     let before = crate::ipc::open_orders_on(&app).expect("the floor");
@@ -753,8 +700,7 @@ fn a_late_table_that_is_open_in_the_cart_still_looks_late() {
     );
 }
 
-/// **One table at a time**, and moving on releases the last one. A floor with
-/// two rings on it is a floor that has lost track of where the cashier is.
+/// One table at a time, and moving on releases the last one.
 #[test]
 fn only_one_table_is_ever_marked() {
     let scratch = Scratch::new("selected_one");
@@ -773,21 +719,7 @@ fn only_one_table_is_ever_marked() {
     }
 }
 
-/// **The floor plan marks NOTHING, and that is not an oversight.**
-///
-/// The owner, 2026-08-22: *"why is the table i selected in the billing section
-/// is highlighted in floor section also? it makes no sense."*
-///
-/// They are right, and the test that used to sit here asserted the opposite —
-/// `both_screens_mark_the_same_table`, written a day earlier on the reasoning
-/// that two screens showing the same room should agree. The reasoning was
-/// wrong because the two screens are not asking the same question. A ring says
-/// **"this is the table your cart is on"**; the billing grid has a cart behind
-/// it and the Floor screen does not. Marking a tile there answered a question
-/// nobody on that screen had asked.
-///
-/// `Room::cart_is_on` is an `Option` for this reason: the Floor screen says
-/// `None` out loud rather than passing two empty ids and hoping.
+/// The floor plan marks NOTHING, and that is not an oversight.
 #[test]
 fn the_floor_plan_marks_no_table_because_it_has_no_cart() {
     let scratch = Scratch::new("selected_both");
@@ -806,8 +738,7 @@ fn the_floor_plan_marks_no_table_because_it_has_no_cart() {
     let grid = crate::ipc::open_orders_on(&app).expect("the grid");
     assert_eq!(marked(&grid), ["3"]);
 
-    // The floor plan does not. `FloorView::tiles` is the same `TableView` the
-    // billing grid gets, so this is a real assertion and not a type accident.
+    // The floor plan does not.
     let plan = floor_on(&app).expect("the plan");
     assert!(
         marked(&plan.tiles).is_empty(),
@@ -816,14 +747,7 @@ fn the_floor_plan_marks_no_table_because_it_has_no_cart() {
     );
 }
 
-/// **Several tables at once, and all or nothing.**
-///
-/// The Floor screen ticks tables and acts on the lot (owner, 2026-08-22:
-/// *"make the tables selectable… and then i should be able to delete them"*).
-/// Doing that as a loop from TypeScript would be N round trips that can stop
-/// halfway, leaving a room half-changed and a screen that has to explain which
-/// half. It is one command and one transaction, so the interesting case is the
-/// one where part of the set cannot go.
+/// Several tables at once, and all or nothing.
 #[test]
 fn a_bulk_delete_takes_all_the_tables_or_none_of_them() {
     let scratch = Scratch::new("bulk_delete");
@@ -843,9 +767,6 @@ fn a_bulk_delete_takes_all_the_tables_or_none_of_them() {
         "the refusal must name what stopped it",
     );
 
-    // **And nothing went.** A partial delete would be worse than the refusal:
-    // the owner would be looking at a room missing two tables with no idea why
-    // the third survived.
     let floor = floor_on(&app).expect("the floor");
     assert_eq!(floor.tables.len(), 4, "part of the set was deleted anyway");
 
@@ -866,8 +787,7 @@ fn a_bulk_delete_takes_all_the_tables_or_none_of_them() {
     );
 }
 
-/// Hiding is the same bargain, and it is what a table with history gets
-/// instead of a delete.
+/// Hiding is the same bargain, and it is what a table with history gets instead of a delete.
 #[test]
 fn a_bulk_hide_takes_them_off_the_floor_and_keeps_their_history() {
     let scratch = Scratch::new("bulk_hide");
@@ -899,13 +819,8 @@ fn a_bulk_hide_takes_them_off_the_floor_and_keeps_their_history() {
     assert_eq!(floor.tables.iter().filter(|t| !t.is_active).count(), 1);
 }
 
-/// **`can_arrange` is the same question the commands ask**, answered once for
-/// the screen — and it is a courtesy, not the control.
-///
-/// The Floor screen hides its arranging panel when this is false, so a waiter
-/// does not get a column of buttons that can only answer "you do not have
-/// permission". `guard::require` is what actually refuses, and this test calls
-/// the commands directly to prove the screen is not what is holding the door.
+/// `can_arrange` is the same question the commands ask, answered once for the screen — and it
+/// is a courtesy, not the control.
 #[test]
 fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
     let scratch = Scratch::new("can_arrange");
@@ -929,8 +844,7 @@ fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
         "a waiter was offered the arranging panel"
     );
 
-    // **And the panel being hidden is not what stops them.** Called directly,
-    // the way a screen never would.
+    // And the panel being hidden is not what stops them.
     for refused in [
         crate::floor::delete_tables_on(&app, vec!["tbl_1".to_owned()]),
         crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], false),

@@ -5,12 +5,11 @@
  */
 export type ImportPlanView = { 
 /**
- * The whole sentence, written in Rust: "312 new item(s) and 88 change(s)."
+ * The whole sentence, written in Rust: "312 new item(s) and 88 change(s).".
  */
 summary: string, newItems: bigint, updatedItems: bigint, 
 /**
- * "Line 4: there is no category called \"Snaks\"" — the line number is the
- * one in the owner's spreadsheet, counting the header as line 1.
+ * "Line 4: there is no category called \"Snaks\"".
  */
 refused: Array<string>, 
 /**

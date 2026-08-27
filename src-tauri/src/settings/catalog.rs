@@ -1,24 +1,4 @@
-//! **The table.** Every setting in the product, exactly once.
-//!
-//! A line here is the whole of a setting: its key, the section it appears in,
-//! what it is called on screen, the sentence that explains it, the words a
-//! person might search for it by, what it may hold, where it is kept, and how
-//! to read and write it on a [`ShopConfig`].
-//!
-//! Nothing else in the product may hard-code any of those facts. Audit **E6**
-//! is a duplication bug — *"one giant command with 41 numbered slots… this has
-//! already caused a 'reuse slot 39 for four columns' patch"* — and duplication
-//! is what a second copy of "the maximum logo width is 100" would be.
-//!
-//! # The guard
-//!
-//! `the_catalogue_is_the_whole_of_the_configuration` serialises
-//! `ShopConfig::default()`, walks every leaf of the resulting JSON, and asserts
-//! that the set of leaf paths is **exactly** the set of keys here. Adding a
-//! field to `ReceiptSettings` without adding a line to this file therefore
-//! fails the build, and so does leaving a key here for a field that has gone.
-//! That is D40's rule — *"the rules that erode are enforced by scripts, not by
-//! agreement"* — applied to the one file most likely to erode.
+//! The table. Every setting in the product, exactly once.
 
 use mb_core::Money;
 use mb_print::doc::Pattern;
@@ -34,32 +14,24 @@ pub enum Group {
     Tax,
     Receipt,
     Kitchen,
-    /// **No scalar settings at all**, and that is not an oversight: paper,
-    /// connection and role belong to a PRINTER, and a shop has none, one or
-    /// six of them. The section exists so the screen has somewhere to put
-    /// `settings::printers`, which owns the records.
+    /// No scalar settings at all, and that is not an oversight: paper, connection and role
+    /// belong to a PRINTER, and a shop has none, one or six of them.
     Printers,
-    /// Also no scalar settings of its own: the counters are records, one per
-    /// terminal per series, and P27 adds terminals.
     Numbering,
     Billing,
     Day,
-    /// P26. The stock book has exactly one scalar setting: the threshold a
-    /// count variance has to pass before the screen asks why. Everything else
-    /// about stock is a record, not a preference.
+    /// The stock book has exactly one scalar setting: the threshold a count variance has to
+    /// pass before the screen asks why.
     Stock,
     Backup,
     Appearance,
-    /// P29. The scanner, the scale, the customer display and the label
-    /// printer. **Every one of them optional**, and an empty port here is a
-    /// finished configuration rather than a half-done one.
+    /// The scanner, the scale, the customer display and the label printer.
     Devices,
 }
 
 impl Group {
-    /// **In the order the sections appear**, which is the order a shop is set
-    /// up in: who you are, what you owe, what you print, how you bill, and
-    /// what happens if the disk dies.
+    /// In the order the sections appear, which is the order a shop is set up in: who you are,
+    /// what you owe, what you print, how you bill, and what happens if the disk dies.
     pub const ALL: &'static [Group] = &[
         Group::Store,
         Group::Tax,
@@ -125,25 +97,22 @@ pub struct Entry {
     pub group: Group,
     pub storage: Storage,
     pub label: &'static str,
-    /// A sentence, from the cashier's side of the screen (UI_GUIDELINES §6).
+    /// A sentence, from the cashier's side of the screen.
     pub help: &'static str,
-    /// What a person might type looking for this. Lower-case, always.
+    /// What a person might type looking for this.
     pub synonyms: &'static [&'static str],
     pub kind: Kind,
     pub read: fn(&ShopConfig) -> Value,
     pub write: fn(&mut ShopConfig, &Value) -> Result<(), Invalid>,
 }
 
-// ---------------------------------------------------------------------------
-// The choices. Each list's stored values are the serde names of the enum it
-// mirrors, so a row is readable in a SQLite browser and survives a relabelling.
-// ---------------------------------------------------------------------------
+// The choices. Each list's stored values are the serde names of the enum it mirrors, so a row
+// is readable in a SQLite browser and survives a relabelling.
 
-/// An empty stored value, which for a choice means "not chosen yet". Named,
-/// because an unexplained `""` in a list of state codes reads like a mistake.
+/// An empty stored value, which for a choice means "not chosen yet".
 const NOT_CHOSEN: &str = "";
 
-/// P29. What the number inside a scale's label means.
+/// What the number inside a scale's label means.
 const LABEL_VALUES: &[Choice] = &[
     Choice {
         value: "quantity",
@@ -155,8 +124,8 @@ const LABEL_VALUES: &[Choice] = &[
     },
 ];
 
-/// P29. **"Show me what it is sending" is a tool, not a fallback** — it is how
-/// a dealer sets up a scale nobody here has ever seen.
+/// "Show me what it is sending" is a tool, not a fallback — it is how a dealer sets up a scale
+/// nobody here has ever seen.
 const SCALE_PROTOCOLS: &[Choice] = &[
     Choice {
         value: "status_then_weight",
@@ -195,22 +164,6 @@ const PATTERNS: &[Choice] = &[
     },
 ];
 
-// **The FONTS list came back at P31, and D71 is why it took this long.**
-//
-// P17 added a font list, T1 rendered the bill with each of its three choices,
-// got three identical documents, and deleted it — correctly. The product
-// embedded one face (D33) and the raster sink drew with whatever the queue
-// loaded at start-up, so the setting was a control wired to nothing.
-//
-// What changed is not the list; it is the layer underneath it. `mb_print::queue`
-// now asks a `Typefaces` for the face on each JOB, the job carries the key, and
-// `typefaces.rs` loads the file. So the choice reaches the dots.
-//
-// It still does not reach `Laid` — a receipt is a character grid and every face
-// produces the same 48 columns — which is why T1 exempts these two keys BY NAME
-// and points at the three tests that cover them instead. If those go, D71
-// stands again and so should the deletion. See FONTS below.
-
 const ROW_HEIGHTS: &[Choice] = &[
     Choice {
         value: "compact",
@@ -226,55 +179,7 @@ const ROW_HEIGHTS: &[Choice] = &[
     },
 ];
 
-/// **Ten sizes, numbered 1 to 10.**
-///
-/// # Three lists in one day, and the owner was right twice
-///
-/// It was `24 px / 48 px / 72 px` — three, because a size WAS the ESC/POS
-/// multiplier and nothing between the multiples could be expressed. Told that,
-/// the owner asked for fine steps, and got twenty-two `px` values. That was
-/// wrong too, and they said so:
-///
-/// > *"u given 22 selectors thats too not working, just 5 to 10 is enough…
-/// > dont use px, just like numbers u use 1,2,3..... etc, dont write smal
-/// > mediam, just think as a user how they feel."*
-///
-/// **They are right, and this is the version that thinks about the person
-/// choosing.** A shopkeeper picking how big the total should print does not
-/// know what a dot is, does not want to count in twos, and gains nothing from
-/// twenty-two options where ten differ visibly. "Small / Medium / Large" is
-/// worse again: it is three words pretending to be a scale, and it does not
-/// say whether Large is bigger than the shop name.
-///
-/// So: **1 is smallest, 10 is biggest, and every step is visibly different on
-/// paper.** No unit, no adjective, no arithmetic.
-///
-/// # The value is still the height in dots
-///
-/// The LABEL is what a shop reads; the VALUE is what the printer draws — 16
-/// dots up to 72, which is three full cells of the printer's own font and the
-/// largest a thermal head will form. Keeping dots in the row means a shop that
-/// tuned its receipt before today still reads back to the same size (24 is
-/// still 3, 48 is still 8, 72 is still 10), and it is what stops the numbers
-/// on this list colliding with the `1`/`2`/`3` multipliers older builds wrote.
-///
-/// A shop on the **Text** print engine gets the nearest multiplier its printer
-/// can form (`Style::scale` rounds to it) — that hardware has one font at
-/// three sizes and no setting here can change it.
-/// **The ten sizes, as cap heights in dots** — P32.
-///
-/// The number is **the height of a capital letter**: a thermal head is 8 dots
-/// to the millimetre, so size 4 is a capital just under 2 mm tall and a person
-/// can hold a ruler against it.
-///
-/// It used to be a nominal row height, and **nothing drew that height**. The
-/// raster sink scaled the face until an `M` fitted a twelve-dot column, so a
-/// request for 24 dots put a 13-dot capital on the paper — and the top five
-/// entries on this list all printed identically, because the layout capped them
-/// to the same number. Measured on the owner's own bill, 2026-08-23.
-///
-/// The values mirror `mb_print::doc::Style::LADDER`, which is the authority the
-/// printer resolves against; the test below fails the build if they disagree.
+/// Ten sizes, numbered 1 to 10.
 pub(super) const SIZES: &[Choice] = &[
     Choice {
         value: "9",
@@ -318,13 +223,7 @@ pub(super) const SIZES: &[Choice] = &[
     },
 ];
 
-/// **The typefaces** — the owner's *"5-6 choices"*.
-///
-/// Mirrors [`mb_print::font::FAMILIES`], which is the list the printer actually
-/// resolves against. Written out rather than generated because `Choice` holds
-/// `&'static str` and this is a `const` table read at start-up — and there is a
-/// test below that fails the build if the two ever disagree, which is the part
-/// that matters.
+/// The typefaces.
 pub(super) const FONTS: &[Choice] = &[
     Choice {
         value: "builtin",
@@ -350,10 +249,6 @@ pub(super) const FONTS: &[Choice] = &[
         value: "cascadia",
         label: "Cascadia Mono",
     },
-    // The proportional faces, 2026-08-17. The owner asked for the v1 list back
-    // — *"i want some fonts like it was in previous mb pos app… Times New
-    // Roman etc"* — and `mb_print::font::FAMILIES` explains what had to change
-    // in the layout to make them honest rather than merely offered.
     Choice {
         value: "times",
         label: "Times New Roman — a printed-book look",
@@ -385,9 +280,6 @@ const LOGO_POSITIONS: &[Choice] = &[
         value: "top",
         label: "Above the shop name",
     },
-    // P32, the owner's ask of 2026-08-23. The picture takes `logo_width_pct`
-    // of the paper on its side and the shop's name, address and numbers are
-    // centred in the rest.
     Choice {
         value: "left",
         label: "Beside the shop name, on the left",
@@ -462,8 +354,7 @@ const ORDER_TYPES: &[Choice] = &[
     },
 ];
 
-/// What kind of taxpayer the shop is. The values are `mb_core::Registration`'s
-/// own serde names, which are also the schema's CHECK.
+/// What kind of taxpayer the shop is.
 const REGISTRATIONS: &[Choice] = &[
     Choice {
         value: "unregistered",
@@ -518,9 +409,6 @@ const GST_RATES: &[Choice] = &[
 ];
 
 /// The GST state codes, which are also the first two characters of every GSTIN.
-///
-/// The list is here rather than in a data file because it is a legal constant:
-/// it changes when a state is created, which has happened twice in fifty years.
 const STATES: &[Choice] = &[
     Choice {
         value: NOT_CHOSEN,
@@ -676,7 +564,7 @@ const STATES: &[Choice] = &[
     },
 ];
 
-/// The state's name for its GST code — "29" is Karnataka. Empty is not a code.
+/// The state's name for its GST code — "29" is Karnataka.
 #[must_use]
 pub fn state_label(code: &str) -> Option<&'static str> {
     if code.is_empty() {
@@ -685,11 +573,8 @@ pub fn state_label(code: &str) -> Option<&'static str> {
     STATES.iter().find(|s| s.value == code).map(|s| s.label)
 }
 
-// ---------------------------------------------------------------------------
-// The macros. One line per setting, and the shape of that line is the same for
-// every setting of the same kind — which is what makes ninety of them
-// reviewable.
-// ---------------------------------------------------------------------------
+// The macros. One line per setting, and the shape of that line is the same for every setting of
+// the same kind — which is what makes ninety of them reviewable.
 
 macro_rules! flag {
     ($key:literal, $group:ident, $storage:ident, $label:literal, $help:literal,
@@ -804,16 +689,7 @@ macro_rules! pick {
     };
 }
 
-/// **Per-section text size, as the height of a capital letter** — P32.
-///
-/// Three vocabularies have been written to this row: the ESC/POS multiplier
-/// (1, 2, 3), a nominal row height (16 … 72), and now a cap height (9 … 41).
-/// The three sets do not overlap, which is what lets `Style::from_stored` tell
-/// them apart exactly rather than guessing — see `mb_print::doc::Style::LADDER`.
-///
-/// **A shop that tuned its receipt keeps what it chose.** Rung for rung: a
-/// stored `24` was the third-from-bottom size and reads back as the
-/// third-from-bottom size.
+/// Per-section text size, as the height of a capital letter.
 macro_rules! size {
     ($key:literal, $group:ident, $label:literal, $help:literal,
      [$($syn:literal),* $(,)?], $($field:ident).+) => {
@@ -828,10 +704,9 @@ macro_rules! size {
             read: |c| Value::Text(c.$($field).+.size.to_string()),
             write: |c, v| {
                 let cap: u16 = match v.as_text()?.parse::<u16>() {
-                    // **Every vocabulary this row has held**, told apart by
-                    // `Style::from_stored` — the one rule, shared with the
-                    // config file's own deserialiser so a stored row and an
-                    // exported file can never be read differently.
+                    // Every vocabulary this row has held, told apart by `Style::from_stored` —
+                    // the one rule, shared with the config file's own deserialiser so a stored
+                    // row and an exported file can never be read differently.
                     Ok(n) if crate::settings::is_a_size(mb_print::Style::from_stored(n)) => {
                         mb_print::Style::from_stored(n)
                     }
@@ -846,11 +721,7 @@ macro_rules! size {
     };
 }
 
-// ---------------------------------------------------------------------------
-// The conversions the `pick!` entries use. Each pair is `to` and `from` for one
-// enum, and the strings are that enum's own serde names — so a stored row and a
-// serialised struct always agree.
-// ---------------------------------------------------------------------------
+// The conversions the `pick!` entries use.
 
 const fn pattern_to(p: Pattern) -> &'static str {
     match p {
@@ -979,8 +850,8 @@ fn order_type_from(text: &str) -> Option<mb_core::OrderType> {
     }
 }
 
-/// A GST rate, stored as basis points in a choice so the five legal rates are
-/// the only five that can be chosen.
+/// A GST rate, stored as basis points in a choice so the five legal rates are the only five
+/// that can be chosen.
 fn rate_to(bp: u32) -> &'static str {
     match bp {
         500 => "500",
@@ -1002,12 +873,10 @@ fn rate_from(text: &str) -> Option<u32> {
     }
 }
 
-// ---------------------------------------------------------------------------
 // THE TABLE.
-// ---------------------------------------------------------------------------
 
 pub const CATALOG: &[Entry] = &[
-    // --- your shop (audit Part 3, "Store Information" and "UPI Payment") ----
+    // Your shop.
     words!(
         "store.name",
         Store,
@@ -1041,9 +910,7 @@ pub const CATALOG: &[Entry] = &[
         Phone,
         store.phone
     ),
-    // **Neither of these is checked any more** — the owner, 2026-08-16. The
-    // length is generous rather than exact for the same reason: it is a string
-    // off a certificate, and the certificate is right.
+    // Neither of these is checked any more.
     words!(
         "store.gstin",
         Store,
@@ -1114,9 +981,6 @@ pub const CATALOG: &[Entry] = &[
         Free,
         store.upi_reference
     ),
-    // --- tax ---------------------------------------------------------------
-    // The registration is STORED on the profile and BELONGS on the tax screen.
-    // That is why group and storage are two things.
     pick_text!(
         "store.registration",
         Tax,
@@ -1135,11 +999,7 @@ pub const CATALOG: &[Entry] = &[
         REGISTRATIONS,
         store.registration
     ),
-    // --- the bill (audit Part 3, "Bill Settings" — every row) --------------
-    // Part 3's "Font" row IS here now — `receipt.font`, a few lines below.
-    // It was deleted at P17 (D71) because there was one embedded face and the
-    // choice changed nothing; P31 gave the queue a face per job and the
-    // choice something to change. See the note above FONTS.
+    // The bill.
     pick!(
         "receipt.pattern",
         Receipt,
@@ -1247,7 +1107,6 @@ pub const CATALOG: &[Entry] = &[
         ["payment", "split", "cash", "card"],
         receipt.show.payment_lines
     ),
-    // --- P32, 2026-08-23. Five things a real bill needs and none of them had.
     flag!(
         "receipt.show.title",
         Receipt,
@@ -1368,8 +1227,7 @@ pub const CATALOG: &[Entry] = &[
         ["separator", "line", "total"],
         receipt.separators.below_grand_total
     ),
-    // **P32 — two rules the template drew with no setting in front of them.**
-    // A rule nobody can switch off is the same fault as a setting nobody reads.
+    // Two rules the template drew with no setting in front of them.
     flag!(
         "receipt.separators.below_tax_summary",
         Receipt,
@@ -1388,8 +1246,6 @@ pub const CATALOG: &[Entry] = &[
         ["separator", "line", "payment"],
         receipt.separators.below_payments
     ),
-    // P31, the owner's fourth item. First among the look settings, because it
-    // is a decision about the whole piece of paper rather than about one line.
     pick_text!(
         "receipt.font",
         Receipt,
@@ -1573,7 +1429,7 @@ pub const CATALOG: &[Entry] = &[
         Free,
         receipt.composition_note
     ),
-    // --- the kitchen ticket (audit Part 3, "KOT visibility" / "KOT sections")
+    // The kitchen ticket.
     flag!(
         "kitchen.show_title",
         Kitchen,
@@ -1628,7 +1484,7 @@ pub const CATALOG: &[Entry] = &[
         ["kot", "time", "clock"],
         kitchen.show_time
     ),
-    // P32 — a cook could not say "KOT 14", because there was no such number.
+    // A cook could not say "KOT 14", because there was no such number.
     flag!(
         "kitchen.show_kot_number",
         Kitchen,
@@ -1726,9 +1582,6 @@ pub const CATALOG: &[Entry] = &[
         ["kot", "separator", "items"],
         kitchen.separators.below_items
     ),
-    // Its own face, separate from the bill's, because the owner asked for both
-    // — and because they are read differently: a ticket across a hot room at
-    // speed, a bill at arm's length.
     pick_text!(
         "kitchen.font",
         Kitchen,
@@ -1793,7 +1646,7 @@ pub const CATALOG: &[Entry] = &[
         ["kot", "bold", "items"],
         kitchen.items.bold
     ),
-    // --- billing behaviour --------------------------------------------------
+    // Billing behaviour.
     pick!(
         "billing.search_mode",
         Billing,
@@ -1931,19 +1784,13 @@ pub const CATALOG: &[Entry] = &[
         rate_from,
         billing.delivery_charge_tax_bp
     ),
-    // --- the day ------------------------------------------------------------
+    // The day.
     number!("day.starts_at_minutes", Day, Row, "Your day starts at",
         "Minutes past midnight. 300 is 5 in the morning, which means a bill \
          printed at 1 a.m. counts as yesterday's. This changes every report you \
          will ever run.",
         ["day", "business day", "5 am", "close", "midnight", "cutoff"],
         0..=1439 "minutes past midnight", u32, day.starts_at_minutes),
-    // P18's day close. The threshold is the shop's own tolerance: a stall that
-    // deals in tens does not want a form every time it is ₹2 out, and a
-    // restaurant taking ₹80,000 a day wants one at ₹100.
-    // P26, scope 4.8. The sibling of the drawer's threshold below, and worded
-    // the same way on purpose: a shop that has learnt what one means has
-    // learnt what the other means.
     cash!(
         "stock.count_reason_above",
         Stock,
@@ -1994,7 +1841,6 @@ pub const CATALOG: &[Entry] = &[
         0..=10_000_000,
         day.float_amount
     ),
-    // --- backup -------------------------------------------------------------
     words!(
         "backup.folder",
         Backup,
@@ -2025,12 +1871,6 @@ pub const CATALOG: &[Entry] = &[
         "Older ones are deleted to save disk space.",
         ["backup", "keep", "retention", "delete", "old"], 1..=365 "backups", u32,
         backup.keep_count),
-    // **P22, audit E8 — and it is off until the shop says otherwise.**
-    //
-    // The help text is the consent: it says what is sent and what is not, in
-    // the words a shopkeeper would use, because a switch whose meaning has to
-    // be guessed is not consent. **The report is written on this computer
-    // either way** (D95) — this is only about sending it.
     flag!(
         "backup.send_crash_reports",
         Backup,
@@ -2051,11 +1891,7 @@ pub const CATALOG: &[Entry] = &[
         ],
         backup.send_crash_reports
     ),
-    // --- how it looks (scope 13.11, 13.12) ----------------------------------
-    // The THEME and the TEXT SIZE are deliberately NOT here. They live in
-    // `AppConfig`, on the machine: they are applied before the first paint and
-    // they have to work when the database will not open. A shop's LANGUAGE is
-    // the shop's — it is on the receipt — so it is a setting like any other.
+    // How it looks (scope 13.11, 13.12)
     pick_text!(
         "appearance.language",
         Appearance,
@@ -2076,18 +1912,7 @@ pub const CATALOG: &[Entry] = &[
         ["barcode", "scan", "scanner", "recall", "bill"],
         receipt.bill_barcode
     ),
-    // -----------------------------------------------------------------------
-    // P29 — the things a counter is plugged into (scope 7.6–7.9).
-    //
-    // **Every one of them is optional and every one of them can be absent.**
-    // An empty port here is a finished configuration, not a half-done one, and
-    // nothing in this section may ever be able to stop a bill.
-    //
-    // The scanner has no port at all: it IS a keyboard. Its only settings are
-    // how to tell it apart from a person typing, and getting that wrong in the
-    // wrong direction throws away what a cashier typed — so the defaults are
-    // deliberately cautious.
-    // -----------------------------------------------------------------------
+    // The things a counter is plugged into.
     number!("devices.scan_average_gap_ms", Devices, Row, "A scan types faster than (average)",
         "How quickly characters have to arrive, on average, to be a barcode \
          scanner rather than a person. Lower is safer: a fast typist read as a \
@@ -2233,20 +2058,7 @@ pub fn find(key: &str) -> Option<&'static Entry> {
     CATALOG.iter().find(|e| e.key == key)
 }
 
-/// **Sub-headings, by key prefix** — and this is a bug found by looking at it.
-///
-/// The bill section is thirty-nine settings, and the first version drew them as
-/// one undifferentiated grid: a shopkeeper wanting "Total size" scrolled past
-/// twenty checkboxes with no landmark to steer by. Audit Part 3 groups them —
-/// visibility, separators, sizes — and the screen did not.
-///
-/// It is a prefix table rather than a field on all ninety lines because **the
-/// keys already say what they are**: everything under `receipt.separators.` is
-/// a separator. The longest matching prefix wins, so `receipt.qr_width_pct`
-/// lands under the QR code rather than under the bill in general.
-///
-/// A key with no prefix here falls back to its group's own label, and there is
-/// a test that every entry gets a heading.
+/// Sub-headings, by key prefix — and this is a bug found by looking at it.
 const TOPICS: &[(&str, &str)] = &[
     ("store.upi_", "Taking money by UPI"),
     ("receipt.pattern", "Paper and spacing"),
@@ -2286,27 +2098,15 @@ pub fn topic_for(entry: &Entry) -> &'static str {
     TOPICS
         .iter()
         .filter(|(prefix, _)| entry.key.starts_with(prefix))
-        // Longest wins: `receipt.qr` and `receipt.qr_width_pct` are both the QR
-        // code, and `kitchen.show_` must not swallow `kitchen.show_column_names`
-        // into something more general.
+        // Longest wins: `receipt.qr` and `receipt.qr_width_pct` are both the QR code, and
+        // `kitchen.show_` must not swallow `kitchen.show_column_names` into something more
+        // general.
         .max_by_key(|(prefix, _)| prefix.len())
         .map_or_else(|| entry.group.label(), |(_, heading)| *heading)
 }
 
-/// **Two settings that belong on one line**, by key prefix.
-///
-/// A size and its bold tick are one decision — "how does the shop name
-/// print?" — and the screen drew them as two boxes in two grid cells, so
-/// "Total size" and "Total in bold" could land in different columns and
-/// different rows. The bill has seven such pairs and the kitchen ticket three:
-/// twenty boxes where there are ten decisions.
-///
-/// A prefix table for the same reason `TOPICS` is one — the keys already say
-/// it. Everything under `receipt.sections.grand_total.` is the total.
+/// Two settings that belong on one line, by key prefix.
 const ROWS: &[(&str, &str)] = &[
-    // The typeface is one line for the same reason the sizes are: it belongs to
-    // the table of "how this prints", and it is what the owner asked for first
-    // — *"just a single font selector for bill"*.
     ("receipt.font", "Bill typeface"),
     ("kitchen.font", "Ticket typeface"),
     ("receipt.sections.store_name.", "Shop name"),
@@ -2326,18 +2126,13 @@ const ROWS: &[(&str, &str)] = &[
 pub fn row_for(entry: &Entry) -> &'static str {
     ROWS.iter()
         .filter(|(prefix, _)| entry.key.starts_with(prefix))
-        // Longest wins, the same rule `topic_for` uses — so a short prefix
-        // added later cannot quietly swallow a longer one already here.
+        // Longest wins, the same rule `topic_for` uses — so a short prefix added later cannot
+        // quietly swallow a longer one already here.
         .max_by_key(|(prefix, _)| prefix.len())
         .map_or("", |(_, line)| *line)
 }
 
-/// **The word this control wears inside a shared line.**
-///
-/// The entry's own label stays what it is — "Total in bold" is what a search
-/// finds and what a screen reader says. On a line already headed "Total",
-/// repeating the word is noise, so the last part of the key names the control
-/// and nothing else does.
+/// The word this control wears inside a shared line.
 #[must_use]
 pub fn short_for(entry: &Entry) -> &'static str {
     match entry.key.rsplit('.').next() {
@@ -2347,11 +2142,7 @@ pub fn short_for(entry: &Entry) -> &'static str {
     }
 }
 
-/// **The GSTIN's state code must be the shop's own state.**
-///
-/// Checked here rather than in `value.rs` because only here are both halves
-/// known. It is the check nobody does and everybody needs: a Karnataka shop
-/// that typed a Kerala GSTIN files a return that is rejected months later.
+/// The GSTIN's state code must be the shop's own state.
 pub fn check_gstin_against_state(config: &ShopConfig) -> Result<(), Invalid> {
     let (gstin, state) = (&config.store.gstin, &config.store.state_code);
     if gstin.is_empty() || state.is_empty() {

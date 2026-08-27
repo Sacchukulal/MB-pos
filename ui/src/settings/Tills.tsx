@@ -1,25 +1,4 @@
-/**
- * **The tills this shop has** — P27, scope 11.1.
- *
- * A shop that outgrows one counter buys a second computer, and this is the
- * screen where it becomes part of the same shop. Three things happen here and
- * nothing else does: a till is named and given its **series prefix**, one till
- * is chosen as the **main till**, and a new machine **joins**.
- *
- * # Why the prefix is the loudest thing on the screen
- *
- * Every till issues its own bill numbers (D135). Counter 1 prints `A/0001` and
- * Counter 2 prints `B/0001`, and they are different bills. That is what makes
- * two counters safe: they share no number to argue over, so neither one waits
- * for the other and neither can run out. The single way to break it is two
- * tills with the same letter, so the prefix is a field a person sees, and Rust
- * refuses a clash with the name of the till that already has it.
- *
- * # Every sentence here is written in Rust (R8)
- *
- * "Bills print as A/0001", "3 bills are waiting to reach the main till", what
- * the plan allows — this file lays them out and writes none of them.
- */
+/** The tills this shop has. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -66,12 +45,7 @@ export function Tills() {
     call('tills').then(setView).catch(complain);
   }, [complain]);
 
-  // **Rust pushes; React subscribes** (M4). The queue changes when a bill is
-  // settled and when the sender drains it, and neither of those is something
-  // this screen could know to ask about — so it is told, and it runs no timer.
-  // The empty dependency list is deliberate: Network.tsx found out the hard way
-  // that depending on `complain` tears the listener down and re-attaches it
-  // often enough for the push to land in the gap.
+  // Rust pushes; React subscribes.
   useEffect(() => {
     if (!inApp()) return undefined;
     let stop: (() => void) | undefined;
@@ -152,17 +126,16 @@ export function Tills() {
         </Badge>}
       />
 
-      {/* **D138's sentence, and it is the feature.** A shop that reads it knows
-          what to do; a shop shown a spinner does not. */}
       {view.awaySays ? (
         <Card className="mb-tills__away">
           <strong>{view.awaySays}</strong>
         </Card>
       ) : null}
 
-      {/* What this till is holding, with the button that pushes it across —
-          the same call the background sender makes, so pressing it can only be
-          early, never different. */}
+      {/*
+        What this till is holding, with the button that pushes it across — the same call the
+        background sender makes, so pressing it can only be early, never different.
+      */}
       {view.waitingSays ? (
         <Card className="mb-tills__waiting">
           <span>{view.waitingSays}</span>

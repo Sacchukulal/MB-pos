@@ -1,23 +1,4 @@
-//! **The bill number and the token number** — audit Part 3's two numbering
-//! blocks, and the one screen in this product that can destroy a shop's legal
-//! record.
-//!
-//! # Why the counters are not in the catalogue
-//!
-//! Like a printer, a counter is a **record**: one per terminal per series, and
-//! P27 will add terminals. `counter.bill.terminal_default.prefix` is not a
-//! setting key, it is a join written in a string.
-//!
-//! # The one dangerous field
-//!
-//! Everything here is ordinary except **the next number**. A bill number that
-//! goes backwards produces two bills with the same number, and a shop's GST
-//! return is a list of bill numbers: the duplicate is not a display bug, it is
-//! a filing the department will reject and an audit trail nobody can defend.
-//!
-//! So the refusal is a sentence about the return, not about a constraint —
-//! and it is a refusal, never a clamp. D7: nothing here may be silently lossy,
-//! and quietly correcting somebody's 1000 to 1207 is exactly that.
+//! The bill number and the token number.
 
 use mb_auth::Permission;
 use mb_db::CounterKind;
@@ -26,9 +7,9 @@ use ts_rs::TS;
 
 use crate::billing::TERMINAL;
 use crate::guard;
+use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
-use crate::log_info;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -51,20 +32,12 @@ pub struct CounterView {
     pub pad_width: u32,
     pub reset_daily: bool,
     pub start: u32,
-    /// **What the NEXT one will be**, already formatted — the number the owner
-    /// is actually thinking about. `Money::to_plain_string`'s rule applied to a
-    /// counter: the string a screen shows is built in Rust.
+    /// What the NEXT one will be, already formatted.
     pub next: String,
     pub next_value: u32,
-    /// What has been handed out, or `None` when nothing has. **Not zero** —
-    /// zero reads as a number that was used.
+    /// What has been handed out, or `None` when nothing has.
     pub issued: Option<u32>,
-    /// **The whole sentence**, built here.
-    ///
-    /// UI_GUIDELINES §6: *"no string is built by joining fragments — plurals
-    /// and word order differ by language."* The screen assembled this from
-    /// three pieces and produced "1 have been issued", which is the finding in
-    /// miniature and was found by reading it.
+    /// The whole sentence, built here.
     pub summary: String,
 }
 
@@ -77,7 +50,7 @@ pub struct CounterEdit {
     pub pad_width: u32,
     pub reset_daily: bool,
     pub start: u32,
-    /// The next number to hand out. **The dangerous one.**
+    /// The next number to hand out.
     pub next_value: u32,
 }
 
@@ -115,8 +88,8 @@ fn view_of(counter: &mb_db::numbering::Counter) -> CounterView {
         pad_width: u32::try_from(counter.pad_width).unwrap_or(0),
         reset_daily: counter.reset_daily,
         start: u32::try_from(counter.start).unwrap_or(1),
-        // Built here, the way the claim builds it (`numbering::claim`), so
-        // what the screen shows and what prints cannot disagree.
+        // Built here, the way the claim builds it (`numbering::claim`), so what the screen
+        // shows and what prints cannot disagree.
         next: format!("{}{:0width$}", counter.prefix, next),
         next_value: u32::try_from(next).unwrap_or(1),
         issued: counter.last_issued.and_then(|n| u32::try_from(n).ok()),
@@ -190,14 +163,7 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
     let at = crate::flows::now();
     let day = crate::flows::today(at);
 
-    // **The refusal is returned as a VALUE, not as a database error.**
-    //
-    // Found by doing it: raising `DbError::invariant` sent the sentence through
-    // `words::from_db`, so the shopkeeper read "The shop's data could not be
-    // read. Nothing has been changed." with the real explanation hidden behind
-    // the details disclosure — which is audit **F8** exactly, on the one screen
-    // where the explanation IS the feature. Nothing is written before the check,
-    // so committing a transaction that decided not to act costs nothing.
+    // The refusal is returned as a VALUE, not as a database error.
     let refusal = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -206,9 +172,7 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                     .find(|c| c.kind == kind);
                 let issued = before.as_ref().and_then(|c| c.last_issued);
 
-                // **THE RULE, and it is the whole reason this screen is
-                // guarded.** A number that has been handed out is on a piece of
-                // paper in somebody's pocket and in a GST return.
+                // THE RULE, and it is the whole reason this screen is guarded.
                 if let Some(issued) = issued
                     && i64::from(edit.next_value) <= issued
                 {
@@ -248,8 +212,6 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                     u64::from(edit.next_value),
                 )?;
 
-                // R11 — the row goes in the same transaction as the change,
-                // and `COUNTER_CHANGED` has existed since P11 waiting for it.
                 mb_db::Repos::new(tx).audit().append(
                     OUTLET,
                     &mb_auth::AuditEntry::new(
@@ -291,9 +253,6 @@ pub fn numbering(app: tauri::State<'_, App>) -> UiResult<NumberingView> {
 }
 
 #[tauri::command]
-pub fn save_counter(
-    app: tauri::State<'_, App>,
-    edit: CounterEdit,
-) -> UiResult<NumberingView> {
+pub fn save_counter(app: tauri::State<'_, App>, edit: CounterEdit) -> UiResult<NumberingView> {
     save_counter_on(&app, edit)
 }

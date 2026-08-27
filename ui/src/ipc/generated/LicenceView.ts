@@ -2,9 +2,8 @@
 
 export type LicenceView = { 
 /**
- * `fine` · `grace` · `expired` · `suspended` · `revoked` · `cancelled` ·
- * `never-activated` · `trial-ended` · `needs-checking` ·
- * `bound-elsewhere` · `emergency`.
+ * `fine` · `grace` · `expired` · `suspended` · `revoked` · `cancelled` · `never-activated`
+ * · `trial-ended` · `needs-checking` · `bound-elsewhere` · `emergency`.
  */
 standing: string, 
 /**
@@ -12,8 +11,7 @@ standing: string,
  */
 chip: string, 
 /**
- * `ok`, `warn` or `danger` — and the words say it too (UI_GUIDELINES §2:
- * colour is never the only carrier).
+ * `ok`, `warn` or `danger` — and the words say it too.
  */
 tone: string, 
 /**
@@ -21,7 +19,7 @@ tone: string,
  */
 headline: string, shopName: string, planName: string, 
 /**
- * **"12 September", not a date field** (2.10).
+ * "12 September", not a date field (2.10).
  */
 renewsOn: string, 
 /**
@@ -47,13 +45,9 @@ included: Array<string>,
 /**
  * "checked 4 minutes ago", or "never".
  */
-checked: string, 
+checked: string, stillHeld: string, 
 /**
- * **BACKEND-C5's sentence**, when a deactivate could not reach the server.
- */
-stillHeld: string, 
-/**
- * D90 — the clock went backwards.
+ * The clock went backwards.
  */
 clockNote: string, 
 /**

@@ -2,14 +2,9 @@
 
 /**
  * What the floor did to an order the cashier has open.
- *
- * Kept beside the cart rather than merged into it: **the cashier's unsaved
- * typing is theirs**, and a phone that adds a dosa must not silently rewrite
- * what somebody is halfway through settling. The screen shows this and offers
- * to take it in.
  */
 export type FloorChange = { 
 /**
- * The whole sentence: "Ravi added 2 Masala Dosa from the floor."
+ * The whole sentence: "Ravi added 2 Masala Dosa from the floor.".
  */
 says: string, itemId: string, name: string, qty: string, note: string | null, };

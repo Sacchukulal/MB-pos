@@ -11,7 +11,6 @@ qty: string, free: string, rate: MoneyView, discount: MoneyView,
  */
 tax: string, taxAmount: MoneyView, value: MoneyView, 
 /**
- * **"₹42.30 a kg"** — what this line actually made the food cost, all in
- * (D123). The number the whole module exists to get right.
+ * "₹42.30 a kg" — what this line actually made the food cost, all in.
  */
 landed: string, returnable: string, };

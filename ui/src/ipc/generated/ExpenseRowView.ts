@@ -7,6 +7,6 @@ export type ExpenseRowView = { id: string, categoryId: string | null, category: 
  */
 mode: string, modeTag: string, paidTo: string | null, reference: string | null, 
 /**
- * "18% · 180.00", or absent. The input credit, said in one string.
+ * "18% · 180.00", or absent.
  */
 inputCredit: string | null, note: string | null, };

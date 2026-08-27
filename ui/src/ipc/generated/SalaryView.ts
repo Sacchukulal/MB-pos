@@ -5,7 +5,6 @@ import type { StructureView } from "./StructureView";
 
 export type SalaryView = { staffId: string, staffName: string, 
 /**
- * Every structure, oldest first. **The history stays** — a raise is a new
- * row, never an edit, which is what lets last month recompute the same.
+ * Every structure, oldest first.
  */
 structures: Array<StructureView>, advances: Array<AdvanceView>, outstanding: MoneyView, mayManage: boolean, };

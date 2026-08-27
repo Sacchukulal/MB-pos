@@ -1,12 +1,3 @@
-﻿/**
- * **T2, T3, T4 and T5 — the billing screen.**
- *
- * The Rust side proves the figures (`src-tauri/src/billing.rs`); this proves
- * what the screen does with them: that the four table states are told apart
- * without colour, that the density mechanism engages, that a parcel order is
- * never lost, and that the totals block does not collapse.
- */
-
 import { render, screen, cleanup, within, act } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -42,9 +33,8 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
 
 describe('the table grid (scope 1.4)', () => {
   it('tells all four states apart WITHOUT colour', () => {
-    // §2 rule 2: "colour is never the only signal." The class carries the
-    // form — dashed vs solid, stripe — and a grey-scale reading of the screen
-    // must still distinguish them.
+    // §2 rule 2: "colour is never the only signal." The class carries the form — dashed vs
+    // solid, stripe — and a grey-scale reading of the screen must still distinguish them.
     const { container } = render(
       <TableGrid
         tables={[
@@ -67,26 +57,14 @@ describe('the table grid (scope 1.4)', () => {
     }
   });
 
-  /**
-   * **The table you are on is marked, and being on it costs nothing else.**
-   *
-   * The owner, 2026-08-22: *"In billing page, selected table is not
-   * highlighted. user should know which table he selected right?"*
-   *
-   * There used to be a fifth STATE for this, `loaded`, and the test above
-   * asserted it happily — while the screen could not mark an empty table at
-   * all, because that state was decided by matching the cart's order and an
-   * empty table has no order. A state is one fact; this is two.
-   */
+  /** The table you are on is marked, and being on it costs nothing else. */
   it('marks the selected table WITHOUT taking its state away', () => {
     const { container } = render(
       <TableGrid
         tables={[
-          // The case the owner hit: nothing typed on it yet.
           table({ id: '1', label: '1', state: 'free', selected: true }),
-          // And the case that would have gone wrong the other way — a late
-          // table must not stop looking late because somebody opened it. §4
-          // calls the late signal "not optional".
+          // And the case that would have gone wrong the other way — a late table must not stop
+          // looking late because somebody opened it.
           table({ id: '2', label: '2', state: 'late', minutes: 47, selected: true }),
           table({ id: '3', label: '3', state: 'free' }),
         ]}
@@ -129,8 +107,7 @@ describe('the table grid (scope 1.4)', () => {
   });
 
   it('steps down a density past the threshold, and not before', () => {
-    // T3. §4: "a busy shop has 40+ tables. Tiles must stay readable at that
-    // count without scrolling becoming the interaction."
+    // "a busy shop has 40+ tables.
     const many = (count: number) =>
       Array.from({ length: count }, (_, n) =>
         table({ id: `t${n}`, label: `${n + 1}` }),
@@ -154,8 +131,6 @@ describe('the table grid (scope 1.4)', () => {
   });
 
   it('never loses a parcel order — it goes in the "No table" group', () => {
-    // T4, and §4: "so no order is ever invisible." This is exactly the kind of
-    // order that goes missing.
     render(
       <TableGrid
         tables={[
@@ -179,7 +154,6 @@ describe('the table grid (scope 1.4)', () => {
   });
 
   it('filters, because twenty open tables is otherwise a scrolling exercise', () => {
-    // Audit F5.
     render(
       <TableGrid
         tables={[table({ id: '1', label: '1' }), table({ id: '2', label: '12' })]}
@@ -235,9 +209,6 @@ describe('the totals block (audit B10 and B11)', () => {
   });
 
   it('keeps the rate-by-rate breakdown OFF the till', () => {
-    // The owner, 2026-08-23. It is still computed on every bill, still printed
-    // and still in the reports — see mb-print's bill template and reports.rs.
-    // A cashier reading a total to a customer is not filing a return.
     render(<Totals bill={bill} />);
     for (const gone of [
       'Taxable @ 5%',
@@ -252,9 +223,9 @@ describe('the totals block (audit B10 and B11)', () => {
   });
 
   it('says when a discount was capped (D15)', () => {
-    // "A discount that had to be capped says so; the flag reaches the bill."
-    // It reaches `Bill`; this is the last hop, and dropping it here would kill
-    // a flag that has travelled three phases.
+    // "A discount that had to be capped says so; the flag reaches the bill." It reaches `Bill`;
+    // this is the last hop, and dropping it here would kill a flag that has travelled three
+    // phases.
     render(<Totals bill={bill} />);
     expect(screen.getByText(/was reduced/)).toBeInTheDocument();
   });
@@ -272,20 +243,7 @@ describe('the totals block (audit B10 and B11)', () => {
   });
 });
 
-/**
- * **An empty floor draws nothing at all** — P30.5.
- *
- * It used to answer with a card in the middle of the counter: "No tables set
- * up yet · Tables are added in Settings." A tea stall, a bakery and a parcel
- * counter have no tables and never will, so that was permanent furniture
- * explaining a feature they do not want, on the one screen a cashier looks at
- * all day. The owner's word for it was *"big buttons without proper styling
- * eating so much spaces unnessorily"*, and they had installed it on a real
- * machine to find out.
- *
- * A filter that matches nothing is the OPPOSITE case and keeps its answer:
- * there is something, and the reason it is not on screen is the filter.
- */
+/** An empty floor draws nothing at all. */
 describe('an empty floor (P30.5)', () => {
   it('takes no space when there is nothing to show and no filter', () => {
     const { container } = render(<TableGrid tables={[]} filter="" onOpen={vi.fn()}
@@ -300,31 +258,9 @@ describe('an empty floor (P30.5)', () => {
   });
 });
 
-/**
- * **The payment modes** — the owner's second point, 2026-08-22.
- *
- * > *"the payment mode selection is also not visible, and it also shows some
- * > error notification, what is it? check properly."*
- *
- * The notification was **"That payment could not be taken — a payment has to be
- * more than zero"**. Each mode button takes *the balance Rust computed*; once
- * the bill was covered that balance was zero, and the buttons went on offering
- * themselves. Rust's refusal is right and stays — a zero-rupee payment row is
- * noise in every report downstream. The button that could only ever produce it
- * was the bug.
- *
- * Nothing here reaches Rust. That is the point: the rule is about a number Rust
- * already sent, and it is now assertable in four lines.
- */
+/** The payment modes. */
 describe('the payment modes (2026-08-23)', () => {
-  /**
-   * **The row is a CHOICE, not an action.**
-   *
-   * Pressing Cash used to take the whole bill on the spot, which is why the
-   * screen then needed a "Clear payments" button and a paragraph explaining
-   * itself. Nothing is charged here now: the lit mode is what `Complete bill`
-   * settles in.
-   */
+  /** The row is a CHOICE, not an action. */
   const mode = (label: string) =>
     screen.getByRole('button', { name: new RegExp(`^${label}`) });
 

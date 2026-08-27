@@ -1,38 +1,4 @@
-//! **The stock book** — P25, scope 4.2, 4.3, 4.4, 4.6, 4.7 and 4.9.
-//!
-//! # The two sentences this file exists to obey
-//!
-//! **The till is sacred; the stock book is not.** [`StockRepo::deduct_for_bill`]
-//! runs inside the settle transaction and cannot refuse a bill. The pure part
-//! of it — `mb_core::recipe::explode` — has no error return at all (D112), for
-//! the same reason `Feature` has no `Billing` variant (D86): a call that would
-//! stop a cashier taking money must not typecheck.
-//!
-//! **A number nobody can trace is worse than no number.** Every quantity here
-//! is the sum of `stock_movements` rows that each say who, when and why. That
-//! is D67 (*the cash position is a QUERY*) and P15's credit ledger (*an account
-//! is a SUM of rows*) applied a third time.
-//!
-//! # Why the deduction is INSIDE the settle transaction
-//!
-//! "It must never slow a sale" reads like an argument for doing it afterwards.
-//! It is the opposite:
-//!
-//! * It is the **same commit and therefore the same single fsync** (D23, and
-//!   `settle.rs`'s own opening paragraph). On the reference machine's 5400 rpm
-//!   disk that fsync is the entire cost of a settle; twenty more INSERTs riding
-//!   in it are microseconds of CPU. A background deduction would cost a
-//!   **second** fsync and be slower.
-//! * Idempotency is free: one commit, one `applied_events` row (D82).
-//! * A crash between "bill settled" and "stock deducted" cannot exist.
-//!
-//! The thing that made "afterwards" look attractive — that a bug in deduction
-//! could roll a bill back — is answered by the type, not by the placement.
-//!
-//! **A shop that has never opened this module pays one cached boolean.** Most
-//! shops will never write a recipe and must not pay a query per settle;
-//! [`StockRepo::has_any_recipe`] is that query and `src-tauri` caches its answer
-//! exactly as D70 caches the day rule.
+//! The stock book.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -54,33 +20,29 @@ pub struct Material {
     pub name: String,
     pub dimension: Dimension,
     pub category: String,
-    /// **D116** — where you buy it. The buy list groups by this, and it stays
-    /// the answer even after P26 brought suppliers: a shop with one owner and
-    /// one scooter buys from "the vegetable market".
+    /// Where you buy it.
     pub buy_from: String,
-    /// **P26.** Who you buy it from, when the shop has said. `None` is the
-    /// everyday answer; setting it is what lets a purchase order be raised.
+    /// Who you buy it from, when the shop has said.
     pub supplier_id: Option<String>,
     pub reorder_level: Qty,
     pub reorder_qty: Qty,
-    /// **D117** — a property that warns, not batch tracking.
+    /// A property that warns, not batch tracking.
     pub is_perishable: bool,
     pub shelf_life_days: Option<u32>,
-    /// Scope 4.10, DESIGN.
+    /// 10, DESIGN.
     pub location: String,
-    /// **D118** — a weighted average of what actually came in.
+    /// A weighted average of what actually came in.
     pub avg_cost: UnitCost,
     pub cost_changed_at: Option<Timestamp>,
-    /// **D115** — `None` means *never counted*, and the variance report says so.
+    /// `None` means never counted, and the variance report says so.
     pub last_counted_at: Option<Timestamp>,
     pub is_active: bool,
     pub sort_order: i64,
-    /// The shop's own packs. The standard units are not stored (D108).
+    /// The shop's own packs.
     pub packs: Vec<(String, Qty)>,
     /// Which pack the buy list defaults to.
     pub purchase_unit: Option<String>,
-    /// Which pack the recipe screen defaults to. Rice is BOUGHT in bags and
-    /// COOKED in grams, so these are two answers and not one.
+    /// Which pack the recipe screen defaults to.
     pub recipe_unit: Option<String>,
 }
 
@@ -110,18 +72,16 @@ impl Material {
         }
     }
 
-    /// Every unit this material may be spoken about in: the dimension's
-    /// standards plus the shop's own packs (D108).
-    ///
-    /// A pack the shop has defined twice, or defined as nothing, is **dropped
-    /// rather than raised**: this is called to draw a screen and to convert a
-    /// row that is already on disk, and a units list that can fail is a stock
-    /// page that goes blank because somebody typed a zero into a pack once.
+    /// Every unit this material may be spoken about in: the dimension's standards plus the
+    /// shop's own packs.
     #[must_use]
     pub fn units(&self) -> Units {
         let mut units = Units::standard(self.dimension);
         for (name, base_per_unit) in &self.packs {
-            units = units.clone().with_pack(name.clone(), *base_per_unit).unwrap_or(units);
+            units = units
+                .clone()
+                .with_pack(name.clone(), *base_per_unit)
+                .unwrap_or(units);
         }
         units
     }
@@ -129,26 +89,30 @@ impl Material {
     /// The unit a recipe line should default to.
     #[must_use]
     pub fn default_recipe_unit(&self) -> String {
-        self.recipe_unit.clone().unwrap_or_else(|| self.dimension.base_unit().to_owned())
+        self.recipe_unit
+            .clone()
+            .unwrap_or_else(|| self.dimension.base_unit().to_owned())
     }
 
     /// The unit the buy list should count in.
     #[must_use]
     pub fn default_purchase_unit(&self) -> String {
-        self.purchase_unit.clone().unwrap_or_else(|| self.dimension.base_unit().to_owned())
+        self.purchase_unit
+            .clone()
+            .unwrap_or_else(|| self.dimension.base_unit().to_owned())
     }
 }
 
-/// Where in the shop something is kept. Scope 4.10 is DESIGN, so there is one.
+/// Where in the shop something is kept.
 pub const DEFAULT_LOCATION: &str = "Store";
 
 /// A material and what is on the shelf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OnHand {
     pub material: Material,
-    /// **Signed.** A stock balance is the one quantity in this product allowed
-    /// to go below zero — a shop that sold food it never recorded buying —
-    /// because refusing would have refused the sale.
+    /// Signed. A stock balance is the one quantity in this product allowed to go below zero — a
+    /// shop that sold food it never recorded buying — because refusing would have refused the
+    /// sale.
     pub base_qty: Qty,
     pub last_movement_at: Option<Timestamp>,
 }
@@ -157,10 +121,13 @@ impl OnHand {
     /// What this holding is worth, at the material's current cost.
     #[must_use]
     pub fn value(&self) -> Money {
-        self.material.avg_cost.cost_of(self.base_qty).unwrap_or(Money::ZERO)
+        self.material
+            .avg_cost
+            .cost_of(self.base_qty)
+            .unwrap_or(Money::ZERO)
     }
 
-    /// Scope 4.6 — is this on the buy list?
+    /// Is this on the buy list?
     #[must_use]
     pub fn is_low(&self) -> bool {
         self.material.reorder_level.is_positive() && self.base_qty <= self.material.reorder_level
@@ -172,24 +139,22 @@ impl OnHand {
 pub enum MovementKind {
     /// Somebody said what was on the shelf on day one.
     Opening,
-    /// **P26 writes these.** The kind is defined here so that P26 adds no
-    /// column to `stock_movements`.
     Purchase,
-    /// A bill took it (D112).
+    /// A bill took it.
     Sale,
-    /// A void put it back — D113, by negating a row.
+    /// A void put it back.
     Reversal,
-    /// Scope 4.7, the report that catches theft.
+    /// 7, the report that catches theft.
     Wastage,
     /// A person changed the figure, with a reason.
     Adjustment,
-    /// A made material came into existence (D111).
+    /// A made material came into existence.
     ProductionIn,
     /// An input consumed by making one.
     ProductionOut,
-    /// Scope 4.10, DESIGN.
+    /// 10, DESIGN.
     TransferIn,
-    /// Scope 4.10, DESIGN.
+    /// 10, DESIGN.
     TransferOut,
 }
 
@@ -241,16 +206,18 @@ impl MovementKind {
     }
 
     pub fn from_tag(tag: &str) -> Result<Self, DbError> {
-        MovementKind::ALL.iter().copied().find(|k| k.tag() == tag).ok_or_else(|| {
-            DbError::invariant(format!("stock_movements.kind holds an unknown value `{tag}`"))
-        })
+        MovementKind::ALL
+            .iter()
+            .copied()
+            .find(|k| k.tag() == tag)
+            .ok_or_else(|| {
+                DbError::invariant(format!(
+                    "stock_movements.kind holds an unknown value `{tag}`"
+                ))
+            })
     }
 
-    /// **Does this kind set the material's average cost?** D118.
-    ///
-    /// A reversal deliberately does not: putting back the goods that left is
-    /// the same goods returning, and re-blending them at today's price would
-    /// move an average for a transaction that added nothing to the shelf.
+    /// Does this kind set the material's average cost?
     #[must_use]
     pub const fn revalues(self) -> bool {
         matches!(
@@ -270,14 +237,14 @@ pub struct Movement {
     pub id: String,
     pub material: MaterialId,
     pub kind: MovementKind,
-    /// **Signed** base units. Out is negative, in is positive.
+    /// Signed base units. Out is negative, in is positive.
     pub base_qty: Qty,
-    /// **D109** — what the person typed, and in which unit. The label half.
+    /// What the person typed, and in which unit.
     pub typed_qty: Qty,
     pub typed_unit: String,
-    /// `None` means *"whatever this material currently costs"*, which is the
-    /// right answer for everything leaving the shelf and is resolved here so
-    /// that no caller can forget to value a wastage row.
+    /// `None` means "whatever this material currently costs", which is the right answer for
+    /// everything leaving the shelf and is resolved here so that no caller can forget to value
+    /// a wastage row.
     pub unit_cost: Option<UnitCost>,
     pub at: Timestamp,
     pub business_day: BusinessDay,
@@ -286,10 +253,10 @@ pub struct Movement {
     pub order_line_id: Option<String>,
     pub reason_id: Option<String>,
     pub note: Option<String>,
-    /// **D113** — the row this puts back.
+    /// The row this puts back.
     pub reverses_id: Option<String>,
     pub produced_for: Option<MaterialId>,
-    /// **D111** — a sale needed a made material nobody had recorded making.
+    /// A sale needed a made material nobody had recorded making.
     pub was_automatic: bool,
     pub location: String,
 }
@@ -326,7 +293,7 @@ impl Movement {
         }
     }
 
-    /// **D109** — record what the person actually typed beside the truth.
+    /// Record what the person actually typed beside the truth.
     #[must_use]
     pub fn typed(mut self, qty: Qty, unit: impl Into<String>) -> Self {
         self.typed_qty = qty;
@@ -366,9 +333,7 @@ pub struct MovementRow {
     pub reason: Option<String>,
     pub note: Option<String>,
     pub was_automatic: bool,
-    /// Which made material a `production_out` fed, by name. It is what lets the
-    /// ledger read "used to make Gravy base" instead of leaving somebody to
-    /// work out why the tomato moved.
+    /// Which made material a `production_out` fed, by name.
     pub produced_for: Option<String>,
 }
 
@@ -378,7 +343,7 @@ pub struct ProblemRow {
     pub id: String,
     pub kind: String,
     pub subject: String,
-    /// **A whole sentence an owner can act on** — D100.
+    /// A whole sentence an owner can act on.
     pub sentence: String,
     pub occurrences: i64,
     pub first_at: Timestamp,
@@ -386,7 +351,7 @@ pub struct ProblemRow {
     pub last_order_id: Option<OrderId>,
 }
 
-/// What a period consumed, theoretical against actual — scope 4.9, D115.
+/// What a period consumed, theoretical against actual.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumptionRow {
     pub material: MaterialId,
@@ -398,15 +363,14 @@ pub struct ConsumptionRow {
     /// `actual - theoretical`. Positive means more went than should have.
     pub variance: Qty,
     pub variance_value: Money,
-    /// **D115** — `None` means nobody has ever counted this, and the screen
-    /// says so instead of showing a confident 0.0%.
+    /// `None` means nobody has ever counted this, and the screen says so instead of showing a
+    /// confident 0.0%.
     pub last_counted_at: Option<Timestamp>,
 }
 
 impl ConsumptionRow {
-    /// The variance as a percentage of what should have been used, in basis
-    /// points so there is no float. `None` when nothing should have been used,
-    /// because a percentage of nothing is not a number.
+    /// The variance as a percentage of what should have been used, in basis points so there is
+    /// no float.
     #[must_use]
     #[allow(
         clippy::integer_division,
@@ -436,10 +400,6 @@ impl<'a> StockRepo<'a> {
     pub(crate) fn new(tx: &'a Transaction<'a>) -> Self {
         StockRepo { tx }
     }
-
-    // =======================================================================
-    // MATERIALS — scope 4.2
-    // =======================================================================
 
     /// Add or change a material and its packs.
     pub fn save_material(
@@ -493,13 +453,14 @@ impl<'a> StockRepo<'a> {
             ],
         )?;
 
-        // **The average cost is NOT written here on an update.** It is the
-        // ledger's answer (D118), and a screen that could type over it would be
-        // the "current price from 2019" this decision exists to prevent.
+        // The average cost is NOT written here on an update.
 
-        // The packs are replaced wholesale: they are a small list edited as one
-        // thing, exactly like a modifier group's choices.
-        self.tx.execute("DELETE FROM material_units WHERE material_id = ?1", [material.id.as_str()])?;
+        // The packs are replaced wholesale: they are a small list edited as one thing, exactly
+        // like a modifier group's choices.
+        self.tx.execute(
+            "DELETE FROM material_units WHERE material_id = ?1",
+            [material.id.as_str()],
+        )?;
         for (seq, (name, base_per_unit)) in material.packs.iter().enumerate() {
             if name.trim().is_empty() || !base_per_unit.is_positive() {
                 return Err(DbError::invariant(format!(
@@ -535,9 +496,6 @@ impl<'a> StockRepo<'a> {
         let rows = stmt.query_map(params![outlet, i64::from(include_retired)], read_material)?;
         let mut out: Vec<Material> = rows.collect::<Result<_, _>>()?;
 
-        // One query for every pack, rather than one per material: a shop with
-        // 300 materials would otherwise open its stock screen with 301 round
-        // trips, which is R4's mistake in a different module.
         let mut packs = self.tx.prepare(
             "SELECT material_id, name, base_per_unit, is_purchase_default, is_recipe_default
                FROM material_units ORDER BY material_id, sort_order",
@@ -570,7 +528,10 @@ impl<'a> StockRepo<'a> {
     }
 
     pub fn material(&self, outlet: &str, id: &MaterialId) -> Result<Option<Material>, DbError> {
-        Ok(self.materials(outlet, true)?.into_iter().find(|m| &m.id == id))
+        Ok(self
+            .materials(outlet, true)?
+            .into_iter()
+            .find(|m| &m.id == id))
     }
 
     /// Every material with what is on the shelf beside it.
@@ -580,14 +541,20 @@ impl<'a> StockRepo<'a> {
         Ok(materials
             .into_iter()
             .map(|material| {
-                let (base_qty, last_movement_at) =
-                    balances.get(&material.id).copied().unwrap_or((Qty::ZERO, None));
-                OnHand { material, base_qty, last_movement_at }
+                let (base_qty, last_movement_at) = balances
+                    .get(&material.id)
+                    .copied()
+                    .unwrap_or((Qty::ZERO, None));
+                OnHand {
+                    material,
+                    base_qty,
+                    last_movement_at,
+                }
             })
             .collect())
     }
 
-    /// The balance cache (D114), as a map.
+    /// The balance cache, as a map.
     pub fn balances(
         &self,
         outlet: &str,
@@ -603,33 +570,25 @@ impl<'a> StockRepo<'a> {
             let at: Option<i64> = row.get(2)?;
             out.insert(
                 MaterialId::new(id),
-                (encode::qty_from_sql(row.get(1)?), at.map(encode::timestamp_from_sql)),
+                (
+                    encode::qty_from_sql(row.get(1)?),
+                    at.map(encode::timestamp_from_sql),
+                ),
             );
         }
         Ok(out)
     }
 
-    // =======================================================================
-    // RECIPES — scope 4.3
-    // =======================================================================
-
-    /// Save a recipe, **refusing a loop by name** (D111).
-    pub fn save_recipe(
-        &self,
-        outlet: &str,
-        recipe: &Recipe,
-        at: Timestamp,
-    ) -> Result<(), DbError> {
+    /// Save a recipe, refusing a loop by name.
+    pub fn save_recipe(&self, outlet: &str, recipe: &Recipe, at: Timestamp) -> Result<(), DbError> {
         if recipe.lines.is_empty() {
             return Err(DbError::invariant(
                 "a recipe with nothing in it would take nothing off the shelf. \
                  Add at least one material, or delete the recipe.",
             ));
         }
-        // Checked at SAVE time, in words that name the loop, because the
-        // alternative is discovering it at 8 pm inside a settle. The candidate
-        // is checked against every OTHER recipe, so re-saving one that is
-        // already stored does not accuse itself.
+        // Checked at SAVE time, in words that name the loop, because the alternative is
+        // discovering it at 8 pm inside a settle.
         let mut others = self.recipes(outlet)?;
         others.remove(&recipe.owner);
         if let Some(chain) = others.cycle_if_saved(recipe) {
@@ -666,7 +625,8 @@ impl<'a> StockRepo<'a> {
             ],
         )?;
 
-        self.tx.execute("DELETE FROM recipe_lines WHERE recipe_id = ?1", [&id])?;
+        self.tx
+            .execute("DELETE FROM recipe_lines WHERE recipe_id = ?1", [&id])?;
         for (seq, line) in recipe.lines.iter().enumerate() {
             if !line.base_qty.is_positive() {
                 return Err(DbError::invariant(
@@ -691,20 +651,17 @@ impl<'a> StockRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "recipes", &id, Op::Upsert, at)
     }
 
-    /// Take a recipe away. The dish stays on the menu and simply stops
-    /// deducting, which is what a shop wants when it has stopped costing one.
+    /// Take a recipe away.
     pub fn delete_recipe(&self, outlet: &str, owner: &RecipeOwner) -> Result<(), DbError> {
         let id = recipe_id(outlet, owner);
-        self.tx.execute("DELETE FROM recipe_lines WHERE recipe_id = ?1", [&id])?;
-        self.tx.execute("DELETE FROM recipes WHERE id = ?1", [&id])?;
+        self.tx
+            .execute("DELETE FROM recipe_lines WHERE recipe_id = ?1", [&id])?;
+        self.tx
+            .execute("DELETE FROM recipes WHERE id = ?1", [&id])?;
         Ok(())
     }
 
     /// Every recipe the shop has.
-    ///
-    /// Loaded whole, because there are tens of them and not thousands, and
-    /// because `mb_core::recipe::explode` is pure — handing it a map is what
-    /// keeps a database query out of the settle transaction's inner loop.
     pub fn recipes(&self, outlet: &str) -> Result<Recipes, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT r.id, r.owner_kind, r.item_id, r.modifier_id, r.material_id, r.batch_yield,
@@ -755,9 +712,6 @@ impl<'a> StockRepo<'a> {
         Ok(out)
     }
 
-    /// **The cheap gate.** A shop with no recipes must not pay a query per
-    /// settle, so `src-tauri` caches this answer the way D70 caches the day
-    /// rule and refreshes it when a recipe is saved.
     pub fn has_any_recipe(&self, outlet: &str) -> Result<bool, DbError> {
         let count: i64 = self.tx.query_row(
             "SELECT EXISTS (SELECT 1 FROM recipes WHERE outlet_id = ?1)",
@@ -792,23 +746,18 @@ impl<'a> StockRepo<'a> {
         Ok(out)
     }
 
-    // =======================================================================
-    // THE LEDGER
-    // =======================================================================
+    // THE LEDGER.
 
-    /// **Write one movement, and keep the balance cache and the average cost in
-    /// step — in this transaction.**
-    ///
-    /// Idempotent by id, like every other write in this product since D82: a
-    /// retried settle must move stock once.
+    /// Write one movement, and keep the balance cache and the average cost in step — in this
+    /// transaction.
     pub fn record(&self, outlet: &str, movement: &Movement) -> Result<(), DbError> {
         if movement.base_qty.is_zero() {
-            return Err(DbError::invariant("a movement of nothing is not a movement"));
+            return Err(DbError::invariant(
+                "a movement of nothing is not a movement",
+            ));
         }
 
-        // **The cost of what leaves is what the shelf holds.** Resolved here
-        // rather than at the call site, so no caller can forget to value a
-        // wastage row and produce a theft report reading ₹0.
+        // The cost of what leaves is what the shelf holds.
         let unit_cost = match movement.unit_cost {
             Some(given) => given,
             None => self.avg_cost(outlet, &movement.material)?,
@@ -848,12 +797,12 @@ impl<'a> StockRepo<'a> {
             ],
         )?;
         if inserted == 0 {
-            // The same movement, twice. D82: applied once.
+            // The same movement, twice.
             return Ok(());
         }
 
-        // **D118 — blend before the balance moves**, because the weight is the
-        // holding as it was BEFORE this delivery arrived.
+        // Blend before the balance moves, because the weight is the holding as it was BEFORE
+        // this delivery arrived.
         if movement.kind.revalues() && movement.base_qty.is_positive() {
             let holding = self.balance(outlet, &movement.material)?;
             let blended = self
@@ -916,14 +865,12 @@ impl<'a> StockRepo<'a> {
         Ok(UnitCost::from_paise_per_thousand(paise))
     }
 
-    /// **D114 — rebuild the cache from the ledger, which is the truth.**
-    ///
-    /// Returns how many materials it corrected. A cache nobody verifies is a
-    /// stored balance with extra words, so this is a visible action and Health
-    /// runs the same comparison.
     pub fn rebuild_balances(&self, outlet: &str, at: Timestamp) -> Result<usize, DbError> {
         let before = self.balances(outlet)?;
-        self.tx.execute("DELETE FROM material_balances WHERE outlet_id = ?1", [outlet])?;
+        self.tx.execute(
+            "DELETE FROM material_balances WHERE outlet_id = ?1",
+            [outlet],
+        )?;
         self.tx.execute(
             "INSERT INTO material_balances (outlet_id, material_id, base_qty, last_movement_at)
              SELECT outlet_id, material_id, SUM(base_qty), MAX(at)
@@ -939,8 +886,8 @@ impl<'a> StockRepo<'a> {
                 corrected += 1;
             }
         }
-        // A material that had a cached row and now has none is also a
-        // correction, and it is the one a naive comparison misses.
+        // A material that had a cached row and now has none is also a correction, and it is the
+        // one a naive comparison misses.
         for material in before.keys() {
             if !after.contains_key(material) {
                 corrected += 1;
@@ -949,12 +896,6 @@ impl<'a> StockRepo<'a> {
         Ok(corrected)
     }
 
-    /// **D114's verification** — which materials' cached balances disagree with
-    /// the sum of their movements.
-    ///
-    /// Run every time the stock screen opens. Summing the ledger for a handful
-    /// of materials is cheap; being quietly wrong about stock for a year is
-    /// not, and a cache nobody verifies is a stored balance with extra words.
     pub fn drifted(&self, outlet: &str) -> Result<Vec<MaterialId>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT b.material_id
@@ -972,8 +913,7 @@ impl<'a> StockRepo<'a> {
         Ok(out)
     }
 
-    /// Names, balances and what has been retired, for
-    /// `mb_core::recipe::explode`.
+    /// Names, balances and what has been retired, for `mb_core::recipe::explode`.
     pub fn facts(&self, outlet: &str) -> Result<MaterialFacts, DbError> {
         let mut names = BTreeMap::new();
         let mut retired = BTreeSet::new();
@@ -1006,8 +946,9 @@ impl<'a> StockRepo<'a> {
     }
 
     fn material_names(&self, outlet: &str) -> Result<BTreeMap<MaterialId, String>, DbError> {
-        let mut stmt =
-            self.tx.prepare("SELECT id, name FROM materials WHERE outlet_id = ?1")?;
+        let mut stmt = self
+            .tx
+            .prepare("SELECT id, name FROM materials WHERE outlet_id = ?1")?;
         let mut cursor = stmt.query([outlet])?;
         let mut out = BTreeMap::new();
         while let Some(row) = cursor.next()? {
@@ -1019,41 +960,35 @@ impl<'a> StockRepo<'a> {
 
     /// What each material currently costs, for the food-cost walk.
     pub fn costs(&self, outlet: &str) -> Result<BTreeMap<MaterialId, UnitCost>, DbError> {
-        let mut stmt =
-            self.tx.prepare("SELECT id, avg_cost FROM materials WHERE outlet_id = ?1")?;
+        let mut stmt = self
+            .tx
+            .prepare("SELECT id, avg_cost FROM materials WHERE outlet_id = ?1")?;
         let mut cursor = stmt.query([outlet])?;
         let mut out = BTreeMap::new();
         while let Some(row) = cursor.next()? {
             let id: String = row.get(0)?;
-            out.insert(MaterialId::new(id), UnitCost::from_paise_per_thousand(row.get(1)?));
+            out.insert(
+                MaterialId::new(id),
+                UnitCost::from_paise_per_thousand(row.get(1)?),
+            );
         }
         Ok(out)
     }
 
-    // =======================================================================
-    // THE SALE PATH — D112 and D113
-    // =======================================================================
+    // THE SALE PATH.
 
-    /// **Deduct what a settled bill used. This cannot refuse the bill.**
-    ///
-    /// It returns `Result` only because writing a row can fail on a disk that
-    /// is full — the same failure that would have rolled the bill back anyway.
-    /// **No business problem reaches this return value**: a missing material, a
-    /// negative shelf, a deleted recipe, a loop, an ad-hoc line with no item id
-    /// — every one of them becomes a `stock_problems` row and the bill settles.
-    /// Read D112 before changing that.
+    /// Deduct what a settled bill used.
     pub fn deduct_for_bill(
         &self,
         outlet: &str,
         order: &SettledOrder,
         at: Timestamp,
     ) -> Result<(), DbError> {
-        // **The cheap gate**, first, before anything else touches the disk.
+        // The cheap gate, first, before anything else touches the disk.
         if !self.has_any_recipe(outlet)? {
             return Ok(());
         }
-        // **D82** — the id, the effect and the outcome in one transaction. A
-        // retried settle deducts once.
+        // The id, the effect and the outcome in one transaction.
         let event = format!("stock:{}", order.core.id);
         let claimed = self.tx.execute(
             "INSERT INTO applied_events (event_id, outlet_id, applied_at, source, result)
@@ -1073,19 +1008,15 @@ impl<'a> StockRepo<'a> {
         let day = order.core.business_day;
         let by = order.settled_by.clone();
 
-        // **The rows go in the order the kitchen did them**, and it matters for
-        // more than tidiness. `record` values anything leaving the shelf at the
-        // material's CURRENT average cost, so a gravy sold before the batch
-        // that supplied it had been written was valued at nothing — the first
-        // curry of a shop's life recorded "sold 150 g of gravy, worth ₹0.00".
-        // Found by settling thirty bills and reading the ledger back with
-        // `peek`; every test passed throughout.
-        //
-        // So: the inputs come off the shelf, then the batch comes into
-        // existence carrying what those inputs cost, and only then does the
-        // dish draw it down.
-        let inputs = explosion.draws.iter().filter(|d| d.for_production.is_some());
-        let sales = explosion.draws.iter().filter(|d| d.for_production.is_none());
+        // The rows go in the order the kitchen did them, and it matters for more than tidiness.
+        let inputs = explosion
+            .draws
+            .iter()
+            .filter(|d| d.for_production.is_some());
+        let sales = explosion
+            .draws
+            .iter()
+            .filter(|d| d.for_production.is_none());
 
         for (seq, draw) in inputs.enumerate() {
             let mut movement = Movement::new(
@@ -1106,8 +1037,7 @@ impl<'a> StockRepo<'a> {
         }
 
         for (seq, made) in explosion.productions.iter().enumerate() {
-            // **The made material's cost is what its inputs cost.** Anything
-            // else would invent a price for something nobody bought.
+            // The made material's cost is what its inputs cost.
             let unit_cost = self.production_cost(outlet, made, &recipes)?;
             let mut movement = Movement::new(
                 format!("stk_{}_p{seq}", order.core.id),
@@ -1149,12 +1079,7 @@ impl<'a> StockRepo<'a> {
         Ok(())
     }
 
-    /// **D113 — put back exactly what was taken, by negating the rows.**
-    ///
-    /// Not by re-running the recipe. Voiding Tuesday's bill on Friday must
-    /// return Tuesday's quantities at Tuesday's costs; re-exploding would use
-    /// Friday's recipe, and if the chef changed the gravy on Wednesday the rice
-    /// balance would permanently gain the difference.
+    /// Put back exactly what was taken, by negating the rows.
     pub fn reverse_for_bill(
         &self,
         outlet: &str,
@@ -1206,8 +1131,8 @@ impl<'a> StockRepo<'a> {
             self.record(outlet, &movement)?;
         }
 
-        // The problems this bill raised are no longer this bill's, so they stop
-        // counting against it.
+        // The problems this bill raised are no longer this bill's, so they stop counting
+        // against it.
         self.tx.execute(
             "UPDATE stock_problems SET resolved_at = ?2
               WHERE last_order_id = ?1 AND resolved_at IS NULL",
@@ -1246,15 +1171,7 @@ impl<'a> StockRepo<'a> {
         Ok(UnitCost::from_batch(costed.total, batch).unwrap_or(UnitCost::ZERO))
     }
 
-    // =======================================================================
-    // PROBLEMS
-    // =======================================================================
-
-    /// Record a problem, **grouped rather than one row per bill**.
-    ///
-    /// A shop with 400 items and 3 recipes would otherwise write four rows
-    /// every bill for ever, and the one thing an owner needs to read would be
-    /// buried under its own repetitions.
+    /// Record a problem, grouped rather than one row per bill.
     pub fn record_problem(
         &self,
         outlet: &str,
@@ -1287,7 +1204,6 @@ impl<'a> StockRepo<'a> {
         Ok(())
     }
 
-    /// Everything the owner has not dealt with.
     pub fn problems(&self, outlet: &str) -> Result<Vec<ProblemRow>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT id, kind, subject, sentence, occurrences, first_at, last_at, last_order_id
@@ -1313,7 +1229,6 @@ impl<'a> StockRepo<'a> {
         Ok(out)
     }
 
-    /// Mark one as dealt with, after the owner has fixed the thing.
     pub fn resolve_problem(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
         self.tx.execute(
             "UPDATE stock_problems SET resolved_at = ?3 WHERE outlet_id = ?1 AND id = ?2",
@@ -1322,9 +1237,7 @@ impl<'a> StockRepo<'a> {
         Ok(())
     }
 
-    // =======================================================================
-    // READING IT BACK
-    // =======================================================================
+    // READING IT BACK.
 
     /// One material's history, newest first.
     pub fn movements(
@@ -1390,14 +1303,7 @@ impl<'a> StockRepo<'a> {
         Ok(out)
     }
 
-    /// **Theoretical against actual** — scope 4.9, D115.
-    ///
-    /// Theoretical is what the recipes say the sales used (`sale` and
-    /// `production_out`, which are the same food). Actual adds wastage and
-    /// adjustments — and until P26's physical count exists, "actual" is only as
-    /// good as what a person typed, which is why `last_counted_at` travels with
-    /// every row and the screen says **"never counted"** rather than showing a
-    /// confident 0.0%.
+    /// Theoretical against actual.
     pub fn consumption(
         &self,
         outlet: &str,
@@ -1444,11 +1350,7 @@ impl<'a> StockRepo<'a> {
         Ok(out)
     }
 
-    /// The closing figure per material, written by the day close (P18).
-    ///
-    /// Idempotent: closing the same day twice writes the same rows, and
-    /// reopening and re-closing overwrites them, which is what D77's door
-    /// requires.
+    /// The closing figure per material, written by the day close.
     pub fn close_day(&self, outlet: &str, day: BusinessDay) -> Result<usize, DbError> {
         let written = self.tx.execute(
             "INSERT INTO stock_day_closes (outlet_id, business_day, material_id, closing_qty, unit_cost)
@@ -1464,7 +1366,7 @@ impl<'a> StockRepo<'a> {
     }
 }
 
-/// Which columns an owner fills in. Exactly one, enforced by the schema.
+/// Which columns an owner fills in.
 fn owner_columns(owner: &RecipeOwner) -> (Option<&str>, Option<&str>, Option<&str>) {
     match owner {
         RecipeOwner::Item(id) => (Some(id.as_str()), None, None),
@@ -1489,18 +1391,13 @@ fn owner_from_row(
     }
 }
 
-/// Deterministic, so saving the same recipe twice updates rather than
-/// duplicates, and so a test can name the row.
+/// Deterministic, so saving the same recipe twice updates rather than duplicates, and so a test
+/// can name the row.
 fn recipe_id(outlet: &str, owner: &RecipeOwner) -> String {
     format!("rcp_{outlet}_{}_{}", owner.tag(), owner.subject())
 }
 
-/// **What a bill sold, as the recipe walk wants it.**
-///
-/// A line with no item id — an ad-hoc price typed at the counter — produces no
-/// `Sold` at all, deliberately. It is not a missing recipe; it is a thing that
-/// was never on the menu, and telling an owner "₹50 has no recipe" every time
-/// somebody types a custom price would be noise they learn to ignore.
+/// What a bill sold, as the recipe walk wants it.
 fn sold_from(order: &SettledOrder) -> Vec<Sold> {
     let mut out = Vec::new();
     for (seq, line) in order.core.cart.lines().iter().enumerate() {
@@ -1522,8 +1419,7 @@ fn sold_from(order: &SettledOrder) -> Vec<Sold> {
                 line_key: key.clone(),
                 name: modifier.name.clone(),
                 owner: RecipeOwner::Modifier(modifier.modifier_id.clone()),
-                // One modifier per dish, so "extra cheese" on two pizzas is
-                // twice the cheese.
+                // One modifier per dish, so "extra cheese" on two pizzas is twice the cheese.
                 qty: line.qty,
             });
         }
@@ -1539,9 +1435,8 @@ fn read_material(row: &rusqlite::Row<'_>) -> rusqlite::Result<Material> {
     Ok(Material {
         id: MaterialId::new(row.get::<_, String>(0)?),
         name: row.get(1)?,
-        // A dimension the code does not recognise falls back to weight rather
-        // than blanking the stock screen. It cannot happen — the column has a
-        // CHECK — and if it ever does, a wrong unit label beats no page.
+        // A dimension the code does not recognise falls back to weight rather than blanking the
+        // stock screen.
         dimension: Dimension::from_tag(&dimension).unwrap_or(Dimension::Weight),
         category: row.get(3)?,
         buy_from: row.get(4)?,

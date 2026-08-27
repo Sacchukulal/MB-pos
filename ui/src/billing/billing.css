@@ -1,9 +1,9 @@
-/* The billing screen. Four regions that never move (UI_GUIDELINES §4).
-   Tokens only — `npm run lint:tokens` fails the build otherwise. */
+/* The billing screen. Four regions that never move. */
 
-/* `Page` supplies the margin and the flex column (P27.5); this only says how
-   the billing screen divides what it is given. The two rows are the bar and
-   the body, and neither ever moves (§1). */
+/*
+ * `Page` supplies the margin and the flex column; this only says how the billing screen divides
+ * what it is given.
+ */
 .mb-billing {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -11,8 +11,7 @@
   min-height: 0;
 }
 
-/* --- Top bar: search, order type, lock — in that order since 2026-08-23,
-       which is how often each one is touched. Always in the same place (§1). */
+/* Top bar: search, order type, lock. */
 
 .mb-billbar {
   display: grid;
@@ -21,23 +20,14 @@
   gap: var(--space-4);
 }
 
-/* The segmented control moved to kit.css at P27.5 — the floor screen uses it
-   for which room, and a component two screens share is a kit component. */
-
-/* **The search box is FIRST, and it is one width.** It was `flex: 1` with a
-   22rem floor, so it ate every pixel the other two controls did not need and
-   they sat squashed in the left corner. `--find-width` is the width of the
-   "find something on this screen" box on credit, menu and stock — billing was
-   the one screen with a search box of its own size, and now it is not.
-   `position: relative` is here because the suggestion list hangs off it. */
+/* The search box is FIRST, and it is one width. */
 .mb-billbar__search {
   flex: none;
   width: var(--find-width);
   position: relative;
 }
 
-/* The order type and the lock share the cart's column, hard against its
-   right edge. */
+/* The order type and the lock share the cart's column, hard against its right edge. */
 .mb-billbar__type {
   display: flex;
   align-items: center;
@@ -45,10 +35,7 @@
   gap: var(--space-3);
 }
 
-/* **The lock, as a picture.** A square barely bigger than the glyph inside it.
-   It is deliberately below `--target-min`: that 44px budget exists for the
-   things a thumb hits during a rush — Cash, Card, UPI, Complete bill — and
-   this is pressed about once a shift, by the owner, with a mouse. */
+/* The lock, as a picture. */
 .mb-billbar__lock {
   flex: none;
   width: var(--billbar-lock-size);
@@ -58,7 +45,7 @@
   border-radius: var(--radius-sm);
 }
 
-/* --- The two columns. The cart is PERMANENT: it never moves, never hides. -- */
+/* The two columns. The cart is PERMANENT: it never moves, never hides. */
 
 .mb-billing__body {
   display: grid;
@@ -67,8 +54,10 @@
   min-height: 0;
 }
 
-/* With the queue open the floor is simply given less; its grid packs with
-   auto-fill, so the tiles re-flow into what is left without being told. */
+/*
+ * With the queue open the floor is simply given less; its grid packs with auto-fill, so the
+ * tiles re-flow into what is left without being told.
+ */
 .mb-billing__body--queue {
   grid-template-columns: 1fr var(--queue-width) var(--cart-width);
 }
@@ -81,52 +70,24 @@
 }
 
 .mb-billing__cart {
-  /* **A FLEX COLUMN, NOT A GRID, AND P27.5 IS WHY.**
-   *
-   * It was `grid-template-rows` with a floor on the items row and (after
-   * P27.5 raised it) a floor on the totals row too. Grid honours those floors
-   * by OVERFLOWING when their sum does not fit — and this column is
-   * `overflow: hidden`, so what overflows is the bottom. Billing a real table
-   * for cash showed exactly that: the payment block grew two rows, the sum of
-   * the minimums passed the column height, and **Complete bill went below the
-   * fold on the sacred path** — the precise bug P09 wrote three paragraphs
-   * about believing it had fixed.
-   *
-   * Row arithmetic cannot promise "these two always survive". Flex can say it
-   * directly: the actions and the payment block do not shrink, the item list
-   * gives way first (shrink 50), and the totals give way only after that
-   * (shrink 1). A cashier can always reach the button; what they lose on a
-   * six-rate bill with three payments is seeing every item at once, which is
-   * the right thing to lose.
-   */
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
-  /* **THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT.**
-
-     It used to, on the reasoning that scrolling beats "silently cropping the
-     buttons off the bottom". Looking at a real three-rate bill showed what
-     that means in practice: the totals block grew by three tax rows and pushed
-     **Complete bill** below the fold, so settling a bill needed a scroll
-     first — on the one path §2.2 calls sacred, on a screen shorter than the
-     reference machine's.
-
-     So the ACTIONS are pinned and the TOTALS scroll instead (see
-     `.mb-totals`). A cashier can always reach the button; what they lose when
-     a bill has six tax rates is having all six visible at once, which is the
-     right thing to lose. */
+  /* THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT. */
   overflow: hidden;
   padding: var(--space-3);
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
-  /* RAISED, per the elevation contract — the cart is a panel sitting on the
-     page, and it is the one thing on this screen that never moves. */
+  /*
+   * RAISED, per the elevation contract — the cart is a panel sitting on the page, and it is the
+   * one thing on this screen that never moves.
+   */
   box-shadow: var(--level-raised);
 }
 
-/* --- Processing orders: the open ones, on their own -------------------- */
+/* Processing orders: the open ones, on their own. */
 
 .mb-queuepanel {
   display: flex;
@@ -242,12 +203,7 @@
   text-align: center;
 }
 
-/* --- The table grid — the ONLY view of open orders (scope 1.4) -----------
-   DENSITY (§4): a busy shop has 40+ tables and 1366x768 leaves about 900px
-   for the floor. `auto-fill` with a minimum tile width means the grid packs
-   as many columns as fit rather than a fixed count, and `.mb-floor--dense`
-   (set by the screen past a threshold) shrinks the minimum and drops the
-   tile's secondary line. See TableGrid.tsx for the threshold and why.      */
+/* The table grid — the ONLY view of open orders. */
 
 .mb-floor__section {
   display: flex;
@@ -255,10 +211,10 @@
   gap: var(--space-2);
 }
 
-/* A section name on the floor is a LABEL, not a headline: it tells you which
-   room you are looking at and then gets out of the way. It used to be
-   uppercase and letterspaced at --text-sm, which made "A/C ROOM" shout louder
-   than the table numbers underneath it. */
+/*
+ * A section name on the floor is a LABEL, not a headline: it tells you which room you are
+ * looking at and then gets out of the way.
+ */
 .mb-floor__heading {
   display: flex;
   align-items: center;
@@ -268,8 +224,10 @@
   color: var(--text-muted);
 }
 
-/* A hairline running to the right of the name, so the eye reads it as the
-   start of a band rather than as a floating word. */
+/*
+ * A hairline running to the right of the name, so the eye reads it as the start of a band
+ * rather than as a floating word.
+ */
 .mb-floor__heading::after {
   content: '';
   flex: 1;
@@ -288,27 +246,14 @@
   gap: var(--space-1);
 }
 
-/* --- A tile. State in FORM as well as colour (§2 rule 2) ----------------- */
+/* A tile. State in FORM as well as colour. */
 
-/* **A REAL BOX** — the owner, 2026-08-17: *"tables looks very very light and
-   very simple, i want to redesign this tables eliment, dark border with
-   rectangular, round cornerd."*
+/* A REAL BOX. */
 
-   Three things were wrong and only one of them was the colour:
-
-   1. the outline was `--border` at 1px, which was 1.23:1 on this ground. It is
-      `--border-strong` at `--border-width-thick` now, which is 3.12:1 and two
-      pixels — a tile is an OBJECT a cashier picks out of forty at a glance,
-      not a row in a list, and it gets the outline of one;
-   2. the corner was `--radius-md`, halfway between square and soft and
-      therefore neither. `--radius-lg` reads as a deliberate rounded rectangle;
-   3. the left edge carried a `--space-1` coloured stripe, which meant the box
-      had a different border on one side and did not read as a rectangle at
-      all. The stripe is an inset shadow now, so the outline stays a single
-      even rectangle the whole way round and the state signal sits INSIDE it.  */
-
-/* A fixed height, not a minimum: a busy tile carries an amount and a timer a
-   free one does not, and with `min-height` every tile was a different size. */
+/*
+ * A fixed height, not a minimum: a busy tile carries an amount and a timer a free one does not,
+ * and with `min-height` every tile was a different size.
+ */
 .mb-tile {
   position: relative;
   display: flex;
@@ -319,16 +264,13 @@
   border-radius: var(--radius-lg);
 }
 
-/* The whole tile, as a press. It fills the box, so nothing about reaching a
-   table changed when the print button arrived beside it. */
+/* The whole tile, as a press. */
 .mb-tile__face {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: var(--space-1);
-  /* Room on the right for the print button to sit without ever landing on the
-     amount. The face keeps its full width on a free tile, where there is no
-     button — hence the modifier below rather than a padding for every tile. */
+  /* Room on the right for the print button to sit without ever landing on the amount. */
   padding: var(--space-2) var(--space-3);
   min-width: 0;
   background: transparent;
@@ -348,9 +290,7 @@
   padding: var(--space-1) var(--space-2);
 }
 
-/* FREE: dashed outline, no fill, quiet text — and no colour at all. The dash
-   is the form half of the signal (§2 rule 2) and it survives grey-scale; it is
-   simply a dash somebody can now see. */
+/* FREE: dashed outline, no fill, quiet text — and no colour at all. */
 .mb-tile--free {
   background: transparent;
   border-style: dashed;
@@ -363,8 +303,7 @@
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
 }
 
-/* LATE: the same stripe in danger, plus an emphasised timer. §4 calls this
-   "the single most useful thing a floor view can show". */
+/* LATE: the same stripe in danger, plus an emphasised timer. */
 .mb-tile--late {
   background: var(--danger-soft);
   border-color: var(--danger);
@@ -373,52 +312,30 @@
 
 /* WAITING sits between the two and is set further down the file. */
 
-/* **SELECTED: the tile the cashier is on.** Drawn on TOP of the state above,
-   never instead of it.
-
-   This was a fifth state, `.mb-tile--loaded`, and being a state was the whole
-   problem (owner, 2026-08-22 — *"selected table is not highlighted"*). Two
-   things followed from it, and this rule fixes both:
-
-   1. it replaced FREE, so a free tile that was selected lost its dash — and,
-      worse, an empty table could never be marked at all, because the state
-      behind it was matched on an order that does not exist until a line is
-      typed;
-   2. it replaced LATE, so opening a late table in the cart turned off the one
-      signal §4 calls *"not optional"*.
-
-   **The border carries it, and nothing is drawn around the tile.** It was an
-   outline at a positive offset, which is a second rectangle floating a pixel
-   off the first — the owner's *"another border shouldn't appear around it"* of
-   2026-08-23. The tile's own edge is already --border-width-thick, so turning
-   it accent is a real change at forty tables' distance, and a free tile picks
-   up the accent fill below as well. Nothing moves: the border was always
-   there and only its colour and style change. */
+/* SELECTED: the tile the cashier is on. */
 .mb-tile--selected {
   border-color: var(--accent);
   border-style: solid;
 }
 
-/* **The state's own inset stripe has to survive the ring**, and `box-shadow`
-   is one property — so a selected occupied tile setting `box-shadow` here
-   would erase the stripe it is drawn over. That is why the ring above is an
-   `outline` and not a second shadow: two different properties cannot fight.
-
-   A selected FREE tile has no stripe of its own, and gets one, because a table
-   somebody has open is not "nothing" any more. It is the accent at the width
-   every other state uses, so the four tiles still read as one family. */
+/*
+ * The state's own inset stripe has to survive the ring, and `box-shadow` is one property — so a
+ * selected occupied tile setting `box-shadow` here would erase the stripe it is drawn over.
+ */
 .mb-tile--free.mb-tile--selected {
   background: var(--accent-soft);
   color: var(--text);
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
 }
 
-/* **The table number is the thing the tile exists to say**, and it was
-   `--text-lg` inside a 4.5rem box — which is the owner's *"boxes are big
-   inside letters are now very small"* in one line. It is the largest type on
-   the floor now, which is what makes a tile readable across a room. */
-/* Nothing on the face shrinks — the tile height is fixed, and flex was
-   squashing the label to nothing to make room. */
+/*
+ * The table number is the thing the tile exists to say, and it was `--text-lg` inside a 4.5rem
+ * box.
+ */
+/*
+ * Nothing on the face shrinks — the tile height is fixed, and flex was squashing the label to
+ * nothing to make room.
+ */
 .mb-tile__face > * {
   flex: none;
 }
@@ -427,8 +344,7 @@
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
-  /* One line always. "Self service" wrapped to two and made that tile taller
-     than the rest. */
+  /* One line always. "Self service" wrapped to two and made that tile taller than the rest. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -439,19 +355,15 @@
   font-size: var(--text-md);
 }
 
-/* The dense step is past 24 tables, where the number has to give some of that
-   back to fit ten columns — but not all of it. */
+/*
+ * The dense step is past 24 tables, where the number has to give some of that back to fit ten
+ * columns — but not all of it.
+ */
 .mb-floor--dense .mb-tile__label {
   font-size: var(--text-lg);
 }
 
-/* **The print mark** — the owner's *"one small print logo inside; if any order
-   inside it should print the bill."*
-
-   Top right, out of the way of the label at the top left and the amount below
-   it. It is `--target-min` wide on a touch monitor and it is the only thing on
-   the tile that is not "open this table", so it says what it does on hover and
-   to a screen reader. */
+/* The print mark. */
 .mb-tile__print {
   position: absolute;
   top: var(--space-1);
@@ -475,18 +387,9 @@
   border-color: var(--border-strong);
 }
 
-/* --- The tile's tools, and what "ticked" looks like ---------------------- */
+/* The tile's tools, and what "ticked" looks like. */
 
-/* **Edit and delete, on hover.** The owner, 2026-08-22: *"just add small edit
-   symbol and delete symbol, icon on top of the table squares when hovered."*
-
-   Bottom-right rather than top-right, because the printer already owns the top
-   corner and a shopkeeper who has learnt where Print is must not find Delete
-   there instead.
-
-   They are in the markup at all times and only *revealed* here, so a keyboard
-   still reaches them — `:focus-within` is not an extra, it is what stops this
-   being a mouse-only feature. */
+/* Edit and delete, on hover. */
 .mb-tile__tools {
   position: absolute;
   right: var(--space-1);
@@ -509,12 +412,7 @@
   opacity: 1;
 }
 
-/* **2rem, not the 3rem a button usually gets.** §7 asks for 44px targets and
-   these are smaller, deliberately and only here: the tile itself is 4.5rem
-   tall, so a 3rem control is two thirds of the square it is drawn on — it
-   covered the seat count and crowded the number the tile exists to show. Both
-   of these have a full-size route as well (the ticked bar's Edit and Delete),
-   so a finger that cannot hit a 2rem icon is not shut out of anything. */
+/* 2rem, not the 3rem a button usually gets. */
 .mb-tile__tool {
   display: flex;
   align-items: center;
@@ -534,21 +432,17 @@
   border-color: var(--accent);
 }
 
-/* Destructive is a semantic colour and never the accent (§2 rule 1) — changing
-   a shop's accent must not make Delete look like Edit. */
+/*
+ * Destructive is a semantic colour and never the accent — changing a shop's accent must not
+ * make Delete look like Edit.
+ */
 .mb-tile__tool--danger:hover {
   color: var(--danger);
   border-color: var(--danger);
   background: var(--danger-soft);
 }
 
-/* **PICKED: ticked for a bulk action.** A different fact from
-   `.mb-tile--selected`, which means "your billing cart is on this table", and
-   drawn differently on purpose — the two live on different screens and must
-   never be learnt as the same mark.
-
-   Selected turns the border accent and leaves the fill alone; picked fills
-   the tile and adds a tick. Both survive grey-scale. */
+/* PICKED: ticked for a bulk action. */
 .mb-tile--picked {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -556,9 +450,7 @@
   color: var(--text);
 }
 
-/* The tick, so "ticked" is a shape and not only a colour (§2 rule 2). Drawn
-   with CSS rather than an element, because the tile's markup belongs to
-   `TableGrid.tsx` and one screen's selection is not a reason to grow it. */
+/* The tick, so "ticked" is a shape and not only a colour. */
 .mb-tile__tick {
   position: absolute;
   top: var(--space-1);
@@ -593,16 +485,7 @@
   font-size: var(--text-sm);
 }
 
-/* **Two timers have to fit, and neither may be cut in half.**
-   A tile is 7.5rem wide and a busy table can carry both "2h 36m" (since the
-   party sat) and "food 2h 36m" (since the kitchen was told, scope 14.2). Side
-   by side those overflow, and `space-between` broke the first one across two
-   lines as "2h / 36m" — a duration split down the middle is unreadable at a
-   glance, which is the only way a floor is ever read.
-
-   So each timer is kept whole and the LINE wraps instead. `flex-start` rather
-   than `space-between`: pushed apart, one timer sat against each edge of the
-   tile and read as two unrelated numbers. */
+/* Two timers have to fit, and neither may be cut in half. */
 .mb-tile__meta {
   display: flex;
   align-items: center;
@@ -624,13 +507,10 @@
   color: var(--danger);
 }
 
-/* "food 18m" — scope 14.2's second timer, quieter than the table timer because
-   it is the second question, not the first.
-
-   It lived in `floor.css` as `.mb-floor__kitchen`, styling the Floor screen's
-   own copy of this tile. A tile's own second line needing a class out of a
-   SCREEN's stylesheet is how the two drifted apart in the first place, so it
-   is here with the rest of the tile. */
+/*
+ * "food 18m" — scope 14.2's second timer, quieter than the table timer because it is the second
+ * question, not the first.
+ */
 .mb-tile__food {
   color: var(--text-muted);
   min-width: 0;
@@ -639,15 +519,9 @@
   white-space: nowrap;
 }
 
-/* **The kitchen has not been told about this table.**
-   A drawn dot rather than the character `●`, which arrived at whatever size
-   and vertical position the substituted font felt like — on the same tile as
-   the timer, so the two never sat on the same line. Warn, not danger: nothing
-   is wrong yet, somebody just has not pressed Kitchen ticket. */
+/* The kitchen has not been told about this table. */
 .mb-tile__kitchen {
   flex-shrink: 0;
-  /* Pushed to the end of the line, which is what `space-between` used to do
-     for it before the meta line learned to wrap. */
   margin-left: auto;
   width: var(--space-2);
   height: var(--space-2);
@@ -655,34 +529,18 @@
   border-radius: var(--radius-pill);
 }
 
-/* --- The cart region ---------------------------------------------------- */
+/* The cart region. */
 
-/* The list gives way FIRST — shrink 50 against the totals block's 1. Its
-   basis is the floor it keeps while there is room to keep it. */
+/*
+ * The list gives way FIRST — shrink 50 against the totals block's 1. Its basis is the floor it
+ * keeps while there is room to keep it.
+ */
 .mb-cart__lines {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   flex: 1 50 var(--cart-lines-min);
-  /* **It gives way FIRST, but it does not disappear** — P30.5.
-   *
-   * `shrink: 50` was doing its job too well. On a 720-pixel work area a plain
-   * two-line bill showed **none of its lines**: the list collapsed to a
-   * scrollbar while the tax breakdown below it sat there taking four rows.
-   * That is backwards — the lines are what a cashier reads back to the
-   * customer, and the breakdown is the thing the comment above
-   * `.mb-totals__breakdown` already says is the right thing to lose.
-   *
-   * **The floor is under a height query, and that is the whole care of it.**
-   * `--totals-min` was deleted at P18 for a reason worth reading in
-   * `tokens.css`: two absolute floors plus a payment block is exactly how
-   * Complete bill went off the bottom. A floor here is a third one, and at the
-   * window's own minimum of 640 it takes so much that TOTAL disappears — I did
-   * that, looked at it, and put the query in. Above 700 pixels of viewport the
-   * room is provably there; below it the old shrink order takes over, and what
-   * a very short window loses is seeing the lines, not the number the cashier
-   * reads out.
-   */
+  /* It gives way FIRST, but it does not disappear. */
 }
 
 @media (min-height: 700px) { /* mb-tokens-allow: media queries cannot use var() */
@@ -705,8 +563,7 @@
 }
 
 .mb-cartline__name {
-  /* Long names WRAP. They never ellipsise — R3, and it is the same rule the
-     printed bill obeys (D30). */
+  /* Long names WRAP. They never ellipsise. */
   overflow-wrap: anywhere;
 }
 
@@ -723,17 +580,7 @@
 .mb-cartline__qty {
   display: flex;
   align-items: center;
-  /* **No gap, and the buttons are square.**
-
-     Measured, not guessed: the kit's small button is 42 px wide because its
-     padding is sized for a word, and four of them plus the gaps took 170 px of
-     a 324 px cart row — leaving 66 px for the item name, so a two-word dish
-     came out on two lines and three items no longer fitted in the list. Found
-     by putting three things on a bill and looking at it.
-
-     Touching each other is also right: minus, quantity, plus is ONE control,
-     and gaps between its parts read as three separate ones. The 44 px hit
-     target §4 asks for is the button's HEIGHT, which does not change. */
+  /* No gap, and the buttons are square. */
   gap: 0;
 }
 
@@ -742,11 +589,10 @@
   padding-inline: 0;
 }
 
-/* **The number is a button**, because tapping it is how you say "make it
-   seven" without pressing + five times. It is deliberately not styled as one:
-   a third bordered control between − and + would read as clutter on a line a
-   cashier looks at forty times an hour, so it looks like the number it is and
-   only says so on hover. */
+/*
+ * The number is a button, because tapping it is how you say "make it seven" without pressing +
+ * five times.
+ */
 .mb-cartline__qty-value {
   min-width: var(--space-6);
   padding: 0;
@@ -765,8 +611,10 @@
   border-color: var(--border);
 }
 
-/* Exactly where the number was, and exactly as wide, so the line does not jump
-   when it turns into a box. */
+/*
+ * Exactly where the number was, and exactly as wide, so the line does not jump when it turns
+ * into a box.
+ */
 .mb-cartline__qty-input {
   width: var(--space-9);
   padding: 0;
@@ -786,39 +634,20 @@
   font-weight: var(--weight-medium);
 }
 
-/* --- Totals: a feature, not a footer ------------------------------------ */
+/* Totals: a feature, not a footer. */
 
 .mb-totals {
   display: flex;
   flex-direction: column;
-  /* **Content-sized, and gives way only after the item list has** (shrink 1
-     against its 50). There is deliberately no floor here: a floor is an
-     absolute promise, and two absolute promises plus a payment block is how
-     Complete bill went off the bottom in the first place. The shrink ORDER is
-     the promise, and it does not need a number to be right. */
+  /* Content-sized, and gives way only after the item list has (shrink 1 against its 50). */
   flex: 0 1 auto;
   min-height: 0;
-  /* The breakdown scrolls; TOTAL and the buttons do not. See below. */
+  /* The breakdown scrolls; TOTAL and the buttons do not. */
   overflow: hidden;
   gap: var(--space-1);
 }
 
-/* **Only the breakdown scrolls.**
- *
- * A mixed-rate bill is the case the tax engine exists for — a bar's bill has a
- * 5% row, an 18% row and a non-GST line, each with its own CGST and SGST, which
- * is six more rows than a plain bill. Two attempts got this wrong, and both
- * were found by billing a dosa, a cola and a beer and looking:
- *
- *   1. the whole cart column scrolled, so **Complete bill** went below the
- *      fold — a scroll before every settle, on the sacred path;
- *   2. then the whole totals block scrolled, so **TOTAL** went out of view —
- *      the number the cashier reads out to the customer.
- *
- * So the breakdown is the only thing that gives way. What a shop loses on a
- * six-rate bill is seeing all six rate rows at once, which is the right thing
- * to lose.
- */
+/* Only the breakdown scrolls. */
 .mb-totals__breakdown {
   display: flex;
   flex-direction: column;
@@ -838,15 +667,9 @@
   color: var(--text-muted);
 }
 
-/* **The number the cashier reads out to the customer.** It gets the biggest
-   type on the screen and its own rule above it, because on a busy bill it is
-   competing with fifteen other figures and it is the only one that is said out
-   loud. */
+/* The number the cashier reads out to the customer. */
 .mb-totals__row--grand {
-  /* And it never gives way. The comment above `.mb-totals__breakdown` says the
-     breakdown is the only thing in this block that shrinks; without this, a
-     short window shrinks the block itself and clips TOTAL, which is failure
-     (2) in that list. P30.5. */
+  /* And it never gives way. */
   flex: 0 0 auto;
   padding-top: var(--space-1);
   font-size: var(--text-lg);
@@ -870,18 +693,19 @@
   white-space: nowrap;
 }
 
-/* The capped-discount flag (D15). Loud on purpose: it means the shop did not
-   get the discount it asked for. */
+/* The capped-discount flag. */
 .mb-totals__capped {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   color: var(--warn);
 }
 
-/* --- Payment and actions ------------------------------------------------ */
+/* Payment and actions. */
 
-/* **Never shrinks.** The payment block and the actions under it are what a
-   cashier is reaching for; everything above them gives way instead. */
+/*
+ * Never shrinks. The payment block and the actions under it are what a cashier is reaching for;
+ * everything above them gives way instead.
+ */
 .mb-payment {
   display: flex;
   flex-direction: column;
@@ -913,8 +737,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The mode that is lit. Colour is not the only carrier — it is also the only
-   filled button in the row (§2 rule 2). */
+/* The mode that is lit. */
 .mb-payment__mode--on {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -952,8 +775,10 @@
   display: none;
 }
 
-/* The tick sits beside the word rather than replacing it — a button that
-   swaps its label for a symbol is a button whose meaning you have to remember. */
+/*
+ * The tick sits beside the word rather than replacing it — a button that swaps its label for a
+ * symbol is a button whose meaning you have to remember.
+ */
 .mb-payment__mode {
   display: inline-flex;
   align-items: center;
@@ -961,17 +786,7 @@
   gap: var(--space-1);
 }
 
-/* **A mode that has taken money says so, even while it is disabled.**
-
-   The owner, 2026-08-22: *"the payment mode selection is also not visible."*
-   Four identical outlines before the money and four identical outlines after
-   it, so a settled bill looked exactly like an unpaid one — which is also why
-   the error toast underneath it made no sense.
-
-   `!important` is not used and the disabled rule is not fought: this is a more
-   specific selector than `.mb-button:disabled`, deliberately, because the one
-   fact worth keeping when all four go dead is WHICH ONE was used. Colour is not
-   the only carrier — the tick is the form half (§2 rule 2). */
+/* A mode that has taken money says so, even while it is disabled. */
 .mb-payment__mode--taken,
 .mb-payment__mode--taken:disabled {
   background: var(--accent-soft);
@@ -981,8 +796,7 @@
   opacity: 1;
 }
 
-/* Why the modes are off. Quiet, and only on a bill that is actually covered —
-   see `PaymentModes`. */
+/* Why the modes are off. */
 .mb-payment__settled {
   margin: 0;
   font-size: var(--text-sm);
@@ -1004,8 +818,7 @@
   row-gap: var(--space-1);
 }
 
-/* The fold under the two main buttons. `hidden` closes it, so it costs no
-   height at all when it is shut. */
+/* The fold under the two main buttons. */
 .mb-actions--more {
   border-top: none;
   padding-top: 0;
@@ -1015,8 +828,10 @@
   display: none;
 }
 
-/* The handle. Full width under both buttons, so it reads as belonging to the
-   pair rather than to either one. */
+/*
+ * The handle. Full width under both buttons, so it reads as belonging to the pair rather than
+ * to either one.
+ */
 .mb-actions__toggle {
   grid-column: 1 / -1;
   display: flex;
@@ -1038,7 +853,7 @@
   color: var(--text);
 }
 
-/* --- The keyboard: suggestions, quantity, help (P10) --------------------- */
+/* The keyboard: suggestions, quantity, help. */
 
 .mb-suggestions {
   position: absolute;
@@ -1072,16 +887,14 @@
   cursor: pointer;
 }
 
-/* A price in the suggestion list. Mono and tabular, because a column of rupees
-   that does not line up looks broken to a shopkeeper (§3). */
+/* A price in the suggestion list. */
 .mb-suggestion__price {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
 }
 
-/* The highlight is a fill AND a stripe, so it survives grey-scale — §2 rule 2
-   applies to the thing a cashier is looking at most of all. */
+/* The highlight is a fill AND a stripe, so it survives grey-scale. */
 .mb-suggestion--on {
   background: var(--accent-soft);
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
@@ -1095,10 +908,11 @@
 
 .mb-quantity__value {
   flex: 1;
-  /* A flex item will not shrink below its intrinsic width without this, and an
-     <input> claims about twenty characters — so the "+" button was pushed off
-     the edge of the dialog and the whole thing grew a scrollbar. Found by
-     running it and looking. */
+  /*
+   * A flex item will not shrink below its intrinsic width without this, and an <input> claims
+   * about twenty characters — so the "+" button was pushed off the edge of the dialog and the
+   * whole thing grew a scrollbar.
+   */
   min-width: 0;
   font-size: var(--text-xl);
   text-align: center;
@@ -1141,19 +955,12 @@
   white-space: nowrap;
 }
 
-/* WAITING: the same stripe in warn, and no fill. P14 split "waiting too long"
-   into two states, because one threshold meant a table was fine and then
-   suddenly red — a smoke alarm rather than a floor view. The form differs from
-   LATE as well as the colour (stripe only, no wash), so grey-scaling the
-   screen still tells them apart. */
+/* WAITING: the same stripe in warn, and no fill. */
 .mb-tile--waiting {
   box-shadow: inset var(--space-1) 0 0 0 var(--warn);
 }
 
-/* What the floor did while this bill was being typed (P20, D83).
-
-   Deliberately above the lines and deliberately not styled as an error: the
-   counter already took the change and nothing is wrong. It is an offer. */
+/* What the floor did while this bill was being typed. */
 .mb-cart__floor {
   display: flex;
   flex-direction: column;
@@ -1171,8 +978,7 @@
   line-height: var(--line-normal);
 }
 
-/* **Audit I6 — a very long bill** (P30). Quiet, because it is a nudge and
-   not a problem: the shop is allowed to sell sixty dishes to one table. */
+/* A very long bill. */
 .mb-cart__long {
   margin: 0;
   padding: var(--space-2) var(--space-3);
@@ -1182,7 +988,7 @@
   border-radius: var(--radius-sm);
 }
 
-/* --- Splitting a bill (P14's 1.21-1.24, wired at P31) -------------------- */
+/* Splitting a bill. */
 
 .mb-split__covers {
   margin-bottom: var(--gap-group);
@@ -1200,8 +1006,7 @@
   font-size: var(--type-caption);
 }
 
-/* − 4 ways + on one line. The count is the widest thing in it, so it is what
-   the row is sized around. */
+/* − 4 ways + on one line. */
 .mb-split__ways {
   display: flex;
   align-items: center;
@@ -1214,8 +1019,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The shares wrap: fifty people is a real party, and a row that scrolled
-   sideways would break UI_GUIDELINES §1. */
 .mb-split__shares {
   display: flex;
   flex-wrap: wrap;
@@ -1232,8 +1035,9 @@
   list-style: none;
 }
 
-/* Name, what is on the bill, how much moves — left to right in the order the
-   question is asked. */
+/*
+ * Name, what is on the bill, how much moves — left to right in the order the question is asked.
+ */
 .mb-split__line {
   display: grid;
   grid-template-columns: 1fr auto var(--space-8);
@@ -1245,11 +1049,7 @@
   overflow-wrap: anywhere;
 }
 
-/* --- "What do we each owe?" ---------------------------------------------
-   A row in the fold, not a dialog. The old Split box asked this, how many
-   people are sitting there, and which food moves to a second bill, all at
-   once — "a complete rocket science for the hotel cashier" (owner,
-   2026-08-23). One number answers the first two; the sentence is Rust's. */
+/* "What do we each owe?". */
 
 .mb-eachpays {
   grid-column: 1 / -1;

@@ -1,21 +1,4 @@
-//! Which printer gets which items — **scope 3.1 and 1.8.**
-//!
-//! v1's behaviour, rebuilt: a shop runs either one printer or a printer per
-//! category, and prints either one ticket per printer or one per category
-//! (audit Part 3, Printer Settings — *"Printer mode: Single / Multiple
-//! (category-wise)"*, *"KOT style: Single KOT / Category-wise KOTs"*).
-//!
-//! Two rules that are not v1's:
-//!
-//! * **a category nobody mapped still prints**, on the default printer. Silence
-//!   is the failure mode that loses food, and a shop that adds a category on a
-//!   Friday evening will not have mapped it;
-//! * **the printer's role is obeyed** — a kitchen-only printer never receives a
-//!   bill.
-//!
-//! And one rule that is: **cart order survives.** P06's kitchen template says
-//! why — the ticket has to read in the sequence the waiter called the items, or
-//! the kitchen loses its place.
+//! Which printer gets which items.
 
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +14,7 @@ pub enum PrinterMode {
     Multiple,
 }
 
-/// One ticket per printer, or one per category (scope 1.8).
+/// One ticket per printer, or one per category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TicketStyle {
@@ -41,9 +24,6 @@ pub enum TicketStyle {
 }
 
 /// A line, with the category it came from.
-///
-/// The names are resolved by the caller: the ledger stores ids, and this crate
-/// has no menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutedLine {
     pub line: TicketLine,
@@ -55,7 +35,7 @@ pub struct RoutedLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ticket {
     pub printer_id: String,
-    /// The station heading, when the shop prints category-wise (scope 3.1).
+    /// The station heading, when the shop prints category-wise.
     pub station: Option<String>,
     pub lines: Vec<TicketLine>,
 }
@@ -64,11 +44,9 @@ pub struct Ticket {
 pub struct RoutingTable {
     pub mode: PrinterMode,
     pub style: TicketStyle,
-    /// Where anything unmapped goes. Never empty in a configured shop.
+    /// Where anything unmapped goes.
     pub default_printer: String,
-    /// `(category id, printer id)`. A plain list rather than a map, because
-    /// D20 forbids a non-string map key anywhere an order can reach and a list
-    /// cannot be got wrong.
+    /// `(category id, printer id)`.
     pub by_category: Vec<(String, String)>,
     /// Where a bill goes, when it is not the default printer.
     pub bill_printer: Option<String>,
@@ -98,7 +76,10 @@ impl RoutingTable {
         self.by_category
             .iter()
             .find(|(id, _)| id == category)
-            .map_or_else(|| self.default_printer.clone(), |(_, printer)| printer.clone())
+            .map_or_else(
+                || self.default_printer.clone(),
+                |(_, printer)| printer.clone(),
+            )
     }
 
     /// Where the bill goes.
@@ -111,13 +92,10 @@ impl RoutingTable {
 }
 
 /// Split a delta into the tickets that have to be printed.
-///
-/// The order of the returned tickets, and of the lines inside each one, is the
-/// order the waiter called them in.
 #[must_use]
 pub fn route(lines: &[RoutedLine], table: &RoutingTable) -> Vec<Ticket> {
-    // A Vec and a linear search rather than a map: there are at most a handful
-    // of tickets, and insertion order IS the answer here.
+    // A Vec and a linear search rather than a map: there are at most a handful of tickets, and
+    // insertion order IS the answer here.
     let mut tickets: Vec<Ticket> = Vec::new();
 
     for routed in lines {
@@ -144,11 +122,6 @@ pub fn route(lines: &[RoutedLine], table: &RoutingTable) -> Vec<Ticket> {
 }
 
 /// Drop the tickets a printer is not allowed to receive, and say which.
-///
-/// Returns `(printable, refused)`. The refused ones are not silently dropped:
-/// the caller re-routes them to the default printer or shows them, because a
-/// ticket that vanishes because of a misconfiguration is food that never gets
-/// cooked.
 #[must_use]
 pub fn split_by_role(
     tickets: Vec<Ticket>,
@@ -227,8 +200,8 @@ mod tests {
 
     #[test]
     fn a_category_nobody_mapped_still_prints() {
-        // A shop that adds a category on a Friday evening has not mapped it,
-        // and silence is the failure mode that loses food.
+        // A shop that adds a category on a Friday evening has not mapped it, and silence is the
+        // failure mode that loses food.
         let tickets = route(&[routed("Falooda", "desserts")], &multiple());
         assert_eq!(tickets.len(), 1);
         assert_eq!(tickets[0].printer_id, "prn_kitchen");
@@ -271,8 +244,12 @@ mod tests {
     fn a_bill_only_printer_refuses_a_ticket() {
         use crate::printer::{Role, Target};
 
-        let counter = PrinterConfig::new("prn_counter", "Counter", Target::None).with_role(Role::Bill);
-        let tickets = route(&[routed("Dosa", "south")], &RoutingTable::single("prn_counter"));
+        let counter =
+            PrinterConfig::new("prn_counter", "Counter", Target::None).with_role(Role::Bill);
+        let tickets = route(
+            &[routed("Dosa", "south")],
+            &RoutingTable::single("prn_counter"),
+        );
         let (printable, refused) = split_by_role(tickets, &[counter]);
         assert!(printable.is_empty());
         assert_eq!(refused.len(), 1, "refused, not silently dropped");

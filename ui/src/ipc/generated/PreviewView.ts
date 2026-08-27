@@ -2,32 +2,15 @@
 import type { PreviewDoc } from "./PreviewDoc";
 
 /**
- * The sample bill or ticket, laid out with the settings **as they are on
- * screen right now**, saved or not.
+ * The sample bill or ticket, laid out with the settings as they are on screen right now, saved
+ * or not.
  */
-export type PreviewView = { doc: PreviewDoc, 
+export type PreviewView = { doc: PreviewDoc, paper: string, 
 /**
- * Which paper this is, in the owner's words: "80 mm (3 inch)".
- */
-paper: string, 
-/**
- * **The face the printer will use, named so a browser can use it too** —
- * 2026-08-17, when a shop could first choose Times New Roman.
- *
- * The label out of `mb_print::font::FAMILIES`, which for every face but
- * the built-in one IS the Windows family name — so the preview draws in
- * the same typeface the paper will. The screen falls back to its monospace
- * stack when the face is not installed, which is what the printer does too
- * (`SystemFaces::load`).
+ * The face the printer will use, named so a browser can use it too.
  */
 font: string, 
 /**
- * **Settings that could not be used yet, by name.**
- *
- * The preview redraws on every keystroke, and half-typed is a normal
- * state: a logo width of `4` on its way to `40` is below the minimum for
- * one keypress. Blanking the preview would punish typing and erroring on
- * every character would be noise — so the last usable value is drawn and
- * this says what was skipped. Nothing is silent (R3) and nothing blocks.
+ * Settings that could not be used yet, by name.
  */
 notUsableYet: Array<string>, };

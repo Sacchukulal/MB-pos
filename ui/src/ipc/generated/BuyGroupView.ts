@@ -3,7 +3,7 @@ import type { BuyLineView } from "./BuyLineView";
 
 export type BuyGroupView = { 
 /**
- * "Metro", "The milk van", or "Not said" when the shop has not filled it
- * in — which is a real answer and not an empty heading.
+ * "Metro", "The milk van", or "Not said" when the shop has not filled it in — which is a
+ * real answer and not an empty heading.
  */
 buyFrom: string, lines: Array<BuyLineView>, };

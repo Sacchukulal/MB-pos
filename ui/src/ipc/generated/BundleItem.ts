@@ -9,11 +9,11 @@ export type BundleItem = {
  */
 name: string, 
 /**
- * What it is, in the shop's words — "the last seven days of the counter's
- * own log", not "logs".
+ * What it is, in the shop's words — "the last seven days of the counter's own log", not
+ * "logs".
  */
 what: string, 
 /**
- * Already formatted: "12 KB". R8.
+ * Already formatted: "12 KB".
  */
 size: string, };

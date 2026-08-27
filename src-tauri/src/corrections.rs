@@ -1,30 +1,9 @@
-//! **The four ways a shop takes something back** — audit B5, B6 and D7.
-//!
-//! > **B5.** *"There is no way to cancel a finalised bill. Once 'Complete Bill'
-//! > is pressed, that bill is in your sales and your GST forever. Every shop
-//! > makes a mistake sometimes."*
-//! > **B6.** *"There is no way to cancel an open (KOT'd) order from the
-//! > counter… the order sits in the Processing list forever and the table stays
-//! > busy."*
-//! > **D7.** *"A reprinted bill is indistinguishable from the original, which
-//! > is an obvious fraud opening."*
-//!
-//! P11 gave the counter the ability to say no. This gives it the ability to say
-//! sorry, and the two are the same feature from either side: **a correction
-//! nobody can trace is indistinguishable from theft.** That is why every flow
-//! here carries a reason, a person and a row, and why none of them deletes
-//! anything.
-//!
-//! # Bodies over `&App`, seats in `ipc.rs`
-//!
-//! D46. These are sequences — void, then refund, then reprint the voided copy —
-//! and a sequence that can only be checked by clicking is a sequence that gets
-//! checked once.
+//! The four ways a shop takes something back.
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
 use mb_core::{AnyOrder, BusinessDay, Money, OrderId, StaffId, Timestamp};
-use mb_db::repo::corrections::{Refund, Reason};
+use mb_db::repo::corrections::{Reason, Refund};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -35,13 +14,10 @@ use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
-/// Above this, a void needs a second person (item 4). Zero means always;
-/// absent means never. P17 gives it a screen.
+/// Above this, a void needs a second person (item 4).
 const APPROVAL_KEY: &str = "bill.void.approval_above_paise";
 
-// ---------------------------------------------------------------------------
 // What the screens see.
-// ---------------------------------------------------------------------------
 
 /// One of today's bills, as the Bills list shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -50,7 +26,6 @@ const APPROVAL_KEY: &str = "bill.void.approval_above_paise";
 pub struct BillRowView {
     pub order_id: String,
     pub number: String,
-    /// Already formatted. R8 — TypeScript does no arithmetic, on money or time.
     pub at: String,
     pub table: Option<String>,
     pub order_type: String,
@@ -58,8 +33,7 @@ pub struct BillRowView {
     pub cashier: Option<String>,
     /// "settled", "voided", "cancelled".
     pub state: String,
-    /// Present on a voided bill, and shown. A void without its reason on screen
-    /// is the same silence audit B5 complains about.
+    /// Present on a voided bill, and shown.
     pub void_reason: Option<String>,
     pub refunded: Option<MoneyView>,
     /// How many pieces of paper this bill has produced beyond the first.
@@ -88,18 +62,9 @@ pub struct DayTotalsView {
     pub cancelled_orders: i64,
 }
 
-// ---------------------------------------------------------------------------
 // The list, and the reasons.
-// ---------------------------------------------------------------------------
 
-/// Today's bills, newest first — **the way in** to every flow below.
-///
-/// P09's grid shows OPEN orders only, so before this a settled bill was
-/// unreachable and void, reprint and refund had no door.
-///
-/// `reports.view` rather than `bill.create`: this is the day's takings on a
-/// screen, and audit C1's first example is *"anybody can open Reports and see
-/// the whole day's cash"*.
+/// Today's bills, newest first — the way in to every flow below.
 pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
     guard::require(app, Permission::ReportsView)?;
     let day = today(now());
@@ -109,18 +74,14 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let staff = repos.people().list_staff(OUTLET)?;
-                let name_of = |id: &StaffId| {
-                    staff
-                        .iter()
-                        .find(|s| s.id == *id)
-                        .map(|s| s.name.clone())
-                };
+                let name_of =
+                    |id: &StaffId| staff.iter().find(|s| s.id == *id).map(|s| s.name.clone());
 
                 let mut out = Vec::new();
                 for order in repos.orders().list_for_day(OUTLET, day)? {
                     let Some(row) = bill_row(&order, &name_of) else {
-                        // A draft or an open order: it is on the floor grid,
-                        // not in the day's bills.
+                        // A draft or an open order: it is on the floor grid, not in the day's
+                        // bills.
                         continue;
                     };
                     let id = OrderId::new(row.order_id.clone());
@@ -132,8 +93,8 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
                         ..row
                     });
                 }
-                // Newest first: the bill somebody wants is nearly always the
-                // one that just printed.
+                // Newest first: the bill somebody wants is nearly always the one that just
+                // printed.
                 out.reverse();
                 Ok(out)
             })
@@ -147,12 +108,7 @@ fn bill_row(
 ) -> Option<BillRowView> {
     let core = order.core();
     let (state, total, cashier, void_reason) = match order {
-        AnyOrder::Settled(o) => (
-            "settled",
-            o.bill.grand_total,
-            name_of(&o.settled_by),
-            None,
-        ),
+        AnyOrder::Settled(o) => ("settled", o.bill.grand_total, name_of(&o.settled_by), None),
         AnyOrder::Voided(o) => (
             "voided",
             o.bill.grand_total,
@@ -223,18 +179,9 @@ pub fn day_totals_on(app: &App) -> UiResult<DayTotalsView> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// 1. Void a bill — B5.
-// ---------------------------------------------------------------------------
+// Void a bill.
 
 /// Reverse a settled bill.
-///
-/// **The bill keeps its number and its amounts.** `SettledOrder::void` (P03)
-/// moves both across untouched, so this cannot edit history even by accident —
-/// it adds a state.
-///
-/// **It does not touch the table.** That bill's table was vacated hours ago and
-/// may have had three parties on it since. Only a cancel frees a table.
 pub fn void_bill_on(
     app: &App,
     order_id: String,
@@ -260,9 +207,6 @@ pub fn void_bill_on(
         ));
     };
 
-    // **The day lock.** A closed day is P18's (scope 10.8) and the RULE belongs
-    // with the void, so it is decided here and read from there: a void against
-    // a closed day is refused, and the shop makes today's correction instead.
     if day_is_closed(app, settled.core.business_day)? {
         return Err(UiError::new(
             "void.day_closed",
@@ -270,7 +214,7 @@ pub fn void_bill_on(
         ));
     }
 
-    // **The second person** — item 4, and T10.
+    // The second person.
     let total = settled.bill.grand_total;
     approve_if_needed(app, total, approver_staff_id, approver_pin)?;
 
@@ -291,13 +235,6 @@ pub fn void_bill_on(
                     app.terminal_id(),
                     &AnyOrder::Voided(voided.clone()),
                 )?;
-                // **P25, D113 — put back exactly what was taken.**
-                //
-                // By NEGATING the rows this bill wrote, never by re-running the
-                // recipe: voiding Tuesday's bill on Friday must return
-                // Tuesday's quantities at Tuesday's costs, and if the chef
-                // changed the gravy on Wednesday, re-exploding would leave the
-                // rice balance permanently richer by the difference.
                 repos.stock().reverse_for_bill(
                     OUTLET,
                     &voided.core.id,
@@ -305,22 +242,28 @@ pub fn void_bill_on(
                     day,
                     Some(&who.staff_id),
                 )?;
-                // **R11 — the same transaction as the thing it describes.**
+                // The same transaction as the thing it describes.
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::BILL_VOIDED, "bill")
-                        .about(voided.bill_number.formatted.clone())
-                        .changed(
-                            serde_json::json!({
-                                "state": "settled",
-                                "total_paise": total.paise(),
-                            }),
-                            serde_json::json!({
-                                "state": "voided",
-                                "total_paise": total.paise(),
-                                "reason": reason,
-                            }),
-                        ),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::BILL_VOIDED,
+                        "bill",
+                    )
+                    .about(voided.bill_number.formatted.clone())
+                    .changed(
+                        serde_json::json!({
+                            "state": "settled",
+                            "total_paise": total.paise(),
+                        }),
+                        serde_json::json!({
+                            "state": "voided",
+                            "total_paise": total.paise(),
+                            "reason": reason,
+                        }),
+                    ),
                 )?;
                 Ok(())
             })
@@ -337,15 +280,6 @@ pub fn void_bill_on(
 }
 
 /// Does this void need a second person, and did it get one?
-///
-/// There is **no token and no "authorised" flag** — a one-shot token would be a
-/// thing to leak, replay and forget to expire, for no gain. The approval is
-/// needed at the moment of the void and nowhere else.
-///
-/// What it protects against: a cashier quietly voiding their own mistakes, or
-/// their own takings, one bill at a time. Not an attacker — P11 handles those,
-/// and somebody holding the manager's PIN has already won that argument. This
-/// is a control against the ordinary, which is what almost all shrinkage is.
 fn approve_if_needed(
     app: &App,
     total: Money,
@@ -409,33 +343,29 @@ fn approve_if_needed(
         })?;
 
     if !mb_auth::verify_pin(&pin, &stored) {
-        return Err(UiError::new("void.approver_wrong_pin", "That PIN is not right."));
+        return Err(UiError::new(
+            "void.approver_wrong_pin",
+            "That PIN is not right.",
+        ));
     }
     Ok(())
 }
 
-/// Scope 10.8's seam. P18 builds the day lock; this reads it.
-///
-/// Until then there is nothing to read and nothing is closed — which is honest
-/// rather than convenient: the rule exists and its input does not yet.
 fn day_is_closed(app: &App, day: BusinessDay) -> UiResult<bool> {
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).corrections().day_is_locked(OUTLET, day))
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .corrections()
+                    .day_is_locked(OUTLET, day)
+            })
             .map_err(|e| words::from_db(&e))
     })
 }
 
-// ---------------------------------------------------------------------------
-// 2. Cancel an open order — B6.
-// ---------------------------------------------------------------------------
+// Cancel an open order.
 
 /// The customer walked out.
-///
-/// **The table frees immediately** — *"the order sits in the Processing list
-/// forever and the table stays busy"* is the whole finding — and if the kitchen
-/// has been told, it gets a slip telling it to stop cooking **everything**, not
-/// a delta, because the whole order is off.
 pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<()> {
     let who = guard::require(app, Permission::OrderCancel)?;
     let at = now();
@@ -456,8 +386,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
     };
 
     // The kitchen first — while the order still says what it was told.
-    let told: Vec<(mb_core::LineIdentity, mb_core::Qty)> =
-        open.core.kitchen.told().to_vec();
+    let told: Vec<(mb_core::LineIdentity, mb_core::Qty)> = open.core.kitchen.told().to_vec();
     let table = open.core.table.as_ref().map(|t| t.as_str().to_owned());
 
     let cancelled = open
@@ -497,29 +426,23 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // The order is on disk and the table is free. NOW the paper — the same
-    // order of operations as `complete_bill`, and for the same reason (D4).
+    // The order is on disk and the table is free.
     if !told.is_empty()
-        && let Err(e) = print_cancellation(app, &open.core, &told, table.as_deref(), Some(&mb_core::AnyOrder::Open(open.clone())))
+        && let Err(e) = print_cancellation(
+            app,
+            &open.core,
+            &told,
+            table.as_deref(),
+            Some(&mb_core::AnyOrder::Open(open.clone())),
+        )
     {
         log_warn!("order {order_id} was cancelled but the kitchen slip failed: {e}");
     }
 
-    // **P24 — and this is the one thing on the kitchen screen that is allowed
-    // to interrupt.** Food already cooking gets thrown away, and food not
-    // started gets cooked for nobody, so the ticket does not vanish: it turns
-    // red and stays until a cook presses "Got it" (D107).
-    //
-    // Not fatal — the order is already cancelled, and a screen that could not
-    // be told is a screen somebody has to be told about in person. It is
-    // logged so that conversation can start.
+    // And this is the one thing on the kitchen screen that is allowed to interrupt.
     if let Err(e) = app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| {
-                mb_db::Repos::new(tx)
-                    .kitchen()
-                    .cancel_order(&order_id, at)
-            })
+            .transaction(|tx| mb_db::Repos::new(tx).kitchen().cancel_order(&order_id, at))
             .map_err(|e| words::from_db(&e))
     }) {
         log_warn!("order {order_id} was cancelled but the kitchen screen was not told: {e}");
@@ -529,24 +452,17 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
     Ok(())
 }
 
-/// Tell the kitchen to stop. `TicketKind::Cancellation` is P06's, already built.
+/// Tell the kitchen to stop.
 fn print_cancellation(
     app: &App,
     core: &mb_core::OrderCore,
     lines: &[(mb_core::LineIdentity, mb_core::Qty)],
     table: Option<&str>,
-    // The order, when the caller has one — so the slip carries the same token
-    // and bill number the ticket that started the cooking did (P32).
+    // The order, when the caller has one — so the slip carries the same token and bill number
+    // the ticket that started the cooking did.
     order: Option<&mb_core::AnyOrder>,
 ) -> UiResult<()> {
-    // P17: a cancellation slip is a kitchen ticket, so it obeys the shop's
-    // kitchen-ticket settings. A slip that looked different from every other
-    // ticket would be the one the kitchen does not recognise.
-    //
-    // And it goes where every other kitchen ticket goes. This asked for
-    // `default_printer` — the BILL printer — so in a shop with a real kitchen
-    // printer the queue refused it and the slip that says STOP COOKING was
-    // thrown away in silence while the cook carried on.
+    // A cancellation slip is a kitchen ticket, so it obeys the shop's kitchen-ticket settings.
     crate::flows::queue_kitchen_lines(
         app,
         mb_print::template::TicketKind::Cancellation,
@@ -560,37 +476,24 @@ fn print_cancellation(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// 3. Void one line — 1.19, and P03's seam.
-// ---------------------------------------------------------------------------
+// Void one line.
 
 /// Take one line off the order in the cart.
-///
-/// **The order of operations is load-bearing** (and it is P03's own note):
-/// remove the line, ask `over_told` what the kitchen is now cooking for
-/// nobody, **print**, and only then `mark_cancelled`. Recording before the
-/// paper is durable loses the cancellation silently and the kitchen carries on.
 pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::billing::CartView> {
-    // One counter action at a time — see `App::begin_action`. Held for the
-    // whole flow, so a second press cannot land between the read and the write.
+    // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::OrderItemVoid)?;
     let at = now();
     let day = today(at);
 
-    // What is being taken off, for the audit row and the slip.
     let (name, qty, order_id) = app.with_cart(|state| {
         let line = state.cart.lines().get(index).ok_or_else(|| {
             UiError::new("void_line.gone", "That line is not on this bill any more.")
         })?;
-        Ok((
-            line.snapshot.name.clone(),
-            line.qty,
-            state.order_id.clone(),
-        ))
+        Ok((line.snapshot.name.clone(), line.qty, state.order_id.clone()))
     })?;
 
-    // 1. Off the order.
+    // Off the order.
     let (cancel, core) = app.with_cart_mut(|state| {
         state.cart.remove(index).map_err(|e| {
             UiError::new("void_line.refused", "That line could not be removed.")
@@ -606,13 +509,12 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
         Ok((cancel, state.to_core_for_printing()))
     })?;
 
-    // 2. The paper, before the ledger.
+    // The paper, before the ledger.
     if !cancel.is_empty() {
         let table = app.with_cart(|state| Ok(state.table_label.clone()))?;
         if let Err(e) = print_cancellation(app, &core, &cancel, table.as_deref(), None) {
-            // Deliberately not fatal, and deliberately loud: the line IS off
-            // the bill, so the customer is not charged. What failed is telling
-            // the kitchen, and the cashier has to be the one who does that now.
+            // Deliberately not fatal, and deliberately loud: the line IS off the bill, so the
+            // customer is not charged.
             log_warn!("a line was voided but the kitchen slip failed: {e}");
             return Err(UiError::new(
                 "void_line.no_slip",
@@ -623,40 +525,38 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
             )
             .with_detail(e.to_string()));
         }
-        // 3. And only now does the ledger believe it.
+        // And only now does the ledger believe it.
         app.with_cart_mut(|state| {
             state.kitchen.mark_cancelled(&cancel).map_err(|e| {
-                UiError::new("void_line.record", "The cancellation could not be recorded.")
-                    .with_detail(e.to_string())
+                UiError::new(
+                    "void_line.record",
+                    "The cancellation could not be recorded.",
+                )
+                .with_detail(e.to_string())
             })
         })?;
     }
 
     app.record(
-        &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::ITEM_VOIDED, "order")
-            .about(order_id.unwrap_or_else(|| "unsaved".to_owned()))
-            .changed(
-                serde_json::json!({ "item": name, "qty": qty.to_string() }),
-                serde_json::json!({ "removed": true, "reason": reason }),
-            ),
+        &AuditEntry::new(
+            at,
+            day,
+            Some(who.staff_id.clone()),
+            action::ITEM_VOIDED,
+            "order",
+        )
+        .about(order_id.unwrap_or_else(|| "unsaved".to_owned()))
+        .changed(
+            serde_json::json!({ "item": name, "qty": qty.to_string() }),
+            serde_json::json!({ "removed": true, "reason": reason }),
+        ),
     );
 
     log_info!("{name} voided off the bill by {} — {reason}", who.name);
     app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
 }
 
-// ---------------------------------------------------------------------------
-// 4. Reprint — D7.
-// ---------------------------------------------------------------------------
-
 /// Print another copy, and say so on the paper.
-///
-/// **One template, two arguments.** `bill_document` takes a `Copy`, and there
-/// is no second call site to diverge — *"v1's diverged because it had its own
-/// copy of the layout"*.
-///
-/// **A reprint of a voided bill prints as VOIDED, not as a duplicate.** The
-/// void is the more important fact about that piece of paper.
 pub fn reprint_bill_on(app: &App, order_id: String, reason: String) -> UiResult<String> {
     let who = guard::require(app, Permission::BillReprint)?;
     let at = now();
@@ -723,17 +623,9 @@ pub fn reprint_bill_on(app: &App, order_id: String, reason: String) -> UiResult<
     Ok(format!("Copy {copy} is printing."))
 }
 
-// ---------------------------------------------------------------------------
-// 5. Refund — 8.7.
-// ---------------------------------------------------------------------------
+// Refund — 8.7.
 
 /// Record money going back to a customer.
-///
-/// **Recording it is this session's; making a card terminal do it is not** —
-/// that is scope 8.4 and P29's, and it needs hardware nobody has yet.
-///
-/// The two rules — only against a voided bill, never more than came in — are
-/// the repository's, because both need to read the order.
 pub fn refund_on(
     app: &App,
     order_id: String,
@@ -757,9 +649,6 @@ pub fn refund_on(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let refund = Refund {
-                    // The order is in the id because a refund belongs to one,
-                    // and the tail is what makes it unique — two refunds on one
-                    // bill in the same millisecond used to be one refund.
                     id: format!("{}_{order_id}", crate::newid::fresh_at("ref", at)),
                     order_id: OrderId::new(order_id.clone()),
                     amount: Money::from_paise(amount_paise),
@@ -771,13 +660,19 @@ pub fn refund_on(
                 repos.corrections().record_refund(OUTLET, &refund, day)?;
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::BILL_VOIDED, "refund")
-                        .about(order_id.clone())
-                        .with_after(serde_json::json!({
-                            "amount_paise": amount_paise,
-                            "mode": mode,
-                            "reason": reason,
-                        })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::BILL_VOIDED,
+                        "refund",
+                    )
+                    .about(order_id.clone())
+                    .with_after(serde_json::json!({
+                        "amount_paise": amount_paise,
+                        "mode": mode,
+                        "reason": reason,
+                    })),
                 )?;
                 Ok(())
             })
@@ -792,16 +687,13 @@ pub fn refund_on(
     list_bills_on(app)
 }
 
-/// The timestamp helper the audit rows share.
 #[allow(dead_code, reason = "kept beside the flows it serves")]
 fn stamp() -> (Timestamp, BusinessDay) {
     let at = now();
     (at, today(at))
 }
 
-// ---------------------------------------------------------------------------
-// The command seats (D46).
-// ---------------------------------------------------------------------------
+// The command seats.
 
 #[tauri::command]
 pub fn list_bills(app: tauri::State<'_, App>) -> UiResult<Vec<BillRowView>> {

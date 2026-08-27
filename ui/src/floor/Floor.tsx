@@ -1,54 +1,6 @@
 /**
- * **The floor** — scope 14.1 the plan, 14.2 the timers, 14.3 the occupancy
- * line, and the three operations (1.21, 1.22, 1.23).
- *
- * The billing screen's grid stays exactly where it is and keeps working. This
- * is the room: an owner's own layout, the two timers that say which table
- * needs somebody, and the arranging of both.
- *
- * # Why this is its own rail item rather than a mode of the billing grid
- *
- * Because it answers a different question. Billing asks *"which table am I
- * putting this dosa on"*; the floor asks *"which table needs me"*, and — since
- * 2026-08-22 — *"what is my room made of"*. A mode toggle on a screen a cashier
- * is mid-bill on would make those questions ones they have to close a bill to
- * ask.
- *
- * # The room is arranged HERE, not in a dialog
- *
- * The owner, 2026-08-22: *"No need for popup for setup room. Redesign the Floor
- * section page to have a adding tables section in one side (at the starting side
- * of the screen)… no need to show table list as it will already be visible in
- * the screen in proper square format. just add small edit symbol and delete
- * symbol, icon on top of the table squares when hovered. make the tables
- * selectable… and then i should be able to delete them."*
- *
- * So: a panel down the left holds the three things that MAKE a room — sections,
- * a run of tables, and the two timers — and the room itself fills the rest of
- * the screen. **The squares are the table list.** The old dialog carried a
- * seven-column table of every table beside a grid drawing the same tables,
- * which is the same information twice and the reason the dialog needed its own
- * scrollbar.
- *
- * What each square can do lives on the square: hover for the pencil and the
- * bin, press to tick it, and the bar above the room acts on everything ticked.
- *
- * # Ticked is not selected
- *
- * `table.selected` means *"the billing cart is on this table"* and is **always
- * false here** — this screen has no cart (owner, same day: *"why is the table i
- * selected in the billing section is highlighted in floor section also? it makes
- * no sense"*). `picked` means *"I have ticked this one"*. Two facts, two props,
- * two marks. See `TableView::selected` and `Room::cart_is_on`.
- *
- * # Nothing here decides anything
- *
- * The tile states arrive decided (Rust compared the minutes to the shop's own
- * thresholds), the occupancy line arrives as sentences, whether this person may
- * arrange the room arrives as `canArrange`, and a dragged tile is a square
- * reported to Rust which accepts or refuses it. R8, and the drag is the
- * interesting case: following the mouse is not a business rule; deciding whether
- * two tables may share a square is.
+ * The floor — scope 14.1 the plan, 14.2 the timers, 14.3 the occupancy line, and the three
+ * operations (1.21, 1.22, 1.23).
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -72,8 +24,7 @@ import {
   useToast,
 } from '../kit';
 import { call } from '../ipc/call';
-/* **The one table tile in the product.** This screen used to have a second
-   copy — see the note where it was. */
+/* The one table tile in the product. */
 import { Tile } from '../billing/TableGrid';
 import type { FloorView } from '../ipc/generated/FloorView';
 import type { SectionView } from '../ipc/generated/SectionView';
@@ -82,7 +33,7 @@ import type { TableView } from '../ipc/generated/TableView';
 
 import './floor.css';
 
-/** What the floor is being asked to show. Audit F5. */
+/** What the floor is being asked to show. */
 type Filter = 'all' | 'busy' | 'attention';
 
 export function Floor() {
@@ -91,53 +42,25 @@ export function Floor() {
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<TableRowView | null>(null);
   const [moving, setMoving] = useState<TableView | null>(null);
-  /**
-   * **The ticked tables, by id.**
-   *
-   * Ids and not rows, so a floor that reloads under a selection does not leave
-   * stale copies of rows behind — everything is read back out of `floor` when
-   * it is needed. Ids that no longer exist are dropped on every reload.
-   */
+  /** The ticked tables, by id. */
   const [picked, setPicked] = useState<readonly string[]>([]);
   const [confirming, setConfirming] = useState<'delete' | 'hide' | null>(null);
-  /**
-   * **Is the arranging panel unfolded?**
-   *
-   * The owner, 2026-08-24: *"make it so that i can Fold the Add rooms side
-   * panel, so that there will only be a small button for add room."* A room is
-   * arranged once and looked at every day, so the panel is the exception and
-   * the room is the screen.
-   *
-   * `null` means "nobody has said" — and then it is open only on a shop with
-   * no tables, where the panel IS the next thing to do (it is what the empty
-   * state points at). One piece of state, no effect, no stored preference.
-   */
+  /** Is the arranging panel unfolded? */
   const [arrangeOpen, setArrangeOpen] = useState<boolean | null>(null);
   /** The one table the bin on a tile is about — see the note on `Tile`. */
   const [deletingOne, setDeletingOne] = useState<TableRowView | null>(null);
   const toast = useToast();
 
-  // One reporter for the whole product, obeying the tone the engine set — so
-  // "the kitchen already has this" is not shown in the colour of a real fault.
+  // One reporter for the whole product, obeying the tone the engine set — so "the kitchen
+  // already has this" is not shown in the colour of a real fault.
   const report = useReport();
 
-  /**
-   * **One place the floor comes back from Rust**, and the one place a stale
-   * tick is dropped.
-   *
-   * Every command on this screen returns the whole `FloorView`, so a table
-   * deleted by one of them is gone from `fresh.tables` — and a tick still
-   * pointing at it would be a bulk action that fails on a row nobody can see.
-   */
+  /** One place the floor comes back from Rust, and the one place a stale tick is dropped. */
   const arrived = useCallback((fresh: FloorView) => {
     setFloor(fresh);
     setPicked((was) => {
       const kept = was.filter((id) => fresh.tables.some((t) => t.id === id));
-      // **The SAME array back when nothing was dropped**, so React can bail out
-      // of the update. `filter` always builds a new one, and a new one is a
-      // render — every reload of the floor would have forced one whether or not
-      // a tick had actually gone. Found by a test hanging: the reload effect
-      // re-runs on a render, so a render it caused is a reload it causes.
+      // The SAME array back when nothing was dropped, so React can bail out of the update.
       return kept.length === was.length ? was : kept;
     });
   }, []);
@@ -148,17 +71,7 @@ export function Floor() {
 
   useEffect(load, [load]);
 
-  /**
-   * **Carry the bill to this table, from the Floor screen too.**
-   *
-   * The owner, 2026-08-17: *"the users are keeps open that floor page for
-   * billing also, so print button inside table cards also wil appeare here."*
-   *
-   * The same command the billing grid's tiles call, doing the same nothing to
-   * the cart: it reads the order off disk, prints it marked NOT PAID, and
-   * leaves the table open. Nothing about this screen's state changes, which is
-   * why it does not reload the floor afterwards.
-   */
+  /** Carry the bill to this table, from the Floor screen too. */
   const printTheBill = useCallback(
     async (tile: TableView) => {
       if (!tile.orderId) return;
@@ -179,8 +92,8 @@ export function Floor() {
         case 'busy':
           return tile.orderId !== null;
         case 'attention':
-          // The two things worth walking over for: a table that has been
-          // waiting, and food the kitchen has not heard about.
+          // The two things worth walking over for: a table that has been waiting, and food the
+          // kitchen has not heard about.
           return (
             tile.state === 'late' ||
             tile.state === 'waiting' ||
@@ -207,22 +120,12 @@ export function Floor() {
 
   const sections = ['All', ...floor.sections.map((s) => s.name)];
 
-  /**
-   * **A tile you can tick is a tile that IS a table.**
-   *
-   * The floor also shows parcel and self-service orders — §4's *"so no order is
-   * ever invisible"* — and those are tiles with an order and no table behind
-   * them. There is nothing to hide or delete, so there is nothing to tick.
-   *
-   * Getting this wrong made the bar lie: it counted `floor.tables` rows while
-   * the ticks came from `floor.tiles`, so ticking four tiles on a floor with
-   * two tables and two parcel orders read *"2 ticked"*. Found by driving it.
-   */
+  /** A tile you can tick is a tile that IS a table. */
   const isATable = (id: string) => floor.tables.some((t) => t.id === id);
   const pickable = floor.canArrange;
   /** Only what is on screen and is a table — the bar acts on what you can see. */
   const ticked = picked.filter((id) => shown.some((t) => t.id === id) && isATable(id));
-  /** **The room is drawn room by room** — see `roomsOf`. */
+  /** The room is drawn room by room — see `roomsOf`. */
   const rooms = roomsOf(floor.sections, shown);
 
   /** What a tile can do, written once for the plan and for every room's grid. */
@@ -239,13 +142,7 @@ export function Floor() {
   /** Open on a shop with no tables, folded once there are some. */
   const arranging = arrangeOpen ?? floor.tables.length === 0;
 
-  /**
-   * **What the ticked tables are about to have done to them.**
-   *
-   * Each of these is ONE command over the whole set — see
-   * `floor::delete_tables_on`. A loop here would be a room that can end up half
-   * changed, and a message that has to explain which half.
-   */
+  /** What the ticked tables are about to have done to them. */
   const act = (what: 'delete' | 'hide' | 'show') => {
     const how = ticked.length;
     const sent =
@@ -275,24 +172,7 @@ export function Floor() {
 
   return (
     <div className="mb-floor">
-      {/*
-        **Two choices, and they must not look like one choice.**
-
-        WHICH ROOM you are looking at, and WHICH TABLES within it. Before P27.5
-        both were rendered as `Button`s with the selected one filled solid
-        accent, side by side on one row — so the screen showed two identical
-        highlighted pills, four inches apart, meaning completely different
-        things. That is the specific failure UI_GUIDELINES §5 is about, and it
-        was on the second-most-used screen in the product.
-
-        Now: the ROOM is a segmented control (one of these, always exactly one,
-        like the order type on the billing screen) and the VIEW is a set of
-        tabs (a lens over what the segment chose). Different shapes, because
-        they are different questions.
-
-        The "Set up the room" button that used to sit at the end is gone with
-        the dialog it opened.
-      */}
+      {/* Two choices, and they must not look like one choice. */}
       <Toolbar
         end={
           <>
@@ -313,11 +193,7 @@ export function Floor() {
           </>
         }
       >
-        {/* **No rooms, no room picker** (P30.5). A shop with no sections got a
-            segmented control holding the single word "All" — a tall empty box
-            in the corner of the screen offering a choice between one thing.
-            One section is the same: "All" and "Main hall" are the same set of
-            tables under two names. */}
+        {/* No rooms, no room picker. */}
         {floor.sections.length > 1 ? (
           <div className="mb-segment" role="group" aria-label="Which room">
             {sections.map((name) => (
@@ -335,9 +211,10 @@ export function Floor() {
         ) : null}
       </Toolbar>
 
-      {/* Hidden entirely from somebody who may not arrange the room: a panel
-          of controls that can only answer "you do not have permission" is worse
-          than no panel. `guard::require` is still the control. */}
+      {/*
+        Hidden entirely from somebody who may not arrange the room: a panel of controls that can
+        only answer "you do not have permission" is worse than no panel.
+      */}
       <SideFold
         label="Rooms and tables"
         open={arranging}
@@ -346,8 +223,7 @@ export function Floor() {
         allowed={pickable}
         panel={<Arrange floor={floor} onChanged={arrived} onFailed={report} />}
       >
-        {/* Only when there is something ticked. A bar that is always there is
-            furniture; a bar that appears is an answer to what you just did. */}
+        {/* Only when there is something ticked. */}
         {pickable && ticked.length > 0 ? (
           <Picked
             floor={floor}
@@ -365,8 +241,8 @@ export function Floor() {
         {floor.hasLayout ? (
           <Plan floor={floor} tiles={shown} pickable={pickable} onFailed={report} onChanged={arrived} {...onTile} />
         ) : shown.length === 0 ? (
-          // Nothing to draw, so nothing to group — `Grid` owns both of the
-          // empty things this screen can be.
+          // Nothing to draw, so nothing to group — `Grid` owns both of the empty things this
+          // screen can be.
           <Grid
             tiles={shown}
             {...onTile}
@@ -382,8 +258,10 @@ export function Floor() {
               return (
                 <section key={room.name} className="mb-floor__roomgroup">
                   <div className="mb-floor__roomhead">
-                    {/* The box first, then the room's name — the name is the
-                        label, so the box needs no words of its own. */}
+                    {/*
+                      The box first, then the room's name — the name is the label, so the box
+                      needs no words of its own.
+                    */}
                     {pickable && mine.length > 0 ? (
                       <Checkbox
                         aria-label={
@@ -394,8 +272,8 @@ export function Floor() {
                         checked={on.length === mine.length}
                         onChange={(event) =>
                           setPicked((was) => {
-                            // Only this room's ticks change; another room's
-                            // stay, so the bar can act on both at once.
+                            // Only this room's ticks change; another room's stay, so the bar
+                            // can act on both at once.
                             const others = was.filter(
                               (id) => !mine.some((t) => t.id === id),
                             );
@@ -406,8 +284,7 @@ export function Floor() {
                         }
                       />
                     ) : null}
-                    {/* A shop with no rooms at all is not told its tables are
-                        in "No room". */}
+                    {/* A shop with no rooms at all is not told its tables are in "No room". */}
                     {rooms.length > 1 || room.name !== '' ? (
                       <h3 className="mb-floor__roomname">
                         {room.name === '' ? 'No room' : room.name}
@@ -450,9 +327,7 @@ export function Floor() {
         />
       ) : null}
 
-      {/* **The bin on a tile.** One table, named, and still confirmed — Rust
-          refuses a table with history, and this says so before the press
-          rather than after it. */}
+      {/* The bin on a tile. */}
       {deletingOne ? (
         <ConfirmDialog
           open
@@ -513,44 +388,19 @@ export function Floor() {
   );
 }
 
-/**
- * **The tiles, split by room, in the shop's own room order.**
- *
- * The owner, 2026-08-24: *"the tables there are not according to Room/section,
- * why is that?"* They were right: `list_tables` orders by sort order then
- * label, which on a shop with two rooms interleaves them — and "All" then drew
- * twelve squares in one run with nothing saying where AC stopped and HALL
- * began. A room is how a shop thinks about its floor, so it is how the floor is
- * drawn.
- *
- * Rooms first, in the order the shop put them in; tables in no room last, and
- * that is where a parcel or self-service order lands too (§4 — it is a tile
- * with an order and no table). A room with nothing in it is not drawn.
- */
+/** The tiles, split by room, in the shop's own room order. */
 function roomsOf(
   sections: readonly SectionView[],
   tiles: readonly TableView[],
 ): { name: string; tiles: TableView[] }[] {
-  // `tile.section` is a name taken from this same list (see `floor_view`), so
-  // every tile lands in exactly one of these buckets.
+  // `tile.section` is a name taken from this same list (see `floor_view`), so every tile lands
+  // in exactly one of these buckets.
   return [...sections.map((s) => s.name), '']
     .map((name) => ({ name, tiles: tiles.filter((t) => (t.section ?? '') === name) }))
     .filter((room) => room.tiles.length > 0);
 }
 
-/**
- * **The room, as three things you can add to it** — sections, tables, timers.
- *
- * This was a modal called *Set up the room* holding all of this plus a
- * seven-column table of every table in the shop. The owner asked for the dialog
- * to go and for the list to go with it: the squares to the right of this panel
- * ARE the list, and a room drawn twice is a room that can disagree with itself.
- *
- * Everything the dialog could do is still here. Hiding and deleting moved to
- * the tiles and the ticked-bar, which is where you can see what you are acting
- * on — and they act on a set, so the one-table-at-a-time `set_dining_table_active`
- * was left with no caller and deleted. `audit-wiring.mjs` is what said so.
- */
+/** The room, as three things you can add to it — sections, tables, timers. */
 function Arrange({
   floor,
   onChanged,
@@ -683,14 +533,7 @@ function Arrange({
   );
 }
 
-/**
- * **What you can do to the tables you ticked.**
- *
- * One bar rather than a menu per tile, because everything here is about a SET —
- * and because the number in it is the confirmation that you ticked what you
- * meant to. With exactly one table ticked it also carries what used to need a
- * click on the tile: editing it, and the order operations.
- */
+/** What you can do to the tables you ticked. */
 function Picked({
   floor,
   ticked,
@@ -731,8 +574,7 @@ function Picked({
         </Button>
       ) : null}
 
-      {/* The order operations — scope 1.21 and 1.22. They belong to one table
-          with one order on it, so they appear exactly then. */}
+      {/* The order operations. */}
       {tile && tile.orderId ? (
         <>
           <Button small onClick={() => onPrint(tile)}>
@@ -795,10 +637,7 @@ function Grid({
   canArrange: boolean;
 }) {
   if (tiles.length === 0) {
-    // **Two different emptinesses** (P30.5). "Try another section" is useless
-    // advice to a shop that has never added a table, and it was the only thing
-    // this screen said on a fresh install. The advice changed with the layout:
-    // the panel that adds a table is now on this screen, not behind a button.
+    // Two different emptinesses.
     return none ? (
       <EmptyState
         title="No tables yet"
@@ -830,13 +669,7 @@ function Grid({
   );
 }
 
-/**
- * The plan — **a grid of squares, not free pixels.**
- *
- * Snapping is what makes a dragged layout look deliberate instead of drunk,
- * and it makes "two tables in the same place" a comparison of two integers
- * rather than a rectangle intersection. Rust holds both halves of that rule.
- */
+/** The plan — a grid of squares, not free pixels. */
 function Plan({
   floor,
   tiles,
@@ -910,9 +743,10 @@ function Plan({
 
   return (
     <>
-      {/* `style={undefined}` was here — the fossil of an inline style somebody
-          removed without removing the prop. The grid size travels as a data
-          attribute and the CSS reads it. */}
+      {/*
+        `style={undefined}` was here — the fossil of an inline style somebody removed without
+        removing the prop.
+      */}
       <div className="mb-plan" data-grid={floor.grid}>
         {squares}
       </div>
@@ -923,31 +757,7 @@ function Plan({
   );
 }
 
-/*
-  **THE FLOOR'S OWN `Tile` USED TO BE HERE, AND IT IS THE BUG.**
-
-  The owner, 2026-08-17: *"in floor page the table icons differently showing.
-  As already i told you from starting to till, dont hardcode any styling
-  themes, that must be global theme follow… if anything hardcoded, remove
-  hardcode immediately, that is the very very strict instruction forever."*
-
-  This file had a second table tile. It reached for the same `mb-tile` classes
-  but drew different markup — a `<button>` rather than the box-and-face the
-  billing grid uses, its own meta line, its own `mb-floor__kitchen` class for
-  the food timer, and no print mark. So the two screens had never actually
-  matched, and when the billing tile was restructured on 2026-08-17 this copy
-  kept the old shape, lost the padding that now lives on `.mb-tile__face`, and
-  every busy table on this screen collapsed into overlapping text.
-
-  **That is the real cost of a duplicate**: not that the two look different,
-  but that fixing one silently breaks the other, and nothing fails to tell you.
-
-  There is one tile now — `billing/TableGrid.tsx` — and both screens import it.
-  The food timer went with it, because it belongs to a tile rather than to a
-  screen. The pencil and the bin were added there for the same reason.
-*/
-
-/** What you can do to the order on a table — scope 1.21, 1.22, 1.23. */
+/** What you can do to the order on a table. */
 function TableActions({
   tile,
   floor,
@@ -1003,10 +813,7 @@ function TableActions({
               .then((fresh) =>
                 onDone(
                   fresh,
-                  // The NAME, never the id. A toast reading "moved to tbl_1"
-                  // is audit F8 — a shopkeeper reading our key — and it was
-                  // found the only way it could be: by moving a table and
-                  // looking at the screen (P14).
+                  // The NAME, never the id.
                   `The order moved to ${
                     free.find((t) => t.id === target)?.printed ?? 'the new table'
                   }.`,
@@ -1059,13 +866,7 @@ function TableActions({
   );
 }
 
-/**
- * One table's own details.
- *
- * Still a dialog, and deliberately: this is a form about a single thing, opened
- * on purpose, with a Save. The dialog the owner asked to remove was the one
- * that held the whole room behind a button.
- */
+/** One table's own details. */
 function EditTable({
   row,
   floor,

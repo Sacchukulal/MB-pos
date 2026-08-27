@@ -8,7 +8,7 @@ import type { UnconfirmedView } from "./UnconfirmedView";
  */
 export type PaymentsView = { day: string, 
 /**
- * Which provider this counter is asking. "Typed in by hand" today.
+ * Which provider this counter is asking.
  */
 provider: string, unconfirmed: Array<UnconfirmedView>, attempts: Array<AttemptView>, 
 /**

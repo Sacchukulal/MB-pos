@@ -11,46 +11,23 @@ export type LockState = {
 signedInAs: string | null, role: string | null, 
 /**
  * What this person may do, so the rail can hide what they cannot open.
- *
- * **This is a courtesy and not the control.** `guard::require` refuses the
- * commands themselves, and there is a test that calls them directly. A
- * screen that treated this list as the security boundary would be audit
- * C1 with extra steps.
  */
 permissions: Array<string>, 
 /**
- * True while nobody in this shop has a PIN. The banner reads off it, and
- * it is why the app opens straight into billing on a shop's first day.
+ * True while nobody in this shop has a PIN.
  */
 nobodyHasAPin: boolean, 
 /**
- * Everybody who could sign in. **Only people with a PIN**, because a name
- * on this list that cannot be chosen is a support call.
+ * Everybody who could sign in.
  */
 people: Array<PersonView>, 
 /**
- * Whether this shop has a recovery code at all, so the lock screen only
- * offers "forgotten your PIN?" when there is something to offer.
+ * Whether this shop has a recovery code at all, so the lock screen only offers "forgotten
+ * your PIN?" when there is something to offer.
  */
 canRecover: boolean, 
 /**
- * **Who the recovery code may set a PIN for**, which is *not* a subset of
- * [`Self::people`] — and the difference is a way to be locked out of your
- * own shop for good.
- *
- * `people` is "who can sign in", so it holds only staff who already have a
- * PIN. The forgotten-PIN screen was drawing its list from it, and that is
- * fine right up until the one person who manages staff has **no** PIN: a
- * manager who taps *Remove the PIN* on themselves while a cashier still has
- * one leaves a shop that locks (somebody has a PIN, so it locks) and whose
- * owner is not on the list (they have none, so they are filtered out). The
- * recovery code is the way back from exactly that, and it had nobody to
- * offer it to.
- *
- * So this list is drawn from what the code is *allowed* to do rather than
- * from what the pad can do with it: everybody active who holds
- * `staff.manage`, PIN or no PIN. It is the same rule
- * `recover_with_code_on` enforces, sent up so the screen cannot invite a
- * refusal — or, worse, offer nothing at all.
+ * Who the recovery code may set a PIN for, which is not a subset of `Self::people` — and
+ * the difference is a way to be locked out of your own shop for good.
  */
 recoverable: Array<PersonView>, };

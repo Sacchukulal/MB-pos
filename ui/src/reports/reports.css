@@ -1,18 +1,7 @@
-/*
- * The reports screen — scope 10, audit G1–G7.
- *
- * Two regions, like Settings: the list of reports on the left, the report on
- * the right. Only the right side scrolls vertically, and the SHEET is the only
- * thing allowed to scroll sideways — §1 forbids the page itself doing it, and a
- * six-column tax report on a 1366-wide till is exactly how that happens.
- *
- * Every value is a token (D21).
- */
+/* The reports screen. */
 
 .mb-reports {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: grid;
   grid-template-columns: var(--settings-rail) minmax(0, 1fr);
   gap: var(--space-4);
@@ -62,8 +51,7 @@
   color: var(--text);
 }
 
-/* The report you are on. A left stripe as well as a fill — colour is never the
-   only signal (§2 rule 2). */
+/* The report you are on. */
 .mb-reports__pick--on {
   background: var(--accent-soft);
   border-color: var(--accent-line);
@@ -117,12 +105,11 @@
   font-size: var(--text-xs);
 }
 
-/* **The only thing on this screen that scrolls sideways.** */
+/* The only thing on this screen that scrolls sideways. */
 .mb-reports__sheet {
   min-width: 0;
   min-height: 0;
 }
-
 
 .mb-reports__note {
   margin: 0;
@@ -131,18 +118,10 @@
   line-height: var(--line-normal);
 }
 
-/* ---------------------------------------------------------------------------
-   Closing the day (P18) — audit B15.
-
-   Two columns on a 1366-wide till: what the till expects on the left, the
-   count on the right, so a person's eyes move between the two figures they are
-   comparing rather than up and down one long form.
-   --------------------------------------------------------------------------- */
+/* Closing the day. */
 
 .mb-dayclose {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -188,9 +167,7 @@
   font-weight: var(--weight-bold);
 }
 
-/* One row per note: the face value, the box, what it comes to. Fixed columns,
-   so the boxes line up under each other — a count grid whose boxes shift as
-   the totals grow is a count somebody redoes. */
+/* One row per note: the face value, the box, what it comes to. */
 .mb-dayclose__grid {
   display: flex;
   flex-direction: column;
@@ -248,18 +225,10 @@
   gap: var(--space-3);
 }
 
-/* ---------------------------------------------------------------------------
-   Today, and what needs you (P18) — audit G1.
-
-   The figures across the top, the comparison under them, then the list. In
-   that order because it is the order the questions come in: how did today go,
-   how does that compare, and what do I have to do about anything.
-   --------------------------------------------------------------------------- */
+/* Today, and what needs you. */
 
 .mb-dash {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -340,19 +309,12 @@
   line-height: var(--line-normal);
 }
 
-/* **P29, scope 8.3 — the payments nobody has confirmed.**
-
-   Beside the drawer count, because the two are the same job: this is the
-   money the shop believes it has and has not checked. The rows carry a
-   button, so each line is a row inside a column card — the same trap the
-   banner below documents. */
-/* Capped, and it scrolls. A shop that took twenty card payments today would
-   otherwise push the drawer count — the whole point of the screen — off the
-   bottom. */
+/* Capped, and it scrolls. */
 .mb-dayclose__unconfirmed {
-  /* `flex: 0 0 auto` as well as the height cap: the page is a flex column, so
-     a card that only says how TALL it may be gets squeezed down to its heading
-     by the siblings around it. Found by looking at it. */
+  /*
+   * `flex: 0 0 auto` as well as the height cap: the page is a flex column, so a card that only
+   * says how TALL it may be gets squeezed down to its heading by the siblings around it.
+   */
   flex: 0 0 auto;
   max-height: var(--raw-output-height);
   overflow-y: auto; /* mb-layout-allow: a <Card> capped at a height, not a page region */
@@ -363,14 +325,13 @@
   gap: var(--space-3);
 }
 
-/* The "this day is closed" banner: the sentence on the left, the way out on
-   the right. */
+/* The "this day is closed" banner: the sentence on the left, the way out on the right. */
 .mb-dayclose__banner {
   display: flex;
-  /* **A Card is a COLUMN** (`.mb-card` sets `flex-direction: column`), so
-     every row placed inside one has to say so. Three of these shipped
-     stacked and centred before anybody looked: this banner, the variance
-     verdict, and each row of the attention list. */
+  /*
+   * A Card is a COLUMN (`.mb-card` sets `flex-direction: column`), so every row placed inside
+   * one has to say so.
+   */
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
@@ -382,10 +343,6 @@
   margin: 0;
 }
 
-/* **P27, D140 — which tills are in the shop's day.**
-   The accent and not the warning colour: a drawer nobody has counted yet at
-   nine in the evening is an ordinary evening, not a problem. It becomes one
-   only if somebody closes without it, and the sentence says that. */
 .mb-dayclose__tills {
   border-left: var(--space-1) solid var(--accent);
 }

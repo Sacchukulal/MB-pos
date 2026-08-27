@@ -1,38 +1,4 @@
-//! **Who is logged in, and when the screen locks itself.**
-//!
-//! # Locked means "no session". That is the whole of it.
-//!
-//! What locking deliberately does **not** touch:
-//!
-//! * the cart (P09's `Mutex<CartState>`) — a shift change at 9 pm cannot cost a
-//!   table its order;
-//! * the kitchen ledger — nothing is re-sent to the kitchen;
-//! * the print queue and its threads — paper keeps coming out, and the
-//!   persistent indicator stays visible on the lock screen, because a bill that
-//!   printed wrong while the screen was locked is still the cashier's problem
-//!   (audit D4);
-//! * the database, which is not closed.
-//!
-//! # The idle clock is Rust's, and it is fed by work
-//!
-//! Every guarded command touches `last_seen` (see [`crate::guard::require`]).
-//! Not mouse movement, not keystrokes crossing the IPC boundary — **work**. A
-//! React timer would be a poll (budget M4, and §5 rule 6 says a 250 ms loop is
-//! M4 gone before a single feature is written), and worse, it would be bypassed
-//! by any screen that is not open.
-//!
-//! # The first day of a shop's life
-//!
-//! **If nobody has a PIN, the app does not lock.** It runs as the stand-in
-//! counter user holding every permission, and the shell shows a banner that
-//! cannot be dismissed. Requirement 3 — *a shop must be able to bill on its
-//! first day* — outranks audit C1 on that one day, and this is the same shape
-//! as `state::fallback_row`: a real thing, named for what it is, that a setup
-//! screen later replaces.
-//!
-//! The moment the first PIN is set, the lock becomes live and the app locks
-//! **immediately**. Proving the PIN works while that person is still standing
-//! there is worth four seconds; finding out at 8 am tomorrow is not.
+//! Who is logged in, and when the screen locks itself.
 
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -40,22 +6,10 @@ use std::time::Duration;
 use mb_auth::{Actor, PermissionSet};
 use mb_core::{StaffId, Timestamp};
 
-/// How long the counter may sit untouched before it locks itself, when the
-/// shop has not said.
-///
-/// **P17 gave it a setting** (`billing.idle_lock_minutes`), and
-/// [`idle_lock_for`] is what the idle thread and the guard actually ask. This
-/// constant is what a shop that has never opened the settings screen gets, and
-/// what the tests in this file measure against.
+/// How long the counter may sit untouched before it locks itself, when the shop has not said.
 pub const IDLE_LOCK: Duration = Duration::from_secs(5 * 60);
 
 /// The shop's answer, as a duration.
-///
-/// **`None` means never** — a kitchen-facing terminal in a locked room has no
-/// use for a screen that keeps asking who is there, and 0 is how the settings
-/// screen says so. Returning `None` rather than a very long duration means the
-/// caller has to decide what "never" means, which is the honest shape: the
-/// idle thread skips, and nothing has to guess.
 #[must_use]
 pub fn idle_lock_for(minutes: u32) -> Option<Duration> {
     if minutes == 0 {
@@ -65,10 +19,7 @@ pub fn idle_lock_for(minutes: u32) -> Option<Duration> {
     }
 }
 
-/// How often the idle thread looks. Fifteen seconds is well inside the
-/// five-minute period and costs nothing measurable — a sleeping thread is not
-/// a poll loop in the sense M4 cares about, because it does no work and touches
-/// no screen unless something changed.
+/// How often the idle thread looks.
 pub const IDLE_TICK: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
@@ -76,8 +27,8 @@ pub struct Session {
     pub actor: Actor,
     pub since: Timestamp,
     pub last_seen: Timestamp,
-    /// True for the stand-in counter user on a shop with no PINs — the banner
-    /// reads off this, and so does "should we lock at all?".
+    /// True for the stand-in counter user on a shop with no PINs — the banner reads off this,
+    /// and so does "should we lock at all?".
     pub is_stand_in: bool,
 }
 
@@ -101,12 +52,7 @@ impl Sessions {
         lock(&self.current).clone()
     }
 
-    /// Log somebody in — **or switch to them, keeping everything else.**
-    ///
-    /// Switching mid-order is the same call: the actor is replaced and nothing
-    /// else is. The cart does not know this happened, which is exactly right —
-    /// `orders.created_by` was decided when the first line went on, and
-    /// `orders.settled_by` is decided when the money is taken.
+    /// Log somebody in — or switch to them, keeping everything else.
     pub fn begin(&self, actor: Actor, now: Timestamp, is_stand_in: bool) {
         *lock(&self.current) = Some(Session {
             actor,
@@ -116,7 +62,6 @@ impl Sessions {
         });
     }
 
-    /// Lock the screen. Returns who was there, for the audit row.
     pub fn end(&self) -> Option<Actor> {
         lock(&self.current).take().map(|s| s.actor)
     }
@@ -128,10 +73,6 @@ impl Sessions {
         }
     }
 
-    /// Has this session gone quiet for too long?
-    ///
-    /// A stand-in session never idles out: a shop with no PIN has nothing to
-    /// lock to, and a lock screen with no way past it is worse than no lock.
     #[must_use]
     pub fn is_idle(&self, now: Timestamp, period: Duration) -> bool {
         let Some(session) = lock(&self.current).as_ref().cloned() else {
@@ -146,21 +87,14 @@ impl Sessions {
 }
 
 /// The permissions the stand-in counter user holds on a shop's first day.
-///
-/// Everything — because the alternative is a shop that cannot reach its own
-/// settings screen to set the first PIN, which is the state that would make
-/// audit C1 permanent rather than fixed.
 #[must_use]
 pub fn stand_in_actor(name: &str, id: &str) -> Actor {
     Actor {
         staff_id: StaffId::new(id),
         name: name.to_owned(),
         role_id: None,
-        // Beside the name in the title bar this reads as a description of the
-        // till, not a contradiction. The first version said "Nobody has signed
-        // in", which rendered as "Counter · Nobody has signed in" — two
-        // statements disagreeing with each other, in the one place a cashier
-        // looks to check whose till they are on.
+        // Beside the name in the title bar this reads as a description of the till, not a
+        // contradiction.
         role_name: Some("No PIN set".to_owned()),
         permissions: PermissionSet::everything(),
         max_discount_bp: None,
@@ -197,15 +131,17 @@ mod tests {
     fn work_keeps_the_screen_open() {
         let sessions = Sessions::new();
         sessions.begin(someone(), now(0), false);
-        assert!(sessions.is_idle(now(600), IDLE_LOCK), "it should have idled");
+        assert!(
+            sessions.is_idle(now(600), IDLE_LOCK),
+            "it should have idled"
+        );
         sessions.touch(now(590));
         assert!(!sessions.is_idle(now(600), IDLE_LOCK), "work did not count");
     }
 
     #[test]
     fn the_stand_in_never_locks() {
-        // A shop with no PIN has nothing to unlock with. A lock screen it
-        // cannot get past is worse than no lock at all.
+        // A shop with no PIN has nothing to unlock with.
         let sessions = Sessions::new();
         sessions.begin(someone(), now(0), true);
         assert!(!sessions.is_idle(now(86_400), IDLE_LOCK));
@@ -237,8 +173,8 @@ mod tests {
 
     #[test]
     fn a_clock_that_goes_backwards_does_not_lock_the_counter() {
-        // Windows corrects the clock, and a counter that locks itself because
-        // NTP moved time backwards is a counter nobody trusts.
+        // Windows corrects the clock, and a counter that locks itself because NTP moved time
+        // backwards is a counter nobody trusts.
         let sessions = Sessions::new();
         sessions.begin(someone(), now(1_000), false);
         assert!(!sessions.is_idle(now(0), IDLE_LOCK));

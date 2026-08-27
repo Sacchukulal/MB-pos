@@ -1,21 +1,3 @@
-/**
- * **What is plugged in, and what it is actually sending** — P29, scope 7.6–7.9.
- *
- * # The screen exists for the dealer, not the shopkeeper
- *
- * Somebody sets a shop up once: a scanner, maybe a scale, maybe a second
- * screen. They need one place that says what is connected, a Test button per
- * device, and — the part that matters — **the raw data the device is sending**.
- * A dealer who can see the bytes can configure a brand nobody here has ever
- * seen, without a phone call.
- *
- * # Nothing here is a fault
- *
- * A shop with no scale is finished, not broken. So "Not set up" is a plain
- * grey line and never a warning: an interface that nags about hardware nobody
- * owns is an interface people stop reading.
- */
-
 import { useCallback, useEffect, useState } from 'react';
 
 import {
@@ -84,9 +66,8 @@ export function Devices() {
       return;
     }
     if (kind === 'printer') {
-      // The printer test lives on the Settings screen, where the printers
-      // themselves are — sending somebody there beats a second half-working
-      // copy of it here (D102).
+      // The printer test lives on the Settings screen, where the printers themselves are —
+      // sending somebody there beats a second half-working copy of it here.
       toast.show('info', 'Open Settings, then Printers, to test a printer.');
       return;
     }
@@ -114,9 +95,7 @@ export function Devices() {
         {view.says}
       </Notice>
 
-      {/* **One list, not six cards.** Six panels for six one-line facts is a
-          screen a dealer scrolls; the whole point is to see everything that is
-          plugged in at once. */}
+      {/* One list, not six cards. */}
       <Panel title="What is plugged in" flush>
         <Table
           rows={[...view.devices]}
@@ -158,8 +137,10 @@ export function Devices() {
                     <span className={answer.answered ? 'mb-devices__ok' : 'mb-devices__quiet'}>
                       {answer.says}
                     </span>
-                    {/* **The raw bytes.** The whole reason a dealer can set up
-                        a scale nobody here has ever seen. */}
+                    {/*
+                      The raw bytes. The whole reason a dealer can set up a scale nobody here
+                      has ever seen.
+                    */}
                     {answer.raw ? <pre className="mb-devices__raw">{answer.raw}</pre> : null}
                   </Stack>
                 );

@@ -11,8 +11,8 @@ date: string,
  */
 kind: string, note: string, 
 /**
- * What it did to the account, with its sign shown as a direction: `debit`
- * adds to what is owed, `credit` reduces it.
+ * What it did to the account, with its sign shown as a direction: `debit` adds to what is
+ * owed, `credit` reduces it.
  */
 amount: MoneyView, adds: boolean, 
 /**

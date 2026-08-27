@@ -7,8 +7,7 @@ export type SupplierView = { id: string, name: string, phone: string | null, gst
  */
 terms: string, balance: MoneyView, 
 /**
- * True when the shop owes them money. A negative balance is an advance,
- * and it is a different sentence.
+ * True when the shop owes them money.
  */
 owes: boolean, 
 /**

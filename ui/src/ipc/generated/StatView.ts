@@ -2,7 +2,6 @@
 
 export type StatView = { label: string, 
 /**
- * Already formatted, always. Even the counts — R8 does not have an
- * exception for small numbers.
+ * Already formatted, always. Even the counts.
  */
 value: string, note: string, };

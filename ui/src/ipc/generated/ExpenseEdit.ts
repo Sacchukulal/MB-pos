@@ -5,7 +5,7 @@
  */
 export type ExpenseEdit = { id: string, categoryId: string | null, description: string, 
 /**
- * Typed by a person. Parsed in Rust (D39).
+ * Typed by a person.
  */
 amount: string, mode: string, paidTo: string, reference: string, 
 /**

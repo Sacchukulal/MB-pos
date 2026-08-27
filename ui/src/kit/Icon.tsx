@@ -1,41 +1,4 @@
-/**
- * **The icon set.** One set, one stroke weight, one optical size.
- *
- * # Why this file exists
- *
- * Until P27.5 this product had no icons. The left rail — the first thing
- * anybody saw, on every screen, all day — drew its navigation with bare Unicode
- * glyphs: `▦` for Floor, `☰` for Credit, `⌁` for Spends, `⬒` for Stock, `⇩` for
- * Buying. Which glyph a shop actually got depended on which font Windows chose
- * to substitute, so they arrived at different weights, different sizes and
- * different vertical positions. That single fact was most of what the owner
- * meant by *"it looks old-styled and unprofessional"*, and a shopkeeper read it
- * in the first two seconds.
- *
- * # The rules this file exists to keep
- *
- * 1. **One geometry.** Every icon is drawn on the same 24×24 grid, with the
- *    same 1.75 stroke, the same round cap and the same round join. Nothing here
- *    is filled. An icon that needs a different weight to look right is an icon
- *    that is drawn wrong.
- * 2. **`currentColor`, always.** An icon is text as far as colour is concerned,
- *    so it inherits — which is what makes it work in light, dark, contrast and
- *    any theme the owner adds later without this file knowing (D21).
- * 3. **Sized by the type scale, not by pixels.** `--icon` and friends are
- *    tokens, so the text-size setting scales icons with the words next to them
- *    rather than leaving them stranded.
- * 4. **Drawn here, not fetched.** No icon font, no CDN, no npm package. This
- *    app runs in a shop with the internet unplugged and that is a supported
- *    state, not a degraded one — an icon set that arrives over a network is an
- *    icon set that is sometimes a row of empty boxes. Under R6 that also means
- *    this costs no dependency at all: the geometry below is ours.
- *
- * # Adding one
- *
- * Add a line to `IconName` and a path to `PATHS`. `tsc` then fails on any typo
- * at the call site, which is the point of the union — a mistyped icon name used
- * to render nothing at all, silently, on whichever screen nobody opened.
- */
+/** The icon set. One set, one stroke weight, one optical size. */
 
 import type { ReactNode } from 'react';
 import { cx } from './cx';
@@ -97,22 +60,16 @@ export type IconName =
   | 'cash'
   | 'card'
   | 'qr'
-  // P29 — the things a counter is plugged into, and the bike outside.
+  // The things a counter is plugged into, and the bike outside.
   | 'bike'
   | 'scan'
   | 'scale'
   | 'monitor'
   | 'plug';
 
-/**
- * The geometry. 24×24, stroked, never filled.
- *
- * Kept as bare children rather than whole `<svg>` elements so that the wrapper
- * below owns the size, the stroke and the accessibility in ONE place — an icon
- * that carried its own `stroke-width` is an icon that would drift.
- */
+/** The geometry. 24×24, stroked, never filled. */
 const PATHS: Record<IconName, ReactNode> = {
-  // ---- the screens -------------------------------------------------------
+  // The screens.
   receipt: (
     <>
       <path d="M5 3.5h14v17l-2.5-1.5L14 20.5 11.5 19 9 20.5 6.5 19 5 20.5z" />
@@ -188,11 +145,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 7v5.2l3.2 2" />
     </>
   ),
-  // **Sliders, not a cog.** The first drawing here was the usual eight-spoke
-  // gear, and at 20px on a dark bar it was indistinguishable from the sun in
-  // the theme toggle four inches to its right — two different icons that read
-  // as the same picture is worse than one ugly icon. Sliders say "the things
-  // you set" and cannot be mistaken for anything else in this product.
+  // Sliders, not a cog.
   settings: (
     <>
       <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
@@ -207,8 +160,8 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
     </>
   ),
-  // The kitchen. A flame with its own inner flame — the single-outline version
-  // read as a water droplet at 20px, which is the wrong kitchen entirely.
+  // The kitchen. A flame with its own inner flame — the single-outline version read as a water
+  // droplet at 20px, which is the wrong kitchen entirely.
   flame: (
     <>
       <path d="M12 2.8c3.4 3.5 6 6 6 9.7a6 6 0 0 1-12 0c0-2 .9-3.7 2.3-5.2.3 1.1 1 1.9 2 2.3-.1-2.6.6-4.8 1.7-6.8z" />
@@ -221,7 +174,7 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
 
-  // ---- the window and the title bar --------------------------------------
+  // The window and the title bar.
   printer: (
     <>
       <path d="M7 8.5V3.5h10v5" />
@@ -252,14 +205,14 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 3.5a8.5 8.5 0 0 1 0 17z" />
     </>
   ),
-  // The window buttons. Drawn rather than typed, so they sit on the same grid
-  // as everything else — the old ones were "–", "□" and "✕" from three
-  // different fonts and never lined up with each other.
+  // The window buttons. Drawn rather than typed, so they sit on the same grid as everything
+  // else — the old ones were "–", "□" and "✕" from three different fonts and never lined up
+  // with each other.
   minimise: <path d="M5.5 12h13" />,
   maximise: <rect x="5.5" y="5.5" width="13" height="13" rx="1.5" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
 
-  // ---- ordinary work -----------------------------------------------------
+  // Ordinary work.
   search: (
     <>
       <circle cx="10.5" cy="10.5" r="6.5" />
@@ -293,8 +246,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 9.5v5M12 17.5h.01" />
     </>
   ),
-  /** The alerts button (P30.6). Everything that used to be a banner lives
-      behind this, so the counter is the counter. */
+  /** The alerts button. */
   bell: (
     <>
       <path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5" />
@@ -328,7 +280,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="18.5" cy="12" r="1.4" />
     </>
   ),
-  // P31. Browse — for choosing a logo, and for choosing where a shop lives.
+  // Browse — for choosing a logo, and for choosing where a shop lives.
   folder: (
     <path d="M3.5 6.5a1 1 0 0 1 1-1h4l2 2.5h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1z" />
   ),
@@ -383,7 +335,6 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M13.5 13.5h3v3h-3zM20.5 13.5v3M17.5 20.5h3M13.5 20.5h.01" />
     </>
   ),
-  // ---- P29 ----------------------------------------------------------------
   bike: (
     <>
       <circle cx="5.5" cy="16.5" r="3" />
@@ -425,17 +376,9 @@ const PATHS: Record<IconName, ReactNode> = {
 
 export interface IconProps {
   name: IconName;
-  /**
-   * `sm` for inside a dense row, `lg` for a page header or an empty state.
-   * The default sits on the body type size, which is where an icon next to a
-   * word belongs.
-   */
+  /** `sm` for inside a dense row, `lg` for a page header or an empty state. */
   size?: 'sm' | 'md' | 'lg';
-  /**
-   * A label makes the icon *the* meaning of its control, for a screen reader.
-   * Leave it off — the default — when there is a visible word next to it, or
-   * the reader says everything twice (§7).
-   */
+  /** A label makes the icon the meaning of its control, for a screen reader. */
   label?: string;
   className?: string;
 }

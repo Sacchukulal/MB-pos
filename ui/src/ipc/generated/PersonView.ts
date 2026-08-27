@@ -3,7 +3,7 @@ import type { MoneyView } from "./MoneyView";
 
 export type PersonView = { id: string, name: string, code: string | null, role: string | null, status: string, hasPin: boolean, 
 /**
- * Empty unless this person is locked out — then it is the sentence the
- * screen shows, already counted down.
+ * Empty unless this person is locked out — then it is the sentence the screen shows,
+ * already counted down.
  */
 lockedOut: string | null, permissions: Array<string>, maxDiscountBp: number | null, maxDiscount: MoneyView | null, };

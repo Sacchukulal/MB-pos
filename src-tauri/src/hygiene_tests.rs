@@ -1,19 +1,4 @@
-//! **The hygiene rules, as tests** — P30.
-//!
-//! P30's checklist asks for "no `#[allow]` without a written reason, no TODO
-//! without an issue, no `unwrap()` on a user path, no committed secret". Every
-//! one of those was true on the day it was checked and none of them stays true
-//! by agreement — which is D40: *the rules that erode are enforced by scripts,
-//! not by agreement.*
-//!
-//! So the checklist is here instead, walking the real tree. It is the same
-//! shape as `check-tokens.mjs` on the front end and `schema_rules.rs` in mb-db:
-//! a rule nobody can quietly break.
-//!
-//! **These read the filesystem rather than `include_str!`** because they cover
-//! every crate, and a list of files to include is exactly the thing that goes
-//! stale (`guard.rs`'s `SOURCES` needs a number bumped by hand, and P27 shipped
-//! a command that was invisible to its own coverage test because of it).
+//! The hygiene rules, as tests.
 
 #![allow(
     clippy::expect_used,
@@ -26,9 +11,7 @@ use std::path::{Path, PathBuf};
 /// The workspace root — the folder above `src-tauri`.
 fn workspace() -> PathBuf {
     let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    here.parent()
-        .expect("src-tauri has a parent")
-        .to_path_buf()
+    here.parent().expect("src-tauri has a parent").to_path_buf()
 }
 
 /// Every `.rs` file in the product, tests included, `target` excluded.
@@ -70,32 +53,24 @@ fn line_of(text: &str, index: usize) -> usize {
     text.get(..index).map_or(1, |before| before.lines().count())
 }
 
-// ---------------------------------------------------------------------------
-// Every `#[allow]` says why
-// ---------------------------------------------------------------------------
+// Every `#[allow]` says why.
 
-/// **An `allow` with no reason is a lint somebody turned off in a hurry.**
-///
-/// Rust's `reason =` keeps the explanation attached to the attribute rather
-/// than in a comment above it that a later edit moves away. P30 found seven
-/// without one — all seven had a comment, which is the point: the comment and
-/// the attribute had already started to drift apart.
+/// An `allow` with no reason is a lint somebody turned off in a hurry.
 #[test]
 fn every_allow_says_why() {
     let mut bare = Vec::new();
     for file in rust_files() {
-        // This file talks ABOUT the attribute, so it matches itself. The same
-        // exemption the secret sweep needs, for the same reason.
+        // This file talks ABOUT the attribute, so it matches itself.
         if show(&file).contains("hygiene_tests") {
             continue;
         }
         let text = std::fs::read_to_string(&file).unwrap_or_default();
         for (at, _) in text.match_indices("allow(") {
-            // Both `#[allow(` and `#![allow(`, and nothing else — `allow(` in
-            // a doc comment or a string is not an attribute.
-            let is_attribute = text.get(..at).is_some_and(|before| {
-                before.ends_with("#[") || before.ends_with("#![")
-            });
+            // Both `#[allow(` and `#![allow(`, and nothing else — `allow(` in a doc comment or
+            // a string is not an attribute.
+            let is_attribute = text
+                .get(..at)
+                .is_some_and(|before| before.ends_with("#[") || before.ends_with("#!["));
             if !is_attribute {
                 continue;
             }
@@ -114,16 +89,9 @@ fn every_allow_says_why() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Nothing panics on a user path
-// ---------------------------------------------------------------------------
+// Nothing panics on a user path.
 
-/// **`unwrap()` is a crash a shopkeeper cannot read**, and requirement 3 says
-/// billing never stops.
-///
-/// `clippy.toml` already denies `unwrap_used` outside tests, so this is a
-/// second lock on the same door — and a deliberately cheap one, because the
-/// clippy exemption is a file somebody can edit.
+/// `unwrap()` is a crash a shopkeeper cannot read, and requirement 3 says billing never stops.
 #[test]
 fn nothing_in_the_product_unwraps() {
     let mut found = Vec::new();
@@ -134,8 +102,8 @@ fn nothing_in_the_product_unwraps() {
             continue;
         }
         let text = std::fs::read_to_string(&file).unwrap_or_default();
-        // A file with `#[cfg(test)] mod tests` at the bottom is fine as long
-        // as the unwrap is inside it, so cut the file at that line.
+        // A file with `#[cfg(test)] mod tests` at the bottom is fine as long as the unwrap is
+        // inside it, so cut the file at that line.
         let product = text
             .split_once("\n#[cfg(test)]")
             .map_or(text.as_str(), |(before, _)| before);
@@ -150,15 +118,9 @@ fn nothing_in_the_product_unwraps() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// No half-finished note left in the tree
-// ---------------------------------------------------------------------------
+// No half-finished note left in the tree.
 
-/// **A TODO is a decision somebody deferred and nobody wrote down.**
-///
-/// This product has none, and that is not an accident: everything deferred is
-/// in `FEATURE_SCOPE.md` §15 with a reason, where the owner can see it, rather
-/// than in a comment only the next session reads.
+/// A TODO is a decision somebody deferred and nobody wrote down.
 #[test]
 fn nothing_is_left_as_a_todo() {
     let mut notes = Vec::new();
@@ -186,16 +148,9 @@ fn nothing_is_left_as_a_todo() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// No secret in the tree
-// ---------------------------------------------------------------------------
+// No secret in the tree.
 
-/// **Nothing that looks like a key is committed.**
-///
-/// The audit's own finding about v1's signing keys was that they existed in
-/// exactly one place; the opposite mistake — a key in the repository — is the
-/// one this catches. The patterns are the shapes that actually leak: a JWT, a
-/// live Stripe key, a GitHub token, a private key block.
+/// Nothing that looks like a key is committed.
 #[test]
 fn no_secret_is_committed() {
     // Written split so this test does not match itself.
@@ -232,15 +187,9 @@ fn no_secret_is_committed() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Every file the tree holds is a file the app loads
-// ---------------------------------------------------------------------------
+// Every file the tree holds is a file the app loads.
 
-/// **A source file nothing declares is dead code the compiler never sees.**
-///
-/// `cargo` only compiles what a `mod` reaches, so a file left behind after a
-/// rename is invisible to every lint, every test and every review — and it
-/// will be read by the next person as if it were live.
+/// A source file nothing declares is dead code the compiler never sees.
 #[test]
 fn every_rust_file_is_reachable_from_a_module_tree() {
     let mut orphans = Vec::new();
@@ -253,9 +202,8 @@ fn every_rust_file_is_reachable_from_a_module_tree() {
         if matches!(stem.as_str(), "main" | "lib" | "mod" | "build") {
             continue;
         }
-        // A file directly inside `tests/` is its own test binary, and one
-        // inside `examples/` is its own example binary. Cargo finds both by
-        // convention, so nothing declares either.
+        // A file directly inside `tests/` is its own test binary, and one inside `examples/` is
+        // its own example binary.
         let own_binary = file.parent().is_some_and(|p| {
             p.file_name()
                 .is_some_and(|n| n == "tests" || n == "examples")

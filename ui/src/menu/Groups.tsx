@@ -1,33 +1,4 @@
-/**
- * **The menu's groups — and where each group's food is cooked.**
- *
- * # What was wrong
- *
- * `save_menu_category` has been in Rust since P13 and nothing ever called it.
- * A shop could see its groups down the left of the Menu screen and could not
- * add one, rename one or retire one — ever, by any route. The owner found it on
- * a real install; it is the first item on their list.
- *
- * `route_category` was reachable, but only from Settings > Printers, three
- * screens away from the place a person is standing when they think *"the
- * tandoor should get the kebabs"*. Both live here now, in one dialog, because
- * they are one thought: **what are my groups, and where does each one's food
- * get cooked?**
- *
- * # Two commands, one screen, and no third copy of anything
- *
- * This file owns no rule. `save_menu_category` decides what a group is,
- * `route_category` decides what a route is, and each returns the whole new list
- * so nothing here has to keep a second one in step (D4).
- *
- * # Why retiring is not deleting
- *
- * There is no `delete_menu_category` in Rust and this does not ask for one. A
- * group with a year of bills behind it cannot be removed without those bills
- * losing what they were — so "Remove" turns it OFF: it stops appearing on the
- * billing screen, its items keep working, and last April's report still adds
- * up. That is `isActive`, and the button says what it does.
- */
+/** The menu's groups — and where each group's food is cooked. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -49,18 +20,10 @@ export function Groups({
   onFailed: (cause: unknown) => void;
 }) {
   const [adding, setAdding] = useState('');
-  /** The group being renamed, and the name so far. `null` when nobody is. */
+  /** The group being renamed, and the name so far. */
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  /**
-   * The printers, and the route each group already has.
-   *
-   * **Absent is a state, not a failure.** Routing needs `settings.printer`,
-   * and a manager who may edit the menu but not the hardware still has every
-   * right to be in this dialog. So a refusal leaves this `null` and the column
-   * simply is not drawn — rather than a toast about a permission they did not
-   * ask to use.
-   */
+  /** The printers, and the route each group already has. */
   const [printers, setPrinters] = useState<PrintersView | null>(null);
 
   useEffect(() => {
@@ -86,9 +49,7 @@ export function Groups({
   const add = async () => {
     const name = adding.trim();
     if (name === '') return;
-    // The id is ours to make and never shown. `save_menu_category` upserts on
-    // it, so a fresh one is what makes this an ADD rather than a rename of
-    // whatever happened to be there.
+    // The id is ours to make and never shown.
     await save(freshId('cat'), name, true);
     setAdding('');
   };
@@ -160,8 +121,10 @@ export function Groups({
                   )}
                 </div>
 
-                {/* **Where this group's food is cooked** — `route_category`,
-                    which existed and lived three screens away from here. */}
+                {/*
+                  Where this group's food is cooked — `route_category`, which existed and lived
+                  three screens away from here.
+                */}
                 {printers ? (
                   <div className="mb-groups__route">
                     <Select
@@ -174,8 +137,8 @@ export function Groups({
                         .catch(onFailed);
                     }}
                     options={[
-                      // Short, because the box is narrow and a label that ellipsises is a
-                      // label nobody can read. The heading above it says "Kitchen printer".
+                      // Short, because the box is narrow and a label that ellipsises is a label
+                      // nobody can read.
                       { value: '', label: 'The usual one' },
                       ...printers.printers
                         .filter((p) => p.role === 'kitchen' || p.role === 'both')

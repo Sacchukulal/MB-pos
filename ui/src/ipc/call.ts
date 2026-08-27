@@ -1,32 +1,4 @@
-/**
- * The one way React talks to Rust.
- *
- * Every command goes through here so that four things are true in one place
- * rather than in every screen:
- *
- * 1. **Errors arrive as `UiError`**, with a code, a sentence for the shopkeeper
- *    and the technical detail behind it — audit F8: *"errors show raw system
- *    text to a restaurant owner."* A screen never sees a Rust panic string.
- * 2. **A failure is never silent.** A screen may choose how to show an error;
- *    it may not choose not to have one.
- * 3. **The names are typed.** `call('app_status')` is checked against the list
- *    below, so a renamed command is a compile error rather than a runtime
- *    "command not found" that only fires on the screen nobody opened.
- * 4. **Nothing polls.** Subscriptions are events pushed from Rust
- *    ([`subscribe`]), which is budget M4 and `PERFORMANCE.md` §5 rule 6.
- *
- * # No argument is ever a `bigint`
- *
- * `invoke` serialises with `JSON.stringify`, and `JSON.stringify` **throws** on
- * a BigInt. An `i64` on the Rust side arrives here as a plain JSON number, so
- * anything that comes back and goes straight out again works by accident; a
- * screen that honestly builds a `1n` does not. P13 found this by saving a
- * modifier group and reading *"Do not know how to serialize a BigInt"*.
- *
- * The fix is on the Rust side — a count that crosses the wire is a `u32`, which
- * `ts-rs` renders as `number` — and there is a guard in `guards.test.ts` that
- * fails the build if a `bigint` appears in an argument type again.
- */
+/** The one way React talks to Rust. */
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -130,21 +102,11 @@ import type { ReportView } from './generated/ReportView';
 import type { SavedFileView } from './generated/SavedFileView';
 import type { CounterEdit } from './generated/CounterEdit';
 
-/**
- * Every command, with what it takes and what it gives back.
- *
- * Hand-written on purpose, and it is the one hand-written thing at this
- * boundary: the *types* are generated from Rust (`ts-rs`), and this maps names
- * to them. If a command is renamed in Rust and not here, the screen that calls
- * it stops compiling — which is the failure we want, at the time we want it.
- */
+/** Every command, with what it takes and what it gives back. */
 export interface Commands {
   app_status: { args: void; returns: AppStatus };
 
-  // --- P30.5, the first run ---------------------------------------------------
-  // **The only three commands that work with no shop at all.** A fresh install
-  // has no database, so nothing here can ask for a permission — these are what
-  // create the thing a permission lives in.
+  // 5, the first run.
   first_run: { args: void; returns: FirstRunView };
   create_shop: { args: { folder: string }; returns: FirstRunView };
   use_existing_shop: { args: { path: string }; returns: FirstRunView };
@@ -156,24 +118,15 @@ export interface Commands {
     args: { printerId: string | null };
     returns: PreviewDoc;
   };
-  /**
-   * **The REAL bill for the REAL order, before it prints** — audit D6, built at
-   * P32 after five sessions of a comment promising it.
-   *
-   * `orderId: null` is the order on this counter's cart, which is what the
-   * billing screen's Preview button asks for.
-   */
+  /** The REAL bill for the REAL order, before it prints. */
   preview_order: { args: { orderId: string | null }; returns: PreviewDoc };
   /** The kitchen ticket that would print right now — the delta, as sent. */
   preview_kitchen: { args: { orderId: string | null }; returns: PreviewDoc };
   retry_print_job: { args: { id: string }; returns: void };
 
-  // The billing screen (P09). Every cart command returns the WHOLE new view:
-  // the bill is recomputed in Rust from the cart every time (D4, 14 us), so a
-  // delta would only be a way of being stale.
+  // The billing screen.
   current_cart: { args: void; returns: CartView };
-  // P20 — the floor added lines to the order this cart has open. The counter
-  // already took them; these decide whether they join the bill on screen.
+  // The floor added lines to the order this cart has open.
   take_the_floors_items: { args: void; returns: CartView };
   dismiss_the_floors_items: { args: void; returns: CartView };
   cart_add: {
@@ -181,11 +134,7 @@ export interface Commands {
     returns: CartView;
   };
   cart_set_qty: { args: { index: number; qty: string }; returns: CartView };
-  /**
-   * − and + on a cart line. **The arithmetic is Rust's** — a quantity is a
-   * whole number of thousandths, and `parseFloat` here would send back
-   * `0.30000000000000004`. Down to nothing removes the line.
-   */
+  /** − and + on a cart line. */
   cart_step_qty: { args: { index: number; by: number }; returns: CartView };
   cart_remove: { args: { index: number }; returns: CartView };
   cart_clear: { args: { keepType: boolean }; returns: CartView };
@@ -196,18 +145,7 @@ export interface Commands {
   };
   cart_clear_payments: { args: void; returns: CartView };
   cart_cash_given: { args: { amount: string }; returns: CartView };
-  /**
-   * **Money off this bill** — scope 1.12, and the command that had no door
-   * until 2026-08-17.
-   *
-   * `kind` is `percent` or `amount`; `value` is TEXT ("10", "12.5", "50.00")
-   * because every rupee and every rate in this product is parsed in Rust (R8,
-   * D39). The discount is spread across the lines BEFORE tax, so a bill mixing
-   * rates still ties rate by rate.
-   *
-   * Refused, in words, when it is over what the signed-in person may give or
-   * when the shop's policy wants a reason.
-   */
+  /** Money off this bill. */
   cart_set_discount: {
     args: { kind: string; value: string; reason: string | null };
     returns: CartView;
@@ -215,42 +153,25 @@ export interface Commands {
   cart_clear_discount: { args: void; returns: CartView };
   open_orders: { args: void; returns: TableView[] };
   menu_items: { args: void; returns: MenuItemView[] };
-  /** Ranked search — the rule lives in Rust (P10, budget B2). */
+  /** Ranked search — the rule lives in Rust. */
   search_items: {
     args: { text: string; mode: 'starts_with' | 'contains' | null };
     returns: MenuItemView[];
   };
-  /** Budget B7 — an existing table's order into the cart. */
   open_table: { args: { tableId: string }; returns: CartView };
-  /** The delta only, from the order's own ledger (crown jewel 2). */
+  /** The delta only, from the order's own ledger. */
   print_kitchen_ticket: { args: void; returns: string };
-  /**
-   * **The cook lost the paper** — P32. The WHOLE order again, marked
-   * `*** REPRINT ***`, with the kitchen ledger untouched so the next delta is
-   * still the same delta.
-   */
+  /** The cook lost the paper. */
   reprint_kitchen_ticket: { args: void; returns: string };
-  /** settle() — one transaction — and THEN the print (audit D4). */
+  /** settle() — one transaction — and THEN the print. */
   complete_bill: { args: void; returns: string };
-  /**
-   * **The bill a waiter carries to the table**, before anybody has paid.
-   *
-   * Prints and changes nothing: the order stays open, the table stays busy, no
-   * payment is recorded and the drawer does not open. The paper is marked
-   * `*** NOT PAID ***` so it can never be mistaken for a settled bill.
-   *
-   * `complete_bill` is the other half and is a different press.
-   */
+  /** The bill a waiter carries to the table, before anybody has paid. */
   print_open_bill: { args: { orderId: string }; returns: string };
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
 
-  // P11 — signing in, the people and the history. Audit C1.
-  //
-  // The first four answer while the screen is LOCKED; everything else is
-  // refused in Rust by `guard::require`, which is the control. Hiding a rail
-  // item is only a courtesy.
+  // Signing in, the people and the history.
   lock_state: { args: void; returns: LockState };
   login: { args: { staffId: string; pin: string }; returns: LockState };
   lock_now: { args: void; returns: LockState };
@@ -261,7 +182,7 @@ export interface Commands {
   };
   list_staff: { args: void; returns: PersonView[] };
   save_staff_member: { args: { staff: StaffEdit }; returns: PersonView[] };
-  /** `null` clears the PIN. Returns the shop's recovery code the first time one is made. */
+  /** `null` clears the PIN. */
   set_staff_pin: {
     args: { staffId: string; pin: string | null };
     returns: string | null;
@@ -278,8 +199,7 @@ export interface Commands {
     returns: AuditView;
   };
 
-  // P12 — the four ways a shop takes something back (audit B5, B6, D7).
-  // Every one of them refuses in Rust; the dialogs only collect the reason.
+  // The four ways a shop takes something back.
   list_bills: { args: void; returns: BillRowView[] };
   day_totals: { args: void; returns: DayTotalsView };
   reasons: { args: { kind: string }; returns: ReasonView[] };
@@ -295,10 +215,6 @@ export interface Commands {
   cancel_order: { args: { orderId: string; reason: string }; returns: void };
   void_line: { args: { index: number; reason: string }; returns: CartView };
   reprint_bill: { args: { orderId: string; reason: string }; returns: string };
-  /**
-   * **Scope 7.10 — the A4 invoice**, as a PDF a shop can email. P32: the sink
-   * had existed since P06 and nothing but the report exporter ever called it.
-   */
   bill_pdf: { args: { orderId: string }; returns: SavedFileView };
   refund_bill: {
     args: {
@@ -310,14 +226,7 @@ export interface Commands {
     returns: BillRowView[];
   };
 
-  // P13 — the menu. Audit B10/B11/B14: v1 had one tax rate for the whole
-  // shop, so it could not bill a bar, an AC/non-AC outlet or anyone selling
-  // packaged goods.
-  //
-  // `menu.manage` gates every one of these in Rust. `save_tax_class` needs
-  // `settings.tax` instead, because a rate is what the shop owes the
-  // government rather than what it charges — getting it wrong is a notice,
-  // not a bad price.
+  // The menu.
   menu_tax_classes: { args: void; returns: TaxClassView[] };
   menu_categories: { args: void; returns: CategoryView[] };
   menu_rows: { args: void; returns: MenuRowView[] };
@@ -330,8 +239,8 @@ export interface Commands {
     args: { id: string; name: string; isActive: boolean };
     returns: CategoryView[];
   };
-  // The kind and the basis are the machine values Rust sent, never words read
-  // back off the screen (P33 §5.1).
+  // The kind and the basis are the machine values Rust sent, never words read back off the
+  // screen.
   save_tax_class: {
     args: {
       id: string;
@@ -351,12 +260,6 @@ export interface Commands {
   run_menu_import: { args: { csv: string }; returns: string };
   export_menu: { args: void; returns: string };
 
-  // What an item is made of — scope 6.1–6.3. A size, a group of choices and a
-  // combo are all prices, so all three need `menu.manage`.
-  //
-  // Each of these returns the WHOLE new picture rather than the one thing that
-  // changed, for the reason the cart does (D4): the second copy is the one that
-  // goes stale.
   item_composition: { args: { itemId: string }; returns: ItemComposition };
   save_item_variant: {
     args: {
@@ -377,12 +280,7 @@ export interface Commands {
   list_combos: { args: void; returns: ComboView[] };
   save_combo: { args: { combo: ComboEdit }; returns: ComboView[] };
 
-  // P14 — the floor. Scope 14.1 the plan, 14.2 the timers, 14.3 occupancy,
-  // and 1.21/1.22/1.23, the three things you do to an order that is already
-  // on a table.
-  //
-  // Every one of these returns the WHOLE floor, for the reason the cart does
-  // (D4): the second copy is the one that goes stale.
+  // The floor.
   floor_plan: { args: void; returns: FloorView };
   save_floor_section: {
     args: { id: string; name: string; sortOrder: number; isActive: boolean };
@@ -406,13 +304,7 @@ export interface Commands {
     returns: FloorView;
   };
   delete_dining_table: { args: { tableId: string }; returns: FloorView };
-  /**
-   * **The bulk pair** — one transaction, all or nothing.
-   *
-   * The Floor screen ticks tables and acts on the lot. A loop of the two
-   * commands above would be N round trips that can stop halfway and leave a
-   * room half-changed; see `floor::delete_tables_on`.
-   */
+  /** The bulk pair — one transaction, all or nothing. */
   delete_dining_tables: { args: { tableIds: readonly string[] }; returns: FloorView };
   set_dining_tables_active: {
     args: { tableIds: readonly string[]; active: boolean };
@@ -426,12 +318,7 @@ export interface Commands {
   even_split: { args: { ways: number }; returns: EvenSplitView };
   set_covers: { args: { covers: number | null }; returns: void };
 
-  // P15 — customers and what they owe. The owner renamed this from "khata"
-  // on 2026-08-08.
-  //
-  // The balance is never sent as a number to add up: every one of these
-  // returns money already formatted and ageing already bucketed, because a
-  // screen that divides by thirty has a second answer.
+  // Customers and what they owe.
   customers: { args: void; returns: CustomerView[] };
   customer_account: { args: { customerId: string }; returns: AccountView };
   /** A duplicate phone comes back as an error carrying the existing id. */
@@ -451,13 +338,11 @@ export interface Commands {
     returns: CartView;
   };
 
-  // P16 — money going out, and the drawer. Audit A2 / ANDROID-D1: v1 never
-  // sent expenses anywhere, so every owner's phone showed a profit that was
-  // too high, every day.
+  // Money going out, and the drawer.
   expenses: { args: void; returns: ExpensesView };
   save_expense: { args: { edit: ExpenseEdit }; returns: ExpensesView };
   delete_expense: { args: { id: string }; returns: ExpensesView };
-  /** The float, a top-up, a payout, a bank drop. A purchase is NOT one. */
+  /** The float, a top-up, a payout, a bank drop. */
   save_cash_movement: {
     args: { kind: string; amount: string; reason: string };
     returns: ExpensesView;
@@ -481,23 +366,16 @@ export interface Commands {
   confirm_recurring_expense: { args: { id: string }; returns: ExpensesView };
   export_expenses: { args: void; returns: string };
 
-  // ---- P28: the employment side ------------------------------------------
-  //
-  // **Every one of these is permission-checked in Rust**, and several of them
-  // decide by WHOSE row is being asked for rather than by a permission alone:
-  // your own hours and your own leave are yours, anybody else's needs the
-  // right. That rule cannot live here — a screen that merely does not draw a
-  // row has still been sent it.
+  // The employment side.
   employees: { args: void; returns: EmployeeView[] };
   save_employee: { args: { edit: EmployeeEdit }; returns: EmployeeView[] };
   attendance: {
     args: { staffId: string | null; from: string; to: string };
     returns: AttendanceView;
   };
-  /** Needs nothing but being signed in. It IS the PIN. */
+  /** Needs nothing but being signed in. */
   clock_in: { args: { terminalId: string | null }; returns: AttendanceView };
   clock_out: { args: void; returns: AttendanceView };
-  /** The watched one: never your own row, always an audit row with both sides. */
   correct_attendance: {
     args: { id: string; started: string; ended: string; reason: string };
     returns: AttendanceView;
@@ -540,24 +418,18 @@ export interface Commands {
   };
   payroll_runs: { args: void; returns: PayrollListView };
   payroll: { args: { runId: string }; returns: PayrollView };
-  /** Computes and stores a DRAFT. Moves no money. */
+  /** Computes and stores a DRAFT. */
   compute_payroll: { args: { from: string; to: string }; returns: PayrollView };
   edit_payroll_line: {
     args: { runId: string; staffId: string; net: string; note: string };
     returns: PayrollView;
   };
-  /** **Where money leaves the shop.** One expense, and the drawer reconciles. */
+  /** Where money leaves the shop. */
   approve_payroll: { args: { runId: string; paidBy: string }; returns: PayrollView };
   reverse_payroll: { args: { runId: string; reason: string }; returns: PayrollView };
   staff_cost: { args: { from: string; to: string }; returns: StaffCostView };
-  // P30 — scope 9.14's third part, which P28 named as not done.
   print_payslip: { args: { runId: string; staffId: string }; returns: string };
 
-  // --- P29, delivery (scope 14.5) -------------------------------------------
-  // Every one of these comes back as the WHOLE board, because the figure that
-  // matters — what a rider is carrying — is a sum over rows and changes when
-  // any of them does. A screen that patched one row would be a screen showing
-  // a stale total beside a fresh one.
   delivery_board: { args: { day: string | null }; returns: DeliveryBoardView };
   save_delivery: { args: { edit: DeliveryEdit }; returns: DeliveryBoardView };
   record_handback: {
@@ -567,58 +439,38 @@ export interface Commands {
   set_rider: { args: { staffId: string; isRider: boolean }; returns: DeliveryBoardView };
   print_delivery_slip: { args: { orderId: string }; returns: string };
 
-  // --- P29, the money that arrives through a machine (scope 8.3, 8.4) -------
   payments: { args: void; returns: PaymentsView };
   confirm_payment: {
     args: { orderId: string; seq: number; reference: string };
     returns: PaymentsView;
   };
 
-  // --- P29, the things a counter is plugged into (scope 7.6-7.9) -----------
-  // **Not one of these can fail into a sale.**  returns a
-  // status rather than an error for every device problem there is, which is
-  // why its return type is a view and not a quantity.
   device_manager: { args: void; returns: DevicesView };
   read_scale_once: { args: void; returns: DeviceTest };
-  // **The timing crosses the wire, the decision does not.** React collects the
-  // characters and the gaps; whether that was a machine or a person is a pure
-  // function in mb-core with its own tests (R8).
+  // The timing crosses the wire, the decision does not.
   scanned: { args: { text: string; gapsMs: number[] }; returns: ScanOutcome };
   show_customer_display: { args: { on: boolean }; returns: DevicesView };
   print_label: { args: { line: string; token: string }; returns: string };
 
-  // --- P25, the stock book --------------------------------------------------
-  // MARKET_GAP_ANALYSIS calls inventory "the biggest single hole". Every
-  // quantity below crosses as a SENTENCE — "1.712 bag", "−180 g" — because
-  // units are where inventory actually fails (D108), and the only thing this
-  // side ever sends back is what a person typed and which unit they typed it
-  // in (D109).
   inventory: { args: { material: string | null }; returns: InventoryView };
   recipe: { args: { ownerKind: string; ownerId: string }; returns: RecipeView };
   save_material: { args: { edit: MaterialEdit }; returns: InventoryView };
   save_recipe: { args: { edit: RecipeEdit }; returns: RecipeView };
   delete_recipe: { args: { ownerKind: string; ownerId: string }; returns: RecipeView };
-  /** An opening balance, a purchase before P26, a wastage entry, an adjustment. */
   record_stock_movement: { args: { edit: MovementEdit }; returns: InventoryView };
-  /** D114 — work the balances out again from the movements. */
+  /** Work the balances out again from the movements. */
   rebuild_stock_balances: { args: void; returns: InventoryView };
   resolve_stock_problem: { args: { id: string }; returns: InventoryView };
-  /** Scope 4.9, D115 — theoretical against actual, and what nobody has counted. */
   stock_variance: { args: { from: string; to: string }; returns: VarianceView[] };
-  /** Scope 4.6 — the buy list as text a person can send. */
+  /** The buy list as text a person can send. */
   buy_list_text: { args: void; returns: string };
 
-  // --- P26, buying and the count --------------------------------------------
-  // **One rupee, one row** (D120). Saving a delivery moves the shelf, the paper
-  // and what the shop owes in one transaction, and writes no expense row — so
-  // there is no second command here for "also record it as a spend", and there
-  // must never be one.
   buying: { args: { supplier: string | null }; returns: BuyingView };
   supplier_account: { args: { id: string }; returns: SupplierAccountView };
   purchase: { args: { id: string }; returns: PurchaseView };
   save_supplier: { args: { edit: SupplierEdit }; returns: BuyingView };
   save_purchase: { args: { edit: PurchaseEdit }; returns: BuyingView };
-  /** D125 — a purchase is never edited. This is the only correction path. */
+  /** A purchase is never edited. */
   cancel_purchase: { args: { id: string; reason: string }; returns: BuyingView };
   record_supplier_payment: {
     args: { supplierId: string; amount: string; mode: string; reference: string };
@@ -630,15 +482,11 @@ export interface Commands {
   };
   save_purchase_order: { args: { edit: PoEdit }; returns: BuyingView };
   set_order_state: { args: { id: string; state: string }; returns: BuyingView };
-  /**
-   * D132 — the photograph, already downscaled by this side (canvas, 1600 px,
-   * JPEG 0.7). Rust checks the size, hashes it and writes the file; there is no
-   * image library on that side at all.
-   */
+  /** The photograph, already downscaled by this side (canvas, 1600 px, JPEG 0.7). */
   attach_photo: { args: { dataUrl: string }; returns: PhotoView };
   purchase_photo: { args: { id: string }; returns: PhotoView };
 
-  /** D127 — the count freezes the book and approving posts a DELTA. */
+  /** The count freezes the book and approving posts a DELTA. */
   stock_count: { args: { id: string | null }; returns: StockCountView };
   open_stock_count: { args: { location: string }; returns: StockCountView };
   record_count_line: { args: { edit: CountEdit }; returns: StockCountView };
@@ -649,27 +497,22 @@ export interface Commands {
   remove_count_line: { args: { countId: string; materialId: string }; returns: StockCountView };
   approve_stock_count: { args: { id: string }; returns: StockCountView };
   abandon_stock_count: { args: { id: string; reason: string }; returns: StockCountView };
-  /** D128 — and the book quantity is deliberately not on it. */
+  /** And the book quantity is deliberately not on it. */
   count_sheet: { args: { location: string }; returns: string };
 
-  /** D134 — scope 10.13. The summary is composed in Rust; this side sends it. */
+  /** The summary is composed in Rust; this side sends it. */
   share_report: {
     args: { id: string; period: PeriodArg; channel: Channel };
     returns: ShareView;
   };
 
-  // --- P27, the tills -------------------------------------------------------
-  // Every one of them answers with the whole roster, so the screen never has to
-  // work out what changed — the same shape the settings and the floor use.
   tills: { args: void; returns: TillsView };
-  /** The prefix is the field that matters: D135's one remaining risk. */
   save_till: { args: { edit: TerminalEdit }; returns: TillsView };
-  /** D139 — a person chooses. There is no election. */
+  /** A person chooses. */
   make_master: { args: { id: string }; returns: TillsView };
   /**
-   * **Waits for somebody at the other counter to press Allow**, so it can take
-   * a minute or two — the screen shows a spinner and Tauri runs it off the UI
-   * thread.
+   * Waits for somebody at the other counter to press Allow, so it can take a minute or two —
+   * the screen shows a spinner and Tauri runs it off the UI thread.
    */
   join_master: {
     args: {
@@ -684,121 +527,89 @@ export interface Commands {
   /** The same call the background sender makes, so pressing it is only early. */
   send_waiting_bills: { args: void; returns: TillsView };
 
-  // --- P17, the settings ----------------------------------------------------
-  // Five commands for ninety settings, because the catalogue IS the screen:
-  // every label, help sentence, limit and choice comes down inside
-  // `SettingsView`, and one component renders all of it.
   settings_all: { args: void; returns: SettingsView };
   /** After a restore, and whenever a screen wants to be sure. */
   reload_settings: { args: void; returns: SettingsView };
-  /** Returns the KEYS that match. The matching rule lives in Rust with the
-   *  synonym list it reads — a second copy here would disagree. */
+  /** Returns the KEYS that match. */
   search_settings: { args: { text: string }; returns: string[] };
   save_settings: { args: { edits: SettingEdit[] }; returns: SavedView };
-  /** What "reset this section" WOULD set. It does not save — the screen shows
-   *  them as unsaved edits, so a reset can be looked at and cancelled. */
+  /** What "reset this section" WOULD set. */
   settings_defaults_for: { args: { group: string }; returns: SettingEdit[] };
-  /** The sample bill or ticket, laid out with the settings as they are on
-   *  screen RIGHT NOW — saved or not. It renders the real mb-print document
-   *  (audit D1: a hand-drawn imitation is how the preview and the paper come
-   *  to disagree), on the shop's own paper width. */
+  /**
+   * The sample bill or ticket, laid out with the settings as they are on screen RIGHT NOW —
+   * saved or not.
+   */
   preview_settings: {
     args: { group: string; edits: SettingEdit[] };
     returns: PreviewView;
   };
 
-  // P31 — the logo, and the two Browse buttons.
-  //
-  // `mb-print` has drawn a logo since P07 and nothing in the product could
-  // ever supply one, so `receipt.logo` and `receipt.logo_width_pct` were two
-  // settings pointing at a picture that did not exist. D37 put the PNG
-  // decoding in the browser; these are the other three quarters of it.
+  // The logo, and the two Browse buttons.
   logo: { args: void; returns: LogoView };
-  /** Opens the operating system's picker. `null` is Cancel, not a failure. */
+  /** Opens the operating system's picker. */
   pick_a_logo: { args: void; returns: PickedFile | null };
-  /** `MB1` dots, base64. Rust decodes them before writing, so a picture that
-   *  would silently fail to print is refused while the person is still
-   *  looking at it. */
+  /**
+   * `MB1` dots, base64. Rust decodes them before writing, so a picture that would silently fail
+   * to print is refused while the person is still looking at it.
+   */
   save_logo: { args: { encoded: string }; returns: LogoView };
   remove_logo: { args: void; returns: LogoView };
-  /** The first run's Browse. Public — there is nobody to hold a permission on
-   *  a machine with no shop yet, and all it can do is return a string. */
+  /** The first run's Browse. */
   pick_a_folder: { args: { start: string | null }; returns: string | null };
 
-  // The printers (P17 part 4). A printer is a RECORD, not a scalar, so it has
-  // its own commands rather than a place in the catalogue.
+  // The printers.
   printer_setup: { args: void; returns: PrintersView };
   save_printer: { args: { edit: PrinterEdit }; returns: PrintersView };
   delete_printer: { args: { id: string }; returns: PrintersView };
-  /** Scope 3.1. An empty printerId means "the default kitchen printer". */
+  /** An empty printerId means "the default kitchen printer". */
   route_category: {
     args: { categoryId: string; printerId: string };
     returns: PrintersView;
   };
-  /** A whole sample BILL, not a slip — a slip cannot show whether a bill is
-   *  centred, and that is what somebody at the printer is asking. */
+  /**
+   * A whole sample BILL, not a slip — a slip cannot show whether a bill is centred, and that is
+   * what somebody at the printer is asking.
+   */
   print_sample_bill: { args: { printerId: string }; returns: string };
   /**
-   * **Where bills print.** One dropdown on the Printers screen, and the
-   * command that makes it mean something — before this, the only way to change
-   * the default was a checkbox at the bottom of the add-a-printer dialog, so
-   * shops kept printing to the stand-in that prints nothing.
-   *
-   * It writes the whole list, so "exactly one default" holds afterwards.
+   * Where bills print. One dropdown on the Printers screen, and the command that makes it mean
+   * something — before this, the only way to change the default was a checkbox at the bottom of
+   * the add-a-printer dialog, so shops kept printing to the stand-in that prints nothing.
    */
   set_default_printer: { args: { printerId: string }; returns: PrintersView };
-  /**
-   * **How wide the roll is** — 58 (2 inch), 80 (3 inch) or 100 (4 inch).
-   *
-   * Written on the printer bills go to, so the bill designer's picker and the
-   * Printers screen are two doors onto one value. The preview redraws on it,
-   * because paper width changes what every other receipt setting does.
-   */
+  /** How wide the roll is — 58 (2 inch), 80 (3 inch) or 100 (4 inch). */
   set_paper_size: { args: { mm: number }; returns: PrintersView };
-  /** Scope 7.11 — print, look at the paper, nudge, print again. */
+  /** Print, look at the paper, nudge, print again. */
   nudge_printer: {
     args: { printerId: string; dxMm: number; dyMm: number };
     returns: PrintersView;
   };
 
-  // Backup (audit group A). `request_restore` does NOT restore: D27 says a
-  // restore runs before the database is opened, so it records the request and
-  // start-up carries it out.
   backup_status: { args: void; returns: BackupView };
   back_up_now: { args: void; returns: BackupView };
   verify_backup: { args: { path: string }; returns: VerifyView };
   request_restore: { args: { path: string }; returns: BackupView };
   cancel_restore: { args: void; returns: BackupView };
-  /** Audit A5 — the screen somebody opens when everything else is broken. */
+  /** The screen somebody opens when everything else is broken. */
   find_shops: { args: void; returns: string[] };
 
-  // The whole configuration, out and in — a dealer sets up the second shop by
-  // copying one file. The import is a DRY RUN first, the same shape P13's CSV
-  // import uses and for the same reason.
+  // The whole configuration, out and in — a dealer sets up the second shop by copying one file.
   export_settings: { args: void; returns: string };
   plan_settings_import: { args: { text: string }; returns: ConfigPlanView };
   run_settings_import: { args: { text: string }; returns: SavedView };
 
-  // The counters (audit Part 3's two numbering blocks). A bill number that
-  // goes backwards is a GST return the department will reject, so Rust
-  // refuses it and says why.
+  // The counters.
   numbering: { args: void; returns: NumberingView };
   save_counter: { args: { edit: CounterEdit }; returns: NumberingView };
 
-  // P18 — thirteen reports behind four commands, because the report list is
-  // the screen. A period crosses as two `YYYY-MM-DD` strings: TypeScript does
-  // no date arithmetic on the value every report is keyed by.
-  // Audit G1's answer: "how did today go, and what needs me" — the question
-  // thirteen reports do not answer because you have to know to ask them.
+  // Thirteen reports behind four commands, because the report list is the screen.
   dashboard: { args: void; returns: DashboardView };
   report_list: { args: void; returns: ReportListView };
   report: { args: { id: string; period: PeriodArg }; returns: ReportView };
   report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
   report_pdf: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
 
-  // P19 — the phones this counter serves. Reading the panel is reports.view;
-  // every write is devices.pair, because letting a phone onto the shop's
-  // network is its own decision.
+  // The phones this counter serves.
   network: { args: void; returns: NetworkView };
   open_pairing: { args: void; returns: NetworkView };
   close_pairing: { args: void; returns: NetworkView };
@@ -806,9 +617,6 @@ export interface Commands {
   refuse_device: { args: { requestId: string }; returns: NetworkView };
   revoke_device: { args: { deviceId: string }; returns: NetworkView };
 
-  // P18's day close — requirement 9 of the ten. `count_cash` recomputes the
-  // variance as somebody types: there is ONE variance calculation and it is in
-  // Rust, so the preview cannot disagree with what gets saved.
   day_close: { args: void; returns: DayCloseView };
   count_cash: { args: { counts: CountArg[] }; returns: DayCloseView };
   close_day: {
@@ -817,11 +625,7 @@ export interface Commands {
   };
   reopen_day: { args: { reason: string }; returns: DayCloseView };
 
-  // P21 — the licence. Reading the screen is reports.view (the plan and the
-  // renewal date are shop information); every write is licence.manage, which
-  // is audit C1's own last example of what anybody behind the counter could
-  // reach. **Every one of these returns the whole view**, so the screen never
-  // has to work out what changed.
+  // The licence.
   account: { args: void; returns: LicenceView };
   refresh_licence: { args: void; returns: LicenceView };
   activate: { args: { key: string; proof: string }; returns: LicenceView };
@@ -830,18 +634,13 @@ export interface Commands {
   transfer_here: { args: { key: string; proof: string }; returns: LicenceView };
   use_emergency_code: { args: { code: string }; returns: LicenceView };
 
-  // P22 — is this counter healthy, and what can we send to support. The plan
-  // is separate from the write on purpose (D94): a person sees the manifest
-  // before the zip exists.
+  // Is this counter healthy, and what can we send to support.
   health: { args: void; returns: HealthView };
-  // Public in Rust, deliberately: on a first run nobody has a PIN yet, and a
-  // set-up list that will not draw until somebody does is a list nobody can
-  // use to create one.
+  // Public in Rust, deliberately: on a first run nobody has a PIN yet, and a set-up list that
+  // will not draw until somebody does is a list nobody can use to create one.
   setup_list: { args: void; returns: SetupView };
 
-  // P24 — the kitchen screen. Every one of them returns the WHOLE view, so a
-  // cook's tap and another waiter's new order can never leave the screen
-  // showing half of each.
+  // The kitchen screen.
   kitchen: { args: { station: string | null }; returns: KitchenView };
   kitchen_shown: { args: { id: string }; returns: KitchenView };
   kitchen_bump: { args: { id: string }; returns: KitchenView };
@@ -856,9 +655,6 @@ export interface Commands {
   write_diagnostics: { args: void; returns: string };
 }
 
-
-
-
 export type CommandName = keyof Commands;
 
 /** Is this thing something Rust sent us, rather than something that broke? */
@@ -871,26 +667,14 @@ export function isUiError(value: unknown): value is UiError {
   );
 }
 
-/**
- * **Is this the licence saying no, rather than something going wrong?** (P30.5)
- *
- * The distinction decides how it is shown. A licence refusal is an ANSWER — the
- * screen renders it in place with the way to fix it (`Locked`), and there is
- * nothing to retry. Anything else is a fault, and a fault is a toast.
- *
- * Every code from `mb_license` is `licence.…` — `licence.not_in_plan`,
- * `licence.not_operating`, and the handling errors beside them. `licensing.rs`
- * holds the list of gated commands and a Rust test walks it, so the set this
- * can fire on is a table and not a habit (D40).
- */
+/** Is this the licence saying no, rather than something going wrong? */
 export function isLicenceRefusal(cause: unknown): cause is UiError {
   return isUiError(cause) && cause.code.startsWith('licence.');
 }
 
 /**
- * A failure that did not come from Rust — the webview lost the bridge, or a
- * command name is wrong. Given the same shape so a screen has one thing to
- * render, and a code that says where to look.
+ * A failure that did not come from Rust — the webview lost the bridge, or a command name is
+ * wrong.
  */
 function asUiError(cause: unknown): UiError {
   if (isUiError(cause)) return cause;
@@ -920,13 +704,7 @@ export async function call<K extends CommandName>(
   }
 }
 
-/**
- * What Rust pushes, when it pushes it.
- *
- * **React never polls.** `PERFORMANCE.md` §5 rule 6: *"a 250 ms poll loop is M4
- * gone before a single feature is written."* There is a test asserting no
- * `setInterval` outside the one shared clock.
- */
+/** What Rust pushes, when it pushes it. */
 export function subscribe(onPush: (message: Pushed) => void): Promise<() => void> {
   return listen<Pushed>('mb://push', (event) => onPush(event.payload));
 }

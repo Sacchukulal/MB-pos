@@ -3,12 +3,12 @@ import type { MoneyView } from "./MoneyView";
 import type { TableState } from "./TableState";
 
 /**
- * One tile in the grid — **the only view of open orders** (scope 1.4).
+ * One tile in the grid — the only view of open orders.
  */
 export type TableView = { id: string, label: string, 
 /**
- * The section's name, or `None` for the "No table" group that holds open
- * parcel and self-service orders — *"so no order is ever invisible"*.
+ * The section's name, or `None` for the "No table" group that holds open parcel and
+ * self-service orders — "so no order is ever invisible".
  */
 section: string | null, seats: number, state: TableState, 
 /**
@@ -16,50 +16,23 @@ section: string | null, seats: number, state: TableState,
  */
 total: MoneyView | null, 
 /**
- * How long it has been sitting. **Computed from the order's own
- * timestamp**, never from a counter the screen keeps — a screen that
- * counts loses the count when it re-renders, which is the same argument
- * D5 makes about business days.
+ * How long it has been sitting.
  */
 minutes: number | null, 
 /**
- * Whether the kitchen has been told (crown jewel 2's delta ledger).
+ * Whether the kitchen has been told.
  */
 kitchenTold: boolean, 
 /**
- * Minutes since the last kitchen ticket went out — scope 14.2's second
- * timer, and the one that catches a forgotten table: *"food ordered 18
- * minutes ago and nothing since"*. `None` when nothing has been sent.
- *
- * Read from `order_events`, never from the ledger: the ledger is what the
- * kitchen believes NOW and its rows are rewritten whenever the order
- * changes, so a timestamp on them would reset when a cashier typed.
+ * Minutes since the last kitchen ticket went out — scope 14.2's second timer, and the one
+ * that catches a forgotten table: "food ordered 18 minutes ago and nothing since".
  */
 kitchenMinutes: number | null, orderId: string | null, 
 /**
- * The bill number this order has already claimed, formatted as it will be
- * printed. Empty until there is an order.
+ * The bill number this order has already claimed, formatted as it will be printed.
  */
 billNumber: string | null, 
 /**
- * **This is the tile the cashier is looking at** — the cart is on it.
- *
- * A flag and not a [`TableState`], and that is the fix rather than a
- * detail of it. It WAS a state, `TableState::Loaded`, and two things
- * followed from that which the owner found on 2026-08-22:
- *
- * 1. **An empty table could not be selected.** `Loaded` was decided by
- *    matching the cart's ORDER against the tile's order, and a table with
- *    nothing typed on it yet has no order — the order is not created until
- *    the first line. So tapping table 2 opened the cart for table 2 and
- *    left every tile on the floor looking identical. *"user should know
- *    which table he selected right?"*
- * 2. **Selecting a late table hid that it was late.** One field cannot
- *    hold two facts, so `Loaded` overrode `Late` — and §4 calls the late
- *    signal *"the single most useful thing a floor view can show"*.
- *
- * Being selected is not a condition the table is in; it is a fact about
- * where the cashier is. So the tile draws the state AND the ring, and a
- * late table that is selected is visibly both.
+ * This is the tile the cashier is looking at — the cart is on it.
  */
 selected: boolean, };

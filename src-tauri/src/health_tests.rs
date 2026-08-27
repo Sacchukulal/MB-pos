@@ -1,12 +1,3 @@
-//! **P22's T7 and T8**, against a real shop and the real command bodies.
-//!
-//! * **T7** — the bundle contains every declared item, the manifest shown on
-//!   screen matches what is written, and the secret scanner passes over the
-//!   whole zip.
-//! * **T8** — every health row reports its fault, driven by **breaking each
-//!   thing in turn** rather than by constructing the row. `health.rs`'s own
-//!   tests check the sentences; these check that the counter notices.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -47,7 +38,12 @@ fn licence(scratch: &Scratch, label: &str, status: Status, renews_in_days: i32) 
     ));
     let mut licensing = Licensing::new(dir, machine(), Arc::clone(&stub) as Arc<dyn Cloud>, "test");
     licensing
-        .activate("MB-STUB-0001", "123456", at, std::time::Duration::from_secs(2))
+        .activate(
+            "MB-STUB-0001",
+            "123456",
+            at,
+            std::time::Duration::from_secs(2),
+        )
         .expect("activates");
     if status != Status::Active {
         stub.set_status(status);
@@ -65,21 +61,16 @@ fn row<'a>(view: &'a crate::health::HealthView, id: &str) -> &'a crate::health::
         .unwrap_or_else(|| panic!("there is no {id} row: {:?}", view.rows))
 }
 
-// ---------------------------------------------------------------------------
-// T8 — break each thing in turn.
-// ---------------------------------------------------------------------------
+// Break each thing in turn.
 
-/// **A healthy counter says so, and says nothing else.**
-///
-/// The control. Without it, every assertion below would pass on a panel that
-/// reported everything as broken.
+/// A healthy counter says so, and says nothing else.
 #[test]
 fn a_counter_with_nothing_wrong_says_nothing_needs_you() {
     let scratch = Scratch::new("health_ok");
     let app = a_shop(&scratch, "ok");
     app.use_licensing(licence(&scratch, "ok", Status::Active, 30));
-    // A release build is the healthy case; this test binary is not one, so the
-    // version row is asserted separately below.
+    // A release build is the healthy case; this test binary is not one, so the version row is
+    // asserted separately below.
     let view = crate::health::look(&app);
 
     assert!(row(&view, "licence").is_ok(), "{:?}", row(&view, "licence"));
@@ -89,22 +80,24 @@ fn a_counter_with_nothing_wrong_says_nothing_needs_you() {
     assert!(row(&view, "log").is_ok());
 }
 
-/// **The licence row notices, and reuses P21's sentence rather than writing a
-/// second one.**
 #[test]
 fn breaking_the_licence_shows_in_health() {
     let scratch = Scratch::new("health_licence");
     let app = a_shop(&scratch, "licence");
 
     app.use_licensing(licence(&scratch, "good", Status::Active, 30));
-    assert!(crate::health::look(&app).rows.iter().any(|r| r.id == "licence" && r.is_ok()));
+    assert!(
+        crate::health::look(&app)
+            .rows
+            .iter()
+            .any(|r| r.id == "licence" && r.is_ok())
+    );
 
     app.use_licensing(licence(&scratch, "suspended", Status::Suspended, 365));
     let view = crate::health::look(&app);
     let licence_row = row(&view, "licence");
     assert!(!licence_row.is_ok());
     assert_eq!(licence_row.go_to.as_deref(), Some("account"));
-    // P21's banner, word for word — two versions of it would drift.
     let today = crate::flows::today(crate::flows::now());
     assert_eq!(
         Some(licence_row.says.clone()),
@@ -114,19 +107,24 @@ fn breaking_the_licence_shows_in_health() {
     assert!(licence_row.says.to_lowercase().contains("bill"));
 }
 
-/// **The version row, and ANDROID-G4.** A development build is never told it is
-/// up to date — and this test binary is one, so it is the live case.
+/// The version row, and ANDROID-G4.
 #[test]
 fn a_development_build_shows_in_health() {
     let scratch = Scratch::new("health_version");
     let app = a_shop(&scratch, "version");
     let view = crate::health::look(&app);
     let version = row(&view, "update");
-    assert!(!version.is_ok(), "a dev build reported itself as up to date");
-    assert!(version.says.contains("development build"), "{}", version.says);
+    assert!(
+        !version.is_ok(),
+        "a dev build reported itself as up to date"
+    );
+    assert!(
+        version.says.contains("development build"),
+        "{}",
+        version.says
+    );
 }
 
-/// **I1 in the panel.** An available update is visible even after a dismissal.
 #[test]
 fn a_dismissed_update_still_shows_in_health() {
     let scratch = Scratch::new("health_update");
@@ -140,11 +138,14 @@ fn a_dismissed_update_still_shows_in_health() {
     });
     let view = crate::health::look(&app);
     let update = row(&view, "update");
-    assert!(!update.is_ok(), "a dismissed update vanished — that is audit I1");
+    assert!(
+        !update.is_ok(),
+        "a dismissed update vanished — that is audit I1"
+    );
     assert!(update.says.contains("1.5.0"));
 }
 
-/// **The headline counts the faults**, and it counts each of them once.
+/// The headline counts the faults, and it counts each of them once.
 #[test]
 fn the_headline_counts_what_is_wrong() {
     let scratch = Scratch::new("health_headline");
@@ -163,8 +164,7 @@ fn the_headline_counts_what_is_wrong() {
     assert_eq!(view.tone, "danger", "a revoked licence is not a warning");
 }
 
-/// Every row, whatever its state, ends in a full stop and names itself. A panel
-/// that draws an empty cell is worse than one that says "fine".
+/// Every row, whatever its state, ends in a full stop and names itself.
 #[test]
 fn every_row_says_something() {
     let scratch = Scratch::new("health_rows");
@@ -180,12 +180,9 @@ fn every_row_says_something() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// T7 — the bundle.
-// ---------------------------------------------------------------------------
+// The bundle.
 
-/// **T7.** What the screen promised is what the zip holds, and the whole zip
-/// passes the secret scanner.
+/// What the screen promised is what the zip holds, and the whole zip passes the secret scanner.
 #[test]
 fn the_bundle_holds_what_the_manifest_promised_and_no_secrets() {
     let scratch = Scratch::new("bundle");
@@ -212,18 +209,19 @@ fn the_bundle_holds_what_the_manifest_promised_and_no_secrets() {
         .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_owned()))
         .collect();
 
-    // **Everything the screen listed is in it.** `logs\ (n files)` is a
-    // folder in the manifest and a prefix in the zip, so it is matched as one.
+    // Everything the screen listed is in it.
     for item in &plan.items {
         let promised = item.name.split_whitespace().next().unwrap_or(&item.name);
         let stem = promised.trim_end_matches('\\');
         assert!(
-            names.iter().any(|n| n == stem || n.starts_with(&format!("{stem}/"))),
+            names
+                .iter()
+                .any(|n| n == stem || n.starts_with(&format!("{stem}/"))),
             "the screen promised {promised} and the zip has {names:?}"
         );
     }
 
-    // **And nothing in it is a secret** — the whole point of D93 and D94.
+    // And nothing in it is a secret.
     for index in 0..zip.len() {
         let mut file = zip.by_index(index).expect("an entry");
         let name = file.name().to_owned();
@@ -240,8 +238,8 @@ fn the_bundle_holds_what_the_manifest_promised_and_no_secrets() {
         );
     }
 
-    // The licence KEY specifically, because that is the one an owner would
-    // email us without thinking about it.
+    // The licence KEY specifically, because that is the one an owner would email us without
+    // thinking about it.
     let mut about = String::new();
     {
         use std::io::Read as _;
@@ -250,14 +248,20 @@ fn the_bundle_holds_what_the_manifest_promised_and_no_secrets() {
             .read_to_string(&mut about)
             .expect("readable");
     }
-    assert!(!about.contains("MB-STUB-0001"), "the licence key is in the bundle:\n{about}");
-    assert!(about.contains("Free trial"), "the plan is missing:\n{about}");
+    assert!(
+        !about.contains("MB-STUB-0001"),
+        "the licence key is in the bundle:\n{about}"
+    );
+    assert!(
+        about.contains("Free trial"),
+        "the plan is missing:\n{about}"
+    );
 
     let _ = std::fs::remove_file(&written);
 }
 
-/// The bundle draws on a counter with no shop — which is the state somebody is
-/// in when the shop's data is the thing that will not open.
+/// The bundle draws on a counter with no shop — which is the state somebody is in when the
+/// shop's data is the thing that will not open.
 #[test]
 fn a_bundle_can_be_made_when_the_shop_will_not_open() {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
@@ -265,7 +269,10 @@ fn a_bundle_can_be_made_when_the_shop_will_not_open() {
     assert!(plan.items.iter().any(|i| i.name == "database.txt"));
     let view = crate::health::look(&app);
     assert_eq!(
-        view.rows.iter().find(|r| r.id == "licence").map(|r| r.tone.clone()),
+        view.rows
+            .iter()
+            .find(|r| r.id == "licence")
+            .map(|r| r.tone.clone()),
         Some("warn".to_owned())
     );
     assert!(!matches!(app.entitlement().standing, Standing::Fine));

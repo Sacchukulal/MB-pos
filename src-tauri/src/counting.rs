@@ -1,19 +1,4 @@
-//! **The physical stock count** — P26, scope 4.8. Bodies over `&App` (D46).
-//!
-//! # The two decisions this screen exists to obey
-//!
-//! **D127 — the count freezes the book and posts a DELTA.** Somebody counts the
-//! store at 11 pm on Sunday and the owner approves it at 9 am on Monday, after
-//! Monday's rice has arrived. Approving posts `counted − the book as it was when
-//! that line was counted`, so the delivery survives. A screen that said "set the
-//! balance to what I counted" would erase it, and nobody would notice for a
-//! month.
-//!
-//! **D128 — the printed count sheet has no book quantity on it.** A person
-//! holding a clipboard that already says "12.5 kg" writes down 12.5 kg. Every
-//! variance goes to zero, and the one thing the shop bought this module for
-//! stops working — quietly, and in a way no test can detect. That is one line in
-//! `sheet()` and it is the most valuable line in the feature.
+//! The physical stock count.
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
@@ -31,9 +16,7 @@ use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // What the screen sees.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -43,8 +26,8 @@ pub struct CountLineView {
     pub material: String,
     /// What was written on the sheet — "10 kg".
     pub counted: String,
-    /// **The book AS IT WAS when this line was counted** (D127), so the screen
-    /// can show what the software thought at that moment.
+    /// The book AS IT WAS when this line was counted, so the screen can show what the software
+    /// thought at that moment.
     pub book: String,
     /// "2 kg short", "500 g over", or "matches".
     pub variance: String,
@@ -83,16 +66,15 @@ pub struct StockCountView {
     pub opened_by: String,
     pub lines: Vec<CountLineView>,
     pub remaining: Vec<ToCountView>,
-    /// **What approving will do, said before anybody presses it** (D127):
-    /// "This will add 2.4 kg and take away 800 g across 14 materials."
+    /// What approving will do, said before anybody presses it: "This will add 2.4 kg and take
+    /// away 800 g across 14 materials.".
     pub effect: String,
     pub short_value: MoneyView,
     pub over_value: MoneyView,
     pub net_value: MoneyView,
-    /// **The three figures as one sentence** (§6, and it fixes a double
-    /// negative found by looking): "Short −600.00 Over 0.00" put a minus sign
-    /// next to the word "short", which says the same thing twice and in two
-    /// notations. This says it once.
+    /// The three figures as one sentence (§6, and it fixes a double negative found by looking):
+    /// "Short −600.00 Over 0.00" put a minus sign next to the word "short", which says the same
+    /// thing twice and in two notations.
     pub totals_says: String,
     /// The reasons a shop may pick from (`reasons.kind = 'count'`).
     pub reasons: Vec<crate::corrections::ReasonView>,
@@ -101,8 +83,7 @@ pub struct StockCountView {
     pub may_approve: bool,
     /// The threshold above which the screen asks for a reason.
     pub reason_above: MoneyView,
-    /// "Nobody has ever counted this store." — D115's honesty, on the screen
-    /// that fixes it.
+    /// "Nobody has ever counted this store.".
     pub note: String,
 }
 
@@ -131,10 +112,6 @@ pub struct CountEdit {
     pub unit: String,
 }
 
-// ---------------------------------------------------------------------------
-// Reading.
-// ---------------------------------------------------------------------------
-
 pub fn stock_count_on(app: &App, id: Option<String>) -> UiResult<StockCountView> {
     guard::require(app, Permission::InventoryView)?;
     crate::licensing::gate(app, Feature::Inventory)?;
@@ -160,7 +137,10 @@ pub fn stock_count_on(app: &App, id: Option<String>) -> UiResult<StockCountView>
                     .corrections()
                     .reasons(OUTLET, "count")?
                     .into_iter()
-                    .map(|r| crate::corrections::ReasonView { id: r.id, text: r.text })
+                    .map(|r| crate::corrections::ReasonView {
+                        id: r.id,
+                        text: r.text,
+                    })
                     .collect();
                 let history = counts
                     .counts(OUTLET, from, day)?
@@ -178,17 +158,23 @@ pub fn stock_count_on(app: &App, id: Option<String>) -> UiResult<StockCountView>
                         ended_reason: c.ended_reason,
                     })
                     .collect::<Vec<_>>();
-                let ever = history.iter().any(|h| h.state == CountState::Approved.label());
+                let ever = history
+                    .iter()
+                    .any(|h| h.state == CountState::Approved.label());
 
-                Ok(view_of(open, &materials, reasons, history, ever, may_approve, threshold))
+                Ok(view_of(
+                    open,
+                    &materials,
+                    reasons,
+                    history,
+                    ever,
+                    may_approve,
+                    threshold,
+                ))
             })
             .map_err(|e| words::from_db(&e))
     })
 }
-
-// ---------------------------------------------------------------------------
-// Writing.
-// ---------------------------------------------------------------------------
 
 pub fn open_stock_count_on(app: &App, location: String) -> UiResult<StockCountView> {
     let who = guard::require(app, Permission::StockCount)?;
@@ -206,14 +192,9 @@ pub fn open_stock_count_on(app: &App, location: String) -> UiResult<StockCountVi
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                repos.counts().open(
-                    OUTLET,
-                    &id,
-                    &location,
-                    day,
-                    at,
-                    Some(&who.staff_id),
-                )?;
+                repos
+                    .counts()
+                    .open(OUTLET, &id, &location, day, at, Some(&who.staff_id))?;
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -233,8 +214,7 @@ pub fn open_stock_count_on(app: &App, location: String) -> UiResult<StockCountVi
     stock_count_on(app, Some(id))
 }
 
-/// **Write down what is on the shelf.** The book is frozen against it here and
-/// never read again (D127).
+/// Write down what is on the shelf.
 pub fn record_count_line_on(app: &App, edit: CountEdit) -> UiResult<StockCountView> {
     guard::require(app, Permission::StockCount)?;
     crate::licensing::gate(app, Feature::Inventory)?;
@@ -245,9 +225,14 @@ pub fn record_count_line_on(app: &App, edit: CountEdit) -> UiResult<StockCountVi
             .read_transaction(|tx| mb_db::Repos::new(tx).stock().materials(OUTLET, true))
             .map_err(|e| words::from_db(&e))
     })?;
-    let Some(material) = materials.iter().find(|m| m.id.as_str() == edit.material_id.trim())
+    let Some(material) = materials
+        .iter()
+        .find(|m| m.id.as_str() == edit.material_id.trim())
     else {
-        return Err(UiError::new("count.material", "That material is not on file."));
+        return Err(UiError::new(
+            "count.material",
+            "That material is not on file.",
+        ));
     };
 
     let units = material.units();
@@ -264,8 +249,11 @@ pub fn record_count_line_on(app: &App, edit: CountEdit) -> UiResult<StockCountVi
         .with_detail(e.to_string())
     })?;
     let base = units.to_base(typed, &unit).map_err(|e| {
-        UiError::new("count.unit", format!("`{unit}` is not a unit of {}.", material.name))
-            .with_detail(e.to_string())
+        UiError::new(
+            "count.unit",
+            format!("`{unit}` is not a unit of {}.", material.name),
+        )
+        .with_detail(e.to_string())
     })?;
 
     let id = edit.count_id.clone();
@@ -276,9 +264,11 @@ pub fn record_count_line_on(app: &App, edit: CountEdit) -> UiResult<StockCountVi
                     OUTLET,
                     &id,
                     &material.id,
-                    // **D109's pair travels together** — the base-unit truth
-                    // and what the person actually wrote on the sheet.
-                    &mb_db::repo::counts::Written { base, typed, unit: unit.clone() },
+                    &mb_db::repo::counts::Written {
+                        base,
+                        typed,
+                        unit: unit.clone(),
+                    },
                     at,
                 )?;
                 Ok(())
@@ -305,7 +295,11 @@ pub fn explain_count_line_on(
                     &id,
                     &MaterialId::new(material_id.clone()),
                     reason_id.as_deref(),
-                    if note.trim().is_empty() { None } else { Some(note.trim()) },
+                    if note.trim().is_empty() {
+                        None
+                    } else {
+                        Some(note.trim())
+                    },
                 )
             })
             .map_err(|e| words::from_db(&e))
@@ -334,19 +328,14 @@ pub fn remove_count_line_on(
     stock_count_on(app, Some(count_id))
 }
 
-/// **Approve: post the deltas and seal it** (D127, D129).
-///
-/// Needs `stock.adjust` and not a permission of its own, because approving a
-/// count IS adjusting stock by hand, at scale.
+/// Approve: post the deltas and seal it.
 pub fn approve_stock_count_on(app: &App, id: String) -> UiResult<StockCountView> {
     let who = guard::require(app, Permission::StockAdjust)?;
     crate::licensing::gate(app, Feature::Inventory)?;
     let at = now();
     let day = today(at);
 
-    // **D75 — the refusal is a VALUE.** A `DbError` here would be rewritten by
-    // `words::from_db` into "The shop's data could not be read", and D77's door
-    // would never be mentioned to the person standing in front of it.
+    // The refusal is a VALUE.
     let moved = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| -> Result<Result<usize, UiError>, mb_db::DbError> {
@@ -357,9 +346,6 @@ pub fn approve_stock_count_on(app: &App, id: String) -> UiResult<StockCountView>
                         "That count is not on file. Refresh and try again.",
                     )));
                 };
-                // **D77 again.** A count that would move stock inside a day
-                // somebody has closed and locked is refused, and the way past is
-                // to reopen the day rather than to be handed a permission.
                 if repos.corrections().day_is_locked(OUTLET, day)? {
                     return Ok(Err(UiError::new(
                         "count.day_locked",
@@ -369,8 +355,9 @@ pub fn approve_stock_count_on(app: &App, id: String) -> UiResult<StockCountView>
                         ),
                     )));
                 }
-                let moved =
-                    repos.counts().approve(OUTLET, &id, at, day, Some(&who.staff_id))?;
+                let moved = repos
+                    .counts()
+                    .approve(OUTLET, &id, at, day, Some(&who.staff_id))?;
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -399,14 +386,19 @@ pub fn abandon_stock_count_on(app: &App, id: String, reason: String) -> UiResult
     let who = guard::require(app, Permission::StockCount)?;
     let at = now();
     if reason.trim().is_empty() {
-        return Err(UiError::new("count.reason", "Say why the count is being given up."));
+        return Err(UiError::new(
+            "count.reason",
+            "Say why the count is being given up.",
+        ));
     }
     let count_id = id.clone();
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                repos.counts().abandon(OUTLET, &count_id, reason.trim(), at)?;
+                repos
+                    .counts()
+                    .abandon(OUTLET, &count_id, reason.trim(), at)?;
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -426,11 +418,7 @@ pub fn abandon_stock_count_on(app: &App, id: String, reason: String) -> UiResult
     stock_count_on(app, None)
 }
 
-/// **The count sheet — D128, and the book quantity is deliberately not on it.**
-///
-/// Returns the document as text the screen can print through the shop's own
-/// printer or copy. A wide blank column, the unit already beside it, grouped by
-/// where the material is kept.
+/// The count sheet.
 pub fn count_sheet_on(app: &App, location: String) -> UiResult<String> {
     guard::require(app, Permission::StockCount)?;
     let day = today(now());
@@ -448,17 +436,13 @@ pub fn count_sheet_on(app: &App, location: String) -> UiResult<String> {
     Ok(sheet(&materials, &location, &day.to_string()))
 }
 
-/// The sheet itself, as a pure function so **D128 has a test**.
-///
-/// The book quantity is not a parameter. It cannot be printed by accident,
-/// because it is not here to print.
 pub fn sheet(materials: &[Material], location: &str, date: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!("STOCK COUNT SHEET — {location}\n{date}\n\n"));
     let mut any = false;
     for material in materials.iter().filter(|m| m.location == location) {
         any = true;
-        // Name, the unit to count in, and a blank. **Nothing else.**
+        // Name, the unit to count in, and a blank.
         out.push_str(&format!(
             "{:<28} {:>6}  ______________\n",
             truncate(&material.name, 28),
@@ -478,10 +462,6 @@ fn truncate(text: &str, at: usize) -> String {
     }
     text.chars().take(at.saturating_sub(1)).collect::<String>() + "…"
 }
-
-// ---------------------------------------------------------------------------
-// Shapes.
-// ---------------------------------------------------------------------------
 
 fn view_of(
     open: Option<mb_db::repo::counts::StockCount>,
@@ -566,8 +546,11 @@ fn view_of(
         })
         .collect();
 
-    let counted: Vec<String> =
-        count.lines.iter().map(|l| l.material_id.to_string()).collect();
+    let counted: Vec<String> = count
+        .lines
+        .iter()
+        .map(|l| l.material_id.to_string())
+        .collect();
     let (up, down) = count.effect();
     let effect = if up == 0 && down == 0 {
         "Nothing has changed — the shelf and the book agree.".to_owned()
@@ -585,7 +568,11 @@ fn view_of(
         state: count.state.label().to_owned(),
         state_tag: count.state.tag().to_owned(),
         date: count.business_day.to_string(),
-        opened_by: count.opened_by.as_ref().map(ToString::to_string).unwrap_or_default(),
+        opened_by: count
+            .opened_by
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
         lines,
         remaining: to_count(materials, &counted),
         effect,
@@ -601,12 +588,7 @@ fn view_of(
     }
 }
 
-/// **What the count is worth, said once.**
-///
-/// The first version showed three labelled figures — `Short −600.00`,
-/// `Over 0.00`, `Net −600.00` — and the minus sign beside the word "short" says
-/// the same thing twice, in two notations, one of which is a hyphen. §6: a
-/// sentence is composed in Rust, not assembled out of fragments on a screen.
+/// What the count is worth, said once.
 fn totals_sentence(short: Money, over: Money, net: Money) -> String {
     if short.is_zero() && over.is_zero() {
         return "Everything counted matches the book.".to_owned();
@@ -622,8 +604,8 @@ fn totals_sentence(short: Money, over: Money, net: Money) -> String {
     if short.is_zero() || over.is_zero() {
         return format!("{said}.");
     }
-    // Both directions, so the net is worth saying — and which way it goes is a
-    // word, never a sign.
+    // Both directions, so the net is worth saying — and which way it goes is a word, never a
+    // sign.
     format!(
         "{said} — {} {} in all.",
         net.abs().to_plain_string(),
@@ -648,9 +630,7 @@ fn to_count(materials: &[Material], done: &[String]) -> Vec<ToCountView> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// The seats (D46).
-// ---------------------------------------------------------------------------
+// The seats.
 
 #[tauri::command]
 pub fn stock_count(app: tauri::State<'_, App>, id: Option<String>) -> UiResult<StockCountView> {
@@ -658,18 +638,12 @@ pub fn stock_count(app: tauri::State<'_, App>, id: Option<String>) -> UiResult<S
 }
 
 #[tauri::command]
-pub fn open_stock_count(
-    app: tauri::State<'_, App>,
-    location: String,
-) -> UiResult<StockCountView> {
+pub fn open_stock_count(app: tauri::State<'_, App>, location: String) -> UiResult<StockCountView> {
     open_stock_count_on(&app, location)
 }
 
 #[tauri::command]
-pub fn record_count_line(
-    app: tauri::State<'_, App>,
-    edit: CountEdit,
-) -> UiResult<StockCountView> {
+pub fn record_count_line(app: tauri::State<'_, App>, edit: CountEdit) -> UiResult<StockCountView> {
     record_count_line_on(&app, edit)
 }
 
@@ -717,12 +691,7 @@ mod tests {
     use super::*;
     use mb_core::Dimension;
 
-    /// **T10 — the count sheet has no book quantity in it.**
-    ///
-    /// One line, against a decision a future session will otherwise "improve" by
-    /// helpfully printing what the software thinks is there. A person holding a
-    /// clipboard that already says 12.5 kg writes down 12.5 kg, every variance
-    /// goes to zero, and the module quietly stops working.
+    /// The count sheet has no book quantity in it.
     #[test]
     fn the_count_sheet_never_prints_the_book_quantity() {
         let mut rice = Material::new(MaterialId::new("mat_rice"), "Rice", Dimension::Weight);
@@ -733,8 +702,7 @@ mod tests {
         assert!(printed.contains("Rice"), "the sheet names the material");
         assert!(printed.contains("bag"), "and the unit to count it in");
         assert!(printed.contains("______"), "and leaves a blank to write in");
-        // The book figure for this material is 50,000 g / 2 bags. Neither may
-        // appear, in any form.
+        // The book figure for this material is 50,000 g / 2 bags.
         for forbidden in ["50000", "50,000", "2 bag", "12.5"] {
             assert!(
                 !printed.contains(forbidden),

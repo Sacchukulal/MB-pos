@@ -9,12 +9,11 @@ export type MovementEdit = { materialId: string,
  */
 kind: string, 
 /**
- * Typed in `unit`. A leading minus takes stock away, which is what an
- * adjustment downwards is; a wastage is always negative whatever is typed.
+ * Typed in `unit`. A leading minus takes stock away, which is what an adjustment downwards
+ * is; a wastage is always negative whatever is typed.
  */
 qty: string, unit: string, reasonId: string | null, note: string | null, 
 /**
- * **The price per PACK**, because that is what a shop knows: "a bag is
- * ₹1,500". Converted to a cost per base unit here (D118).
+ * The price per PACK, because that is what a shop knows: "a bag is ₹1,500".
  */
 cost: string | null, };

@@ -6,7 +6,6 @@ export type PurchaseLineEdit = { materialId: string,
  */
 qty: string, unit: string, free: string, 
 /**
- * Paise per whole `unit`, as a string — D58 keeps money off the wire as a
- * number that TypeScript could do arithmetic on.
+ * Paise per whole `unit`, as a string.
  */
 rate: string, discount: string, taxPercent: string, };

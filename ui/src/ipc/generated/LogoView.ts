@@ -6,15 +6,11 @@ import type { Dots } from "./Dots";
  */
 export type LogoView = { hasOne: boolean, 
 /**
- * "220 × 80 dots — about 30 mm wide on 80 mm paper". Written here, because
- * dots per millimetre is a fact about the paper and not about the screen.
+ * "220 × 80 dots — about 30 mm wide on 80 mm paper".
  */
 says: string, 
 /**
- * The dots, so the screen can draw exactly what will print rather than a
- * second rendering of the original file. `null` when there is none.
- *
- * Sent as the picture itself and not as a path: the webview cannot read a
- * file, and this is a few kilobytes.
+ * The dots, so the screen can draw exactly what will print rather than a second rendering
+ * of the original file.
  */
 dots: Dots | null, };

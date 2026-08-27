@@ -1,13 +1,4 @@
-//! **The phones this counter serves** — P19, decision D9.
-//!
-//! One table, four operations, and one rule that shapes all of them:
-//! **a revoked device is not deleted.** D47 again — a correction is a state and
-//! never a deletion — because an owner asking *"which phone was that, and who
-//! took it off?"* three months later needs the row to still be there.
-//!
-//! It lives here rather than in `mb-lan` because `mb-lan` writes no SQL and
-//! knows no business rule; and rather than in `magic-bill` because that crate
-//! writes no SQL either (audit E3).
+//! The phones this counter serves.
 
 use mb_auth::PinHash;
 use mb_core::{StaffId, Timestamp};
@@ -23,8 +14,7 @@ pub struct LanDevice {
     pub id: String,
     pub name: String,
     pub platform: String,
-    /// **Argon2, never the credential.** This database is copied to a pen drive
-    /// on purpose (P05).
+    /// Argon2, never the credential.
     pub secret_hash: String,
     pub staff_id: Option<StaffId>,
     pub paired_at: Timestamp,
@@ -53,9 +43,6 @@ impl<'a> DevicesRepo<'a> {
     }
 
     /// Every device, revoked ones last.
-    ///
-    /// The panel shows both: a revoked phone that has disappeared from the list
-    /// is a question an owner cannot answer.
     pub fn all(&self, outlet: &str) -> Result<Vec<LanDevice>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT id, name, platform, secret_hash, staff_id, paired_at, paired_by,
@@ -72,9 +59,13 @@ impl<'a> DevicesRepo<'a> {
                 staff_id: row.get::<_, Option<String>>(4)?.map(StaffId::new),
                 paired_at: encode::timestamp_from_sql(row.get(5)?),
                 paired_by: row.get::<_, Option<String>>(6)?.map(StaffId::new),
-                last_seen_at: row.get::<_, Option<i64>>(7)?.map(encode::timestamp_from_sql),
+                last_seen_at: row
+                    .get::<_, Option<i64>>(7)?
+                    .map(encode::timestamp_from_sql),
                 last_ip: row.get(8)?,
-                revoked_at: row.get::<_, Option<i64>>(9)?.map(encode::timestamp_from_sql),
+                revoked_at: row
+                    .get::<_, Option<i64>>(9)?
+                    .map(encode::timestamp_from_sql),
             })
         })?;
         let mut out = Vec::new();
@@ -85,11 +76,6 @@ impl<'a> DevicesRepo<'a> {
     }
 
     /// One LIVE device, by id.
-    ///
-    /// **Filtered on `revoked_at IS NULL` in the SQL, not by the caller.** That
-    /// is the whole of T3: the authentication path asks for a live device, so a
-    /// revocation bites on the next request rather than the next login, and
-    /// there is no way to forget the filter at a call site.
     pub fn live(&self, outlet: &str, id: &str) -> Result<Option<LanDevice>, DbError> {
         Ok(self
             .all(outlet)?
@@ -134,10 +120,6 @@ impl<'a> DevicesRepo<'a> {
     }
 
     /// Take a phone off the counter.
-    ///
-    /// An UPDATE and never a DELETE. Returns false when there was nothing live
-    /// to revoke, so the screen can say "that phone was already removed"
-    /// instead of pretending it did something.
     pub fn revoke(
         &self,
         outlet: &str,
@@ -162,17 +144,7 @@ impl<'a> DevicesRepo<'a> {
     }
 
     /// "Last seen", for the panel.
-    ///
-    /// **No outbox row**, deliberately: this is written on the phone's traffic,
-    /// and D16's free-tier budget does not survive a sync row per poll. The
-    /// print spool made the same call for the same reason.
-    pub fn seen(
-        &self,
-        outlet: &str,
-        id: &str,
-        at: Timestamp,
-        ip: &str,
-    ) -> Result<(), DbError> {
+    pub fn seen(&self, outlet: &str, id: &str, at: Timestamp, ip: &str) -> Result<(), DbError> {
         self.tx.execute(
             "UPDATE lan_devices SET last_seen_at = ?3, last_ip = ?4
               WHERE outlet_id = ?1 AND id = ?2",
@@ -183,11 +155,6 @@ impl<'a> DevicesRepo<'a> {
 }
 
 /// The stored hash, read back with its shape checked.
-///
-/// # Errors
-///
-/// When the column is not a complete Argon2id hash — which must be a locked
-/// door and never an open one, exactly as it is for a PIN.
 pub fn hash_of(device: &LanDevice) -> Result<PinHash, DbError> {
     PinHash::from_stored(&device.secret_hash)
         .map_err(|_| DbError::invariant("a device's stored credential is not readable"))

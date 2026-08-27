@@ -2,10 +2,5 @@
 
 /**
  * One row of the count, as the screen sends it.
- *
- * **`i32` paise and a `u32` count** — D58: `ts-rs` renders an `i64` as a
- * TypeScript `bigint` and `JSON.stringify` throws on one. ₹500 is 50,000
- * paise, which fits an `i32` with room for a denomination nobody has printed
- * yet.
  */
 export type CountArg = { value: number, count: number, };

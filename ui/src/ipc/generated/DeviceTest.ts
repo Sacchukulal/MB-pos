@@ -5,7 +5,7 @@
  */
 export type DeviceTest = { 
 /**
- * True when the device answered. False is a normal outcome here.
+ * True when the device answered.
  */
 answered: boolean, 
 /**
@@ -13,8 +13,6 @@ answered: boolean,
  */
 says: string, 
 /**
- * **The raw bytes, exactly as they arrived.** This is the whole point of
- * the device screen: a dealer setting up a brand nobody here has ever
- * seen needs to see what it is actually sending.
+ * The raw bytes, exactly as they arrived.
  */
 raw: string, };

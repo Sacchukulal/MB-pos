@@ -14,22 +14,14 @@ label: string, help: string, prefix: string,
  */
 padWidth: number, resetDaily: boolean, start: number, 
 /**
- * **What the NEXT one will be**, already formatted — the number the owner
- * is actually thinking about. `Money::to_plain_string`'s rule applied to a
- * counter: the string a screen shows is built in Rust.
+ * What the NEXT one will be, already formatted.
  */
 next: string, nextValue: number, 
 /**
- * What has been handed out, or `None` when nothing has. **Not zero** —
- * zero reads as a number that was used.
+ * What has been handed out, or `None` when nothing has.
  */
 issued: number | null, 
 /**
- * **The whole sentence**, built here.
- *
- * UI_GUIDELINES §6: *"no string is built by joining fragments — plurals
- * and word order differ by language."* The screen assembled this from
- * three pieces and produced "1 have been issued", which is the finding in
- * miniature and was found by reading it.
+ * The whole sentence, built here.
  */
 summary: string, };

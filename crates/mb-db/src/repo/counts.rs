@@ -1,31 +1,4 @@
-//! **The physical stock count** — P26, scope 4.8.
-//!
-//! Recipes tell a shop what *should* have gone. Only a person with a clipboard
-//! can tell it what *did*. This is the module that turns P25's honest *"never
-//! counted"* (D115) into a real figure, and it is the reason the whole inventory
-//! module is worth paying for.
-//!
-//! # D127 — the count freezes the book and posts a DELTA, never a SET
-//!
-//! The sequence in a real shop is not "count, approve": it is **count at 11 pm
-//! on Sunday, approve at 9 am on Monday** — after Monday's 25 kg of rice has
-//! been delivered and after Monday's breakfast has been sold.
-//!
-//! A system that sets the balance to Sunday's counted figure **erases the
-//! delivery**, and nobody notices for a month. So every line carries the book
-//! quantity as it was at the moment that line was counted, the variance is
-//! computed against that frozen figure, and approval posts
-//! `counted − book_at_that_moment` as an ordinary adjustment.
-//!
-//! A test that asserts the shelf equals the counted figure after approval is
-//! asserting the bug.
-//!
-//! # D128 — the count sheet does not carry the book quantity
-//!
-//! That decision lives in `mb-print`'s document, not here, but this module is
-//! why: a person holding a clipboard that already says "12.5 kg" writes down
-//! 12.5 kg, every variance goes to zero, and the one thing the shop bought this
-//! module for stops working quietly, in a way no test can detect.
+//! The physical stock count.
 
 use mb_core::{BusinessDay, MaterialId, Money, Qty, StaffId, Timestamp, UnitCost};
 use rusqlite::{Transaction, params};
@@ -35,20 +8,23 @@ use crate::error::DbError;
 use crate::repo::outbox::{Op, OutboxRepo};
 use crate::repo::stock::{Movement, MovementKind, StockRepo};
 
-/// Where a count has got to — **D129**. There is no `deleted`.
+/// Where a count has got to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CountState {
     Draft,
-    /// Sealed for ever. Its adjustments are ordinary ledger rows carrying its
-    /// id, so the variance history is a query and not a second store.
+    /// Sealed for ever. Its adjustments are ordinary ledger rows carrying its id, so the
+    /// variance history is a query and not a second store.
     Approved,
-    /// Given up on, with a reason. A state, never a deletion (D47).
+    /// Given up on, with a reason.
     Abandoned,
 }
 
 impl CountState {
-    pub const ALL: &'static [CountState] =
-        &[CountState::Draft, CountState::Approved, CountState::Abandoned];
+    pub const ALL: &'static [CountState] = &[
+        CountState::Draft,
+        CountState::Approved,
+        CountState::Abandoned,
+    ];
 
     #[must_use]
     pub const fn tag(self) -> &'static str {
@@ -69,9 +45,13 @@ impl CountState {
     }
 
     pub fn from_tag(tag: &str) -> Result<Self, DbError> {
-        CountState::ALL.iter().copied().find(|s| s.tag() == tag).ok_or_else(|| {
-            DbError::invariant(format!("stock_counts.state holds an unknown value `{tag}`"))
-        })
+        CountState::ALL
+            .iter()
+            .copied()
+            .find(|s| s.tag() == tag)
+            .ok_or_else(|| {
+                DbError::invariant(format!("stock_counts.state holds an unknown value `{tag}`"))
+            })
     }
 }
 
@@ -81,20 +61,17 @@ pub struct CountLine {
     pub seq: i64,
     pub material_id: MaterialId,
     pub material_name: String,
-    /// **D127 — the book as it was when this line was counted**, and when that
-    /// was. Without these two the variance is computed against whatever the
-    /// shelf says at approval time, which is the bug.
+    /// The book as it was when this line was counted, and when that was.
     pub book_qty: Qty,
     pub book_at: Timestamp,
     pub counted_qty: Qty,
-    /// **D109** — what the person actually wrote on the sheet.
+    /// What the person actually wrote on the sheet.
     pub typed_qty: Qty,
     pub typed_unit: String,
     /// `counted − book`. Negative means less on the shelf than the book claims.
     pub variance_qty: Qty,
     pub unit_cost: UnitCost,
-    /// **A variance in kilos is one nobody reads.** A variance in rupees is the
-    /// one that finds the person taking the paneer home.
+    /// A variance in kilos is one nobody reads.
     pub variance_value: Money,
     pub reason_id: Option<String>,
     pub note: Option<String>,
@@ -119,28 +96,31 @@ pub struct StockCount {
 }
 
 impl StockCount {
-    /// What approving would do, as two numbers the screen says out loud before
-    /// anybody presses it: *"This will add 2.4 kg and remove 800 g."*
+    /// What approving would do, as two numbers the screen says out loud before anybody presses
+    /// it: "This will add 2.4 kg and remove 800 g.".
     #[must_use]
     pub fn effect(&self) -> (usize, usize) {
-        let up = self.lines.iter().filter(|l| l.variance_qty.is_positive()).count();
-        let down = self.lines.iter().filter(|l| l.variance_qty.is_negative()).count();
+        let up = self
+            .lines
+            .iter()
+            .filter(|l| l.variance_qty.is_positive())
+            .count();
+        let down = self
+            .lines
+            .iter()
+            .filter(|l| l.variance_qty.is_negative())
+            .count();
         (up, down)
     }
 
-    /// What the whole count is worth, plus or minus. The figure an owner reads
-    /// first.
+    /// What the whole count is worth, plus or minus.
     #[must_use]
     pub fn variance_value(&self) -> Money {
         Money::try_sum(self.lines.iter().map(|l| l.variance_value)).unwrap_or(Money::ZERO)
     }
 }
 
-/// **What somebody wrote on the sheet, as one thing** — D109's pair, which
-/// travels together everywhere else in this product and should here too.
-///
-/// It also keeps `record_line` inside clippy's argument limit, which is the
-/// lint noticing the same thing: three parameters that are really one value.
+/// What somebody wrote on the sheet, as one thing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written {
     /// The truth, in base units.
@@ -150,8 +130,8 @@ pub struct Written {
     pub unit: String,
 }
 
-/// One material's history of being counted — **the report that answers "is this
-/// always short, or was it one bad month".**
+/// One material's history of being counted — the report that answers "is this always short, or
+/// was it one bad month".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarianceRow {
     pub name: String,
@@ -176,9 +156,9 @@ impl<'a> CountRepo<'a> {
         CountRepo { tx }
     }
 
-    /// Start a walk. **One open count per location at a time** (D129) — a second
-    /// one is refused naming the first, because two people counting the same
-    /// shelf into two sheets produces two truths and one argument.
+    /// Start a walk. One open count per location at a time — a second one is refused naming the
+    /// first, because two people counting the same shelf into two sheets produces two truths
+    /// and one argument.
     pub fn open(
         &self,
         outlet: &str,
@@ -222,7 +202,9 @@ impl<'a> CountRepo<'a> {
         );
         let mut stmt = self.tx.prepare(&sql)?;
         let mut rows = stmt.query_map(params![outlet, location], read_count)?;
-        let Some(mut count) = rows.next().transpose()? else { return Ok(None) };
+        let Some(mut count) = rows.next().transpose()? else {
+            return Ok(None);
+        };
         drop(rows);
         count.lines = self.lines_of(&count.id)?;
         Ok(Some(count))
@@ -233,14 +215,16 @@ impl<'a> CountRepo<'a> {
             format!("SELECT {COUNT_COLUMNS} FROM stock_counts WHERE outlet_id = ?1 AND id = ?2");
         let mut stmt = self.tx.prepare(&sql)?;
         let mut rows = stmt.query_map(params![outlet, id], read_count)?;
-        let Some(mut count) = rows.next().transpose()? else { return Ok(None) };
+        let Some(mut count) = rows.next().transpose()? else {
+            return Ok(None);
+        };
         drop(rows);
         count.lines = self.lines_of(&count.id)?;
         Ok(Some(count))
     }
 
-    /// Every count in a period, newest first — including the abandoned ones,
-    /// because "we gave up counting three times last month" is itself a finding.
+    /// Every count in a period, newest first — including the abandoned ones, because "we gave
+    /// up counting three times last month" is itself a finding.
     pub fn counts(
         &self,
         outlet: &str,
@@ -299,12 +283,7 @@ impl<'a> CountRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// **Write down what is on the shelf, and freeze the book against it**
-    /// (D127).
-    ///
-    /// `counted` and `typed` are the same quantity twice: the base-unit truth
-    /// and what the person wrote in the unit they chose (D109). The book figure
-    /// and the cost are read HERE, at the moment of counting, and never again.
+    /// Write down what is on the shelf, and freeze the book against it.
     pub fn record_line(
         &self,
         outlet: &str,
@@ -324,7 +303,9 @@ impl<'a> CountRepo<'a> {
             )));
         }
         if counted.is_negative() {
-            return Err(DbError::invariant("a counted quantity cannot be less than nothing"));
+            return Err(DbError::invariant(
+                "a counted quantity cannot be less than nothing",
+            ));
         }
 
         let stock = StockRepo::new(self.tx);
@@ -339,9 +320,9 @@ impl<'a> CountRepo<'a> {
             .map_err(|e| DbError::invariant(format!("that count cannot be compared: {e}")))?;
         let variance_value = unit_cost.cost_of(variance).unwrap_or(Money::ZERO);
 
-        // The sequence is stable per material, so counting the same thing twice
-        // corrects the line rather than adding a second one — a person walking a
-        // store re-counts, and two rows for one shelf is two truths again.
+        // The sequence is stable per material, so counting the same thing twice corrects the
+        // line rather than adding a second one — a person walking a store re-counts, and two
+        // rows for one shelf is two truths again.
         let seq: i64 = self
             .tx
             .query_row(
@@ -394,8 +375,7 @@ impl<'a> CountRepo<'a> {
             .ok_or_else(|| DbError::invariant("the count line could not be read back"))
     }
 
-    /// Why the shelf and the book disagree. Above the shop's threshold the
-    /// screen insists on one; below it, it does not nag.
+    /// Why the shelf and the book disagree.
     pub fn explain_line(
         &self,
         outlet: &str,
@@ -437,14 +417,7 @@ impl<'a> CountRepo<'a> {
         Ok(())
     }
 
-    /// **Approve: post the deltas, stamp the materials, seal the count** (D127,
-    /// D129).
-    ///
-    /// Every line becomes an `adjustment` movement of **its variance** — not of
-    /// "counted minus whatever the shelf says now". That is the whole decision:
-    /// approve on Monday morning and Monday's delivery survives.
-    ///
-    /// Returns how many materials moved.
+    /// Approve: post the deltas, stamp the materials, seal the count.
     pub fn approve(
         &self,
         outlet: &str,
@@ -463,7 +436,9 @@ impl<'a> CountRepo<'a> {
             )));
         }
         if count.lines.is_empty() {
-            return Err(DbError::invariant("nothing was counted, so there is nothing to approve"));
+            return Err(DbError::invariant(
+                "nothing was counted, so there is nothing to approve",
+            ));
         }
 
         let stock = StockRepo::new(self.tx);
@@ -479,8 +454,8 @@ impl<'a> CountRepo<'a> {
                     at,
                     day,
                 )
-                // **Valued at the cost frozen onto the line**, so that a report
-                // of last month's count does not change when a price does.
+                // Valued at the cost frozen onto the line, so that a report of last month's
+                // count does not change when a price does.
                 .costing(line.unit_cost);
                 movement.reason_id = line.reason_id.clone();
                 movement.note = Some(format!("Counted on {}", count.business_day));
@@ -496,9 +471,6 @@ impl<'a> CountRepo<'a> {
                 moved += 1;
             }
 
-            // **D115 stops being "never" for this material.** P25's variance
-            // report reads this column and does not change one line, which is
-            // the test that its shape was right.
             self.tx.execute(
                 "UPDATE materials SET last_counted_at = ?2 WHERE id = ?1",
                 params![line.material_id.as_str(), encode::timestamp_to_sql(at)],
@@ -508,18 +480,17 @@ impl<'a> CountRepo<'a> {
         self.tx.execute(
             "UPDATE stock_counts SET state = 'approved', approved_at = ?2, approved_by = ?3
               WHERE id = ?1",
-            params![count.id, encode::timestamp_to_sql(at), by.map(StaffId::as_str)],
+            params![
+                count.id,
+                encode::timestamp_to_sql(at),
+                by.map(StaffId::as_str)
+            ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "stock_counts", &count.id, Op::Upsert, at)?;
         Ok(moved)
     }
 
-    /// **The variance history** — every approved count's lines in a period, so
-    /// an owner can see whether the paneer keeps going missing or whether it was
-    /// one bad month.
-    ///
-    /// Approved counts only: a draft is somebody's half-finished walk round the
-    /// store, and putting it in a report would make a number out of a guess.
+    /// The variance history.
     pub fn variance_history(
         &self,
         outlet: &str,
@@ -565,8 +536,7 @@ impl<'a> CountRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// Give up on a count, with a reason. **A state, never a deletion** (D47) —
-    /// a shop that abandons three counts a month is telling somebody something.
+    /// Give up on a count, with a reason.
     pub fn abandon(
         &self,
         outlet: &str,
@@ -605,7 +575,9 @@ fn read_count(row: &rusqlite::Row<'_>) -> rusqlite::Result<StockCount> {
         ),
         opened_at: encode::timestamp_from_sql(row.get(4)?),
         opened_by: row.get::<_, Option<String>>(5)?.map(StaffId::new),
-        approved_at: row.get::<_, Option<i64>>(6)?.map(encode::timestamp_from_sql),
+        approved_at: row
+            .get::<_, Option<i64>>(6)?
+            .map(encode::timestamp_from_sql),
         approved_by: row.get::<_, Option<String>>(7)?.map(StaffId::new),
         ended_reason: row.get(8)?,
         note: row.get(9)?,

@@ -1,22 +1,16 @@
-/*
- * Customers and what they owe — scope 5.1-5.4.
- *
- * Every colour, size and space is a token; the lint fails the build if that
- * stops being true.
- */
+/* Customers and what they owe. */
 
 .mb-credit {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
   height: 100%;
-  /* The PAGE does not scroll: the panel and the list each scroll on their own,
-     the same way the floor works. A page that scrolls as a whole would take
-     the search box away with it. */
+  /*
+   * The PAGE does not scroll: the panel and the list each scroll on their own, the same way the
+   * floor works.
+   */
   overflow: hidden;
 }
 
@@ -40,9 +34,10 @@
   color: var(--text-muted);
 }
 
-/* Over ninety days is the bucket somebody phones about, so it is the one
-   bucket that carries colour — and it carries the words "Over 90" too, which
-   is §2 rule 2: colour is never the only signal. */
+/*
+ * Over ninety days is the bucket somebody phones about, so it is the one bucket that carries
+ * colour.
+ */
 .mb-credit__old {
   color: var(--danger);
 }
@@ -64,8 +59,10 @@
   color: var(--text-muted);
 }
 
-/* The statement itself. A plain table, because a statement is a column of
-   numbers that has to add up and nothing else. */
+/*
+ * The statement itself. A plain table, because a statement is a column of numbers that has to
+ * add up and nothing else.
+ */
 .mb-ledger {
   width: 100%;
   margin-top: var(--space-2);
@@ -85,10 +82,7 @@
   font-weight: var(--weight-medium);
 }
 
-/* The search box on the toolbar. Wide enough for a customer's whole name —
-   it used to sit in a plain `mb-row` and shrink to about 240px, so the
-   placeholder itself ("Find a customer, or a number") was cut off, which is a
-   search box that cannot say what it searches. */
+/* The search box on the toolbar. */
 .mb-credit__find {
   width: var(--find-width);
 }

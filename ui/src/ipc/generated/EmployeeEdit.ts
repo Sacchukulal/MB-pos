@@ -2,6 +2,6 @@
 
 export type EmployeeEdit = { id: string, designation: string, department: string, address: string, emergencyName: string, emergencyPhone: string, idProof: string, employmentType: string, 
 /**
- * Typed by a person, parsed in Rust (D39). Empty is "still working".
+ * Typed by a person, parsed in Rust.
  */
 leftOn: string, };

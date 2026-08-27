@@ -1,22 +1,4 @@
-//! **Letting a phone in, and the two things that must both be true.**
-//!
-//! A phone joins the counter only when:
-//!
-//! 1. it presents a token the counter is showing **right now**, and
-//! 2. **a person presses Allow**, having seen the device's name.
-//!
-//! Either one alone is not enough, and the second is the one that matters. A
-//! token can leak — somebody photographs the screen, a waiter forwards a
-//! screenshot — and a leaked token that pairs automatically is a stranger on
-//! the guest WiFi holding a counter credential. A person seeing "SAMSUNG-A14"
-//! appear when nobody is standing there is a person who presses Refuse.
-//!
-//! # Why the token is short-lived and single-use
-//!
-//! Because the alternative is a permanent pairing code, and a permanent
-//! pairing code ends up written on the wall beside the WiFi password. This one
-//! exists only while the panel is showing it, expires in
-//! [`TOKEN_LIFETIME_SECONDS`], and is consumed by a successful pair.
+//! Letting a phone in, and the two things that must both be true.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -25,8 +7,8 @@ use mb_core::Timestamp;
 
 use crate::counter::Refusal;
 
-/// Five minutes. Long enough to walk a phone over from the kitchen, short
-/// enough that a photograph of the screen is worthless by the end of service.
+/// Five minutes. Long enough to walk a phone over from the kitchen, short enough that a
+/// photograph of the screen is worthless by the end of service.
 pub const TOKEN_LIFETIME_SECONDS: i64 = 300;
 
 /// A phone waiting for somebody to press Allow.
@@ -51,10 +33,10 @@ struct Inner {
     open: Option<OpenToken>,
     /// Phones that presented a good token and are waiting for a person.
     waiting: Vec<Waiting>,
-    /// request_id -> the credential a person approved, waiting to be collected
-    /// by the phone that is polling.
+    /// Request_id -> the credential a person approved, waiting to be collected by the phone
+    /// that is polling.
     approved: HashMap<String, crate::counter::PairedDevice>,
-    /// request_id -> refused, so the phone is told rather than left polling.
+    /// Request_id -> refused, so the phone is told rather than left polling.
     refused: Vec<String>,
 }
 
@@ -80,14 +62,8 @@ impl Desk {
     }
 
     /// The counter operator pressed "Add a phone".
-    ///
-    /// Returns the token (for the QR) and the short code (for typing).
-    /// **Opening a second one closes the first**: two live tokens is two ways
-    /// in and only one of them is on the screen somebody is watching.
     pub fn open(&self, now: Timestamp) -> (String, String) {
-        // 16 bytes is 128 bits for a token that lives five minutes and is used
-        // once. Twenty-four made the QR two versions denser for security
-        // nothing was buying — see `qr::pairing_uri`.
+        // 16 bytes is 128 bits for a token that lives five minutes and is used once.
         let token = mb_auth::random_token(16);
         let code = mb_auth::short_code();
         let mut inner = lock(&self.inner);
@@ -99,8 +75,7 @@ impl Desk {
         (token, code)
     }
 
-    /// Stop showing it. Called when the panel closes, and after a successful
-    /// pair.
+    /// Stop showing it. Called when the panel closes, and after a successful pair.
     pub fn close(&self) {
         lock(&self.inner).open = None;
     }
@@ -117,14 +92,6 @@ impl Desk {
     }
 
     /// A phone presented a token or a code.
-    ///
-    /// **The token is consumed here, not at approval.** A token that stayed
-    /// live while somebody decided would let a second phone in behind the
-    /// first — and the person approving would see one name and let in two.
-    ///
-    /// # Errors
-    ///
-    /// [`Refusal::BadToken`] when it is wrong, used or expired.
     pub fn present(
         &self,
         offered: &str,
@@ -142,8 +109,6 @@ impl Desk {
             return Err(Refusal::BadToken);
         }
         // Either the long token from the QR or the short code typed by hand.
-        // The short code is compared case- and dash-insensitively, because it
-        // is read off a screen by somebody in a hurry.
         let tidy = |s: &str| {
             s.chars()
                 .filter(char::is_ascii_alphanumeric)
@@ -199,14 +164,6 @@ impl Desk {
     }
 
     /// The phone polls with its request id.
-    ///
-    /// `Ok(Some(..))` once and once only — the credential is removed as it is
-    /// collected, because a credential sitting in memory waiting to be asked
-    /// for twice is a credential a second caller can ask for.
-    ///
-    /// # Errors
-    ///
-    /// [`Refusal::BadToken`] when the request was refused or is unknown.
     pub fn collect(
         &self,
         request_id: &str,
@@ -231,8 +188,7 @@ fn expired(opened_at: Timestamp, now: Timestamp) -> bool {
     age_ms > TOKEN_LIFETIME_SECONDS.saturating_mul(1_000)
 }
 
-/// A poisoned pairing desk is not a reason to stop the counter serving. The
-/// same rule the rest of the product uses for its own mutexes.
+/// A poisoned pairing desk is not a reason to stop the counter serving.
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -245,7 +201,7 @@ mod tests {
         Timestamp::from_millis(seconds.saturating_mul(1_000))
     }
 
-    /// **T11.** A token expires, and a used one cannot be used twice.
+    /// A token expires, and a used one cannot be used twice.
     #[test]
     fn a_token_is_single_use_and_short_lived() {
         let desk = Desk::new();
@@ -265,7 +221,13 @@ mod tests {
         let (stale, _) = desk.open(at(0));
         assert!(desk.showing(at(TOKEN_LIFETIME_SECONDS + 1)).is_none());
         assert_eq!(
-            desk.present(&stale, "Late phone", "android", "1.2.3.4", at(TOKEN_LIFETIME_SECONDS + 1)),
+            desk.present(
+                &stale,
+                "Late phone",
+                "android",
+                "1.2.3.4",
+                at(TOKEN_LIFETIME_SECONDS + 1)
+            ),
             Err(Refusal::BadToken)
         );
     }
@@ -282,8 +244,7 @@ mod tests {
         );
     }
 
-    /// Nothing is issued until a person presses Allow. A phone that presented
-    /// a perfectly good token still waits.
+    /// Nothing is issued until a person presses Allow.
     #[test]
     fn a_good_token_is_not_a_credential() {
         let desk = Desk::new();

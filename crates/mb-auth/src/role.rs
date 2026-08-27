@@ -1,22 +1,10 @@
-//! **Roles are bundles, and no rule is ever written against a role's name.**
-//!
-//! `if role == "Manager"` is a rule that a shop deletes by renaming a role to
-//! "Supervisor" — silently, on a Tuesday, with nobody able to explain why the
-//! discount stopped working. The check is always
-//! [`Actor::can`](crate::Actor::can), and there is a workspace-wide test that
-//! no role name appears in a comparison.
-//!
-//! The four presets below are a **starting point, not law.** `is_builtin` (the
-//! column P04 wrote) means "cannot be deleted", not "cannot be edited" — a shop
-//! whose waiters take payments should be able to say so without asking us.
+//! Roles are bundles, and no rule is ever written against a role's name.
 
 use mb_core::Money;
 
 use crate::error::AuthError;
 use crate::permission::{Permission, PermissionSet};
 
-/// A role as it is stored and edited: a name, a bundle, and the discount
-/// ceiling that scope 1.12 hangs off.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleShape {
     pub id: String,
@@ -24,20 +12,13 @@ pub struct RoleShape {
     /// Cannot be deleted. Can be edited.
     pub is_builtin: bool,
     pub permissions: PermissionSet,
-    /// Basis points, `None` for no limit. Basis points because that is what
-    /// `DiscountPolicy` speaks and because a percentage stored as a float is
-    /// the bug D7 forbids.
+    /// Basis points, `None` for no limit.
     pub max_discount_bp: Option<u32>,
     pub max_discount: Option<Money>,
 }
 
 impl RoleShape {
-    /// The ceiling as a person reads it — `"10%"`, `"12.5%"`, or `None` for no
-    /// limit.
-    ///
-    /// **Formatted here, not in TypeScript** (R8, D39). The money guard caught
-    /// the first attempt doing `bp / 100` in a React file, which is the same
-    /// mistake as formatting rupees there: one arithmetic rule, one language.
+    /// The ceiling as a person reads it — `"10%"`, `"12.5%"`, or `None` for no limit.
     #[must_use]
     pub fn percent_label(&self) -> Option<String> {
         self.max_discount_bp
@@ -46,9 +27,6 @@ impl RoleShape {
     }
 
     /// And back again, from whatever somebody typed into the box.
-    ///
-    /// Empty is `None`, which is "no limit" — not zero. Those mean opposite
-    /// things, and a role limited to 0% (a waiter) is a real thing a shop sets.
     pub fn parse_percent(typed: &str) -> Result<Option<u32>, AuthError> {
         let typed = typed.trim().trim_end_matches('%').trim();
         if typed.is_empty() {
@@ -58,9 +36,9 @@ impl RoleShape {
             Some((w, f)) => (w, f),
             None => (typed, ""),
         };
-        // Two decimal places is a basis point; a third would be silently
-        // dropped, and silently dropping a digit somebody typed is the kind of
-        // thing they find out about from a customer.
+        // Two decimal places is a basis point; a third would be silently dropped, and silently
+        // dropping a digit somebody typed is the kind of thing they find out about from a
+        // customer.
         if frac.len() > 2 || !typed.chars().all(|c| c.is_ascii_digit() || c == '.') {
             return Err(AuthError::BadPercent {
                 typed: typed.to_owned(),
@@ -75,9 +53,11 @@ impl RoleShape {
         };
         let frac: u32 = match frac.len() {
             0 => 0,
-            1 => frac.parse::<u32>().map_err(|_| AuthError::BadPercent {
-                typed: typed.to_owned(),
-            })? * 10,
+            1 => {
+                frac.parse::<u32>().map_err(|_| AuthError::BadPercent {
+                    typed: typed.to_owned(),
+                })? * 10
+            }
             _ => frac.parse().map_err(|_| AuthError::BadPercent {
                 typed: typed.to_owned(),
             })?,
@@ -136,9 +116,8 @@ impl RolePreset {
         let permissions: PermissionSet = match self {
             RolePreset::Owner => PermissionSet::everything(),
 
-            // Everything except the two that let somebody quietly take the shop
-            // over: making themselves an administrator, and walking off with —
-            // or overwriting — the data.
+            // Everything except the two that let somebody quietly take the shop over: making
+            // themselves an administrator, and walking off with — or overwriting — the data.
             RolePreset::Manager => Permission::ALL
                 .iter()
                 .copied()
@@ -155,8 +134,7 @@ impl RolePreset {
             .into_iter()
             .collect(),
 
-            // A waiter takes orders. Nothing about a waiter's job involves the
-            // cash drawer, and C1 is a finding about exactly this.
+            // A waiter takes orders.
             RolePreset::Waiter => [Permission::BillCreate].into_iter().collect(),
         };
 
@@ -197,8 +175,6 @@ mod tests {
 
     #[test]
     fn a_waiter_cannot_open_the_drawer_or_see_the_takings() {
-        // Audit C1 in one assertion: "anybody who walks behind the counter can
-        // open Reports and see the whole day's cash".
         let waiter = RolePreset::Waiter.shape();
         assert!(waiter.permissions.has(Permission::BillCreate));
         assert!(!waiter.permissions.has(Permission::DrawerOpen));
@@ -219,15 +195,12 @@ mod tests {
 
     #[test]
     fn a_builtin_role_is_still_editable() {
-        // The column means "cannot be deleted". A shop whose waiters take
-        // payments must be able to say so without asking us.
+        // The column means "cannot be deleted".
         assert!(RolePreset::Cashier.shape().is_builtin);
     }
 
     #[test]
     fn a_ceiling_round_trips_through_the_screen() {
-        // The R8 fix: this arithmetic used to be `bp / 100` in a React file,
-        // and the money guard failed the build over it.
         for (typed, bp, label) in [
             ("10", 1_000_u32, "10%"),
             ("12.5", 1_250, "12.5%"),
@@ -249,8 +222,16 @@ mod tests {
 
     #[test]
     fn no_limit_and_no_discount_are_not_the_same_thing() {
-        assert_eq!(RoleShape::parse_percent("   "), Ok(None), "empty is no limit");
-        assert_eq!(RoleShape::parse_percent("0"), Ok(Some(0)), "0 is no discount");
+        assert_eq!(
+            RoleShape::parse_percent("   "),
+            Ok(None),
+            "empty is no limit"
+        );
+        assert_eq!(
+            RoleShape::parse_percent("0"),
+            Ok(Some(0)),
+            "0 is no discount"
+        );
 
         let mut role = RolePreset::Owner.shape();
         assert_eq!(role.percent_label(), None);

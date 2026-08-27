@@ -6,12 +6,10 @@ import type { ChangeView } from "./ChangeView";
  */
 export type ConfigPlanView = { changes: Array<ChangeView>, 
 /**
- * Keys this build has never heard of. **Reported, not refused** — a file
- * written by a NEWER Magic Bill must still be usable, and dropping the two
- * keys it gained is the honest outcome.
+ * Keys this build has never heard of.
  */
 unknown: Array<string>, 
 /**
- * Why it cannot be used. Non-empty means nothing will be written.
+ * Why it cannot be used.
  */
 problems: Array<string>, usable: boolean, };

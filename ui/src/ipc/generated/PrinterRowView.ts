@@ -8,11 +8,7 @@ kind: string,
 /**
  * The Windows name, the `host:port`, or the COM port.
  */
-address: string, 
-/**
- * In words: "Windows: EPSON TM-T82", "Not connected yet".
- */
-connection: string, paperMm: number, isDefault: boolean, 
+address: string, connection: string, paperMm: number, isDefault: boolean, 
 /**
  * `bill`, `kitchen` or `both`.
  */
@@ -20,14 +16,8 @@ role: string,
 /**
  * `raster` or `text`.
  */
-engine: string, isBoldDark: boolean, canKickDrawer: boolean, 
+engine: string, isBoldDark: boolean, canKickDrawer: boolean, offsetXMm: number, offsetYMm: number, 
 /**
- * Scope 7.11, in the millimetres the owner nudges in.
- */
-offsetXMm: number, offsetYMm: number, 
-/**
- * True for the stand-in row a shop has before it sets a printer up. It
- * can be edited into a real one; it cannot be deleted, because the queue
- * and the spool both hold a foreign key to it.
+ * True for the stand-in row a shop has before it sets a printer up.
  */
 isStandIn: boolean, };

@@ -3,18 +3,10 @@ import type { GroupView } from "./GroupView";
 
 export type SettingsView = { groups: Array<GroupView>, 
 /**
- * **False when there is no shop open**, and the screen says so instead of
- * drawing a form.
- *
- * Found by running it: the configuration lives in `App` and starts as the
- * defaults, so on a machine whose database would not open — a first run, a
- * failed migration, a restore waiting for a restart — every setting drew
- * perfectly and Save was the first thing that said anything. That is the
- * exact situation audit **A5** is about, and it is the worst possible one
- * in which to show somebody a form.
+ * False when there is no shop open, and the screen says so instead of drawing a form.
  */
 hasShop: boolean, 
 /**
- * Why, when there is no shop. Already in the cashier's words.
+ * Why, when there is no shop.
  */
 trouble: string | null, };

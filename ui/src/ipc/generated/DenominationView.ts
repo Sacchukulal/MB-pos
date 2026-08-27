@@ -6,12 +6,10 @@ import type { MoneyView } from "./MoneyView";
  */
 export type DenominationView = { value: number, 
 /**
- * "500", "50 paise" — the words, so the screen prints no currency of its
- * own.
+ * "500", "50 paise" — the words, so the screen prints no currency of its own.
  */
 label: string, count: number, 
 /**
- * `count × value`, computed in Rust. R8: the one multiplication on this
- * screen is the one TypeScript would most obviously be asked to do.
+ * `count × value`, computed in Rust.
  */
 total: MoneyView, };

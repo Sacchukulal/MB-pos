@@ -1,27 +1,9 @@
-//! Budget **M5** — the database after one year of trading — and the fsync
-//! measurement that settles `docs/PERFORMANCE.md` §5 rule 2.
-//!
-//! `docs/PERFORMANCE.md` §2.4: *M5 — database size after one year (~75,000
-//! bills): **400 MB**, ceiling **800 MB**. Prompt: P04.*
-//!
-//! A schema decides this on the day it is written. Measuring it after a year of
-//! real bills is measuring something nobody can change any more, so this test
-//! builds a realistic shop, weighs it, and projects.
-//!
-//! §3.1's rules, obeyed: assertions in release only; every run prints the
-//! number; the assert is against the CEILING, not the budget; `std::time` and
-//! `std::fs` only, no criterion.
-//!
 //! ```text
 //! cargo test -p mb-db --release --test perf -- --nocapture
 //! ```
 
-// A measuring harness, not shipped code — the same exemption mb-core's
-// tests/perf.rs takes, and for the same reason. `expect` here IS the assertion;
-// bytes over bills and elapsed over commits ARE the measurement; and reporting
-// a megabyte figure to two decimal places is the one place in this workspace
-// where a float is the right answer. D7 is about the money path, and no money
-// goes anywhere near this file.
+// A measuring harness, not shipped code — the same exemption mb-core's tests/perf.rs takes, and
+// for the same reason.
 #![allow(
     clippy::expect_used,
     clippy::integer_division,
@@ -39,15 +21,10 @@ use mb_db::numbering::{self, CounterKind};
 use mb_db::{Db, DbConfig, Synchronous, encode};
 use rusqlite::Transaction;
 
-/// One year of trading, from `PERFORMANCE.md`.
 const BILLS_PER_YEAR: u64 = 75_000;
-/// The M5 ceiling in bytes. The budget is 400 MB; §3.1 rule 3 says the assert
-/// is against the ceiling, so a slightly fat run does not turn into a red
-/// build.
 const M5_CEILING_BYTES: u64 = 800 * 1024 * 1024;
 
-/// How many bills to actually write. Enough that page overhead and index
-/// fan-out are represented; small enough to run in a normal test suite.
+/// How many bills to actually write.
 const SAMPLE_BILLS: u64 = 2_000;
 
 /// A realistic bill: eight lines, two tax rates, 1.5 payments on average.
@@ -66,9 +43,7 @@ fn m5_a_year_of_trading_fits_the_budget() {
     }
     let writing = write_bills.elapsed();
 
-    // The WAL holds the most recent commits. Weighing the main file alone would
-    // under-report, and checkpointing first is also what P05's backup will have
-    // to do before it copies anything.
+    // The WAL holds the most recent commits.
     db.checkpoint().expect("checkpoint");
 
     let bytes = file_bytes(&scratch);
@@ -105,16 +80,6 @@ fn m5_a_year_of_trading_fits_the_budget() {
 }
 
 /// The fsync question, measured rather than argued.
-///
-/// `docs/PERFORMANCE.md` §5 rule 2 says `synchronous = NORMAL`. This crate ships
-/// `FULL`, because in WAL mode NORMAL does not fsync on commit and a power cut
-/// therefore loses the last committed bills — and requirement 1 of the ten is
-/// that a failure loses NOTHING.
-///
-/// The trade is one fsync per commit against budget **B5** (settle a bill:
-/// number claimed and written durably, 150 ms budget / 400 ms ceiling), and §5
-/// rule 1 already says a settle is one transaction, so it is one fsync and not
-/// four. This prints both, so the choice is a number rather than a preference.
 #[test]
 fn synchronous_full_costs_one_fsync_and_b5_can_afford_it() {
     const COMMITS: u32 = 200;
@@ -137,8 +102,8 @@ fn synchronous_full_costs_one_fsync_and_b5_can_afford_it() {
     if cfg!(debug_assertions) {
         return;
     }
-    // Deliberately loose: this catches "FULL made a settle impossible", not
-    // "FULL is slower", which it obviously is.
+    // Deliberately loose: this catches "FULL made a settle impossible", not "FULL is slower",
+    // which it obviously is.
     assert!(
         full < 400.0,
         "a commit under synchronous=FULL took {full:.1} ms, which does not fit \
@@ -146,15 +111,6 @@ fn synchronous_full_costs_one_fsync_and_b5_can_afford_it() {
     );
 }
 
-/// Budgets **R5** and **R6** — P05.
-///
-/// `PERFORMANCE.md` §2.3: *R5, local backup of a one-year database, 20 s /
-/// 60 s. R6, restore and verify that backup, 60 s / 180 s.*
-///
-/// Building a real 317 MB database in a test would make the suite unrunnable,
-/// so this measures **throughput** on a realistic sample and projects to the
-/// 400 MB M5 budget — the same approach M5 itself takes above, and honest about
-/// being a projection rather than the thing.
 #[test]
 fn r5_and_r6_backup_and_restore_fit_their_budgets() {
     const SAMPLE: u64 = 400;
@@ -201,8 +157,8 @@ fn r5_and_r6_backup_and_restore_fit_their_budgets() {
         }
     }
 
-    // The restore runs with no handle on the database, which is the only way it
-    // is allowed to run — see `backup::restore`.
+    // The restore runs with no handle on the database, which is the only way it is allowed to
+    // run — see `backup::restore`.
     let started = Instant::now();
     let report = mb_db::backup::restore(&backup_path, &scratch.db_path()).expect("restore");
     let restore_secs = started.elapsed().as_secs_f64();
@@ -226,13 +182,6 @@ fn r5_and_r6_backup_and_restore_fit_their_budgets() {
     );
 }
 
-/// Budget **B5** — a whole settle, end to end, measured at p95.
-///
-/// *"Settle a bill: number claimed + written durably to disk — 150 ms, ceiling
-/// 400 ms."* One transaction, one fsync, and the number claimed inside it.
-///
-/// **p95, not the mean.** B5 is written as a p95 and a mean would hide the one
-/// flush in twenty that took 300 ms, which is the one the cashier notices.
 #[test]
 fn b5_a_whole_settle_is_one_durable_write() {
     const SETTLES: usize = 200;
@@ -274,17 +223,18 @@ fn b5_a_whole_settle_is_one_durable_write() {
     );
 }
 
-// ---------------------------------------------------------------------------
-
 fn mb(bytes: u64) -> f64 {
     // Reporting only.
-    #[allow(clippy::cast_precision_loss, reason = "a file size, printed to one decimal place")]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "a file size, printed to one decimal place"
+    )]
     let bytes = bytes as f64;
     bytes / (1024.0 * 1024.0)
 }
 
-/// The main file plus its WAL and shared-memory files: what a backup would
-/// actually have to carry.
+/// The main file plus its WAL and shared-memory files: what a backup would actually have to
+/// carry.
 fn file_bytes(scratch: &Scratch) -> u64 {
     let mut total = 0;
     for suffix in ["", "-wal", "-shm"] {
@@ -321,8 +271,8 @@ fn seed_a_shop(db: &Db) {
         tx.execute_batch(common::STAFF_SQL)?;
         tx.execute_batch(common::FLOOR_SQL)?;
         tx.execute_batch(common::MENU_SQL)?;
-        // A menu of a realistic size, so the item table is not a rounding error
-        // and the indexes on it have something to hold.
+        // A menu of a realistic size, so the item table is not a rounding error and the indexes
+        // on it have something to hold.
         for n in 0..300 {
             tx.execute(
                 "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
@@ -353,8 +303,7 @@ fn seed_a_shop(db: &Db) {
     .expect("seed the shop");
 }
 
-/// One settled bill, in ONE transaction — `PERFORMANCE.md` §5 rule 1, which is
-/// also what makes the fsync measurement above mean anything.
+/// One settled bill, in ONE transaction.
 fn write_one_bill(db: &Db, n: u64) {
     // Spread the bills over a year so the day indexes have real cardinality.
     #[allow(
@@ -382,7 +331,13 @@ fn write_bill_rows(
     let at_sql = encode::timestamp_to_sql(at);
 
     let bill_no = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, day)?;
-    let token = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Token, day)?;
+    let token = numbering::claim(
+        tx,
+        common::OUTLET,
+        common::TERMINAL,
+        CounterKind::Token,
+        day,
+    )?;
 
     tx.execute(
         "INSERT INTO orders (id, outlet_id, terminal_id, state, business_day, created_at,
@@ -469,7 +424,10 @@ fn write_bill_rows(
     )?;
 
     // Two rate rows, as a mixed-rate shop really has.
-    for rate in [TaxRate::from_percent(5).expect("5%"), TaxRate::from_percent(18).expect("18%")] {
+    for rate in [
+        TaxRate::from_percent(5).expect("5%"),
+        TaxRate::from_percent(18).expect("18%"),
+    ] {
         tx.execute(
             "INSERT INTO bill_tax_rows (order_id, rate_bp, taxable, cgst, sgst, igst)
              VALUES (?1, ?2, ?3, ?4, ?4, 0)",
@@ -482,8 +440,7 @@ fn write_bill_rows(
         )?;
     }
 
-    // Every bill has one payment; every other bill has a second (scope 1.15,
-    // split payment).
+    // Every bill has one payment; every other bill has a second.
     tx.execute(
         "INSERT INTO payments (id, order_id, seq, mode, amount, tip, settles_credit,
                                received_at, received_by, business_day)
@@ -511,7 +468,6 @@ fn write_bill_rows(
         )?;
     }
 
-    // The trail, and the outbox entry that A1 / A2 / A3 exist for.
     tx.execute(
         "INSERT INTO order_events (id, order_id, at, business_day, event, staff_id)
          VALUES (?1, ?2, ?3, ?4, 'settled', 'staff_1')",
@@ -523,8 +479,8 @@ fn write_bill_rows(
         rusqlite::params![format!("{order_id}_ob"), order_id, at_sql],
     )?;
 
-    // An expense every twentieth bill and a credit repayment every fiftieth, so
-    // those tables are not zero in the projection.
+    // An expense every twentieth bill and a credit repayment every fiftieth, so those tables
+    // are not zero in the projection.
     if n.is_multiple_of(20) {
         tx.execute(
             "INSERT INTO expenses (id, outlet_id, category_id, description, amount, mode,
@@ -551,19 +507,6 @@ fn write_bill_rows(
     Ok(())
 }
 
-/// **M5's P11 addendum — what the audit trail costs.**
-///
-/// `m5_a_year_of_trading_fits_the_budget` above weighs bills, and it was
-/// written before `audit_log` had anything in it. P11 fills that table on
-/// every login, void, discount, price change and setting change, and adds
-/// `seq`, `prev_hash` and `hash` to every row — 128 bytes of hex on top of the
-/// content.
-///
-/// D35 asked exactly this question about the print spool and the answer was to
-/// stop keeping one ("a spool, not a log"). It cannot be the answer here: an
-/// audit trail that forgets is not an audit trail. So the number has to be
-/// measured and it has to fit — and if it ever stops fitting, the fix is a
-/// written retention rule executed by P18's day close, never a quieter trail.
 #[test]
 fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
     use mb_auth::AuditEntry;
@@ -575,9 +518,8 @@ fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
     let scratch = Scratch::new("m5_audit");
     let db = scratch.open();
 
-    // The main file PLUS its WAL: in WAL mode the rows are not in the main
-    // file until a checkpoint, and the first version of this measured 0 bytes
-    // per row because of it.
+    // The main file PLUS its WAL: in WAL mode the rows are not in the main file until a
+    // checkpoint, and the first version of this measured 0 bytes per row because of it.
     let empty = file_bytes(&scratch);
 
     db.transaction(|tx| {
@@ -594,8 +536,8 @@ fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
     db.transaction(|tx| {
         let repos = mb_db::Repos::new(tx);
         for n in 0..SAMPLE {
-            // The widest realistic shape: a price change, which is the only
-            // kind that carries both a before and an after.
+            // The widest realistic shape: a price change, which is the only kind that carries
+            // both a before and an after.
             let entry = AuditEntry::new(
                 Timestamp::from_millis(1_770_000_000_000 + i64::try_from(n).unwrap_or(0)),
                 BusinessDay::from_days_since_epoch(20_600),
@@ -622,12 +564,13 @@ fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
     println!("\n--- M5 addendum: the audit trail (P11) ---");
     println!("  rows written         {SAMPLE}");
     println!("  per row              {per_row} bytes");
-    println!("  at {ACTIONS_PER_DAY}/day, one year  {} MB", per_year / (1024 * 1024));
+    println!(
+        "  at {ACTIONS_PER_DAY}/day, one year  {} MB",
+        per_year / (1024 * 1024)
+    );
     println!("  M5 headroom          400 MB budget, bills project to 318 MB");
     println!("  wrote in             {wrote_in:.2?}");
 
-    // The whole M5 budget is 400 MB and the bills project to 318. The trail has
-    // to live in what is left, with room to spare — 40 MB is half the headroom.
     #[cfg(not(debug_assertions))]
     assert!(
         per_year < 40 * 1024 * 1024,
@@ -636,21 +579,6 @@ fn m5_the_audit_trail_fits_beside_a_year_of_bills() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// R1, R2, R3 — the report budgets (P18)
-// ---------------------------------------------------------------------------
-
-/// **R1 500 ms for today, R2 2.5 s for a year, R3 1.5 s for the day close.**
-///
-/// The reports are the one part of this product a shop runs *while* the
-/// counter is billing, so `PERFORMANCE.md` §5's rules R1–R3 are what make the
-/// numbers hold: they read on a reader connection, they never take the writer,
-/// and every one of them is filtered by `idx_orders_day`.
-///
-/// **Three readings, not one.** The master plan records a single B4 run taken
-/// straight after a build that read 23.3 µs and looked like a 55% regression;
-/// three clean runs gave 15.5–15.8. A stopwatch started on a cold cache is
-/// measuring the cache.
 #[test]
 fn r1_r2_r3_the_report_budgets() {
     use mb_db::repo::reports::{Period, SalesBy};
@@ -659,8 +587,6 @@ fn r1_r2_r3_the_report_budgets() {
     let db = scratch.open();
 
     seed_a_shop(&db);
-    // The same sample the M5 test uses, spread across a year, so the day index
-    // has real cardinality rather than one hot page.
     for n in 0..SAMPLE_BILLS {
         write_one_bill(&db, n);
     }
@@ -673,12 +599,10 @@ fn r1_r2_r3_the_report_budgets() {
     let today = Period::one_day(BusinessDay::from_days_since_epoch(20_100));
 
     // The projection: the sample is SAMPLE_BILLS, a year is BILLS_PER_YEAR.
-    // Reporting the measured time AND the projection, because a 2,000-bill
-    // database is not a year and pretending otherwise is the mistake M5's own
-    // comment warns about.
-    // Both are small round constants; the cast is exact and the lint is about
-    // values this file does not have.
-    #[allow(clippy::cast_precision_loss, reason = "2,000 and 75,000 are exact in f64")]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "2,000 and 75,000 are exact in f64"
+    )]
     let scale = BILLS_PER_YEAR as f64 / SAMPLE_BILLS as f64;
 
     let mut day_best = f64::MAX;
@@ -715,10 +639,7 @@ fn r1_r2_r3_the_report_budgets() {
     println!("  R2 a year, projected {projected_year:.1} ms at {BILLS_PER_YEAR} bills");
     println!("     (budget 2500 ms, ceiling 6000)");
 
-    // **R3 — the day close.** Everything the closing screen reads before a
-    // person can type the first number: what the day took, what the drawer
-    // should hold, and whether the day is already sealed. It is one paint of
-    // one screen, so it is measured as one round trip rather than as three.
+    // The day close.
     let mut close_best = f64::MAX;
     for _ in 0..3 {
         let start = Instant::now();
@@ -736,7 +657,10 @@ fn r1_r2_r3_the_report_budgets() {
 
     #[cfg(not(debug_assertions))]
     {
-        assert!(day_best < 1_500.0, "R1's ceiling: today took {day_best:.1} ms");
+        assert!(
+            day_best < 1_500.0,
+            "R1's ceiling: today took {day_best:.1} ms"
+        );
         assert!(
             projected_year < 6_000.0,
             "R2's ceiling: a year projects to {projected_year:.1} ms"

@@ -1,10 +1,4 @@
 //! A whole shop, built once, used by the backup and repository tests.
-//!
-//! Deliberately not minimal: T1's claim is that **nothing** is lost, and a
-//! fixture that leaves out the awkward cases only proves the easy ones survive.
-//! So this shop has a bill in every state, split payments including a credit
-//! one, a capped discount, a non-GST line, a partial kitchen delta, a customer
-//! who owes money, cash and non-cash expenses, and a locked day close.
 
 #![allow(
     clippy::expect_used,
@@ -17,15 +11,14 @@ use mb_auth::{PermissionSet, RolePreset};
 
 use super::Scratch;
 use mb_core::{
-    Registration,
     AnyOrder, BillInput, BusinessDay, Cart, CategoryId, Charge, ChargeKind, CustomerId, Discount,
     DiscountEntry, DraftOrder, ItemId, Money, OrderId, OrderType, Payment, PaymentMode,
-    PlaceOfSupply, Qty, RoundingMode, Settlement, StaffId, TableId, TaxRate, TaxSpec,
+    PlaceOfSupply, Qty, Registration, RoundingMode, Settlement, StaffId, TableId, TaxRate, TaxSpec,
     Timestamp, compute_bill,
 };
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::repo::menu::{Category, MenuItem};
-use mb_db::repo::money::{Customer, DayClose, Expense, CreditPayment};
+use mb_db::repo::money::{CreditPayment, Customer, DayClose, Expense};
 use mb_db::repo::people::{StaffMember, StaffStatus};
 use mb_db::repo::settings::{Printer, StoreProfile};
 use mb_db::{Db, Repos, backup, settle};
@@ -41,7 +34,7 @@ fn day(n: i32) -> BusinessDay {
     BusinessDay::from_days_since_epoch(20_600 + n)
 }
 
-/// Everything a shop is. Returns the ids that the assertions need to look up.
+/// Everything a shop is.
 pub fn build(db: &Db) -> BuiltShop {
     seed_masters(db);
     let orders = seed_orders(db);
@@ -57,9 +50,7 @@ fn seed_masters(db: &Db) {
     db.transaction(|tx| {
         let repos = Repos::new(tx);
 
-        // Staff and a role, so permissions have somewhere to hang. The preset
-        // rather than a hand-written list: a fixture that invents its own
-        // permissions is a fixture that stops resembling a shop.
+        // Staff and a role, so permissions have somewhere to hang.
         repos
             .people()
             .save_role(OUTLET, &RolePreset::Cashier.shape(), at(0))?;
@@ -71,11 +62,7 @@ fn seed_masters(db: &Db) {
                 code: Some("R1".to_owned()),
                 role_id: Some("role_cashier".to_owned()),
                 role_name: None,
-                // A REAL Argon2 hash, not a placeholder string. P11 made
-                // `StaffMember::pin()` refuse a column it cannot parse — a
-                // truncated hash must be a locked door, never "no PIN set" —
-                // so a fixture with a fake one would be testing a shop that
-                // cannot exist.
+                // A REAL Argon2 hash, not a placeholder string.
                 pin_hash: Some(
                     mb_auth::hash_pin(&mb_auth::Pin::parse("1234").expect("a valid PIN"))
                         .expect("hashes")
@@ -89,7 +76,7 @@ fn seed_masters(db: &Db) {
             },
             at(0),
         )?;
-        // Somebody who has left. Scope 9.15 — never deleted.
+        // Somebody who has left.
         repos.people().save_staff(
             OUTLET,
             &StaffMember {
@@ -140,8 +127,7 @@ fn seed_masters(db: &Db) {
                 name: "Food".to_owned(),
                 sort_order: 0,
                 is_active: true,
-                // P24 — the test shop has one kitchen screen, like a real
-                // small shop. `kitchen.rs` has its own tests for two.
+                // The test shop has one kitchen screen, like a real small shop.
                 station: None,
             },
             at(0),
@@ -180,7 +166,6 @@ fn seed_masters(db: &Db) {
             at(0),
         )?;
 
-        // Scope 7.11: the offset the owner nudged to get the print straight.
         repos.settings().save_printer(
             OUTLET,
             &Printer {
@@ -193,8 +178,6 @@ fn seed_masters(db: &Db) {
                 can_kick_drawer: true,
                 offset_x_mm: -2,
                 offset_y_mm: 1,
-                // P07's three columns: what this printer may receive, which
-                // sink draws for it, and v1's "Bold & Dark".
                 role: "both".to_owned(),
                 engine: "raster".to_owned(),
                 is_bold_dark: false,
@@ -250,12 +233,10 @@ fn menu() -> Vec<MenuItem> {
             category_id: Some(CategoryId::new("cat_food")),
             name: "Water".to_owned(),
             unit_price: Money::from_paise(2_000),
-            // **No class, deliberately.** This is an inclusive-priced one-off,
-            // and the seeded "Packaged goods 18%" is exclusive — an item
-            // pointing at a class must carry that class's tax spec (D56), so
-            // giving it one here would be a fixture describing a shop that
-            // cannot exist. Found by a CSV round trip, which resolves the
-            // class and quite correctly overwrote the disagreement.
+            // No class, deliberately. This is an inclusive-priced one-off, and the seeded
+            // "Packaged goods 18%" is exclusive — an item pointing at a class must carry that
+            // class's tax spec, so giving it one here would be a fixture describing a shop that
+            // cannot exist.
             tax_class_id: None,
             tax: TaxSpec::gst_inclusive(TaxRate::from_percent(18).expect("18%")),
             hsn: Some("2201".to_owned()),
@@ -343,8 +324,8 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
             draft.on_table(TableId::new(format!("tbl_{}", (n % 6) + 1)))
         };
 
-        // Every fifth order is left as a draft: an order still being typed is a
-        // real state and a backup that loses it loses somebody's work.
+        // Every fifth order is left as a draft: an order still being typed is a real state and
+        // a backup that loses it loses somebody's work.
         if n % 5 == 4 {
             let mut draft = draft;
             draft.core.cart = cart_for(n);
@@ -360,8 +341,7 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
 
         let mut draft = draft;
         draft.core.cart = cart_for(n);
-        // The kitchen has been told about SOME of it — a partial delta, which
-        // is crown jewel 2 and the thing a naive backup flattens.
+        // The kitchen has been told about SOME of it.
         let pending = draft
             .core
             .kitchen
@@ -380,7 +360,6 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
         match n % 5 {
             // Left open on the floor.
             0 => {}
-            // Settled.
             1 | 3 => {
                 let bill = bill_for(&open.core.cart);
                 let settlement = settlement_for(&bill, n);
@@ -395,8 +374,8 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
                 )
                 .expect("settle");
 
-                // Every tenth settled bill is then voided — with its bill
-                // number and its amounts kept (P03).
+                // Every tenth settled bill is then voided — with its bill number and its
+                // amounts kept.
                 if n % 10 == 3 {
                     let voided = settled
                         .void("wrong table", StaffId::new("staff_1"), at(n + 200))
@@ -411,7 +390,7 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
                     .expect("save the void");
                 }
             }
-            // Cancelled: the customer walked out (audit B6).
+            // Cancelled: the customer walked out.
             _ => {
                 let cancelled = open
                     .cancel("customer left", StaffId::new("staff_1"), at(n + 150))
@@ -445,16 +424,25 @@ fn cart_for(n: i64) -> Cart {
         vec![],
     )
     .expect("add");
-    cart.add(items[1].snapshot(), Qty::from_whole(2).expect("qty"), None, vec![])
-        .expect("add");
+    cart.add(
+        items[1].snapshot(),
+        Qty::from_whole(2).expect("qty"),
+        None,
+        vec![],
+    )
+    .expect("add");
     if n % 2 == 0 {
-        // A non-GST line, so a bar can bill (scope 2.3).
-        cart.add(items[2].snapshot(), Qty::from_whole(1).expect("qty"), None, vec![])
-            .expect("add");
+        // A non-GST line, so a bar can bill.
+        cart.add(
+            items[2].snapshot(),
+            Qty::from_whole(1).expect("qty"),
+            None,
+            vec![],
+        )
+        .expect("add");
     }
     if n % 7 == 0 {
-        // A discount big enough to be capped, so `was_capped` has something to
-        // say (D15).
+        // A discount big enough to be capped, so `was_capped` has something to say.
         cart.set_line_discount(
             1,
             Some(
@@ -470,7 +458,12 @@ fn cart_for(n: i64) -> Cart {
 
 fn bill_for(cart: &Cart) -> mb_core::Bill {
     let charges = [
-        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::from_percent(5).expect("5%")),
+        Charge::percent(
+            ChargeKind::Service,
+            "Service Charge",
+            500,
+            TaxRate::from_percent(5).expect("5%"),
+        ),
         Charge::flat(
             ChargeKind::Other("Donation".to_owned()),
             "Donation",
@@ -493,23 +486,25 @@ fn bill_for(cart: &Cart) -> mb_core::Bill {
 }
 
 fn settlement_for(bill: &mb_core::Bill, n: i64) -> Settlement {
-    let mut settlement = Settlement::with_tip(Money::from_paise(if n % 3 == 0 { 2_000 } else { 0 }))
-        .expect("tip");
-    // `amount_due` is the bill PLUS the tip — the tip is not taken out of what
-    // was owed. Paying only the grand total leaves the bill unsettled, which
-    // mb-core refuses, and rightly.
+    let mut settlement =
+        Settlement::with_tip(Money::from_paise(if n % 3 == 0 { 2_000 } else { 0 })).expect("tip");
+    // `amount_due` is the bill PLUS the tip — the tip is not taken out of what was owed.
     let total = settlement
         .amount_due(bill.grand_total)
         .expect("amount due")
         .paise();
 
     if n % 6 == 1 {
-        // Split three ways, including credit — the case audit B12 is about.
+        // Split three ways, including credit.
         let a = Money::from_paise(total / 2);
         let b = Money::from_paise(total / 4);
         let c = Money::from_paise(total - a.paise() - b.paise());
         settlement
-            .add(Payment::new(PaymentMode::Card, a).expect("payment").with_reference("APPR-771"))
+            .add(
+                Payment::new(PaymentMode::Card, a)
+                    .expect("payment")
+                    .with_reference("APPR-771"),
+            )
             .expect("add");
         settlement
             .add(Payment::new(PaymentMode::Other("Sodexo".to_owned()), b).expect("payment"))
@@ -532,8 +527,6 @@ fn settlement_for(bill: &mb_core::Bill, n: i64) -> Settlement {
 fn seed_money(db: &Db) {
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        // P16 seeds a starting set of categories, `exc_gas` among them, so
-        // this fixture no longer creates it — it just uses it.
         {
             let seeded: i64 = tx.query_row(
                 "SELECT count(*) FROM expense_categories WHERE id = 'exc_gas'",
@@ -550,7 +543,11 @@ fn seed_money(db: &Db) {
                     category_id: Some("exc_gas".to_owned()),
                     description: format!("Gas cylinder {n}"),
                     amount: Money::from_paise(180_000 + n),
-                    mode: if n % 2 == 0 { "cash".to_owned() } else { "upi".to_owned() },
+                    mode: if n % 2 == 0 {
+                        "cash".to_owned()
+                    } else {
+                        "upi".to_owned()
+                    },
                     paid_to: None,
                     reference: None,
                     gst_rate_bp: None,
@@ -582,9 +579,9 @@ fn seed_money(db: &Db) {
             OUTLET,
             &DayClose {
                 id: "close_0".to_owned(),
-                // The SHOP's roll-up (D140): a one-till shop's close is both
-                // its drawer and the shop's, and this fixture is the shop's
-                // because it is the row the day lock reads.
+                // The SHOP's roll-up: a one-till shop's close is both its drawer and the
+                // shop's, and this fixture is the shop's because it is the row the day lock
+                // reads.
                 terminal: None,
                 shift_no: 0,
                 business_day: day(0),
@@ -603,15 +600,15 @@ fn seed_money(db: &Db) {
     .expect("seed the money");
 }
 
-/// Every row of every table, as text, so two databases can be compared without
-/// naming four hundred columns.
+/// Every row of every table, as text, so two databases can be compared without naming four
+/// hundred columns.
 pub fn snapshot(db: &Db) -> Vec<(String, Vec<String>)> {
     db.read(|conn| {
         let mut out = Vec::new();
         for table in mb_db::schema::tables(conn)? {
             if table == "schema_version" {
-                // The ledger legitimately differs: a restored older backup is
-                // migrated forward and gains a row with its own timestamp.
+                // The ledger legitimately differs: a restored older backup is migrated forward
+                // and gains a row with its own timestamp.
                 continue;
             }
             let columns = mb_db::schema::columns(conn, &table)?;

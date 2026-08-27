@@ -1,11 +1,7 @@
-/*
- * Buying and the stock count — P26. Every value is a token (D38, audit E11).
- */
+/* Buying and the stock count. */
 
 .mb-buying {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -13,11 +9,7 @@
   height: 100%;
 }
 
-/* **The count does NOT scroll itself.** It is a tab INSIDE the stock screen,
-   which already scrolls, and giving it its own `height: 100%` and `overflow-y`
-   produced two scrollbars side by side with the Approve button trapped under
-   the fold of the inner one. Same shape as P17's `<pre>` in a flex parent.
-   Found by looking at it. */
+/* The count does NOT scroll itself. */
 .mb-count {
   display: flex;
   flex-direction: column;
@@ -25,8 +17,6 @@
   min-height: 0;
 }
 
-/* A row inside a Card must say so: `.mb-card` is a COLUMN, and three things
-   placed in one shipped stacked and centred at P18. */
 .mb-buying__top {
   display: flex;
   flex-direction: row;
@@ -43,9 +33,7 @@
   flex-wrap: wrap;
 }
 
-/* No width here on purpose. P08 shipped every dialog 64 px wide because a
-   SPACING token was used where a width belonged, and there is no width token —
-   so the card sizes to its content and the row wraps. */
+/* No width here on purpose. */
 .mb-buying__figure {
   display: flex;
   flex-direction: column;
@@ -64,7 +52,7 @@
   font-weight: var(--weight-bold);
 }
 
-/* A sentence that needs somebody. Never colour alone (§2). */
+/* A sentence that needs somebody. */
 .mb-buying__attention,
 .mb-count__attention {
   border-left: calc(var(--border-width) * 3) solid var(--warn);
@@ -96,8 +84,7 @@
   min-width: 0;
 }
 
-/* The line grid. It scrolls sideways on its own rather than taking the page
-   with it — UI_GUIDELINES §3, and P17 found the `<pre>` version of this bug. */
+/* The line grid. It scrolls sideways on its own rather than taking the page with it. */
 .mb-buying__lines {
   width: 100%;
   border-collapse: collapse;
@@ -119,8 +106,10 @@
   vertical-align: bottom;
 }
 
-/* A select holds itself as wide as its longest option, so a flex child needs
-   this or the row grows a horizontal scrollbar (P13 part 2e). */
+/*
+ * A select holds itself as wide as its longest option, so a flex child needs this or the row
+ * grows a horizontal scrollbar.
+ */
 .mb-buying__lines select,
 .mb-buying__lines input {
   min-width: 0;
@@ -154,15 +143,12 @@
   border: var(--border-width) solid var(--border);
 }
 
-/* The count sheet, as text a person can read before printing it. It scrolls
-   inside itself for the same reason the line grid does. */
+/* The count sheet, as text a person can read before printing it. */
 .mb-count__sheet {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   white-space: pre;
-  /* Sideways only. The MODAL BODY scrolls vertically — P25 found `.mb-modal`
-     scrolling as a whole and taking its own Save button off the screen, and a
-     second scrolling box inside it is how that comes back. */
+  /* Sideways only. The MODAL BODY scrolls vertically. */
   overflow-x: auto;
   background: var(--surface-sunk);
   border-radius: var(--radius-sm);

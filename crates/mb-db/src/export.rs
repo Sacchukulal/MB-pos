@@ -1,41 +1,4 @@
-//! "Give me my whole shop's data" — audit **A6** — and the CSV bug from **G7**.
-//!
-//! > A6: *"No export of the raw data. There is CSV export per report, but there
-//! > is no 'give me my whole shop's data' button. An owner who leaves has no
-//! > way to take their data with them; this is also a data-protection weak
-//! > point."*
-//!
-//! One folder: one CSV per table, plus a copy of the database itself, plus the
-//! manifest. **Not a zip** — that is a dependency for a convenience, and a
-//! folder the owner can open and read beats an archive they have to extract.
-//! If P22 later wants one file to attach to an email it can zip the folder.
-//!
-//! # The CSV writer, and why it is not a crate
-//!
-//! > G7: *"CSV export builds text by joining with commas. An item name
-//! > containing a comma ('Chicken Biryani, Half') will break the columns of
-//! > that row."*
-//! >
-//! > **Fix:** *"proper CSV escaping. Small bug, silently wrong data."*
-//!
-//! Doing it correctly is about thirty lines and four rules, and every one of
-//! the four is a bug v1 had or would have had:
-//!
-//! 1. A field containing a comma, a double quote, a CR or an LF is wrapped in
-//!    double quotes. (The G7 bug itself.)
-//! 2. A double quote inside a quoted field is doubled.
-//! 3. `NULL` is an **empty unquoted** field; an empty string is `""`. Those are
-//!    different values and a round trip must keep them different — which is the
-//!    one thing a naive writer always loses, and the reason a shop's optional
-//!    note column comes back as an empty string on every row.
-//! 4. Line endings are CRLF, per RFC 4180, because the owner will open this in
-//!    Excel.
-//!
-//! And a fifth rule that is ours rather than the RFC's: **money is written as
-//! integer paise, not as `123.45`.** A spreadsheet will happily reinterpret
-//! `123.45` as a float and hand it back rounded, which is D2 undone by
-//! Excel. The paise go in the file and the word "paise" goes in the column
-//! header.
+//! "Give me my whole shop's data".
 
 use std::path::{Path, PathBuf};
 
@@ -64,14 +27,12 @@ pub fn export_all(db: &Db, to: &Path, app_version: &str) -> Result<ExportReport,
     for table in &tables {
         let rows = db.read(|conn| export_table(conn, table))?;
         let path = to.join(format!("{table}.csv"));
-        std::fs::write(&path, rows.text.as_bytes()).map_err(|e| {
-            DbError::invariant(format!("could not write {}: {e}", path.display()))
-        })?;
+        std::fs::write(&path, rows.text.as_bytes())
+            .map_err(|e| DbError::invariant(format!("could not write {}: {e}", path.display())))?;
         written.push((table.clone(), rows.count));
     }
 
-    // The raw file too. A CSV is what an owner reads; the database is what
-    // actually restores.
+    // The raw file too.
     let database_copy = to.join("shop.db");
     if database_copy.exists() {
         std::fs::remove_file(&database_copy).map_err(|e| {
@@ -109,11 +70,6 @@ pub struct ImportReport {
 }
 
 /// Bring a shop back from an export folder.
-///
-/// **Dry run first, by default in the caller's hands**: `dry_run` reports what
-/// would happen and touches nothing. And an import into a database that already
-/// has orders in it is refused unless `force` — importing a shop over a trading
-/// shop is not a thing anybody means to do.
 pub fn import_all(
     db: &Db,
     from: &Path,
@@ -133,14 +89,13 @@ pub fn import_all(
 
     let tables = db.read(schema::tables)?;
 
-    // Read and parse everything BEFORE touching the database, so a malformed
-    // CSV halfway through the folder cannot leave a half-imported shop.
+    // Read and parse everything BEFORE touching the database, so a malformed CSV halfway
+    // through the folder cannot leave a half-imported shop.
     let mut sheets: Vec<Sheet> = Vec::new();
     let mut report = Vec::new();
     for table in &tables {
         if table == "schema_version" {
-            // The engine owns the ledger. Importing someone else's is how a
-            // database ends up claiming migrations it has not run.
+            // The engine owns the ledger.
             continue;
         }
         let Ok(text) = std::fs::read_to_string(from.join(format!("{table}.csv"))) else {
@@ -161,15 +116,8 @@ pub fn import_all(
         });
     }
 
-    // **One transaction for the whole import**, with foreign keys DEFERRED to
-    // the commit rather than switched off.
-    //
-    // The tables arrive in name order, so `bill_charges` is written long before
-    // the `orders` it points at. Checking each row as it lands would fail on
-    // the ordering and prove nothing; switching foreign keys off would import a
-    // broken shop in silence. Deferring checks every constraint at COMMIT, once
-    // every row is present — so a genuinely inconsistent export still fails,
-    // and fails as a whole.
+    // One transaction for the whole import, with foreign keys DEFERRED to the commit rather
+    // than switched off.
     db.transaction(|tx| {
         tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
 
@@ -207,18 +155,14 @@ pub fn import_all(
     })
 }
 
-// ---------------------------------------------------------------------------
 // The CSV writer and reader.
-// ---------------------------------------------------------------------------
 
 struct Csv {
     text: String,
     count: usize,
 }
 
-/// One parsed CSV, held whole before anything is written: `(table, header,
-/// rows)`. A field is `None` when the CSV said NULL and `Some` otherwise —
-/// keeping those apart is rule 3 in the module header.
+/// One parsed CSV, held whole before anything is written: `(table, header, rows)`.
 type Sheet = (String, Vec<Option<String>>, Vec<Vec<Option<String>>>);
 
 fn export_table(conn: &rusqlite::Connection, table: &str) -> Result<Csv, DbError> {
@@ -238,10 +182,8 @@ fn export_table(conn: &rusqlite::Connection, table: &str) -> Result<Csv, DbError
             cells.push(match row.get_ref(i)? {
                 ValueRef::Null => None,
                 ValueRef::Integer(v) => Some(v.to_string()),
-                // There is no REAL column in this schema (D25), so reaching
-                // this arm means somebody has changed something they should
-                // not have. Write it rather than lose it, and let the schema
-                // test be the thing that fails.
+                // There is no REAL column in this schema, so reaching this arm means somebody
+                // has changed something they should not have.
                 ValueRef::Real(v) => Some(v.to_string()),
                 ValueRef::Text(v) => Some(String::from_utf8_lossy(v).into_owned()),
                 ValueRef::Blob(v) => Some(hex(v)),
@@ -254,10 +196,6 @@ fn export_table(conn: &rusqlite::Connection, table: &str) -> Result<Csv, DbError
 }
 
 /// Rule 3 lives here: `None` writes nothing at all, `Some("")` writes `""`.
-/// One CSV row, escaped the one way this product escapes CSV.
-///
-/// `pub` since P16, which exports expenses: a second writer is how audit G7's
-/// four escaping bugs were four rather than one.
 pub fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = Option<&'a str>>) {
     let mut first = true;
     for cell in cells {
@@ -370,7 +308,6 @@ mod tests {
 
     #[test]
     fn the_g7_bug_cannot_happen() {
-        // "Chicken Biryani, Half" is the auditor's own example.
         let mut out = String::new();
         write_row(
             &mut out,
@@ -411,8 +348,8 @@ mod tests {
 
     #[test]
     fn leading_and_trailing_spaces_survive() {
-        // A shop really does have an item called "  Water" because somebody
-        // typed it that way, and losing the space silently renames it.
+        // A shop really does have an item called " Water" because somebody typed it that way,
+        // and losing the space silently renames it.
         let mut out = String::new();
         write_row(&mut out, [Some("  Water ")].into_iter());
         assert_eq!(parse_csv(&out)[0], vec![Some("  Water ".to_owned())]);

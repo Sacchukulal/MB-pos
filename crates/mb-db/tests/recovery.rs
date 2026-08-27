@@ -1,9 +1,3 @@
-//! P05: T1-T19. Backup, verify, restore, export, and the repositories.
-//!
-//! The audit called GROUP A *"Data safety. This is the most dangerous group."*
-//! Requirement 1 of the ten is *"a hard disk failure loses NOTHING."* These are
-//! the tests that make that a fact rather than an intention.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -13,24 +7,13 @@
 
 mod common;
 
-use common::shop::{self, OUTLET, TERMINAL};
 use common::Scratch;
-use mb_core::{
-    AnyOrder, CustomerId, ItemId, Money, OrderId, StaffId, TableId, Timestamp,
-};
+use common::shop::{self, OUTLET, TERMINAL};
+use mb_core::{AnyOrder, CustomerId, ItemId, Money, OrderId, StaffId, TableId, Timestamp};
 use mb_db::repo::floor::DiningTable;
 use mb_db::{Db, DbError, Repos, backup, export, locate};
 
-/// T1. **THE ONE THAT MATTERS.**
-///
-/// Build a whole shop, back it up, **delete the database entirely**, restore,
-/// and assert two separate things: every table matches row for row and rupee
-/// for rupee, and every order read back through the repository is `==` to the
-/// `AnyOrder` that was saved.
-///
-/// That second half is the private-field wall — `Cart`, `Settlement`,
-/// `KitchenLedger` and `TaxSummary` are rebuilt by replaying their public API,
-/// and this is where "replays exactly" stops being a claim.
+/// THE ONE THAT MATTERS.
 #[test]
 fn t1_a_whole_shop_survives_delete_and_restore() {
     let scratch = Scratch::new("t1");
@@ -40,8 +23,6 @@ fn t1_a_whole_shop_survives_delete_and_restore() {
         let db = scratch.open();
         let built = shop::build(&db);
 
-        // Half of T1 before we go anywhere near a backup: the orders must come
-        // back out of the live database identical to what went in.
         assert_orders_round_trip(&db, &built.orders);
 
         let before = shop::snapshot(&db);
@@ -71,8 +52,8 @@ fn t1_a_whole_shop_survives_delete_and_restore() {
     );
     for ((table, before_rows), (after_table, after_rows)) in before.iter().zip(&after) {
         assert_eq!(table, after_table);
-        // sync_outbox is deliberately different: a restore re-queues
-        // everything, because the counter has no idea what the cloud has seen.
+        // Sync_outbox is deliberately different: a restore re-queues everything, because the
+        // counter has no idea what the cloud has seen.
         if table == "sync_outbox" {
             assert_eq!(
                 before_rows.len(),
@@ -94,8 +75,7 @@ fn t1_a_whole_shop_survives_delete_and_restore() {
 /// The private-field wall, asserted: save → read → `==`.
 fn assert_orders_round_trip(db: &Db, ids: &[OrderId]) {
     let mut states = std::collections::BTreeMap::new();
-    db.read(|_| Ok(()))
-        .expect("the database opens");
+    db.read(|_| Ok(())).expect("the database opens");
 
     for id in ids {
         let found = db
@@ -112,17 +92,15 @@ fn assert_orders_round_trip(db: &Db, ids: &[OrderId]) {
         };
         *states.entry(label).or_insert(0_usize) += 1;
 
-        // Read it a second time and assert the two agree. A replay that is not
-        // deterministic — a cart that merges differently on the way back, a
-        // settlement whose tip lands on a different payment — shows up here.
+        // Read it a second time and assert the two agree.
         let again = db
             .transaction(|tx| Repos::new(tx).orders().find(id))
             .expect("find again")
             .expect("still there");
         assert_eq!(found, again, "order {id} does not read back the same twice");
 
-        // And saving what we read must be a no-op, which is the real proof that
-        // nothing was lost on the way out.
+        // And saving what we read must be a no-op, which is the real proof that nothing was
+        // lost on the way out.
         db.transaction(|tx| Repos::new(tx).orders().save(OUTLET, TERMINAL, &found))
             .expect("re-save");
         let third = db
@@ -141,7 +119,7 @@ fn assert_orders_round_trip(db: &Db, ids: &[OrderId]) {
     }
 }
 
-/// T2. Saving an order is atomic: a failure after the lines leaves nothing.
+/// Saving an order is atomic: a failure after the lines leaves nothing.
 #[test]
 fn t2_saving_an_order_is_atomic() {
     let scratch = Scratch::new("t2");
@@ -161,8 +139,8 @@ fn t2_saving_an_order_is_atomic() {
 
     let result: Result<(), DbError> = db.transaction(|tx| {
         Repos::new(tx).orders().save(OUTLET, TERMINAL, &clone)?;
-        // Everything is written. Now the caller fails, the way a print failure
-        // or a licence check might.
+        // Everything is written. Now the caller fails, the way a print failure or a licence
+        // check might.
         Err(DbError::invariant("something went wrong after the write"))
     });
     assert!(result.is_err());
@@ -188,8 +166,7 @@ fn t2_saving_an_order_is_atomic() {
     .expect("count");
 }
 
-/// T3. A corrupted backup fails verification, two different ways, and is not
-/// restorable.
+/// A corrupted backup fails verification, two different ways, and is not restorable.
 #[test]
 fn t3_a_corrupted_backup_is_caught_and_refused() {
     let scratch = Scratch::new("t3");
@@ -213,8 +190,7 @@ fn t3_a_corrupted_backup_is_caught_and_refused() {
         "a backup that failed verification was restored anyway"
     );
 
-    // (b) The file itself is damaged. Overwrite a page in the middle, past the
-    // header, so SQLite's own integrity check is what notices.
+    // (b) The file itself is damaged.
     let bytes = shop::take_and_verify(&db, &dir, "bytes.db");
     {
         use std::io::{Seek, SeekFrom, Write};
@@ -226,13 +202,8 @@ fn t3_a_corrupted_backup_is_caught_and_refused() {
         f.seek(SeekFrom::Start(len / 2)).expect("seek");
         f.write_all(&[0xAB; 2048]).expect("corrupt");
     }
-    // **Either outcome is the file being caught, and which one you get depends
-    // on which page the damage lands in.** It used to land somewhere SQLite
-    // could still read around, so `verify` returned a report saying "not ok";
-    // P11's extra columns moved the layout and now the same offset lands
-    // somewhere SQLite refuses to read at all, and `verify` returns an error.
-    // The test asserted the shape of the refusal, which was never the point —
-    // the point is that the damaged backup cannot be restored over a shop.
+    // Either outcome is the file being caught, and which one you get depends on which page the
+    // damage lands in.
     match backup::verify(&bytes.path) {
         Ok(report) => assert!(!report.is_ok(), "a damaged file was accepted: {report:?}"),
         Err(_) => { /* refused outright, which is the same answer, louder */ }
@@ -243,18 +214,15 @@ fn t3_a_corrupted_backup_is_caught_and_refused() {
     );
 }
 
-/// T4. When the restored database fails its own verification, the safety copy
-/// goes back.
-///
-/// A half-restored shop is worse than the broken one you started with.
+/// When the restored database fails its own verification, the safety copy goes back.
 #[test]
 fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
     let scratch = Scratch::new("t4");
     let dir = shop::backup_dir(&scratch);
 
-    // The handle is dropped before anything restores: a restore aimed at a
-    // database the app still has open is refused (see `restore_files`), and the
-    // sanctioned flow is request-then-restart.
+    // The handle is dropped before anything restores: a restore aimed at a database the app
+    // still has open is refused (see `restore_files`), and the sanctioned flow is
+    // request-then-restart.
     let before = {
         let db = scratch.open();
         shop::build(&db);
@@ -262,16 +230,17 @@ fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
         shop::snapshot(&db)
     };
 
-    // First, the check that comes BEFORE anything is touched: a backup with an
-    // orphaned row is refused outright, and the shop is never opened up.
+    // First, the check that comes BEFORE anything is touched: a backup with an orphaned row is
+    // refused outright, and the shop is never opened up.
     let orphaned = dir.join("orphaned.db");
     std::fs::copy(dir.join("good.db"), &orphaned).expect("copy");
     {
         let conn = rusqlite::Connection::open(&orphaned).expect("open");
-        // Foreign keys off, which is exactly how a bad row gets into a database
-        // in the real world — and precisely why `verify` runs
-        // `foreign_key_check` separately from `integrity_check`.
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("pragma");
+        // Foreign keys off, which is exactly how a bad row gets into a database in the real
+        // world — and precisely why `verify` runs `foreign_key_check` separately from
+        // `integrity_check`.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("pragma");
         conn.execute(
             "INSERT INTO order_lines (id, order_id, seq, name, unit_price, tax_rate_bp,
                                       tax_kind, tax_basis, qty, was_discount_capped)
@@ -286,11 +255,7 @@ fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
         "a backup with orphaned rows was restored"
     );
 
-    // Now the rollback path itself. A backup whose migration LEDGER is damaged
-    // passes every check `verify` can make — the data is intact and the
-    // checksum matches — and then cannot be migrated forward, because the
-    // engine tries to create tables that are already there. That is a real way
-    // to reach the rollback, and it is the moment not to make things worse.
+    // Now the rollback path itself.
     let sabotaged = dir.join("sabotaged.db");
     std::fs::copy(dir.join("good.db"), &sabotaged).expect("copy");
     {
@@ -301,7 +266,10 @@ fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
     remanifest(&sabotaged, &dir.join("good.db"));
 
     let report = backup::restore(&sabotaged, &scratch.db_path()).expect("restore runs");
-    assert!(report.rolled_back, "a broken restore was accepted: {report:?}");
+    assert!(
+        report.rolled_back,
+        "a broken restore was accepted: {report:?}"
+    );
     assert!(report.failure.is_some(), "the rollback did not say why");
     assert!(report.safety_copy.is_some(), "no safety copy was taken");
 
@@ -313,8 +281,6 @@ fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
     );
 }
 
-/// Rebuild a manifest so a deliberately-damaged file still passes `verify` and
-/// the post-restore check is the thing that has to catch it.
 fn remanifest(path: &std::path::Path, template: &std::path::Path) {
     let mut manifest_path = path.as_os_str().to_os_string();
     manifest_path.push(".manifest");
@@ -322,8 +288,8 @@ fn remanifest(path: &std::path::Path, template: &std::path::Path) {
     template_manifest.push(".manifest");
     let text = std::fs::read_to_string(std::path::PathBuf::from(template_manifest)).expect("read");
 
-    // Recount and re-checksum by taking a fresh verify of the file and writing
-    // what it actually contains.
+    // Recount and re-checksum by taking a fresh verify of the file and writing what it actually
+    // contains.
     let conn = rusqlite::Connection::open(path).expect("open");
     let mut rebuilt = String::new();
     for line in text.lines() {
@@ -364,8 +330,8 @@ fn fnv_file(path: &std::path::Path) -> String {
     format!("{hash:016x}")
 }
 
-/// T5. A newer backup is refused; an older one is restored **and migrated
-/// forward**, which is the ordinary case after an update.
+/// A newer backup is refused; an older one is restored and migrated forward, which is the
+/// ordinary case after an update.
 #[test]
 fn t5_newer_is_refused_and_older_is_migrated_forward() {
     let scratch = Scratch::new("t5");
@@ -395,8 +361,8 @@ fn t5_newer_is_refused_and_older_is_migrated_forward() {
         other => panic!("a newer backup was not refused: {other:?}"),
     }
 
-    // And the ordinary case: the current one restores, and comes out at the
-    // version this build knows.
+    // And the ordinary case: the current one restores, and comes out at the version this build
+    // knows.
     let report = backup::restore(&taken.path, &scratch.db_path()).expect("restore");
     assert!(!report.rolled_back);
     assert_eq!(report.migrated_to, mb_db::migrate::latest_version());
@@ -407,8 +373,8 @@ fn t5_newer_is_refused_and_older_is_migrated_forward() {
     );
 }
 
-/// T6. Retention keeps 7 daily and 4 weekly — and **never** prunes the newest,
-/// including when the clock jumps backwards.
+/// Retention keeps 7 daily and 4 weekly — and never prunes the newest, including when the clock
+/// jumps backwards.
 #[test]
 fn t6_retention_keeps_the_right_backups_and_never_the_newest() {
     const DAY_MS: i64 = 86_400_000;
@@ -439,8 +405,7 @@ fn t6_retention_keeps_the_right_backups_and_never_the_newest() {
         "the newest backup was pruned"
     );
 
-    // The clock jumps backwards — a real thing on a counter PC whose time
-    // syncs after a reboot. The newest must still survive.
+    // The clock jumps backwards — a real thing on a counter PC whose time syncs after a reboot.
     let pruned_again = backup::prune(&dir, now - 10 * DAY_MS).expect("prune again");
     let left_again = backup::list(&dir).expect("list");
     assert!(
@@ -464,9 +429,7 @@ fn backdate(taken: &backup::Backup, to_ms: i64) {
     std::fs::write(taken.manifest_path(), rebuilt).expect("write");
 }
 
-/// T7. A backup taken **while the shop is billing** is consistent.
-///
-/// This is the WAL snapshot, proved. Never a header without its lines.
+/// A backup taken while the shop is billing is consistent.
 #[test]
 fn t7_a_backup_during_active_billing_is_consistent() {
     use std::sync::Arc;
@@ -492,9 +455,9 @@ fn t7_a_backup_during_active_billing_is_consistent() {
                     mb_core::OrderType::Parcel,
                     StaffId::new("staff_1"),
                 );
-                // Real lines, not an empty order: the assertion below is that
-                // no order was copied WITHOUT its lines, and an order that
-                // never had any would make that assertion vacuous.
+                // Real lines, not an empty order: the assertion below is that no order was
+                // copied WITHOUT its lines, and an order that never had any would make that
+                // assertion vacuous.
                 draft
                     .core
                     .cart
@@ -528,9 +491,7 @@ fn t7_a_backup_during_active_billing_is_consistent() {
     let report = backup::verify(&taken.path).expect("verify");
     assert!(report.is_ok(), "{}", report.summary());
 
-    // Consistency is more than integrity: every order in the copy must be
-    // whole. An order with a bill and no bill lines is the tear a file copy
-    // would have produced.
+    // Consistency is more than integrity: every order in the copy must be whole.
     let conn = rusqlite::Connection::open(&taken.path).expect("open");
     let torn: i64 = conn
         .query_row(
@@ -551,23 +512,25 @@ fn t7_a_backup_during_active_billing_is_consistent() {
             |r| r.get(0),
         )
         .expect("query");
-    assert_eq!(billed_without_lines, 0, "a bill was copied without its lines");
+    assert_eq!(
+        billed_without_lines, 0,
+        "a bill was copied without its lines"
+    );
 }
 
-/// T8 and T9. Export → wipe → import reproduces the shop, **and** the G7 CSV
-/// bug cannot happen.
 #[test]
 fn t8_and_t9_export_import_round_trip_survives_nasty_text() {
     let scratch = Scratch::new("t8");
     let db = scratch.open();
     shop::build(&db);
 
-    // The auditor's own example, plus the two cases a naive writer loses.
     db.transaction(|tx| {
         let repos = Repos::new(tx);
         let mut nasty = shop_item();
         nasty.name = "Chicken \"Biryani\", Half\nSpecial".to_owned();
-        repos.menu().save_item(OUTLET, &nasty, Timestamp::from_millis(1))?;
+        repos
+            .menu()
+            .save_item(OUTLET, &nasty, Timestamp::from_millis(1))?;
 
         // A NULL note and an empty-string note on two otherwise identical rows.
         tx.execute(
@@ -589,7 +552,10 @@ fn t8_and_t9_export_import_round_trip_survives_nasty_text() {
         report.tables.iter().any(|(t, n)| t == "orders" && *n > 0),
         "the export wrote no orders"
     );
-    assert!(report.database_copy.exists(), "the raw database was not exported");
+    assert!(
+        report.database_copy.exists(),
+        "the raw database was not exported"
+    );
 
     // A dry run touches nothing.
     let fresh = Scratch::new("t8-import");
@@ -665,7 +631,7 @@ fn shop_item() -> mb_db::repo::menu::MenuItem {
     }
 }
 
-/// T10. Money survives every round trip as exact paise.
+/// Money survives every round trip as exact paise.
 #[test]
 fn t10_money_is_the_same_integer_at_every_stage() {
     let scratch = Scratch::new("t10");
@@ -702,12 +668,14 @@ fn t10_money_is_the_same_integer_at_every_stage() {
     let fresh = Scratch::new("t10-import");
     let target = fresh.open();
     export::import_all(&target, &folder, false, false).expect("import");
-    assert_eq!(original, totals(&target), "a total changed across the export");
+    assert_eq!(
+        original,
+        totals(&target),
+        "a total changed across the export"
+    );
 }
 
-/// T11. Every write enqueues, in the same transaction.
-///
-/// A2 and A3 were one forgotten enqueue each.
+/// Every write enqueues, in the same transaction.
 #[test]
 fn t11_every_write_enqueues_in_the_same_transaction() {
     let scratch = Scratch::new("t11");
@@ -763,11 +731,13 @@ fn t11_every_write_enqueues_in_the_same_transaction() {
     let after: i64 = db
         .transaction(|tx| Repos::new(tx).outbox().pending_count())
         .expect("count");
-    assert_eq!(before, after, "a rolled-back write left an outbox row behind");
+    assert_eq!(
+        before, after,
+        "a rolled-back write left an outbox row behind"
+    );
 }
 
-/// T12. A restore re-queues the whole outbox, and the re-queue carries no
-/// payload.
+/// A restore re-queues the whole outbox, and the re-queue carries no payload.
 #[test]
 fn t12_a_restore_requeues_the_whole_outbox() {
     let scratch = Scratch::new("t12");
@@ -775,7 +745,6 @@ fn t12_a_restore_requeues_the_whole_outbox() {
     let db = scratch.open();
     shop::build(&db);
 
-    // Pretend P33 has drained everything.
     let total = db
         .transaction(|tx| {
             let outbox = Repos::new(tx).outbox();
@@ -818,9 +787,7 @@ fn t12_a_restore_requeues_the_whole_outbox() {
     .expect("check the payload");
 }
 
-/// T13. A settle that fails does not burn a bill number.
-///
-/// This is why the claim lives inside the transaction.
+/// A settle that fails does not burn a bill number.
 #[test]
 fn t13_a_failed_settle_returns_its_bill_number() {
     let scratch = Scratch::new("t13");
@@ -857,8 +824,6 @@ fn t13_a_failed_settle_returns_its_bill_number() {
     );
 }
 
-/// T14. The database is found again after the config file is lost — audit A5 —
-/// and a stray file is not mistaken for a shop.
 #[test]
 fn t14_a_lost_config_finds_the_database_again() {
     let scratch = Scratch::new("t14");
@@ -873,12 +838,11 @@ fn t14_a_lost_config_finds_the_database_again() {
         Some(scratch.db_path())
     );
 
-    // The owner's browser storage is cleared — or, here, the config file goes.
     std::fs::remove_file(locate::config_path(&config_dir)).expect("delete the config");
     assert_eq!(locate::read_config(&config_dir).expect("read"), None);
 
-    // The live shop is still there and must be found, with enough about it to
-    // describe: "last used on Tuesday, N bills".
+    // The live shop is still there and must be found, with enough about it to describe: "last
+    // used on Tuesday, N bills".
     let found = locate::search_usual_places(&[scratch.db_path()]);
     let ours = found
         .iter()
@@ -908,11 +872,7 @@ fn t14_a_lost_config_finds_the_database_again() {
     );
 }
 
-/// T15. A restore cannot be aimed at a live database, and the restore-at-startup
-/// seam works.
-///
-/// The type-level half is a `compile_fail` doc test on `backup::restore` —
-/// there is no overload taking a `&Db`. This is the behavioural half.
+/// A restore cannot be aimed at a live database, and the restore-at-startup seam works.
 #[test]
 fn t15_a_restore_is_requested_and_performed_before_the_database_opens() {
     let scratch = Scratch::new("t15");
@@ -931,7 +891,6 @@ fn t15_a_restore_is_requested_and_performed_before_the_database_opens() {
     let pending = backup::pending_restore(&config_dir).expect("a restore is pending");
     assert_eq!(pending.from, taken.path);
 
-    // What P08 does at startup, before `Db::open`.
     backup::restore(&pending.from, &scratch.db_path()).expect("restore");
     backup::clear_pending_restore(&config_dir).expect("clear");
 
@@ -943,7 +902,7 @@ fn t15_a_restore_is_requested_and_performed_before_the_database_opens() {
     assert!(!shop::snapshot(&db).is_empty());
 }
 
-/// T16. The credit balance is a SUM, and there is no column to disagree with it.
+/// The credit balance is a SUM, and there is no column to disagree with it.
 #[test]
 fn t16_the_credit_balance_is_computed_not_stored() {
     let scratch = Scratch::new("t16");
@@ -980,8 +939,7 @@ fn t16_the_credit_balance_is_computed_not_stored() {
         "the balance did not follow the ledger"
     );
 
-    // And there is no stored balance anywhere to drift from it. v1 had
-    // `credit_balance REAL` right here.
+    // And there is no stored balance anywhere to drift from it.
     db.read(|conn| {
         for column in mb_db::schema::columns(conn, "customers")? {
             assert!(
@@ -995,7 +953,7 @@ fn t16_the_credit_balance_is_computed_not_stored() {
     .expect("inspect");
 }
 
-/// T17. A sold item cannot be deleted, and the refusal says why in words.
+/// A sold item cannot be deleted, and the refusal says why in words.
 #[test]
 fn t17_a_sold_item_cannot_be_deleted_and_says_so() {
     let scratch = Scratch::new("t17");
@@ -1033,7 +991,9 @@ fn t17_a_sold_item_cannot_be_deleted_and_says_so() {
         let repos = Repos::new(tx);
         let mut typo = shop_item();
         typo.id = ItemId::new("itm_typo");
-        repos.menu().save_item(OUTLET, &typo, Timestamp::from_millis(3))?;
+        repos
+            .menu()
+            .save_item(OUTLET, &typo, Timestamp::from_millis(3))?;
         repos
             .menu()
             .delete_item(OUTLET, &ItemId::new("itm_typo"), Timestamp::from_millis(4))
@@ -1041,7 +1001,7 @@ fn t17_a_sold_item_cannot_be_deleted_and_says_so() {
     .expect("an unsold item must be deletable");
 }
 
-/// T18. Typed settings: a mismatch is an error, a missing key is `None`.
+/// Typed settings: a mismatch is an error, a missing key is `None`.
 #[test]
 fn t18_settings_are_typed_and_never_default() {
     let scratch = Scratch::new("t18");
@@ -1065,25 +1025,19 @@ fn t18_settings_are_typed_and_never_default() {
         assert_eq!(settings.get::<i64>(OUTLET, "nobody.set.this")?, None);
         assert_eq!(settings.get::<String>(OUTLET, "nobody.set.this")?, None);
 
-        // Reading an int as a bool is an error. v1's 41-slot positional UPDATE
-        // is what happens when nobody checks (audit E6).
-        assert!(settings.get::<bool>(OUTLET, "day.starts_at_minutes").is_err());
+        // Reading an int as a bool is an error.
+        assert!(
+            settings
+                .get::<bool>(OUTLET, "day.starts_at_minutes")
+                .is_err()
+        );
         assert!(settings.get::<i64>(OUTLET, "bill.footer").is_err());
         Ok(())
     })
     .expect("settings");
 }
 
-/// A permission that is not a row cannot be granted — BACKEND-G7, from the
-/// repository's side.
-///
-/// **P11 moved the first half of this into the type system**: `save_role` takes
-/// a `RoleShape` whose permissions are a `PermissionSet`, so a typo does not
-/// compile. What is left to test at this level is the two things a type cannot
-/// promise: that the database itself still refuses a bad code written past the
-/// repository, and that reading one back is an **error** rather than a
-/// permission quietly dropped from the set — which is what a silent "denied"
-/// looked like from behind the counter.
+/// A permission that is not a row cannot be granted.
 #[test]
 fn a_permission_typo_is_refused_not_silently_denied() {
     let scratch = Scratch::new("perms");
@@ -1118,11 +1072,7 @@ fn a_permission_typo_is_refused_not_silently_denied() {
     assert!(!ravi.permissions.has(mb_auth::Permission::BillVoid));
 }
 
-/// **T9.** A code the program does not know is an error at the row.
-///
-/// The only way to get one in is to put it in the `permissions` table first,
-/// which is exactly what a newer build of Magic Bill would have done to a shop
-/// that was then rolled back — so this is not a hypothetical.
+/// A code the program does not know is an error at the row.
 #[test]
 fn a_permission_this_build_does_not_know_is_an_error_not_a_quiet_deny() {
     let scratch = Scratch::new("perm_unknown");

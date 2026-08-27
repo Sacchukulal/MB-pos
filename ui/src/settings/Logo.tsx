@@ -1,42 +1,4 @@
-/**
- * **Your logo** — P31, and the owner's third item: *"Logo: browse and pick a
- * PNG."*
- *
- * # The conversion happens here, and that is decision D37
- *
- * > *"A PNG decoder is a dependency, an inflate implementation and a parser
- * > being fed a file a shopkeeper uploaded, all to answer a question with two
- * > possible answers per dot… the conversion happens once, upstream: P17's
- * > settings screen takes the JPEG or PNG the owner uploads, decodes it in the
- * > browser — which does that for free and can show the result before it is
- * > saved — thresholds it, and stores this."*
- *
- * The browser has a PNG decoder, a JPEG decoder and a resampler already, and
- * they are somebody else's problem to keep safe. So: Rust opens the file
- * dialog and hands back the bytes, this decodes them, resizes to the paper,
- * thresholds them to one bit, **shows the shopkeeper the actual dots**, and
- * sends those dots to `save_logo`.
- *
- * The screen showing the real dots is the whole point. A thermal printer has
- * no greys: a photograph with a soft grey background comes out as a black
- * rectangle, and the moment to find that out is now — not on the first bill of
- * the lunch rush.
- *
- * # What crosses the wire
- *
- * `MB1`, `mb_print::image`'s own format, base64'd:
- *
- * ```text
- * 0..3   "MB1"
- * 3      version, 1
- * 4..6   width in dots,  u16 little-endian
- * 6..8   height in dots, u16 little-endian
- * 8..    packed rows, ceil(width / 8) bytes each, MSB leftmost, set bit = ink
- * ```
- *
- * Rust decodes it before writing it, so a picture that would silently fail to
- * print is refused here instead, in front of the person who chose it.
- */
+/** Your logo. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -44,23 +6,10 @@ import { Button, Card, Icon, Notice, SectionHeader, Select, Spinner, useToast } 
 import { call, inApp, isUiError } from '../ipc/call';
 import type { LogoView } from '../ipc/generated/LogoView';
 
-/**
- * The widest a stored logo is ever kept, in dots.
- *
- * 576 is the whole of 80 mm paper, so a logo stored at this size can print at
- * any width the shop asks for without ever being enlarged. Bigger would only
- * be dots the printer throws away — and `receipt.logo_width_pct` is what
- * decides how much of the paper it actually uses.
- */
+/** The widest a stored logo is ever kept, in dots. */
 const MAX_DOTS_WIDE = 576;
 
-/**
- * How dark a dot has to be to become ink.
- *
- * Three named choices, not a slider with a number on it. The question a
- * shopkeeper is answering is "is my logo coming out too heavy or too faint",
- * and 0-255 is not the language of that question.
- */
+/** How dark a dot has to be to become ink. */
 const DARKNESS = [
   { value: '200', label: 'Fainter — keep only the dark parts' },
   { value: '128', label: 'Normal' },
@@ -91,8 +40,7 @@ export function Logo() {
 
   useEffect(load, [load]);
 
-  // **Draw the dots that are actually stored**, one canvas pixel per printed
-  // dot. Not the original file: the original is not what comes out.
+  // Draw the dots that are actually stored, one canvas pixel per printed dot.
   useEffect(() => {
     const canvas = stored.current;
     const dots = view?.dots;
@@ -105,8 +53,8 @@ export function Logo() {
     for (let i = 0; i < dots.ink.length; i += 1) {
       const on = dots.ink[i] === 1;
       const at = i * 4;
-      // Ink is black on white — the paper's colours, not the theme's, because
-      // this is a picture of paper.
+      // Ink is black on white — the paper's colours, not the theme's, because this is a picture
+      // of paper.
       image.data[at] = on ? 0 : 255;
       image.data[at + 1] = on ? 0 : 255;
       image.data[at + 2] = on ? 0 : 255;
@@ -116,11 +64,8 @@ export function Logo() {
   }, [view]);
 
   /**
-   * Decode, resize, threshold — and give back both the dots to draw and the
-   * `MB1` bytes to send.
-   *
-   * Nothing here is a rule about a bill; it is an image being turned into the
-   * only thing a thermal head can print.
+   * Decode, resize, threshold — and give back both the dots to draw and the `MB1` bytes to
+   * send.
    */
   const convert = useCallback(
     (dataUrl: string, cutoff: number) =>
@@ -142,14 +87,7 @@ export function Logo() {
               reject(new Error('This computer could not draw the picture.'));
               return;
             }
-            // **White behind it first.** A PNG with a transparent background
-            // arrives as transparent black, which thresholds to solid ink —
-            // a logo that comes out as a filled rectangle. Found by trying one.
-            // The same value as `--print-paper`, and for the same reason that
-            // token exists: a thermal roll is white when the app is dark, and
-            // thresholding against the theme's surface would change what
-            // PRINTS when somebody toggles the lights. It cannot read the
-            // token — a canvas fill is not a cascade.
+            // White behind it first.
             ctx.fillStyle = '#ffffff'; // mb-tokens-allow: the colour of paper, not of the app
             ctx.fillRect(0, 0, width, height);
             ctx.drawImage(img, 0, 0, width, height);
@@ -161,11 +99,8 @@ export function Logo() {
             for (let y = 0; y < height; y += 1) {
               for (let x = 0; x < width; x += 1) {
                 const at = (y * width + x) * 4;
-                // Rec. 601 luma, which is what every thresholding tool uses
-                // and what makes a red logo behave the way somebody expects.
-                // `?? 0` for `noUncheckedIndexedAccess`: every index here is
-                // inside the buffer by construction, and asserting that with a
-                // `!` would be a lie the day the construction changes.
+                // Rec. 601 luma, which is what every thresholding tool uses and what makes a
+                // red logo behave the way somebody expects.
                 const luma =
                   0.299 * (pixels[at] ?? 0) +
                   0.587 * (pixels[at + 1] ?? 0) +
@@ -199,8 +134,8 @@ export function Logo() {
     [],
   );
 
-  // Redraw the trial whenever the picture or the darkness changes, so the
-  // three choices are three pictures rather than three words.
+  // Redraw the trial whenever the picture or the darkness changes, so the three choices are
+  // three pictures rather than three words.
   useEffect(() => {
     const canvas = trying.current;
     if (!canvas || !chosen) return;

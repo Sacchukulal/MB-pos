@@ -1,9 +1,4 @@
 //! Reading the schema back out of the database.
-//!
-//! These helpers exist so the rules this schema claims to obey are *checked*
-//! rather than *believed*. Almost every caller is a test — that is the point.
-//! A comment saying "no REAL columns" is a wish; a function that walks
-//! `sqlite_master` and a test that fails the build is a rule.
 
 use rusqlite::Connection;
 
@@ -13,9 +8,7 @@ use crate::error::DbError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
-    /// The declared type, upper-cased. In a STRICT table this is one of INT,
-    /// INTEGER, REAL, TEXT, BLOB or ANY — SQLite refuses to create the table
-    /// otherwise, which is what makes `BOOLEAN` and `VARCHAR` impossible here.
+    /// The declared type, upper-cased.
     pub decl_type: String,
     pub not_null: bool,
     pub is_primary_key: bool,
@@ -31,8 +24,7 @@ pub struct ForeignKey {
     pub on_delete: String,
 }
 
-/// Every ordinary table, in name order. Excludes views and SQLite's own
-/// `sqlite_*` bookkeeping.
+/// Every ordinary table, in name order.
 pub fn tables(conn: &Connection) -> Result<Vec<String>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT name FROM sqlite_master
@@ -59,8 +51,7 @@ pub fn views(conn: &Connection) -> Result<Vec<String>, DbError> {
     Ok(out)
 }
 
-/// Every index this schema created, by name. Excludes the automatic indexes
-/// SQLite makes for UNIQUE and PRIMARY KEY, which have no name of ours.
+/// Every index this schema created, by name.
 pub fn indexes(conn: &Connection) -> Result<Vec<String>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT name FROM sqlite_master
@@ -77,9 +68,8 @@ pub fn indexes(conn: &Connection) -> Result<Vec<String>, DbError> {
 
 /// The columns of one table, in declaration order.
 pub fn columns(conn: &Connection, table: &str) -> Result<Vec<Column>, DbError> {
-    let mut stmt = conn.prepare(
-        "SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid")?;
     let rows = stmt.query_map([table], |row| {
         Ok(Column {
             name: row.get::<_, String>(0)?,
@@ -116,9 +106,6 @@ pub fn foreign_keys(conn: &Connection, table: &str) -> Result<Vec<ForeignKey>, D
 }
 
 /// The `CREATE TABLE` text SQLite stored for one table.
-///
-/// Used to check for things `pragma_table_info` does not expose: `STRICT`,
-/// `AUTOINCREMENT`, and whether a boolean column carries a CHECK naming it.
 pub fn create_sql(conn: &Connection, name: &str) -> Result<String, DbError> {
     let sql: Option<String> = conn
         .query_row(
@@ -131,22 +118,14 @@ pub fn create_sql(conn: &Connection, name: &str) -> Result<String, DbError> {
 }
 
 /// True if a boolean column's name follows the convention the schema promises.
-///
-/// The convention is load-bearing: it is what lets a test enumerate every
-/// boolean in the whole database and check that each one is INTEGER, NOT NULL
-/// and constrained to 0/1, without carrying a hand-written list that will drift.
 #[must_use]
 pub fn is_boolean_name(name: &str) -> bool {
     const PREFIXES: [&str; 4] = ["is_", "has_", "was_", "can_"];
     PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
-/// The tables that own their own rows, as opposed to child tables that reach an
-/// outlet through their parent.
-///
-/// This list is deliberately hand-written. Adding a table without an
-/// `outlet_id` should be a decision somebody makes on purpose, with a diff
-/// against it — scope 11.4 is the dimension that cannot be retro-fitted.
+/// The tables that own their own rows, as opposed to child tables that reach an outlet through
+/// their parent.
 pub const ROOT_TABLES: &[&str] = &[
     "audit_log",
     "applied_events",
@@ -177,10 +156,8 @@ pub const ROOT_TABLES: &[&str] = &[
     "waitlist",
 ];
 
-/// Tables whose rows are money or evidence, and which therefore may never be
-/// reached by an `ON DELETE CASCADE`.
-///
-/// A bill is not deleted. It is voided, which is a state, not an absence.
+/// Tables whose rows are money or evidence, and which therefore may never be reached by an `ON
+/// DELETE CASCADE`.
 pub const MONEY_PATH_TABLES: &[&str] = &[
     "bill_charges",
     "bill_lines",

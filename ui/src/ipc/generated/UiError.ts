@@ -11,10 +11,10 @@ code: string,
  */
 message: string, 
 /**
- * For the log and the "details" disclosure. Shown on request.
+ * For the log and the "details" disclosure.
  */
 detail: string | null, 
 /**
- * How loudly to say it. [`Tone::Problem`] unless someone said otherwise.
+ * How loudly to say it.
  */
 tone: Tone, };

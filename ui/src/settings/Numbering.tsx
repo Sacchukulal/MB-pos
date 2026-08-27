@@ -1,13 +1,4 @@
-/**
- * **The bill number and the token number** — audit Part 3's two numbering
- * blocks.
- *
- * The one screen in this product that can destroy a shop's legal record, so it
- * shows the consequence rather than the field: what the next bill will actually
- * say, spelled out, before anything is saved. Rust refuses a number that goes
- * backwards past one a customer is holding, and says why in a sentence about
- * the GST return.
- */
+/** The bill number and the token number. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -38,9 +29,9 @@ export function Numbering() {
         setView(await call('save_counter', { edit }));
         toast.show('ok', 'Saved.');
       } catch (cause) {
-        // **The refusal is the feature here**, so it is shown for a long time
-        // and in full: it explains what a duplicate bill number does to a GST
-        // return, which is the whole reason the rule exists.
+        // The refusal is the feature here, so it is shown for a long time and in full: it
+        // explains what a duplicate bill number does to a GST return, which is the whole reason
+        // the rule exists.
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
       }
     },
@@ -77,11 +68,7 @@ function Counter({
     <Card>
       <SectionHeader title={counter.label} note={counter.help} />
 
-      {/* **What the next one will actually say**, as ONE sentence from Rust.
-          The formatting is the same `format!` the claim uses, so the screen
-          cannot disagree with the paper — and the sentence is not assembled
-          here, because this file assembling it produced "1 have been issued"
-          (§6: no string is built by joining fragments). */}
+      {/* What the next one will actually say, as ONE sentence from Rust. */}
       <p className="mb-numbering__next">{counter.summary}</p>
 
       <div className="mb-numbering__fields">

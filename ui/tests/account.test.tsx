@@ -1,20 +1,4 @@
-/**
- * **The account screen** — P21.
- *
- * `mb-license` proves the entitlement and `licence_tests.rs` proves the gate.
- * This proves the three claims that are the SCREEN'S own, and every one of them
- * is a thing v1 got wrong:
- *
- * 1. **the screen composes no sentences.** Every string on it arrives from
- *    `words.rs`, which is *the one place a machine state becomes words* — so
- *    the test hands it a view with nonsense sentences in it and expects to see
- *    those exact strings, not better ones;
- * 2. **BACKEND-C5's sentence is actually shown.** An offline deactivate leaves
- *    the licence held, and the screen says so — v1 said "done";
- * 3. **the buttons a person may not press are not pressable.** `mayManage` is
- *    a courtesy on top of `guard::require`, and a courtesy that does not
- *    happen is a screen that produces refusals nobody understands.
- */
+/** The account screen. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -68,8 +52,8 @@ afterEach(cleanup);
 
 it('shows the renewal as a sentence and not as a date field', async () => {
   show(activated);
-  // 2.10: "your plan renews on 12 September" beats a date field, and the
-  // difference is that one of them is a sentence.
+  // 2.10: "your plan renews on 12 September" beats a date field, and the difference is that one
+  // of them is a sentence.
   expect(await screen.findByText('Your plan renews on 12 September.')).toBeTruthy();
   expect(screen.getByText("Anna's Kitchen")).toBeTruthy();
   expect(screen.getByText('Restaurant Standard')).toBeTruthy();
@@ -82,14 +66,7 @@ it('shows the machine id, because support asks for it', async () => {
   expect(screen.getByText('from Windows')).toBeTruthy();
 });
 
-/**
- * **The screen writes nothing.**
- *
- * Given a view whose sentences are deliberately not English anybody would
- * choose, the screen shows those. If this test ever fails because the screen
- * "improved" a message, the sentence has moved out of `words.rs` and the two
- * copies will drift.
- */
+/** The screen writes nothing. */
 it('shows the sentences Rust wrote, whatever they say', async () => {
   show({
     ...activated,
@@ -105,7 +82,6 @@ it('shows the sentences Rust wrote, whatever they say', async () => {
   expect(screen.getByText('ZZZ-CLOCK note.')).toBeTruthy();
 });
 
-/** **BACKEND-C5.** The one sentence v1 never said. */
 it('says the licence is still held when a deactivate could not reach the server', async () => {
   show({
     ...activated,
@@ -134,8 +110,8 @@ it('offers a key, a trial and an emergency code when nothing is activated', asyn
   expect(screen.getByRole('button', { name: 'Emergency code' })).toBeTruthy();
   // Nothing to deactivate.
   expect(screen.queryByRole('button', { name: 'Deactivate' })).toBeNull();
-  // And it still says billing works, because that is the thing an owner is
-  // actually worried about.
+  // And it still says billing works, because that is the thing an owner is actually worried
+  // about.
   expect(screen.getByText(/You can bill and print/)).toBeTruthy();
 });
 
@@ -150,10 +126,7 @@ it('does not let somebody without licence.manage press anything that changes it'
   expect(screen.getByRole('button', { name: 'Check again' }).hasAttribute('disabled')).toBe(false);
 });
 
-/**
- * Activation sends the key **and the proof** — BACKEND-C6, from the screen's
- * side. There is no path through this dialog that sends a key alone.
- */
+/** Activation sends the key and the proof. */
 it('will not activate on a key alone', async () => {
   show({
     ...activated,

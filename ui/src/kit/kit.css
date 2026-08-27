@@ -1,20 +1,4 @@
-/* =========================================================================
-   THE UI KIT'S STYLING — and the only styling in the product.
-   =========================================================================
-   Every value here is a var(--token). There is not one raw colour, size or
-   radius in this file, and `scripts/check-tokens.mjs` fails the build if one
-   appears — audit E11:
-
-     "208 hand-written inline styles have crept back across 18 screen files,
-      fighting the design-token system that was built to prevent exactly that."
-
-   Which is why a screen never writes CSS. A screen composes components.
-   ========================================================================= */
-
-/* --- Button --------------------------------------------------------------
-   Every interactive thing looks interactive and has a visible focus ring
-   (UI_GUIDELINES §5), and every one is at least 44px tall (§7) because half
-   the shops that buy this run a touch monitor.                            */
+/* THE UI KIT'S STYLING — and the only styling in the product. */
 
 .mb-button {
   display: inline-flex;
@@ -58,8 +42,10 @@
   background: var(--surface-2);
 }
 
-/* Quiet is for a LIST of choices — a category rail, a report rail — where a
-   border round every line would be a cage. */
+/*
+ * Quiet is for a LIST of choices — a category rail, a report rail — where a border round every
+ * line would be a cage.
+ */
 .mb-button--quiet {
   background: transparent;
   color: var(--text-muted);
@@ -69,10 +55,7 @@
   color: var(--text);
 }
 
-/* **An action standing beside other actions gets an edge**, wherever it is.
-   Quiet is the most-used variant in the product, and in a row of actions it
-   reads as a disabled label: "Edit" had a border, "Sizes & choices" and "Sold
-   out" next to it did not. One rule rather than a decision per screen. */
+/* An action standing beside other actions gets an edge, wherever it is. */
 .mb-table td .mb-button--quiet,
 .mb-toolbar .mb-button--quiet,
 .mb-pagehead__actions .mb-button--quiet,
@@ -85,8 +68,10 @@
   color: var(--text);
 }
 
-/* Destructive is a SEMANTIC colour, never the accent (§2 rule 1): changing a
-   shop's accent must never make "delete" look like "save". */
+/*
+ * Destructive is a SEMANTIC colour, never the accent: changing a shop's accent must never make
+ * "delete" look like "save".
+ */
 .mb-button--danger {
   background: var(--danger);
   color: var(--accent-ink);
@@ -105,23 +90,16 @@
   width: 100%;
 }
 
-/* --- Segmented control ---------------------------------------------------
-   ONE of these, always exactly one: which order type, which room. Distinct in
-   SHAPE from tabs, which are a lens over what a segment chose — two different
-   questions must not look like the same question (§5).                     */
+/* Segmented control. */
 
-/* **The order-type switch.** A segmented control: the whole thing sits in a
-   sunk track and the chosen one RISES out of it. P27.5 changed this from four
-   bordered boxes with the chosen one filled solid accent — which put a heavy
-   coloured slab in the top-left corner of the busiest screen in the product,
-   competing with the search box next to it for the eye, every second of the
-   day. The selection still carries three signals (the raised surface, the
-   weight, the ink) so it survives grey-scale. */
+/*
+ * The order-type switch. A segmented control: the whole thing sits in a sunk track and the
+ * chosen one RISES out of it.
+ */
 .mb-segment {
   display: inline-flex;
   box-sizing: border-box;
-  /* The same height as an input, so a segment and a search box in one row are
-     the same size. */
+  /* The same height as an input, so a segment and a search box in one row are the same size. */
   height: var(--target-min);
   gap: var(--space-1);
   padding: var(--space-1);
@@ -131,8 +109,10 @@
 }
 
 .mb-segment__option {
-  /* No height of its own: the segment sets one and flex stretches these to
-     it, so the control lines up with an input beside it. */
+  /*
+   * No height of its own: the segment sets one and flex stretches these to it, so the control
+   * lines up with an input beside it.
+   */
   padding: var(--space-2) var(--gap-field);
   background: transparent;
   color: var(--text-muted);
@@ -159,8 +139,6 @@
   box-shadow: var(--level-raised);
 }
 
-/* --- Fields ------------------------------------------------------------- */
-
 .mb-field {
   display: flex;
   flex-direction: column;
@@ -184,8 +162,9 @@
   color: var(--text-faint);
 }
 
-/* An error is carried by the border AND the text AND an icon — colour is
-   never the only signal (§2 rule 2). Grey-scale the screen: still readable. */
+/*
+ * An error is carried by the border AND the text AND an icon — colour is never the only signal.
+ */
 .mb-field__error {
   display: flex;
   align-items: center;
@@ -217,8 +196,10 @@
   background: var(--danger-soft);
 }
 
-/* Digits align, everywhere they are compared (§3): "a column of rupees that
-   doesn't line up looks broken to a shopkeeper." */
+/*
+ * Digits align, everywhere they are compared (§3): "a column of rupees that doesn't line up
+ * looks broken to a shopkeeper.".
+ */
 .mb-input--number,
 .mb-numeric {
   font-family: var(--font-mono);
@@ -243,16 +224,9 @@
   cursor: pointer;
 }
 
-/* --- A field with a mark in it: ₹, +91 ----------------------------------- */
+/* A field with a mark in it: ₹, +91. */
 
-/* **The mark is beside the value, never inside it** (2026-08-22). See
-   `MoneyInput`: what reaches Rust is the digits alone, so the symbol cannot
-   reach the database and cannot reach `Money::parse`.
-
-   The same shape as `.mb-search` below — a positioned box with the control
-   filling it and the mark sitting in padding reserved for it. An `<input>` is a
-   replaced element, so `::before` on it draws nothing; this is a browser fact,
-   not a preference. */
+/* The mark is beside the value, never inside it. */
 .mb-adorned {
   position: relative;
   display: flex;
@@ -265,8 +239,10 @@
   padding-left: var(--space-7);
 }
 
-/* `+91` is three characters where `₹` is one, so the box gives it more room
-   rather than the mark shrinking to fit. */
+/*
+ * `+91` is three characters where `₹` is one, so the box gives it more room rather than the
+ * mark shrinking to fit.
+ */
 .mb-adorned:has(.mb-input--phone) .mb-input {
   padding-left: var(--space-8);
 }
@@ -306,7 +282,7 @@
   pointer-events: none;
 }
 
-/* --- Keypad: touch, and the same layout as the keyboard ----------------- */
+/* Keypad: touch, and the same layout as the keyboard. */
 
 .mb-keypad {
   display: grid;
@@ -320,14 +296,10 @@
   font-size: var(--text-lg);
 }
 
-/* The hole where the decimal point is on a money pad and is not on a PIN pad.
-   It holds the cell open so 0 and Delete stay in the two places a hand already
-   knows — a grid that reflows is a grid that moves Delete under the thumb. */
+/* The hole where the decimal point is on a money pad and is not on a PIN pad. */
 .mb-keypad__gap {
   min-height: var(--target-min);
 }
-
-/* --- Overlays ----------------------------------------------------------- */
 
 .mb-overlay {
   position: fixed;
@@ -345,10 +317,10 @@
   flex-direction: column;
   gap: var(--space-4);
   width: 100%;
-  /* --modal-width, NOT --space-8. The first version of this used the spacing
-     token, which is 4rem, and every dialog came out sixty-four pixels wide with
-     one word per line. The lint cannot catch that — both are tokens — which is
-     exactly why the session ends by running the app and looking at it. */
+  /*
+   * Modal-width, NOT --space-8. The first version of this used the spacing token, which is
+   * 4rem, and every dialog came out sixty-four pixels wide with one word per line.
+   */
   max-width: var(--modal-width);
   max-height: 85%;
   padding: var(--space-5);
@@ -357,12 +329,7 @@
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
-  /* **The PANEL does not scroll — the body does.** It scrolled as a whole
-     until P25, which was invisible for seventeen sessions because no dialog had
-     ever been taller than 85% of the window. The recipe editor is, and Save
-     went below the fold: an owner could fill in a recipe and have no way to
-     keep it. This is P17's "export/import below the fold" in the kit rather
-     than in one screen. Found by opening the editor and looking at it. */
+  /* The PANEL does not scroll — the body does. */
   overflow: hidden;
 }
 
@@ -371,9 +338,7 @@
   width: var(--modal-width-wide);
 }
 
-/* The title and, when the dialog has one, the tip that says what it is for.
-   A row rather than the title alone, because the ⓘ belongs beside the words it
-   explains — a tip somewhere else on the panel is a tip about the panel. */
+/* The title and, when the dialog has one, the tip that says what it is for. */
 .mb-modal__head {
   display: flex;
   align-items: center;
@@ -391,29 +356,24 @@
 .mb-modal__body {
   color: var(--text-muted);
   white-space: pre-line;
-  /* A flex child will not shrink below its content unless it is told to, so
-     without `min-height` the scrollbar never appears and the panel grows past
-     the window instead. */
+  /*
+   * A flex child will not shrink below its content unless it is told to, so without
+   * `min-height` the scrollbar never appears and the panel grows past the window instead.
+   */
   min-height: 0;
   overflow-y: auto;
 }
 
-/* **It wraps, and P18 is why.**
-   P17 gave ConfirmDialog a third button and never put three long labels in
-   one. "Cancel / Close without printing / Close and print the slip" is wider
-   than a 26rem modal, and the row did not wrap — so Cancel was pushed off the
-   left edge and clipped. A dialog you cannot back out of is the worst kind.
-   Found by closing a day and looking at the screen. */
 .mb-modal__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
-  /* Never scrolled away with the body. See `.mb-modal`. */
+  /* Never scrolled away with the body. */
   flex-shrink: 0;
 }
 
-/* --- Toasts: ONE system, stacked --------------------------------------- */
+/* Toasts: ONE system, stacked. */
 
 .mb-toasts {
   position: fixed;
@@ -436,8 +396,10 @@
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
-  /* The stripe is the form half of the signal, so a colour-blind cashier and
-     a bad monitor both still tell an error from a confirmation. */
+  /*
+   * The stripe is the form half of the signal, so a colour-blind cashier and a bad monitor both
+   * still tell an error from a confirmation.
+   */
   border-left: var(--space-1) solid var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
@@ -456,8 +418,6 @@
   border-left-color: var(--info);
 }
 
-/* --- Surfaces ----------------------------------------------------------- */
-
 .mb-card {
   display: flex;
   flex-direction: column;
@@ -466,15 +426,11 @@
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
-  /* RAISED, per the elevation contract in tokens.css. A card IS a panel — the
-     two names are historical — and everything raised in this product is raised
-     by the same amount. */
+  /* RAISED, per the elevation contract in tokens.css. */
   box-shadow: var(--level-raised);
 }
 
-/* Group by proximity, separate by space, not by boxes — avoid cards inside
-   cards (§5). A nested card loses its border, its shadow and its padding, and
-   keeps only its spacing. Nothing in this product is elevated twice. */
+/* Group by proximity, separate by space, not by boxes — avoid cards inside cards (§5). */
 .mb-card .mb-card {
   border: none;
   padding: var(--space-0);
@@ -500,13 +456,14 @@
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
-  /* Tightened, because at this size the mono face's default tracking makes a
-     five-figure takings number look like a licence key. */
+  /*
+   * Tightened, because at this size the mono face's default tracking makes a five-figure
+   * takings number look like a licence key.
+   */
   letter-spacing: var(--tracking-title);
 }
 
-/* **In the UI font, deliberately.** This is a sentence, not a figure, and it
-   is the sibling of the value rather than a child of it — see `StatCard`. */
+/* In the UI font, deliberately. */
 .mb-stat__note {
   font-size: var(--type-caption);
   color: var(--text-muted);
@@ -520,20 +477,12 @@
   border-bottom: var(--border-width) solid var(--border);
 }
 
-/* The heading takes what it needs and the action sits at the far end. The
-   info tip belongs to the title, so it goes next to it and not across the
-   room from it. */
+/* The heading takes what it needs and the action sits at the far end. */
 .mb-section > :last-child:not(.mb-section__title):not(.mb-tip) {
   margin-left: auto;
 }
 
-/* **The note gives way, never the heading** (P31).
-   Both were plain flex items, so a long note squeezed the title and "Your
-   logo" came out as two lines in a card two hundred pixels wider than it
-   needed to be. A heading that wraps while the sentence beside it does not is
-   backwards: the heading is what the eye scans down the page for.
-   `overflow-wrap` is the safety net for a title genuinely wider than its
-   panel — it breaks rather than escaping the card. */
+/* The note gives way, never the heading. */
 .mb-section__title {
   margin: 0;
   flex-shrink: 0;
@@ -551,8 +500,10 @@
   flex-shrink: 0;
 }
 
-/* The section's name stays put while its content scrolls: ninety settings
-   later you could not tell which section you were in. */
+/*
+ * The section's name stays put while its content scrolls: ninety settings later you could not
+ * tell which section you were in.
+ */
 .mb-section--sticky {
   position: sticky;
   top: 0;
@@ -560,23 +511,14 @@
   background: var(--surface);
 }
 
-/* --- InfoTip: the explanation you ask for -------------------------------- */
-
-/* The owner, 2026-08-22: *"you are adding these explaination texts everywhere
-   in the app… it makes the app look cluttered and un professional… make it a
-   kind of popup text, when hovered on the section heading."*
-
-   `.mb-section__note` used to be here and drew that sentence permanently. It
-   is gone, not restyled — a note is a tip now (see `SectionHeader`), and
-   leaving the class behind would leave a second way to say the same thing. */
+/* InfoTip: the explanation you ask for. */
 
 .mb-tip {
   display: inline-flex;
   align-items: center;
-  /* **The anchor's name is scoped to this tip**, so every tip on the screen can
-     use the same one. Without `anchor-scope` a shared `anchor-name` resolves to
-     whichever element is last in the document, and every bubble on the Floor
-     screen would have flown to the bottom-most ⓘ. */
+  /*
+   * The anchor's name is scoped to this tip, so every tip on the screen can use the same one.
+   */
   anchor-scope: --mb-tip;
 }
 
@@ -600,19 +542,8 @@
   color: var(--accent);
 }
 
-/* **No JavaScript decides this.** `:hover` and `:focus-within` are the whole
-   mechanism — nothing to get stuck open, nothing to clean up, and two of them
-   can never be open at once. */
-/* **`fixed`, not `absolute`, and that is the whole reason this works.**
-
-   An absolutely positioned bubble is clipped by any ancestor that scrolls — and
-   the Floor screen's arranging panel scrolls, so the first version of this came
-   out with half a sentence cut off at the panel's edge. Found by opening the
-   screen and looking at it, which is the only way it could have been.
-
-   A fixed element escapes ancestor overflow, and CSS anchor positioning is what
-   keeps it glued to its ⓘ afterwards — so there is no measuring, no scroll
-   listener, and still no JavaScript in this component. */
+/* No JavaScript decides this. */
+/* `fixed`, not `absolute`, and that is the whole reason this works. */
 .mb-tip__bubble {
   position: fixed;
   position-anchor: --mb-tip;
@@ -620,8 +551,10 @@
   position-area: bottom span-right;
   /* Near an edge it flips rather than hanging off the screen. */
   position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
-  /* And if the ⓘ itself scrolls out of view, the bubble goes with it instead of
-     floating over the middle of the screen. */
+  /*
+   * And if the ⓘ itself scrolls out of view, the bubble goes with it instead of floating over
+   * the middle of the screen.
+   */
   position-visibility: anchors-visible;
   margin: var(--space-1) 0;
   z-index: var(--layer-tip);
@@ -637,8 +570,10 @@
   font-weight: var(--weight-normal);
   line-height: var(--line-normal);
   text-align: left;
-  /* `visibility` rather than `display`, so the bubble keeps its box for a
-     screen reader to describe and can fade rather than blink. */
+  /*
+   * `visibility` rather than `display`, so the bubble keeps its box for a screen reader to
+   * describe and can fade rather than blink.
+   */
   visibility: hidden;
   opacity: 0;
   transition: opacity var(--motion-fast) ease;
@@ -656,7 +591,7 @@
   }
 }
 
-/* --- Badge: shape as well as colour ------------------------------------- */
+/* Badge: shape as well as colour. */
 
 .mb-badge {
   display: inline-flex;
@@ -701,12 +636,9 @@
   border-color: var(--accent-line);
 }
 
-/* --- Table -------------------------------------------------------------- */
-
-/* A squeezed table scrolls sideways here rather than wrapping its cells to one
-   word per line. `flex: 0 0 auto` because `overflow-x` also makes this a
-   vertical scroll box, and in a flex column that collapses it to no height —
-   which is why the menu list vanished when the side panel opened. */
+/*
+ * A squeezed table scrolls sideways here rather than wrapping its cells to one word per line.
+ */
 .mb-table__wrap {
   flex: 0 0 auto;
   overflow-x: auto;
@@ -729,29 +661,22 @@
   white-space: nowrap;
 }
 
-/* A cell stays on one line. Wrapping a short phrase like "5% · Tax added on
-   top" into a narrow column gives three lines of nothing; if the whole table
-   will not fit, `.mb-table__wrap` scrolls instead. */
+/* A cell stays on one line. */
 .mb-table td {
   padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--border);
   white-space: nowrap;
 }
 
-/* The name is the one thing worth wrapping — it is the only cell that can be
-   arbitrarily long. */
+/*
+ * The name is the one thing worth wrapping — it is the only cell that can be arbitrarily long.
+ */
 .mb-table td:first-child {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-/* **A column header is a LABEL, not a figure.**
-   `.mb-numeric` carries the mono face so a column of rupees lines up (§3), and
-   the Table component puts it on the header cell too — so "On the shelf",
-   "Costs" and "Worth" were all set like a terminal, above columns of numbers
-   that were correctly monospaced. Right-aligned, yes; monospaced, no. Found by
-   opening the Stock screen with eighteen rows in it and looking (D55) — the
-   same class of mistake as the stat card's note. */
+/* A column header is a LABEL, not a figure. */
 .mb-table td.mb-numeric,
 .mb-table th.mb-numeric {
   text-align: right;
@@ -761,19 +686,7 @@
   font-family: var(--font-ui);
 }
 
-/* **An actions cell takes only the room it needs.**
- *
- * A table's columns divide the width evenly by default, so a trailing "Open /
- * Edit" column got the same share as the customer's name — which left a wide
- * empty channel between the last figure and the first button, on every table
- * screen in the product. `width: 1%` is the standard way to say "shrink to
- * content" in a table; the slack then goes to the columns that have something
- * to say.
- *
- * Matched by `:has()` rather than by a flag each screen has to remember to
- * pass: the shape of the cell IS the fact — a cell containing a row of buttons
- * is an actions cell.
- */
+/* An actions cell takes only the room it needs. */
 .mb-table td:last-child:has(> .mb-row),
 .mb-table th:last-child:empty {
   width: 1%;
@@ -784,16 +697,16 @@
   background: var(--surface-2);
 }
 
-/* The totals row. Heavier rule above it and bold figures, so it reads as the
-   sum of the column rather than as one more row of it. */
+/*
+ * The totals row. Heavier rule above it and bold figures, so it reads as the sum of the column
+ * rather than as one more row of it.
+ */
 .mb-table tfoot td {
   border-top: var(--border-width) solid var(--border-strong);
   border-bottom: none;
   font-weight: var(--weight-bold);
   color: var(--text);
 }
-
-/* --- Tabs --------------------------------------------------------------- */
 
 .mb-tabs {
   display: flex;
@@ -819,7 +732,7 @@
   border-bottom-color: var(--accent);
 }
 
-/* --- Empty and busy ----------------------------------------------------- */
+/* Empty and busy. */
 
 .mb-empty {
   display: flex;
@@ -863,15 +776,14 @@
   }
 }
 
-/* Motion respects the setting; a spinner that cannot spin still says "busy"
-   by being there. */
+/* Motion respects the setting; a spinner that cannot spin still says "busy" by being there. */
 @media (prefers-reduced-motion: reduce) {
   .mb-spinner {
     animation: none;
   }
 }
 
-/* --- SaveBar: the unsaved-changes guard, one component everywhere -------- */
+/* SaveBar: the unsaved-changes guard, one component everywhere. */
 
 .mb-savebar {
   display: flex;
@@ -893,22 +805,13 @@
   gap: var(--space-2);
 }
 
-/* --- Dates -------------------------------------------------------------- */
-
 .mb-daterange {
   display: flex;
   align-items: flex-end;
   gap: var(--space-3);
 }
 
-/* --- Shared helpers ----------------------------------------------------- */
-
-/* `.mb-row`, `.mb-row--end` and `.mb-stack` MOVED TO layout.css at P27.5.
-   They are layout, and layout now lives in one file. The comment that was here
-   is worth keeping, because the bug it records is the one this whole session is
-   about: they were used in sixteen places and defined in none of them, so every
-   Cancel and Save in the app sat on the left — invisible to every test, obvious
-   the moment somebody opened a dialog and looked (P13). */
+/* Shared helpers. */
 
 .mb-muted {
   color: var(--text-muted);

@@ -1,13 +1,6 @@
-//! What the database actually does: T5, T6, T7, T13, T14, T15, T16, T22, T23.
-//!
-//! The schema tests read the declarations. These ones make the declarations
-//! prove themselves.
-
-// See clippy.toml (P01). The fixtures at the bottom of this file build rows,
-// and the closures passed to `Db::read` / `Db::transaction` are not `#[test]`
-// functions, so the exemption does not reach them. `integer_division` is
-// allowed because splitting a grand total three ways for a split-payment
-// fixture is arithmetic on a test amount, not on a customer's money.
+// See clippy.toml. The fixtures at the bottom of this file build rows, and the closures passed
+// to `Db::read` / `Db::transaction` are not `#[test]` functions, so the exemption does not
+// reach them.
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -23,29 +16,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::Scratch;
 use mb_core::{
-    Registration,
     Bill, BillInput, Cart, Charge, ChargeKind, CustomerId, Discount, DiscountEntry, ItemId,
     ItemSnapshot, LineIdentity, ModifierId, Money, OrderType, Payment, PaymentMode, PlaceOfSupply,
-    Qty, RoundingMode, Settlement, TaxRate, TaxSpec, compute_bill,
+    Qty, Registration, RoundingMode, Settlement, TaxRate, TaxSpec, compute_bill,
 };
-use mb_db::numbering::{self, CounterKind};
 use mb_db::encode;
+use mb_db::numbering::{self, CounterKind};
 use rusqlite::Transaction;
 
 /// `gross, line_discount, bill_discount_share, net, taxable, cgst, sgst, igst,`
-/// `gross_including_tax, rate_bp, tax_kind` — D4's pipeline, in its own order.
+/// `gross_including_tax, rate_bp, tax_kind`.
 type BillLineRow = (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, String);
 
-/// `mode, customer_id, mode_label, amount, tip, settles_credit` — the tag, both
-/// payloads, and the flag audit B12 says must not be a mode.
+/// `mode, customer_id, mode_label, amount, tip, settles_credit`.
 type PaymentRow = (String, Option<String>, Option<String>, i64, i64, i64);
 
-/// T5. Foreign keys are enforced — **on a connection taken from the reader
-/// pool**, not only on the writer.
-///
-/// `PRAGMA foreign_keys` is per-connection, is OFF by default, and is not
-/// stored in the file. v1 never turned it on at all. A test that only checked
-/// the writer would happily pass on that bug.
+/// Foreign keys are enforced — on a connection taken from the reader pool, not only on the
+/// writer.
 #[test]
 fn t5_foreign_keys_are_enforced_on_every_connection() {
     let db = Scratch::new("t5").open();
@@ -71,8 +58,7 @@ fn t5_foreign_keys_are_enforced_on_every_connection() {
     .expect("read the pragma");
 }
 
-/// T6. A transaction that fails leaves nothing behind, across every table it
-/// touched.
+/// A transaction that fails leaves nothing behind, across every table it touched.
 #[test]
 fn t6_a_rolled_back_transaction_leaves_nothing() {
     let db = Scratch::new("t6").open();
@@ -85,18 +71,20 @@ fn t6_a_rolled_back_transaction_leaves_nothing() {
             "INSERT INTO expense_categories (id, outlet_id, name)
              VALUES ('exc_1', 'outlet_default', 'Gas');",
         )?;
-        Err(mb_db::DbError::invariant("something went wrong at the counter"))
+        Err(mb_db::DbError::invariant(
+            "something went wrong at the counter",
+        ))
     });
     assert!(result.is_err());
 
     db.read(|conn| {
         for table in ["staff", "sections", "dining_tables", "categories", "items"] {
-            let n: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;
+            let n: i64 =
+                conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;
             assert_eq!(n, 0, "{table} kept rows from a rolled-back transaction");
         }
-        // `expense_categories` is SEEDED by migration 0001 (P16), so the
-        // question here is whether the rolled-back row survived — not
-        // whether the table is empty.
+        // `expense_categories` is SEEDED by migration 0001, so the question here is whether the
+        // rolled-back row survived — not whether the table is empty.
         let rolled_back: i64 = conn.query_row(
             "SELECT count(*) FROM expense_categories WHERE id = 'exc_1'",
             [],
@@ -108,10 +96,7 @@ fn t6_a_rolled_back_transaction_leaves_nothing() {
     .expect("count");
 }
 
-/// T7. WAL — a long read does not block a write.
-///
-/// This is scope 16.6 and the whole reason the reader pool exists. Audit E1: "a
-/// heavy report on a slow PC can make the search box stutter mid-rush."
+/// WAL — a long read does not block a write.
 #[test]
 fn t7_a_long_read_does_not_block_a_write() {
     let scratch = Scratch::new("t7");
@@ -133,8 +118,8 @@ fn t7_a_long_read_does_not_block_a_write() {
         scope.spawn(move || {
             reader_db
                 .read(|conn| {
-                    // Hold a real read transaction open — a snapshot, exactly
-                    // as a long report would.
+                    // Hold a real read transaction open — a snapshot, exactly as a long report
+                    // would.
                     conn.execute_batch("BEGIN DEFERRED; SELECT count(*) FROM staff;")?;
                     reader_writing.store(true, Ordering::SeqCst);
                     // Give the writer time to finish while this read is open.
@@ -175,8 +160,8 @@ fn t7_a_long_read_does_not_block_a_write() {
 
     // And the reverse: the reader's snapshot is still readable afterwards.
     db.read(|conn| {
-        // The twelve seeded by migration 0001 (P16), plus the one this test
-        // wrote while a read was open.
+        // The twelve seeded by migration 0001, plus the one this test wrote while a read was
+        // open.
         let n: i64 = conn.query_row(
             "SELECT count(*) FROM expense_categories WHERE id LIKE 'exc_t7%' OR id = 'exc_1'",
             [],
@@ -188,11 +173,7 @@ fn t7_a_long_read_does_not_block_a_write() {
     .expect("read after write");
 }
 
-/// T13. Ten thousand claims from several threads: no repeats, no gaps,
-/// ascending.
-///
-/// This is B4. A `SELECT` followed by an `UPDATE` fails this test; one
-/// statement passes it.
+/// Ten thousand claims from several threads: no repeats, no gaps, ascending.
 #[test]
 fn t13_ten_thousand_claims_have_no_repeats_and_no_gaps() {
     const THREADS: usize = 4;
@@ -244,11 +225,7 @@ fn t13_ten_thousand_claims_have_no_repeats_and_no_gaps() {
     }
 }
 
-/// T14. The reset happens **inside** the claim.
-///
-/// No restart, no settings visit, no separate reset call — which is exactly
-/// audit B3: "the counter PC is set to never sleep and stays on for days… so if
-/// the app is never closed, the token number never resets at midnight."
+/// The reset happens inside the claim.
 #[test]
 fn t14_the_daily_reset_happens_inside_the_claim() {
     let scratch = Scratch::new("t14");
@@ -259,7 +236,13 @@ fn t14_the_daily_reset_happens_inside_the_claim() {
 
     let claim = |day| {
         db.transaction(|tx| {
-            numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Token, day)
+            numbering::claim(
+                tx,
+                common::OUTLET,
+                common::TERMINAL,
+                CounterKind::Token,
+                day,
+            )
         })
         .expect("claim")
     };
@@ -271,8 +254,7 @@ fn t14_the_daily_reset_happens_inside_the_claim() {
     assert_eq!(claim(day2).value, 1, "a new day resets the token series");
     assert_eq!(claim(day2).value, 2);
 
-    // Three days without the app ever restarting. This is the test that would
-    // have caught B3.
+    // Three days without the app ever restarting.
     assert_eq!(claim(day3).value, 1);
 
     // And the bill series, which does NOT reset daily, keeps running.
@@ -285,12 +267,12 @@ fn t14_the_daily_reset_happens_inside_the_claim() {
     assert_eq!(bill(day1).value, 1);
     assert_eq!(bill(day2).value, 2);
     assert_eq!(bill(day3).value, 3);
-    // pad_width 4 on the bill counter, so the printed form is zero-padded.
+    // Pad_width 4 on the bill counter, so the printed form is zero-padded.
     assert_eq!(bill(day3).formatted, "0004");
 }
 
-/// The claim's counterpart for the settings screen, and the proof that it
-/// cannot be mistaken for one.
+/// The claim's counterpart for the settings screen, and the proof that it cannot be mistaken
+/// for one.
 #[test]
 fn the_settings_edit_reads_the_past_and_writes_the_future() {
     let scratch = Scratch::new("setnext");
@@ -310,7 +292,6 @@ fn the_settings_edit_reads_the_past_and_writes_the_future() {
             Some(1)
         );
 
-        // The owner types "the next bill should be 500".
         numbering::set_next(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, 500)?;
         let next = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, day)?;
         assert_eq!(next.value, 500);
@@ -319,15 +300,6 @@ fn the_settings_edit_reads_the_past_and_writes_the_future() {
     .expect("settings round trip");
 }
 
-/// T15 and T16, on one bill, because building it is the expensive part.
-///
-/// **T15** proves requirement 7 of the ten — "the printed bill's lines always
-/// sum to its printed total" — with a SQL statement and no Rust arithmetic, so
-/// the same proof still works over a year of bills.
-///
-/// **T16** proves the type mapping in `encode.rs` is real: every value written
-/// comes back identical, including the two payload-carrying payment modes, both
-/// charge bases, the capped flag and the rounding mode.
 #[test]
 fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
     let scratch = Scratch::new("t15");
@@ -348,7 +320,7 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
     })
     .expect("write the bill");
 
-    // ---- T15: the reconciliation, in SQL. -------------------------------
+    // The reconciliation, in SQL.
     db.read(|conn| {
         let (lines, charges, round_off, grand): (i64, i64, i64, i64) = conn.query_row(
             "SELECT
@@ -366,9 +338,8 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
             "the stored lines and charges do not sum to the stored grand total"
         );
 
-        // And the rate-wise summary ties to the stored tax totals, which is
-        // what makes the GSTR-1 report (2.8) a GROUP BY instead of a
-        // recomputation.
+        // And the rate-wise summary ties to the stored tax totals, which is what makes the
+        // GSTR-1 report (2.8) a GROUP BY instead of a recomputation.
         let (taxable, cgst, sgst, igst): (i64, i64, i64, i64) = conn.query_row(
             "SELECT COALESCE(SUM(taxable),0), COALESCE(SUM(cgst),0),
                     COALESCE(SUM(sgst),0), COALESCE(SUM(igst),0)
@@ -387,10 +358,16 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
     })
     .expect("reconcile in SQL");
 
-    // ---- T16: the round trip, value by value. ---------------------------
+    // The round trip, value by value.
     db.read(|conn| {
         let (total_taxable, non_gst, round_off, grand, place, rounding, capped): (
-            i64, i64, i64, i64, String, String, i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            String,
+            String,
+            i64,
         ) = conn.query_row(
             "SELECT total_taxable, non_gst_value, round_off, grand_total,
                     place_of_supply, rounding_mode, was_bill_discount_capped
@@ -398,7 +375,13 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
             [],
             |r| {
                 Ok((
-                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
                 ))
             },
         )?;
@@ -432,8 +415,17 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
         let rows: Vec<BillLineRow> = stmt
             .query_map([], |r| {
                 Ok((
-                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
-                    r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?,
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
+                    r.get(9)?,
+                    r.get(10)?,
                 ))
             })?
             .collect::<Result<_, _>>()?;
@@ -452,7 +444,10 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
                 encode::tax_rate_from_sql(row.9, "bill_lines.rate_bp").expect("in range"),
                 line.tax.rate
             );
-            assert_eq!(encode::tax_kind_from_sql(&row.10).expect("known"), line.tax.kind);
+            assert_eq!(
+                encode::tax_kind_from_sql(&row.10).expect("known"),
+                line.tax.kind
+            );
         }
 
         // Both charge bases.
@@ -462,7 +457,14 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
         )?;
         let charges: Vec<(String, String, String, i64, i64, i64)> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
             })?
             .collect::<Result<_, _>>()?;
         assert_eq!(charges.len(), bill.charges.len());
@@ -479,15 +481,20 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
             assert_eq!(encode::money_from_sql(row.5), charge.gross_including_tax);
         }
 
-        // Both payload-carrying payment modes, and the credit flag that audit
-        // B12 says must not be a mode.
         let mut stmt = conn.prepare(
             "SELECT mode, customer_id, mode_label, amount, tip, settles_credit
                FROM payments WHERE order_id = 'ord_1' ORDER BY seq",
         )?;
         let payments: Vec<PaymentRow> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
             })?
             .collect::<Result<_, _>>()?;
         assert_eq!(payments.len(), settlement.payments().len());
@@ -512,12 +519,8 @@ fn t15_and_t16_a_real_bill_reconciles_in_sql_and_survives_the_round_trip() {
     .expect("round trip");
 }
 
-/// T22. The snapshot is frozen: renaming or deleting an item does not change a
-/// bill that was already printed.
-///
-/// Audit Part 4's one compliment to v1: *"each order stores its items as a
-/// frozen snapshot… If you rename an item or change its price tomorrow, old
-/// bills do not change. This is correct and legally safer."*
+/// The snapshot is frozen: renaming or deleting an item does not change a bill that was already
+/// printed.
 #[test]
 fn t22_the_item_snapshot_is_frozen() {
     let scratch = Scratch::new("t22");
@@ -549,7 +552,6 @@ fn t22_the_item_snapshot_is_frozen() {
         })
         .expect("read the line");
 
-    // Tomorrow the owner renames the dish and puts the price up.
     db.transaction(|tx| {
         tx.execute(
             "UPDATE items SET name = 'Special Masala Dosa', unit_price = 15000
@@ -574,22 +576,14 @@ fn t22_the_item_snapshot_is_frozen() {
     assert_eq!(before, after, "editing the menu changed a printed bill");
 
     // And an item that has been SOLD cannot be deleted at all.
-    //
-    // The snapshot protects the printed bill from a rename or a reprice, but it
-    // does not make the sale disappear: `order_lines.item_id` is what
-    // item-wise sales (scope 10.2) reads a year later, and `ON DELETE SET NULL`
-    // would quietly turn last Diwali's best seller into an unattributed row.
-    // So an item that has ever been billed is history, exactly like a staff
-    // member who has left (scope 9.15). P13 removes it from the menu with
-    // `is_available`, not with a DELETE.
     let sold = db.transaction(|tx| {
         tx.execute("DELETE FROM items WHERE id = 'itm_dosa'", [])
             .map_err(Into::into)
     });
     assert!(sold.is_err(), "an item that has been sold was deleted");
 
-    // An item that was typed in by mistake and never sold deletes fine — the
-    // constraint bites on history, not on housekeeping.
+    // An item that was typed in by mistake and never sold deletes fine — the constraint bites
+    // on history, not on housekeeping.
     db.transaction(|tx| {
         tx.execute(
             "INSERT INTO items (id, outlet_id, name, unit_price, created_at, updated_at)
@@ -615,12 +609,7 @@ fn t22_the_item_snapshot_is_frozen() {
     assert_eq!(before, after_all, "the printed bill changed");
 }
 
-/// T23. A repeated bill number is refused by the database.
-///
-/// mb-core's `Counter::claim` saturates at the top of its range rather than
-/// wrapping, and its comment says the repeat "is caught by P04's uniqueness
-/// constraint rather than silently reused". A promise in a comment in another
-/// crate is not a constraint. This is the constraint.
+/// A repeated bill number is refused by the database.
 #[test]
 fn t23_a_repeated_bill_number_is_refused() {
     let db = Scratch::new("t23").open();
@@ -665,9 +654,9 @@ fn t23_a_repeated_bill_number_is_refused() {
     .expect("tomorrow's token 1 must be allowed");
 }
 
-/// The CHECK constraints that carry mb-core's type-level rules down to the
-/// disk: a cancelled order has a reason, a dine-in order past draft has a
-/// table, and a credit payment names its customer.
+/// The CHECK constraints that carry mb-core's type-level rules down to the disk: a cancelled
+/// order has a reason, a dine-in order past draft has a table, and a credit payment names its
+/// customer.
 #[test]
 fn the_orders_table_refuses_what_mb_core_refuses() {
     let db = Scratch::new("checks").open();
@@ -682,7 +671,7 @@ fn the_orders_table_refuses_what_mb_core_refuses() {
                                     created_by, order_type, table_id, token_value, token_formatted,
                                     bill_number_value, bill_number_formatted, cancel_reason)";
 
-    // A cancelled order with no reason (audit B6 says the reason is compulsory).
+    // A cancelled order with no reason.
     let no_reason = db.transaction(|tx| {
         tx.execute_batch(&format!(
             "{base} VALUES ('o1','outlet_default','terminal_default','cancelled',20669,1,
@@ -690,7 +679,10 @@ fn the_orders_table_refuses_what_mb_core_refuses() {
         ))
         .map_err(Into::into)
     });
-    assert!(no_reason.is_err(), "a cancelled order was stored without a reason");
+    assert!(
+        no_reason.is_err(),
+        "a cancelled order was stored without a reason"
+    );
 
     // A whitespace-only reason is not a reason.
     let blank_reason = db.transaction(|tx| {
@@ -702,7 +694,7 @@ fn the_orders_table_refuses_what_mb_core_refuses() {
     });
     assert!(blank_reason.is_err(), "'   ' was accepted as a reason");
 
-    // A dine-in order past draft with no table (audit 2.3).
+    // A dine-in order past draft with no table.
     let no_table = db.transaction(|tx| {
         tx.execute_batch(
             "INSERT INTO orders (id, outlet_id, terminal_id, state, business_day, created_at,
@@ -713,10 +705,12 @@ fn the_orders_table_refuses_what_mb_core_refuses() {
         )
         .map_err(Into::into)
     });
-    assert!(no_table.is_err(), "a dine-in order was opened without a table");
+    assert!(
+        no_table.is_err(),
+        "a dine-in order was opened without a table"
+    );
 
-    // But a DRAFT dine-in order may sit there without one while the cashier
-    // is still typing.
+    // But a DRAFT dine-in order may sit there without one while the cashier is still typing.
     db.transaction(|tx| {
         tx.execute_batch(
             "INSERT INTO orders (id, outlet_id, terminal_id, state, business_day, created_at,
@@ -729,19 +723,7 @@ fn the_orders_table_refuses_what_mb_core_refuses() {
     .expect("a draft may be incomplete");
 }
 
-/// **Every table is counted in a backup manifest, or is named as one that is
-/// not.**
-///
-/// `backup::COUNTED` opens with *"every table in the schema, hand-listed rather
-/// than discovered, so that a new table has to be added here on purpose"* — and
-/// by P25 it had drifted by **eleven tables**, including every one of P19's
-/// paired phones and every one of P24's kitchen tickets. A backup of a shop that
-/// used either could lose them and still verify clean, which is the exact
-/// failure the manifest exists to catch.
-///
-/// A sentence in a doc comment is not a mechanism. This is D40 — *the rules that
-/// erode are enforced by scripts, not by agreement* — applied to the rule that
-/// says a table cannot go missing.
+/// Every table is counted in a backup manifest, or is named as one that is not.
 #[test]
 fn every_table_is_counted_or_named_as_not() {
     let scratch = Scratch::new("counted");
@@ -749,20 +731,29 @@ fn every_table_is_counted_or_named_as_not() {
 
     db.read(|conn| {
         let live: BTreeSet<String> = mb_db::schema::tables(conn)?.into_iter().collect();
-        let counted: BTreeSet<String> =
-            mb_db::backup::COUNTED.iter().map(|t| (*t).to_owned()).collect();
-        let uncounted: BTreeSet<String> =
-            mb_db::backup::UNCOUNTED.iter().map(|t| (*t).to_owned()).collect();
+        let counted: BTreeSet<String> = mb_db::backup::COUNTED
+            .iter()
+            .map(|t| (*t).to_owned())
+            .collect();
+        let uncounted: BTreeSet<String> = mb_db::backup::UNCOUNTED
+            .iter()
+            .map(|t| (*t).to_owned())
+            .collect();
 
-        let missed: Vec<&String> =
-            live.iter().filter(|t| !counted.contains(*t) && !uncounted.contains(*t)).collect();
+        let missed: Vec<&String> = live
+            .iter()
+            .filter(|t| !counted.contains(*t) && !uncounted.contains(*t))
+            .collect();
         assert!(
             missed.is_empty(),
             "these tables are in the database and in neither COUNTED nor UNCOUNTED, \
              so a backup would not notice losing them: {missed:?}"
         );
 
-        let phantom: Vec<&String> = counted.union(&uncounted).filter(|t| !live.contains(*t)).collect();
+        let phantom: Vec<&String> = counted
+            .union(&uncounted)
+            .filter(|t| !live.contains(*t))
+            .collect();
         assert!(
             phantom.is_empty(),
             "these are listed and no longer exist — delete the line: {phantom:?}"
@@ -772,13 +763,6 @@ fn every_table_is_counted_or_named_as_not() {
     .expect("read the schema");
 }
 
-/// **P33 Phase 2: a bar's bill survives the disk.**
-///
-/// A beer at 20% state VAT, priced tax-in, settled through the real save path
-/// and read back. Before migration 0004 the rupees charged as VAT had no column
-/// to go in and came back as `Vat::ZERO`, and an inclusive liquor line read back
-/// as exclusive. Both are asserted here, on the line, on the bill total and in
-/// the VAT summary, because a bar bill that reprints wrong is an excise problem.
 #[test]
 fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
     let scratch = Scratch::new("vat_round_trip");
@@ -829,7 +813,10 @@ fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
             .with_rounding(RoundingMode::NearestRupee),
     )
     .expect("compute");
-    assert!(!bill.total_vat.is_zero(), "the fixture charges no VAT to lose");
+    assert!(
+        !bill.total_vat.is_zero(),
+        "the fixture charges no VAT to lose"
+    );
 
     let mut settlement = Settlement::new();
     settlement
@@ -873,7 +860,10 @@ fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
     let stored = &settled.bill;
 
     let beer = stored.lines.first().expect("the beer line");
-    assert_eq!(beer.vat, bill.lines[0].vat, "the VAT rupees did not survive");
+    assert_eq!(
+        beer.vat, bill.lines[0].vat,
+        "the VAT rupees did not survive"
+    );
     assert!(!beer.vat.is_zero());
     assert_eq!(beer.tax.kind, mb_core::TaxKind::OutsideGst);
     assert_eq!(beer.tax.basis, mb_core::PriceBasis::Inclusive);
@@ -881,8 +871,14 @@ fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
     assert!(beer.gst.is_zero(), "a liquor line was given GST");
 
     assert_eq!(stored.total_vat, bill.total_vat);
-    assert_eq!(stored.vat_included, bill.vat_included, "the tax-in split moved");
-    assert_eq!(stored.total_gst, bill.total_gst, "the GST book moved with it");
+    assert_eq!(
+        stored.vat_included, bill.vat_included,
+        "the tax-in split moved"
+    );
+    assert_eq!(
+        stored.total_gst, bill.total_gst,
+        "the GST book moved with it"
+    );
     assert_eq!(stored.registration, Registration::Regular);
     assert_eq!(stored.state_tax, bill.state_tax);
 
@@ -897,29 +893,43 @@ fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fixtures.
-//
-// These build rows with hand-written SQL and the encoders from `encode.rs`, and
-// that is the P04/P05 seam working as intended: P04 owns the value mapping, so
-// its tests can write a row; P05 owns `save_settled_order`, so this is not it.
-// ---------------------------------------------------------------------------
-
-/// A bill with everything on it: three rates including a non-GST line, a line
-/// discount, a bill discount, a percentage charge and a flat one, round-off on.
+/// A bill with everything on it: three rates including a non-GST line, a line discount, a bill
+/// discount, a percentage charge and a flat one, round-off on.
 fn build_a_real_bill() -> (Bill, Settlement) {
     let mut cart = Cart::new();
 
-    let dosa = ItemSnapshot::new(ItemId::new("itm_dosa"), "Masala Dosa", Money::from_paise(12_000), TaxRate::from_percent(5).expect("5%"))
-        .with_hsn("2106");
-    let water = ItemSnapshot::new(ItemId::new("itm_water"), "Water", Money::from_paise(2_000), TaxRate::from_percent(18).expect("18%"))
-        .with_tax(TaxSpec::gst_inclusive(TaxRate::from_percent(18).expect("18%")))
-        .with_hsn("2201");
-    let beer = ItemSnapshot::new(ItemId::new("itm_beer"), "Beer", Money::from_paise(22_000), TaxRate::ZERO)
-        .with_tax(TaxSpec::liquor(TaxRate::ZERO));
+    let dosa = ItemSnapshot::new(
+        ItemId::new("itm_dosa"),
+        "Masala Dosa",
+        Money::from_paise(12_000),
+        TaxRate::from_percent(5).expect("5%"),
+    )
+    .with_hsn("2106");
+    let water = ItemSnapshot::new(
+        ItemId::new("itm_water"),
+        "Water",
+        Money::from_paise(2_000),
+        TaxRate::from_percent(18).expect("18%"),
+    )
+    .with_tax(TaxSpec::gst_inclusive(
+        TaxRate::from_percent(18).expect("18%"),
+    ))
+    .with_hsn("2201");
+    let beer = ItemSnapshot::new(
+        ItemId::new("itm_beer"),
+        "Beer",
+        Money::from_paise(22_000),
+        TaxRate::ZERO,
+    )
+    .with_tax(TaxSpec::liquor(TaxRate::ZERO));
 
-    cart.add(dosa, Qty::from_whole(2).expect("qty"), Some("extra crispy".to_owned()), vec![])
-        .expect("add");
+    cart.add(
+        dosa,
+        Qty::from_whole(2).expect("qty"),
+        Some("extra crispy".to_owned()),
+        vec![],
+    )
+    .expect("add");
     cart.add(water, Qty::from_whole(3).expect("qty"), None, vec![])
         .expect("add");
     cart.add(beer, Qty::from_whole(1).expect("qty"), None, vec![])
@@ -936,8 +946,18 @@ fn build_a_real_bill() -> (Bill, Settlement) {
     .expect("line discount");
 
     let charges = [
-        Charge::percent(ChargeKind::Service, "Service Charge", 500, TaxRate::from_percent(5).expect("5%")),
-        Charge::flat(ChargeKind::Packing, "Packing", Money::from_paise(1_500), TaxRate::from_percent(18).expect("18%")),
+        Charge::percent(
+            ChargeKind::Service,
+            "Service Charge",
+            500,
+            TaxRate::from_percent(5).expect("5%"),
+        ),
+        Charge::flat(
+            ChargeKind::Packing,
+            "Packing",
+            Money::from_paise(1_500),
+            TaxRate::from_percent(18).expect("18%"),
+        ),
     ];
 
     let bill = compute_bill(
@@ -952,8 +972,7 @@ fn build_a_real_bill() -> (Bill, Settlement) {
     )
     .expect("compute");
 
-    // Split payment: part cash, part credit, part something the shop calls
-    // "Sodexo". The credit one carries a customer; the other one a label.
+    // Split payment: part cash, part credit, part something the shop calls "Sodexo".
     let mut settlement = Settlement::with_tip(Money::from_paise(2_000)).expect("tip");
     let half = Money::from_paise(bill.grand_total.paise() / 2);
     let quarter = Money::from_paise(bill.grand_total.paise() / 4);
@@ -979,8 +998,8 @@ fn build_a_real_bill() -> (Bill, Settlement) {
     (bill, settlement)
 }
 
-/// Writes a settled order: the header, the typed lines, the computed lines, the
-/// charges, the rate summary, the payments and the kitchen ledger.
+/// Writes a settled order: the header, the typed lines, the computed lines, the charges, the
+/// rate summary, the payments and the kitchen ledger.
 fn write_settled_order(
     tx: &Transaction<'_>,
     order_id: &str,
@@ -989,7 +1008,13 @@ fn write_settled_order(
     settlement: &Settlement,
 ) -> Result<(), mb_db::DbError> {
     let claimed = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, day)?;
-    let token = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Token, day)?;
+    let token = numbering::claim(
+        tx,
+        common::OUTLET,
+        common::TERMINAL,
+        CounterKind::Token,
+        day,
+    )?;
     let day_sql = encode::business_day_to_sql(day);
 
     tx.execute(
@@ -1139,9 +1164,13 @@ fn write_settled_order(
 
     for (seq, payment) in settlement.payments().iter().enumerate() {
         let cols = encode::payment_mode_to_sql(&payment.mode);
-        // The tip belongs to the settlement, not to one payment; it is put on
-        // the first row so the settlement's total is recoverable.
-        let tip = if seq == 0 { settlement.tip() } else { Money::ZERO };
+        // The tip belongs to the settlement, not to one payment; it is put on the first row so
+        // the settlement's total is recoverable.
+        let tip = if seq == 0 {
+            settlement.tip()
+        } else {
+            Money::ZERO
+        };
         tx.execute(
             "INSERT INTO payments (id, order_id, seq, mode, customer_id, mode_label, amount, tip,
                                    reference, settles_credit, received_at, received_by, business_day)
@@ -1168,7 +1197,11 @@ fn write_settled_order(
         let identity = LineIdentity {
             item_id: line.snapshot.item_id.clone(),
             note: line.note.clone(),
-            modifier_ids: line.modifiers.iter().map(|m| m.modifier_id.clone()).collect::<Vec<ModifierId>>(),
+            modifier_ids: line
+                .modifiers
+                .iter()
+                .map(|m| m.modifier_id.clone())
+                .collect::<Vec<ModifierId>>(),
         };
         tx.execute(
             "INSERT INTO kitchen_ledger (order_id, identity_key, item_id, note, qty_told, updated_at)

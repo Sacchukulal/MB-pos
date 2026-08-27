@@ -7,11 +7,11 @@ import type { UnitView } from "./UnitView";
  */
 export type RecipeLineView = { materialId: string, material: string, 
 /**
- * **D109** — what the person typed, shown back exactly as typed.
+ * What the person typed, shown back exactly as typed.
  */
 qty: string, unit: string, units: Array<UnitView>, 
 /**
- * D110 — how much of it survives. 100 is the everyday value.
+ * How much of it survives.
  */
 yieldPercent: number, 
 /**
@@ -19,7 +19,7 @@ yieldPercent: number,
  */
 issued: string, cost: MoneyView, 
 /**
- * True when this material has never been priced, so the cost is a lie by
- * omission and the screen says so on the line.
+ * True when this material has never been priced, so the cost is a lie by omission and the
+ * screen says so on the line.
  */
 isUnpriced: boolean, };

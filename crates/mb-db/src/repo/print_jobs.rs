@@ -1,28 +1,4 @@
-//! The print spool — audit **D4**, and the one repository that is deliberately
-//! not like the others.
-//!
-//! > *"A failed print is only a red message on screen. Nothing remembers it. In
-//! > a rush the cashier misses the toast and the kitchen simply never gets the
-//! > order."*
-//!
-//! A job is written here before the caller is let go, so a power cut in the
-//! middle of a rush loses no kitchen ticket. mb-print's queue owns what a job
-//! *means*; this file only owns the row.
-//!
-//! # Two things this repository does not do, on purpose
-//!
-//! **It does not enqueue an outbox row.** Every other repository in this crate
-//! does, and somebody will eventually notice and "fix" it — so: a print job is
-//! local to one counter, it is worthless to a phone or to the cloud, and syncing
-//! one would spend real egress from D16's 10 MB monthly budget on a row nobody
-//! will ever read. Requirement 3 of the ten says billing continues with no
-//! cloud; the print queue is part of the machinery that makes that true, not
-//! something the cloud has an opinion about.
-//!
-//! **It does not read `payload`.** That column is a `mb-print` `Document` as
-//! JSON and this crate has no idea what one is. Storage stores; printing
-//! prints. Decision D32 draws that line, and it is the reason mb-print may
-//! depend on mb-db and not the other way round.
+//! The print spool.
 
 use mb_core::{BusinessDay, Timestamp};
 use rusqlite::Transaction;
@@ -31,10 +7,6 @@ use crate::encode;
 use crate::error::DbError;
 
 /// One unfinished print job, exactly as the row holds it.
-///
-/// Strings rather than enums: the states and kinds belong to mb-print, and a
-/// second copy of them here would be two lists to keep in step. The CHECK
-/// constraints in the schema are what stops a typo reaching the disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrintJobRow {
     pub id: String,
@@ -44,7 +16,7 @@ pub struct PrintJobRow {
     pub copies: i64,
     pub priority: i64,
     pub attempts: i64,
-    /// The document, as JSON. Opaque here.
+    /// The document, as JSON.
     pub payload: String,
     pub reason: Option<String>,
     pub last_error: Option<String>,
@@ -64,8 +36,7 @@ impl<'a> PrintJobRepo<'a> {
         PrintJobRepo { tx }
     }
 
-    /// Write a job durably. The queue calls this before it tells the caller the
-    /// ticket is on its way, which is the whole of D4's fix.
+    /// Write a job durably.
     pub fn save(&self, outlet: &str, job: &PrintJobRow, at: Timestamp) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO print_jobs (id, outlet_id, printer_id, kind, state, copies, priority,
@@ -125,10 +96,7 @@ impl<'a> PrintJobRepo<'a> {
         Ok(())
     }
 
-    /// **A job that printed has no row (D35).**
-    ///
-    /// This is the line that keeps budget M5 intact: the payload is kilobytes,
-    /// a shop prints two of them per bill, and a year is 150,000 of them.
+    /// A job that printed has no row.
     pub fn remove(&self, id: &str) -> Result<(), DbError> {
         self.tx
             .execute("DELETE FROM print_jobs WHERE id = ?1", [id])?;
@@ -136,10 +104,6 @@ impl<'a> PrintJobRepo<'a> {
     }
 
     /// Everything still waiting, most urgent first.
-    ///
-    /// What the queue reads at start-up to resume after a crash, and what the
-    /// cashier's screen shows. Ordered by priority and then by age, so a bill
-    /// does not sit behind forty kitchen tickets.
     pub fn unfinished(&self, outlet: &str) -> Result<Vec<PrintJobRow>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, printer_id, kind, state, copies, priority, attempts, payload,
@@ -202,8 +166,7 @@ impl<'a> PrintJobRepo<'a> {
         Ok(out)
     }
 
-    /// How many jobs are outstanding. The number behind the cashier's indicator,
-    /// and what a test asserts is zero after a healthy evening (D35).
+    /// How many jobs are outstanding.
     pub fn count(&self, outlet: &str) -> Result<i64, DbError> {
         let mut stmt = self
             .tx
@@ -213,11 +176,6 @@ impl<'a> PrintJobRepo<'a> {
     }
 
     /// How much paper is still addressed to this printer.
-    ///
-    /// P17 asks before removing one. The foreign key would refuse anyway; the
-    /// point of asking first is that "there are still 3 print jobs against this
-    /// printer" is a sentence and `FOREIGN KEY constraint failed` is not
-    /// (audit F8).
     pub fn count_for_printer(&self, printer_id: &str) -> Result<i64, DbError> {
         let mut stmt = self
             .tx

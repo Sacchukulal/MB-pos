@@ -1,17 +1,4 @@
-/**
- * **The floor screen** — scope 14.1, 14.2, 14.3.
- *
- * Rust proves the rules (`floor_tests.rs` drives the commands end to end);
- * this proves what the screen does with them:
- *
- * 1. the **fifth** tile state is told apart from the other four WITHOUT
- *    colour — P14 split "waiting too long" into amber and red, and a state
- *    that only differs by hue fails §2 rule 2;
- * 2. a shop with no floor plan gets the section grid and everything works —
- *    the fallback is not a degraded mode;
- * 3. "needs attention" actually filters (audit F5);
- * 4. a move sends the table the screen showed, not the one it guessed.
- */
+/** The floor screen — scope 14.1, 14.2, 14.3. */
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,10 +21,7 @@ function show() {
   );
 }
 
-/**
- * **Open the arranging panel.** It is folded to a button on any shop that
- * already has tables — the owner, 2026-08-24.
- */
+/** Open the arranging panel. */
 function unfold() {
   fireEvent.click(screen.getByRole('button', { name: 'Rooms and tables' }));
 }
@@ -98,8 +82,7 @@ function floor(over: Partial<FloorView> = {}): FloorView {
     warnMinutes: 20,
     lateMinutes: 45,
     hasLayout: false,
-    // The default is an owner, because the interesting cases are about the
-    // arranging panel. A waiter is its own test.
+    // The default is an owner, because the interesting cases are about the arranging panel.
     canArrange: true,
     ...over,
   };
@@ -146,12 +129,12 @@ describe('the floor (scope 14.1–14.3)', () => {
 
     const plan = container.querySelector('.mb-plan');
     expect(plan).toBeTruthy();
-    // 16 x 16 squares, from the grid size RUST sent — not a number the screen
-    // decided for itself.
+    // 16 x 16 squares, from the grid size RUST sent — not a number the screen decided for
+    // itself.
     expect(plan?.querySelectorAll('.mb-plan__cell')).toHaveLength(256);
   });
 
-  /** Audit F5: "with 20 tables open it becomes a scrolling exercise." */
+  /** "with 20 tables open it becomes a scrolling exercise.". */
   it('filters to the tables that need somebody', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
@@ -172,19 +155,7 @@ describe('the floor (scope 14.1–14.3)', () => {
     show();
     await screen.findByText('4 seats');
 
-    // Table 2 is busy; tick it and move its order to table 1, which the view
-    // says is free.
-    //
-    // **Tick, then act.** Pressing a tile used to open the order dialog
-    // straight away. Since the room is arranged on this screen (2026-08-22) a
-    // press ticks the table, and everything you can do to what you ticked is on
-    // the bar — which also means the screen names the table before it offers to
-    // move it.
-    //
-    // A prefix match, because the tile announces its state too: this screen had
-    // its own copy of the table tile until 2026-08-17, whose whole aria-label
-    // was "Table 2". It uses the shared one now, which says "Table 2, Hall,
-    // busy, 646.00, 12m" so a blind cashier hears whether the table is free.
+    // Table 2 is busy; tick it and move its order to table 1, which the view says is free.
     fireEvent.click(screen.getByLabelText(/^Table 2\b/));
     fireEvent.click(await screen.findByRole('button', { name: 'Move or merge' }));
 
@@ -205,32 +176,16 @@ describe('the floor (scope 14.1–14.3)', () => {
     fireEvent.click(screen.getByLabelText(/^Table 1\b/));
     // It ticks, like any other table — free tables are the ones you delete.
     expect(await screen.findByText('1 ticked')).toBeTruthy();
-    // But there is no order on it, so nothing about an order is offered ON THE
-    // BAR. Scoped to the bar deliberately: table 2 is busy and still wears its
-    // own print mark, which is a fact about that tile and not about this tick.
+    // But there is no order on it, so nothing about an order is offered ON THE BAR.
     const bar = screen.getByRole('group', { name: 'What to do with the ticked tables' });
     expect(within(bar).queryByRole('button', { name: 'Move or merge' })).toBeNull();
     expect(within(bar).queryByRole('button', { name: /Print the bill/ })).toBeNull();
   });
 });
 
-/**
- * **The room is arranged on the screen, not in a dialog** — the owner,
- * 2026-08-22.
- *
- * > *"No need for popup for setup room. Redesign the Floor section page to have
- * > a adding tables section in one side (at the starting side of the screen)…
- * > no need to show table list as it will already be visible in the screen in
- * > proper square format… make the tables selectable… and then i should be able
- * > to delete them."*
- */
+/** The room is arranged on the screen, not in a dialog. */
 describe('arranging the room (2026-08-22)', () => {
-  /**
-   * **Folded on a shop that already has tables** — the owner, 2026-08-24:
-   * *"make it so that i can Fold the Add rooms side panel, so that there will
-   * only be a small button for add room and when clicked, it will unfold that
-   * ui."* A room is arranged once and looked at every day.
-   */
+  /** Folded on a shop that already has tables. */
   it('folds the panel to a button, and unfolds it when pressed', async () => {
     call.mockResolvedValue(floor());
     show();
@@ -250,8 +205,8 @@ describe('arranging the room (2026-08-22)', () => {
   });
 
   it('hides the panel from somebody who may not arrange the room', async () => {
-    // A courtesy, not the control — guard::require is what refuses, and
-    // FloorView::can_arrange is that same question asked once.
+    // A courtesy, not the control — guard::require is what refuses, and FloorView::can_arrange
+    // is that same question asked once.
     call.mockResolvedValue(floor({ canArrange: false }));
     show();
     await screen.findByText('4 seats');
@@ -276,19 +231,13 @@ describe('arranging the room (2026-08-22)', () => {
     fireEvent.click(screen.getByLabelText(/^Table 2\b/));
     expect(await screen.findByText('1 ticked')).toBeTruthy();
 
-    // **"Section wise" — the room segment narrows what is shown, and this ticks
-    // all of what a tick can mean anything about.**
-    //
-    // Two of the four tiles in this fixture are tables; the other two are open
-    // orders with no table behind them (§4, "so no order is ever invisible").
-    // You cannot delete or hide one of those, so it cannot be ticked — and the
-    // count says two, not four. Getting that wrong made the bar say "2 ticked"
-    // after ticking four things, which is a screen contradicting itself.
+    // "Section wise" — the room segment narrows what is shown, and this ticks all of what a
+    // tick can mean anything about.
     fireEvent.click(screen.getByLabelText(/^Tick all 2/));
     expect(await screen.findByText('2 ticked')).toBeTruthy();
   });
 
-  /** **The point of ticking.** */
+  /** The point of ticking. */
   it('deletes everything ticked in ONE command', async () => {
     call.mockResolvedValue(floor());
     show();
@@ -296,9 +245,7 @@ describe('arranging the room (2026-08-22)', () => {
 
     fireEvent.click(screen.getByLabelText(/^Table 1\b/));
     fireEvent.click(screen.getByLabelText(/^Table 2\b/));
-    // **Scoped to the bar.** Each tile wears a bin of its own now ("Delete
-    // table 1"), so a loose /^Delete/ finds three buttons meaning two different
-    // things — one table, or everything ticked.
+    // Scoped to the bar.
     const bar = await screen.findByRole('group', {
       name: 'What to do with the ticked tables',
     });
@@ -325,14 +272,7 @@ describe('arranging the room (2026-08-22)', () => {
     expect(sent?.[1]).toMatchObject({ from: 5, to: 8, seats: 4 });
   });
 
-  /**
-   * **The explanations are asked for, not given** — the owner, same day:
-   * *"you are adding these explaination texts everywhere in the app, it is not
-   * needed, it makes the app look cluttered and un professional."*
-   *
-   * The words are not deleted. They move into a tip, so the screen is quiet and
-   * the answer is still one hover away.
-   */
+  /** The explanations are asked for, not given. */
   it('keeps the timer explanation in a tip rather than on the screen', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
@@ -350,17 +290,8 @@ describe('arranging the room (2026-08-22)', () => {
 });
 
 /**
- * **A shop with one room has no room picker, and a shop with none has no
- * tables screen worth the name** — P30.5.
- *
- * The default fixture has ONE section, and until P30.5 that drew a segmented
- * control containing the single word "All": a tall box in the corner of the
- * screen offering a choice between one thing. "All" and "Hall" are the same
- * set of tables under two names.
- *
- * And on a shop with no tables at all — a tea stall, a bakery, a parcel
- * counter — the screen said "Nothing here · Try another section, or show
- * everything", which is advice nobody can take.
+ * A shop with one room has no room picker, and a shop with none has no tables screen worth the
+ * name.
  */
 describe('empty is not a lecture (P30.5)', () => {
   it('hides the room picker until there is more than one room', async () => {
@@ -384,14 +315,7 @@ describe('empty is not a lecture (P30.5)', () => {
     expect(screen.getByRole('button', { name: 'AC room' })).toBeTruthy();
   });
 
-  /**
-   * **The floor is drawn room by room** — the owner, 2026-08-24: *"the tables
-   * there are not according to Room/section, why is that? fix it. that tick all
-   * should be tick section or room whatever."*
-   *
-   * `list_tables` orders by sort order then label, so two rooms came out
-   * interleaved in one long run of squares with nothing between them.
-   */
+  /** The floor is drawn room by room. */
   it('groups the tables under their room, and ticks one room at a time', async () => {
     call.mockResolvedValue(
       floor({
@@ -430,7 +354,7 @@ describe('empty is not a lecture (P30.5)', () => {
       ['3', '4'],
     ]);
 
-    // **The tick-all belongs to a room**, so it ticks that room and no other.
+    // The tick-all belongs to a room, so it ticks that room and no other.
     fireEvent.click(screen.getByLabelText('Tick all 2 in AC room'));
     expect(await screen.findByText('2 ticked')).toBeTruthy();
     const bar = screen.getByRole('group', { name: 'What to do with the ticked tables' });
@@ -446,41 +370,18 @@ describe('empty is not a lecture (P30.5)', () => {
     show();
     expect(await screen.findByText('No tables yet')).toBeTruthy();
     expect(screen.queryByText(/Try another section/)).toBeNull();
-    // **The way to fix it is now beside the words rather than behind a button.**
-    // It used to say "Set up the room" twice — a toolbar button and an empty
-    // state — and both opened the same dialog. The panel is on the screen, so
-    // the empty state points at it.
+    // The way to fix it is now beside the words rather than behind a button.
     expect(screen.getByRole('complementary', { name: 'Rooms and tables' })).toBeTruthy();
     expect(screen.getByText(/Add a room and a run of tables on the left/)).toBeTruthy();
   });
 
-  /**
-   * **The Floor screen draws the SAME tile as the billing screen, from the
-   * same file** — the owner, 2026-08-17:
-   *
-   * > *"billing screen table structure and in floor page tables cards
-   * > structure completely looks different, instead use same in both, bcz the
-   * > users are keeps open that floor page for billing also, so print button
-   * > inside table cards also wil appeare here also, so make sure both are
-   * > same source file."*
-   *
-   * This screen had its own copy of the tile until then — same class names,
-   * different markup — so the two never quite matched and a fix to one silently
-   * broke the other. The print mark is the visible proof that the shared one is
-   * what is on screen: the copy never had it, and could not have grown it
-   * without being edited a second time.
-   *
-   * `check-layout.mjs` guards the same claim from the other side: it fails the
-   * build if any file but `billing/TableGrid.tsx` writes an `mb-tile` class.
-   */
+  /** The Floor screen draws the SAME tile as the billing screen, from the same file. */
   it('offers the same print-the-bill mark the billing screen has', async () => {
     call.mockResolvedValue(floor());
     show();
     await screen.findByText('4 seats');
 
-    // Table 2 is busy, so it can be printed. Table 1 is free, so it cannot —
-    // a print button whose only possible outcome is an error message is worse
-    // than no button.
+    // Table 2 is busy, so it can be printed.
     const print = screen.getByRole('button', { name: 'Print the bill for table 2' });
     expect(screen.queryByRole('button', { name: 'Print the bill for table 1' })).toBeNull();
 

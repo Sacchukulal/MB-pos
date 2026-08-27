@@ -1,23 +1,4 @@
-/**
- * **The board for orders that leave on a bike** — P29, scope 14.5.
- *
- * # Two questions, in this order
- *
- * 1. *Where is the food?* — the list, one row per delivery, with the state in
- *    words and the address the rider was given.
- * 2. *Where is the money?* — one line per rider, and the figure that matters:
- *    what they are carrying right now.
- *
- * The second one is the reason the screen exists. A shop can see where its food
- * is by looking out of the door; it cannot see that Kumar has nine hundred
- * rupees in his pocket, and at eleven o'clock that is the only question left.
- *
- * # Nothing here is arithmetic
- *
- * Every figure and every sentence — "Carrying ₹900.00", "Collect ₹640.00",
- * "Everything is back." — is written in Rust and printed here (R8). This file
- * decides where things sit and nothing else.
- */
+/** The board for orders that leave on a bike. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -72,7 +53,7 @@ export function Delivery() {
   const [failing, setFailing] = useState<DeliveryView | null>(null);
   const [why, setWhy] = useState('');
   const [handback, setHandback] = useState<RiderDayView | null>(null);
-  /** P31 — who is allowed to take an order out, which nothing could set. */
+  /** Who is allowed to take an order out, which nothing could set. */
   const [choosingRiders, setChoosingRiders] = useState(false);
   const [amount, setAmount] = useState('');
   const toast = useToast();
@@ -181,10 +162,9 @@ export function Delivery() {
       render: (r) => {
         const next = NEXT[r.state];
         if (!may) return null;
-        // A deliberate column, not a wrapped row: three buttons of very
-        // different widths wrapping at the edge of a table cell came out
-        // ragged, and the eye reads the middle one as belonging to the row
-        // below.
+        // A deliberate column, not a wrapped row: three buttons of very different widths
+        // wrapping at the edge of a table cell came out ragged, and the eye reads the middle
+        // one as belonging to the row below.
         return (
           <Stack gap="inline">
             {next ? (
@@ -251,9 +231,9 @@ export function Delivery() {
             small
             onClick={() => {
               setHandback(r);
-              // Prefilled with what they are carrying, because that is what a
-              // rider hands over nine times out of ten — and the tenth time
-              // the difference has to be TYPED, not defaulted away.
+              // Prefilled with what they are carrying, because that is what a rider hands over
+              // nine times out of ten — and the tenth time the difference has to be TYPED, not
+              // defaulted away.
               setAmount(r.carrying.text);
             }}
           >
@@ -274,7 +254,6 @@ export function Delivery() {
         <span className="mb-delivery__day">{view.day}</span>
       </Toolbar>
 
-      {/* The one sentence the owner reads at eleven o'clock. */}
       <Notice tone={view.carrying.paise > 0 ? 'warn' : 'ok'} icon="bike">
         {view.says}
       </Notice>
@@ -308,11 +287,7 @@ export function Delivery() {
           {view.riders.length === 0 ? (
             <EmptyState
               title="Nobody is out"
-              /* **The old words sent people to a screen that could not do it.**
-                 They said "mark somebody as a rider on the Staff screen", and
-                 `set_rider` had no button on the Staff screen or anywhere
-                 else — it had no caller at all. The button is now beside this
-                 sentence, which is where somebody reading it is looking. */
+              /* The old words sent people to a screen that could not do it. */
               body="Say who rides — the button above — and then give them an order."
             />
           ) : (
@@ -330,8 +305,7 @@ export function Delivery() {
         />
       ) : null}
 
-      {/* **A failure has to say why.** Not a default, not a shrug — the reason
-          is what tells a shop whether the food comes back or is written off. */}
+      {/* A failure has to say why. */}
       <Modal
         open={failing !== null}
         title="Why did it not arrive?"
@@ -379,8 +353,7 @@ export function Delivery() {
             <Button
               variant="primary"
               onClick={() => {
-                // The typed text goes to Rust exactly as typed. R8 and D39:
-                // there is one money parser in this product and it is not here.
+                // The typed text goes to Rust exactly as typed.
                 if (!handback || amount.trim() === '') return;
                 call('record_handback', {
                   riderId: handback.id,
@@ -404,22 +377,7 @@ export function Delivery() {
   );
 }
 
-/**
- * **Who is allowed to take an order out** — `set_rider`, P29's command with no
- * caller until P31.
- *
- * The empty state on the riders panel used to say *"mark somebody as a rider on
- * the Staff screen"*, and there was no such control on the Staff screen or
- * anywhere else: the only riders a shop could ever have were the ones a
- * migration happened to flag. So the delivery board could be opened, and the
- * first thing it asked for could not be done.
- *
- * # A rider is a FLAG on a person, not a second kind of person
- *
- * They are already staff — they clock in, they have a PIN, they show up in the
- * audit trail. This says one more thing about them, which is why it is a
- * tick-box beside a name and not a form.
- */
+/** Who is allowed to take an order out. */
 function WhoRides({
   view,
   onClose,

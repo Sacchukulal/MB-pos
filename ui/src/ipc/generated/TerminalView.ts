@@ -2,8 +2,7 @@
 
 export type TerminalView = { id: string, name: string, 
 /**
- * **The series this till issues under** (D135) — "A", "B". Empty only
- * while a shop has one till.
+ * The series this till issues under — "A", "B".
  */
 prefix: string, isMaster: boolean, 
 /**
@@ -11,7 +10,7 @@ prefix: string, isMaster: boolean,
  */
 isThisOne: boolean, 
 /**
- * "seen 2 minutes ago", "never" — written in Rust (R8).
+ * "seen 2 minutes ago", "never" — written in Rust.
  */
 lastSeen: string, 
 /**

@@ -7,10 +7,10 @@ export type BundlePlanView = { items: Array<BundleItem>,
  */
 total: string, 
 /**
- * **What is deliberately not in it.** One sentence, shown beside the list.
+ * What is deliberately not in it.
  */
 excludes: string, 
 /**
- * Where it will be written, so nobody has to hunt for it (D76).
+ * Where it will be written, so nobody has to hunt for it.
  */
 folder: string, };

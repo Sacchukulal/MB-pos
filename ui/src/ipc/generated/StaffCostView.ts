@@ -2,8 +2,7 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * Scope 9.16 — **the second of the two numbers that decide whether a
- * restaurant makes money.** P25 gave the first (food cost); this is the other.
+ * The second of the two numbers that decide whether a restaurant makes money.
  */
 export type StaffCostView = { from: string, to: string, wages: MoneyView, revenue: MoneyView, 
 /**

@@ -1,9 +1,7 @@
-/*
- * The delivery board — P29, scope 14.5. Every value is a token.
- */
+/* The delivery board. */
 
 .mb-delivery {
-  /* The page margin is the SHELL's (P27.5, .mb-main). */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--gap-group);
@@ -16,8 +14,10 @@
   color: var(--text-muted);
 }
 
-/* The address is what the rider actually reads, so it is body text and it
-   WRAPS (D30) — a truncated address is a delivery that comes back. */
+/*
+ * The address is what the rider actually reads, so it is body text and it WRAPS — a truncated
+ * address is a delivery that comes back.
+ */
 .mb-delivery__address {
   white-space: normal;
   max-width: 32ch;
@@ -35,9 +35,7 @@
   max-width: 28ch;
 }
 
-/* **The two money words.** "Collect ₹640" has to be findable from a metre
-   away on a busy evening; "Paid" must not shout, because a rider who sees
-   colour everywhere stops reading any of it. */
+/* The two money words. */
 .mb-delivery__collect {
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
@@ -49,8 +47,7 @@
   color: var(--text-muted);
 }
 
-/* Cash in somebody's pocket. Not an error — it is a completely normal
-   evening — but it is the figure the owner is looking for. */
+/* Cash in somebody's pocket. */
 .mb-delivery__carrying {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

@@ -1,16 +1,4 @@
-//! Backup, verify and restore — the session's headline, and audit A1's fix.
-//!
-//! > *"Only bills are backed up. Everything else lives on one hard disk… There
-//! > is no backup button and no restore button anywhere in the app. If that
-//! > PC's disk fails tomorrow morning, you lose: the whole menu with prices,
-//! > every setting you spent weeks tuning, all expense records, and — worst —
-//! > **the record of who owes you how much money.**"*
-//! >
-//! > *"This alone justifies the rebuild."*
-//!
-//! Requirement 1 of the ten is *"a hard disk failure loses NOTHING. Backup and
-//! restore work and have been tested by actually restoring onto a clean
-//! machine."* Note what it does not say: it does not say a backup exists.
+//! Backup, verify and restore.
 
 use std::path::{Path, PathBuf};
 
@@ -21,18 +9,6 @@ use crate::error::DbError;
 use crate::migrate;
 
 /// The tables whose row counts go into the manifest and are checked on verify.
-///
-/// Every table in the schema, hand-listed rather than discovered, so that a new
-/// table has to be added here on purpose. A table nobody counted is a table
-/// whose loss a verify would not notice.
-///
-/// **P25 found that the list had drifted** and made the rule a test rather than
-/// a sentence — `tests/behaviour.rs::every_table_is_counted_or_named_as_not`
-/// fails the build for a table that is in neither this list nor [`UNCOUNTED`].
-/// Eleven tables had gone missing since P12, including every one of P19's paired
-/// phones and every one of P24's kitchen tickets, so a backup of a shop that
-/// used either could lose them and still verify clean. This is D40 again: *the
-/// rules that erode are enforced by scripts, not by agreement.*
 pub const COUNTED: &[&str] = &[
     "applied_events",
     "advance_recoveries",
@@ -121,15 +97,11 @@ pub const COUNTED: &[&str] = &[
 ];
 
 /// Tables deliberately left out of the manifest, each with its reason.
-///
-/// Being on this list is a decision, which is the whole point of having it.
 pub const UNCOUNTED: &[&str] = &[
-    // The migration ledger. It is written by the engine before any of this
-    // exists, and a restore checks the schema version on its own.
+    // The migration ledger. It is written by the engine before any of this exists, and a
+    // restore checks the schema version on its own.
     "schema_version",
-    // **D35: the print spool is a SPOOL, not a log.** Rows leave it when they
-    // print, so its count is whatever happened to be queued at the second the
-    // backup ran — a number that would differ on every verify for no reason.
+    // The print spool is a SPOOL, not a log.
     "print_jobs",
 ];
 
@@ -143,11 +115,7 @@ pub struct Manifest {
     pub checksum: String,
     /// `(table, rows)`, in table order.
     pub counts: Vec<(String, i64)>,
-    /// **D132 — the photographs.** `(filename, bytes, checksum)`.
-    ///
-    /// Empty on every backup taken before P26 and on every shop that has never
-    /// photographed an invoice, which is what makes an old single-file backup
-    /// still restore.
+    /// The photographs.
     pub attachments: Vec<(String, u64, String)>,
 }
 
@@ -191,8 +159,6 @@ impl Manifest {
                 (Some("count"), Some(table), Some(n)) => {
                     counts.push((table.to_owned(), n.parse().unwrap_or(-1)));
                 }
-                // **D132.** A manifest written before P26 has none of these, and
-                // the empty vector is exactly what makes such a backup restore.
                 (Some("attachment"), Some(name), Some(size)) => {
                     attachments.push((
                         name.to_owned(),
@@ -216,12 +182,7 @@ impl Manifest {
     }
 }
 
-/// **D132 — where the photographs live: beside the database, never inside it.**
-///
-/// A photographed invoice is ~200 KB and a shop takes ~100 deliveries a month.
-/// Inside the database that is 240 MB a year that `VACUUM INTO` would copy on
-/// every backup, spending R5 and R6 on pictures no query reads. So they are
-/// files, and the backup carries the folder.
+/// Where the photographs live: beside the database, never inside it.
 #[must_use]
 pub fn attachments_dir(db: &Path) -> PathBuf {
     match db.parent() {
@@ -238,11 +199,11 @@ pub fn backup_attachments_dir(backup: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
-/// Copy every file in `from` into `to`, returning `(name, bytes, checksum)` for
-/// each. A folder that does not exist is not an error: it is a shop that has
-/// never photographed an invoice.
+/// Copy every file in `from` into `to`, returning `(name, bytes, checksum)` for each.
 fn copy_attachments(from: &Path, to: &Path) -> Result<Vec<(String, u64, String)>, DbError> {
-    let Ok(entries) = std::fs::read_dir(from) else { return Ok(Vec::new()) };
+    let Ok(entries) = std::fs::read_dir(from) else {
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
     let mut made = false;
     for entry in entries.flatten() {
@@ -290,19 +251,6 @@ fn manifest_path(db: &Path) -> PathBuf {
 }
 
 /// Take a backup of the live database while the shop keeps billing.
-///
-/// **Not a file copy.** A file copy can catch a half-written page and produce a
-/// backup that opens fine and is wrong — the failure mode you never find out
-/// about until the day you need it.
-///
-/// The copy itself is [`Db::backup_to`], which is `VACUUM INTO` on a reader.
-/// That reverses this session's prompt — see that function's comment for what
-/// implementing the online backup API turned up and why a backup that may never
-/// finish is worse than one without a progress bar.
-///
-/// WAL means the copy reads a snapshot, so **the cashier never waits** — `t7`
-/// runs settles on another thread throughout and asserts the copy is still
-/// consistent.
 pub fn take(db: &Db, to: &Path, app_version: &str) -> Result<Backup, DbError> {
     if let Some(parent) = to.parent()
         && !parent.as_os_str().is_empty()
@@ -314,12 +262,8 @@ pub fn take(db: &Db, to: &Path, app_version: &str) -> Result<Backup, DbError> {
 
     db.backup_to(to)?;
 
-    // **D132 — a backup is the database AND the photographs.** They are copied
-    // before the manifest is written, because the manifest is what says they
-    // are there and a manifest that promises a file it has not written is worse
-    // than no manifest at all.
-    let attachments =
-        copy_attachments(&attachments_dir(db.path()), &backup_attachments_dir(to))?;
+    // A backup is the database AND the photographs.
+    let attachments = copy_attachments(&attachments_dir(db.path()), &backup_attachments_dir(to))?;
 
     let conn = open_read_only(to)?;
     let manifest = Manifest {
@@ -343,11 +287,6 @@ pub fn take(db: &Db, to: &Path, app_version: &str) -> Result<Backup, DbError> {
 }
 
 /// Copy a finished backup somewhere else.
-///
-/// **A backup on the same failing disk is not a backup.** The second location
-/// is a pen drive or a network path, and a failure to write it is a WARNING and
-/// not a failed backup — a missing pen drive must never stop the shop backing
-/// up at all.
 pub fn copy_to_second_location(backup: &Backup, dir: &Path) -> Result<PathBuf, DbError> {
     std::fs::create_dir_all(dir)
         .map_err(|e| DbError::invariant(format!("could not create {}: {e}", dir.display())))?;
@@ -360,8 +299,8 @@ pub fn copy_to_second_location(backup: &Backup, dir: &Path) -> Result<PathBuf, D
         .map_err(|e| DbError::invariant(format!("could not copy the backup: {e}")))?;
     std::fs::copy(backup.manifest_path(), manifest_path(&target))
         .map_err(|e| DbError::invariant(format!("could not copy the manifest: {e}")))?;
-    // D132: the second copy carries the photographs too, or it is not a second
-    // copy of the same thing.
+    // The second copy carries the photographs too, or it is not a second copy of the same
+    // thing.
     copy_attachments(
         &backup_attachments_dir(&backup.path),
         &backup_attachments_dir(&target),
@@ -376,13 +315,10 @@ pub struct VerifyReport {
     pub integrity_ok: bool,
     pub foreign_keys_ok: bool,
     pub checksum_ok: bool,
-    /// Tables whose row count disagrees with the manifest: `(table, manifest,
-    /// actual)`.
+    /// Tables whose row count disagrees with the manifest: `(table, manifest, actual)`.
     pub count_mismatches: Vec<(String, i64, i64)>,
     pub schema_version: u32,
-    /// **D132.** Photographs the manifest promises that are missing or do not
-    /// match their checksum. A picture of a ₹40,000 invoice that silently rots
-    /// is exactly the failure a verify exists to find.
+    /// Photographs the manifest promises that are missing or do not match their checksum.
     pub bad_attachments: Vec<String>,
     /// How many photographs this backup carries, for the health line.
     pub attachment_count: usize,
@@ -398,7 +334,7 @@ impl VerifyReport {
             && self.bad_attachments.is_empty()
     }
 
-    /// One line an owner could read, for the health panel (P22).
+    /// One line an owner could read, for the health panel.
     #[must_use]
     pub fn summary(&self) -> String {
         if self.is_ok() {
@@ -415,7 +351,10 @@ impl VerifyReport {
             why.push("the file does not match its manifest".to_owned());
         }
         if !self.count_mismatches.is_empty() {
-            why.push(format!("{} table(s) have the wrong row count", self.count_mismatches.len()));
+            why.push(format!(
+                "{} table(s) have the wrong row count",
+                self.count_mismatches.len()
+            ));
         }
         if !self.bad_attachments.is_empty() {
             why.push(format!(
@@ -427,18 +366,11 @@ impl VerifyReport {
     }
 }
 
-/// Check a backup before trusting it. **A backup that has never been restored
-/// is a rumour**, and this is the last chance to find out before the day it
-/// matters.
-///
-/// Four checks, and the second one is the one people forget: `integrity_check`
-/// does not look at foreign keys, so a backup with orphaned bill lines passes
-/// it and restores into a broken shop.
+/// Check a backup before trusting it.
 pub fn verify(path: &Path) -> Result<VerifyReport, DbError> {
     let conn = open_read_only(path)?;
 
-    let integrity: String =
-        conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     let integrity_ok = integrity == "ok";
 
     let foreign_keys_ok = {
@@ -466,24 +398,24 @@ pub fn verify(path: &Path) -> Result<VerifyReport, DbError> {
                     }
                 }
 
-                // **D132** — and this is the check that makes a photograph a
-                // promise rather than a hope. A file that is there but no longer
-                // hashes the same is the failure nobody would otherwise see.
+                // And this is the check that makes a photograph a promise rather than a hope.
                 let dir = backup_attachments_dir(path);
                 let mut bad = Vec::new();
                 for (name, bytes, checksum) in &manifest.attachments {
                     let file = dir.join(name);
                     let size = std::fs::metadata(&file).map(|m| m.len()).ok();
                     let matches = size == Some(*bytes)
-                        && file_checksum(&file).map(|c| &c == checksum).unwrap_or(false);
+                        && file_checksum(&file)
+                            .map(|c| &c == checksum)
+                            .unwrap_or(false);
                     if !matches {
                         bad.push(name.clone());
                     }
                 }
                 (checksum_ok, mismatches, bad, manifest.attachments.len())
             }
-            // No manifest is itself a failure: an unverifiable backup is not a
-            // backup, and quietly passing it is how a rumour becomes a policy.
+            // No manifest is itself a failure: an unverifiable backup is not a backup, and
+            // quietly passing it is how a rumour becomes a policy.
             Err(_) => (false, Vec::new(), Vec::new(), 0),
         };
 
@@ -508,8 +440,8 @@ pub struct RestoreReport {
     pub restored_schema_version: u32,
     pub migrated_to: u32,
     pub safety_copy: Option<PathBuf>,
-    /// True when the restored database failed its own verification, or could
-    /// not be migrated forward, and the safety copy was put back.
+    /// True when the restored database failed its own verification, or could not be migrated
+    /// forward, and the safety copy was put back.
     pub rolled_back: bool,
     /// Why, when `rolled_back`. Something a health panel can show.
     pub failure: Option<String>,
@@ -517,20 +449,6 @@ pub struct RestoreReport {
 }
 
 /// Put a database file in place, taking its stale journal with it.
-///
-/// The `-wal` and `-shm` files belong to the database that WAS there, not to
-/// the one arriving; leaving them lets SQLite replay a journal written against
-/// a different file, which is corruption with extra steps.
-///
-/// **If the target cannot be replaced, this refuses rather than half-writing.**
-/// On Windows an open file cannot be removed, so a restore aimed at a database
-/// the app still has open fails here with something a person can read, instead
-/// of overwriting the pages underneath a live connection and producing
-/// "malformed database schema" ten seconds later. That is a real thing that
-/// happened while writing this session's tests, and it is the reason the
-/// sanctioned path is [`request_restore`] plus a restart, not a call from a
-/// running app. On platforms where an open file *can* be unlinked the guard
-/// does not fire — the flow is what protects you there, not the filesystem.
 fn restore_files(src: &Path, dst: &Path) -> Result<(), DbError> {
     for suffix in ["-wal", "-shm"] {
         let mut side = dst.as_os_str().to_os_string();
@@ -556,39 +474,12 @@ fn restore_files(src: &Path, dst: &Path) -> Result<(), DbError> {
 
 /// Put a backup back.
 ///
-/// **This takes paths, never a `&Db`, and that is the refusal expressed in
-/// types.** The first draft of this session said restore "refuses to run while
-/// the app holds the database open" and then left no way for a restore to ever
-/// happen — the only program that can restore is the one that must not be
-/// running. There is no overload here that accepts an open handle, so the
-/// illegal thing is unrepresentable rather than checked, which is the same fix
-/// P03 used for the order lifecycle.
-///
-/// The app therefore restores **at startup, before it opens the database** —
-/// see [`request_restore`] and [`pending_restore`].
-///
-/// The order of the steps is the design:
-///
-/// 1. Verify the backup. Refuse before touching anything.
-/// 2. Refuse a **newer** schema; migrate an **older** one forward, which is the
-///    ordinary case after an update and not an exception.
-/// 3. Take a safety copy of the current database, named so a human can find it.
-/// 4. Restore.
-/// 5. Verify the result.
-/// 6. If step 5 fails, **put the safety copy back** — a half-restored shop is
-///    worse than the broken one you started with.
-///
-/// The type-level half of that first paragraph, as a test rather than a claim —
-/// there is no overload taking an open database:
-///
 /// ```compile_fail
 /// # use std::path::Path;
 /// # fn cannot_restore_over_a_live_database(db: &mb_db::Db, from: &Path) {
 /// mb_db::backup::restore(from, db);
 /// # }
 /// ```
-///
-/// And the same thing spelled the way it is meant to be used, from a path:
 ///
 /// ```no_run
 /// # use std::path::Path;
@@ -617,7 +508,7 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
 
     let manifest = read_manifest(from)?;
 
-    // Step 3. Named for a human at 9 am, not for a machine.
+    // Named for a human at 9 am, not for a machine.
     let safety_copy = if to.exists() {
         let name = format!(
             "before-restore-{}.db",
@@ -627,7 +518,9 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
         );
         let path = to.with_file_name(name);
         std::fs::copy(to, &path).map_err(|e| {
-            DbError::invariant(format!("could not take a safety copy before restoring: {e}"))
+            DbError::invariant(format!(
+                "could not take a safety copy before restoring: {e}"
+            ))
         })?;
         Some(path)
     } else {
@@ -636,15 +529,8 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
 
     restore_files(from, to)?;
 
-    // Step 2b, and this is correction (f): an OLDER backup is the ordinary
-    // case, so bring it up to what this build expects, exactly as `Db::open`
-    // would.
-    //
-    // **A failure here rolls back too**, which the first version of this
-    // function did not do: it had already overwritten the target, so returning
-    // an error left the shop holding a database that had been replaced and then
-    // not migrated. A backup whose ledger is damaged is a real way to reach
-    // this, and it is exactly the moment not to make things worse.
+    // Step 2b, and this is correction (f): an OLDER backup is the ordinary case, so bring it up
+    // to what this build expects, exactly as `Db::open` would.
     let migrate_result = (|| -> Result<u32, DbError> {
         let mut conn = Connection::open(to).map_err(|source| DbError::Open {
             path: to.to_path_buf(),
@@ -660,9 +546,8 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
         Err(e) => (report.schema_version, Some(e.to_string())),
     };
 
-    // Step 5. Verified WITHOUT the manifest's counts, because migrating
-    // forward may legitimately change them; integrity and foreign keys are the
-    // checks that still mean something here.
+    // Verified WITHOUT the manifest's counts, because migrating forward may legitimately change
+    // them; integrity and foreign keys are the checks that still mean something here.
     let structure_ok = failure.is_none() && verify_structure(to).unwrap_or(false);
     if !structure_ok {
         if let Some(safety) = &safety_copy {
@@ -683,14 +568,10 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
         });
     }
 
-    // **D132 — the photographs come back too**, and only once the database is
-    // known good. They are copied and never moved, so a failed restore that
-    // rolls back still leaves the backup complete.
+    // The photographs come back too, and only once the database is known good.
     copy_attachments(&backup_attachments_dir(from), &attachments_dir(to))?;
 
-    // The outbox knows nothing about what the cloud has seen since this backup
-    // was taken. See `OutboxRepo::requeue_everything` for why the whole thing
-    // is marked pending rather than half of it.
+    // The outbox knows nothing about what the cloud has seen since this backup was taken.
     let counts = {
         let conn = Connection::open(to).map_err(|source| DbError::Open {
             path: to.to_path_buf(),
@@ -716,8 +597,8 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
     })
 }
 
-/// Integrity and foreign keys only — used after a restore, where the manifest's
-/// row counts may legitimately have changed by migrating forward.
+/// Integrity and foreign keys only — used after a restore, where the manifest's row counts may
+/// legitimately have changed by migrating forward.
 fn verify_structure(path: &Path) -> Result<bool, DbError> {
     let conn = open_read_only(path)?;
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
@@ -729,15 +610,7 @@ fn verify_structure(path: &Path) -> Result<bool, DbError> {
     Ok(rows.next()?.is_none())
 }
 
-// ---------------------------------------------------------------------------
-// Retention
-// ---------------------------------------------------------------------------
-
 /// Keep 7 daily and 4 weekly, prune the rest.
-///
-/// **The newest is never pruned**, under any circumstance — not by a retention
-/// bug, not by a clock that jumped backwards, which is why it is picked out
-/// explicitly rather than trusted to fall out of the arithmetic.
 pub fn prune(dir: &Path, now_ms: i64) -> Result<Vec<PathBuf>, DbError> {
     const DAY_MS: i64 = 86_400_000;
     const KEEP_DAILY: i64 = 7;
@@ -753,15 +626,13 @@ pub fn prune(dir: &Path, now_ms: i64) -> Result<Vec<PathBuf>, DbError> {
     backups.sort_by(|a, b| b.manifest.taken_at_ms.cmp(&a.manifest.taken_at_ms));
 
     let mut keep = std::collections::BTreeSet::new();
-    // Rule zero, applied before anything else can reason its way out of it:
-    // **the newest is never pruned.** Not by an off-by-one in the arithmetic
-    // below, and not by a counter PC whose clock jumped backwards after a
-    // reboot — which is why this does not depend on `now_ms` at all.
+    // Rule zero, applied before anything else can reason its way out of it: the newest is never
+    // pruned.
     keep.insert(backups[0].path.clone());
 
-    // Counted, not windowed. "The last 7 daily and the last 4 weekly" is a
-    // count of backups, and expressing it as an age window makes the answer
-    // depend on how often the scheduler happened to fire.
+    // Counted, not windowed. "The last 7 daily and the last 4 weekly" is a count of backups,
+    // and expressing it as an age window makes the answer depend on how often the scheduler
+    // happened to fire.
     let daily_slots = usize::try_from(KEEP_DAILY).unwrap_or(0);
     let weekly_slots = usize::try_from(KEEP_WEEKLY).unwrap_or(0);
     let mut seen_days = std::collections::BTreeSet::new();
@@ -788,18 +659,14 @@ pub fn prune(dir: &Path, now_ms: i64) -> Result<Vec<PathBuf>, DbError> {
         }
         let _ = std::fs::remove_file(backup.manifest_path());
         std::fs::remove_file(&backup.path).map_err(|e| {
-            DbError::invariant(format!(
-                "could not prune {}: {e}",
-                backup.path.display()
-            ))
+            DbError::invariant(format!("could not prune {}: {e}", backup.path.display()))
         })?;
         pruned.push(backup.path);
     }
     Ok(pruned)
 }
 
-/// Every backup in a folder, with its manifest. Files without a readable
-/// manifest are skipped — they are not backups this program can offer.
+/// Every backup in a folder, with its manifest.
 pub fn list(dir: &Path) -> Result<Vec<Backup>, DbError> {
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(dir) {
@@ -825,11 +692,6 @@ pub fn list(dir: &Path) -> Result<Vec<Backup>, DbError> {
     Ok(out)
 }
 
-// ---------------------------------------------------------------------------
-// Restore-before-open: the seam P08 and P22 use
-// ---------------------------------------------------------------------------
-
-/// A restore the owner has asked for, waiting for the next launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRestore {
     pub from: PathBuf,
@@ -840,18 +702,14 @@ fn pending_path(config_dir: &Path) -> PathBuf {
 }
 
 /// Record that a restore should happen next time the app starts.
-///
-/// A plain file beside the config, deliberately: it must be readable and
-/// removable **without opening SQLite**, because the whole point is that the
-/// database may be the thing that is broken.
 pub fn request_restore(config_dir: &Path, from: &Path) -> Result<(), DbError> {
-    std::fs::create_dir_all(config_dir)
-        .map_err(|e| DbError::invariant(format!("could not create {}: {e}", config_dir.display())))?;
+    std::fs::create_dir_all(config_dir).map_err(|e| {
+        DbError::invariant(format!("could not create {}: {e}", config_dir.display()))
+    })?;
     std::fs::write(pending_path(config_dir), from.to_string_lossy().as_bytes())
         .map_err(|e| DbError::invariant(format!("could not record the restore request: {e}")))
 }
 
-/// P08 calls this **before `Db::open`**. P22 owns the screen and the restart.
 pub fn pending_restore(config_dir: &Path) -> Option<PendingRestore> {
     let text = std::fs::read_to_string(pending_path(config_dir)).ok()?;
     let trimmed = text.trim();
@@ -863,8 +721,7 @@ pub fn pending_restore(config_dir: &Path) -> Option<PendingRestore> {
     })
 }
 
-/// Clear the request once it has been carried out — success or failure. A
-/// request that survives its own attempt is a boot loop.
+/// Clear the request once it has been carried out — success or failure.
 pub fn clear_pending_restore(config_dir: &Path) -> Result<(), DbError> {
     match std::fs::remove_file(pending_path(config_dir)) {
         Ok(()) => Ok(()),
@@ -874,8 +731,6 @@ pub fn clear_pending_restore(config_dir: &Path) -> Result<(), DbError> {
         ))),
     }
 }
-
-// ---------------------------------------------------------------------------
 
 fn open_read_only(path: &Path) -> Result<Connection, DbError> {
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|source| {
@@ -914,11 +769,6 @@ fn read_manifest(db: &Path) -> Result<Manifest, DbError> {
 }
 
 /// FNV-1a over the file, in 64 KB chunks.
-///
-/// The same reasoning as the migration checksum (R6): this is a tripwire
-/// against corruption and truncation, not a security control, and nobody is
-/// forging a backup they also control the manifest of. A cryptographic hash
-/// would cost a dependency and buy nothing.
 fn file_checksum(path: &Path) -> Result<String, DbError> {
     use std::io::Read;
 

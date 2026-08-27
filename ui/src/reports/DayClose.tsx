@@ -1,23 +1,4 @@
-/**
- * **Closing the day** — requirement 9 of the ten, audit B15.
- *
- * The nightly ritual: count the drawer, compare it against what the till
- * expected, say why if the two differ, print the slip, lock the day.
- *
- * # Everything on this screen was computed in Rust
- *
- * The grid sends `{ value, count }` pairs on every keystroke and gets the whole
- * screen back — including the running total, the difference, and the sentence
- * that describes it. **There is exactly one variance calculation in this
- * product**, which is why the number on screen while you type cannot disagree
- * with the number that gets saved. R8, and it is the rule that matters most on
- * the one screen that is entirely about money.
- *
- * # The difference is a sentence
- *
- * "Short by 340.00", not "-340.00". A minus sign in front of an amount on a
- * screen somebody reads at eleven at night, tired, is read wrong eventually.
- */
+/** Closing the day. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -46,7 +27,7 @@ export function DayClose() {
   const [confirming, setConfirming] = useState(false);
   const [reopening, setReopening] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
-  // P29. Every electronic payment nobody has said arrived yet.
+  // Every electronic payment nobody has said arrived yet.
   const [unconfirmed, setUnconfirmed] = useState<UnconfirmedView[]>([]);
   const [waiting, setWaiting] = useState('');
   const toast = useToast();
@@ -61,8 +42,8 @@ export function DayClose() {
   const arrived = useCallback((fresh: DayCloseView) => {
     setView(fresh);
     setReason(fresh.reason);
-    // The stored count, when there is one, becomes what the boxes show — so a
-    // reopened day does not have to be counted again from scratch.
+    // The stored count, when there is one, becomes what the boxes show — so a reopened day does
+    // not have to be counted again from scratch.
     setCounts(
       Object.fromEntries(fresh.denominations.filter((d) => d.count > 0).map((d) => [d.value, d.count])),
     );
@@ -70,9 +51,8 @@ export function DayClose() {
 
   useEffect(() => {
     call('day_close').then(arrived).catch(complain);
-    // P29. Silent on failure: a shop whose person may not read reports still
-    // closes its day, and an error toast about a list they cannot see would
-    // be noise they can do nothing about.
+    // Silent on failure: a shop whose person may not read reports still closes its day, and an
+    // error toast about a list they cannot see would be noise they can do nothing about.
     call('payments')
       .then((view) => {
         setUnconfirmed([...view.unconfirmed]);
@@ -117,10 +97,7 @@ export function DayClose() {
         }
       />
 
-      {/* **Which tills are in this day** (P27, D140). Silent in a one-till
-          shop, and in a two-till shop it is what stops a manager going home
-          believing the day is closed: the shop's total is the SUM of the
-          drawers, so a drawer nobody counted is a total that is short. */}
+      {/* Which tills are in this day. */}
       {view.tillsSay ? (
         <Card className="mb-dayclose__tills">
           <p className="mb-dayclose__closed">{view.tillsSay}</p>
@@ -128,9 +105,7 @@ export function DayClose() {
       ) : null}
 
       {view.isClosed ? (
-        // The sentence and the way out, side by side. A quiet button on its
-        // own line came out centred with no chrome and read as a heading —
-        // an action nobody would press because it did not look like one.
+        // The sentence and the way out, side by side.
         <Card className="mb-dayclose__banner">
           <p className="mb-dayclose__closed">{view.closedSays}</p>
           {view.mayClose ? (
@@ -207,12 +182,6 @@ export function DayClose() {
         <strong>{view.varianceSays}</strong>
       </Card>
 
-      {/* **P29, scope 8.3 — what has not been confirmed.**
-
-          Here rather than on a screen of its own, because "at close" is when a
-          shop can still do something about it: the customer is gone, but the
-          bank app is open and the reference is on the screen. A list nobody is
-          standing in front of is a list nobody clears. */}
       {unconfirmed.length > 0 ? (
         <Card className="mb-dayclose__unconfirmed">
           <SectionHeader title="Not confirmed yet" />
@@ -287,8 +256,10 @@ export function DayClose() {
         />
       ) : null}
 
-      {/* A Modal and not a ConfirmDialog: this one asks for something, and a
-          confirm dialog that grew a text box would stop being a confirmation. */}
+      {/*
+        A Modal and not a ConfirmDialog: this one asks for something, and a confirm dialog that
+        grew a text box would stop being a confirmation.
+      */}
       <Modal
         open={reopening}
         title="Open this day again?"

@@ -1,10 +1,4 @@
 //! A file.
-//!
-//! Two jobs: "print to file", which a shop occasionally wants, and **every test
-//! in this crate**. The queue, its retries, its parking, its parallelism and
-//! its bytes are all provable against this, on a machine with no printer — and
-//! that is the difference between a session that can be verified and one that
-//! has to be believed.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -36,8 +30,8 @@ impl Transport for FileTransport {
             });
         }
 
-        // Appended, so a second job does not erase the first — a file target is
-        // a paper roll, and a roll does not rewind.
+        // Appended, so a second job does not erase the first — a file target is a paper roll,
+        // and a roll does not rewind.
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -51,9 +45,8 @@ impl Transport for FileTransport {
             target: self.path.display().to_string(),
             reason: e.to_string(),
         })?;
-        // Flushed rather than left to the drop, because a job that reports
-        // success and then loses its bytes in a buffer is the same lie the whole
-        // queue exists to stop.
+        // Flushed rather than left to the drop, because a job that reports success and then
+        // loses its bytes in a buffer is the same lie the whole queue exists to stop.
         file.flush().map_err(|e| TransportError::Write {
             target: self.path.display().to_string(),
             reason: e.to_string(),

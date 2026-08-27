@@ -1,35 +1,8 @@
-//! **What a table is called, and when two of them are the same table.**
-//!
-//! Audit loophole I5, kept in full because it names the exact half-fix:
-//!
-//! > *"Table numbers accept any text; two people can create "1" and "AC 1"
-//! > that print identically (this is now guarded in the table master, but the
-//! > billing screen's free-text table box is not guarded the same way)."*
-//!
-//! v1 had the right idea and guarded one of the two doors. So the rule lives
-//! here, in the domain crate, with no database and no screen anywhere near it,
-//! and **everything that can name a table calls it** — the master editor, the
-//! bulk range add, and the billing screen's table box.
-//!
-//! # A section is part of the name
-//!
-//! That is the whole point. "1" in the AC room prints as `AC 1`, and a table
-//! literally *named* "AC 1" with no section prints the same string. Those two
-//! are one table as far as a cook holding a ticket is concerned, and the
-//! second one must be refused.
-//!
-//! The corollary matters just as much: **"1" in AC and "1" in Garden are two
-//! different tables** and both must be allowed. A rule that compares bare
-//! labels forbids the most ordinary table layout in India.
+//! What a table is called, and when two of them are the same table.
 
 use serde::{Deserialize, Serialize};
 
-/// A sub-table letter — scope 1.6's `6A` / `6B`.
-///
-/// Two parties at one big table, each with their own order and their own bill.
-/// The table is `6`; this is the letter, and it is stored on the ORDER
-/// (`orders.sub_table`) rather than on the table, because it exists only while
-/// somebody is sitting there.
+/// A sub-table letter.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SubTable(String);
@@ -44,10 +17,7 @@ pub enum TableError {
 }
 
 impl SubTable {
-    /// A single letter, upper-cased. `6a` and `6A` are the same seat.
-    ///
-    /// Deliberately not "any text": the letter is printed on a ticket beside a
-    /// number, and `6Front-left-by-the-window` is not a thing a cook can read.
+    /// A single letter, upper-cased.
     pub fn parse(text: &str) -> Result<Self, TableError> {
         let trimmed = text.trim();
         let mut chars = trimmed.chars();
@@ -65,11 +35,7 @@ impl SubTable {
     }
 }
 
-/// **What a table prints as** — the one string the whole system compares by.
-///
-/// Not stored anywhere. Storing it would make it a second copy of the truth
-/// that could disagree with its own parts, which is the mistake D56 was
-/// written to avoid on the other side of the app.
+/// What a table prints as — the one string the whole system compares by.
 #[must_use]
 pub fn printed_name(section: Option<&str>, label: &str) -> String {
     let label = label.trim();
@@ -80,9 +46,6 @@ pub fn printed_name(section: Option<&str>, label: &str) -> String {
 }
 
 /// The same, with a sub-table letter: `AC 1A`.
-///
-/// The letter joins the LABEL, not the section — `AC 1A`, never `AC A1` and
-/// never `AC 1 A`. It reads as one seat identifier because that is what it is.
 #[must_use]
 pub fn printed_seat(section: Option<&str>, label: &str, sub: Option<&SubTable>) -> String {
     match sub {
@@ -91,36 +54,23 @@ pub fn printed_seat(section: Option<&str>, label: &str, sub: Option<&SubTable>) 
     }
 }
 
-/// Are these two the same table, as far as anybody reading a ticket is
-/// concerned?
+/// Are these two the same table, as far as anybody reading a ticket is concerned?
 #[must_use]
 pub fn same_table(a: (Option<&str>, &str), b: (Option<&str>, &str)) -> bool {
     comparable(&printed_name(a.0, a.1)) == comparable(&printed_name(b.0, b.1))
 }
 
-/// The form two names are compared in: **case-folded, with runs of whitespace
-/// collapsed to one space.**
-///
-/// `"AC  1"`, `"ac 1"` and `"AC 1"` are one table.
-///
-/// **This form is never stored.** The label prints verbatim — the same
-/// argument `cart::normalise_note` makes about a kitchen note: quietly
-/// changing what a cook reads is worse than the duplicate it prevents. So the
-/// shop keeps typing `AC` in capitals if it wants to, and the comparison
-/// simply does not care.
+/// The form two names are compared in: case-folded, with runs of whitespace collapsed to one
+/// space.
 #[must_use]
 pub fn comparable(name: &str) -> String {
-    name.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Check a proposed name against what the shop already has.
-///
-/// `existing` is `(id, section, label)` for every table that is not this one —
-/// the caller filters itself out, because renaming a table to its own name has
-/// to be allowed.
-///
-/// Returns the id of the table it would collide with, so the message can name
-/// it: *"AC 1 already exists in Main hall"* rather than *"duplicate"*.
 pub fn clashes_with<'a>(
     section: Option<&str>,
     label: &str,
@@ -139,18 +89,19 @@ pub fn clashes_with<'a>(
 }
 
 /// The labels a "add tables 1 to 20" range would create.
-///
-/// Rejects a backwards or absurd range rather than creating nothing and
-/// claiming success. The cap is 200 because a range is a convenience for a
-/// dining room, not a bulk import: a shop with 500 tables has a different
-/// problem and should be typing them into a spreadsheet.
 pub fn range_labels(from: i64, to: i64, prefix: &str) -> Result<Vec<String>, TableError> {
     if to < from || to - from >= 200 {
         return Err(TableError::EmptyLabel);
     }
     let prefix = prefix.trim();
     Ok((from..=to)
-        .map(|n| if prefix.is_empty() { n.to_string() } else { format!("{prefix}{n}") })
+        .map(|n| {
+            if prefix.is_empty() {
+                n.to_string()
+            } else {
+                format!("{prefix}{n}")
+            }
+        })
         .collect())
 }
 
@@ -167,8 +118,6 @@ mod tests {
         assert_eq!(printed_name(Some("   "), "5"), "5");
     }
 
-    /// **Loophole I5, as a test.** These two rows are different in the master
-    /// and identical to the kitchen.
     #[test]
     fn one_in_ac_and_a_table_named_ac_one_are_the_same_table() {
         assert!(same_table((Some("AC"), "1"), (None, "AC 1")));
@@ -176,8 +125,8 @@ mod tests {
         assert!(same_table((Some(" AC "), " 1 "), (None, "ac 1")));
     }
 
-    /// The corollary, and the one a naive rule gets wrong: the most ordinary
-    /// table layout in India has a table 1 in every room.
+    /// The corollary, and the one a naive rule gets wrong: the most ordinary table layout in
+    /// India has a table 1 in every room.
     #[test]
     fn the_same_number_in_two_rooms_is_two_tables() {
         assert!(!same_table((Some("AC"), "1"), (Some("Garden"), "1")));
@@ -186,16 +135,19 @@ mod tests {
 
     #[test]
     fn a_clash_names_the_row_it_clashed_with() {
-        let existing = vec![
-            ("tbl_1", Some("Main hall"), "1"),
-            ("tbl_ac1", None, "AC 1"),
-        ];
+        let existing = vec![("tbl_1", Some("Main hall"), "1"), ("tbl_ac1", None, "AC 1")];
         assert_eq!(
             clashes_with(Some("AC"), "1", existing.clone()).expect("a name"),
             Some("tbl_ac1"),
         );
-        assert_eq!(clashes_with(Some("AC"), "2", existing.clone()).expect("a name"), None);
-        assert_eq!(clashes_with(None, "  ", existing), Err(TableError::EmptyLabel));
+        assert_eq!(
+            clashes_with(Some("AC"), "2", existing.clone()).expect("a name"),
+            None
+        );
+        assert_eq!(
+            clashes_with(None, "  ", existing),
+            Err(TableError::EmptyLabel)
+        );
     }
 
     #[test]

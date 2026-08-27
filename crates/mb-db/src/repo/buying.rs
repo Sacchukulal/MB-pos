@@ -1,33 +1,3 @@
-//! **Buying** — P26, scope 4.5: suppliers, the paper, the supplier ledger and
-//! purchase orders.
-//!
-//! # One rupee, one row. One kilo, one row. (D120)
-//!
-//! Saving one delivery moves four ledgers at once — the shelf (P25), the drawer
-//! (P16), the tax return (P13/P18) and what the shop owes other people (here) —
-//! and the only way they can never disagree is that each fact is written
-//! **exactly once**, in one transaction, and everything else is a query over
-//! those rows.
-//!
-//! So there is deliberately **no `expenses` row and no `cash_movements` row**
-//! for a purchase. [`MoneyRepo::cash_position`](super::money::MoneyRepo) gains
-//! one more term instead — cash paid to suppliers — and the day close's expected
-//! drawer becomes correct for a shop that pays the vegetable man from the till,
-//! which before this session it silently was not.
-//!
-//! # There is no balance column
-//!
-//! [`BuyingRepo::supplier_balance`] is a `SUM` every time, exactly as
-//! `customer_balance` is (P15). A stored balance is a balance that can disagree
-//! with its own ledger, and the day it does nobody can tell which is right.
-//!
-//! # What this file does not do
-//!
-//! **It does not cost anything.** `mb_core::purchase::cost_invoice` produces the
-//! landed cost, and `UnitCost::blend` inside [`StockRepo::record`] turns a
-//! sequence of deliveries into a material's average (D118, D122). This file
-//! persists what those two decided, and writes the ledger rows.
-
 use std::collections::BTreeMap;
 
 use mb_core::credit::{self, Ageing};
@@ -48,9 +18,7 @@ pub struct Supplier {
     pub phone: Option<String>,
     pub gstin: Option<String>,
     pub address: Option<String>,
-    /// **Days.** Zero means cash-and-carry: due the day it arrives. This is the
-    /// only supplier-shaped input to ageing, because D131 makes a payment term a
-    /// shift of the date and not a second algorithm.
+    /// Days. Zero means cash-and-carry: due the day it arrives.
     pub terms_days: u32,
     pub note: Option<String>,
     pub is_active: bool,
@@ -71,20 +39,18 @@ impl Supplier {
         }
     }
 
-    /// **D131** — when this invoice falls due. Frozen onto the purchase at entry
-    /// so that changing the terms next month cannot re-age last month.
+    /// When this invoice falls due.
     #[must_use]
     pub fn due_day(&self, received: BusinessDay) -> BusinessDay {
         BusinessDay::from_days_since_epoch(
-            received.days_since_epoch().saturating_add(i32::try_from(self.terms_days).unwrap_or(0)),
+            received
+                .days_since_epoch()
+                .saturating_add(i32::try_from(self.terms_days).unwrap_or(0)),
         )
     }
 }
 
 /// What a supplier sells and what they last charged for it.
-///
-/// **`last_rate` is a memory of a price list and never a cost** (D122). A screen
-/// may show it; nothing values stock with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SupplierMaterial {
     pub material_id: MaterialId,
@@ -99,9 +65,8 @@ pub struct SupplierMaterial {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PurchaseKind {
     Purchase,
-    /// **D126** — its own document pointing at its parent, never a negative line
-    /// edited onto the original, because the original is a photograph of
-    /// something that happened.
+    /// Its own document pointing at its parent, never a negative line edited onto the original,
+    /// because the original is a photograph of something that happened.
     Return,
 }
 
@@ -126,9 +91,9 @@ impl PurchaseKind {
         match tag {
             "purchase" => Ok(PurchaseKind::Purchase),
             "return" => Ok(PurchaseKind::Return),
-            other => {
-                Err(DbError::invariant(format!("purchases.kind holds an unknown value `{other}`")))
-            }
+            other => Err(DbError::invariant(format!(
+                "purchases.kind holds an unknown value `{other}`"
+            ))),
         }
     }
 }
@@ -140,7 +105,7 @@ pub struct PurchaseLine {
     pub material_id: MaterialId,
     /// Filled in when read back, for every screen and document.
     pub material_name: String,
-    /// **D109 — both numbers.** What was typed, in which unit, and the truth.
+    /// Both numbers.
     pub typed_qty: Qty,
     pub typed_unit: String,
     pub base_qty: Qty,
@@ -156,17 +121,18 @@ pub struct PurchaseLine {
     pub discount_share: Money,
     pub landed_value: Money,
     pub landed_unit_cost: UnitCost,
-    /// The ledger row this line wrote. **What makes D126 exact**: a return goes
-    /// out at what these goods cost when they came, read from here.
+    /// The ledger row this line wrote.
     pub movement_id: Option<String>,
     /// On a return line: which line of the parent invoice is going back.
     pub returns_seq: Option<i64>,
 }
 
 impl PurchaseLine {
-    /// Everything that came off the vehicle — charged plus free (D123).
+    /// Everything that came off the vehicle — charged plus free.
     pub fn received(&self) -> Qty {
-        self.base_qty.add(self.free_base_qty).unwrap_or(self.base_qty)
+        self.base_qty
+            .add(self.free_base_qty)
+            .unwrap_or(self.base_qty)
     }
 }
 
@@ -180,7 +146,6 @@ pub struct Purchase {
     pub kind: PurchaseKind,
     pub parent_id: Option<String>,
     pub invoice_no: Option<String>,
-    /// **D5, and audit B1 is why.** Stored, never re-derived from a timestamp.
     pub business_day: BusinessDay,
     pub received_at: Timestamp,
     pub due_day: BusinessDay,
@@ -189,7 +154,7 @@ pub struct Purchase {
     pub invoice_discount: Money,
     pub charges: Money,
     pub tax_total: Money,
-    /// **D124** — how much of that tax the shop may actually claim back.
+    /// How much of that tax the shop may actually claim back.
     pub tax_creditable: Money,
     pub round_off: Money,
     pub total: Money,
@@ -199,7 +164,7 @@ pub struct Purchase {
     pub attachment_id: Option<String>,
     pub note: Option<String>,
     pub created_by: Option<StaffId>,
-    /// **D125** — the only correction path a purchase has.
+    /// The only correction path a purchase has.
     pub cancelled: Option<Cancellation>,
     pub lines: Vec<PurchaseLine>,
 }
@@ -248,11 +213,7 @@ impl Purchase {
         }
     }
 
-    /// **The sign a return carries into every ledger.** A return's money and its
-    /// quantities are recorded positive on the paper and applied negative
-    /// everywhere else, because a ledger row with a negative "amount" in it is
-    /// how a subtraction becomes an addition in somebody's report six months
-    /// later.
+    /// The sign a return carries into every ledger.
     #[must_use]
     pub const fn direction(&self) -> i64 {
         match self.kind {
@@ -262,13 +223,8 @@ impl Purchase {
     }
 }
 
-/// **Turn what somebody typed into the rows that will be written** — the one
-/// place the paper becomes a document, used by the command and by the tests.
-///
-/// `materials[i]` names the material and the typed unit of `invoice.lines[i]`;
-/// the arithmetic is `mb_core::purchase::cost_invoice` and nothing here repeats
-/// any of it. The caller resolves each line's [`Pack`] from the material, which
-/// is what keeps the costing engine free of the database.
+/// Turn what somebody typed into the rows that will be written — the one place the paper
+/// becomes a document, used by the command and by the tests.
 pub fn draft(
     id: impl Into<String>,
     supplier: &Supplier,
@@ -280,8 +236,8 @@ pub fn draft(
     if materials.len() != invoice.lines.len() {
         return Err(DbError::invariant("every line needs a material against it"));
     }
-    let costed = mb_core::purchase::cost_invoice(invoice)
-        .map_err(|e| DbError::invariant(e.to_string()))?;
+    let costed =
+        mb_core::purchase::cost_invoice(invoice).map_err(|e| DbError::invariant(e.to_string()))?;
 
     let mut purchase = Purchase::new(id, supplier.id.clone(), day, at);
     purchase.supplier_name = supplier.name.clone();
@@ -323,13 +279,13 @@ pub fn draft(
     Ok(purchase)
 }
 
-/// Money handed to a supplier — D121, always its own row.
+/// Money handed to a supplier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SupplierPayment {
     pub id: String,
     pub supplier_id: String,
     pub amount: Money,
-    /// `cash`, `bank`, `upi` or `card`. **`cash` is the one the drawer reads.**
+    /// `cash`, `bank`, `upi` or `card`.
     pub mode: String,
     pub reference: Option<String>,
     /// Set when the money went over with the delivery.
@@ -359,8 +315,8 @@ pub struct SupplierAdjustment {
 pub struct Outstanding {
     pub supplier: Supplier,
     pub balance: Money,
-    /// **D131** — customer ageing fed the DUE date, so "current" means *not due
-    /// yet* and the 90-day bucket means ninety days **overdue**.
+    /// Customer ageing fed the DUE date, so "current" means not due yet and the 90-day bucket
+    /// means ninety days overdue.
     pub ageing: Ageing,
     pub last_movement: BusinessDay,
 }
@@ -407,14 +363,19 @@ impl OrderState {
     }
 
     pub fn from_tag(tag: &str) -> Result<Self, DbError> {
-        OrderState::ALL.iter().copied().find(|s| s.tag() == tag).ok_or_else(|| {
-            DbError::invariant(format!("purchase_orders.state holds an unknown value `{tag}`"))
-        })
+        OrderState::ALL
+            .iter()
+            .copied()
+            .find(|s| s.tag() == tag)
+            .ok_or_else(|| {
+                DbError::invariant(format!(
+                    "purchase_orders.state holds an unknown value `{tag}`"
+                ))
+            })
     }
 }
 
-/// **D130 — a purchase order is optional, and the proof is that nothing reads
-/// one.** The purchase screen never asks for a PO and never mentions one.
+/// A purchase order is optional, and the proof is that nothing reads one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PurchaseOrder {
     pub id: String,
@@ -442,26 +403,24 @@ pub struct OrderLine {
     pub rate: Money,
 }
 
-/// One row of a buying report. One shape for four reports, because they are the
-/// same question grouped four ways — and four hand-written row types would be
-/// four places for "what a purchase is worth" to drift.
+/// One row of a buying report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuyingRow {
-    /// The stable key â a material id, so the screen can say the quantity in
-    /// the unit a person uses. Empty where the row is not about a material.
+    /// The stable key â a material id, so the screen can say the quantity in the unit a
+    /// person uses.
     pub key: String,
     pub label: String,
     /// How many invoices are behind this row.
     pub count: i64,
-    /// Only for the material report; `None` elsewhere, because a quantity of
-    /// "Metro" is not a thing.
+    /// Only for the material report; `None` elsewhere, because a quantity of "Metro" is not a
+    /// thing.
     pub qty: Option<Qty>,
     pub unit: String,
     pub value: Money,
     pub tax: Money,
 }
 
-/// What one material has been costing — and **the rise is the finding**.
+/// What one material has been costing — and the rise is the finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriceTrendRow {
     pub material: MaterialId,
@@ -475,9 +434,7 @@ pub struct PriceTrendRow {
 }
 
 impl PriceTrendRow {
-    /// How far the last delivery is above or below the period's average, in
-    /// basis points. `None` when there is no average to compare with — a
-    /// percentage of nothing is not a number (P25's `variance_bp` said the same).
+    /// How far the last delivery is above or below the period's average, in basis points.
     #[must_use]
     #[allow(
         clippy::integer_division,
@@ -494,16 +451,14 @@ impl PriceTrendRow {
     }
 }
 
-/// **D132** — the photograph's metadata. The bytes live in `attachments\`
-/// beside the database; this row is what makes a missing file a detectable fact
-/// and not a mystery.
+/// The photograph's metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
     pub id: String,
     pub kind: String,
     pub subject_id: Option<String>,
-    /// `<sha256>.jpg`. Stored rather than derived, so a future format change
-    /// cannot orphan today's files.
+    /// `<sha256>.jpg`. Stored rather than derived, so a future format change cannot orphan
+    /// today's files.
     pub filename: String,
     pub byte_count: i64,
     pub sha256: String,
@@ -530,12 +485,7 @@ impl<'a> BuyingRepo<'a> {
         BuyingRepo { tx }
     }
 
-    // =======================================================================
-    // SUPPLIERS
-    // =======================================================================
-
-    /// Add or change a supplier. **D47: retired, never deleted** — last year's
-    /// invoices point at this row.
+    /// Add or change a supplier.
     pub fn save_supplier(
         &self,
         outlet: &str,
@@ -586,9 +536,8 @@ impl<'a> BuyingRepo<'a> {
     }
 
     pub fn supplier(&self, outlet: &str, id: &str) -> Result<Option<Supplier>, DbError> {
-        let sql = format!(
-            "SELECT {SUPPLIER_COLUMNS} FROM suppliers WHERE outlet_id = ?1 AND id = ?2"
-        );
+        let sql =
+            format!("SELECT {SUPPLIER_COLUMNS} FROM suppliers WHERE outlet_id = ?1 AND id = ?2");
         let mut stmt = self.tx.prepare(&sql)?;
         let mut rows = stmt.query_map(params![outlet, id], read_supplier)?;
         rows.next().transpose().map_err(DbError::from)
@@ -620,8 +569,7 @@ impl<'a> BuyingRepo<'a> {
         Ok(out)
     }
 
-    /// Remember what a supplier charges for a material, so the next purchase
-    /// line pre-fills. Called by [`Self::record_purchase`] and by the screen.
+    /// Remember what a supplier charges for a material, so the next purchase line pre-fills.
     pub fn remember_price(
         &self,
         supplier: &str,
@@ -649,25 +597,19 @@ impl<'a> BuyingRepo<'a> {
         Ok(())
     }
 
-    // =======================================================================
-    // THE PAPER — D120
-    // =======================================================================
+    // THE PAPER.
 
-    /// **Write a delivery: the paper, the shelf and the ledger, in one
-    /// transaction** (D120).
-    ///
-    /// The caller has already costed it with `mb_core::purchase::cost_invoice`;
-    /// this writes what that decided. It does **not** write an `expenses` row or
-    /// a `cash_movements` row — the money half is a [`SupplierPayment`] (D121)
-    /// and the drawer reads it directly.
-    ///
-    /// Returns the purchase with each line's `movement_id` filled in.
+    /// Write a delivery: the paper, the shelf and the ledger, in one transaction.
     pub fn record_purchase(&self, outlet: &str, purchase: &Purchase) -> Result<Purchase, DbError> {
         if purchase.lines.is_empty() {
-            return Err(DbError::invariant("a purchase with no lines is not a purchase"));
+            return Err(DbError::invariant(
+                "a purchase with no lines is not a purchase",
+            ));
         }
         if purchase.kind == PurchaseKind::Return && purchase.parent_id.is_none() {
-            return Err(DbError::invariant("a return has to say which delivery it goes back on"));
+            return Err(DbError::invariant(
+                "a return has to say which delivery it goes back on",
+            ));
         }
 
         let stock = StockRepo::new(self.tx);
@@ -709,13 +651,9 @@ impl<'a> BuyingRepo<'a> {
         )?;
 
         for line in &mut written.lines {
-            // **The shelf moves through P25's own writer**, which is what blends
-            // the average cost (D118) and maintains the balance cache (D114).
-            // This session adds no averaging code and no second balance.
             let movement_id = format!("mov_{}_{}", purchase.id, line.seq);
-            let signed = Qty::from_thousandths(
-                line.received().thousandths().saturating_mul(direction),
-            );
+            let signed =
+                Qty::from_thousandths(line.received().thousandths().saturating_mul(direction));
             let movement = Movement {
                 note: purchase.invoice_no.clone(),
                 ..Movement::new(
@@ -797,14 +735,7 @@ impl<'a> BuyingRepo<'a> {
         Ok(written)
     }
 
-    /// **D125 — the only correction path a purchase has.**
-    ///
-    /// A saved purchase has already moved the average cost of five materials and
-    /// some of that stock has been cooked and sold, so an edit would be a
-    /// rewrite of the past with no record. Cancelling negates the movements **at
-    /// the cost they went in at** (D113's reasoning), leaves the paper on the
-    /// record as a cancelled document, and the screen offers to re-enter a
-    /// corrected copy.
+    /// The only correction path a purchase has.
     pub fn cancel_purchase(
         &self,
         outlet: &str,
@@ -825,18 +756,22 @@ impl<'a> BuyingRepo<'a> {
 
         let stock = StockRepo::new(self.tx);
         for line in &purchase.lines {
-            let Some(original) = &line.movement_id else { continue };
+            let Some(original) = &line.movement_id else {
+                continue;
+            };
             let mut reversal = Movement::new(
                 format!("mov_cx_{}_{}", purchase.id, line.seq),
                 line.material_id.clone(),
                 MovementKind::Purchase,
                 Qty::from_thousandths(
-                    line.received().thousandths().saturating_mul(-purchase.direction()),
+                    line.received()
+                        .thousandths()
+                        .saturating_mul(-purchase.direction()),
                 ),
                 at,
                 purchase.business_day,
             )
-            // **At the cost it came in at**, never today's average.
+            // At the cost it came in at, never today's average.
             .costing(line.landed_unit_cost);
             reversal.reverses_id = Some(original.clone());
             reversal.note = Some(format!("Cancelled: {}", reason.trim()));
@@ -877,7 +812,9 @@ impl<'a> BuyingRepo<'a> {
         );
         let mut stmt = self.tx.prepare(&sql)?;
         let mut rows = stmt.query_map(params![outlet, id], read_purchase)?;
-        let Some(mut purchase) = rows.next().transpose()? else { return Ok(None) };
+        let Some(mut purchase) = rows.next().transpose()? else {
+            return Ok(None);
+        };
         drop(rows);
         purchase.lines = self.lines_of(&purchase.id)?;
         Ok(Some(purchase))
@@ -920,9 +857,7 @@ impl<'a> BuyingRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// Every document in a period, newest first. Cancelled ones are included and
-    /// marked — D47: a correction is a state, and a list that hides them is a
-    /// list that cannot be reconciled with the paper on the spike.
+    /// Every document in a period, newest first.
     pub fn purchases(
         &self,
         outlet: &str,
@@ -955,10 +890,7 @@ impl<'a> BuyingRepo<'a> {
         Ok(out)
     }
 
-    /// **How much of one delivery's line is still on the shelf to send back.**
-    ///
-    /// A query and not a cached column, so nothing can drift: returns point at
-    /// the parent's line, and what is left is arithmetic over rows.
+    /// How much of one delivery's line is still on the shelf to send back.
     pub fn returnable(&self, purchase: &str, seq: i64) -> Result<Qty, DbError> {
         let bought: i64 = self
             .tx
@@ -984,15 +916,9 @@ impl<'a> BuyingRepo<'a> {
         Ok(encode::qty_from_sql(bought.saturating_sub(returned)))
     }
 
-    // =======================================================================
-    // THE SUPPLIER LEDGER — D121 and D131
-    // =======================================================================
+    // THE SUPPLIER LEDGER.
 
-    pub fn record_payment(
-        &self,
-        outlet: &str,
-        payment: &SupplierPayment,
-    ) -> Result<(), DbError> {
+    pub fn record_payment(&self, outlet: &str, payment: &SupplierPayment) -> Result<(), DbError> {
         if !payment.amount.is_positive() {
             return Err(DbError::invariant("a payment of nothing is not a payment"));
         }
@@ -1033,7 +959,9 @@ impl<'a> BuyingRepo<'a> {
             return Err(DbError::invariant("an adjustment needs a reason"));
         }
         if !adjustment.amount.is_positive() {
-            return Err(DbError::invariant("an adjustment of nothing changes nothing"));
+            return Err(DbError::invariant(
+                "an adjustment of nothing changes nothing",
+            ));
         }
         self.tx.execute(
             "INSERT INTO supplier_adjustments
@@ -1060,12 +988,8 @@ impl<'a> BuyingRepo<'a> {
         )
     }
 
-    /// **The account, as movements** — and it is `mb_core::credit::Movement`,
-    /// the very type a customer's account uses.
-    ///
-    /// **D131: a purchase enters the ledger on its DUE day.** A payment term is
-    /// a shift of the date, not a second ageing algorithm, so `credit::ageing`
-    /// answers "ninety days overdue" with no new code.
+    /// The account, as movements — and it is `mb_core::credit::Movement`, the very type a
+    /// customer's account uses.
     pub fn supplier_ledger(&self, supplier: &str) -> Result<Vec<credit::Movement>, DbError> {
         let mut out = Vec::new();
 
@@ -1084,11 +1008,14 @@ impl<'a> BuyingRepo<'a> {
             let note = invoice.unwrap_or(id);
             out.push(match kind {
                 // A delivery increases what the shop owes.
-                PurchaseKind::Purchase => {
-                    credit::Movement { day, kind: credit::MovementKind::Sale, amount, note }
-                }
-                // Goods going back reduce it, and they are an adjustment rather
-                // than a repayment because no money moved.
+                PurchaseKind::Purchase => credit::Movement {
+                    day,
+                    kind: credit::MovementKind::Sale,
+                    amount,
+                    note,
+                },
+                // Goods going back reduce it, and they are an adjustment rather than a
+                // repayment because no money moved.
                 PurchaseKind::Return => credit::Movement {
                     day,
                     kind: credit::MovementKind::Adjustment { increases: false },
@@ -1146,16 +1073,14 @@ impl<'a> BuyingRepo<'a> {
         Ok(out)
     }
 
-    /// **A `SUM` every time.** There is no balance column here for the same
-    /// reason there is none on a customer (P15).
+    /// A `SUM` every time.
     pub fn supplier_balance(&self, supplier: &str) -> Result<Money, DbError> {
         let movements = self.supplier_ledger(supplier)?;
         credit::balance(&movements)
             .map_err(|e| DbError::invariant(format!("that account cannot be totalled: {e}")))
     }
 
-    /// "Who am I overdue with" — the default view of the supplier screen, the
-    /// way P15 opens on "who owes me money".
+    /// "Who am I overdue with".
     pub fn outstanding(
         &self,
         outlet: &str,
@@ -1179,16 +1104,19 @@ impl<'a> BuyingRepo<'a> {
                 .map(|m| m.day)
                 .max_by_key(|d| d.days_since_epoch())
                 .unwrap_or(today);
-            out.push(Outstanding { supplier, balance, ageing, last_movement });
+            out.push(Outstanding {
+                supplier,
+                balance,
+                ageing,
+                last_movement,
+            });
         }
         // The oldest money first, which is the order somebody pays in.
         out.sort_by_key(|o| o.ageing.oldest_days.map(|d| -d).unwrap_or(0));
         Ok(out)
     }
 
-    /// **What the drawer paid out to suppliers** — the term D120 adds to
-    /// `cash_position`, and the reason a purchase writes no `cash_movements`
-    /// row.
+    /// What the drawer paid out to suppliers.
     pub fn cash_paid_out(&self, outlet: &str, day: BusinessDay) -> Result<Money, DbError> {
         let paise: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM supplier_payments
@@ -1199,9 +1127,7 @@ impl<'a> BuyingRepo<'a> {
         Ok(encode::money_from_sql(paise))
     }
 
-    // =======================================================================
-    // PURCHASE ORDERS — D130
-    // =======================================================================
+    // PURCHASE ORDERS.
 
     pub fn save_order(&self, outlet: &str, order: &PurchaseOrder) -> Result<(), DbError> {
         if order.number.trim().is_empty() {
@@ -1234,7 +1160,10 @@ impl<'a> BuyingRepo<'a> {
                 order.closed_at.map(encode::timestamp_to_sql),
             ],
         )?;
-        self.tx.execute("DELETE FROM purchase_order_lines WHERE po_id = ?1", [&order.id])?;
+        self.tx.execute(
+            "DELETE FROM purchase_order_lines WHERE po_id = ?1",
+            [&order.id],
+        )?;
         for line in &order.lines {
             self.tx.execute(
                 "INSERT INTO purchase_order_lines
@@ -1281,8 +1210,12 @@ impl<'a> BuyingRepo<'a> {
                 note: row.get(6)?,
                 created_at: encode::timestamp_from_sql(row.get(7)?),
                 created_by: row.get::<_, Option<String>>(8)?.map(StaffId::new),
-                sent_at: row.get::<_, Option<i64>>(9)?.map(encode::timestamp_from_sql),
-                closed_at: row.get::<_, Option<i64>>(10)?.map(encode::timestamp_from_sql),
+                sent_at: row
+                    .get::<_, Option<i64>>(9)?
+                    .map(encode::timestamp_from_sql),
+                closed_at: row
+                    .get::<_, Option<i64>>(10)?
+                    .map(encode::timestamp_from_sql),
                 lines: Vec::new(),
             })
             .map(|order| (order, row.get::<_, String>(4), row.get::<_, Option<i64>>(5)))
@@ -1328,10 +1261,6 @@ impl<'a> BuyingRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    // =======================================================================
-    // REPORTS — all of them through P18's catalogue, and none of them a screen
-    // =======================================================================
-
     /// What went to each supplier in a period.
     pub fn by_supplier(
         &self,
@@ -1351,7 +1280,11 @@ impl<'a> BuyingRepo<'a> {
               GROUP BY s.id ORDER BY 3 DESC",
         )?;
         let rows = stmt.query_map(
-            params![outlet, encode::business_day_to_sql(from), encode::business_day_to_sql(to)],
+            params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to)
+            ],
             |row| {
                 Ok(BuyingRow {
                     key: String::new(),
@@ -1367,8 +1300,8 @@ impl<'a> BuyingRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// What was bought of each material — the report that answers *"where does
-    /// ₹40,000 a month go"*.
+    /// What was bought of each material — the report that answers "where does ₹40,000 a month
+    /// go".
     pub fn by_material(
         &self,
         outlet: &str,
@@ -1390,7 +1323,11 @@ impl<'a> BuyingRepo<'a> {
               GROUP BY m.id ORDER BY 6 DESC",
         )?;
         let rows = stmt.query_map(
-            params![outlet, encode::business_day_to_sql(from), encode::business_day_to_sql(to)],
+            params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to)
+            ],
             |row| {
                 let dimension: String = row.get(2)?;
                 Ok(BuyingRow {
@@ -1409,12 +1346,7 @@ impl<'a> BuyingRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// **The price trend, and the rise is the finding.**
-    ///
-    /// An owner does not read a table of rates; they act on *"onion is up 46%"*.
-    /// So this compares the LAST landed cost against the average of everything
-    /// bought in the period before it, and hands back the change in basis points
-    /// for the sentence to be written from.
+    /// The price trend, and the rise is the finding.
     pub fn price_trend(
         &self,
         outlet: &str,
@@ -1441,7 +1373,11 @@ impl<'a> BuyingRepo<'a> {
               GROUP BY m.id ORDER BY m.name",
         )?;
         let rows = stmt.query_map(
-            params![outlet, encode::business_day_to_sql(from), encode::business_day_to_sql(to)],
+            params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to)
+            ],
             |row| {
                 let dimension: String = row.get(2)?;
                 let average: f64 = row.get(6)?;
@@ -1471,8 +1407,7 @@ impl<'a> BuyingRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// **D124** — input credit, rate by rate. Empty for a 5%-scheme shop, and
-    /// the screen says why in a sentence rather than showing a blank table.
+    /// Input credit, rate by rate.
     pub fn input_credit(
         &self,
         outlet: &str,
@@ -1494,7 +1429,11 @@ impl<'a> BuyingRepo<'a> {
               GROUP BY pl.tax_rate_bp ORDER BY pl.tax_rate_bp",
         )?;
         let rows = stmt.query_map(
-            params![outlet, encode::business_day_to_sql(from), encode::business_day_to_sql(to)],
+            params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to)
+            ],
             |row| {
                 let rate_bp: i64 = row.get(0)?;
                 Ok(BuyingRow {
@@ -1516,7 +1455,7 @@ impl<'a> BuyingRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// How much of the period's input tax the shop may actually claim (D124).
+    /// How much of the period's input tax the shop may actually claim.
     pub fn creditable_total(
         &self,
         outlet: &str,
@@ -1528,15 +1467,15 @@ impl<'a> BuyingRepo<'a> {
                                       ELSE -tax_creditable END), 0)
                FROM purchases
               WHERE outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3 AND is_cancelled = 0",
-            params![outlet, encode::business_day_to_sql(from), encode::business_day_to_sql(to)],
+            params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to)
+            ],
             |row| row.get(0),
         )?;
         Ok(encode::money_from_sql(paise))
     }
-
-    // =======================================================================
-    // ATTACHMENTS — D132
-    // =======================================================================
 
     pub fn save_attachment(&self, outlet: &str, attachment: &Attachment) -> Result<(), DbError> {
         self.tx.execute(
@@ -1561,10 +1500,6 @@ impl<'a> BuyingRepo<'a> {
     }
 
     /// Tell a photograph what it is a picture of.
-    ///
-    /// It is taken **before** the purchase exists — a person shoots the paper,
-    /// then reads it — which is why `subject_id` is not a foreign key and why
-    /// this is a second step rather than a column on the insert.
     pub fn point_attachment_at(
         &self,
         outlet: &str,
@@ -1578,8 +1513,7 @@ impl<'a> BuyingRepo<'a> {
         Ok(())
     }
 
-    /// What has been paid against each delivery, for the screen's outstanding
-    /// column.
+    /// What has been paid against each delivery, for the screen's outstanding column.
     pub fn paid_by_purchase(&self, outlet: &str) -> Result<BTreeMap<String, Money>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT purchase_id, SUM(amount) FROM supplier_payments
@@ -1588,7 +1522,10 @@ impl<'a> BuyingRepo<'a> {
         let mut cursor = stmt.query([outlet])?;
         let mut out = BTreeMap::new();
         while let Some(row) = cursor.next()? {
-            out.insert(row.get::<_, String>(0)?, encode::money_from_sql(row.get(1)?));
+            out.insert(
+                row.get::<_, String>(0)?,
+                encode::money_from_sql(row.get(1)?),
+            );
         }
         Ok(out)
     }
@@ -1602,8 +1539,7 @@ impl<'a> BuyingRepo<'a> {
         rows.next().transpose().map_err(DbError::from)
     }
 
-    /// Every photograph on file — what a backup has to carry, and what Health
-    /// counts.
+    /// Every photograph on file — what a backup has to carry, and what Health counts.
     pub fn attachments(&self, outlet: &str) -> Result<Vec<Attachment>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT id, kind, subject_id, filename, byte_count, sha256, created_at, created_by
@@ -1674,8 +1610,16 @@ fn read_purchase(row: &rusqlite::Row<'_>) -> rusqlite::Result<Purchase> {
         created_by: row.get::<_, Option<String>>(21)?.map(StaffId::new),
         cancelled: cancelled_at.map(|at| Cancellation {
             at: encode::timestamp_from_sql(at),
-            by: row.get::<_, Option<String>>(24).ok().flatten().map(StaffId::new),
-            reason: row.get::<_, Option<String>>(25).ok().flatten().unwrap_or_default(),
+            by: row
+                .get::<_, Option<String>>(24)
+                .ok()
+                .flatten()
+                .map(StaffId::new),
+            reason: row
+                .get::<_, Option<String>>(25)
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
         }),
         lines: Vec::new(),
     })

@@ -1,23 +1,9 @@
-//! **Did the money arrive, and what did the machine say?** — P29, scope 8.3.
-//!
-//! Two things live here, and neither of them is the payment itself — payments
-//! are written by [`crate::repo::order`], inside the settle, and that does not
-//! change.
-//!
-//! 1. **The attempts ledger.** Every time a provider is asked, the answer is
-//!    written down. An approved attempt is nearly redundant; a DECLINED one is
-//!    the only record that the event happened at all, because a declined card
-//!    leaves no payment row and an unsettled bill.
-//! 2. **The unconfirmed list.** Every electronic payment this product takes
-//!    today is unconfirmed, because [`mb_core::provider::Manual`] cannot check
-//!    a bank and will not pretend to. The list is the feature: a shop cannot
-//!    chase what it cannot list, and "what have we not confirmed tonight?" is
-//!    a question with an answer for the first time.
+//! Did the money arrive, and what did the machine say?
 
+use mb_core::Timestamp;
 use mb_core::businessday::BusinessDay;
 use mb_core::money::Money;
 use mb_core::provider::Answer;
-use mb_core::Timestamp;
 use rusqlite::{Transaction, params};
 
 use crate::encode;
@@ -132,10 +118,7 @@ impl<'a> PaymentsRepo<'a> {
         Ok(out)
     }
 
-    /// **The list a shop reads at close.**
-    ///
-    /// Only settled bills: an unsettled one is not money anybody is waiting
-    /// for yet, and putting it here would bury the ones that matter.
+    /// The list a shop reads at close.
     pub fn unconfirmed_on(
         &self,
         outlet: &str,
@@ -167,11 +150,7 @@ impl<'a> PaymentsRepo<'a> {
         Ok(out)
     }
 
-    /// **Somebody says the money arrived.**
-    ///
-    /// One direction only. Un-confirming would be a second way to make money
-    /// disappear from a day that has been closed; if a confirmation was wrong,
-    /// the bill is corrected the way every other mistake is (D47).
+    /// Somebody says the money arrived.
     pub fn confirm(
         &self,
         outlet: &str,

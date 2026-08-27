@@ -2,6 +2,6 @@
 
 export type WaitingView = { requestId: string, name: string, platform: string, ip: string, 
 /**
- * The whole sentence: "SM-A146B is asking to join, from 192.168.1.31."
+ * The whole sentence: "SM-A146B is asking to join, from 192.168.1.31.".
  */
 says: string, };

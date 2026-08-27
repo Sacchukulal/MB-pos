@@ -1,9 +1,7 @@
-/*
- * The device screen — P29. Every value is a token.
- */
+/* The device screen. */
 
 .mb-devices {
-  /* The page margin is the SHELL's (P27.5, .mb-main). */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--gap-group);
@@ -11,9 +9,7 @@
   height: 100%;
 }
 
-/* A badge hugs its word. Inside a Stack (which stretches its children) it was
-   filling the whole column, and a status pill as wide as a paragraph reads as
-   a button. */
+/* A badge hugs its word. */
 .mb-devices .mb-stack > .mb-badge {
   align-self: flex-start;
 }
@@ -29,15 +25,16 @@
   font-weight: var(--weight-medium);
 }
 
-/* A device that did not answer is not an error — most shops own none of
-   these — so it is quiet text and never red. */
+/*
+ * A device that did not answer is not an error — most shops own none of these — so it is quiet
+ * text and never red.
+ */
 .mb-devices__quiet {
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
 
-/* **The bytes, exactly as they arrived.** Monospace because alignment is the
-   information: a dealer is counting digit positions in a scale's label. */
+/* The bytes, exactly as they arrived. */
 .mb-devices__raw {
   font-family: var(--font-mono);
   font-size: var(--text-sm);

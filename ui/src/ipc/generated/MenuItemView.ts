@@ -2,7 +2,6 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * A menu item, as the screen offers it. P13 owns the menu properly; this is
- * what the billing screen needs to put something in a cart.
+ * A menu item, as the screen offers it.
  */
 export type MenuItemView = { id: string, name: string, price: MoneyView, rateLabel: string, category: string | null, };

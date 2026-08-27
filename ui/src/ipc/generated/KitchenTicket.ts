@@ -10,8 +10,7 @@ export type KitchenTicket = { id: string, orderId: string, station: string,
  */
 place: string, token: string, waiter: string | null, 
 /**
- * Minutes since the counter told the kitchen. Computed in Rust so the
- * screen does no arithmetic (R8).
+ * Minutes since the counter told the kitchen.
  */
 waitingMinutes: number, 
 /**
@@ -23,10 +22,7 @@ waiting: string,
  */
 expected: string, 
 /**
- * `new`, `cooking`, `late`, `printed` or `cancelled`. **Colour is never
- * the only carrier** (§2) — the screen shows a word and a border too,
- * because the room is bright, the screen is two metres away, and a
- * colour-blind cook is not a rare event.
+ * `new`, `cooking`, `late`, `printed` or `cancelled`.
  */
 tone: string, 
 /**
@@ -38,14 +34,10 @@ says: string,
  */
 course: string, lines: Array<KitchenLine>, 
 /**
- * **A cancellation nobody has acknowledged.** The one thing on this screen
- * allowed to interrupt: food already cooking is thrown away, and food not
- * started is cooked for nobody.
+ * A cancellation nobody has acknowledged.
  */
 isCancelled: boolean, 
 /**
- * True when this went to paper because no screen drew it in time. Shown
- * greyed and silent — the kitchen has it, and counting it again is the
- * double-cook the whole design prevents.
+ * True when this went to paper because no screen drew it in time.
  */
 wasPrinted: boolean, };

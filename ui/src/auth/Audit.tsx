@@ -1,22 +1,4 @@
-/**
- * **The history** — audit C4.
- *
- * > *"No audit trail on the counter. Nothing records who deleted an item, who
- * > changed a price, who reprinted a bill, who edited the bill counter, who
- * > changed a payment mode. The cloud admin panel has a full audit log; the
- * > till has none."*
- *
- * The owner must be able to answer **"who voided that bill?"** in two clicks
- * without knowing the word "audit" — which is why the rail says *History*, the
- * filters say *who* and *what*, and every action is a sentence rather than a
- * tag.
- *
- * # The banner at the top is the whole point of the hash chain
- *
- * Two triggers make `UPDATE` and `DELETE` fail, and they stop nobody with a
- * SQLite browser, who drops them first. The chain is what catches that person,
- * and this banner is where the shop finds out.
- */
+/** The history. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -57,9 +39,7 @@ export function Audit() {
     void load();
   }, [load]);
 
-  // The names for the filter. It needs `staff.manage`, so a manager with
-  // `audit.view` and nothing else simply gets no name filter rather than an
-  // error — the history itself is what they came for.
+  // The names for the filter.
   useEffect(() => {
     void (async () => {
       try {

@@ -1,28 +1,4 @@
-/**
- * **The customer's side of the counter** — P29, scope 7.8.
- *
- * A second window, on a second monitor, showing the bill as it is typed and
- * the total at the end. A customer watching their bill being made is a real
- * trust feature: it is the difference between "he charged me ₹640" and "I
- * watched it add up to ₹640".
- *
- * # It must never take the keyboard
- *
- * **A cashier who has to click back into the search box after every item will
- * unplug the display by Friday.** So this page has, deliberately, *nothing
- * focusable on it*: no button, no input, no link, no `tabIndex`. There is a
- * test that says so, and it is not a style rule — it is the condition on the
- * feature existing at all.
- *
- * The other half of that promise is in Rust: the window is built unfocused and
- * never asks for focus. Both halves are asserted, because either one alone
- * would leave the door open.
- *
- * # Nothing here is arithmetic
- *
- * Every figure arrives already formatted (R8). This file is a layout for text
- * somebody else wrote — which is also why it can be this short.
- */
+/** The customer's side of the counter. */
 
 import { useEffect, useState } from 'react';
 
@@ -52,8 +28,8 @@ export function Display() {
         stop = off;
       })
       .catch(() => {
-        // A display that cannot attach shows the idle screen for ever, which
-        // is the right failure: it is a sign in a shop, not a program.
+        // A display that cannot attach shows the idle screen for ever, which is the right
+        // failure: it is a sign in a shop, not a program.
       });
     return () => stop?.();
   }, []);

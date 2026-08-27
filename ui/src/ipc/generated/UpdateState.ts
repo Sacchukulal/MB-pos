@@ -9,8 +9,7 @@ export type UpdateState = {
  */
 available: string | null, notes: string, 
 /**
- * The business day it was last dismissed on, as `YYYY-MM-DD`. A dismissal
- * lasts until the next day and no longer — I1.
+ * The business day it was last dismissed on, as `YYYY-MM-DD`.
  */
 dismissedOn: string | null, 
 /**

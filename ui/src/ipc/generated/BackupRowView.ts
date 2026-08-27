@@ -2,11 +2,10 @@
 
 export type BackupRowView = { path: string, name: string, 
 /**
- * Already formatted (R8 — TypeScript does no arithmetic, on money or time).
+ * Already formatted.
  */
 takenAt: string, size: string, 
 /**
- * What the last verify of THIS file found, in words. `None` means nobody
- * has ever checked it, and the screen says so rather than showing a tick.
+ * What the last verify of THIS file found, in words.
  */
 verified: string | null, verifiedOk: boolean, };

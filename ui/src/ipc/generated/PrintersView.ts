@@ -4,12 +4,10 @@ import type { RouteView } from "./RouteView";
 
 export type PrintersView = { printers: Array<PrinterRowView>, 
 /**
- * **The real printers Windows knows about**, for the "which one?" list.
- * Empty is a state, not a failure: a counter with no printer installed
- * still has to be able to open this screen.
+ * The real printers Windows knows about, for the "which one?" list.
  */
 windows: Array<string>, 
 /**
- * Scope 3.1 — which printer each category's kitchen tickets go to.
+ * Which printer each category's kitchen tickets go to.
  */
 routes: Array<RouteView>, };

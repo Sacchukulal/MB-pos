@@ -9,12 +9,11 @@ export type HealthRow = {
  */
 id: string, 
 /**
- * "Backup", "Printers" — what the owner calls it.
+ * "Backup", "Printers".
  */
 name: string, 
 /**
- * `ok`, `warn` or `danger`. **Never the only carrier** (§2) — `says`
- * says it too.
+ * `ok`, `warn` or `danger`.
  */
 tone: string, 
 /**

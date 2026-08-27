@@ -1,23 +1,4 @@
-/**
- * **The settings screen, and there is only one of it.**
- *
- * Audit Part 3 is four screens and about ninety settings, and v1 built them as
- * four hand-written forms over one 41-slot save. This is one form over a
- * catalogue: Rust sends `SettingsView`, every entry carries its own label, help
- * sentence, control kind, limits and choices, and this file draws whatever it
- * is given.
- *
- * **So adding a setting is a line in `catalog.rs` and nothing here.** That is
- * the same promise D21 makes about a theme, and it is the reason a session that
- * adds one setting cannot forget to add it to a screen.
- *
- * # What this file may and may not decide
- *
- * It may decide *where a box sits*. It may not decide what is valid, what the
- * default is, what a setting is called, or what it means — every one of those
- * is in the catalogue, and Rust refuses a bad value whatever this file thinks
- * (R8, and D45's argument applied to values rather than to permissions).
- */
+/** The settings screen, and there is only one of it. */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
@@ -61,24 +42,12 @@ import { Updates } from './Updates';
 
 import './settings.css';
 
-/**
- * Sections that carry a screen as well as (or instead of) a form.
- *
- * A printer and a backup are **records and actions** — a list you add to, a
- * button that takes a snapshot — and the catalogue describes scalars. Rather
- * than bend one into the other, these two sections get a component under their
- * settings, and the frame keeps the section list, the search and the guard.
- *
- * Backup has both: four settings (where, how often, how many) and then the
- * buttons. Printers has no scalar settings at all — paper belongs to a
- * printer, not to a shop.
- */
+/** Sections that carry a screen as well as (or instead of) a form. */
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
-  // P31. The logo is a FILE, not a scalar, so it cannot be in the catalogue —
-  // but `receipt.logo` and `receipt.logo_width_pct` are, and they were two
-  // settings pointing at a picture nothing could supply. It goes directly
-  // under them, with the live paper beside it.
+  // The logo is a FILE, not a scalar, so it cannot be in the catalogue — but `receipt.logo` and
+  // `receipt.logo_width_pct` are, and they were two settings pointing at a picture nothing
+  // could supply.
   receipt: () => <Logo />,
   numbering: () => <Numbering />,
   backup: () => <Backup />,
@@ -88,50 +57,22 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   version: () => <Updates />,
 };
 
-/**
- * **Sections that are not settings.**
- *
- * The catalogue is the screen (D72) and P19 has nothing to put in it: a paired
- * phone is a ROW, not a setting, exactly as a printer and a counter are. So
- * the rail gets one appended entry rather than the catalogue getting a group
- * with nothing in it — which would have to be special-cased in the load, the
- * save, the export and the both-directions test.
- */
+/** Sections that are not settings. */
 const EXTRA_SECTIONS = [
   { code: 'network', label: 'Phones', canEdit: true, settings: [] },
-  // P27. A till is a ROW too, for the same reason a phone is.
+  // A till is a ROW too, for the same reason a phone is.
   { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
-  // P31. **A shop must be able to go back** — audit E9, I1 and ANDROID-G2/G4.
-  // `main.rs` already tells a counter that will not start to look in
-  // "Settings > Go back", and until now there was no such place.
+  // A shop must be able to go back.
   { code: 'version', label: 'This version', canEdit: true, settings: [] },
 ];
 
-/**
- * Which sections show the paper beside them.
- *
- * **The two that design a piece of paper, and no others.** The shop's details
- * used to be here on the argument that the name and the GST number print — but
- * the owner, 2026-08-24: *"why there is paper width and bill preview in your
- * shop section?"* They are right. Nothing on that form is a decision about the
- * paper: it is the shop's own facts, and typing an address is not tuning a
- * receipt. The roll width sitting there was worse — a printer setting on a
- * screen that has no printer on it.
- */
+/** Which sections show the paper beside them. */
 const SHOWS_PAPER = new Set(['receipt', 'kitchen']);
 
 /** The edits a person has made and not yet saved, by key. */
 type Edits = Record<string, string>;
 
-/**
- * Put one value into the edits.
- *
- * **A box put back to what is saved is not a change.** Ticking a box and
- * unticking it, or typing a letter and deleting it, used to leave the key
- * behind and the save bar up with nothing to save. Both doors on to this
- * screen — the fields and "put back to standard" — come through here, so
- * neither can forget.
- */
+/** Put one value into the edits. */
 function withEdit(edits: Edits, key: string, value: string, saved: string | undefined): Edits {
   const next = { ...edits };
   if (value === saved) delete next[key];
@@ -167,9 +108,7 @@ export function Settings() {
       .catch((cause) => {
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
       });
-    // `toast` is stable for the life of the provider — deliberately, and P09
-    // found out why: a context value that changed on every toast turned one
-    // error into a few hundred in a couple of seconds.
+    // `toast` is stable for the life of the provider.
   }, [toast]);
 
   const dirty = Object.keys(edits).length > 0;
@@ -187,8 +126,7 @@ export function Settings() {
     [savedValue],
   );
 
-  // **Search is Rust's** — the synonym list is part of the rule (T9). Debounced
-  // by the box rather than by a timer: no screen in this product owns a clock.
+  // Search is Rust's — the synonym list is part of the rule.
   const onSearch = useCallback(
     (text: string) => {
       setQuery(text);
@@ -207,16 +145,7 @@ export function Settings() {
   const active = groups.find((g) => g.code === group) ?? groups[0];
   const showsPaper = active !== undefined && SHOWS_PAPER.has(active.code) && matches === null;
 
-  // **The live preview — audit D1's fix, and it renders the REAL document.**
-  //
-  // It redraws whenever a setting moves, saved or not, which is the whole
-  // point: v1's worst design fault was a hand-drawn imitation beside the
-  // settings, and *"this is the single biggest source of 'the preview does not
-  // match the paper'"*. Rust lays it out; `Receipt` maps lines to spans.
-  //
-  // Keyed on the EDITS, not on a timer. There is no debounce because there is
-  // nothing to debounce: laying out a forty-line bill is budget P1's 2 ms, and
-  // a timer here would be a second clock (§5 rule 10).
+  // The live preview.
   useEffect(() => {
     if (!inApp() || !showsPaper || !active) return;
     const list = Object.entries(edits).map(([key, value]) => ({ key, value }));
@@ -236,9 +165,7 @@ export function Settings() {
 
   const go = useCallback(
     (code: string) => {
-      // **The guard, and it is the whole of it.** v1 lost edits silently when
-      // a person clicked another section; this asks, and Save actually saves
-      // before moving (T8).
+      // The guard, and it is the whole of it.
       if (dirty) {
         setLeavingTo(code);
         return;
@@ -280,16 +207,15 @@ export function Settings() {
     if (!active) return;
     try {
       const defaults = await call('settings_defaults_for', { group: active.code });
-      // **Shown as unsaved edits, not written.** A reset a person cannot look
-      // at and cancel is a reset that happens by accident.
+      // Shown as unsaved edits, not written.
       let wanted: Edits = { ...edits };
       let moved = 0;
       for (const setting of defaults) {
         const current = active.settings.find((s) => s.key === setting.key);
         const now = edits[setting.key] ?? current?.value ?? '';
         if (now !== setting.value) moved += 1;
-        // Standard may be what is already saved — then this drops the edit
-        // rather than adding one that saves nothing.
+        // Standard may be what is already saved — then this drops the edit rather than adding
+        // one that saves nothing.
         wanted = withEdit(wanted, setting.key, setting.value, current?.value);
       }
       setEdits(wanted);
@@ -326,12 +252,7 @@ export function Settings() {
     );
   }
 
-
-  // **No shop, no form** — found by running it. The configuration lives in
-  // Rust and starts as the standard one, so on a machine whose database would
-  // not open every setting drew perfectly and Save was the first thing to say
-  // anything. That is audit A5's own situation, and a form somebody fills in
-  // and cannot save is the worst thing to show them in it.
+  // No shop, no form — found by running it.
   if (!view.hasShop) {
     return (
       <div className="mb-settings mb-settings--empty">
@@ -355,10 +276,7 @@ export function Settings() {
           placeholder="Search every setting"
           onChange={(event) => onSearch(event.currentTarget.value)}
         />
-        {/* **Only the sections scroll.** Ten of them plus the export block was
-            taller than the column, so the block sat below the fold and nobody
-            would ever have found it — found by looking, after the tenth
-            section was added. */}
+        {/* Only the sections scroll. */}
         <Scroller inset className="mb-settings__sections">
           {groups.map((section) => (
             <button
@@ -378,21 +296,12 @@ export function Settings() {
           ))}
         </Scroller>
 
-        {/* **The whole configuration, out and in.** A dealer setting up a
-            second shop copies one file instead of retyping ninety settings —
-            and the import is a DRY RUN first, the same shape P13's CSV import
-            uses and for the same reason. */}
+        {/* The whole configuration, out and in. */}
         <div className="mb-settings__moving">
-          {/* **Read them again from the shop's data file** — `reload_settings`,
-              which existed and had no caller.
-
-              A second till on the same shop is a real thing (P27): the owner
-              changes the footer at the counter, and the till by the door is
-              still showing what it read when it started. This is how that
-              person catches up without restarting the program.
-
-              It discards nothing: unsaved edits are what the guard below
-              protects, so this is refused while there are any. */}
+          {/*
+            Read them again from the shop's data file — `reload_settings`, which existed and had
+            no caller.
+          */}
           <Button
             small
             variant="quiet"
@@ -427,20 +336,7 @@ export function Settings() {
           >
             Write these settings out
           </Button>
-          {/*
-            **A label wearing the kit's button, over a hidden file input**
-            (P30.5).
-
-            It used to be a caption above a bare `<input type="file">`, so the
-            bottom of the settings screen showed Windows' own grey "Choose File
-            / No file chosen" next to our buttons — a different font, a
-            different height and a different century. The kit still owns the
-            shape: this borrows `mb-button`, it does not redraw one.
-
-            A `<label>` and not a `<button>` because opening the file picker
-            from script is what browsers block; a label pointing at the input is
-            the one way that always works.
-          */}
+          {/* A label wearing the kit's button, over a hidden file input. */}
           <label className="mb-button mb-button--secondary mb-settings__load">
             Load settings from a file
             <input
@@ -457,17 +353,14 @@ export function Settings() {
         </div>
       </nav>
 
-      {/* **Two columns, two scrollbars** — the owner, 2026-08-24: the old
-          screen had *"separate scrollbar for preview"* and this one did not.
-          One scroller held both, so a long bill pushed the settings down with
-          it and reaching the footer settings scrolled the paper away. They are
-          independent panes now: the settings scroll, the paper scrolls, and
-          neither moves the other. */}
+      {/* Two columns, two scrollbars. */}
       <div className={cx('mb-settings__panes', showsPaper && 'mb-settings__panes--paper')}>
-        {/* **Back to the top when the section changes**, and this was a bug
-            found by looking: the body kept the previous section's scroll
-            position, so clicking "Your shop" after scrolling through the bill
-            landed halfway down the shop's form with its heading off screen. */}
+        {/*
+          Back to the top when the section changes, and this was a bug found by looking: the
+          body kept the previous section's scroll position, so clicking "Your shop" after
+          scrolling through the bill landed halfway down the shop's form with its heading off
+          screen.
+        */}
           <Scroller className="mb-settings__body" ref={body}>
             {matches ? (
               <Found
@@ -479,28 +372,12 @@ export function Settings() {
               />
             ) : active ? (
               <div className="mb-stack">
-                {/* **The paper, at the top, before anything else on this screen.**
-
-                    The owner, 2026-08-17: *"the paper size selection in top, it
-                    should 2 inch 3 inch 4 inch."* It was only in Printers, and
-                    they are right that it belongs here too: paper width is the one
-                    setting that changes what every OTHER setting on this screen
-                    does. A shop heading that fits on 80 mm is capped on 58; the
-                    item table goes two-line on a roll with no room for four
-                    columns. Tuning a receipt against the wrong width is tuning the
-                    wrong receipt — and the preview to the right redraws on it.
-
-                    Not a `Field`: it is not one of the catalogue's scalars. Paper
-                    lives on the PRINTER (a shop can have an 80 mm bill printer and
-                    a 58 mm kitchen printer), so this sets it on the printer bills
-                    go to — the same one the preview draws. */}
+                {/* The paper, at the top, before anything else on this screen. */}
                 {SHOWS_PAPER.has(active.code) ? (
                   <PaperWidth
                     paper={paper}
                     onChanged={() => {
-                      // Nudge the preview to re-ask. It keys off `edits`, and the
-                      // paper is not an edit — so without this the settings on
-                      // screen would be right and the paper beside them stale.
+                      // Nudge the preview to re-ask.
                       setEdits((was) => ({ ...was }));
                     }}
                   />
@@ -526,12 +403,11 @@ export function Settings() {
           {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
         </div>
 
-      {/* **Its own row, spanning both columns**, and this was a bug found by
-          looking: the screen is a two-column grid, so the save bar landed in
-          the left cell under the section list, six words wide and six lines
-          tall. Exactly P08's "every dialog was 64 px because a spacing token
-          was used as a width" — a component that assumed it was a full-width
-          row, put somewhere that is not one. */}
+      {/*
+        Its own row, spanning both columns, and this was a bug found by looking: the screen is a
+        two-column grid, so the save bar landed in the left cell under the section list, six
+        words wide and six lines tall.
+      */}
       <div className="mb-settings__save">
         <SaveBar
           dirty={dirty}
@@ -544,7 +420,7 @@ export function Settings() {
         />
       </div>
 
-      {/* T8 — Save / Discard / Cancel, and Save really saves first. */}
+      {/* Save / Discard / Cancel, and Save really saves first. */}
       <ConfirmDialog
         open={leavingTo !== null}
         title="You have unsaved changes"
@@ -568,8 +444,7 @@ export function Settings() {
         }}
       />
 
-      {/* **The dry run**, and it is the feature. Nothing is written until this
-          says what would change and somebody agrees to it. */}
+      {/* The dry run, and it is the feature. */}
       <Modal
         open={importing !== null}
         title="Load these settings?"
@@ -656,24 +531,18 @@ function Section({
           ) : null
         }
       />
-      {/* **Sub-headings, and they were missing until somebody looked.** The
-          bill is thirty-nine settings; one flat grid meant scrolling past
-          twenty checkboxes to reach "Total size" with nothing to steer by.
-          The heading text is Rust's, so this file decides nothing about it. */}
+      {/* Sub-headings, and they were missing until somebody looked. */}
       {topicsOf(section).map(({ topic, settings }) => (
         <section key={topic} className="mb-settings__topic">
-          {/* A setting with no heading of its own falls back to its section's
-              name, which drew "YOUR SHOP" directly under the heading "Your
-              shop" — a stutter, and found by looking at it. */}
+          {/*
+            A setting with no heading of its own falls back to its section's name, which drew
+            "YOUR SHOP" directly under the heading "Your shop" — a stutter, and found by looking
+            at it.
+          */}
           {topic === section.label ? null : (
             <h3 className="mb-settings__subtitle">{topic}</h3>
           )}
-          {/* **A run of tick boxes packs tighter than a run of boxes to type
-              in.** The one grid gave every setting a whole text-field column,
-              so seventeen ticks on the bill drew as a sparse two-column table
-              with a lot of nothing in it — the owner's "horrible to look at",
-              2026-08-24. A checkbox is a line of words, so it gets a column
-              the width of a line of words. */}
+          {/* A run of tick boxes packs tighter than a run of boxes to type in. */}
           <div className={cx('mb-settings__fields', allTicks(settings) && 'mb-settings__fields--ticks')}>
             {linesOf(settings).map((line) =>
               line.row === '' ? (
@@ -703,17 +572,7 @@ function Section({
   );
 }
 
-/**
- * **How wide the roll is** — 2, 3 or 4 inch, at the top of the bill designer.
- *
- * The three widths are the ones a thermal counter printer comes in, and they
- * are named the way a shopkeeper buys paper (in inches) with the millimetres
- * beside them, because the box says 80 mm and the dealer says three inch.
- *
- * It writes through `set_paper_size`, which puts it on the printer bills go
- * to — so this control and the Printers screen are two doors onto one value
- * and cannot drift apart.
- */
+/** How wide the roll is — 2, 3 or 4 inch, at the top of the bill designer. */
 const PAPER_WIDTHS = [
   { value: '58', label: '2 inch (58 mm)' },
   { value: '80', label: '3 inch (80 mm)' },
@@ -728,9 +587,7 @@ function PaperWidth({
   onChanged: () => void;
 }) {
   const toast = useToast();
-  // The preview says which paper it drew on ("80 mm (3 inch)"); the number in
-  // it is the value. Read from there rather than kept in a second piece of
-  // state, so the dropdown cannot disagree with the paper beside it.
+  // The preview says which paper it drew on ("80 mm (3 inch)"); the number in it is the value.
   const current = paper?.paper.match(/^(\d+)/)?.[1] ?? '80';
 
   return (
@@ -762,20 +619,7 @@ function PaperWidth({
   );
 }
 
-/**
- * **The paper, beside the settings that change it.**
- *
- * Audit D1 is why this is a sink and not a drawing:
- *
- * > *"The same bill is drawn three separate times, by hand, in three places…
- * > the three **will** drift apart. This is the single biggest source of 'the
- * > preview does not match the paper'."*
- *
- * So Rust builds the document, lays it out and hands down lines; `Receipt`
- * maps them to spans and measures nothing. What is on the left of this panel
- * and what comes out of the printer are the same `Laid`, and a test asserts it
- * character for character.
- */
+/** The paper, beside the settings that change it. */
 function Paper({
   preview,
   kitchen,
@@ -794,19 +638,22 @@ function Paper({
         </span>
       </div>
 
-      {/* **The roll's own scrollbar.** A four-page bill scrolls here and
-          nowhere else — the settings beside it do not move. */}
+      {/* The roll's own scrollbar. */}
       <Scroller inset className="mb-settings__paperroll">
         {preview ? (
           <>
-            {/* In the face the paper will be, and — for a proportional one —
-                laid out by the layout's own boxes. 2026-08-17. */}
+            {/*
+              In the face the paper will be, and — for a proportional one — laid out by the
+              layout's own boxes.
+            */}
             <Receipt
               doc={preview.doc}
               font={preview.font}
             />
-            {/* Half-typed is a normal state, and saying which box is not usable
-                yet beats blanking the paper or shouting on every keystroke. */}
+            {/*
+              Half-typed is a normal state, and saying which box is not usable yet beats
+              blanking the paper or shouting on every keystroke.
+            */}
             {preview.notUsableYet.length > 0 ? (
               <p className="mb-settings__papernote">
                 Not used yet: {preview.notUsableYet.join(', ')}.
@@ -821,13 +668,7 @@ function Paper({
   );
 }
 
-/**
- * The section's settings, in runs of the same heading.
- *
- * **In catalogue order, and never sorted.** The order is a decision somebody
- * made in `catalog.rs` — a size next to its own bold tick, the QR mode next to
- * its width — and re-ordering here would quietly overrule it.
- */
+/** The section's settings, in runs of the same heading. */
 function topicsOf(section: GroupView): { topic: string; settings: SettingView[] }[] {
   const runs: { topic: string; settings: SettingView[] }[] = [];
   for (const setting of section.settings) {
@@ -838,13 +679,7 @@ function topicsOf(section: GroupView): { topic: string; settings: SettingView[] 
   return runs;
 }
 
-/**
- * A topic's settings, in the lines they share.
- *
- * Same shape as `topicsOf` one level down, and the same rule: **Rust says
- * which settings are one line** (`catalog::ROWS`), this only walks the runs.
- * A setting with no line of its own gets one to itself.
- */
+/** A topic's settings, in the lines they share. */
 function linesOf(settings: SettingView[]): { row: string; settings: SettingView[] }[] {
   const lines: { row: string; settings: SettingView[] }[] = [];
   for (const setting of settings) {
@@ -860,19 +695,7 @@ function allTicks(settings: SettingView[]): boolean {
   return settings.every((setting) => setting.control === 'tick');
 }
 
-/**
- * **Settings that are one decision, on one line.**
- *
- * The owner, 2026-08-24, on the screen this replaced: *"just a single font
- * selector for bill, font size and bold in one line."* A size and its bold
- * tick were two boxes in two cells of a two-column grid, so "Total size" and
- * "Total in bold" could sit in different columns on different rows — seven
- * pairs on the bill, torn apart fourteen ways.
- *
- * The line is named once, and each control wears the short word Rust gave it.
- * The full label is still on the control for a screen reader, because "Size"
- * on its own means nothing when you cannot see the heading beside it.
- */
+/** Settings that are one decision, on one line. */
 function Line({
   row,
   settings,
@@ -887,9 +710,8 @@ function Line({
   onChange: (key: string, value: string) => void;
 }) {
   const changed = settings.some((setting) => edits[setting.key] !== undefined);
-  // The controls lose their own labels here, and the tip goes with a label —
-  // so the line keeps it. First one that has anything to say: a size and a
-  // bold tick are one decision, so they cannot need two explanations.
+  // The controls lose their own labels here, and the tip goes with a label — so the line keeps
+  // it.
   const hint = settings.find((setting) => setting.help !== '')?.help;
   return (
     <div className={cx('mb-settings__line', changed && 'mb-settings__field--changed')}>
@@ -982,13 +804,7 @@ function Found({
   );
 }
 
-/**
- * One setting, drawn as whatever it says it is.
- *
- * Five controls cover all ninety. There is deliberately no per-setting special
- * case here: the moment one appears, the thing it knows belongs in the
- * catalogue instead.
- */
+/** One setting, drawn as whatever it says it is. */
 function Field({
   setting,
   value,
@@ -1001,14 +817,12 @@ function Field({
   value: string;
   changed: boolean;
   disabled: boolean;
-  /** Drawn inside a shared line, which already carries the name. See `Line`. */
+  /** Drawn inside a shared line, which already carries the name. */
   inLine?: boolean;
   onChange: (value: string) => void;
 }) {
   const hint = setting.help === '' ? undefined : setting.help;
-  // On a shared line the heading beside it says "Total"; the control says
-  // "Size". The full name stays as the accessible one — a screen reader gets
-  // "Total size", the same words a search matched.
+  // On a shared line the heading beside it says "Total"; the control says "Size".
   const shown = inLine ? setting.short : setting.label;
   const body = (() => {
     switch (setting.control) {
@@ -1046,8 +860,10 @@ function Field({
             }
             value={value}
             disabled={disabled}
-            /* A count, so digits and nothing else — `Kind::Int` has no room
-               for a dot and less for a letter. */
+            /*
+             * A count, so digits and nothing else — `Kind::Int` has no room for a dot and less
+             * for a letter.
+             */
             onChange={(event) => onChange(event.currentTarget.value.replace(/[^0-9-]/g, ''))}
           />
         );
@@ -1061,9 +877,7 @@ function Field({
             onChange={onChange}
           />
         );
-      /* **The shop's own number, and it is a phone like every other.** It fell
-         into the text box below until 2026-08-22, which is why a name could be
-         typed into it — `Kind::Text { shape: Phone }` says "phone" now. */
+      /* The shop's own number, and it is a phone like every other. */
       case 'phone':
         return (
           <PhoneInput

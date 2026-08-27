@@ -3,13 +3,11 @@ import type { MoneyView } from "./MoneyView";
 
 export type CartLineView = { index: number, name: string, note: string | null, 
 /**
- * Written as a shopkeeper writes it: "2", "0.5", "1.333" (scope 1.10).
- * `Qty` is thousandths; the formatting is mb-core's, not the screen's.
+ * Written as a shopkeeper writes it: "2", "0.5", "1.333".
  */
 qty: string, 
 /**
- * "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute
- * with.
+ * "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute with.
  */
 rateLabel: string, unitPrice: MoneyView, gross: MoneyView, discount: MoneyView, 
 /**

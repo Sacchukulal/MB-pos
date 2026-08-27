@@ -1,28 +1,8 @@
 #!/usr/bin/env node
 /**
- * **Two Rust types may not export to the same TypeScript file.**
+ * Two Rust types may not export to the same TypeScript file.
  *
- * Found at P21 by nearly shipping it. The licensing screen's view model was
- * called `AccountView`, and so is P15's customer account — *"what does this
- * customer owe?"*. Both carry `#[ts(export, export_to =
- * "../../ui/src/ipc/generated/")]`, so both write
- * `generated/AccountView.ts`, and **the last one to run wins.**
- *
- * The failure mode is what makes it worth a script:
- *
- *  * it is silent. `ts-rs` does not warn, `cargo test` passes, `cargo clippy`
- *    passes.
- *  * which type survives depends on **test execution order**, so it can differ
- *    between two runs on the same machine.
- *  * the symptom lands on a screen nobody touched. P15's credit statement would
- *    start failing `tsc` with "property 'customer' does not exist", weeks
- *    later, in a session about something else entirely.
- *
- * D40: *"the rules that erode are enforced by scripts, not by agreement."* This
- * one cannot even be agreed to, because nobody knows the other file exists.
- *
- * NO DEPENDENCIES (see check-tokens.mjs for why).
- *
+ * Usage:
  *   node scripts/check-view-names.mjs            check ../src-tauri/src
  *   node scripts/check-view-names.mjs <dir>      check somewhere else
  */
@@ -43,14 +23,7 @@ function rustFiles(dir) {
   return out;
 }
 
-/**
- * Types that carry `#[ts(export...)]`, and where.
- *
- * The attribute and the type declaration are on different lines, and there may
- * be `#[serde(...)]` and doc comments between them — so this walks forward from
- * the attribute to the first `pub struct`/`pub enum`/`pub type`, which is
- * exactly what `ts-rs` itself does.
- */
+/** Types that carry `#[ts(export...)]`, and where. */
 function exportedTypes(files) {
   const found = new Map();
   for (const file of files) {
@@ -79,8 +52,8 @@ if (files.length === 0) {
 const types = exportedTypes(files);
 const clashes = [...types].filter(([, where]) => where.length > 1);
 
-// The scan itself is load-bearing, so it gets an assertion rather than trust —
-// the same reason `guard.rs` checks that its own command scan found something.
+// The scan itself is load-bearing, so it gets an assertion rather than trust — the same reason
+// `guard.rs` checks that its own command scan found something.
 if (types.size < 20) {
   console.error(
     `check-view-names: the scan found only ${types.size} exported types, so it is ` +

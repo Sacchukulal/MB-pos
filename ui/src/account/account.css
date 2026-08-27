@@ -1,11 +1,7 @@
-/*
- * The account screen — scope 2.10. Every value is a token (D38).
- */
+/* The account screen. */
 
 .mb-account {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -13,8 +9,7 @@
   height: 100%;
 }
 
-/* `.mb-card` is a COLUMN — P18 shipped three rows inside Cards stacked and
-   centred because of it. Any row inside a Card says so. */
+/* `.mb-card` is a COLUMN. */
 .mb-account__top {
   align-items: flex-start;
   justify-content: space-between;
@@ -40,8 +35,10 @@
   color: var(--text-muted);
 }
 
-/* The banner sentence. It is the thing an owner opens this screen to read, so
-   it is body text and not a tooltip. */
+/*
+ * The banner sentence. It is the thing an owner opens this screen to read, so it is body text
+ * and not a tooltip.
+ */
 .mb-account__headline {
   margin: var(--space-3) 0 0;
   font-size: var(--text-base);
@@ -55,8 +52,6 @@
   color: var(--text-muted);
 }
 
-/* Something the owner has to act on. Bordered rather than coloured-in: colour
-   is never the only carrier (§2), and the sentence inside already says it. */
 .mb-account__warn {
   margin: var(--space-3) 0 0;
   padding: var(--space-3);
@@ -83,8 +78,10 @@
   gap: var(--space-2);
 }
 
-/* Label above value, wrapping — a 1366 x 768 screen is the reference machine
-   and four facts in a row is what fits. */
+/*
+ * Label above value, wrapping — a 1366 x 768 screen is the reference machine and four facts in
+ * a row is what fits.
+ */
 .mb-account__facts {
   display: flex;
   flex-wrap: wrap;

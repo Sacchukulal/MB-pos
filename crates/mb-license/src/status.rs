@@ -1,16 +1,4 @@
 //! The licence, its status, and the standing that comes out of both.
-//!
-//! # The distinction this file exists to keep
-//!
-//! [`Status`] is what the cloud was told — by an admin pressing Suspend, by
-//! Razorpay saying a card failed, by a shop cancelling. [`Standing`] is what
-//! that means **today**, on this counter, with this clock. One is a fact; the
-//! other is a decision, and [`crate::decide`] is the only thing allowed to turn
-//! the first into the second.
-//!
-//! v1 had no second type. It had a billing date, and every screen did its own
-//! arithmetic on it — which is why the admin panel could say "the POS locks at
-//! its next status check" while the POS was not looking at status at all.
 
 use mb_core::{BusinessDay, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -19,21 +7,16 @@ use crate::machine::MachineId;
 use crate::plan::Plan;
 
 /// What the cloud says about this licence.
-///
-/// **Every one of these is a gate** — that is BACKEND-C1 in one sentence, and
-/// [`crate::decide`] reads this before it looks at any date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
     /// Paid for, and running.
     Active,
-    /// A self-service trial with an end date. Converts to `Active` without
-    /// anybody re-activating anything (requirement 4).
+    /// A self-service trial with an end date.
     Trial,
-    /// An admin pressed Suspend, or a payment failed (BACKEND-C2). **Today**,
-    /// whatever the billing date says.
+    /// An admin pressed Suspend, or a payment failed.
     Suspended,
-    /// An admin pressed Revoke. Not coming back without support.
+    /// An admin pressed Revoke.
     Revoked,
     /// The shop cancelled. Their choice, and the copy must not scold them.
     Cancelled,
@@ -52,12 +35,7 @@ impl Status {
         }
     }
 
-    /// **Does this status let the shop operate at all, before any date is
-    /// considered?**
-    ///
-    /// This is the function BACKEND-C1 says did not exist. It is deliberately
-    /// tiny and deliberately separate from the date arithmetic, so that reading
-    /// [`crate::decide`] makes it obvious which question is asked first.
+    /// Does this status let the shop operate at all, before any date is considered?
     #[must_use]
     pub const fn lets_the_shop_work(self) -> bool {
         match self {
@@ -74,35 +52,27 @@ pub struct Licence {
     pub shop_name: String,
     pub plan: Plan,
     pub status: Status,
-    /// The next billing date. **The second question, never the first.**
+    /// The next billing date.
     pub renews_on: BusinessDay,
     /// This licence's OWN grace override, set per customer in the admin panel.
-    /// `None` means "use the shop-wide setting" — see D88 and `decide`.
     pub grace_days: Option<u16>,
-    /// The machine this licence is bound to, if any. `None` is a licence that
-    /// has been sold and not yet activated — which in v1 meant *"whoever types
-    /// the key first becomes the counter"* (BACKEND-C6). The counter cannot fix
-    /// that alone; what it can do is never send an activation without the
-    /// owner's proof, and `cloud::activate` takes one.
+    /// The machine this licence is bound to, if any.
     pub bound_to: Option<MachineId>,
     pub trial_ends_on: Option<BusinessDay>,
-    /// Already masked by the cloud — `+91 98••••••10`. **The counter never
-    /// receives the full number**: this screen is visible to anyone with
-    /// `reports.view`, and the owner's mobile is not a thing a shop's staff
-    /// need.
+    /// Already masked by the cloud — `+91 98••••••10`.
     pub registered_contact: String,
 }
 
-/// What the licence means **today**.
+/// What the licence means today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Standing {
     /// Paid, in date, running.
     Fine,
-    /// Past the billing date and inside the grace period. **Everything still
-    /// works** — a grace period that quietly removed features would be a lock
-    /// nobody announced.
-    InGrace { days_left: u16 },
+    /// Past the billing date and inside the grace period.
+    InGrace {
+        days_left: u16,
+    },
     /// Past the billing date and past the grace period.
     Expired,
     Suspended,
@@ -111,29 +81,18 @@ pub enum Standing {
     /// No licence on this machine at all: a first run, or after a deactivate.
     NeverActivated,
     TrialEnded,
-    /// **We have not been able to ask for too long.** Past both of D89's
-    /// expiries with no successful check.
-    ///
-    /// Deliberately **not** `Expired`: we do not know that the plan has
-    /// expired, and saying so would be the same class of claim as v1's Suspend
-    /// button — a screen asserting something nothing had checked. The copy says
-    /// what is true, which is that we could not reach the server.
+    /// We have not been able to ask for too long.
     NeedsChecking,
     /// This licence belongs to a different computer.
-    ///
-    /// BACKEND-C4's half the counter can enforce with no network at all: a
-    /// config folder copied onto a second PC does not entitle it.
     BoundElsewhere,
-    /// The 72-hour offline unlock support read out over the phone. Everything
-    /// works, and the banner counts down (POS-A4).
-    Emergency { until: Timestamp },
+    /// The 72-hour offline unlock support read out over the phone.
+    Emergency {
+        until: Timestamp,
+    },
 }
 
 impl Standing {
-    /// **May the shop use the things a plan pays for?**
-    ///
-    /// Note what this does *not* decide: billing. Nothing in this crate decides
-    /// billing, because [`crate::Feature`] cannot name it (D86).
+    /// May the shop use the things a plan pays for?
     #[must_use]
     pub const fn operating(self) -> bool {
         match self {
@@ -149,8 +108,7 @@ impl Standing {
         }
     }
 
-    /// The chip on the account screen. Short, and in the shop's words rather
-    /// than ours (UI_GUIDELINES §6).
+    /// The chip on the account screen.
     #[must_use]
     pub const fn chip(self) -> &'static str {
         match self {
@@ -191,8 +149,6 @@ impl Standing {
 mod tests {
     use super::*;
 
-    /// **BACKEND-C1, at the smallest scale there is.** Suspend, Revoke and
-    /// Cancel are gates. Nothing in v1 asked this question at all.
     #[test]
     fn status_is_a_gate() {
         assert!(Status::Active.lets_the_shop_work());
@@ -210,10 +166,12 @@ mod tests {
 
     #[test]
     fn an_emergency_unlock_is_a_working_shop() {
-        assert!(Standing::Emergency {
-            until: Timestamp::from_millis(1),
-        }
-        .operating());
+        assert!(
+            Standing::Emergency {
+                until: Timestamp::from_millis(1),
+            }
+            .operating()
+        );
     }
 
     #[test]

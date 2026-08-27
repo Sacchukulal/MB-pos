@@ -1,16 +1,4 @@
-/**
- * **The settings screen** — audit Part 3, and P17's T8.
- *
- * Rust proves what a setting is and what it may hold (`settings/tests.rs`,
- * `settings_tests.rs`). This proves the three claims that are the screen's own:
- *
- * 1. **the catalogue is the screen** — every control is drawn from what Rust
- *    sent, so a section this file has never heard of still renders;
- * 2. **the unsaved-changes guard offers Save / Discard / Cancel, and Save
- *    really saves before moving** (T8) — v1 lost edits silently;
- * 3. **a section a person may not change is read-only, not missing** — hiding
- *    it would leave the printer person wondering where the tax rates went.
- */
+/** The settings screen. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,10 +17,6 @@ import type { SettingsView } from '../src/ipc/generated/SettingsView';
 import type { SettingView } from '../src/ipc/generated/SettingView';
 import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
 
-/**
- * One line of the preview, in the shape Rust sends since P32: every position
- * and every size in **printer dots**.
- */
 function line(
   text: string,
   extra: Partial<Extract<PreviewLine, { kind: 'text' }>> = {},
@@ -51,14 +35,7 @@ function line(
   };
 }
 
-/**
- * One setting, with the boring parts filled in.
- *
- * The catalogue has fifteen fields per entry and a test cares about three of
- * them; writing all fifteen out ninety times is how a fixture stops being
- * readable. `row` and `short` default to empty, which is what most settings
- * are — a line of their own.
- */
+/** One setting, with the boring parts filled in. */
 function setting(
   key: string,
   label: string,
@@ -125,11 +102,7 @@ const view: SettingsView = {
         }),
       ],
     },
-    /**
-     * **The section that designs a piece of paper**, and the one the paper
-     * tests use. It is editable, which the bill above deliberately is not, and
-     * it carries the size-and-bold pair that Rust says is one line.
-     */
+    /** The section that designs a piece of paper, and the one the paper tests use. */
     {
       code: 'kitchen',
       label: 'The kitchen ticket',
@@ -213,7 +186,6 @@ afterEach(cleanup);
 describe('the settings screen', () => {
   it('draws whatever the catalogue sent, in the control it asked for', async () => {
     draw();
-    // Words.
     expect(await screen.findByLabelText('Shop name')).toHaveValue('Anna Kuteera');
     // A choice, with its options — and this file has never heard of "state".
     const state = screen.getByLabelText('State') as HTMLSelectElement;
@@ -265,7 +237,6 @@ describe('the settings screen', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
   });
 
-  /** **T8**, and all three ways out of it. */
   it('asks before leaving a section with unsaved changes', async () => {
     draw();
     const name = await screen.findByLabelText('Shop name');
@@ -310,7 +281,7 @@ describe('the settings screen', () => {
     expect(call).not.toHaveBeenCalledWith('save_settings', expect.anything());
   });
 
-  /** **T9** — and the matching is Rust's, so this proves the screen uses it. */
+  /** And the matching is Rust's, so this proves the screen uses it. */
   it('searches across every section and says where each hit lives', async () => {
     draw();
     await screen.findByLabelText('Shop name');
@@ -319,31 +290,21 @@ describe('the settings screen', () => {
     });
 
     await waitFor(() => expect(call).toHaveBeenCalledWith('search_settings', { text: 'logo' }));
-    // The hit, and the section it came from — a result that does not say where
-    // it lives answers the question once and not next time.
-    // Exact: the field's info tip is labelled "About Logo width".
+    // The hit, and the section it came from — a result that does not say where it lives answers
+    // the question once and not next time.
     expect(await screen.findByLabelText('Logo width')).toBeTruthy();
-    // "The bill" twice: once in the section list, once above the hit saying
-    // where it lives. The second one is the point.
+    // "The bill" twice: once in the section list, once above the hit saying where it lives.
     expect(screen.getAllByText('The bill')).toHaveLength(2);
   });
 
-  /**
-   * **The live preview — audit D1.**
-   *
-   * The document is Rust's; this proves the screen asks for it with the
-   * UNSAVED edits, which is the whole point of a live preview.
-   */
+  /** The live preview. */
   it('draws the sample paper and redraws it as a setting is typed', async () => {
     draw();
     await screen.findByLabelText('Shop name');
     fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
 
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
-    // **Which paper it DREW on**, said above the paper itself. Matched by the
-    // whole sentence rather than by "80 mm": the paper-width picker added on
-    // 2026-08-17 offers "3 inch (80 mm)" as an option, so a loose match now
-    // finds two things and cannot tell the label from the picture.
+    // Which paper it DREW on, said above the paper itself.
     expect(screen.getByText('Sample · 80 mm (3 inch)')).toBeTruthy();
 
     call.mockClear();
@@ -359,15 +320,7 @@ describe('the settings screen', () => {
     );
   });
 
-  /**
-   * **The shop's own details are not a piece of paper** — the owner,
-   * 2026-08-24: *"why there is paper width and bill preview in your shop
-   * section?"*
-   *
-   * The roll width is a printer's setting and the sample is the bill
-   * designer's; neither belongs on the form where somebody types an address.
-   * This is the test that keeps them off it.
-   */
+  /** The shop's own details are not a piece of paper. */
   it('shows no paper and no roll width on the shop section', async () => {
     draw();
     await screen.findByLabelText('Shop name');
@@ -382,15 +335,7 @@ describe('the settings screen', () => {
     expect(screen.getByLabelText('Preview of what prints')).toBeTruthy();
   });
 
-  /**
-   * **A size and its bold tick are one decision, so they are one line** — the
-   * owner, 2026-08-24: *"font size and bold in one line."*
-   *
-   * Which settings share a line is Rust's (`catalog::ROWS`), so this proves
-   * the screen obeys it: the line is named once, each control wears the short
-   * word, and the full name is still the accessible one — a screen reader and
-   * a search both still find "Title in bold".
-   */
+  /** A size and its bold tick are one decision, so they are one line. */
   it('draws a size and its bold tick on one named line', async () => {
     draw();
     await screen.findByLabelText('Shop name');
@@ -449,7 +394,7 @@ describe('the settings screen', () => {
     await screen.findByLabelText('Shop name');
     fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
 
-    // The paper is still drawn...
+    // The paper is still drawn.
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
     // ...and the box that could not be used is named.
     expect(screen.getByText(/Not used yet: Logo width/)).toBeTruthy();

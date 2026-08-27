@@ -1,4 +1,4 @@
-//! Sections and tables — what P09's grid draws and P14 arranges.
+//! Sections and tables.
 
 use mb_core::{TableId, Timestamp};
 use rusqlite::OptionalExtension;
@@ -23,7 +23,7 @@ pub struct DiningTable {
     /// What the waiter says: "6", "AC 1".
     pub label: String,
     pub seats: i64,
-    /// Scope 14.1, the floor plan. `None` until the table is placed.
+    /// 1, the floor plan.
     pub pos: Option<(i64, i64)>,
     pub sort_order: i64,
     pub is_active: bool,
@@ -91,27 +91,9 @@ impl<'a> FloorRepo<'a> {
 
     /// Refuses a label that another active table already prints.
     ///
-    /// Crown jewel 19: v1's table master "refuses two tables that would print
-    /// the same name", and it is worth keeping — two tables called `1` produce
-    /// two kitchen tickets nobody can tell apart.
-    ///
-    /// # P14 replaced the rule that was here
-    ///
-    /// The first version compared bare labels across the whole outlet in SQL:
-    ///
     /// ```sql
     /// AND lower(trim(label)) = lower(trim(?3))
     /// ```
-    ///
-    /// That is wrong in both directions. It **refused** table `1` in the AC
-    /// room when a table `1` already existed in the Garden — which is the most
-    /// ordinary table layout in India — and it **allowed** a table literally
-    /// named `AC 1` beside section AC's table `1`, which is loophole I5 itself,
-    /// the exact case it was written to stop.
-    ///
-    /// The rule now lives in `mb_core::table` and is section-aware, and the
-    /// billing screen's free-text table box calls the same function — that
-    /// second door being unguarded is the other half of I5.
     pub fn save_table(
         &self,
         outlet: &str,
@@ -188,11 +170,6 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// The name check, section-aware, against everything the shop already has.
-    ///
-    /// Compares against **hidden tables too**. A hidden table is off the floor,
-    /// not gone: it still prints its name on the bills it already has, and
-    /// letting a second table take its name means two different tables share a
-    /// name in one shop's history.
     fn refuse_clash(&self, outlet: &str, table: &DiningTable) -> Result<(), DbError> {
         let existing = self.list_tables(outlet)?;
         let sections = self.list_sections(outlet)?;
@@ -206,22 +183,26 @@ impl<'a> FloorRepo<'a> {
         let rows: Vec<(String, Option<String>, String)> = existing
             .iter()
             .filter(|other| other.id != table.id)
-            .map(|other| (other.id.as_str().to_owned(), name_of(&other.section_id), other.label.clone()))
+            .map(|other| {
+                (
+                    other.id.as_str().to_owned(),
+                    name_of(&other.section_id),
+                    other.label.clone(),
+                )
+            })
             .collect();
 
         let clash = mb_core::table::clashes_with(
             mine.as_deref(),
             &table.label,
-            rows.iter().map(|(id, section, label)| {
-                (id.as_str(), section.as_deref(), label.as_str())
-            }),
+            rows.iter()
+                .map(|(id, section, label)| (id.as_str(), section.as_deref(), label.as_str())),
         )
         .map_err(|e| DbError::invariant(e.to_string()))?;
 
         if let Some(id) = clash {
-            // The id came out of `rows`, so this cannot miss — but an
-            // `expect` in a repository is a panic in a shop, so the
-            // unreachable branch produces a message instead.
+            // The id came out of `rows`, so this cannot miss — but an `expect` in a repository
+            // is a panic in a shop, so the unreachable branch produces a message instead.
             let Some((_, section, label)) = rows.iter().find(|(other, _, _)| other == id) else {
                 return Err(DbError::invariant("that name is already taken"));
             };
@@ -241,10 +222,6 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// Is this square on the plan, and is it free?
-    ///
-    /// Called by BOTH doors — `place` (a drag) and `save_table` (an edit that
-    /// happens to carry a position). One door guarded and one open is exactly
-    /// the shape of loophole I5, which this file has already had to fix once.
     fn check_cell(
         &self,
         outlet: &str,
@@ -274,18 +251,19 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// Add a whole range in one go — "tables 1 to 20 in the AC room".
-    ///
-    /// **All or nothing.** If any label in the range would clash, none of them
-    /// is created: a shop that asked for 1-20 and silently got 14 of them has
-    /// to find out which six are missing by counting, and a half-done bulk
-    /// action is the same failure the CSV import refuses at P13.
     pub fn add_range(
         &self,
         outlet: &str,
         range: &Range,
         at: Timestamp,
     ) -> Result<Vec<TableId>, DbError> {
-        let Range { section_id, prefix, from, to, seats } = range;
+        let Range {
+            section_id,
+            prefix,
+            from,
+            to,
+            seats,
+        } = range;
         let (from, to, seats) = (*from, *to, *seats);
         let section_id = section_id.as_deref();
         let labels = mb_core::table::range_labels(from, to, prefix)
@@ -301,8 +279,8 @@ impl<'a> FloorRepo<'a> {
         let mut made = Vec::with_capacity(labels.len());
         for (n, label) in labels.into_iter().enumerate() {
             let table = DiningTable {
-                // The id is derived from the label so running the same range
-                // twice is idempotent rather than duplicating the room.
+                // The id is derived from the label so running the same range twice is
+                // idempotent rather than duplicating the room.
                 id: TableId::new(format!("tbl_{}", slug(outlet, section_id, &label))),
                 section_id: section_id.map(str::to_owned),
                 label,
@@ -318,14 +296,6 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// Where a table sits on the floor plan (scope 14.1).
-    ///
-    /// `None` takes it off the plan and back into the section grid, which is
-    /// the fallback every shop starts in.
-    ///
-    /// **Two tables may not share a cell.** The plan is a grid on purpose:
-    /// "the same place" is then a comparison of two integers rather than a
-    /// rectangle intersection, and a tile hidden underneath another tile is a
-    /// table that has vanished from the floor.
     pub fn place(
         &self,
         outlet: &str,
@@ -344,16 +314,14 @@ impl<'a> FloorRepo<'a> {
             rusqlite::params![outlet, table.as_str(), x, y],
         )?;
         if changed == 0 {
-            return Err(DbError::invariant("that table is not on the floor any more"));
+            return Err(DbError::invariant(
+                "that table is not on the floor any more",
+            ));
         }
         OutboxRepo::new(self.tx).enqueue(outlet, "dining_tables", table.as_str(), Op::Upsert, at)
     }
 
     /// The first empty square, scanning left to right and top to bottom.
-    ///
-    /// A table added after a layout exists has to land somewhere **visible**:
-    /// (0,0) would put it under an existing tile, and no position at all would
-    /// drop it out of a plan the owner is looking at.
     pub fn first_free_cell(&self, outlet: &str) -> Result<(i64, i64), DbError> {
         let taken: Vec<(i64, i64)> = self
             .list_tables(outlet)?
@@ -371,9 +339,6 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// How many orders have ever pointed at this table.
-    ///
-    /// The number a refusal quotes: *"Table 6 has 38 bills against it. It can
-    /// be hidden, which takes it off the floor and keeps its history."*
     pub fn orders_against(&self, table: &TableId) -> Result<i64, DbError> {
         Ok(self.tx.query_row(
             "SELECT count(*) FROM orders WHERE table_id = ?1",
@@ -382,8 +347,8 @@ impl<'a> FloorRepo<'a> {
         )?)
     }
 
-    /// The open order sitting at this table, if there is one — id and whatever
-    /// it is called on screen (its token, falling back to its bill number).
+    /// The open order sitting at this table, if there is one — id and whatever it is called on
+    /// screen (its token, falling back to its bill number).
     pub fn open_order_at(&self, table: &TableId) -> Result<Option<(String, String)>, DbError> {
         Ok(self
             .tx
@@ -398,9 +363,6 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// Take a table off the floor, or put it back.
-    ///
-    /// **Hiding is what "delete" usually means here**, and the difference is
-    /// explained where a shopkeeper meets it rather than left to a foreign key.
     pub fn set_active(
         &self,
         outlet: &str,
@@ -408,9 +370,7 @@ impl<'a> FloorRepo<'a> {
         active: bool,
         at: Timestamp,
     ) -> Result<(), DbError> {
-        if !active
-            && let Some((_, called)) = self.open_order_at(table)?
-        {
+        if !active && let Some((_, called)) = self.open_order_at(table)? {
             return Err(DbError::invariant(format!(
                 "there is an open order on this table ({called}) — settle or cancel it first"
             )));
@@ -422,13 +382,13 @@ impl<'a> FloorRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "dining_tables", table.as_str(), Op::Upsert, at)
     }
 
-    /// Really delete a table — **only ever possible for one nothing points at.**
-    ///
-    /// A table that has taken a single order keeps that order's history
-    /// forever (`orders.table_id` is a foreign key), so this succeeds for a
-    /// mistyped table added five minutes ago and refuses for a real one, with
-    /// a message that says what to do instead.
-    pub fn delete_table(&self, outlet: &str, table: &TableId, at: Timestamp) -> Result<(), DbError> {
+    /// Really delete a table — only ever possible for one nothing points at.
+    pub fn delete_table(
+        &self,
+        outlet: &str,
+        table: &TableId,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
         if let Some((_, called)) = self.open_order_at(table)? {
             return Err(DbError::invariant(format!(
                 "there is an open order on this table ({called}) — settle or cancel it first"
@@ -448,9 +408,14 @@ impl<'a> FloorRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "dining_tables", table.as_str(), Op::Delete, at)
     }
 
-    /// Delete a section. Refused while tables are still in it, and the refusal
-    /// says how many so an owner knows what they are being asked to move.
-    pub fn delete_section(&self, outlet: &str, section: &str, at: Timestamp) -> Result<(), DbError> {
+    /// Delete a section. Refused while tables are still in it, and the refusal says how many so
+    /// an owner knows what they are being asked to move.
+    pub fn delete_section(
+        &self,
+        outlet: &str,
+        section: &str,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
         let holding: i64 = self.tx.query_row(
             "SELECT count(*) FROM dining_tables WHERE section_id = ?1",
             [section],
@@ -469,11 +434,6 @@ impl<'a> FloorRepo<'a> {
     }
 
     /// What the floor looks like right now, in numbers — scope 14.3.
-    ///
-    /// Computed here in one pass rather than by the screen, for the reason R8
-    /// gives and one more: **a summary that disagrees with the grid under it is
-    /// worse than no summary**, so both read the same rows in the same
-    /// transaction.
     pub fn occupancy(&self, outlet: &str, day: mb_core::BusinessDay) -> Result<Occupancy, DbError> {
         let tables: i64 = self.tx.query_row(
             "SELECT count(*) FROM dining_tables WHERE outlet_id = ?1 AND is_active = 1",
@@ -488,9 +448,7 @@ impl<'a> FloorRepo<'a> {
         )?;
 
         let day = encode::business_day_to_sql(day);
-        // A "turn" is a dine-in order that finished today: the table was used
-        // and freed. An open order is not a turn yet, which is why the two
-        // figures are counted separately rather than added.
+        // A "turn" is a dine-in order that finished today: the table was used and freed.
         let (turns, seated_covers): (i64, Option<i64>) = self.tx.query_row(
             "SELECT count(*), sum(covers) FROM orders
               WHERE outlet_id = ?1 AND business_day = ?2 AND order_type = 'dine_in'
@@ -498,9 +456,8 @@ impl<'a> FloorRepo<'a> {
             rusqlite::params![outlet, day],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        // Rounded to a whole minute BY SQLITE, so no float ever reaches Rust and
-        // there is no cast to argue about. "Average time at table" is a number
-        // an owner glances at; a fractional minute would be noise.
+        // Rounded to a whole minute BY SQLITE, so no float ever reaches Rust and there is no
+        // cast to argue about.
         let average_minutes: Option<i64> = self.tx.query_row(
             "SELECT CAST(round(avg(settled_at - created_at) / 60000.0) AS INTEGER) FROM orders
               WHERE outlet_id = ?1 AND business_day = ?2 AND order_type = 'dine_in'
@@ -519,10 +476,7 @@ impl<'a> FloorRepo<'a> {
         })
     }
 
-    /// Record that one order's food went onto another's bill (scope 1.22).
-    ///
-    /// The link is a column rather than a sentence in the reason, so a report
-    /// can tell a merge from a walkout without reading English.
+    /// Record that one order's food went onto another's bill.
     pub fn record_merge(&self, absorbed: &str, survivor: &str) -> Result<(), DbError> {
         let changed = self.tx.execute(
             "UPDATE orders SET merged_into = ?2 WHERE id = ?1",
@@ -540,45 +494,41 @@ impl<'a> FloorRepo<'a> {
 pub struct Occupancy {
     pub tables: i64,
     pub busy: i64,
-    /// Covers sitting down right now. Orders with no cover count contribute
-    /// nothing rather than one — see `OrderCore::covers`.
+    /// Covers sitting down right now.
     pub covers_now: i64,
     pub turns: i64,
     pub covers_today: i64,
-    /// `None` until something has been settled today; there is no honest
-    /// average of nothing.
+    /// `None` until something has been settled today; there is no honest average of nothing.
     pub average_minutes: Option<i64>,
 }
 
 /// How many squares the floor plan is, each way.
-///
-/// A fixed grid rather than free pixels: see [`FloorRepo::place`]. Sixteen is
-/// enough for a 60-table room at four squares per table and small enough that
-/// the whole plan fits a 1366x768 screen without scrolling, which is the
-/// reference machine (D12).
 pub const GRID_CELLS: i64 = 16;
 
-/// A stable id from a label, so re-running "add 1 to 20" does not make a
-/// second set of twenty tables.
+/// A stable id from a label, so re-running "add 1 to 20" does not make a second set of twenty
+/// tables.
 fn slug(outlet: &str, section: Option<&str>, label: &str) -> String {
     let mut out = String::new();
     for part in [outlet, section.unwrap_or("none"), label] {
         for ch in part.chars() {
-            out.push(if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '_' });
+            out.push(if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            });
         }
         out.push('_');
     }
     out
 }
 
-
-/// What "add tables 1 to 20" means — one argument instead of six, because six
-/// positional parameters of the same two types is a call site nobody can read
-/// and clippy is right about it.
+/// What "add tables 1 to 20" means — one argument instead of six, because six positional
+/// parameters of the same two types is a call site nobody can read and clippy is right about
+/// it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Range {
     pub section_id: Option<String>,
-    /// "G" makes G1, G2, G3. Empty makes 1, 2, 3.
+    /// "G" makes G1, G2, G3.
     pub prefix: String,
     pub from: i64,
     pub to: i64,

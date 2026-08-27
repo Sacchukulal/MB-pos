@@ -2,7 +2,7 @@
 
 export type TaxClassView = { id: string, name: string, 
 /**
- * Preformatted — "5%", "12.5%". R8: TypeScript divides nothing, ever.
+ * Preformatted — "5%", "12.5%".
  */
 rate: string, 
 /**
@@ -10,16 +10,15 @@ rate: string,
  */
 rateBp: number, 
 /**
- * **The machine values.** The editor sends these back; it never reads the
- * words, so rewording a label cannot change what a class taxes (P33 §5.1).
+ * The machine values. The editor sends these back; it never reads the words, so rewording
+ * a label cannot change what a class taxes.
  */
 kind: "gst" | "exempt" | "outside_gst" | "untaxed", basis: "exclusive" | "inclusive", 
 /**
- * For a person to read in the list. Never parsed back.
+ * For a person to read in the list.
  */
 treatment: string, isActive: boolean, 
 /**
- * How many items would move if this class changed. The screen says it out
- * loud before an owner edits a rate.
+ * How many items would move if this class changed.
  */
 itemsUsing: bigint, };

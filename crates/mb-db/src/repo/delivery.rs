@@ -1,30 +1,8 @@
-//! **Orders that leave on a bike** — P29, scope 14.5.
-//!
-//! The columns were reserved at P04 (`orders.delivery_address`,
-//! `delivery_rider`, `delivery_state`) and this is what makes them mean
-//! something.
-//!
-//! # The part that matters, and it is not the addresses
-//!
-//! **Cash-on-delivery is where a restaurant actually loses money.** A delivery
-//! paid in cash is settled when the rider hands the food over — the sale is
-//! real, the bill is paid, and the notes are in somebody's pocket on a bike.
-//! Every other cash payment in this product is in the drawer the moment it is
-//! taken.
-//!
-//! So a rider is carrying `collected − handed back`, computed from rows every
-//! time, and [`MoneyRepo::cash_position`] subtracts it. A shop that does not
-//! subtract it is a shop whose drawer is short all evening for a reason nobody
-//! can name — and the shortfall walks back in at nine o'clock, which makes it
-//! look like a theft that resolved itself.
-//!
-//! A rider carrying nine hundred rupees of somebody else's money for two hours
-//! is completely normal. **A shop that cannot say so at eleven o'clock is
-//! not.**
+//! Orders that leave on a bike.
 
+use mb_core::Timestamp;
 use mb_core::businessday::BusinessDay;
 use mb_core::money::Money;
-use mb_core::Timestamp;
 use rusqlite::{Transaction, params};
 
 use crate::encode;
@@ -36,9 +14,6 @@ pub struct DeliveryRepo<'a> {
 }
 
 /// Where a delivery has got to.
-///
-/// `failed` is reachable from `out` and is a STATE, not a deletion (D47): the
-/// food went, the money did not, and both have to be accounted for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryState {
     Pending,
@@ -73,11 +48,7 @@ impl DeliveryState {
         }
     }
 
-    /// **What may follow what.**
-    ///
-    /// Forward only, except that anything on the road can fail. A delivered
-    /// order cannot go back to `out` — the food is eaten — and a failed one is
-    /// corrected by a void with a reason (D47), not by pretending it arrived.
+    /// What may follow what.
     #[must_use]
     pub const fn may_become(self, next: DeliveryState) -> bool {
         matches!(
@@ -112,22 +83,14 @@ pub struct Delivery {
     pub rider_id: Option<String>,
     pub rider_name: Option<String>,
     pub state: DeliveryState,
-    /// Why it did not arrive. Present exactly when the state is
-    /// [`DeliveryState::Failed`], which the table enforces.
+    /// Why it did not arrive.
     pub failure: Option<String>,
     pub total: Money,
-    /// **Cash the rider took**, or zero when it was paid at the counter or on
-    /// a card. This is the figure the handback is measured against.
+    /// Cash the rider took, or zero when it was paid at the counter or on a card.
     pub cash_collected: Money,
     pub customer_name: Option<String>,
     pub phone: Option<String>,
     /// The ORDER's state — `draft`, `open`, `settled`, `cancelled`, `voided`.
-    ///
-    /// Separate from the delivery state and it has to be: an order can be
-    /// `delivered` and still unsettled (the rider is bringing the cash back),
-    /// and it can be `settled` and still on the road (it was paid online).
-    /// Two facts, two columns, and conflating them is how a shop ends up
-    /// believing an evening's deliveries were all paid for.
     pub order_state: String,
 }
 
@@ -141,7 +104,7 @@ pub struct RiderDay {
     pub failed: i64,
     pub collected: Money,
     pub handed_back: Money,
-    /// `collected − handed_back`, floored at zero. **Never stored.**
+    /// `collected − handed_back`, floored at zero.
     pub carrying: Money,
 }
 
@@ -152,15 +115,6 @@ impl<'a> DeliveryRepo<'a> {
     }
 
     /// Say where a delivery is going, and who is taking it.
-    ///
-    /// **The step is checked** against [`DeliveryState::may_become`], so the
-    /// order of the evening is the database's rule and not each screen's — the
-    /// same argument as the order state machine in P04. Setting a state to
-    /// itself is allowed and does nothing to the state; it is how the address
-    /// or the rider is edited without moving the delivery along.
-    ///
-    /// `failure` is compulsory on [`DeliveryState::Failed`] and refused on
-    /// every other state, matching the CHECK on the table.
     #[allow(clippy::too_many_arguments, reason = "a delivery IS this many facts")]
     pub fn set_delivery(
         &self,
@@ -181,9 +135,9 @@ impl<'a> DeliveryRepo<'a> {
                 |r| r.get(0),
             )
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => DbError::invariant(
-                    "that order is not a delivery on this counter".to_owned(),
-                ),
+                rusqlite::Error::QueryReturnedNoRows => {
+                    DbError::invariant("that order is not a delivery on this counter".to_owned())
+                }
                 other => DbError::from(other),
             })?;
         let now = DeliveryState::from_sql(&current.unwrap_or_else(|| "pending".to_owned()))?;
@@ -202,17 +156,11 @@ impl<'a> DeliveryRepo<'a> {
                 ));
             }
             (DeliveryState::Failed, some) => some,
-            // Moving off `failed` — which today only a void does — clears the
-            // reason, because a reason on a delivered order is a lie the CHECK
-            // would refuse anyway.
+            // Moving off `failed` — which today only a void does — clears the reason, because a
+            // reason on a delivered order is a lie the CHECK would refuse anyway.
             _ => None,
         };
 
-        // **The first writer of `orders.customer_id`**, which P04 reserved and
-        // nothing had used: a credit sale attaches its customer to the PAYMENT,
-        // because that is where the debt is. A delivery attaches one to the
-        // ORDER, because that is where the address and the phone are, and a
-        // rider needs both before anybody has paid anything.
         self.tx.execute(
             "UPDATE orders
                 SET delivery_address = COALESCE(?3, delivery_address),
@@ -240,27 +188,20 @@ impl<'a> DeliveryRepo<'a> {
     }
 
     /// Every delivery on a day, newest first.
-    pub fn deliveries_on(
-        &self,
-        outlet: &str,
-        day: BusinessDay,
-    ) -> Result<Vec<Delivery>, DbError> {
+    pub fn deliveries_on(&self, outlet: &str, day: BusinessDay) -> Result<Vec<Delivery>, DbError> {
         self.list_where(None, outlet, Some(day))
     }
 
-    /// One query for both readers, and the filters are BOUND rather than
-    /// spliced: a `format!` that changes which parameters the statement has is
-    /// how the two callers ended up passing a different number of them.
+    /// One query for both readers, and the filters are BOUND rather than spliced: a `format!`
+    /// that changes which parameters the statement has is how the two callers ended up passing
+    /// a different number of them.
     fn list_where(
         &self,
         order_id: Option<&str>,
         outlet: &str,
         day: Option<BusinessDay>,
     ) -> Result<Vec<Delivery>, DbError> {
-        // **The cash figure is a sub-select, not a join.** A join would
-        // multiply the order row by its payments and every total on the screen
-        // would be wrong on a split-paid bill — which is exactly the bug P16's
-        // split payments made possible.
+        // The cash figure is a sub-select, not a join.
         let mut stmt = self.tx.prepare(
             "SELECT o.id,
                     o.bill_number_formatted,
@@ -309,7 +250,7 @@ impl<'a> DeliveryRepo<'a> {
         Ok(out)
     }
 
-    /// The people who take orders out. A rider is a staff member with a flag.
+    /// The people who take orders out.
     pub fn riders(&self, outlet: &str) -> Result<Vec<(String, String)>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, name FROM staff
@@ -344,7 +285,7 @@ impl<'a> DeliveryRepo<'a> {
         Ok(())
     }
 
-    /// **Money handed over the counter by a rider.**
+    /// Money handed over the counter by a rider.
     #[allow(clippy::too_many_arguments, reason = "a ledger row IS this many facts")]
     pub fn record_handback(
         &self,
@@ -375,8 +316,8 @@ impl<'a> DeliveryRepo<'a> {
         Ok(())
     }
 
-    /// **Every rider's evening.** What went out, what arrived, what was
-    /// collected, what came back, and what is still on a bike.
+    /// Every rider's evening. What went out, what arrived, what was collected, what came back,
+    /// and what is still on a bike.
     pub fn rider_day(&self, outlet: &str, day: BusinessDay) -> Result<Vec<RiderDay>, DbError> {
         let day_sql = encode::business_day_to_sql(day);
         let mut stmt = self.tx.prepare(
@@ -408,9 +349,9 @@ impl<'a> DeliveryRepo<'a> {
                 |r| r.get(0),
             )?;
             let handed_back = encode::money_from_sql(handed);
-            // Floored at zero: a rider who hands back more than they collected
-            // has made a mistake somebody must look at, and it must never read
-            // as the shop being owed money by its own till.
+            // Floored at zero: a rider who hands back more than they collected has made a
+            // mistake somebody must look at, and it must never read as the shop being owed
+            // money by its own till.
             let carrying = if handed_back >= collected {
                 Money::ZERO
             } else {

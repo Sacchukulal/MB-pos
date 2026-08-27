@@ -1,10 +1,3 @@
-//! **The credit account, against a real database** — P15, scope 5.1–5.4.
-//!
-//! mb-core proves the arithmetic (`credit.rs`); this proves the account is
-//! assembled from the right rows — and, above all, that **voiding a credit
-//! bill puts the balance back exactly**, which is the property v1 could not
-//! have had, because it kept the balance in a column.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -40,8 +33,8 @@ fn customer(id: &str, phone: &str) -> Customer {
     }
 }
 
-/// **One phone number is one customer**, however it was typed — and the
-/// database refuses the second row rather than trusting a screen to check.
+/// One phone number is one customer, however it was typed — and the database refuses the second
+/// row rather than trusting a screen to check.
 #[test]
 fn a_phone_number_belongs_to_one_customer() {
     let scratch = Scratch::new("one_phone");
@@ -49,15 +42,21 @@ fn a_phone_number_belongs_to_one_customer() {
     shop::build(&db);
 
     db.transaction(|tx| {
-        Repos::new(tx)
-            .money()
-            .save_customer(OUTLET, &customer("cus_rekha", "+91 98765 43210"), at(1))
+        Repos::new(tx).money().save_customer(
+            OUTLET,
+            &customer("cus_rekha", "+91 98765 43210"),
+            at(1),
+        )
     })
     .expect("saved");
 
     // The same number, typed the way the next cashier types it.
     let found = db
-        .transaction(|tx| Repos::new(tx).money().customer_by_phone(OUTLET, "9876543210"))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .money()
+                .customer_by_phone(OUTLET, "9876543210")
+        })
         .expect("looked up");
     assert_eq!(
         found.map(|c| c.id.as_str().to_owned()),
@@ -71,12 +70,13 @@ fn a_phone_number_belongs_to_one_customer() {
             .money()
             .save_customer(OUTLET, &customer("cus_other", "098765-43210"), at(2))
     });
-    assert!(refused.is_err(), "two rows for one number are two balances for one person");
+    assert!(
+        refused.is_err(),
+        "two rows for one number are two balances for one person"
+    );
 }
 
-/// **The property the whole design turns on.** A credit sale, then a void, and
-/// the balance is exactly what it was — with no reversing row, because the sale
-/// stops being a settled sale (D47).
+/// The property the whole design turns on.
 #[test]
 fn voiding_a_credit_bill_returns_the_balance_exactly() {
     let scratch = Scratch::new("void_credit");
@@ -109,8 +109,8 @@ fn voiding_a_credit_bill_returns_the_balance_exactly() {
 
     db.transaction(|tx| {
         tx.execute(
-            // `mode_label` is only for 'other' — the CHECK says so, and it is the
-            // kind of rule a hand-written UPDATE finds for you.
+            // `mode_label` is only for 'other' — the CHECK says so, and it is the kind of rule
+            // a hand-written UPDATE finds for you.
             "UPDATE payments SET mode = 'credit', mode_label = NULL, customer_id = ?2
               WHERE order_id = ?1",
             rusqlite::params![order_id.as_str(), who.as_str()],
@@ -124,17 +124,12 @@ fn voiding_a_credit_bill_returns_the_balance_exactly() {
         .expect("balance");
     assert!(owed.is_positive(), "the sale is on the account");
 
-    // Void it, the way P12 does: the state changes.
     db.transaction(|tx| {
         tx.execute(
             "UPDATE orders SET state = 'voided', voided_at = ?2, voided_by = ?3,
                                void_reason = 'wrong bill'
               WHERE id = ?1",
-            rusqlite::params![
-                order_id.as_str(),
-                at(9).millis(),
-                "staff_1",
-            ],
+            rusqlite::params![order_id.as_str(), at(9).millis(), "staff_1",],
         )?;
         Ok(())
     })
@@ -143,7 +138,11 @@ fn voiding_a_credit_bill_returns_the_balance_exactly() {
     let after = db
         .transaction(|tx| Repos::new(tx).money().customer_balance(&who))
         .expect("balance");
-    assert_eq!(after, Money::ZERO, "a voided bill is not money anybody owes");
+    assert_eq!(
+        after,
+        Money::ZERO,
+        "a voided bill is not money anybody owes"
+    );
 
     // And the movements agree with the balance, which is the invariant.
     let movements = db
@@ -152,8 +151,8 @@ fn voiding_a_credit_bill_returns_the_balance_exactly() {
     assert_eq!(balance(&movements).expect("sum"), after);
 }
 
-/// Sales, repayments and adjustments all reach the account, and the balance is
-/// their sum — never a stored number.
+/// Sales, repayments and adjustments all reach the account, and the balance is their sum —
+/// never a stored number.
 #[test]
 fn the_account_is_the_sum_of_its_movements() {
     let scratch = Scratch::new("movements");
@@ -182,7 +181,7 @@ fn the_account_is_the_sum_of_its_movements() {
             },
         )?;
 
-        // A repayment, in a REAL payment mode (audit B12).
+        // A repayment, in a REAL payment mode.
         repos.money().record_credit_payment(
             OUTLET,
             &CreditPayment {
@@ -220,7 +219,10 @@ fn the_account_is_the_sum_of_its_movements() {
         .expect("movements");
 
     assert_eq!(movements.len(), 3);
-    assert_eq!(movements[0].kind, MovementKind::Adjustment { increases: true });
+    assert_eq!(
+        movements[0].kind,
+        MovementKind::Adjustment { increases: true }
+    );
     assert_eq!(movements[1].kind, MovementKind::Repayment);
     assert_eq!(
         balance(&movements).expect("balance"),
@@ -228,20 +230,22 @@ fn the_account_is_the_sum_of_its_movements() {
         "1000 owed, 400 paid, 100 written off",
     );
 
-    // The repo's own SUM and the ledger must agree — two ways of asking the
-    // same question, and the day they disagree nobody can tell which is right.
+    // The repo's own SUM and the ledger must agree — two ways of asking the same question, and
+    // the day they disagree nobody can tell which is right.
     let repo_balance = db
         .transaction(|tx| Repos::new(tx).money().customer_balance(&who))
         .expect("balance");
     assert_eq!(
-        repo_balance.add(Money::from_rupees(900).expect("money")).expect("sum"),
+        repo_balance
+            .add(Money::from_rupees(900).expect("money"))
+            .expect("sum"),
         balance(&movements).expect("balance"),
         "customer_balance counts sales and repayments; the ledger adds the adjustments",
     );
 }
 
-/// An adjustment without a reason is refused, because this is the one door
-/// somebody could use to make money disappear.
+/// An adjustment without a reason is refused, because this is the one door somebody could use
+/// to make money disappear.
 #[test]
 fn an_adjustment_needs_a_reason_and_a_direction() {
     let scratch = Scratch::new("adjustment_rules");
@@ -270,7 +274,10 @@ fn an_adjustment_needs_a_reason_and_a_direction() {
             },
         )
     });
-    assert!(blank.is_err(), "an adjustment with no reason is a mistake with paperwork");
+    assert!(
+        blank.is_err(),
+        "an adjustment with no reason is a mistake with paperwork"
+    );
 
     let negative = db.transaction(|tx| {
         Repos::new(tx).money().save_credit_adjustment(
@@ -290,7 +297,7 @@ fn an_adjustment_needs_a_reason_and_a_direction() {
     assert!(negative.is_err(), "the direction is a flag, never a sign");
 }
 
-/// "Who owes me money", oldest first — the screen an owner actually opens.
+/// "Who owes me money", oldest first.
 #[test]
 fn who_owes_is_sorted_by_how_long_it_has_been_owed() {
     let scratch = Scratch::new("who_owes");
@@ -332,12 +339,14 @@ fn who_owes_is_sorted_by_how_long_it_has_been_owed() {
         .transaction(|tx| Repos::new(tx).money().who_owes(OUTLET, day(100)))
         .expect("who owes");
 
-    // The fixture shop has its own customer; this test is about the ORDER of
-    // the three it created.
+    // The fixture shop has its own customer; this test is about the ORDER of the three it
+    // created.
     let order: Vec<&str> = owing
         .iter()
         .map(|o| o.customer.id.as_str())
-        .filter(|id| id.starts_with("cus_old") || id.starts_with("cus_mid") || id.starts_with("cus_new"))
+        .filter(|id| {
+            id.starts_with("cus_old") || id.starts_with("cus_mid") || id.starts_with("cus_new")
+        })
         .collect();
     assert_eq!(
         order,
@@ -346,5 +355,8 @@ fn who_owes_is_sorted_by_how_long_it_has_been_owed() {
     );
     assert_eq!(owing[0].ageing.oldest_days, Some(80));
     assert_eq!(owing[0].ageing.days_90, Money::ZERO);
-    assert_eq!(owing[0].ageing.days_60, Money::from_rupees(100).expect("money"));
+    assert_eq!(
+        owing[0].ageing.days_60,
+        Money::from_rupees(100).expect("money")
+    );
 }

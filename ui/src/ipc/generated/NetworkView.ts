@@ -4,23 +4,21 @@ import type { WaitingView } from "./WaitingView";
 
 export type NetworkView = { 
 /**
- * **The sentence at the top**, and it is the whole point of the screen:
- * "Phones can reach this counter at 192.168.1.7." — or the opposite, with
- * what to check.
+ * The sentence at the top, and it is the whole point of the screen: "Phones can reach this
+ * counter at 192.168.1.7." — or the opposite, with what to check.
  */
 headline: string, 
 /**
- * `ok`, `warn` or `danger`. The headline says it in words too (§2).
+ * `ok`, `warn` or `danger`.
  */
 tone: string, address: string, port: number, fingerprint: string, 
 /**
- * Written when the counter's certificate is new, because every phone must
- * then be added again — and fifteen waiters discovering that one at a
- * time during a rush is the alternative to saying so here.
+ * Written when the counter's certificate is new, because every phone must then be added
+ * again — and fifteen waiters discovering that one at a time during a rush is the
+ * alternative to saying so here.
  */
 certificateNote: string, devices: Array<DeviceRowView>, waiting: Array<WaitingView>, 
 /**
- * The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid. Empty
- * unless pairing is open.
+ * The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid.
  */
 qr: Array<string>, code: string, mayPair: boolean, };

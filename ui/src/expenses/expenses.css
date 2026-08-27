@@ -1,11 +1,7 @@
-/*
- * Money going out — scope 10.6. Every value is a token.
- */
+/* Money going out — scope 10.6. Every value is a token. */
 
 .mb-expenses {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -13,9 +9,10 @@
   height: 100%;
 }
 
-/* Quick add. The whole point of the screen: two fields and Enter, because a
-   cashier records a 40-rupee milk purchase mid-service or does not record it
-   at all. */
+/*
+ * Quick add. The whole point of the screen: two fields and Enter, because a cashier records a
+ * 40-rupee milk purchase mid-service or does not record it at all.
+ */
 .mb-expenses__quick {
   align-items: flex-end;
   flex-wrap: wrap;
@@ -37,8 +34,7 @@
   color: var(--text-muted);
 }
 
-/* The arithmetic, spelled out. A shopkeeper counting a drawer wants to see
-   which number they disagree with. */
+/* The arithmetic, spelled out. */
 .mb-expenses__sum {
   font-size: var(--text-sm);
   color: var(--text-faint);

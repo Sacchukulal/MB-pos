@@ -1,36 +1,4 @@
-//! **Did the money actually arrive?** — P29, scope 8.3 and 8.4.
-//!
-//! # Where the pieces live
-//!
-//! | | |
-//! |---|---|
-//! | the seam and the manual provider | [`mb_core::provider`] |
-//! | the attempts ledger, the unconfirmed list | [`mb_db::repo::payments`] |
-//! | this file | taking a payment through a provider, and the words |
-//!
-//! # What actually changes at the counter
-//!
-//! Pressing **Cash** is exactly what it was. Pressing **UPI** or **Card** now
-//! asks whoever this shop's provider is, and there are three answers:
-//!
-//! | answer | what happens |
-//! |---|---|
-//! | approved | the payment is taken and marked confirmed |
-//! | waiting | the payment is taken and marked **unconfirmed** |
-//! | declined | **no payment is taken**, the bill stays unsettled, and the reason is shown and written down |
-//!
-//! The provider that ships answers `waiting` for everything electronic, because
-//! it is a person looking at a phone and nothing in this product can check a
-//! bank. That is not a small feature dressed up: it turns "we think that UPI
-//! came through" into a list the shop reads before it closes.
-//!
-//! # The rule for this whole session applies here too
-//!
-//! **A payment machine that is absent, unplugged or slow must never stop a
-//! sale.** A provider that cannot answer returns `waiting`; it does not hold
-//! the counter, and the cashier can always take cash instead. The only thing
-//! that stops a bill is an explicit *no* — which is not a failure of the
-//! device, it is the bank saying the money is not there.
+//! Did the money actually arrive?
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -87,7 +55,7 @@ pub struct AttemptView {
 #[serde(rename_all = "camelCase")]
 pub struct PaymentsView {
     pub day: String,
-    /// Which provider this counter is asking. "Typed in by hand" today.
+    /// Which provider this counter is asking.
     pub provider: String,
     pub unconfirmed: Vec<UnconfirmedView>,
     pub attempts: Vec<AttemptView>,
@@ -131,7 +99,7 @@ fn attempt_view_of(row: &Attempt) -> AttemptView {
     }
 }
 
-/// The shop's word for a mode tag (UI_GUIDELINES §6).
+/// The shop's word for a mode tag.
 fn mode_words(tag: &str) -> String {
     match tag {
         "cash" => "Cash",
@@ -143,15 +111,9 @@ fn mode_words(tag: &str) -> String {
     .to_owned()
 }
 
-// ===========================================================================
-// Asking a provider
-// ===========================================================================
+// Asking a provider.
 
-/// **Ask whoever this shop's provider is, and write down what they said.**
-///
-/// Called by `cart_add_payment` before a non-cash payment goes on the bill.
-/// Returns the answer; the caller decides what to do with it, because only the
-/// caller knows whether it is holding a cart.
+/// Ask whoever this shop's provider is, and write down what they said.
 pub fn ask_about(
     app: &App,
     order_id: Option<&str>,
@@ -168,9 +130,7 @@ pub fn ask_about(
         reference: reference.map(str::to_owned),
     });
 
-    // **Cash is not written down as an attempt.** The manual provider approves
-    // it without being asked anything, and a ledger with one row per cash sale
-    // is a ledger nobody reads.
+    // Cash is not written down as an attempt.
     if matches!(mode, PaymentMode::Cash | PaymentMode::Credit(_)) {
         return Ok(answer);
     }
@@ -196,17 +156,14 @@ pub fn ask_about(
             })
             .map_err(|e| words::from_db(&e))
     });
-    // **A ledger that cannot be written must not stop a sale.** The answer is
-    // still the answer; the shop loses a line of history and keeps its bill.
+    // A ledger that cannot be written must not stop a sale.
     if let Err(e) = write {
         crate::log_warn!("the payment attempt could not be written down ({e})");
     }
     Ok(answer)
 }
 
-// ===========================================================================
-// The screen
-// ===========================================================================
+// The screen.
 
 pub fn payments_on(app: &App) -> UiResult<PaymentsView> {
     guard::require(app, Permission::ReportsView)?;
@@ -252,12 +209,7 @@ pub fn payments_on(app: &App) -> UiResult<PaymentsView> {
     })
 }
 
-/// **Somebody says the money arrived.**
-///
-/// `BillCreate` and not `ReportsView`: this is the person at the counter with
-/// the bank app open, and making it an owner-only action would mean nothing is
-/// ever confirmed. It writes an audit row every time, which is what makes that
-/// safe.
+/// Somebody says the money arrived.
 pub fn confirm_payment_on(
     app: &App,
     order_id: String,
@@ -308,9 +260,7 @@ pub fn confirm_payment_on(
     payments_on(app)
 }
 
-// ===========================================================================
-// The commands
-// ===========================================================================
+// The commands.
 
 #[tauri::command]
 pub fn payments(app: tauri::State<'_, App>) -> UiResult<PaymentsView> {

@@ -13,14 +13,11 @@ kind: string, name: string,
  */
 what: string, 
 /**
- * Whether this shop has set it up at all. **Not "is it working"** — a
- * shop with no scale is a shop that is finished, not a shop with a
- * problem.
+ * Whether this shop has set it up at all.
  */
 setUp: boolean, 
 /**
- * The honest sentence: "Not set up", "COM3 at 9600 baud", "Nothing
- * answered on COM3".
+ * The honest sentence: "Not set up", "COM3 at 9600 baud", "Nothing answered on COM3".
  */
 says: string, 
 /**

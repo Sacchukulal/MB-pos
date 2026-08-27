@@ -1,58 +1,18 @@
 #!/usr/bin/env node
 /**
- * **THE LINT THAT KEEPS AN ID OUT OF THE CLOCK.**
+ * THE LINT THAT KEEPS AN ID OUT OF THE CLOCK.
  *
- * Twenty-one places in Rust and seventeen on the screens built a row's id from
- * the current millisecond — `` `cus_${Date.now().toString(36)}` `` and
- * `format!("adj_{}", at.millis())`. Two rows made in the same thousandth of a
- * second got the same id, and two rows cannot share one.
- *
- * Most writes then refused, and the shopkeeper read *"The shop's data could not
- * be read"* — ugly, nothing lost. **`expenses` is an upsert**, so there the
- * second spend silently replaced the first: money quietly gone from a day's
- * list with nothing on screen to say why.
- *
- * Nobody wrote that on purpose. Each one was written by somebody who needed an
- * id, reached for the clock because it was to hand, and moved on. That is what
- * a lint is for — the same argument `check-tokens.mjs` and `check-fields.mjs`
- * make, and the same mechanism.
- *
- * It fails the build on:
- *
- *   1. **`Date.now()` used to build a string** in a screen. Use `freshId` from
- *      the kit. `Date.now()` on its own is fine — timing a keystroke burst is
- *      not an id.
- *   2. **`at.millis()` or `now().millis()` inside a `format!` in Rust.** Use
- *      `crate::newid::fresh_at`.
- *
- * # What is allowed, and why there has to be a way out
- *
- * An id that is DERIVED from something real must stay derived. `close_{day}`
- * and `float_{day}` are built from the business day on purpose: one close per
- * day, and a second one has to collide so the database refuses it. Randomness
- * there would quietly allow two closes for one day — the opposite of a fix.
- *
- * Those are the only two, and they are named below rather than escaped, so
- * adding a third is a decision somebody makes in this file.
- *
- * NO DEPENDENCIES, like its two siblings.
- *
+ * Usage:
  *   node scripts/check-ids.mjs
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
-/**
- * The screens, and the Rust that serves them.
- *
- * A directory may be given instead, which is how the test in `look.test.tsx`
- * points it at a deliberately broken file — **a lint nobody has watched fail is
- * a lint nobody knows works.**
- */
+/** The screens, and the Rust that serves them. */
 const ROOTS = process.argv[2] ? [process.argv[2]] : ['src', '../src-tauri/src'];
 
-/** An id that is derived on purpose. See the note above. */
+/** An id that is derived on purpose. */
 const DERIVED = [
   /format!\("close_\{\}", *day\./,
   /format!\("float_\{\}", *day\./,
@@ -107,8 +67,8 @@ function check(path, kind) {
     }
     if (!what) return;
 
-    // Eight lines of room, because a reason worth writing is usually a
-    // paragraph and the marker belongs at the top of it where it is read.
+    // Eight lines of room, because a reason worth writing is usually a paragraph and the marker
+    // belongs at the top of it where it is read.
     const above = lines.slice(Math.max(0, index - 8), index).join(' ');
     if (ESCAPE.test(above) || ESCAPE.test(line)) {
       escapes += 1;

@@ -1,14 +1,3 @@
-//! **P19's T1–T12, against a real server on a real socket.**
-//!
-//! Every one of these runs with no database, no Tauri and no shop — because
-//! everything mb-lan can ask the shop goes through the [`Counter`] trait, and
-//! this file implements it with a fake. That seam is the reason these tests
-//! take milliseconds and the reason a revocation can be made to land exactly
-//! between two requests.
-//!
-//! The clock is injected too. A rate limiter tested by sleeping is a test suite
-//! that takes a minute and fails on a loaded machine.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -23,9 +12,7 @@ use mb_auth::{Permission, PermissionSet};
 use mb_core::Timestamp;
 use mb_lan::counter::{Counter, Device, DeviceRow, PairRequest, PairedDevice, Refusal};
 
-// ---------------------------------------------------------------------------
 // A shop that does not exist.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 struct Row {
@@ -41,15 +28,13 @@ struct Row {
 struct FakeCounter {
     rows: Mutex<Vec<Row>>,
     limit: AtomicU32,
-    /// What `authenticate` was asked, so a test can prove the register really
-    /// is read on every request rather than trusted from a cached claim.
+    /// What `authenticate` was asked, so a test can prove the register really is read on every
+    /// request rather than trusted from a cached claim.
     reads: AtomicU32,
     seen: Mutex<Vec<(String, String)>>,
-    /// P20 — which intents reached the counter, so a test can prove an
-    /// unpaired phone got nowhere near the applier.
+    /// Which intents reached the counter, so a test can prove an unpaired phone got nowhere
+    /// near the applier.
     applied: Mutex<Vec<String>>,
-    /// P27/D141 — the sentence the shop's plan gives back, or nothing when
-    /// there is room for another till.
     till_full: Mutex<Option<String>>,
 }
 
@@ -162,14 +147,6 @@ impl Counter for FakeCounter {
         })
     }
 
-    /// P20's operations, as a fake shop.
-    ///
-    /// **Deliberately trivial.** What P20's real behaviour is — idempotency,
-    /// the conflicts, the kitchen delta — is tested in `magic-bill`'s
-    /// `order_tests.rs` against a real database, because the counter is the
-    /// authority and a test that stubs the counter is testing nothing. What
-    /// this file tests is the ROAD: that an authenticated device reaches these
-    /// and an unauthenticated one does not.
     fn apply(&self, device: &Device, intent: &mb_lan::Intent) -> mb_lan::Outcome {
         self.applied.lock().unwrap().push(intent.id.clone());
         mb_lan::Outcome::Ok {
@@ -191,8 +168,8 @@ impl Counter for FakeCounter {
         mb_lan::BatchResult { outcomes, says }
     }
 
-    /// P27. **A fact, not a request** (D136) — so the fake stores what it is
-    /// given and reports it, which is all the real one does either.
+    /// A fact, not a request — so the fake stores what it is given and reports it, which is all
+    /// the real one does either.
     fn receive(&self, _device: &Device, forwarded: &mb_lan::Forwarded) -> mb_lan::Receipt {
         let stored: Vec<(String, bool)> = forwarded
             .orders
@@ -216,8 +193,8 @@ impl Counter for FakeCounter {
     }
 
     fn catalogue(&self, held: Option<&str>) -> Option<mb_lan::Catalogue> {
-        // The one behaviour worth faking, because it is a status code and not
-        // a business rule: an unchanged version is answered 304.
+        // The one behaviour worth faking, because it is a status code and not a business rule:
+        // an unchanged version is answered 304.
         if held == Some("v1") {
             return None;
         }
@@ -229,8 +206,7 @@ impl Counter for FakeCounter {
     }
 }
 
-/// A clock a test moves by hand. A rate limiter tested by sleeping is a test
-/// suite that takes a minute and fails on a loaded machine.
+/// A clock a test moves by hand.
 #[derive(Debug)]
 struct Clock(AtomicI64);
 
@@ -260,9 +236,7 @@ impl Harness {
         Harness::start_with(false)
     }
 
-    /// `tls` picks the real handshake. Off for most tests, because what they
-    /// are testing is the gate and not the cryptography; on for T10, which is
-    /// testing exactly the cryptography.
+    /// `tls` picks the real handshake.
     fn start_with(tls: bool) -> Harness {
         let counter = FakeCounter::new();
         let clock = Clock::arc();
@@ -275,19 +249,18 @@ impl Harness {
             Arc::clone(&identity),
             Arc::new(move || ticking.now()),
         );
-        let config = tls
-            .then(|| mb_lan::TlsConfig::from_identity(&identity).expect("tls"))
-            ;
-        // Port 0: the OS picks a free one, so two tests running at once cannot
-        // collide — which they do, because cargo runs them in parallel.
-        let running = mb_lan::start_on(shared.clone(), std::net::Ipv4Addr::LOCALHOST, 0, config).expect("it listens");
+        let config = tls.then(|| mb_lan::TlsConfig::from_identity(&identity).expect("tls"));
+        // Port 0: the OS picks a free one, so two tests running at once cannot collide — which
+        // they do, because cargo runs them in parallel.
+        let running = mb_lan::start_on(shared.clone(), std::net::Ipv4Addr::LOCALHOST, 0, config)
+            .expect("it listens");
         let scheme = if tls { "https" } else { "http" };
         let base = format!("{scheme}://127.0.0.1:{}", running.port);
 
         let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
         if tls {
-            // **The pin.** The client trusts this one certificate and nothing
-            // else — which is what a paired phone does.
+            // The pin. The client trusts this one certificate and nothing else — which is what
+            // a paired phone does.
             let der = pem_to_der(&identity.certificate_pem);
             builder = builder
                 .add_root_certificate(reqwest::Certificate::from_der(&der).expect("a certificate"))
@@ -327,8 +300,8 @@ fn pem_to_der(pem: &str) -> Vec<u8> {
         .expect("decodes")
 }
 
-/// Pair a phone the way a real one does: present the token, a person approves,
-/// the phone collects its credential.
+/// Pair a phone the way a real one does: present the token, a person approves, the phone
+/// collects its credential.
 async fn pair_a_phone(h: &Harness, name: &str) -> PairedDevice {
     let (token, _code) = h.shared.desk.open(h.clock.now());
     let asked: serde_json::Value = h
@@ -345,10 +318,12 @@ async fn pair_a_phone(h: &Harness, name: &str) -> PairedDevice {
         .json()
         .await
         .expect("json");
-    let request_id = asked["request_id"].as_str().expect("a request id").to_owned();
+    let request_id = asked["request_id"]
+        .as_str()
+        .expect("a request id")
+        .to_owned();
 
-    // Nothing is issued until a person presses Allow. That press is the panel's
-    // job, and here it is one line.
+    // Nothing is issued until a person presses Allow.
     let waiting = h.shared.desk.take(&request_id).expect("it is in the queue");
     let device = h
         .counter
@@ -378,17 +353,13 @@ fn bearer(device: &PairedDevice) -> String {
     format!("Bearer {}.{}", device.device_id, device.secret)
 }
 
-// ---------------------------------------------------------------------------
 // The tests.
-// ---------------------------------------------------------------------------
 
-/// **T1.** A simulated client pairs, is approved, connects and is served.
+/// A simulated client pairs, is approved, connects and is served.
 #[tokio::test]
 async fn a_phone_pairs_is_approved_and_is_served() {
     let h = Harness::start();
 
-    // `/v1/hello` first — this is what discovery confirms, and it needs no
-    // credential by design.
     let hello: serde_json::Value = h
         .client
         .get(h.url("/v1/hello"))
@@ -400,7 +371,12 @@ async fn a_phone_pairs_is_approved_and_is_served() {
         .expect("json");
     assert_eq!(hello["shop_name"], "Anna Kuteera");
     assert_eq!(hello["protocol_version"], mb_lan::PROTOCOL_VERSION);
-    assert!(hello["fingerprint"].as_str().unwrap().starts_with("sha256:"));
+    assert!(
+        hello["fingerprint"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
 
     let device = pair_a_phone(&h, "Ravi's phone").await;
     assert!(!device.secret.is_empty());
@@ -415,21 +391,25 @@ async fn a_phone_pairs_is_approved_and_is_served() {
     assert_eq!(me.status(), 200);
     let body: serde_json::Value = me.json().await.expect("json");
     assert_eq!(body["name"], "Ravi's phone");
-    // The STAFF member is identified separately from the device, so a shared
-    // tablet still attributes each action to a person.
+    // The STAFF member is identified separately from the device, so a shared tablet still
+    // attributes each action to a person.
     assert_eq!(body["staff_id"], "staff_1");
 
     // And the counter noticed it, for the panel's "last seen".
     assert!(!h.counter.seen.lock().unwrap().is_empty());
 }
 
-/// **T2.** An unpaired client is refused everything except `/v1/hello`.
 #[tokio::test]
 async fn an_unpaired_phone_gets_nothing_but_hello() {
     let h = Harness::start();
 
     assert_eq!(
-        h.client.get(h.url("/v1/hello")).send().await.expect("hello").status(),
+        h.client
+            .get(h.url("/v1/hello"))
+            .send()
+            .await
+            .expect("hello")
+            .status(),
         200
     );
 
@@ -451,13 +431,12 @@ async fn an_unpaired_phone_gets_nothing_but_hello() {
         );
         let body: serde_json::Value = response.json().await.expect("json");
         let said = body["message"].as_str().unwrap_or_default();
-        // One refusal for "no such device" and "wrong secret". Telling them
-        // apart is a way to enumerate the shop's phones.
+        // One refusal for "no such device" and "wrong secret".
         assert!(said.contains("not connected"), "{said}");
     }
 }
 
-/// **T3.** A revoked device is refused on its VERY NEXT request.
+/// A revoked device is refused on its VERY NEXT request.
 #[tokio::test]
 async fn a_revoked_phone_is_refused_on_the_next_request() {
     let h = Harness::start();
@@ -491,8 +470,8 @@ async fn a_revoked_phone_is_refused_on_the_next_request() {
     assert!(h.counter.reads.load(Ordering::SeqCst) > reads_before);
 }
 
-/// **T4.** A client without a permission is refused server-side, even when the
-/// UI would have hidden the button.
+/// A client without a permission is refused server-side, even when the UI would have hidden the
+/// button.
 #[tokio::test]
 async fn a_permission_is_enforced_on_the_server_not_on_the_phone() {
     let h = Harness::start();
@@ -510,8 +489,7 @@ async fn a_permission_is_enforced_on_the_server_not_on_the_phone() {
     assert!(said.contains("void a bill"), "{said}");
     assert!(said.contains("Ask somebody who can"), "{said}");
 
-    // And granting it changes the answer on the very next call — the same
-    // property T3 tests for revocation, for the same reason.
+    // And granting it changes the answer on the very next call.
     h.counter
         .set_permissions(&paired.device_id, PermissionSet::everything());
     let device = h
@@ -521,17 +499,13 @@ async fn a_permission_is_enforced_on_the_server_not_on_the_phone() {
     assert!(mb_lan::require(&device, Permission::BillVoid).is_ok());
 }
 
-/// **T5.** Fifty concurrent clients do not measurably slow a billing
-/// operation. The number is printed and goes in `docs/PERFORMANCE.md`.
+/// Fifty concurrent clients do not measurably slow a billing operation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn fifty_phones_do_not_slow_the_till() {
     let h = Harness::start();
     let device = pair_a_phone(&h, "One of fifty").await;
 
-    // What "a billing operation" costs with nobody on the network. The work
-    // itself is a stand-in for the till's — what is being measured is whether
-    // the network layer can get in its way, and the answer must not depend on
-    // what the till happens to be doing.
+    // What "a billing operation" costs with nobody on the network.
     let quiet = time_a_bill();
 
     let mut phones = Vec::new();
@@ -545,8 +519,8 @@ async fn fifty_phones_do_not_slow_the_till() {
             }
         }));
     }
-    // Measured while all fifty are in flight, which is the only version of
-    // this measurement that means anything.
+    // Measured while all fifty are in flight, which is the only version of this measurement
+    // that means anything.
     let busy = time_a_bill();
     for phone in phones {
         let _ = phone.await;
@@ -556,9 +530,7 @@ async fn fifty_phones_do_not_slow_the_till() {
     println!("  a billing operation, network quiet: {quiet:?}");
     println!("  the same, with 50 phones connected: {busy:?}");
 
-    // Generous on purpose: this runs on a laptop that is also compiling. What
-    // it is guarding against is an ORDER-OF-MAGNITUDE regression — a handler
-    // taking a lock the till needs — not a few microseconds of scheduler noise.
+    // Generous on purpose: this runs on a laptop that is also compiling.
     assert!(
         busy < quiet * 20 + std::time::Duration::from_millis(50),
         "fifty phones made the till {busy:?} against {quiet:?} — something is \
@@ -566,8 +538,8 @@ async fn fifty_phones_do_not_slow_the_till() {
     );
 }
 
-/// A stand-in for the till's synchronous work: a mutex taken and released,
-/// which is the shape of every `Counter` call and of every `App::with_shop`.
+/// A stand-in for the till's synchronous work: a mutex taken and released, which is the shape
+/// of every `Counter` call and of every `App::with_shop`.
 fn time_a_bill() -> std::time::Duration {
     let lock = Mutex::new(0_u64);
     let start = std::time::Instant::now();
@@ -578,14 +550,13 @@ fn time_a_bill() -> std::time::Duration {
     start.elapsed()
 }
 
-/// **T6.** The server survives a client that connects and then goes silent
-/// mid-request; nothing leaks and nothing blocks.
+/// The server survives a client that connects and then goes silent mid-request; nothing leaks
+/// and nothing blocks.
 #[tokio::test]
 async fn a_silent_client_blocks_nothing() {
     let h = Harness::start();
 
-    // Five sockets that connect, send half a request line and stop. This is a
-    // port scanner, and it is also a phone that walked out of range.
+    // Five sockets that connect, send half a request line and stop.
     let mut zombies = Vec::new();
     for _ in 0..5 {
         let stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", h.running.port))
@@ -593,7 +564,10 @@ async fn a_silent_client_blocks_nothing() {
             .expect("connected");
         use tokio::io::AsyncWriteExt as _;
         let mut stream = stream;
-        stream.write_all(b"GET /v1/he").await.expect("half a request");
+        stream
+            .write_all(b"GET /v1/he")
+            .await
+            .expect("half a request");
         zombies.push(stream);
     }
 
@@ -610,9 +584,8 @@ async fn a_silent_client_blocks_nothing() {
     drop(zombies);
 }
 
-/// **T7.** Killing and restarting the server re-establishes clients without
-/// re-pairing — because the credential is bound to the SERVER, not to a socket
-/// and not to an address.
+/// Killing and restarting the server re-establishes clients without re-pairing — because the
+/// credential is bound to the SERVER, not to a socket and not to an address.
 #[tokio::test]
 async fn a_restart_does_not_cost_a_pairing() {
     let mut h = Harness::start();
@@ -628,12 +601,12 @@ async fn a_restart_does_not_cost_a_pairing() {
         200
     );
 
-    // Down.
     h.running.stop();
 
-    // Up again — a new listener, a new port (DHCP moves a shop's counter too),
-    // the same identity and the same register.
-    let running = mb_lan::start_on(h.shared.clone(), std::net::Ipv4Addr::LOCALHOST, 0, None).expect("it listens again");
+    // Up again — a new listener, a new port (DHCP moves a shop's counter too), the same
+    // identity and the same register.
+    let running = mb_lan::start_on(h.shared.clone(), std::net::Ipv4Addr::LOCALHOST, 0, None)
+        .expect("it listens again");
     let base = format!("http://127.0.0.1:{}", running.port);
     h.running = running;
     h.base = base;
@@ -652,7 +625,7 @@ async fn a_restart_does_not_cost_a_pairing() {
     );
 }
 
-/// **T8.** A version-mismatched client gets the clear upgrade message.
+/// A version-mismatched client gets the clear upgrade message.
 #[tokio::test]
 async fn an_old_phone_is_told_to_update_in_words() {
     let h = Harness::start();
@@ -674,8 +647,8 @@ async fn an_old_phone_is_told_to_update_in_words() {
     // Not a tag, not a number, not "protocol mismatch".
     assert!(!said.contains("protocol"), "{said}");
 
-    // The other direction says the other thing — the counter is the one to
-    // update, and a waiter must not be sent to the Play Store for it.
+    // The other direction says the other thing — the counter is the one to update, and a waiter
+    // must not be sent to the Play Store for it.
     let newer = h
         .client
         .get(h.url("/v1/me"))
@@ -688,8 +661,6 @@ async fn an_old_phone_is_told_to_update_in_words() {
     let said = body["message"].as_str().unwrap_or_default();
     assert!(said.contains("counter PC"), "{said}");
 
-    // And `/v1/hello` still answers, because a phone that is told to upgrade
-    // must still be able to ask what it is talking to.
     assert_eq!(
         h.client
             .get(h.url("/v1/hello"))
@@ -702,7 +673,7 @@ async fn an_old_phone_is_told_to_update_in_words() {
     );
 }
 
-/// **T9.** Rate limiting engages AND recovers, over the real socket.
+/// Rate limiting engages AND recovers, over the real socket.
 #[tokio::test]
 async fn the_pairing_door_shuts_and_opens_again() {
     let h = Harness::start();
@@ -724,8 +695,8 @@ async fn the_pairing_door_shuts_and_opens_again() {
     }
     let response = last.expect("at least one");
     assert_eq!(response.status(), 429, "the Argon2 door never shut");
-    // A `Retry-After`, always: a phone refused with no idea when to come back
-    // retries into a wall and decides the counter is broken.
+    // A `Retry-After`, always: a phone refused with no idea when to come back retries into a
+    // wall and decides the counter is broken.
     let retry = response
         .headers()
         .get("retry-after")
@@ -750,8 +721,7 @@ async fn the_pairing_door_shuts_and_opens_again() {
     assert_ne!(again.status(), 429, "the door shut and never opened again");
 }
 
-/// **T10.** A client that does not trust the pinned certificate is rejected;
-/// one that pins it succeeds.
+/// A client that does not trust the pinned certificate is rejected; one that pins it succeeds.
 #[tokio::test]
 async fn tls_only_lets_in_a_client_that_pinned_the_certificate() {
     let h = Harness::start_with(true);
@@ -765,8 +735,8 @@ async fn tls_only_lets_in_a_client_that_pinned_the_certificate() {
     );
     assert_eq!(response.expect("ok").status(), 200);
 
-    // A client that trusts the ordinary certificate authorities and nothing
-    // else — which is every HTTP library's default, and a stranger's tooling.
+    // A client that trusts the ordinary certificate authorities and nothing else — which is
+    // every HTTP library's default, and a stranger's tooling.
     let stranger = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -779,33 +749,14 @@ async fn tls_only_lets_in_a_client_that_pinned_the_certificate() {
     );
 }
 
-/// **P27 — a second till, over the real wire, from meeting to forwarding.**
-///
-/// `src-tauri`'s eleven prove what happens to a shop's MONEY when two machines
-/// write bills at once, and they hand the batch straight to the master's
-/// receiver. This is the other half: the whole client, over TLS, against a real
-/// socket, doing the three things a till does in order.
-///
-/// 1. **Meet.** The till has only what a person carried from the QR — an
-///    address and a fingerprint. It fetches the certificate over a connection
-///    that trusts nothing, checks the fingerprint by hand, and pins it. Nothing
-///    on the wire made that safe; the person holding the code did.
-/// 2. **Join.** P19's pairing, with `platform: "till"`, waiting for somebody at
-///    the other counter to press Allow.
-/// 3. **Forward.** A settled bill, as a fact — and sent twice, because a real
-///    sender retries and the second send must change nothing.
-///
-/// And the refusal that matters: a fingerprint one character out is a stranger
-/// answering on the master's address, and the join stops before a credential is
-/// ever asked for.
+/// A second till, over the real wire, from meeting to forwarding.
 #[tokio::test]
 async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
     let h = Harness::start_with(true);
     let real = mb_lan::identity::fingerprint_of(&h.shared.identity.certificate_pem)
         .expect("a fingerprint");
 
-    // **The refusal first**, because it is the one that would be quietly
-    // skipped. One digit different is somebody else on this address.
+    // The refusal first, because it is the one that would be quietly skipped.
     let mut wrong: Vec<char> = real.chars().collect();
     let last = wrong.len() - 1;
     wrong[last] = if wrong[last] == '0' { '1' } else { '0' };
@@ -815,22 +766,22 @@ async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
         "a certificate whose fingerprint did not match the code was accepted"
     );
 
-    // 1. Meet, with the fingerprint from the code.
+    // Meet, with the fingerprint from the code.
     let master = mb_lan::Master::meet(&h.base, &real)
         .await
         .expect("the till recognised the main one");
-    // The certificate it pinned is the one it checked — not one it fetched
-    // again afterwards, which would be a second chance for a stranger.
+    // The certificate it pinned is the one it checked — not one it fetched again afterwards,
+    // which would be a second chance for a stranger.
     assert_eq!(master.certificate_pem(), h.shared.identity.certificate_pem);
 
-    // 2. Join. A person at the other counter presses Allow while the till
-    //    waits, so the approval is driven from here on its own task.
+    // Join. A person at the other counter presses Allow while the till waits, so the approval
+    // is driven from here on its own task.
     let (token, _code) = h.shared.desk.open(h.clock.now());
     let desk = h.shared.desk.clone();
     let counter = Arc::clone(&h.counter);
     let allowing = tokio::spawn(async move {
-        // Poll for the request to arrive, exactly as the panel's operator would
-        // wait for the name to appear on their screen.
+        // Poll for the request to arrive, exactly as the panel's operator would wait for the
+        // name to appear on their screen.
         for _ in 0..100 {
             if let Some(waiting) = desk.waiting().first().cloned() {
                 let device = counter
@@ -858,11 +809,9 @@ async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
         .expect("it joined");
     assert!(!credential.device_id.is_empty());
     assert!(!credential.secret.is_empty());
-    // **The panel saw a till and not a phone**, which is what the person
-    // pressing Allow reads and what D141 counts against a different line.
     assert_eq!(allowing.await.expect("the operator"), "till");
 
-    // 3. Forward, twice.
+    // Forward, twice.
     let master = master.as_device(credential);
     let batch = mb_lan::Forwarded {
         terminal_id: "term_2".to_owned(),
@@ -874,16 +823,16 @@ async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
     assert!(first.all_stored(), "{first:?}");
     assert_eq!(first.stored, vec![("ord_b1".to_owned(), true)]);
 
-    // **A repeat is a success**, byte for byte, which is what lets a secondary
-    // retry for ever without keeping track of what it has already sent.
+    // A repeat is a success, byte for byte, which is what lets a secondary retry for ever
+    // without keeping track of what it has already sent.
     let again = master.forward(&batch).await.expect("it went across again");
     assert_eq!(again.stored, first.stored);
     assert_eq!(again.says, first.says);
 }
 
-/// **T11.** Covered in `pairing.rs`'s unit tests for the token's own rules;
-/// this is the same property through the socket, because a rule that only holds
-/// below the HTTP layer is a rule with a way around it.
+/// Covered in `pairing.rs`'s unit tests for the token's own rules; this is the same property
+/// through the socket, because a rule that only holds below the HTTP layer is a rule with a way
+/// around it.
 #[tokio::test]
 async fn a_used_token_cannot_pair_a_second_phone() {
     let h = Harness::start();
@@ -916,8 +865,7 @@ async fn a_used_token_cannot_pair_a_second_phone() {
     );
 }
 
-/// **T12.** The device limit refuses the next phone, in a sentence with the
-/// number in it.
+/// The device limit refuses the next phone, in a sentence with the number in it.
 #[tokio::test]
 async fn the_device_limit_refuses_in_a_sentence_with_the_number() {
     let h = Harness::start();
@@ -941,22 +889,17 @@ async fn the_device_limit_refuses_in_a_sentence_with_the_number() {
     assert_eq!(refused.status(), 403);
     let body: serde_json::Value = refused.json().await.expect("json");
     let said = body["message"].as_str().unwrap_or_default();
-    assert!(said.contains('2'), "the number is not in the sentence: {said}");
+    assert!(
+        said.contains('2'),
+        "the number is not in the sentence: {said}"
+    );
     assert!(said.contains("phones"), "{said}");
-    assert!(said.contains("Remove one"), "it does not say what to do: {said}");
+    assert!(
+        said.contains("Remove one"),
+        "it does not say what to do: {said}"
+    );
 }
 
-/// **T7 / D141 — the licence counts tills at the door, and a till is not a
-/// phone.**
-///
-/// Two halves, and the second is the one that matters. A shop whose plan is full
-/// of tills must still be able to add the phone it paid for, and a shop that has
-/// used up its phones must still be able to add a till: they are separate lines
-/// on the plan, so they are separate gates here.
-///
-/// Nothing in this test can stop a till that has already joined — there is no
-/// call for it to make. That is D141's other half, and it is true by there being
-/// no code rather than by a test asserting it.
 #[tokio::test]
 async fn a_full_plan_refuses_a_new_till_and_leaves_the_phones_alone() {
     let h = Harness::start();
@@ -994,9 +937,6 @@ async fn a_full_plan_refuses_a_new_till_and_leaves_the_phones_alone() {
     assert!(!phone.device_id.is_empty());
 }
 
-/// **P20 on the road**: an authenticated phone reaches the applier, an
-/// unauthenticated one does not get near it, and an unchanged catalogue is a
-/// 304 rather than four hundred items.
 #[tokio::test]
 async fn an_intent_needs_a_credential_and_a_stale_catalogue_is_not_resent() {
     let h = Harness::start();
@@ -1078,8 +1018,8 @@ async fn an_intent_needs_a_credential_and_a_stale_catalogue_is_not_resent() {
     );
 }
 
-/// The reconnection model: a phone that dropped gets what it missed, and one
-/// that is too far behind is TOLD so rather than left to work it out.
+/// The reconnection model: a phone that dropped gets what it missed, and one that is too far
+/// behind is TOLD so rather than left to work it out.
 #[tokio::test]
 async fn a_reconnecting_phone_gets_what_it_missed_and_never_a_refetch_storm() {
     let h = Harness::start();
@@ -1095,8 +1035,7 @@ async fn a_reconnecting_phone_gets_what_it_missed_and_never_a_refetch_storm() {
         mb_lan::Missed::TooFarBehind { .. } => panic!("three messages is not too far behind"),
     }
 
-    // Far enough behind that the buffer cannot serve it. The server says so
-    // explicitly — a full refetch is a decision, never a fallback.
+    // Far enough behind that the buffer cannot serve it.
     for n in 0..200 {
         h.shared.push("table", serde_json::json!({ "n": n }));
     }

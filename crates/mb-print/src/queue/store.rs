@@ -1,37 +1,9 @@
-//! Where an unfinished job lives — **the port, and its two implementations.**
-//!
-//! # Why a port and not just "write to the database"
-//!
-//! Because the two moments a shop most needs to print are moments when there is
-//! no database open:
-//!
-//! * **first run.** The owner has installed the counter, plugged in a printer,
-//!   and wants a test print before anything else exists;
-//! * **after a restore.** D27 is explicit that a restore runs *before*
-//!   `Db::open`, against a file, precisely so Windows refuses a restore aimed at
-//!   an open database instead of corrupting it.
-//!
-//! A queue that requires storage cannot help the person whose storage is what
-//! went wrong. So durability is a *choice* the caller makes — [`SqliteStore`]
-//! when there is a shop, [`MemoryStore`] when there is not — and the queue
-//! itself does not know the difference.
-//!
-//! # Why `StoredJob` is not `mb_db::PrintJobRow`
-//!
-//! They carry the same fields and they are deliberately separate types. This one
-//! is the queue's idea of a job; that one is a row. Fifteen lines of conversion
-//! in [`super::sqlite`] is the price of the queue not being shaped by SQLite,
-//! and of P08 being able to implement this trait over something else if a
-//! terminal ever spools to another terminal (scope 11.1).
+//! Where an unfinished job lives — the port, and its two implementations.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 /// A job as it survives a power cut.
-///
-/// Everything is a plain value: the payload is JSON, the state and kind are the
-/// strings the schema's CHECK constraints allow, and nothing here needs the
-/// crate that will print it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredJob {
     pub id: String,
@@ -61,8 +33,7 @@ pub enum StoreError {
 
 /// Somewhere unfinished jobs are kept.
 pub trait JobStore: Send + Sync + std::fmt::Debug {
-    /// Write a job **durably**, before the caller is told the ticket is on its
-    /// way. That ordering is the whole of audit D4's fix.
+    /// Write a job durably, before the caller is told the ticket is on its way.
     fn save(&self, job: &StoredJob) -> Result<(), StoreError>;
 
     /// Record what happened, without rewriting the payload.
@@ -75,20 +46,15 @@ pub trait JobStore: Send + Sync + std::fmt::Debug {
         engine_used: Option<&str>,
     ) -> Result<(), StoreError>;
 
-    /// **A job that printed has no row** (D35). See the schema note on
-    /// `print_jobs`: keeping them would cost more than every bill in the shop.
+    /// A job that printed has no row.
     fn remove(&self, id: &str) -> Result<(), StoreError>;
 
-    /// Everything still waiting, most urgent first. What the queue reads at
-    /// start-up to carry on after a crash.
+    /// Everything still waiting, most urgent first.
     fn unfinished(&self) -> Result<Vec<StoredJob>, StoreError>;
 }
 
-/// A queue that does not survive a restart, and is the right answer anyway when
-/// there is nothing to survive into.
-///
-/// Used by the test print during first-run setup, by every test in this crate,
-/// and by a counter whose database is being restored.
+/// A queue that does not survive a restart, and is the right answer anyway when there is
+/// nothing to survive into.
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     jobs: Mutex<BTreeMap<String, StoredJob>>,
@@ -100,8 +66,7 @@ impl MemoryStore {
         MemoryStore::default()
     }
 
-    /// How many jobs are outstanding. The in-memory equivalent of the row count
-    /// D35 says must go back to zero.
+    /// How many jobs are outstanding.
     #[must_use]
     pub fn len(&self) -> usize {
         lock(&self.jobs).len()

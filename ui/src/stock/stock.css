@@ -1,11 +1,7 @@
-/*
- * The stock book — P25. Every value is a token.
- */
+/* The stock book. */
 
 .mb-stock {
-  /* The page margin is the SHELL's (P27.5, .mb-main). Fourteen screens each
-     set their own here and they disagreed — space-3, space-4 and space-5 —
-     so the left edge of the app moved as you walked through it. */
+  /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -13,8 +9,6 @@
   height: 100%;
 }
 
-/* A row inside a flex column has to say so: `.mb-card` is a COLUMN, and three
-   rows placed inside one shipped stacked and centred at P18. */
 .mb-stock__head {
   flex-wrap: wrap;
   align-items: flex-end;
@@ -36,16 +30,16 @@
   gap: var(--space-2);
 }
 
-/* A balance below zero is not an error and not a refusal — it is what the book
-   says, and it has to be readable at a glance. Colour is never the only
-   carrier (§2): the row also shows the words "Below zero". */
+/*
+ * A balance below zero is not an error and not a refusal — it is what the book says, and it has
+ * to be readable at a glance.
+ */
 .mb-stock__negative {
   font-family: var(--font-mono);
   color: var(--danger);
 }
 
-/* D114 — the cache disagreed with the ledger, and the sentence carries the
-   button that fixes it. */
+/* The cache disagreed with the ledger, and the sentence carries the button that fixes it. */
 .mb-stock__drift {
   display: flex;
   flex-direction: row;
@@ -97,9 +91,7 @@
   margin-left: auto;
 }
 
-/* A pack, a reorder level, a movement: a number and the unit it is in. Every
-   flex child needs `min-width: 0`, because a <select> holds itself as wide as
-   its longest option and pushes the button off the edge (P13). */
+/* A pack, a reorder level, a movement: a number and the unit it is in. */
 .mb-stock__pack {
   display: flex;
   flex-direction: row;
@@ -112,12 +104,7 @@
   min-width: 0;
 }
 
-/* **A recipe line is ONE row, and a grid is what makes that true.**
-   As a wrapping flex row it broke into three: the yield box dropped to its own
-   line and the line's cost floated away from the line it belonged to. Fifty
-   dishes at that height is a dialog nobody scrolls to the bottom of. Named
-   columns, so each field gets the width it deserves rather than the width its
-   longest option wants. */
+/* A recipe line is ONE row, and a grid is what makes that true. */
 .mb-stock__line {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.9fr) auto auto;
@@ -142,8 +129,6 @@
   font-size: var(--text-sm);
 }
 
-/* The cost, and the gap between what the owner thought and what the recipe
-   says (D119). The gap is the finding, so it is on the same line. */
 .mb-stock__cost {
   display: flex;
   flex-direction: row;
@@ -156,15 +141,12 @@
   font-size: var(--text-sm);
 }
 
-/* The find box on the toolbar. The same width as every other "find something
-   on this screen" box in the product (--find-width) — a search field that is a
-   different size on each screen is the alignment complaint in miniature. */
+/* The find box on the toolbar. */
 .mb-stock__find {
   width: var(--find-width);
 }
 
-/* **Used more than the recipes say** (P31). Danger, and in bold as well as in
-   colour — §2 rule 2: grey-scale the screen and it must still read. */
+/* Used more than the recipes say. */
 .mb-stock__over {
   color: var(--danger);
   font-weight: var(--weight-bold);

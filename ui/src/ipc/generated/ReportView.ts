@@ -4,15 +4,15 @@ import type { ReportColumn } from "./ReportColumn";
 
 export type ReportView = { id: string, title: string, 
 /**
- * The period, in words: "1 Aug – 9 Aug 2026 · 9 days".
+ * The period, in words: "1 Aug.
  */
 subtitle: string, columns: Array<ReportColumn>, 
 /**
- * Already formatted. TypeScript does no arithmetic on money (R8).
+ * Already formatted. TypeScript does no arithmetic on money.
  */
 rows: Array<Array<string>>, totals: Array<string> | null, 
 /**
- * Scope 10.9 — against the previous equal period.
+ * Against the previous equal period.
  */
 compare: CompareView | null, 
 /**

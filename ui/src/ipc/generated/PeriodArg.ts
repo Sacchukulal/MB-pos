@@ -2,11 +2,5 @@
 
 /**
  * A period, as the screen asks for one.
- *
- * **Two `YYYY-MM-DD` strings**, which is what an `<input type="date">`
- * produces. Not numbers: D58 bans a `bigint` at this boundary anyway, and a
- * days-since-epoch integer would have to be computed in TypeScript — date
- * arithmetic on the value every report is keyed by, in the language §6 keeps
- * arithmetic out of.
  */
 export type PeriodArg = { from: string, to: string, };

@@ -1,18 +1,3 @@
-/**
- * **Backup — audit group A, which is the most dangerous group in the report.**
- *
- * P05 built the whole of this and none of it was reachable. The screen's job
- * is one sentence at the top: *is this shop's data safe, and does anybody
- * know?* Everything else is a button under it.
- *
- * Two things this screen does that a backup screen usually does not:
- *
- * * **it says loudly when a backup has never been checked**, because A1 is
- *   that an unverified backup is not a backup;
- * * **it refuses to restore a file nobody has checked** — the one moment a bad
- *   backup does the most damage is the moment it replaces a good database.
- */
-
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button, Card, ConfirmDialog, EmptyState, SectionHeader, Spinner, Table, useToast } from '../kit';
@@ -56,8 +41,10 @@ export function Backup() {
 
   return (
     <div className="mb-backup">
-      {/* The headline. Colour AND words, because colour is never the only
-          signal (§2 rule 2) — and this is the one line that has to be read. */}
+      {/*
+        The headline. Colour AND words, because colour is never the only signal — and this is
+        the one line that has to be read.
+      */}
       <p className={`mb-backup__headline mb-backup__headline--${view.tone}`}>{view.headline}</p>
 
       {view.restoreWaiting ? (
@@ -193,8 +180,7 @@ export function Backup() {
         </Card>
       )}
 
-      {/* D27 — this asks, and then asks the app to restart. It does not
-          restore: a restore replaces the file the counter is billing into. */}
+      {/* This asks, and then asks the app to restart. */}
       <ConfirmDialog
         open={restoring !== null}
         destructive

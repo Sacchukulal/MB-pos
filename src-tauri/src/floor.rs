@@ -1,22 +1,5 @@
-//! **The floor** — scope 14.1, 14.2, 14.3, and the three things you do to an
-//! order that is already on a table (1.21, 1.22, 1.23).
-//!
-//! P09 built the tiles and the "No table" group. This is the master data
-//! behind them, the layout, the timers that make a floor worth looking at, and
-//! the operations.
-//!
-//! Bodies over `&App` (D46). Everything that changes the floor needs
-//! `settings.tables`; everything that changes an ORDER needs the permission
-//! that matches what it is really doing — moving an order is billing work, and
-//! merging one away is close enough to a void that it is gated with one.
-//!
-//! # Two thresholds, and they come from settings
-//!
-//! `billing.rs` had `const LATE_AFTER_MINUTES: i64 = 30` — one threshold,
-//! hard-coded. A dosa counter turns a table in eight minutes and a fine-dining
-//! room in ninety; one constant is wrong for both. They are settings now, read
-//! in Rust, and the tile state comes back **decided** so no screen ever
-//! compares a number to a threshold (R8).
+//! The floor — scope 14.1, 14.2, 14.3, and the three things you do to an order that is already
+//! on a table (1.21, 1.22, 1.23).
 
 use mb_auth::Permission;
 use mb_core::{BusinessDay, Money, Qty, TableId, Timestamp};
@@ -32,21 +15,15 @@ use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-/// Settings keys for the two thresholds (scope 14.2). Spelled once.
+/// Settings keys for the two thresholds (scope 14.2).
 pub const WARN_KEY: &str = "floor.warn_minutes";
 pub const LATE_KEY: &str = "floor.late_minutes";
 
 /// What a shop gets before anybody opens the settings screen.
-///
-/// Twenty and forty-five: long enough that an ordinary lunch never turns the
-/// floor amber, short enough that both states are seen during a shift rather
-/// than in theory.
 pub const DEFAULT_WARN_MINUTES: i64 = 20;
 pub const DEFAULT_LATE_MINUTES: i64 = 45;
 
-// ---------------------------------------------------------------------------
 // What the screen sees.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -65,27 +42,25 @@ pub struct SectionView {
 pub struct TableRowView {
     pub id: String,
     pub label: String,
-    /// What this table PRINTS as, worked out by the one function that decides
-    /// it (`mb_core::table`). Shown in the master so an owner can see why two
-    /// rows clash.
+    /// What this table PRINTS as, worked out by the one function that decides it
+    /// (`mb_core::table`).
     pub printed: String,
     pub section_id: Option<String>,
     pub seats: u32,
-    /// `None` when the table is not on the plan — which is every table until
-    /// somebody drags one.
+    /// `None` when the table is not on the plan — which is every table until somebody drags
+    /// one.
     pub x: Option<u32>,
     pub y: Option<u32>,
     pub is_active: bool,
-    /// Whether an order is sitting on it right now. A table cannot be hidden
-    /// or deleted while this is true, and the screen says so before the click.
+    /// Whether an order is sitting on it right now.
     pub is_busy: bool,
-    /// How many orders have ever pointed at it — the number the "hide it
-    /// instead" refusal quotes.
+    /// How many orders have ever pointed at it — the number the "hide it instead" refusal
+    /// quotes.
     pub history: u32,
 }
 
-/// The whole floor in one answer: the tiles, the plan, the numbers, the
-/// thresholds that decided the tile states.
+/// The whole floor in one answer: the tiles, the plan, the numbers, the thresholds that decided
+/// the tile states.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -94,26 +69,13 @@ pub struct FloorView {
     pub sections: Vec<SectionView>,
     pub tables: Vec<TableRowView>,
     pub occupancy: OccupancyView,
-    /// How many squares each way. The screen draws the grid from this rather
-    /// than from a number of its own that could disagree.
+    /// How many squares each way.
     pub grid: u32,
     pub warn_minutes: u32,
     pub late_minutes: u32,
-    /// True once ANY table has been placed. False means the section grid is
-    /// what gets drawn — and that is not a degraded mode: no shop should have
-    /// to draw a floor plan before it can bill.
+    /// True once ANY table has been placed.
     pub has_layout: bool,
-    /// **Whether this person may change the room.**
-    ///
-    /// Asked here rather than worked out on the screen, for R8's reason: the
-    /// rule is `Permission::TablesManage`, every command on this screen already
-    /// checks it with `guard::require`, and a second copy of it in TypeScript is
-    /// a second copy that can drift.
-    ///
-    /// It is a **courtesy and not the control** — hiding the panel saves a
-    /// waiter from a row of buttons that can only fail; `guard::require` is
-    /// what actually refuses, and there is a test that calls the commands
-    /// without going near this field.
+    /// Whether this person may change the room.
     pub can_arrange: bool,
 }
 
@@ -140,21 +102,20 @@ pub struct TableEdit {
     pub is_active: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Reading.
-// ---------------------------------------------------------------------------
-
 /// The two thresholds, with the shop's answer or the default.
 pub fn thresholds(app: &App) -> UiResult<(i64, i64)> {
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let settings = mb_db::Repos::new(tx).settings();
-                let warn = settings.get::<i64>(OUTLET, WARN_KEY)?.unwrap_or(DEFAULT_WARN_MINUTES);
-                let late = settings.get::<i64>(OUTLET, LATE_KEY)?.unwrap_or(DEFAULT_LATE_MINUTES);
-                // A late threshold below the warn one would make the amber
-                // state unreachable, and the tile would jump straight to red.
-                // Believing the pair as typed is worse than repairing it here.
+                let warn = settings
+                    .get::<i64>(OUTLET, WARN_KEY)?
+                    .unwrap_or(DEFAULT_WARN_MINUTES);
+                let late = settings
+                    .get::<i64>(OUTLET, LATE_KEY)?
+                    .unwrap_or(DEFAULT_LATE_MINUTES);
+                // A late threshold below the warn one would make the amber state unreachable,
+                // and the tile would jump straight to red.
                 Ok((warn.max(1), late.max(warn.max(1) + 1)))
             })
             .map_err(|e| words::from_db(&e))
@@ -163,15 +124,14 @@ pub fn thresholds(app: &App) -> UiResult<(i64, i64)> {
 
 pub fn floor_on(app: &App) -> UiResult<FloorView> {
     guard::require(app, Permission::BillCreate)?;
-    // Asked, not assumed. `guard::require` returns the actor when it allows, so
-    // "may this person arrange the room" is the same question the arranging
-    // commands ask, answered once for the screen.
+    // Asked, not assumed. `guard::require` returns the actor when it allows, so "may this
+    // person arrange the room" is the same question the arranging commands ask, answered once
+    // for the screen.
     let can_arrange = guard::require(app, Permission::TablesManage).is_ok();
     let at = now();
     let (warn, late) = thresholds(app)?;
-    // Taken once, outside the transaction: a tile's running total is rounded
-    // and charged the way the bill will be, and reading that inside the loop
-    // would be a lock per table.
+    // Taken once, outside the transaction: a tile's running total is rounded and charged the
+    // way the bill will be, and reading that inside the loop would be a lock per table.
     let config = app.shop_config();
 
     app.with_shop(|shop| {
@@ -181,32 +141,28 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                 let tables = repos.floor().list_tables(OUTLET)?;
                 let sections = repos.floor().list_sections(OUTLET)?;
                 let open = repos.orders().list_open(OUTLET)?;
-                let told = repos.events().last_for_each(mb_db::repo::events::KITCHEN_TICKET)?;
+                let told = repos
+                    .events()
+                    .last_for_each(mb_db::repo::events::KITCHEN_TICKET)?;
 
                 let day = open
                     .first()
                     .map_or_else(|| today(at), |order| order.core().business_day);
                 let numbers = repos.floor().occupancy(OUTLET, day)?;
 
-                let mut tiles =
-                    floor_view(
-                        &tables,
-                        &sections,
-                        &open,
-                        crate::billing::Room {
-                            // **This screen has no cart, so it marks nothing.**
-                            // The owner, 2026-08-22: *"why is the table i
-                            // selected in the billing section is highlighted in
-                            // floor section also? it makes no sense."* The ring
-                            // means "your cart is on this table", and the Floor
-                            // screen is a view of the room, not of a bill.
-                            cart_is_on: None,
-                            now: at,
-                            warn_after: warn,
-                            late_after: late,
-                            config: &config,
-                        },
-                    );
+                let mut tiles = floor_view(
+                    &tables,
+                    &sections,
+                    &open,
+                    crate::billing::Room {
+                        // This screen has no cart, so it marks nothing.
+                        cart_is_on: None,
+                        now: at,
+                        warn_after: warn,
+                        late_after: late,
+                        config: &config,
+                    },
+                );
                 // The second timer: minutes since the last kitchen ticket.
                 for tile in &mut tiles {
                     if let Some(order_id) = &tile.order_id {
@@ -293,9 +249,7 @@ fn minutes_between(from: Timestamp, to: Timestamp) -> i64 {
     (to.millis() - from.millis()).div_euclid(60_000).max(0)
 }
 
-// ---------------------------------------------------------------------------
 // The master.
-// ---------------------------------------------------------------------------
 
 pub fn save_section_on(
     app: &App,
@@ -306,7 +260,10 @@ pub fn save_section_on(
 ) -> UiResult<FloorView> {
     guard::require(app, Permission::TablesManage)?;
     if name.trim().is_empty() {
-        return Err(UiError::new("floor.section_name", "A section needs a name — AC, Garden."));
+        return Err(UiError::new(
+            "floor.section_name",
+            "A section needs a name — AC, Garden.",
+        ));
     }
     let at = now();
 
@@ -315,7 +272,12 @@ pub fn save_section_on(
             .transaction(|tx| {
                 mb_db::Repos::new(tx).floor().save_section(
                     OUTLET,
-                    &Section { id: id.clone(), name: name.trim().to_owned(), sort_order, is_active },
+                    &Section {
+                        id: id.clone(),
+                        name: name.trim().to_owned(),
+                        sort_order,
+                        is_active,
+                    },
                     at,
                 )
             })
@@ -329,7 +291,11 @@ pub fn delete_section_on(app: &App, id: String) -> UiResult<FloorView> {
     let at = now();
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).floor().delete_section(OUTLET, &id, at))
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .floor()
+                    .delete_section(OUTLET, &id, at)
+            })
             .map_err(|e| words::from_db(&e))
     })?;
     floor_on(app)
@@ -338,7 +304,10 @@ pub fn delete_section_on(app: &App, id: String) -> UiResult<FloorView> {
 pub fn save_table_on(app: &App, edit: TableEdit) -> UiResult<FloorView> {
     guard::require(app, Permission::TablesManage)?;
     if edit.label.trim().is_empty() {
-        return Err(UiError::new("floor.table_label", "A table needs a name — 6, G3, Counter."));
+        return Err(UiError::new(
+            "floor.table_label",
+            "A table needs a name — 6, G3, Counter.",
+        ));
     }
     let at = now();
 
@@ -352,12 +321,17 @@ pub fn save_table_on(app: &App, edit: TableEdit) -> UiResult<FloorView> {
                     .into_iter()
                     .find(|t| t.id.as_str() == edit.id);
 
-                // A table already on the plan keeps its square; a new one is
-                // given a free one, so it lands somewhere VISIBLE rather than
-                // at (0,0) under another tile or nowhere at all.
+                // A table already on the plan keeps its square; a new one is given a free one,
+                // so it lands somewhere VISIBLE rather than at (0,0) under another tile or
+                // nowhere at all.
                 let pos = match &existing {
                     Some(table) => table.pos,
-                    None if repos.floor().list_tables(OUTLET)?.iter().any(|t| t.pos.is_some()) => {
+                    None if repos
+                        .floor()
+                        .list_tables(OUTLET)?
+                        .iter()
+                        .any(|t| t.pos.is_some()) =>
+                    {
                         Some(repos.floor().first_free_cell(OUTLET)?)
                     }
                     None => None,
@@ -415,11 +389,15 @@ pub fn add_tables_on(
     floor_on(app)
 }
 
-pub fn place_table_on(app: &App, table_id: String, x: Option<i64>, y: Option<i64>) -> UiResult<FloorView> {
+pub fn place_table_on(
+    app: &App,
+    table_id: String,
+    x: Option<i64>,
+    y: Option<i64>,
+) -> UiResult<FloorView> {
     guard::require(app, Permission::TablesManage)?;
     let at = now();
-    // **The drag is React's; the layout is Rust's.** The screen reports which
-    // square a tile was dropped on; this decides whether that is allowed.
+    // The drag is React's; the layout is Rust's.
     let pos = match (x, y) {
         (Some(x), Some(y)) => Some((x, y)),
         _ => None,
@@ -428,27 +406,17 @@ pub fn place_table_on(app: &App, table_id: String, x: Option<i64>, y: Option<i64
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                mb_db::Repos::new(tx)
-                    .floor()
-                    .place(OUTLET, &TableId::new(table_id.clone()), pos, at)
+                mb_db::Repos::new(tx).floor().place(
+                    OUTLET,
+                    &TableId::new(table_id.clone()),
+                    pos,
+                    at,
+                )
             })
             .map_err(|e| words::from_db(&e))
     })?;
     floor_on(app)
 }
-
-// **`set_table_active_on` was here, and `audit-wiring.mjs` is why it is not.**
-//
-// It was the Hide / Put back button in the *Set up the room* dialog. The dialog
-// went (owner, 2026-08-22) and hiding moved to the ticked-tables bar, which acts
-// on a set — so the singular command was left with no screen, and the wiring
-// lint said so on the first run after the redesign. That lint exists because
-// P31 found 29 commands nobody could reach.
-//
-// It is deleted rather than kept "in case": [`set_tables_active_on`] with one id
-// in the list does exactly the same thing, and two ways to hide a table is two
-// places for the rule to drift. `delete_table_on` stayed, because the Edit
-// dialog's own Delete button still calls it on the one table it is about.
 
 pub fn delete_table_on(app: &App, table_id: String) -> UiResult<FloorView> {
     guard::require(app, Permission::TablesManage)?;
@@ -456,28 +424,18 @@ pub fn delete_table_on(app: &App, table_id: String) -> UiResult<FloorView> {
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                mb_db::Repos::new(tx)
-                    .floor()
-                    .delete_table(OUTLET, &TableId::new(table_id.clone()), at)
+                mb_db::Repos::new(tx).floor().delete_table(
+                    OUTLET,
+                    &TableId::new(table_id.clone()),
+                    at,
+                )
             })
             .map_err(|e| words::from_db(&e))
     })?;
     floor_on(app)
 }
 
-/// **Several tables at once — one transaction, all or nothing.**
-///
-/// The Floor screen lets an owner pick tables and act on the lot (owner,
-/// 2026-08-22: *"make the tables selectable… and then i should be able to
-/// delete them"*). Doing that as a loop of `delete_dining_table` from
-/// TypeScript would be N round trips that can stop halfway, leaving a room
-/// half-changed and a screen that has to explain which half.
-///
-/// So it is one command and one transaction. If any table in the set cannot go
-/// — an open order on it, or history behind it — **none of them goes**, and the
-/// refusal is the one `mb_db` already writes, naming the table that stopped it.
-/// That is the same bargain `add_tables_on` makes about a range of names, and a
-/// shopkeeper only has to learn it once.
+/// Several tables at once — one transaction, all or nothing.
 pub fn delete_tables_on(app: &App, table_ids: Vec<String>) -> UiResult<FloorView> {
     guard::require(app, Permission::TablesManage)?;
     let at = now();
@@ -495,10 +453,7 @@ pub fn delete_tables_on(app: &App, table_ids: Vec<String>) -> UiResult<FloorView
     floor_on(app)
 }
 
-/// The same bargain for hiding and putting back — see [`delete_tables_on`].
-///
-/// Hiding is refused on a table with an order sitting on it, so this can fail
-/// part way through in exactly the same way, and answers it the same way.
+/// The same bargain for hiding and putting back — see `delete_tables_on`.
 pub fn set_tables_active_on(
     app: &App,
     table_ids: Vec<String>,
@@ -540,9 +495,7 @@ pub fn save_thresholds_on(app: &App, warn: i64, late: i64) -> UiResult<FloorView
     floor_on(app)
 }
 
-// ---------------------------------------------------------------------------
 // The three operations.
-// ---------------------------------------------------------------------------
 
 /// Read one open order, or say why not in words rather than by an unwrap.
 fn open_order(app: &App, id: &str) -> UiResult<mb_core::AnyOrder> {
@@ -558,11 +511,6 @@ fn open_order(app: &App, id: &str) -> UiResult<mb_core::AnyOrder> {
     })
 }
 
-/// **MOVE** — scope 1.23. The party changed seats.
-///
-/// Only `table_id` changes. The order keeps its id, its bill number, its cart,
-/// its covers and its kitchen ledger, because it is the same order in a
-/// different chair — and a move that mints a new order abandons a bill number.
 pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<FloorView> {
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
@@ -571,12 +519,13 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
     let order = open_order(app, &order_id)?;
     let from = order.core().table.clone();
     if from.as_ref() == Some(&target) {
-        return Err(UiError::new("floor.same_table", "That order is already on that table."));
+        return Err(UiError::new(
+            "floor.same_table",
+            "That order is already on that table.",
+        ));
     }
 
-    // **Asked before the write, and answered in words.** `DbError::Invariant`
-    // deliberately does not reach a shopkeeper (`words::from_db` says why), so
-    // a rule a cashier can act on gets its own guard and its own sentence here.
+    // Asked before the write, and answered in words.
     if let Some(called) = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).floor().open_order_at(&target))
@@ -625,8 +574,8 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // A cart holding the moved order has to hear about it, or the screen would
-    // keep billing the table the party has left.
+    // A cart holding the moved order has to hear about it, or the screen would keep billing the
+    // table the party has left.
     app.with_cart_mut(|state| {
         if state.order_id.as_deref() == Some(order_id.as_str()) {
             state.table = Some(target.as_str().to_owned());
@@ -651,18 +600,15 @@ fn with_table(order: mb_core::AnyOrder, table: Option<TableId>) -> mb_core::AnyO
     order
 }
 
-/// **MERGE** — scope 1.22. Two tables, one bill.
-///
-/// The absorbed order is **cancelled with a link**, never deleted (D47), and
-/// the reasoning is in the schema comment on `orders.merged_into`: its food
-/// was sold on the other bill, so counting it in the day's gross would count
-/// it twice.
 pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiResult<FloorView> {
     let who = guard::require(app, Permission::BillVoid)?;
     let at = now();
 
     if from_order == into_order {
-        return Err(UiError::new("floor.same_order", "Those are the same order."));
+        return Err(UiError::new(
+            "floor.same_order",
+            "Those are the same order.",
+        ));
     }
     let absorbed = open_order(app, &from_order)?;
     let survivor = open_order(app, &into_order)?;
@@ -677,8 +623,9 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
             kitchen: absorbed.core().kitchen.clone(),
         },
     );
-    mb_core::merge_into(&mut survivor_portion, absorbed_portion)
-        .map_err(|e| UiError::new("floor.merge", "Those orders could not be merged.").with_detail(e.to_string()))?;
+    mb_core::merge_into(&mut survivor_portion, absorbed_portion).map_err(|e| {
+        UiError::new("floor.merge", "Those orders could not be merged.").with_detail(e.to_string())
+    })?;
 
     let day = survivor.core().business_day;
     let absorbed_label = absorbed
@@ -727,9 +674,11 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
                         ));
                     }
                 };
-                repos
-                    .orders()
-                    .save(OUTLET, app.terminal_id(), &mb_core::AnyOrder::Cancelled(closed))?;
+                repos.orders().save(
+                    OUTLET,
+                    app.terminal_id(),
+                    &mb_core::AnyOrder::Cancelled(closed),
+                )?;
                 repos.floor().record_merge(&from_order, &into_order)?;
                 repos.events().record(
                     &from_order,
@@ -756,9 +705,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // If either order is in the cart, the cart is now stale in a way the
-    // cashier cannot see. Emptying it is the honest answer: the food is on the
-    // other bill, and the screen reloads it from disk.
+    // If either order is in the cart, the cart is now stale in a way the cashier cannot see.
     app.with_cart_mut(|state| {
         if state.order_id.as_deref() == Some(from_order.as_str())
             || state.order_id.as_deref() == Some(into_order.as_str())
@@ -780,18 +727,12 @@ pub struct SplitRequest {
     pub order_id: String,
     /// `(line index, quantity as typed)` — the lines going to the new bill.
     pub lines: Vec<(usize, String)>,
-    /// Where the new order sits. `None` leaves it on the same table as a
-    /// second seat (`6A` / `6B`, scope 1.6).
+    /// Where the new order sits.
     pub to_table: Option<String>,
     /// The letter for the new order when it stays at the same table.
     pub seat: Option<String>,
 }
 
-/// **SPLIT** — scope 1.21. Two guests, two bills.
-///
-/// The money is `transfer::take_lines`' problem and the reasoning lives there.
-/// This is the plumbing: a second order, its own bill number, and the ledger
-/// arithmetic that stops the kitchen being told twice.
 pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
@@ -811,16 +752,17 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
         picks.push(mb_core::Pick { index: *index, qty });
     }
 
-    let moved = mb_core::take_lines(&mut origin, &picks).map_err(|e| {
-        UiError::new("floor.split", format!("That split is not possible: {e}"))
-    })?;
+    let moved = mb_core::take_lines(&mut origin, &picks)
+        .map_err(|e| UiError::new("floor.split", format!("That split is not possible: {e}")))?;
 
     let seat = request
         .seat
         .as_deref()
         .map(mb_core::SubTable::parse)
         .transpose()
-        .map_err(|e| UiError::new("floor.seat", "A seat is one letter, A to Z.").with_detail(e.to_string()))?;
+        .map_err(|e| {
+            UiError::new("floor.seat", "A seat is one letter, A to Z.").with_detail(e.to_string())
+        })?;
 
     let day = order.core().business_day;
     let table = match &request.to_table {
@@ -842,16 +784,14 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                         o.core.kitchen = kitchen;
                     }
                     _ => {
-                        return Err(mb_db::DbError::invariant(
-                            "only an open order can be split",
-                        ));
+                        return Err(mb_db::DbError::invariant("only an open order can be split"));
                     }
                 }
                 repos.orders().save(OUTLET, app.terminal_id(), &kept)?;
 
-                // And what leaves: a new order with its own numbers, claimed
-                // against the ORIGINAL's business day (D5) so a split at 00:15
-                // does not jump to tomorrow's series.
+                // And what leaves: a new order with its own numbers, claimed against the
+                // ORIGINAL's business day so a split at 00:15 does not jump to tomorrow's
+                // series.
                 let (moved_cart, moved_kitchen) = moved.clone().into_parts();
                 let mut fresh = mb_core::DraftOrder::new(
                     mb_core::OrderId::new(crate::newid::fresh_at("ord", at)),
@@ -865,10 +805,10 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 fresh.core.table = table.clone();
                 fresh.core.sub_table = seat.clone();
 
-                // Its own token and bill number, claimed in THIS transaction so a
-                // failure cannot consume one — the same rule `open_draft`
-                // follows, and claimed against the ORIGINAL order's business
-                // day (D5) so a split at 00:15 does not jump to tomorrow.
+                // Its own token and bill number, claimed in THIS transaction so a failure
+                // cannot consume one — the same rule `open_draft` follows, and claimed against
+                // the ORIGINAL order's business day so a split at 00:15 does not jump to
+                // tomorrow.
                 let token = mb_db::numbering::claim(
                     tx,
                     OUTLET,
@@ -883,7 +823,11 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                     mb_db::numbering::CounterKind::Bill,
                     day,
                 )?;
-                let opened = mb_core::OpenOrder { core: fresh.core, token, bill_number };
+                let opened = mb_core::OpenOrder {
+                    core: fresh.core,
+                    token,
+                    bill_number,
+                };
                 let new_id = opened.core.id.as_str().to_owned();
                 repos
                     .orders()
@@ -928,12 +872,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
     floor_on(app)
 }
 
-/// What an even split comes to, per guest — scope 1.21's other half.
-///
-/// **This answers a question; it does not create bills.** Splitting the money
-/// n ways without splitting the food is what a group asking "what do we each
-/// owe?" actually wants, and inventing n orders to answer it would litter the
-/// day with bills nobody asked for.
+/// What an even split comes to, per guest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -941,8 +880,8 @@ pub struct EvenSplitView {
     pub total: MoneyView,
     pub ways: u32,
     pub shares: Vec<MoneyView>,
-    /// "₹33.34 each, and one of you pays a paisa more" — said out loud,
-    /// because a remainder nobody mentions looks like a rounding bug.
+    /// "₹33.34 each, and one of you pays a paisa more" — said out loud, because a remainder
+    /// nobody mentions looks like a rounding bug.
     pub note: String,
 }
 
@@ -950,8 +889,12 @@ pub fn even_split_on(app: &App, ways: u32) -> UiResult<EvenSplitView> {
     guard::require(app, Permission::BillCreate)?;
     let total = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))?;
 
-    let shares = mb_core::even_shares(total, ways)
-        .map_err(|e| UiError::new("floor.even_split", format!("That split is not possible: {e}")))?;
+    let shares = mb_core::even_shares(total, ways).map_err(|e| {
+        UiError::new(
+            "floor.even_split",
+            format!("That split is not possible: {e}"),
+        )
+    })?;
 
     let biggest = shares.first().copied().unwrap_or(Money::ZERO);
     let smallest = shares.last().copied().unwrap_or(Money::ZERO);
@@ -974,7 +917,7 @@ pub fn even_split_on(app: &App, ways: u32) -> UiResult<EvenSplitView> {
     })
 }
 
-/// Scope 1.24 — how many are eating. Never compulsory.
+/// How many are eating.
 pub fn set_covers_on(app: &App, covers: Option<u32>) -> UiResult<()> {
     guard::require(app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
@@ -983,7 +926,7 @@ pub fn set_covers_on(app: &App, covers: Option<u32>) -> UiResult<()> {
     })
 }
 
-// --- the seats -------------------------------------------------------------
+// The seats.
 
 #[tauri::command]
 pub fn floor_plan(app: tauri::State<'_, App>) -> UiResult<FloorView> {
@@ -1097,9 +1040,12 @@ pub fn set_covers(app: tauri::State<'_, App>, covers: Option<u32>) -> UiResult<(
     set_covers_on(&app, covers)
 }
 
-/// Unused today; here so the day the floor needs a business day it does not
-/// invent a second way of asking for one.
-#[allow(dead_code, reason = "the floor's own day helper, used by occupancy tests")]
+/// Unused today; here so the day the floor needs a business day it does not invent a second way
+/// of asking for one.
+#[allow(
+    dead_code,
+    reason = "the floor's own day helper, used by occupancy tests"
+)]
 fn business_day_now() -> BusinessDay {
     today(now())
 }

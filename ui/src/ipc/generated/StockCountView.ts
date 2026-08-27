@@ -11,15 +11,14 @@ export type StockCountView = { id: string | null, location: string,
  */
 state: string, stateTag: string, date: string, openedBy: string, lines: Array<CountLineView>, remaining: Array<ToCountView>, 
 /**
- * **What approving will do, said before anybody presses it** (D127):
- * "This will add 2.4 kg and take away 800 g across 14 materials."
+ * What approving will do, said before anybody presses it: "This will add 2.4 kg and take
+ * away 800 g across 14 materials.".
  */
 effect: string, shortValue: MoneyView, overValue: MoneyView, netValue: MoneyView, 
 /**
- * **The three figures as one sentence** (§6, and it fixes a double
- * negative found by looking): "Short −600.00 Over 0.00" put a minus sign
- * next to the word "short", which says the same thing twice and in two
- * notations. This says it once.
+ * The three figures as one sentence (§6, and it fixes a double negative found by looking):
+ * "Short −600.00 Over 0.00" put a minus sign next to the word "short", which says the same
+ * thing twice and in two notations.
  */
 totalsSays: string, 
 /**
@@ -35,7 +34,6 @@ history: Array<CountSummaryView>, mayApprove: boolean,
  */
 reasonAbove: MoneyView, 
 /**
- * "Nobody has ever counted this store." — D115's honesty, on the screen
- * that fixes it.
+ * "Nobody has ever counted this store.".
  */
 note: string, };

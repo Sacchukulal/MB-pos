@@ -1,37 +1,4 @@
-//! **Setting a shop up** — P22 part 6, and the design is not the one the
-//! prompt's draft asked for.
-//!
-//! # D102 — the checklist READS the shop; it does not remember a position
-//!
-//! The obvious build is a wizard: seven screens, a stored step number, Next and
-//! Back. It is the wrong shape here, for two reasons that both cost real money
-//! if ignored.
-//!
-//! **First, every one of those screens already exists.** P17 has the shop's
-//! details and the printers, P13 has the menu and its CSV import with a dry
-//! run, P14 has the numbered run of tables, P11 has staff and PINs, and P05
-//! has the backup. A wizard that re-implements them is seven more editors to
-//! keep in step with the real ones, and the copy that drifts is always the one
-//! a new shopkeeper sees first.
-//!
-//! **Second, a stored step number is a lie waiting to happen.** It says "you
-//! did the menu" while somebody deletes every item; it says "you have not done
-//! tax" after they set it from the Settings screen instead. So every step here
-//! is **derived from what is actually in the shop**, which makes it
-//! self-healing, makes skipping implicit, and makes resuming automatic. There
-//! is no progress file to get out of step because there is no progress file.
-//!
-//! # And it is never in front of the till
-//!
-//! The prompt's draft said *"an owner must be able to bill within fifteen
-//! minutes of installing"*. **PERFORMANCE S5 says three minutes** — "install →
-//! first bill printable". Those are not the same requirement and one long form
-//! cannot satisfy both.
-//!
-//! So: the counter bills the moment it opens. This is a list beside the till,
-//! not a gate in front of it. Fifteen minutes is how long a full set-up takes;
-//! three minutes is how long it takes to take money, and a form between a
-//! shopkeeper and their first customer is how a product gets uninstalled.
+//! Setting a shop up.
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -47,14 +14,12 @@ pub struct SetupStep {
     pub id: String,
     /// "Tell us about your shop".
     pub title: String,
-    /// **Why it is worth doing**, in the shop's words — not what it is.
-    /// "Your name and GSTIN go on every bill you print" beats "store details".
+    /// Why it is worth doing, in the shop's words — not what it is.
     pub why: String,
     pub done: bool,
-    /// The screen that does it. There is no seventh editor.
+    /// The screen that does it.
     pub go_to: String,
-    /// **True when a shop cannot really trade without it.** Nothing here stops
-    /// the counter working; this only decides what is said loudest.
+    /// True when a shop cannot really trade without it.
     pub matters_most: bool,
 }
 
@@ -70,10 +35,7 @@ pub struct SetupView {
     pub finished: bool,
 }
 
-/// **Look at the shop and work out what is still worth doing.**
-///
-/// Never fails: a set-up list that cannot draw on a shop that will not open is
-/// a list that is missing exactly when it is needed.
+/// Look at the shop and work out what is still worth doing.
 #[must_use]
 pub fn look(app: &App) -> SetupView {
     let config = app.shop_config();
@@ -81,9 +43,7 @@ pub fn look(app: &App) -> SetupView {
     let has_shop_name = !config.store.name.trim().is_empty();
     let has_gstin = !config.store.gstin.trim().is_empty();
 
-    // **Backups are FILES, not rows.** P05 made a backup a folder on a disk
-    // that is deliberately not this one — the whole point is that it survives
-    // this database — so the only honest way to count them is to look.
+    // Backups are FILES, not rows.
     let backups = i64::try_from(
         mb_db::backup::list(&crate::settings::backup::folder_for(app, &config))
             .unwrap_or_default()
@@ -99,16 +59,7 @@ pub fn look(app: &App) -> SetupView {
                     Ok(statement.query_row([], |row| row.get(0))?)
                 };
                 Ok(Counts {
-                    // `items`, and `is_available` — **found by P27.5 running the
-                    // app and looking at it (D55).** This read named a table
-                    // that has never existed (`menu_items`) and a column on it
-                    // that has never existed (`is_active`), so it errored, and
-                    // the `unwrap_or_default` below turned the error into five
-                    // zeros. A shop with a full menu, a full room, a printer, a
-                    // PIN and a backup was told it had done none of it, on the
-                    // billing screen, for ever. Nineteen sessions of green tests
-                    // never saw it because nothing rendered this against a shop
-                    // that had anything in it.
+                    // `items`, and `is_available`.
                     items: one("SELECT COUNT(*) FROM items WHERE is_available = 1")?,
                     tables: one("SELECT COUNT(*) FROM dining_tables WHERE is_active = 1")?,
                     printers: one("SELECT COUNT(*) FROM printers")?,
@@ -119,10 +70,8 @@ pub fn look(app: &App) -> SetupView {
             .map_err(|e| crate::words::from_db(&e))
     });
 
-    // Still never fails (the doc comment above is a promise a first run
-    // depends on) — but **no longer silently** (R3). A checklist that cannot
-    // read the shop says everything is outstanding, which is the safe answer;
-    // the log is how anybody ever finds out it happened.
+    // Still never fails (the doc comment above is a promise a first run depends on) — but no
+    // longer silently.
     let counts = match read {
         Ok(counts) => counts,
         Err(e) if e.code == "shop.none" => Counts::default(),
@@ -231,11 +180,7 @@ struct Counts {
 #[must_use]
 pub fn health_row(view: &SetupView) -> crate::health::HealthRow {
     if view.finished {
-        return crate::health::HealthRow::ok(
-            "setup",
-            "Set-up",
-            "Your shop is fully set up.",
-        );
+        return crate::health::HealthRow::ok("setup", "Set-up", "Your shop is fully set up.");
     }
     let urgent: Vec<&str> = view
         .steps
@@ -256,11 +201,7 @@ pub fn health_row(view: &SetupView) -> crate::health::HealthRow {
         format!(
             "{} still to do before this shop is really set up: {}. Open Billing \
              and the list is on the right.",
-            crate::words::count(
-                i64::try_from(urgent.len()).unwrap_or(0),
-                "thing",
-                "things"
-            ),
+            crate::words::count(i64::try_from(urgent.len()).unwrap_or(0), "thing", "things"),
             urgent.join("; ").to_lowercase(),
         ),
     )
@@ -268,9 +209,7 @@ pub fn health_row(view: &SetupView) -> crate::health::HealthRow {
 }
 
 pub fn look_on(app: &App) -> UiResult<SetupView> {
-    // **Deliberately not guarded beyond the counter existing.** On a first run
-    // the stand-in is who is standing there, and a set-up list that refuses to
-    // draw until somebody has a PIN is a list nobody can use to create the PIN.
+    // Deliberately not guarded beyond the counter existing.
     let _ = OUTLET;
     Ok(look(app))
 }
@@ -284,16 +223,7 @@ pub fn setup_list(app: tauri::State<'_, App>) -> UiResult<SetupView> {
 mod tests {
     use super::*;
 
-    /// **The test that was missing, and the bug it would have caught.**
-    ///
-    /// Every other test in this module builds a `SetupView` by hand and checks
-    /// the words. Not one of them ever ran [`look`] against a real database, so
-    /// nothing noticed that its SQL named a table (`menu_items`) and a column
-    /// (`is_active`) that have never existed in this product — the read errored,
-    /// the error was swallowed, and the counts came back as five zeros.
-    ///
-    /// The shop below has a menu and a room. If either step reads as still to
-    /// do, the read is broken again.
+    /// The test that was missing, and the bug it would have caught.
     #[test]
     fn a_shop_that_has_a_menu_and_a_room_is_not_told_to_add_them() {
         let scratch = crate::signin_tests::Scratch::new("setup_counts");
@@ -345,18 +275,18 @@ mod tests {
         app.open_shop(db, path);
 
         let view = look(&app);
-        let done = |id: &str| {
-            view.steps.iter().any(|s| s.id == id && s.done)
-        };
+        let done = |id: &str| view.steps.iter().any(|s| s.id == id && s.done);
 
-        assert!(done("menu"), "a shop with an item on its menu was told to put its menu in");
-        assert!(done("tables"), "a shop with a table was told to add its tables");
-        // And what it genuinely has NOT done is still outstanding, so the fix
-        // is a fix rather than a blanket "everything is fine". Nobody has a
-        // PIN here, and that is the step that matters most after the shop's own
-        // details — it is what stops a stranger opening the reports.
-        // (`printer` is not asserted: `open_shop` seeds a default one, so it
-        // reads as done on any shop and proves nothing either way.)
+        assert!(
+            done("menu"),
+            "a shop with an item on its menu was told to put its menu in"
+        );
+        assert!(
+            done("tables"),
+            "a shop with a table was told to add its tables"
+        );
+        // And what it genuinely has NOT done is still outstanding, so the fix is a fix rather
+        // than a blanket "everything is fine".
         assert!(!done("staff"), "nobody has a PIN, so that step stands");
     }
 
@@ -389,11 +319,7 @@ mod tests {
         view
     }
 
-    /// **The list nags about what matters and lets the rest be.**
-    ///
-    /// A shop with no table service must not be told forever that it has not
-    /// added tables — that is the nag people learn to ignore, and then they
-    /// ignore the one about backups too.
+    /// The list nags about what matters and lets the rest be.
     #[test]
     fn only_what_matters_reaches_the_health_panel() {
         let no_tables = a_view(&["shop"]);
@@ -419,33 +345,30 @@ mod tests {
         assert!(health_row(&all).is_ok());
     }
 
-    /// **The headline says the thing that matters most**: you can trade now.
+    /// The headline says the thing that matters most: you can trade now.
     #[test]
     fn the_headline_says_billing_works_anyway() {
         let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
         let view = look(&app);
-        assert!(!view.finished, "a counter with no shop has everything to do");
+        assert!(
+            !view.finished,
+            "a counter with no shop has everything to do"
+        );
         assert!(
             view.headline.contains("take money in the meantime"),
             "{}",
             view.headline
         );
-        // And `count` put the number in exactly once — D78, again.
+        // And `count` put the number in exactly once.
         assert!(view.headline.starts_with(&view.left.to_string()));
     }
 
-    /// **D102.** Nothing is stored, so nothing can be out of step. The list is
-    /// a function of the shop, and calling it twice gives the same answer.
+    /// Nothing is stored, so nothing can be out of step.
     #[test]
     fn the_list_is_read_and_never_remembered() {
         let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
         assert_eq!(look(&app), look(&app));
-        // And there is no file behind it, which is the property that makes it
-        // self-healing.
-        // The shipped half, and **code lines only** — the module note explains
-        // at length why there is no progress file, so scanning the comments
-        // finds the word "progress" and fails on its own explanation. The same
-        // trap `gate.rs`'s prose scan fell into.
+        // And there is no file behind it, which is the property that makes it self-healing.
         let source = include_str!("setup.rs");
         let shipped = source.split("\n#[cfg(test)]").next().unwrap_or(source);
         for line in shipped.lines() {
@@ -471,8 +394,7 @@ mod tests {
         for step in &look(&app).steps {
             assert!(!step.why.is_empty(), "{}", step.id);
             assert!(step.why.ends_with('.'), "{}", step.why);
-            // A reason is longer than a label. This is coarse and it is the
-            // check that would have caught "Store details".
+            // A reason is longer than a label.
             assert!(
                 step.why.split_whitespace().count() > 8,
                 "{} explains nothing: {}",

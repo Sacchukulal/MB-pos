@@ -1,16 +1,3 @@
-/**
- * **The credit screens** — scope 5.1–5.4.
- *
- * Rust proves the ledger (`credit_tests.rs`); this proves what the screen does
- * with it:
- *
- * 1. the default view is **who owes me money**, not an alphabetical list;
- * 2. "no limit" is shown as no limit, never as 0.00 — the difference between
- *    "may owe anything" and "may owe nothing";
- * 3. the statement's running column is Rust's, printed as it arrived;
- * 4. putting a bill on an account asks what it would do FIRST.
- */
-
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -87,14 +74,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('who owes me money (scope 5.1)', () => {
-  /**
-   * **One list, and everybody is on it** — the owner, 2026-08-24: *"when i add
-   * a credit customer, it seemed like it disappeared but the thing was it was
-   * in everybody section."*
-   *
-   * The screen used to open on "who owes me", and a customer added a minute ago
-   * owes nothing — so adding one looked exactly like losing one.
-   */
+  /** One list, and everybody is on it. */
   it('asks for everybody, and has no second view to lose a customer in', async () => {
     call.mockResolvedValue([customer({ id: 'cus_rekha', name: 'Rekha' })]);
     show();
@@ -106,11 +86,7 @@ describe('who owes me money (scope 5.1)', () => {
     expect(screen.queryByText('Who owes me')).toBeNull();
   });
 
-  /**
-   * **The customer form is the side panel** — the owner, same day: *"i want add
-   * customer panel in the side (foldable)"*, and the screen's own "Credit 0"
-   * title and sub-line went with the dialog.
-   */
+  /** The customer form is the side panel. */
   it('adds and edits in one folding side panel, not a dialog', async () => {
     call.mockResolvedValue([customer({ id: 'cus_rekha', name: 'Rekha' })]);
     show();
@@ -138,7 +114,7 @@ describe('who owes me money (scope 5.1)', () => {
     expect(screen.getByText('4,200.00')).toBeTruthy();
   });
 
-  /** Blank is no limit. A screen that renders it as 0.00 says the opposite. */
+  /** Blank is no limit. */
   it('says "No limit" rather than zero', async () => {
     call.mockResolvedValue([
       customer({ id: 'cus_free', name: 'Anand', creditLimit: null }),

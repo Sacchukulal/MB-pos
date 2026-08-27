@@ -5,8 +5,7 @@
  */
 export type AttentionView = { 
 /**
- * `danger`, `warn` or `info`. The words say it too — colour is never the
- * only signal (§2 rule 2).
+ * `danger`, `warn` or `info`.
  */
 tone: string, title: string, 
 /**

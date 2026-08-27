@@ -1,25 +1,4 @@
-//! **Rust pushes. React subscribes. Nothing polls.**
-//!
-//! Budget **M4** — idle CPU under 1 % — and `PERFORMANCE.md` §5 rule 6:
-//!
-//! > *"No polling. Rust pushes state; React subscribes. A 250 ms poll loop is
-//! > M4 gone before a single feature is written."*
-//!
-//! This is the pipe. The print queue's own `subscribe()` gives a
-//! `Receiver<QueueEvent>` on a background thread (P07); this turns each event
-//! into a snapshot and emits it to the window, and the screen re-renders. The
-//! UI thread waits for nothing and asks for nothing.
-//!
-//! # Why a snapshot rather than the event
-//!
-//! A delta is a thing that can be missed — a screen that mounted late, a window
-//! that was closed and reopened, an event dropped while the webview was
-//! reloading. The queue holds at most a handful of jobs (D35: *"the spool is
-//! not a log"*), so sending all of them costs nothing and cannot desynchronise.
-//!
-//! It is the same reasoning P07 used for `snapshot()` in the first place: *"a
-//! screen that attached after the `Parked` event would otherwise be blind to
-//! the one thing it exists to show."*
+//! Rust pushes. React subscribes.
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -30,17 +9,12 @@ use crate::state::{App, Pushed};
 pub const CHANNEL: &str = "mb://push";
 
 /// Start forwarding the print queue's events to the window.
-///
-/// Spawns one thread that outlives the call. It ends when the queue's sender is
-/// dropped, which happens on shutdown — so there is no stop handle to forget
-/// and no way to leave a thread running against a queue that has gone.
 pub fn pump_print_queue(app: &AppHandle) {
     let Some(state) = app.try_state::<App>() else {
         return;
     };
     let Some(events) = state.subscribe_to_queue() else {
-        // No shop, so no queue yet. `App::open_shop` calls this again when one
-        // opens; a first run simply has nothing to push.
+        // No shop, so no queue yet.
         return;
     };
 
@@ -48,18 +22,13 @@ pub fn pump_print_queue(app: &AppHandle) {
     let spawned = std::thread::Builder::new()
         .name("mb-push".to_owned())
         .spawn(move || {
-            // Every event is a reason to re-send the snapshot. The events
-            // themselves are not forwarded: a screen does not need to know that
-            // attempt three of five failed, it needs to know what is unfinished
-            // right now.
+            // Every event is a reason to re-send the snapshot.
             while events.recv().is_ok() {
                 emit_print_queue(&handle);
             }
         });
 
     if let Err(e) = spawned {
-        // Without this thread the indicator goes stale, which is audit D4 by
-        // another route — so it is a warning and not a silence.
         log_warn!("the print queue's status thread could not be started: {e}");
     }
 }
@@ -76,10 +45,6 @@ pub fn emit_print_queue(app: &AppHandle) {
 }
 
 /// Tell the window who is at the counter — or that nobody is.
-///
-/// The same argument as the queue snapshot: the screen is told the state, never
-/// the transition, so a screen that mounted late cannot be showing a stale
-/// name over an unlocked till.
 pub fn emit_session(app: &AppHandle) {
     let Some(state) = app.try_state::<App>() else {
         return;
@@ -95,32 +60,20 @@ pub fn emit_session(app: &AppHandle) {
     }
 }
 
-/// **A phone is asking to join** (P19, budget M4).
-///
-/// The panel does not poll. A phone can present its code at any moment, and
-/// the person holding it is standing at the counter waiting for the name to
-/// appear — so the counter pushes, exactly as it does for a print job and a
-/// sign-in. The first version of the panel ran a `setInterval` while the code
-/// was on screen, and `guards.test.ts` failed the build over it, which is
-/// D40's rule working: the rules that erode are enforced by scripts.
+/// A phone is asking to join.
 pub fn emit_pairing(app: &AppHandle) {
     let Some(state) = app.try_state::<App>() else {
         return;
     };
-    let waiting = state
-        .network()
-        .map_or(0, |n| u32::try_from(n.shared.desk.waiting().len()).unwrap_or(u32::MAX));
+    let waiting = state.network().map_or(0, |n| {
+        u32::try_from(n.shared.desk.waiting().len()).unwrap_or(u32::MAX)
+    });
     if let Err(e) = app.emit(CHANNEL, Pushed::Pairing { waiting }) {
         log_warn!("the pairing panel could not be told: {e}");
     }
 }
 
-/// **The floor changed the order the cashier has open** (P20, D83).
-///
-/// Pushed, and it has to be: the alternative is the cashier finding out when
-/// they next happen to press something, and the thing they are most likely to
-/// press next is Complete bill. Found by looking at the screen — the note was
-/// sitting in the cart and nothing had asked for it.
+/// The floor changed the order the cashier has open.
 pub fn emit_floor_change(app: &AppHandle) {
     let Some(state) = app.try_state::<App>() else {
         return;
@@ -132,12 +85,6 @@ pub fn emit_floor_change(app: &AppHandle) {
 }
 
 /// Watch the pairing desk while it is open.
-///
-/// **This is not a poll of the SCREEN** — nothing crosses to React unless the
-/// number actually changes, and the thread sleeps whenever no code is being
-/// shown. It exists because a phone arrives over a socket on another thread,
-/// and a socket handler must not reach into Tauri's window (rule 2 of
-/// `mb-lan`'s guarantee: a handler holds nothing the counter needs).
 pub fn watch_for_pairing(app: &AppHandle) {
     let handle = app.clone();
     std::thread::Builder::new()
@@ -155,17 +102,8 @@ pub fn watch_for_pairing(app: &AppHandle) {
                 let waiting =
                     u32::try_from(network.shared.desk.waiting().len()).unwrap_or(u32::MAX);
 
-                // **Asleep unless somebody is deliberately watching for a
-                // phone — OR a phone is already standing there.**
-                //
-                // The second half was missing and the whole feature did not
-                // work: presenting a token CONSUMES it (a token that stayed
-                // live while somebody decided would let a second phone in
-                // behind the first), so `showing()` goes to `None` at exactly
-                // the moment a phone arrives — and this loop stopped watching
-                // one tick before the thing it exists to watch for. Found by
-                // pairing a real phone against the running counter and
-                // watching nothing appear.
+                // Asleep unless somebody is deliberately watching for a phone — OR a phone is
+                // already standing there.
                 if waiting == 0 && network.shared.desk.showing(crate::flows::now()).is_none() {
                     last = 0;
                     continue;
@@ -179,12 +117,7 @@ pub fn watch_for_pairing(app: &AppHandle) {
         .ok();
 }
 
-/// **The idle clock** (P11 item 8, budget M4).
-///
-/// One thread, asleep almost always, that locks the counter when nothing has
-/// happened for [`crate::session::IDLE_LOCK`]. It is here rather than in React
-/// for two reasons: a React timer is a poll, and a React timer is bypassed by
-/// any screen that is not open.
+/// The idle clock.
 pub fn watch_for_idle(app: &AppHandle) {
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
@@ -195,9 +128,8 @@ pub fn watch_for_idle(app: &AppHandle) {
                 let Some(state) = handle.try_state::<App>() else {
                     return;
                 };
-                // P17: the shop's own limit, and **0 means never** — a terminal
-                // in a locked back room has no use for a screen that keeps
-                // asking who is there.
+                // The shop's own limit, and 0 means never — a terminal in a locked back room
+                // has no use for a screen that keeps asking who is there.
                 let Some(limit) =
                     crate::session::idle_lock_for(state.shop_config().billing.idle_lock_minutes)
                 else {
@@ -207,7 +139,10 @@ pub fn watch_for_idle(app: &AppHandle) {
                     continue;
                 }
                 if let Some(who) = state.sessions().end() {
-                    crate::log_info!("the counter locked itself after {who} went quiet", who = who.name);
+                    crate::log_info!(
+                        "the counter locked itself after {who} went quiet",
+                        who = who.name
+                    );
                     state.record_lock(&who);
                 }
                 emit_session(&handle);
@@ -215,8 +150,6 @@ pub fn watch_for_idle(app: &AppHandle) {
         });
 
     if let Err(e) = spawned {
-        // A counter that never locks is audit C1 back again, so this is said
-        // out loud rather than swallowed.
         log_warn!("the idle lock could not be started: {e}");
     }
 }

@@ -1,11 +1,6 @@
 /**
- * The keyboard, on screen: the suggestion list, the quantity popup, the
- * busy-table chooser and the help sheet.
- *
- * **None of these decides anything.** Every one of them renders a `Mode` the
- * reducer in `keyboard.ts` put it in, and reports taps back as events. The
- * decisions are all in the reducer, which is why they are testable without a
- * browser.
+ * The keyboard, on screen: the suggestion list, the quantity popup, the busy-table chooser and
+ * the help sheet.
  */
 
 import { useEffect, useRef } from 'react';
@@ -39,16 +34,12 @@ export function Suggestions({
             ]
               .filter(Boolean)
               .join(' ')}
-            // Touch reaches the same place Enter does (scope 1.28).
+            // Touch reaches the same place Enter does.
             onClick={() => onPick(index)}
           >
             <span className="mb-cartline__name">{item.name}</span>
             <span className="mb-cartline__rate">{item.rateLabel}</span>
-            {/* Its own class, not the table tile's. It borrowed
-                `mb-tile__amount` for a mono, tabular price — which is a
-                perfectly good look and exactly the borrowing that lets two
-                things drift apart when one of them is restyled. The look is
-                the same; the owner of it is now this list. */}
+            {/* Its own class, not the table tile's. */}
             <span className="mb-suggestion__price">{item.price.text}</span>
           </button>
         </li>
@@ -57,12 +48,7 @@ export function Suggestions({
   );
 }
 
-/**
- * The quantity popup.
- *
- * Plus and minus for touch, a typed number for the keyboard, **blank means
- * one** — which is what makes "name, Enter, Enter" the whole interaction.
- */
+/** The quantity popup. */
 export function QuantityPopup({
   mode,
   onType,
@@ -74,22 +60,11 @@ export function QuantityPopup({
   onType: (text: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
-  /**
-   * **P29, scope 7.7 — take the quantity off the scale.**
-   *
-   * `undefined` when this shop has no scale, which is nearly all of them —
-   * and then there is no button at all, rather than a button that explains
-   * itself when pressed.
-   */
   onWeigh?: () => void;
 }) {
   const box = useRef<HTMLInputElement>(null);
 
-  // **The quantity field takes focus, and it has to win a fight to get it.**
-  // `Modal` focuses its own panel so Escape and screen readers behave, and a
-  // child's effect runs BEFORE its parent's — so plain `autoFocus` here was
-  // being overwritten a moment later and the typed quantity went nowhere. A
-  // frame later is after both. Found by running it: typing "3" produced one.
+  // The quantity field takes focus, and it has to win a fight to get it.
   useEffect(() => {
     const id = requestAnimationFrame(() => box.current?.focus());
     return () => cancelAnimationFrame(id);
@@ -144,14 +119,7 @@ export function QuantityPopup({
   );
 }
 
-/**
- * Plus and minus, on a **quantity** — which is a count, not money.
- *
- * `check-no-money.mjs` allows this because nothing here is named like an
- * amount, and the distinction is real: `Qty` is thousandths and mb-core owns
- * every rule about it. This nudges a string a cashier is typing; the value that
- * matters is parsed by `Qty::parse` in Rust.
- */
+/** Plus and minus, on a quantity — which is a count, not money. */
 function step(current: string, by: number): string {
   const asNumber = Number(current);
   if (!Number.isFinite(asNumber)) return '1';
@@ -159,13 +127,7 @@ function step(current: string, by: number): string {
   return next === 0 ? '' : String(Number(next.toFixed(3)));
 }
 
-/**
- * A busy table: merge, or take a sub-table letter (scope 1.6).
- *
- * > Crown jewel 3: *"the sub-table letters (B–H) and the merge popup. This
- * > solves a real problem — two parties on one table — that most POS systems
- * > handle badly."*
- */
+/** A busy table: merge, or take a sub-table letter. */
 export function BusyTable({
   mode,
   taken,
@@ -200,8 +162,8 @@ export function BusyTable({
             <Button
               key={letter}
               variant={mode.choice === index + 1 ? 'primary' : 'secondary'}
-              // A letter already in use is refused rather than hidden, so the
-              // floor's shape stays legible.
+              // A letter already in use is refused rather than hidden, so the floor's shape
+              // stays legible.
               disabled={taken.includes(letter)}
               onClick={() => onChoose(index + 1)}
             >
@@ -219,16 +181,7 @@ export function BusyTable({
   );
 }
 
-/**
- * The shortcut sheet — **audit F4.**
- *
- * > *"No keyboard help. The whole speed advantage rests on shortcuts that are
- * > written in one thin hint line and nowhere else."*
- *
- * Generated from `SHORTCUTS`, the same table the state machine is documented
- * against, so a key that exists and is undocumented is impossible rather than
- * unlikely. `window.print()` gives the one-page sheet for the counter wall.
- */
+/** The shortcut sheet. */
 export function HelpSheet({ onClose }: { onClose: () => void }) {
   const groups = [...new Set(SHORTCUTS.map((s) => s.group))];
   return (

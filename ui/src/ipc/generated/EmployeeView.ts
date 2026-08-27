@@ -13,7 +13,7 @@ status: string,
  */
 joined: string, 
 /**
- * Set when they have left. The record stays for ever (scope 9.15).
+ * Set when they have left.
  */
 left: string, 
 /**

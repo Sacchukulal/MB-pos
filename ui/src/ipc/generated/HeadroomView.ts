@@ -7,7 +7,7 @@ export type HeadroomView = { customer: string, balance: MoneyView, after: MoneyV
  */
 verdict: string, 
 /**
- * The whole sentence: *"Rekha owes 4,200.00 and her limit is 5,000.00.
- * This bill takes her to 5,340.00."*
+ * The whole sentence: "Rekha owes 4,200.00 and her limit is 5,000.00. This bill takes her
+ * to 5,340.00.".
  */
 says: string, };

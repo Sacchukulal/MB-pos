@@ -3,21 +3,14 @@ import type { ModifierView } from "./ModifierView";
 
 export type ModifierGroupView = { id: string, name: string, 
 /**
- * **`u32`, not `i64`, and the reason is the wire.** `ts-rs` renders an
- * `i64` as a TypeScript `bigint`, and `JSON.stringify` — which is what
- * Tauri's `invoke` uses — throws on one. A screen that honestly built a
- * `1n` could not send it back. Caught by saving a group and reading
- * *"Do not know how to serialize a BigInt"* (P13).
- *
- * A group with four billion choices is not a thing, so nothing is lost.
+ * `u32`, not `i64`, and the reason is the wire.
  */
 minSelect: number, maxSelect: number | null, 
 /**
- * The rule in words — "Choose one", "Any number". Worked out once, here,
- * rather than in every screen that shows a group (UI_GUIDELINES §6).
+ * The rule in words — "Choose one", "Any number".
  */
 rule: string, modifiers: Array<ModifierView>, 
 /**
- * Whether THIS item offers it. Only meaningful inside `item_composition`.
+ * Whether THIS item offers it.
  */
 attached: boolean, };

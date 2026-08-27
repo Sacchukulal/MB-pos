@@ -1,42 +1,7 @@
-//! What the on-screen bill preview is handed — **the fourth sink's input.**
-//!
-//! text (P06) · PDF (P06) · raster (P07) · screen (P08). All four render the
-//! same `Laid`, which is D29: *"there is exactly one function that walks a
-//! laid-out document, and every renderer is a `Sink` it calls."*
-//!
-//! # Why this is a view model and not `Laid` itself
-//!
-//! `Laid` could cross the wire — it is `Serialize` already, and P06 built it
-//! that way on purpose. Sending it would mean `#[derive(TS)]` on ten types
-//! across three files of mb-print, which is a dependency added to a library
-//! crate for the benefit of a screen.
-//!
-//! So this converts, in one function, exactly as `PrintJobView` does for the
-//! queue. The cost is this file; the gain is that mb-print's types can change
-//! without a screen changing, and that the conversion is a single place to test.
-//!
-//! **And the conversion adds nothing.** No wrapping, no measuring, no
-//! truncation, no arithmetic — every one of those was decided by
-//! `mb_print::layout` before this saw anything. If this file ever starts
-//! deciding where a line breaks, there are two layout engines and audit D1 is
-//! back.
-//!
-//! # It speaks in dots now — P32
-//!
-//! Every position and every size crosses in **printer dots**, because that is
-//! what the paper is measured in and the screen's job is to scale one number.
-//! It used to send a size in "px" that the CSS scaled against 24, while the
-//! raster sink drew whatever fitted a twelve-dot column — two size models, and
-//! the paper was the only place anybody could see them disagree. Measured on a
-//! real bill: the screen showed 24, the paper drew 13.
+//! What the on-screen bill preview is handed — the fourth sink's input.
 
-// Dots into percentages and dots back into characters. D7's ban on integer
-// division is about the MONEY path; no amount is computed anywhere in this
-// file — every figure arrives as a string `Money::to_plain_string` produced.
-#![allow(
-    clippy::integer_division,
-    reason = "dots and characters, not money"
-)]
+// Dots into percentages and dots back into characters.
+#![allow(clippy::integer_division, reason = "dots and characters, not money")]
 
 use mb_print::doc::Align;
 use mb_print::layout::{Laid, LaidContent};
@@ -48,23 +13,18 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewDoc {
-    /// Printable dots across. The preview is exactly as wide as the paper, not
-    /// "about right".
+    /// Printable dots across. The preview is exactly as wide as the paper, not "about right".
     pub dots: u32,
-    /// Characters across at the body size — what the settings screen tells a
-    /// shop it is choosing when it picks a size.
+    /// Characters across at the body size — what the settings screen tells a shop it is
+    /// choosing when it picks a size.
     pub columns: usize,
     pub lines: Vec<PreviewLine>,
-    /// **How much roll this costs.** The owner's complaint began with paper
-    /// being eaten; the screen should say how much before it is.
+    /// How much roll this costs.
     pub millimetres: u32,
-    /// `raster` or `text` — which engine this preview is showing. A printer set
-    /// to the text engine gets a different layout, and a preview that does not
-    /// say which one it is drawing is a preview that can lie.
+    /// `raster` or `text` — which engine this preview is showing.
     pub engine: String,
-    /// Anything the layout had to do that a person might want to know — a size
-    /// that had to come down (crown jewel 18), an offset that was clamped
-    /// (scope 7.11). P17 shows these beside the setting that caused them.
+    /// Anything the layout had to do that a person might want to know — a size that had to come
+    /// down, an offset that was clamped.
     pub notes: Vec<String>,
 }
 
@@ -79,31 +39,18 @@ pub enum PreviewLine {
         indent: u32,
         /// Dots of roll this row spends, top to bottom.
         row: u32,
-        /// **The height of a capital letter, in dots** — what the shop chose
-        /// and what the printer will draw. The screen scales it by the same
-        /// one factor it scales everything else by.
+        /// The height of a capital letter, in dots — what the shop chose and what the printer
+        /// will draw.
         cap: u16,
-        /// One character's advance, in dots. What a box's width is counted in.
+        /// One character's advance, in dots.
         advance: u32,
-        /// 1, 2 or 3 — what the TEXT print engine will emit. Kept beside `cap`
-        /// because a preview that showed 15 dots while a shop on that engine
-        /// got the printer's own font would be a preview that lies about which
-        /// of the two it is drawing.
+        /// 1, 2 or 3 — what the TEXT print engine will emit.
         scale: u8,
         bold: bool,
-        /// **The aligned boxes on this line**, in characters.
-        ///
-        /// Empty for a plain line. A proportional face cannot be aligned by
-        /// counting the spaces the layout padded with — the screen lays each
-        /// box out at its own width and aligns the text inside it, which is
-        /// exactly what the raster sink does with the same numbers.
+        /// The aligned boxes on this line, in characters.
         segments: Vec<PreviewSegment>,
     },
-    /// **A drawn rule, not a row of characters** — P32.
-    ///
-    /// The screen used to repeat the pattern's glyph, which came out nearly
-    /// solid in a CSS monospace font while the paper printed five dots of ink
-    /// in every twelve-dot cell. Both draw a line now, from the same numbers.
+    /// A drawn rule, not a row of characters.
     Rule {
         /// Dots from the left edge.
         indent: u32,
@@ -115,16 +62,14 @@ pub enum PreviewLine {
         thickness: u32,
         /// How many strokes — `Double` is two.
         strokes: u32,
-        /// Dots between them. One word, so `serde` and `ts-rs` produce the same
-        /// name on both sides without a rename attribute nobody would notice
-        /// was missing.
+        /// Dots between them. One word, so `serde` and `ts-rs` produce the same name on both
+        /// sides without a rename attribute nobody would notice was missing.
         gap: u32,
         /// `on`/`off` dots for a dashed or dotted rule; `null` is continuous.
         dash: Option<Vec<u32>>,
     },
-    /// The printer draws a real square (D36); the screen draws one too, from
-    /// the same payload, because a shop tuning its letterhead needs to see how
-    /// much paper it takes.
+    /// The printer draws a real square; the screen draws one too, from the same payload,
+    /// because a shop tuning its letterhead needs to see how much paper it takes.
     Qr {
         payload: String,
         indent: u32,
@@ -132,7 +77,7 @@ pub enum PreviewLine {
         /// Dots across, so the square on screen is the square on paper.
         size: u32,
     },
-    /// P29. The printer draws the bars; the screen draws bars too.
+    /// The printer draws the bars; the screen draws bars too.
     Barcode {
         payload: String,
         indent: u32,
@@ -140,20 +85,17 @@ pub enum PreviewLine {
         /// Dots tall — `GS h` is set to 60 by `escpos`.
         height: u32,
     },
-    /// A logo the raster sink will draw. **The dots travel now** (P32) so the
-    /// screen can draw the real picture at the real size: a shop could never
-    /// see how big its logo was until it printed one.
+    /// A logo the raster sink will draw.
     Logo {
         indent: u32,
         row: u32,
         left: u32,
         width: u32,
         height: u32,
-        /// One byte per dot, row by row, 1 is ink. `null` when the logo could
-        /// not be read — the paper prints nothing there either (D37).
+        /// One byte per dot, row by row, 1 is ink.
         ink: Option<Vec<u8>>,
     },
-    /// **The letterhead**: a logo and the shop's name side by side (P32).
+    /// The letterhead: a logo and the shop's name side by side.
     Band {
         row: u32,
         image: Box<PreviewLine>,
@@ -187,8 +129,7 @@ pub struct PreviewBandLine {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSegment {
-    /// The text inside the box, already trimmed. The screen aligns it; it does
-    /// not slice anything, because slicing is deciding.
+    /// The text inside the box, already trimmed.
     pub text: String,
     /// How many characters wide the box is.
     pub width: usize,
@@ -270,9 +211,8 @@ pub fn to_preview(laid: &Laid, metrics: &Metrics, engine: &str) -> PreviewDoc {
                 image_height,
                 lines: band,
             } => {
-                // The picture is placed inside the band, so the screen needs
-                // its top as well as its left — the band draws both from the
-                // same origin.
+                // The picture is placed inside the band, so the screen needs its top as well as
+                // its left — the band draws both from the same origin.
                 let top = *image_top;
                 let picture = unpack(image, *image_width);
                 PreviewLine::Band {
@@ -314,11 +254,7 @@ pub fn to_preview(laid: &Laid, metrics: &Metrics, engine: &str) -> PreviewDoc {
     }
 }
 
-/// **The logo's dots, at the size it will print**, one byte per dot.
-///
-/// Fat compared with the packed form and far simpler for a canvas to draw, and
-/// a logo is small. `None` for a picture that will not read — the paper prints
-/// nothing there either, which is D37.
+/// The logo's dots, at the size it will print, one byte per dot.
 fn unpack(data: &[u8], width: u32) -> Option<(u32, u32, Vec<u8>)> {
     let image = mb_print::image::Monochrome::decode(data).ok()?;
     let scaled = image.scaled_to(width.max(1));
@@ -339,14 +275,7 @@ const fn align_name(align: Align) -> &'static str {
     }
 }
 
-/// **The layout's boxes, with the text that is in each one.**
-///
-/// The slicing happens here rather than on the screen for the reason this whole
-/// module exists: the screen decides nothing. `mb_print::layout` said where each
-/// box is and the padded text says what is in it — this only puts the two
-/// together, exactly as `raster.rs` does with the same two numbers, so the
-/// preview and the paper cannot come to different answers about which column an
-/// amount sits in.
+/// The layout's boxes, with the text that is in each one.
 fn boxes(text: &str, segments: &[mb_print::layout::Segment]) -> Vec<PreviewSegment> {
     let chars: Vec<char> = text.chars().collect();
     segments
@@ -367,19 +296,21 @@ fn boxes(text: &str, segments: &[mb_print::layout::Segment]) -> Vec<PreviewSegme
         .collect()
 }
 
-/// A layout note, in words (crown jewel 14 again).
+/// A layout note, in words.
 fn describe(note: &mb_print::layout::Note) -> String {
     use mb_print::layout::Note;
     match note {
-        // Not "a heading": the same note comes from the item table, where the
-        // reason is that the fixed columns had already eaten the paper.
-        // **In the numbers on the dropdown**, not in dots.
+        // Not "a heading": the same note comes from the item table, where the reason is that
+        // the fixed columns had already eaten the paper.
         Note::ScaleCapped { asked, used } => format!(
             "Size {} does not fit this paper here, so it printed at {}.",
             crate::settings::size_label(*asked),
             crate::settings::size_label(*used)
         ),
-        Note::OffsetClamped { asked_mm, used_dots } => format!(
+        Note::OffsetClamped {
+            asked_mm,
+            used_dots,
+        } => format!(
             "The print offset of {asked_mm:+} mm was too far, so it was limited \
              to {} mm.",
             used_dots / 8
@@ -407,8 +338,8 @@ mod tests {
 
     #[test]
     fn every_line_of_the_layout_reaches_the_preview() {
-        // The sink property, at this boundary: nothing may be dropped on the
-        // way to the screen either.
+        // The sink property, at this boundary: nothing may be dropped on the way to the screen
+        // either.
         let m = metrics(PaperKind::Mm80);
         let mut doc = Document::new(Paper::new(PaperKind::Mm80));
         doc.text("ANNA KUTEERA", Style::new(2, true), Align::Centre)
@@ -426,12 +357,14 @@ mod tests {
 
     #[test]
     fn the_preview_does_no_layout_of_its_own() {
-        // Whatever the layout produced is what the preview carries, character
-        // for character. If this ever needs a `trim` or a `slice`, something
-        // has started deciding.
+        // Whatever the layout produced is what the preview carries, character for character.
         let m = metrics(PaperKind::Mm58);
         let mut doc = Document::new(Paper::new(PaperKind::Mm58));
-        doc.row("Paneer Butter Masala (Half) Extra Spicy", "1,240.00", Style::NORMAL);
+        doc.row(
+            "Paneer Butter Masala (Half) Extra Spicy",
+            "1,240.00",
+            Style::NORMAL,
+        );
 
         let laid = layout_for(&doc, &m).expect("lays out");
         let preview = to_preview(&laid, &m, "raster");
@@ -450,9 +383,7 @@ mod tests {
         assert_eq!(from_layout, from_preview);
     }
 
-    /// **The preview carries the size the paper will draw**, in the same unit.
-    /// This is the assertion that would have failed on every build before
-    /// 2026-08-23, where the screen said 24 and the paper drew 13.
+    /// The preview carries the size the paper will draw, in the same unit.
     #[test]
     fn the_preview_carries_the_paper_s_own_dots() {
         let m = metrics(PaperKind::Mm80);
@@ -461,7 +392,10 @@ mod tests {
         let laid = layout_for(&doc, &m).expect("lays out");
         let preview = to_preview(&laid, &m, "raster");
 
-        let PreviewLine::Text { cap, row, advance, .. } = &preview.lines[0] else {
+        let PreviewLine::Text {
+            cap, row, advance, ..
+        } = &preview.lines[0]
+        else {
             panic!("not text");
         };
         let expected = m.size(Style::new(2, true));

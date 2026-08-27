@@ -1,17 +1,10 @@
 //! What keeps the catalogue honest.
-//!
-//! The first test is the important one. Everything else in `settings/` is
-//! ordinary code that either works or does not; the catalogue is a **second
-//! list**, and audit E6 is what happens to a second list nobody checks.
 
 use super::catalog::{CATALOG, Group};
 use super::value::{Kind, Value};
 use super::*;
 
 /// Every leaf of `ShopConfig`, as a dotted path.
-///
-/// Built from serde rather than from a hand-written list, because a
-/// hand-written list is a *third* copy and would need its own guard.
 fn leaf_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
     match value {
         serde_json::Value::Object(map) => {
@@ -36,11 +29,7 @@ fn config_leaves() -> Vec<String> {
     out
 }
 
-/// **T10 — the completeness guard, and the reason this module is one table.**
-///
-/// A field added to `ReceiptSettings` with no catalogue line fails here. So
-/// does a catalogue line for a field that has been removed. Both directions,
-/// because only one direction is the half that lets a setting go dark.
+/// The completeness guard, and the reason this module is one table.
 #[test]
 fn the_catalogue_is_the_whole_of_the_configuration() {
     let leaves = config_leaves();
@@ -65,12 +54,16 @@ fn the_catalogue_is_the_whole_of_the_configuration() {
 fn nothing_is_in_the_catalogue_twice() {
     let mut seen = std::collections::BTreeSet::new();
     for entry in CATALOG {
-        assert!(seen.insert(entry.key), "{} is in the catalogue twice", entry.key);
+        assert!(
+            seen.insert(entry.key),
+            "{} is in the catalogue twice",
+            entry.key
+        );
     }
 }
 
-/// A default that its own validation refuses would make `reset` impossible and
-/// `load` fail on a fresh shop.
+/// A default that its own validation refuses would make `reset` impossible and `load` fail on a
+/// fresh shop.
 #[test]
 fn every_default_is_valid() {
     let defaults = ShopConfig::default();
@@ -85,8 +78,7 @@ fn every_default_is_valid() {
     }
 }
 
-/// Reading a setting and writing it straight back must be a no-op. If it is
-/// not, the pair disagree — which is the bug the whole file exists to prevent.
+/// Reading a setting and writing it straight back must be a no-op.
 #[test]
 fn every_entry_round_trips_through_its_own_pair() {
     let defaults = ShopConfig::default();
@@ -104,8 +96,8 @@ fn every_entry_round_trips_through_its_own_pair() {
     }
 }
 
-/// Every entry says something a person can read, and every choice's stored
-/// value is stable enough to be a stored value.
+/// Every entry says something a person can read, and every choice's stored value is stable
+/// enough to be a stored value.
 #[test]
 fn every_entry_is_written_for_a_shopkeeper() {
     for entry in CATALOG {
@@ -127,18 +119,17 @@ fn every_entry_is_written_for_a_shopkeeper() {
         if let Kind::Choice(options) = entry.kind {
             assert!(!options.is_empty(), "{} is a choice of nothing", entry.key);
             for option in options {
-                assert!(!option.label.is_empty(), "{} has an unlabelled choice", entry.key);
+                assert!(
+                    !option.label.is_empty(),
+                    "{} has an unlabelled choice",
+                    entry.key
+                );
             }
         }
     }
 }
 
-/// **Every setting sits under a heading, and headings come in runs.**
-///
-/// The screen draws a heading when it changes, so a topic that appears, stops
-/// and comes back again would draw the same heading twice with unrelated
-/// settings between. Found by looking at thirty-nine receipt settings in one
-/// flat grid; this is what stops it happening again.
+/// Every setting sits under a heading, and headings come in runs.
 #[test]
 fn every_setting_has_a_heading_and_the_headings_do_not_interleave() {
     for group in Group::ALL {
@@ -163,7 +154,7 @@ fn every_setting_has_a_heading_and_the_headings_do_not_interleave() {
     }
 }
 
-/// **T9.** An owner must never hunt.
+/// An owner must never hunt.
 #[test]
 fn search_finds_a_setting_by_the_word_a_person_would_type() {
     for (typed, expected) in [
@@ -189,11 +180,6 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
 }
 
 /// A section's name finds the whole section.
-///
-/// It finds a little more than the section — "This shop has no kitchen ticket"
-/// is a Billing setting whose label contains the words — and that is right. A
-/// person typing "kitchen ticket" wants everything about kitchen tickets, not
-/// everything filed under a heading.
 #[test]
 fn searching_by_section_finds_that_section() {
     let found = super::search("kitchen ticket");
@@ -209,7 +195,6 @@ fn searching_by_section_finds_that_section() {
     );
 }
 
-/// **T4, on the two halves that can only be checked together.**
 #[test]
 fn a_gstin_that_does_not_match_its_state_is_refused() {
     let mut config = ShopConfig::default();
@@ -217,15 +202,14 @@ fn a_gstin_that_does_not_match_its_state_is_refused() {
     config.store.gstin = "29ABCDE1234F1ZW".to_owned();
     assert!(catalog::check_gstin_against_state(&config).is_ok());
 
-    // A real Kerala number on a Karnataka shop. Both halves are individually
-    // valid, which is exactly why nobody catches this until a return bounces.
+    // A real Kerala number on a Karnataka shop.
     config.store.gstin = "32ABCDE1234F1Z9".to_owned();
     let error = catalog::check_gstin_against_state(&config).expect_err("it was allowed");
     assert!(error.message.contains("Kerala"), "{}", error.message);
     assert_eq!(error.key, Some("store.gstin"));
 }
 
-/// **Reset says what it will do, and does only that.**
+/// Reset says what it will do, and does only that.
 #[test]
 fn resetting_one_section_leaves_the_others_alone() {
     let mut config = ShopConfig::default();
@@ -234,16 +218,16 @@ fn resetting_one_section_leaves_the_others_alone() {
 
     let after = super::reset_group(&config, Group::Receipt);
     assert_eq!(after.receipt.footer, ShopConfig::default().receipt.footer);
-    assert_eq!(after.billing.idle_lock_minutes, 45, "the billing section moved");
+    assert_eq!(
+        after.billing.idle_lock_minutes, 45,
+        "the billing section moved"
+    );
 }
 
-/// **T7's pure half** — the whole configuration survives a round trip through
-/// the export format. The database half is in `settings_tests.rs`.
 #[test]
 fn a_configuration_survives_being_written_out_and_read_back() {
     let mut config = ShopConfig::default();
-    // Move every kind of value, so the round trip is not proving that booleans
-    // work.
+    // Move every kind of value, so the round trip is not proving that booleans work.
     config.receipt.footer = "Visit again!".to_owned();
     config.receipt.qr_width_pct = 55;
     config.billing.packing_charge = mb_core::Money::from_paise(1_500);
@@ -259,12 +243,15 @@ fn a_configuration_survives_being_written_out_and_read_back() {
     assert_eq!(restored, config);
 }
 
-/// **T15.** One bad value and the file changes nothing at all.
+/// One bad value and the file changes nothing at all.
 #[test]
 fn an_import_with_one_bad_value_changes_nothing() {
     let current = ShopConfig::default();
     let mut file = super::to_map(&current);
-    file.insert("receipt.footer".to_owned(), serde_json::json!("Come back soon"));
+    file.insert(
+        "receipt.footer".to_owned(),
+        serde_json::json!("Come back soon"),
+    );
     file.insert("receipt.logo_width_pct".to_owned(), serde_json::json!(400));
 
     let (wanted, plan) = super::plan_import(&current, &file);
@@ -283,10 +270,7 @@ fn an_import_with_one_bad_value_changes_nothing() {
 fn an_unknown_key_is_reported_and_not_fatal() {
     let current = ShopConfig::default();
     let mut file = super::to_map(&current);
-    file.insert(
-        "receipt.show.horoscope".to_owned(),
-        serde_json::json!(true),
-    );
+    file.insert("receipt.show.horoscope".to_owned(), serde_json::json!(true));
     let (_, plan) = super::plan_import(&current, &file);
     assert!(plan.is_usable(), "{:?}", plan.problems);
     assert_eq!(plan.unknown, vec!["receipt.show.horoscope".to_owned()]);
@@ -336,8 +320,7 @@ fn charges_follow_the_order_type() {
     assert_eq!(delivery[0].kind, ChargeKind::Delivery);
 }
 
-/// The day rule reaches `mb_core` intact, and a corrupt one does not stop the
-/// shop billing.
+/// The day rule reaches `mb_core` intact, and a corrupt one does not stop the shop billing.
 #[test]
 fn the_day_start_becomes_a_day_rule() {
     assert_eq!(Day::default().rule(), mb_core::DayRule::DEFAULT);
@@ -350,8 +333,8 @@ fn the_day_start_becomes_a_day_rule() {
         .starts_at_minutes(),
         240
     );
-    // Past the end of a day: refused by the screen (T4), so reaching this means
-    // the row is corrupt — and a corrupt row must not stop a bill being dated.
+    // Past the end of a day: refused by the screen, so reaching this means the row is corrupt —
+    // and a corrupt row must not stop a bill being dated.
     assert_eq!(
         Day {
             starts_at_minutes: 5_000,
@@ -383,14 +366,7 @@ fn describing_a_value_never_shows_a_tag() {
     );
 }
 
-/// **P31 — the two font lists cannot drift apart.**
-///
-/// `catalog::FONTS` is what the settings screen offers; `mb_print::font::FAMILIES`
-/// is what the print queue resolves against. They are two tables because one is
-/// a `&'static [Choice]` read at start-up and the other is a fact about
-/// typefaces that belongs in the printing crate — and two tables of the same
-/// thing is exactly how a shop ends up choosing a face that silently does not
-/// exist. So the build fails instead.
+/// The two font lists cannot drift apart.
 #[test]
 fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
     use super::catalog::FONTS;
@@ -413,18 +389,7 @@ fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
     }
 }
 
-/// **Ten sizes, numbered 1 to 10, and nothing else on the label.**
-///
-/// The owner, 2026-08-17, on the twenty-two `px` values that replaced the
-/// original three:
-///
-/// > *"u given 22 selectors thats too not working, just 5 to 10 is enough…
-/// > dont use px, just like numbers u use 1,2,3..... etc, dont write smal
-/// > mediam, just think as a user how they feel."*
-///
-/// Made mechanical, because this is the third version of this list in one day:
-/// a label that goes back to "px", to "Large", or to a list of twenty-two
-/// fails the build.
+/// Ten sizes, numbered 1 to 10, and nothing else on the label.
 #[test]
 fn the_text_sizes_are_plain_numbers() {
     use super::catalog::SIZES;
@@ -449,11 +414,7 @@ fn the_text_sizes_are_plain_numbers() {
     }
 }
 
-/// **Every step is a different size on paper, and they only go up.**
-///
-/// The label is 1 to 10; the VALUE is the height in dots the printer draws. A
-/// list whose numbers went up while its dots did not would be ten choices that
-/// change nothing — which is what "thats too not working" meant.
+/// Every step is a different size on paper, and they only go up.
 #[test]
 fn every_size_is_bigger_than_the_one_before_it() {
     use super::catalog::SIZES;
@@ -467,18 +428,15 @@ fn every_size_is_bigger_than_the_one_before_it() {
         dots.windows(2).all(|w| w[0] < w[1]),
         "the sizes are out of order or repeat: {dots:?}"
     );
-    // **And it is the same list the printer resolves against** (P32). Two lists
-    // is how the labels and the dots drifted apart in the first place.
+    // And it is the same list the printer resolves against.
     assert_eq!(
         dots,
         mb_print::Style::LADDER.to_vec(),
         "the screen offers different sizes from the ones the printer draws"
     );
 
-    // **Deliberately disjoint from every value an older build stored** — the
-    // multipliers 1/2/3 and the nominal heights. That is what lets
-    // `Style::from_stored` tell a shop's old row from a new one exactly rather
-    // than guessing, so a tuned receipt keeps the rung it was tuned to.
+    // Deliberately disjoint from every value an older build stored — the multipliers 1/2/3 and
+    // the nominal heights.
     for old in [1_u16, 2, 3, 16, 20, 24, 28, 32, 36, 40, 48, 60, 72] {
         assert!(
             !dots.contains(&old),
@@ -487,16 +445,15 @@ fn every_size_is_bigger_than_the_one_before_it() {
     }
 }
 
-/// **A size is described to a shop by its number**, not by dots and not by "×".
+/// A size is described to a shop by its number, not by dots and not by "×".
 #[test]
 fn a_capped_size_is_reported_as_a_number_a_shop_can_pick() {
     // Exactly on the list.
     assert_eq!(super::size_label(mb_print::Style::LADDER[2]), "3");
     assert_eq!(super::size_label(mb_print::Style::LARGEST), "10");
-    // A size between two rungs reports as the nearest below, because that is
-    // what a person would have had to choose to get it.
+    // A size between two rungs reports as the nearest below, because that is what a person
+    // would have had to choose to get it.
     assert_eq!(super::size_label(mb_print::Style::LADDER[4] + 1), "5");
     // And below the smallest is still the smallest anybody can ask for.
     assert_eq!(super::size_label(4), "1");
 }
-

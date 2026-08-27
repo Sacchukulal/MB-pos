@@ -6,7 +6,7 @@ import type { ModifierEdit } from "./ModifierEdit";
  */
 export type GroupEdit = { id: string, name: string, 
 /**
- * See `ModifierGroupView` — `u32` so it can cross the wire at all.
+ * See `ModifierGroupView`.
  */
 minSelect: number, 
 /**

@@ -1,60 +1,12 @@
-/* =========================================================================
-   MAGIC BILL — THE ONE FILE THAT DECIDES WHAT THE PRODUCT LOOKS LIKE.
-   =========================================================================
-
-   *** IF YOU ARE HERE TO CHANGE THE LOOK, YOU ARE IN THE RIGHT PLACE, AND
-   *** THIS IS THE ONLY PLACE. Nothing outside this file holds a colour, a
-   *** radius, a spacing value or a type size. A lint fails the build if it
-   *** does (scripts/check-tokens.mjs), and a test fails if changing a theme
-   *** moves a single element (kit/__tests__/theme.test.tsx).
-
-   The owner's ruling, 2026-08-04, given as the answer to all three questions
-   they were asked about the theme:
-
-       "Design a central theme system so that in future it can be changed
-        easily with my suggestion WITHOUT TOUCHING ANY FUNCTIONALITY OF THE
-        APP."
-
-   So: the values below are DEFAULTS the owner has pre-approved changing.
-   They are not the design. The system is the design.
-
-   ---------------------------------------------------------------------
-   HOW TO CHANGE THE ACCENT COLOUR  (the owner asked for this by name)
-   ---------------------------------------------------------------------
-   Edit `--accent` and `--accent-ink` in [data-theme="light"] and
-   [data-theme="dark"] below. Four lines, one file, nothing else. Do not
-   touch any component. If you find yourself having to, that is a bug in
-   the token layer and it is the bug to fix.
-
-   ---------------------------------------------------------------------
-   HOW TO ADD A WHOLE NEW THEME
-   ---------------------------------------------------------------------
-   1. copy a [data-theme="…"] block below, rename it, change the values;
-   2. add one line to themes.ts.
-   That is the entire procedure. No component, no layout, no test, no build
-   change — and there is a test that proves it stays that way.
-
-   ---------------------------------------------------------------------
-   TWO RULES THAT OUTRANK EVERY VALUE HERE  (UI_GUIDELINES §2)
-   ---------------------------------------------------------------------
-   1. SEMANTIC COLOURS ARE SEPARATE FROM THE ACCENT. Changing a shop's
-      accent must never make "paid" and "void" look alike. Never render a
-      semantic state with --accent.
-   2. COLOUR IS NEVER THE ONLY SIGNAL. Every state is also carried by
-      shape, weight, fill or a stripe — for bright rooms, cheap monitors,
-      tired eyes and colour-blind users. Grey-scale the screen: it must
-      still be readable.
-   ========================================================================= */
+/* MAGIC BILL — THE ONE FILE THAT DECIDES WHAT THE PRODUCT LOOKS LIKE. */
 
 :root {
-  /* -----------------------------------------------------------------------
-     THE SCALES. These do NOT change between themes — a theme is a palette,
-     not a different product. Density is "middle" per the owner's answer:
-     modest radii and a real rhythm, with 40+ tables still fitting at
-     1366x768 (UI_GUIDELINES §4).
-     ----------------------------------------------------------------------- */
+  /*
+   * THE SCALES. These do NOT change between themes — a theme is a palette, not a different
+   * product.
+   */
 
-  /* Spacing. A rhythm, not ad-hoc values (§5) — everything lands on this. */
+  /* Spacing. A rhythm, not ad-hoc values — everything lands on this. */
   --space-0: 0;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -65,51 +17,24 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
-  /* -----------------------------------------------------------------------
-     THE SPACING CONTRACT — P27.5, and it is the fix for the owner's actual
-     complaint.
+  /* THE SPACING CONTRACT. */
 
-     The scale above was never the problem. Every screen already used it, and
-     `check-tokens.mjs` made sure of that for nineteen sessions. The problem is
-     that NOBODY EVER DECIDED WHAT A STEP MEANS, so seventeen feature CSS files
-     each answered that question for themselves: account reached for 1–5,
-     billing for 1,2,3,4,6,8, corrections for 1,2,3, credit for 2,3,4. Every one
-     of them legal. None of them the same. **That is what "it looks here and
-     there" is** — the owner is describing the absence of this block.
-
-     So from here on a screen does not choose a NUMBER, it names a JOB. There
-     is exactly one answer for each job, and there are only five jobs. A screen
-     that needs a sixth has found a missing layout primitive, not a missing
-     value — go and add the primitive.
-     ----------------------------------------------------------------------- */
-
-  /** Icon to its label, a number to its unit — inside one thing. */
+  /* Icon to its label, a number to its unit — inside one thing. */
   --gap-inline: var(--space-2);
-  /** Between two controls that belong to each other. */
+  /* Between two controls that belong to each other. */
   --gap-field: var(--space-3);
-  /** Between two groups of controls under one heading. */
+  /* Between two groups of controls under one heading. */
   --gap-group: var(--space-5);
-  /** Between two sections of a page. */
+  /* Between two sections of a page. */
   --gap-section: var(--space-6);
-  /** The page's own margin — the same on all four sides. Nothing else sets it. */
+  /* The page's own margin — the same on all four sides. */
   --page-pad: var(--space-3);
   --page-pad-x: var(--page-pad);
   --page-pad-y: var(--page-pad);
-  /**
-   * How wide the scrollbar is. Two places need to agree on it: the bar itself
-   * (::-webkit-scrollbar, below) and the gutter a page header steps back by so
-   * it lines up with the scrolling body under it.
-   */
+  /* How wide the scrollbar is. */
   --scrollbar: var(--space-3);
 
-  /* -----------------------------------------------------------------------
-     THE TYPE CONTRACT — the same argument as spacing.
-
-     Six sizes existed and no screen was ever told which one a page title is,
-     which a section header, which a field label, which a table cell. So the
-     eye had nothing to follow down a screen. These name the job; the sizes
-     stay on the one scale, and the text-size setting still scales all of it.
-     ----------------------------------------------------------------------- */
+  /* THE TYPE CONTRACT — the same argument as spacing. */
 
   --type-page: var(--text-xl);
   --type-page-weight: var(--weight-bold);
@@ -121,72 +46,46 @@
   --type-cell: var(--text-sm);
   --type-caption: var(--text-xs);
 
-  /* -----------------------------------------------------------------------
-     THE ELEVATION CONTRACT — three levels, and no fourth.
-
-     `--shadow` and `--shadow-pop` existed and seven of seventeen screens used
-     one of them, on no principle at all. These say what is raised and what is
-     not, so depth means something: FLAT is the page's own content (a table, a
-     grid); RAISED is a panel that sits on the page; POP is something over the
-     page that the page cannot be used until you deal with (a dialog, a toast,
-     a menu). Nothing is raised twice.
-     ----------------------------------------------------------------------- */
+  /* THE ELEVATION CONTRACT — three levels, and no fourth. */
 
   --level-flat: none;
-  /* --level-raised and --level-pop are per-theme: a shadow is a colour. */
+  /* Level-raised and --level-pop are per-theme: a shadow is a colour. */
 
-  /* Icons (P27.5). Sized off the type scale rather than in pixels, so the
-     text-size setting moves an icon with the word beside it — an icon that
-     stayed put while its label grew is the thing that looks broken. */
+  /*
+   * Icons. Sized off the type scale rather than in pixels, so the text-size setting moves an
+   * icon with the word beside it — an icon that stayed put while its label grew is the thing
+   * that looks broken.
+   */
   --icon-sm: 1rem;
   --icon-md: 1.25rem;
   --icon-lg: 1.75rem;
   --icon-stroke: 1.75;
 
-  /* **How narrow a kitchen ticket may get before it wraps** (P24).
-     Four columns on a wall monitor, two on a tablet, one on a phone — decided
-     by the screen rather than by a breakpoint somebody has to maintain. It is
-     a token because it is a size, and every size in this product is one (D21);
-     it lives here so a shop with an unusually small screen has one number to
-     change. */
+  /* How narrow a kitchen ticket may get before it wraps. */
   --kds-card-min: 18rem;
 
-  /* Radius. "Middle": modest, not soft, not sharp. Lifted a step at P27.5 —
-     4/6/10 read as a Windows dialog from 2012 next to anything made since. */
+  /* Radius. "Middle": modest, not soft, not sharp. */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-pill: 999px;
 
-  /* Type.
-     The UI face is THE OPERATING SYSTEM'S OWN (§3): this is a native
-     Windows app, matching the OS is correct, and it removes a font-loading
-     failure mode. Not a web font.
-     Numbers are monospace with tabular-nums EVERYWHERE DIGITS ALIGN — a
-     column of rupees that does not line up looks broken to a shopkeeper. */
+  /*
+   * Type. The UI face is THE OPERATING SYSTEM'S OWN (§3): this is a native Windows app,
+   * matching the OS is correct, and it removes a font-loading failure mode.
+   */
   --font-ui: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI",
     Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New",
     monospace;
 
-  /* The text-size setting (audit F9, scope 13.12) multiplies THIS and
-     nothing else, so it reaches every screen, every dialog and the receipt
-     preview at once. Set by ThemeProvider on <html>. */
+  /*
+   * The text-size setting multiplies THIS and nothing else, so it reaches every screen, every
+   * dialog and the receipt preview at once.
+   */
   --type-scale: 1;
 
-  /* **The bottom of the scale came up** — the owner's second complaint of
-     2026-08-17: *"boxes are big inside letters are now very small."*
-
-     They are describing a real ratio, not a preference. A table tile is 4.5rem
-     tall and its seat count was 0.75rem; a payment button is 44px tall and its
-     word was 1rem. The box was sized for a finger and the text for a mouse, so
-     every control on the counter read as mostly empty.
-
-     The fix is at the BOTTOM of the scale, not the top. `xs` and `sm` carry
-     every caption, label, cell and hint in the product — which is most of the
-     words on any screen — and `md` upward was never the complaint. Raising
-     these two and leaving the headings alone also keeps the steps between
-     sizes, so the hierarchy the type contract sets up still reads. */
+  /* The bottom of the scale came up. */
   --text-xs: calc(0.8125rem * var(--type-scale));
   --text-sm: calc(0.9375rem * var(--type-scale));
   --text-md: calc(1rem * var(--type-scale));
@@ -199,64 +98,54 @@
   --weight-bold: 650;
 
   --tracking-caps: 0.06em;
-  /* A page title at --text-xl and weight 650 looks loose on the OS UI font
-     without this. Optical, not mathematical (§5). */
+  /* A page title at --text-xl and weight 650 looks loose on the OS UI font without this. */
   --tracking-title: -0.01em;
-  /* The other direction, for a string somebody is copying character by
-     character onto paper — the recovery code at first run. */
+  /*
+   * The other direction, for a string somebody is copying character by character onto paper —
+   * the recovery code at first run.
+   */
   --tracking-code: 0.12em;
 
-  /* **How far an icon drops to sit on the text baseline.** An icon box is
-     centred on the line box, not on the baseline, so a 20px icon next to 16px
-     text floats. This one number is most of the difference between icons that
-     sit with their words and icons that hover above them (§5). */
+  /* How far an icon drops to sit on the text baseline. */
   --icon-baseline: -0.15em;
-  /* The same nudge the other way, for an icon at the top of a wrapping block
-     (a notice), where it must line up with the FIRST line rather than centre
-     itself against three. */
+  /*
+   * The same nudge the other way, for an icon at the top of a wrapping block (a notice), where
+   * it must line up with the FIRST line rather than centre itself against three.
+   */
   --icon-nudge: 0.15em;
 
   --line-tight: 1.25;
   --line-normal: 1.5;
 
-  /* Motion: 120–200 ms, CSS only, and NOTHING on the billing path animates
-     (§5, budget B1 — one dropped frame per keystroke is the whole
-     advantage gone). Zeroed under prefers-reduced-motion, below. */
+  /* Motion: 120–200 ms, CSS only, and NOTHING on the billing path animates. */
   --motion-fast: 120ms;
   --motion-normal: 200ms;
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
 
-  /* Touch targets. 44px minimum (§7) — this is a counter, and half the
-     shops that buy this run a touch monitor. */
+  /*
+   * Touch targets. 44px minimum (§7) — this is a counter, and half the shops that buy this run
+   * a touch monitor.
+   */
   --target-min: 44px;
 
-  /* Component widths. Here rather than in a component, because "the rail is
-     too narrow" and "that dialog is cramped" are look complaints, and look
-     complaints are answered in this file. */
-  /* **The navigation runs ACROSS THE TOP** — the owner's instruction of
-     2026-08-15: *"the verticll left menu bars i didnt like, i wish to see that
-     in horizontal top side"*. The left rail is gone.
-
-     A top bar normally costs vertical room, and at 1366x768 vertical room is
-     the scarce one — so it does not get a row of its own. It shares the title
-     bar: the shop's name and the window buttons sit at the two ends of the
-     same 48px strip the navigation runs along. Net cost against the old rail:
-     nothing, and the billing screen gets 76px of width back. */
+  /*
+   * Component widths. Here rather than in a component, because "the rail is too narrow" and
+   * "that dialog is cramped" are look complaints, and look complaints are answered in this
+   * file.
+   */
+  /* The navigation runs ACROSS THE TOP. */
   --topbar-height: 48px;
-  /* A control that sits INSIDE the top strip. It must be shorter than
-     --topbar-height or its fill and its underline are drawn across the bar's
-     bottom border. */
+  /* A control that sits INSIDE the top strip. */
   --topbar-control-height: 2.25rem;
   --topbar-item-gap: var(--space-1);
   --titlebar-height: var(--topbar-height);
-  /* The "More" sheet. Wide enough for the longest label plus its icon with
-     room to spare — "Settings" and "History" both sit comfortably, and a sheet
-     that hugs its text reads as cramped rather than as tidy. */
+  /*
+   * The "More" sheet. Wide enough for the longest label plus its icon with room to spare —
+   * "Settings" and "History" both sit comfortably, and a sheet that hugs its text reads as
+   * cramped rather than as tidy.
+   */
   --rail-sheet-width: 13rem;
-  /* A "find something on this screen" box. One width for all of them, because
-     a search box that is a different size on every screen is the alignment
-     complaint in miniature. Wide enough that the longest placeholder in the
-     product — "Find a customer, or a number" — is not cut off. */
+  /* A "find something on this screen" box. */
   --find-width: 20rem;
   --modal-width: 26rem;
   --modal-width-wide: 42rem;
@@ -264,254 +153,144 @@
   --toast-width-min: 14rem;
   --toast-width-max: 20rem;
 
-  /* The billing screen (P09). The cart is permanent and never moves, so its
-     width is a look decision and belongs here — "the cart is too narrow" is
-     answered in this file, not in a component. The tile numbers ARE the
-     density solution: at 1366x768 the floor gets about 900px, so a 7.5rem
-     minimum packs seven columns; the dense step past 24 tables packs ten and
-     the tile drops its secondary line. */
+  /* The billing screen. */
   --cart-width: 24rem;
-  /* The processing-orders panel, between the floor and the cart. Narrower than
-     the cart: a line of it is a label, a number, a time and an amount. */
+  /* The processing-orders panel, between the floor and the cart. */
   --queue-width: 17rem;
-  /* P31. How wide the minus and plus on a cart line are. Square and tight: the
-     cart is 24rem and the item name has to survive three buttons beside it. */
+  /* How wide the minus and plus on a cart line are. */
   --cart-step-size: 1.75rem;
-  /* The lock beside the order type on the billing bar, 2026-08-23. The owner
-     asked for "a very tiny lock icon": a square the size of a small icon plus
-     one step of air, and no words. */
   --billbar-lock-size: 1.5rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
   --tile-height: 6.5rem;
   --tile-height-dense: 3.75rem;
-  /** Print, edit, delete — the small buttons that sit on a tile. */
+  /* Print, edit, delete — the small buttons that sit on a tile. */
   --tile-button: 1.5rem;
   --suggestions-height: 22rem;
-  /* The floor plan (P14, scope 14.1). Sixteen squares each way is enough for a
-     60-table room at four squares a table, and small enough that the whole
-     plan fits the reference machine's 1366x768 without scrolling (D12). The
-     COUNT is Rust's (`floor::GRID_CELLS`) and arrives with the view; this is
-     the size one square is drawn at. */
+  /* The floor plan. */
   --plan-cells: 16;
   --plan-cell-size: 3.5rem;
   --help-keys-width: 9rem;
-  /* P31, the Groups dialog. The printer column wants this much and gives way
-     before the name does; the name never goes below its own minimum, and below
-     that the row wraps rather than squeezing either. Written down together
-     because they are one decision: the first version fixed the printer column
-     and let the name collapse to one character per line. */
   --group-route-width: 12rem;
   --group-name-min: 9rem;
-  /* P30.5, the first run — the one screen in the product that is deliberately
-     NARROW. A form stretched across 1366 px reads as a wall; a column the eye
-     can follow reads as a conversation, and the person in front of this one
-     has never seen the product before. */
+  /* 5, the first run — the one screen in the product that is deliberately NARROW. */
   --firstrun-width: 34rem;
   --firstrun-lede: 44ch;
   --firstrun-dot: 1.75rem;
-  /* How wide the item name wants to be on the last set-up step, before the
-     row wraps. Wide enough for "Chicken Biryani" and no wider. */
+  /* How wide the item name wants to be on the last set-up step, before the row wraps. */
   --firstrun-item: 12rem;
-  /* P29. How much of a device's raw output the device screen shows before it
-     scrolls. Twelve lines is enough to see a scale repeating itself, which is
-     the thing a dealer is looking for. */
+  /* How much of a device's raw output the device screen shows before it scrolls. */
   --raw-output-height: 12rem;
-  /* How little of the cart may ever be on screen. The cart column is a grid of
-     auto rows around one flexible one, and CSS gives the auto rows their
-     content first — so when payments appeared the item list was squeezed to
-     nothing while it still said "2 lines". Found by paying a bill and looking
-     at it. Four lines is a floor, not a height. */
-  /* Lowered from 8rem at P27.5: of the two floors below, this is the one that
-     should give way first. A cashier can scroll a list of items they are
-     reading; they cannot scroll a tax breakdown they have not been shown. */
+  /* How little of the cart may ever be on screen. */
   --cart-lines-min: 6rem;
 
-  /* The alerts panel (P30.6). Wide enough for a licence sentence on two lines
-     with a button beside it, and never taller than a short window's screen. */
+  /* The alerts panel. */
   --alerts-width: 26rem;
-  /* The Floor screen's arranging panel. Wide enough for two fields side by
-     side (From and To) and no wider — the room is what the screen is for. */
+  /* The Floor screen's arranging panel. */
   --arrange-width: var(--find-width);
-  /* An info tip holds a sentence or two. Wider and it stops being a tip and
-     becomes the paragraph it replaced. */
+  /* An info tip holds a sentence or two. */
   --tip-width: 20rem;
   --alerts-tall: 70vh;
-  /* (--totals-min was here and is GONE. It was a floor on the totals block,
-     and a floor is an absolute promise: two of them plus a payment block is
-     exactly how Complete bill went off the bottom of the cart. What the cart
-     needs is a shrink ORDER, not a second number — see billing.css.) */
+  /* (--totals-min was here and is GONE. */
 
-  /* The settings screen (P17). The section list is fixed at a width that holds
-     "The kitchen ticket" plus its read-only mark; the fields flow into as many
-     columns as fit, and 20rem is the width at which a GSTIN and a state name
-     both still fit on one line. At 1366 that is two columns, which is what
-     stops ninety settings becoming a mile of scrolling. */
+  /* The settings screen. */
   --settings-rail: 15rem;
   --settings-field: 20rem;
-  /* A tick box is a line of words, so it packs tighter than a field you type
-     in. 15rem holds "Print the payment lines" and its info tip. */
+  /* A tick box is a line of words, so it packs tighter than a field you type in. */
   --settings-tick: 15rem;
-  /* What is left beside the bill sample is about 34rem, which is one 20rem
-     column and a lot of nothing. Two of these fit. */
+  /*
+   * What is left beside the bill sample is about 34rem, which is one 20rem column and a lot of
+   * nothing.
+   */
   --settings-field-tight: 16rem;
-  /* Wide enough that a 48-column receipt FITS: 48 characters of --text-sm mono
-     is about 25rem, plus the paper's own padding and border. 26rem was not,
-     and the bill came out with "SAMPL", "Dine I" and "478.8" cut off — which
-     is a preview that lies about the one thing it exists to show. */
+  /*
+   * Wide enough that a 48-column receipt FITS: 48 characters of --text-sm mono is about 25rem,
+   * plus the paper's own padding and border.
+   */
   --settings-paper: 28rem;
 
-  /* The day close (P18). Two columns at 1366 and one below that: the expected
-     figures and the count have to sit side by side, because the whole task is
-     comparing them. The face value column is wide enough for "500" and the box
-     for four digits — nobody counts ten thousand notes of one kind. */
+  /* The day close. */
   --dayclose-column: 22rem;
   --dayclose-face: 3rem;
   --dayclose-box: 5rem;
   /* Four stat cards across at 1366, two on a laptop, one on a tablet. */
   --dash-stat: 13rem;
 
-  /* P19 pairing QR. A version-2 code is 25 modules; 8px each makes it 200px
-     across, which every phone camera reads from arm length. Six, not eight:
-     a real fingerprint makes a 33-module code, and 8px ran it off the bottom
-     of the panel — which is a code the camera sees half of. */
   --qr-dot: 6px;
-  /* **The two values in this file that a theme must NOT change** — the owner,
-     2026-08-24: *"print preview should always be in white no matter the theme.
-     that is the only exception in no hardcoding rule."*
-
-     A picture of paper is not a surface of the app. A thermal roll is white
-     and the printer only makes black, so a bill drawn in the dark theme's
-     colours is a picture of something that cannot come out of a printer — and
-     a QR is worse, because a camera reads it and a dark-mode QR does not scan.
-
-     They are still tokens, because D21 says every value lives in this file —
-     including the ones with a reason never to move. Three things use them: the
-     UPI QR, the logo preview, and the bill and kitchen-ticket previews. */
+  /* The two values in this file that a theme must NOT change. */
   --print-ink: #000000;
   --print-paper: #ffffff;
   /* How wide the logo preview may get on screen before it stops growing. */
   --logo-preview-width: 18rem;
 
-  /* The lock screen and the people screens (P11). The card is narrow on
-     purpose: a PIN pad the width of a monitor is a PIN pad you have to look
-     at, and the whole point is that a cashier does it without looking. */
+  /* The lock screen and the people screens. */
   --lock-width: 24rem;
   --lock-people-height: 18rem;
   --dot-size: 0.875rem;
   --permission-min: 15rem;
-  /* The menu screen (P13). The category pane is a list of names, so it is
-     narrow; the class tiles wrap at a width that keeps a rate and a count on
-     one line. */
+  /* The menu screen. */
   --menu-categories-width: 14rem;
   --class-min: 18rem;
   --import-box-height: 12rem;
-  /** How narrow a table may get before it scrolls sideways instead of wrapping. */
+  /* How narrow a table may get before it scrolls sideways instead of wrapping. */
   --table-min: 34rem;
 
-  /* -----------------------------------------------------------------------
-     THE LAYER CONTRACT. Same argument as spacing and type: a screen names a
-     JOB, never a number. Raw 1, 40, 50, 100 and 200 were scattered across five
-     files and nothing said which was meant to be above which.
-     ----------------------------------------------------------------------- */
+  /*
+   * THE LAYER CONTRACT. Same argument as spacing and type: a screen names a JOB, never a
+   * number.
+   */
 
-  /** A sticky header or a rail inside a page. */
+  /* A sticky header or a rail inside a page. */
   --layer-sticky: 10;
-  /** A side panel lying over the page's own content. */
+  /* A side panel lying over the page's own content. */
   --layer-panel: 20;
-  /** The top bar, which everything on the page passes under. */
+  /* The top bar, which everything on the page passes under. */
   --layer-chrome: 40;
-  /** An info tip: part of the page, above the panel it explains. */
+  /* An info tip: part of the page, above the panel it explains. */
   --layer-tip: 50;
-  /** A dialog and the sheet it dims. */
+  /* A dialog and the sheet it dims. */
   --layer-modal: 100;
-  /** A toast, over the dialog that raised it. */
+  /* A toast, over the dialog that raised it. */
   --layer-toast: 200;
-  /** The lock. Above everything — a toast over a locked screen leaks. */
+  /* The lock. Above everything — a toast over a locked screen leaks. */
   --layer-lock: 300;
 
   --focus-ring-width: 2px;
-  /* **A ring sits ON the edge, never around it** — the owner, 2026-08-23:
-     *"basically border itself colour changes, another border shouldn't appear
-     around it."*
-
-     A positive `outline-offset` puts the ring outside the border box, so a
-     box that already has a border ends up wearing two: its own, a gap, and a
-     halo. A NEGATIVE offset of the ring's own width lays the ring exactly over
-     the outermost pixels instead, and what a shopkeeper sees is the border
-     changing colour and thickening — one edge, not two.
-
-     Every focus and every selection in this product uses this. There is no
-     second way to draw a ring. */
+  /* A ring sits ON the edge, never around it. */
   --focus-ring-inset: calc(var(--focus-ring-width) * -1);
-  /* **A second line weight, and it is the owner's complaint of 2026-08-17**:
-     *"the lines and letters brightness not correctly visble."*
-
-     Colour was only half of that (the ramps below are the other half). A
-     1px hairline is a hairline whatever colour it is — on a table tile, which
-     is a box a cashier picks out of forty at a glance from two feet away, the
-     outline has to be a real edge. Two weights, and no third: HAIRLINE
-     separates, THICK outlines something that is its own object. */
   --border-width-thick: 2px;
-  /* The rule under the current screen in the top bar. A token because it is a
-     size, and every size in this product is one (D21) — the lint does not scan
-     inside box-shadow, which is exactly why this needs saying rather than
-     enforcing. */
+  /* The rule under the current screen in the top bar. */
   --nav-underline: 2px;
   --border-width: 1px;
 }
 
-/* ==========================================================================
-   LIGHT — the default. Ships with dark; the sun/moon toggle switches them
-   and the choice persists (owner's ruling: both ship, neither is "the" one).
-   ========================================================================== */
+/* LIGHT — the default. */
 [data-theme="light"] {
   color-scheme: light;
 
-  /* ground — a neutral grey ramp with the faintest cool cast. The old one was
-     bluer, and on a cheap counter monitor a blue-grey page reads as dirty
-     rather than as calm. */
+  /* Ground — a neutral grey ramp with the faintest cool cast. */
   --bg: #f6f7f9;
   --surface: #ffffff;
   --surface-2: #f9fafb;
   --surface-sunk: #eef0f3;
 
-  /* line — two weights and they do different jobs. `--border` separates
-     things that belong together (rows in a table); `--border-strong` outlines
-     things you can act on (an input, a secondary button).
-
-     **Both came up on 2026-08-17, and the amount is computed, not chosen.**
-     `--border-strong` was #cfd4dc, which is 1.49:1 against white — an input
-     whose outline you cannot see is an input that does not look like one, and
-     WCAG 1.4.11 asks 3:1 of exactly this. It is 3.14:1 now. `--border` is a
-     separator rather than an outline, so it is held to a lower bar (1.64:1,
-     up from 1.24:1) — a row rule at 3:1 stops separating rows and starts
-     drawing a grid. `contrast.test.ts` checks both, in every theme, which is
-     what stops this drifting back. */
+  /* Line — two weights and they do different jobs. */
   --border: #c2c7d0;
   --border-strong: #868d9b;
 
-  /* text — three steps, and the gap between them is deliberate. Muted is for
-     a label, faint is for a hint nobody has to read. */
+  /* Text — three steps, and the gap between them is deliberate. */
   --text: #101828;
   --text-muted: #545d6d;
   --text-faint: #6f7889;
 
-  /* accent — PROVISIONAL DEFAULT, indigo.
-     Chosen so that green, amber and red stay free for paid / warning /
-     void (rule 1 above): an accent in any of those families makes a
-     semantic state ambiguous the first time they sit side by side.
-     Deepened at P27.5 from #3d55c8 — the old one was light enough that white
-     text on it only just cleared the contrast floor, which is why every
-     primary button looked slightly washed out.
-     THE OWNER WILL NAME A DIFFERENT ONE. Change these two lines. */
+  /* Accent — PROVISIONAL DEFAULT, indigo. */
   --accent: #4a45c4;
   --accent-ink: #ffffff;
   --accent-hover: #3d38a8;
   --accent-soft: #ecebfa;
   --accent-line: #c3c0ee;
 
-  /* semantic — never rendered with --accent, never the only signal */
+  /* Semantic — never rendered with --accent, never the only signal. */
   --ok: #177a48;
   --ok-soft: #e3f5ea;
   --warn: #96601a;
@@ -521,9 +300,7 @@
   --info: #1c6a86;
   --info-soft: #e3f1f6;
 
-  /* elevation — the contract above, given colour. Two layers each, because a
-     single blurred shadow reads as fog and a shadow with a tight first layer
-     reads as an edge. */
+  /* Elevation — the contract above, given colour. */
   --level-raised: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
   --level-pop: 0 4px 8px rgb(16 24 40 / 6%), 0 16px 32px rgb(16 24 40 / 14%);
   --shadow: var(--level-raised);
@@ -531,39 +308,24 @@
   --overlay: rgb(16 24 40 / 45%);
 }
 
-/* ==========================================================================
-   DARK
-   ========================================================================== */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* Dark is NOT the light theme inverted. The page is the darkest thing and
-     surfaces rise out of it, which is the opposite of light — there, the page
-     is grey and surfaces are white. Getting that backwards is what makes a
-     dark mode look like a bug. */
+  /* Dark is NOT the light theme inverted. */
   --bg: #0e1015;
   --surface: #171a21;
   --surface-2: #1e222b;
   --surface-sunk: #0a0c10;
 
-  /* **This is the pair the owner was actually looking at.** The screenshot of
-     2026-08-17 is the dark theme, and `--border-strong` was #3a414f: 1.68:1
-     against `--surface`. Every input, every secondary button, every payment
-     key and every table tile was outlined in a line that is, measurably,
-     almost not there. 3.12:1 now. `--border` goes 1.23:1 → 1.96:1. */
   --border: #454b57;
   --border-strong: #5f6979;
 
   --text: #e9ecf2;
-  /* Lifted with the lines, and for the same reading. "4 seats", "5%", every
-     field label and every section note is one of these two, and on this ground
-     they were doing the greyed-out-and-disabled impression rather than the
-     secondary-information one. Faint goes 3.66:1 → 5.20:1. */
+  /* Lifted with the lines, and for the same reading. */
   --text-muted: #a9b3c4;
   --text-faint: #838da0;
 
-  /* The same indigo, lifted so it holds its contrast on a dark ground.
-     Change these two lines with the light ones above. */
+  /* The same indigo, lifted so it holds its contrast on a dark ground. */
   --accent: #8b8cf5;
   --accent-ink: #0e1015;
   --accent-hover: #a3a4f8;
@@ -579,9 +341,10 @@
   --info: #5cb5d4;
   --info-soft: #0e2530;
 
-  /* On a dark ground a shadow is nearly invisible, so elevation is carried by
-     the SURFACE getting lighter — the shadow only stops a panel's edge from
-     dissolving. Which is why `--surface` and `--surface-2` step up above. */
+  /*
+   * On a dark ground a shadow is nearly invisible, so elevation is carried by the SURFACE
+   * getting lighter — the shadow only stops a panel's edge from dissolving.
+   */
   --level-raised: 0 1px 2px rgb(0 0 0 / 45%), 0 1px 3px rgb(0 0 0 / 35%);
   --level-pop: 0 4px 8px rgb(0 0 0 / 35%), 0 16px 32px rgb(0 0 0 / 55%);
   --shadow: var(--level-raised);
@@ -589,12 +352,7 @@
   --overlay: rgb(0 0 0 / 65%);
 }
 
-/* ==========================================================================
-   HIGH CONTRAST — and note that it is a THEME, not a mode.
-   That is the whole argument for this file's shape: the accessibility
-   requirement (audit F9) and the owner's "add more themes easily"
-   requirement turn out to be the same requirement, and it cost one block.
-   ========================================================================== */
+/* HIGH CONTRAST — and note that it is a THEME, not a mode. */
 [data-theme="contrast"] {
   color-scheme: light;
 
@@ -630,9 +388,7 @@
   --overlay: rgb(0 0 0 / 65%);
 }
 
-/* ==========================================================================
-   The base. Small on purpose: everything else is a component.
-   ========================================================================== */
+/* The base. Small on purpose: everything else is a component. */
 * {
   box-sizing: border-box;
 }
@@ -650,8 +406,7 @@ body {
   font-family: var(--font-ui);
   font-size: var(--text-md);
   line-height: var(--line-normal);
-  /* A desktop app is not a document: nothing here should rubber-band or
-     select like prose. Inputs opt back in. */
+  /* A desktop app is not a document: nothing here should rubber-band or select like prose. */
   -webkit-user-select: none;
   user-select: none;
   overflow: hidden;
@@ -666,18 +421,9 @@ textarea {
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--accent);
   outline-offset: var(--focus-ring-inset);
-  /* No `border-radius` here. It used to force --radius-sm, which did not
-     restyle the RING — it restyled the ELEMENT, so a pill button and a tile
-     both changed shape the moment they were focused. With the ring inset it
-     follows whatever corner the box already has, which is the right one. */
 }
 
-/* **The scrollbars.** Themed here, not per-screen: a scrollbar is a colour.
-
-   Do NOT add `scrollbar-width` or `scrollbar-color` here. Setting either one
-   switches Chromium to the OS scrollbar and silently ignores every
-   `::-webkit-scrollbar` rule below — square thumb, stepper arrows, Windows
-   grey on a dark page. That is what shipped for nineteen sessions. */
+/* The scrollbars. Themed here, not per-screen: a scrollbar is a colour. */
 *::-webkit-scrollbar {
   width: var(--scrollbar);
   height: var(--scrollbar);
@@ -690,9 +436,10 @@ textarea {
 *::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: var(--radius-pill);
-  /* The border is transparent and the background is clipped to the padding
-     box, which is how a thumb gets inset from its track without a second
-     element to do it with. */
+  /*
+   * The border is transparent and the background is clipped to the padding box, which is how a
+   * thumb gets inset from its track without a second element to do it with.
+   */
   border: var(--space-1) solid transparent;
   background-clip: padding-box;
 }
@@ -702,8 +449,10 @@ textarea {
   background-clip: padding-box;
 }
 
-/* A scrollbar in a corner where two meet, and the stepper buttons: neither
-   earns its space at this size. */
+/*
+ * A scrollbar in a corner where two meet, and the stepper buttons: neither earns its space at
+ * this size.
+ */
 *::-webkit-scrollbar-corner,
 *::-webkit-scrollbar-button {
   display: none;

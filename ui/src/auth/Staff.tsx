@@ -1,21 +1,4 @@
-/**
- * **The people, and what each of them may do** — audit C2's fix.
- *
- * > *"There are two different staff systems. The POS has its own local staff
- * > list that does nothing… Meanwhile the real staff system lives in the cloud
- * > and is managed only from the Android app. The owner has no idea which one
- * > is real."*
- *
- * There is one list, it is this one, and it is mastered here (D9/D16 — the
- * counter must be able to sign a cashier in during a power cut, and a login is
- * not worth an Edge Function call). P33 makes the cloud a mirror of it.
- *
- * # Nothing here is a control
- *
- * Every button on this screen calls a command that checks `staff.manage` in
- * Rust. The screen not being reachable is a courtesy; `guard::require` is the
- * control, and there is a test that calls the commands directly without it.
- */
+/** The people, and what each of them may do. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -48,15 +31,15 @@ export function Staff() {
   const [tab, setTab] = useState('people');
   const [people, setPeople] = useState<readonly EmployeeView[]>([]);
 
-  // The employment tabs need the list of people to choose between, and the
-  // salary tab needs it before anybody has opened People. Loaded once, here.
+  // The employment tabs need the list of people to choose between, and the salary tab needs it
+  // before anybody has opened People.
   useEffect(() => {
     call('employees')
       .then(setPeople)
       .catch(() => {
-        // A person with no staff permission still reaches this screen for
-        // their OWN attendance and leave (scope 9.14), and an empty list is
-        // the honest state for them rather than a toast about permission.
+        // A person with no staff permission still reaches this screen for their OWN attendance
+        // and leave, and an empty list is the honest state for them rather than a toast about
+        // permission.
       });
   }, []);
 
@@ -92,7 +75,7 @@ function People() {
   const [roles, setRoles] = useState<readonly RoleView[]>([]);
   const [editing, setEditing] = useState<PersonView | null>(null);
   const [pinFor, setPinFor] = useState<PersonView | null>(null);
-  /** P31 — the employment record behind a person: what they do, and when they left. */
+  /** The employment record behind a person: what they do, and when they left. */
   const [atWork, setAtWork] = useState<PersonView | null>(null);
   const toast = useToast();
 
@@ -122,8 +105,8 @@ function People() {
     {
       key: 'status',
       header: 'Status',
-      // Colour is never the only signal (§2): the word is the signal and the
-      // tone is the emphasis.
+      // Colour is never the only signal (§2): the word is the signal and the tone is the
+      // emphasis.
       render: (p) => (
         <Badge tone={p.status === 'active' ? 'ok' : 'neutral'}>
           {p.status === 'active'
@@ -145,8 +128,10 @@ function People() {
           <Button small variant="quiet" onClick={() => setPinFor(p)}>
             PIN
           </Button>
-          {/* P31. What they do, who to call, and the day they left —
-              `save_employee`, which had no button at all. */}
+          {/*
+            What they do, who to call, and the day they left — `save_employee`, which had no
+            button at all.
+          */}
           <Button small variant="quiet" onClick={() => setAtWork(p)}>
             At work
           </Button>
@@ -296,21 +281,7 @@ function EditPerson({
   );
 }
 
-/**
- * **Setting somebody else's PIN.**
- *
- * Two things changed here on 2026-08-22, both from the same review of the
- * sign-in path:
- *
- * * It is asked for **twice**. Set-up (`FirstRun`) already did, and this did
- *   not — so the one screen where a manager types a PIN for somebody who is not
- *   in the room was also the one screen where a slipped finger went unnoticed
- *   until that person could not sign in. The cost of being wrong is highest
- *   exactly here.
- * * The box is a password box. A manager sets a waiter's PIN at the counter,
- *   with the waiter standing next to them — and the note underneath already
- *   promised it "cannot be read back", which was not true of the screen.
- */
+/** Setting somebody else's PIN. */
 function SetPin({
   person,
   onClose,
@@ -327,8 +298,7 @@ function SetPin({
   const toast = useToast();
 
   const setIt = () => {
-    // The same rule Rust holds — `mb_auth::pin::PIN_DIGITS`. Said here so the
-    // form does not invite a shape the program then refuses.
+    // The same rule Rust holds — `mb_auth::pin::PIN_DIGITS`.
     if (pin.length !== PIN_DIGITS) {
       setProblem(`A PIN is ${PIN_DIGITS} digits.`);
       return;
@@ -345,8 +315,7 @@ function SetPin({
     try {
       const code = await call('set_staff_pin', { staffId: person.id, pin: value });
       if (code) {
-        // Shown once, and printed. After this it exists on paper and nowhere
-        // else — so the dialog stays open until it is acknowledged.
+        // Shown once, and printed.
         setRecovery(code);
         return;
       }
@@ -360,10 +329,7 @@ function SetPin({
   if (recovery) {
     return (
       <Modal open title="Write this down" onClose={() => { onDone(); onClose(); }}>
-        {/* **It says "and printed" because it now is** — round 5, 2026-08-22.
-            The slip was promised here and in `mb_auth::recovery` and by the
-            audit log, and nothing put it on a printer. See
-            `ipc::print_the_recovery_slip`. */}
+        {/* It says "and printed" because it now is. */}
         <p>
           This is the shop&rsquo;s recovery code. It is the way back in if the
           owner forgets their PIN. It is shown here <strong>once</strong> and
@@ -437,9 +403,8 @@ function Roles() {
     void (async () => {
       try {
         setRoles(await call('list_roles'));
-        // **The grid is built from the permissions that exist**, never from a
-        // list typed into this file — so it can only ever offer a permission
-        // the database has a row for (BACKEND-G7).
+        // The grid is built from the permissions that exist, never from a list typed into this
+        // file — so it can only ever offer a permission the database has a row for.
         setPermissions(await call('list_permissions'));
       } catch (cause) {
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
@@ -496,8 +461,7 @@ function EditRole({
 }) {
   const [name, setName] = useState(role.name);
   const [granted, setGranted] = useState<readonly string[]>(role.permissions);
-  // The text Rust formatted, edited as text and sent back as text. Rust parses
-  // it — R8, and the reason there is no `/ 100` anywhere in this file.
+  // The text Rust formatted, edited as text and sent back as text.
   const [percent, setPercent] = useState(role.maxDiscountPercent ?? '');
   const toast = useToast();
 

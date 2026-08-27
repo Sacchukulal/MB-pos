@@ -1,20 +1,4 @@
-/**
- * **The stock count** — P26, scope 4.8. It lives on the Stock screen, because a
- * count is a question about the shelf and that is where the person already is.
- *
- * # Two decisions this screen exists to obey
- *
- * **D127 — the book is frozen when a line is counted, and approving posts a
- * DELTA.** So the screen shows what the book said *at the moment somebody
- * counted*, not what it says now, and it says out loud what approving will do
- * before anybody presses it.
- *
- * **D128 — the printed sheet has no book quantity on it.** That is enforced in
- * Rust (`counting::sheet`, with a test); this screen only shows what comes
- * back. If you are ever tempted to "helpfully" add the current figure to the
- * sheet here, read D128 first: a person holding a clipboard that already says
- * 12.5 kg writes down 12.5 kg, and the whole feature quietly stops working.
- */
+/** The stock count. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -79,7 +63,7 @@ export function Count() {
   if (!view) return <div className="mb-count" />;
 
   const chosen = view.remaining.find((m) => m.materialId === material);
-  /** Whether anything on this sheet may still be changed — D129. */
+  /** Whether anything on this sheet may still be changed. */
   const open = view.id !== null && view.stateTag === 'draft';
 
   const write = () => {
@@ -104,8 +88,6 @@ export function Count() {
   const columns: Column<CountLineView>[] = [
     { key: 'material', header: 'Material', render: (l) => l.material },
     { key: 'counted', header: 'Counted', render: (l) => l.counted },
-    /* **D127 on the screen**: what the software thought at the moment this
-       shelf was counted, not what it thinks now. */
     { key: 'book', header: 'Book said', render: (l) => l.book },
     {
       key: 'variance',
@@ -136,11 +118,7 @@ export function Count() {
     },
   ];
 
-  // **D129 — an approved count is SEALED, so the screen must not offer to
-  // change it.** The first version left Remove, "Say why" and "Give up on this
-  // count" on an approved sheet: Rust refuses every one of them, which makes
-  // three lying buttons of exactly the kind P21 spent a session removing.
-  // Found by approving one and looking at what was still on the screen.
+  // An approved count is SEALED, so the screen must not offer to change it.
   if (open) {
     columns.push({
       key: 'do',
@@ -245,15 +223,15 @@ export function Count() {
           ) : (
             <>
               <Table rows={view.lines} columns={columns} rowKey={(l) => l.materialId} />
-              {/* One sentence, composed in Rust. Three labelled figures put a
-                  minus sign next to the word "short" — the same thing said
-                  twice, in two notations. */}
+              {/* One sentence, composed in Rust. */}
               <p className="mb-count__says">{view.totalsSays}</p>
             </>
           )}
 
-          {/* **What approving will do, said before anybody presses it** — and
-              only while there is still something to press. */}
+          {/*
+            What approving will do, said before anybody presses it — and only while there is
+            still something to press.
+          */}
           {open ? <p className="mb-count__says">{view.effect}</p> : null}
 
           {open ? (
@@ -306,7 +284,7 @@ export function Count() {
 
       {sheet !== null ? (
         <Modal open title="Count sheet" onClose={() => setSheet(null)} wide>
-          {/* No book quantity on it, on purpose — D128. */}
+          {/* No book quantity on it, on purpose. */}
           <pre className="mb-count__sheet">{sheet}</pre>
           <div className="mb-row mb-row--end">
             <Button variant="quiet" onClick={() => navigator.clipboard.writeText(sheet)}>

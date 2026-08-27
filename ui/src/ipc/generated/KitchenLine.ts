@@ -13,13 +13,11 @@ key: string, qty: string, name: string,
  */
 note: string | null, 
 /**
- * Which course this dish belongs to. Empty when the shop does not use
- * courses, which is most shops.
+ * Which course this dish belongs to.
  */
 course: string, 
 /**
- * **Added after the kitchen first saw this order.** A cook who glanced
- * away must not miss an addition.
+ * Added after the kitchen first saw this order.
  */
 isNew: boolean, 
 /**

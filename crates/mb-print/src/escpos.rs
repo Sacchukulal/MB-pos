@@ -1,22 +1,4 @@
-//! ESC/POS — **a typed builder, not raw byte soup.**
-//!
-//! Every command here is re-derived from the ESC/POS specification and carries
-//! the spec's own name for it in a comment. v1's byte sequences worked on the
-//! owner's TVSE printer and said nothing about what they were, so nobody could
-//! change one without a printer on the desk. R1 allows reading them; it does
-//! not allow pasting them, and it certainly does not allow inheriting their
-//! silence.
-//!
-//! # The two encoders
-//!
-//! * [`encode_text`] drives the printer's own font — fast, tiny, and the only
-//!   thing that works on a printer with no raster support;
-//! * [`encode_raster`] sends dots — crown jewel 17, what-you-see-is-what-you-get,
-//!   and the path an Indic script will one day take.
-//!
-//! Both take the same [`Capabilities`], and **both obey them**: a printer with
-//! no blade is never sent a cut, a printer with no drawer socket is never sent
-//! a pulse, and a printer with no QR encoder gets the payload as text.
+//! ESC/POS — a typed builder, not raw byte soup.
 
 use crate::doc::Align;
 use crate::drawer::{DrawerConfig, DrawerPin};
@@ -24,7 +6,7 @@ use crate::layout::{Laid, LaidContent};
 use crate::printer::Capabilities;
 use crate::raster::{Band, Raster};
 
-// --- the bytes, named -------------------------------------------------------
+// The bytes, named.
 
 const ESC: u8 = 0x1B;
 const GS: u8 = 0x1D;
@@ -34,12 +16,11 @@ const GS: u8 = 0x1D;
 pub enum Cut {
     /// Right through. Some printers only have this.
     Full,
-    /// Leaves a small tab so the receipt does not fall on the floor. What a
-    /// counter wants.
+    /// Leaves a small tab so the receipt does not fall on the floor.
     #[default]
     Partial,
-    /// Feed `dots` first, so the cut lands below the last line rather than
-    /// through it — the blade sits some millimetres above the head.
+    /// Feed `dots` first, so the cut lands below the last line rather than through it — the
+    /// blade sits some millimetres above the head.
     PartialAfterFeed(u8),
 }
 
@@ -65,27 +46,19 @@ impl EscPos {
         &self.out
     }
 
-    /// `ESC @` — initialise. Clears every mode the last job left set, which
-    /// matters because the printer remembers them and the last job may have
-    /// been somebody else's.
+    /// `ESC @` — initialise.
     pub fn init(&mut self) -> &mut Self {
         self.out.extend_from_slice(&[ESC, b'@']);
         self
     }
 
-    /// `ESC t n` — select character code table. 0 is PC437, which every printer
-    /// has and which covers the ASCII a receipt is written in.
+    /// `ESC t n` — select character code table.
     pub fn codepage(&mut self, table: u8) -> &mut Self {
         self.out.extend_from_slice(&[ESC, b't', table]);
         self
     }
 
-    /// `ESC a n` — justification. 0 left, 1 centre, 2 right.
-    ///
-    /// The layout has already padded every line to its alignment, so the text
-    /// encoder leaves this at 0 and lets the spaces do the work — otherwise the
-    /// printer would centre an already-centred line. It is used for pictures,
-    /// which have no spaces to pad with.
+    /// `ESC a n` — justification.
     pub fn align(&mut self, align: Align) -> &mut Self {
         let n = match align {
             Align::Left => 0,
@@ -103,18 +76,12 @@ impl EscPos {
     }
 
     /// `ESC G n` — double-strike: the same line printed twice.
-    ///
-    /// This is v1's "Bold & Dark" option, and it is the honest way to do it. A
-    /// vendor density command would be one printer's idea; striking twice is in
-    /// the specification and works everywhere.
     pub fn double_strike(&mut self, on: bool) -> &mut Self {
         self.out.extend_from_slice(&[ESC, b'G', u8::from(on)]);
         self
     }
 
-    /// `GS ! n` — character size. The low nibble is the height multiplier minus
-    /// one, the high nibble the width multiplier minus one, so 1× is `0x00` and
-    /// 3× is `0x22`.
+    /// `GS ! n` — character size.
     pub fn size(&mut self, scale: u8) -> &mut Self {
         let n = scale.clamp(1, 8) - 1;
         self.out.extend_from_slice(&[GS, b'!', (n << 4) | n]);
@@ -145,8 +112,7 @@ impl EscPos {
         self
     }
 
-    /// `GS V m` — cut. 0 full, 1 partial; `GS V 66 n` feeds `n` dots and then
-    /// cuts partially, which is the one a counter actually wants.
+    /// `GS V m` — cut.
     pub fn cut(&mut self, cut: Cut) -> &mut Self {
         match cut {
             Cut::Full => self.out.extend_from_slice(&[GS, b'V', 0]),
@@ -156,25 +122,17 @@ impl EscPos {
         self
     }
 
-    /// `ESC p m t1 t2` — pulse the drawer kick-out connector.
-    ///
-    /// `m` is 0 for pin 2 and 1 for pin 5; `t1` and `t2` are the on and off
-    /// times in units of **two milliseconds**.
     pub fn drawer(&mut self, pin: DrawerPin, on_units: u8, off_units: u8) -> &mut Self {
         let m = match pin {
             DrawerPin::Pin2 => 0,
             DrawerPin::Pin5 => 1,
         };
-        self.out.extend_from_slice(&[ESC, b'p', m, on_units, off_units]);
+        self.out
+            .extend_from_slice(&[ESC, b'p', m, on_units, off_units]);
         self
     }
 
     /// Text, folded to the printer's character set.
-    ///
-    /// Anything outside ASCII becomes `?`. That is not a truncation — the
-    /// character is still one character wide and the columns still add up — it
-    /// is the printer's ROM font not having the glyph, which is precisely the
-    /// limitation [`crate::raster`] exists to lift.
     pub fn text(&mut self, text: &str) -> &mut Self {
         for ch in text.chars() {
             let byte = if ch.is_ascii() { ch as u8 } else { b'?' };
@@ -191,9 +149,6 @@ impl EscPos {
     }
 
     /// `GS v 0 m xL xH yL yH d…` — raster bit image.
-    ///
-    /// `m = 0` is normal size; the width is in **bytes** and the height in dot
-    /// rows, both little-endian. This is the command crown jewel 17 rides on.
     pub fn raster_image(&mut self, width_dots: u32, height_dots: u32, bits: &[u8]) -> &mut Self {
         let bytes_per_row = u16::try_from((width_dots as usize).div_ceil(8)).unwrap_or(u16::MAX);
         let rows = u16::try_from(height_dots).unwrap_or(u16::MAX);
@@ -204,56 +159,38 @@ impl EscPos {
         self
     }
 
-    /// `GS ( k` — the printer's own QR encoder (D36), in the five calls the
-    /// specification requires:
-    ///
-    /// 1. `fn 165` select the model — 2, which every phone reads;
-    /// 2. `fn 167` module size in dots;
-    /// 3. `fn 169` error correction — M (15 %), the usual compromise between
-    ///    size and a receipt that has been in somebody's pocket;
-    /// 4. `fn 180` store the data;
-    /// 5. `fn 181` print what was stored.
-    ///
-    /// Not adding a QR encoder to this product is worth roughly 50 KB and a
-    /// dependency, and the printer's own square is better than ours would be.
+    /// `GS ( k` — the printer's own QR encoder, in the five calls the specification requires:.
     pub fn qr(&mut self, payload: &str, module: u8) -> &mut Self {
-        // 1. GS ( k pL pH cn fn n1 n2 — model 2.
+        // GS ( k pL pH cn fn n1 n2 — model 2.
         self.out
             .extend_from_slice(&[GS, b'(', b'k', 4, 0, 49, 65, 50, 0]);
-        // 2. module size, 1–16 dots.
+        // Module size, 1–16 dots.
         self.out
             .extend_from_slice(&[GS, b'(', b'k', 3, 0, 49, 67, module.clamp(1, 16)]);
-        // 3. error correction level: 48 L, 49 M, 50 Q, 51 H.
+        // Error correction level: 48 L, 49 M, 50 Q, 51 H.
         self.out
             .extend_from_slice(&[GS, b'(', b'k', 3, 0, 49, 69, 49]);
-        // 4. store the data. pL/pH count the data plus the three bytes of
-        //    cn/fn/m that follow them.
+        // Store the data. pL/pH count the data plus the three bytes of cn/fn/m that follow
+        // them.
         let data = payload.as_bytes();
-        // pL/pH count the payload plus the three bytes of cn, fn and m that
-        // follow them — little-endian, like every other length in ESC/POS.
+        // PL/pH count the payload plus the three bytes of cn, fn and m that follow them —
+        // little-endian, like every other length in ESC/POS.
         let length = u16::try_from(data.len().saturating_add(3)).unwrap_or(u16::MAX);
         let [pl, ph] = length.to_le_bytes();
         self.out
             .extend_from_slice(&[GS, b'(', b'k', pl, ph, 49, 80, 48]);
         self.out.extend_from_slice(data);
-        // 5. print it.
+        // Print it.
         self.out
             .extend_from_slice(&[GS, b'(', b'k', 3, 0, 49, 81, 48]);
         self
     }
 
-    /// **CODE 128, P29.** Every scanner sold reads it, and unlike EAN it takes
-    /// letters — which a bill number has in it.
-    ///
-    /// `GS k 73 n d1..dn`, the length-prefixed form. The older
-    /// NUL-terminated form (`GS k 6`) cannot carry a NUL and is refused by
-    /// several current printers, so this uses the one that is universal on
-    /// anything made this decade.
     pub fn barcode(&mut self, payload: &str, human_readable: bool, height: u8) -> &mut Self {
-        // How tall, in dots. 60 is about 8 mm — readable, and not half the
-        // receipt.
-        self.out.extend_from_slice(&[GS, b'h', height.clamp(1, 255)]);
-        // Narrow bar width, 2 dots. Wider is easier to scan and eats paper.
+        // How tall, in dots.
+        self.out
+            .extend_from_slice(&[GS, b'h', height.clamp(1, 255)]);
+        // Narrow bar width, 2 dots.
         self.out.extend_from_slice(&[GS, b'w', 2]);
         // Where the characters go: 0 none, 2 below.
         self.out
@@ -261,7 +198,8 @@ impl EscPos {
         // Code set B, which covers the printable ASCII a bill number uses.
         let data = payload.as_bytes();
         let length = u8::try_from(data.len().saturating_add(2)).unwrap_or(u8::MAX);
-        self.out.extend_from_slice(&[GS, b'k', 73, length, b'{', b'B']);
+        self.out
+            .extend_from_slice(&[GS, b'k', 73, length, b'{', b'B']);
         self.out.extend_from_slice(data);
         self
     }
@@ -271,13 +209,11 @@ impl EscPos {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JobOptions {
     pub cut: bool,
-    /// Blank lines fed before the cut, so the receipt clears the blade and the
-    /// customer can take it without touching the mechanism.
+    /// Blank lines fed before the cut, so the receipt clears the blade and the customer can
+    /// take it without touching the mechanism.
     pub feed_lines: u8,
-    /// `Some` when this job should also open the drawer. [`crate::drawer`]
-    /// decides; this only carries the answer.
+    /// `Some` when this job should also open the drawer.
     pub drawer: Option<DrawerConfig>,
-    /// v1's "Bold & Dark".
     pub bold_dark: bool,
 }
 
@@ -300,18 +236,17 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
     if options.bold_dark {
         out.double_strike(true);
     }
-    // Left, always: the layout has already padded each line to its alignment,
-    // and asking the printer to centre an already-centred line centres the
-    // padding too.
+    // Left, always: the layout has already padded each line to its alignment, and asking the
+    // printer to centre an already-centred line centres the padding too.
     out.align(Align::Left);
 
     let mut scale = 1_u8;
     let mut bold = false;
     out.size(1).emphasis(false);
 
-    // The layout counts in dots (P32); this engine prints with the printer's
-    // own fixed font, so it divides back — exactly, because
-    // `Metrics::printer_font` only ever answers in whole multiples of it.
+    // The layout counts in dots; this engine prints with the printer's own fixed font, so it
+    // divides back — exactly, because `Metrics::printer_font` only ever answers in whole
+    // multiples of it.
     let advance = laid.base_advance.max(1);
     let columns_of = |dots: u32| -> usize {
         #[expect(
@@ -351,9 +286,8 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                 let body: String = std::iter::repeat_n(pattern.glyph(), across).collect();
                 out.line(&format!("{indent}{body}"));
             }
-            // **The letterhead's picture cannot be drawn by the printer's own
-            // font; its text still must be.** Dropping the whole band would
-            // lose the shop's name on every text-engine printer.
+            // The letterhead's picture cannot be drawn by the printer's own font; its text
+            // still must be.
             LaidContent::Band { lines, .. } => {
                 if scale != 1 {
                     scale = 1;
@@ -368,15 +302,17 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                         bold = text.style.bold;
                         out.emphasis(bold);
                     }
-                    out.align(text.align).line(text.text.trim()).align(Align::Left);
+                    out.align(text.align)
+                        .line(text.text.trim())
+                        .align(Align::Left);
                 }
             }
             LaidContent::QrCode { payload, align, .. } => {
                 if caps.native_qr {
                     out.align(*align).qr(payload, 6).align(Align::Left);
                 } else {
-                    // The same choice the text sink makes: a URI a customer can
-                    // read and type beats a blank space.
+                    // The same choice the text sink makes: a URI a customer can read and type
+                    // beats a blank space.
                     out.line(payload);
                 }
             }
@@ -391,14 +327,13 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                         .line("")
                         .align(Align::Left);
                 } else {
-                    // The same choice the QR arm makes above: characters a
-                    // person can read beat a blank space.
+                    // The same choice the QR arm makes above: characters a person can read beat
+                    // a blank space.
                     out.line(payload);
                 }
             }
             LaidContent::Image { .. } => {
-                // A printer's own font path cannot draw a logo. An empty arm is
-                // the visible decision the `Sink` trait exists to force.
+                // A printer's own font path cannot draw a logo.
             }
             LaidContent::Blank => {
                 out.line("");
@@ -410,7 +345,6 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
     out.finish()
 }
 
-/// Crown jewel 17's path: dots.
 #[must_use]
 pub fn encode_raster(raster: &Raster, caps: &Capabilities, options: &JobOptions) -> Vec<u8> {
     let mut out = EscPos::new();
@@ -418,9 +352,9 @@ pub fn encode_raster(raster: &Raster, caps: &Capabilities, options: &JobOptions)
     if options.bold_dark {
         out.double_strike(true);
     }
-    // Zero line spacing between bands: the bands are already exactly as tall as
-    // the picture, and the printer's default 30-dot spacing would insert a gap
-    // between every slice of the same receipt.
+    // Zero line spacing between bands: the bands are already exactly as tall as the picture,
+    // and the printer's default 30-dot spacing would insert a gap between every slice of the
+    // same receipt.
     out.line_spacing(0).align(Align::Left);
 
     for band in &raster.bands {
@@ -447,14 +381,13 @@ pub fn encode_raster(raster: &Raster, caps: &Capabilities, options: &JobOptions)
     out.finish()
 }
 
-/// The end of every job: the drawer, the feed and the cut, each only if this
-/// printer can do it.
+/// The end of every job: the drawer, the feed and the cut, each only if this printer can do it.
 fn finish_job(out: &mut EscPos, caps: &Capabilities, options: &JobOptions) {
     if let Some(drawer) = options.drawer
         && caps.drawer
     {
-        // Before the feed and the cut, so the drawer opens as the receipt comes
-        // out rather than after the cashier has already torn it off.
+        // Before the feed and the cut, so the drawer opens as the receipt comes out rather than
+        // after the cashier has already torn it off.
         out.drawer(drawer.pin, drawer.on_units(), drawer.off_units());
     }
     if options.bold_dark {
@@ -472,12 +405,7 @@ fn finish_job(out: &mut EscPos, caps: &Capabilities, options: &JobOptions) {
 mod tests {
     use super::*;
 
-    /// T2. Every command, against the bytes the specification gives.
-    ///
-    /// Written out literally rather than computed, because a test that builds
-    /// the expected bytes the same way the code does proves only that the code
-    /// is consistent with itself.
-    /// A command, how to emit it, and the bytes the specification gives.
+    /// Every command, against the bytes the specification gives.
     type Case = (&'static str, Box<dyn Fn(&mut EscPos)>, Vec<u8>);
 
     #[test]
@@ -639,22 +567,22 @@ mod tests {
         out.qr("upi://pay?pa=anna@upi", 6);
         let bytes = out.finish();
 
-        // 1. model 2
+        // Model 2.
         assert_eq!(
             bytes.get(0..9),
             Some([0x1D, 0x28, 0x6B, 4, 0, 49, 65, 50, 0].as_slice())
         );
-        // 2. module size
+        // Module size.
         assert_eq!(
             bytes.get(9..17),
             Some([0x1D, 0x28, 0x6B, 3, 0, 49, 67, 6].as_slice())
         );
-        // 3. error correction M
+        // Error correction M.
         assert_eq!(
             bytes.get(17..25),
             Some([0x1D, 0x28, 0x6B, 3, 0, 49, 69, 49].as_slice())
         );
-        // 4. store — pL/pH count the payload plus cn, fn and m.
+        // Store — pL/pH count the payload plus cn, fn and m.
         let payload = "upi://pay?pa=anna@upi";
         let length = payload.len() + 3;
         assert_eq!(
@@ -673,11 +601,7 @@ mod tests {
                 .as_slice()
             )
         );
-        assert_eq!(
-            bytes.get(33..33 + payload.len()),
-            Some(payload.as_bytes())
-        );
-        // 5. print
+        assert_eq!(bytes.get(33..33 + payload.len()), Some(payload.as_bytes()));
         assert_eq!(
             bytes.get(33 + payload.len()..),
             Some([0x1D, 0x28, 0x6B, 3, 0, 49, 81, 48].as_slice())
@@ -686,8 +610,8 @@ mod tests {
 
     #[test]
     fn non_ascii_folds_rather_than_disappearing() {
-        // The width of a line is what the layout counted, so a character that
-        // the printer's ROM cannot draw must still occupy one column.
+        // The width of a line is what the layout counted, so a character that the printer's ROM
+        // cannot draw must still occupy one column.
         let mut out = EscPos::new();
         out.text("Anna Kuteera \u{20B9}240");
         let bytes = out.finish();

@@ -1,16 +1,4 @@
-/**
- * **The tills screen** — P27.
- *
- * Rust proves the money (`src-tauri/src/terminal_tests.rs`, T1 to T11). This
- * proves the three claims a future session could quietly undo:
- *
- * 1. **the sentences come from Rust and are shown whole** (R8) — "Bills print
- *    as A/0001", what the plan allows, and D138's "the main till is off";
- * 2. **a till that is holding bills says so, and says nothing is lost** — the
- *    fear this answers is a shop thinking the money has gone;
- * 3. **the prefix is editable and reaches Rust as typed**, because it is
- *    D135's one remaining risk and the refusal lives on the other side.
- */
+/** The tills screen. */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -80,9 +68,7 @@ describe('the tills screen', () => {
     show(QUIET);
 
     expect(await screen.findByText('Counter 1')).toBeTruthy();
-    // **The whole sentence, not a prefix the screen dressed up.** A screen that
-    // built "Bills print as " + prefix + "0001" would be a second answer to
-    // what this till numbers look like, and the padding is a setting.
+    // The whole sentence, not a prefix the screen dressed up.
     expect(screen.getByText(/Bills print as A\/0001\./)).toBeTruthy();
     expect(screen.getByText(/Bills print as B\/0001\./)).toBeTruthy();
     // The plan's sentence, also from Rust.
@@ -99,8 +85,6 @@ describe('the tills screen', () => {
       waiting: 3,
     });
 
-    // D138's sentence, whole. It tells a shop what still works and what does
-    // not, which is the entire feature.
     expect(
       await screen.findByText(/This till can take counter and parcel bills/),
     ).toBeTruthy();
@@ -119,16 +103,15 @@ describe('the tills screen', () => {
     show(QUIET);
 
     fireEvent.click((await screen.findAllByText('Change'))[0]!);
-    // An exact label: the field's info tip is labelled "About What goes in
-    // front of its bill numbers", so a loose regex now matches both.
+    // An exact label: the field's info tip is labelled "About What goes in front of its bill
+    // numbers", so a loose regex now matches both.
     const prefix = screen.getByLabelText('What goes in front of its bill numbers');
     fireEvent.change(prefix, { target: { value: 'C/' } });
     fireEvent.click(screen.getByText('Save'));
 
     const saved = call.mock.calls.find(([name]) => name === 'save_till');
     expect(saved).toBeTruthy();
-    // **Untouched** — no trimming, no upper-casing, no slash appended. Rust owns
-    // the rule and Rust writes the refusal that names the clashing till.
+    // Untouched — no trimming, no upper-casing, no slash appended.
     expect((saved![1] as { edit: { prefix: string } }).edit.prefix).toBe('C/');
   });
 

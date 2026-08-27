@@ -1,21 +1,4 @@
-//! **The reports, as one shape** — so one screen renders all of them.
-//!
-//! P17 taught this: the settings screen is one component over one catalogue,
-//! and adding a setting touches no UI file. The same trick works here and for
-//! the same reason. Every report comes down as a [`ReportView`] — a title, a
-//! set of columns, rows of **already-formatted strings**, totals, and the
-//! comparison against the previous period. One React component draws all of
-//! them, one CSV writer exports all of them, one print path prints all of them.
-//!
-//! **Adding a report is a function in `mb-db`'s `reports.rs` plus a line in
-//! [`CATALOGUE`], and nothing on the screen, ever.** A test walks that list in
-//! both directions.
-//!
-//! # Every cell is a string, and money was formatted in Rust
-//!
-//! D39 and R2. `Money::to_plain_string` is the only formatter in this product,
-//! and a report is the place that rule is most tempting to break: it is all
-//! numbers, and JavaScript has no integers. So the boundary carries text.
+//! The reports, as one shape — so one screen renders all of them.
 
 use mb_auth::Permission;
 use mb_core::{BusinessDay, Money};
@@ -28,9 +11,7 @@ use crate::guard;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // The one shape.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -38,13 +19,13 @@ use crate::words::{self, UiError, UiResult};
 pub struct ReportView {
     pub id: String,
     pub title: String,
-    /// The period, in words: "1 Aug – 9 Aug 2026 · 9 days".
+    /// The period, in words: "1 Aug.
     pub subtitle: String,
     pub columns: Vec<ReportColumn>,
-    /// Already formatted. TypeScript does no arithmetic on money (R8).
+    /// Already formatted. TypeScript does no arithmetic on money.
     pub rows: Vec<Vec<String>>,
     pub totals: Option<Vec<String>>,
-    /// Scope 10.9 — against the previous equal period.
+    /// Against the previous equal period.
     pub compare: Option<CompareView>,
     /// Anything the report needs to admit: "4 items have no cost price".
     pub notes: Vec<String>,
@@ -59,23 +40,19 @@ pub struct ReportColumn {
     pub numeric: bool,
 }
 
-/// What changed since the period before — audit **G2**.
+/// What changed since the period before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct CompareView {
-    /// "1 Jul – 31 Jul", so a person can see WHAT it is being compared against
-    /// rather than trusting a percentage.
+    /// "1 Jul – 31 Jul", so a person can see WHAT it is being compared against rather than
+    /// trusting a percentage.
     pub period: String,
     pub before: String,
     pub now: String,
-    /// The whole sentence: "up 8% on the 31 days before". **One string**,
-    /// because §6 forbids building one out of fragments — a percentage, a
-    /// direction and a period assembled on the screen is three languages'
-    /// worth of word order.
+    /// The whole sentence: "up 8% on the 31 days before".
     pub summary: String,
-    /// `up`, `down` or `same`. For the arrow — colour is never the only
-    /// signal, and neither is a sign.
+    /// `up`, `down` or `same`.
     pub direction: String,
 }
 
@@ -85,9 +62,6 @@ pub struct Entry {
     pub id: &'static str,
     pub title: &'static str,
     pub group: &'static str,
-    /// What it needs. **`reports.view` for the money ones**, because audit C1's
-    /// first example is *"anybody can open Reports and see the whole day's
-    /// cash"*.
     pub needs: Permission,
     pub kind: Kind,
 }
@@ -102,33 +76,19 @@ pub enum Kind {
     Control,
     MenuEngineering,
     StoppedSelling,
-    /// P24, scope 3.7 — how long the kitchen takes.
     KitchenSpeed(SpeedBy),
-    /// P26, scope 4.5 — what went out to suppliers, grouped two ways.
     Buying(BuyingBy),
-    /// **The rise is the finding**: onion is up 46% on its three-month average.
+    /// The rise is the finding: onion is up 46% on its three-month average.
     PriceTrend,
-    /// D124. Rows for a claiming shop; one honest sentence for a 5%-scheme one.
+    /// Rows for a claiming shop; one honest sentence for a 5%-scheme one.
     InputCredit,
-    /// Who the shop owes, oldest first (D131).
+    /// Who the shop owes, oldest first.
     SupplierOutstanding,
-    /// What is on the shelf, at what it actually cost (D118).
+    /// What is on the shelf, at what it actually cost.
     StockValuation,
-    /// P26, scope 4.8 — is this always short, or was it one bad month?
     CountVariance,
-    /// **P26, D133, and audit B14's answer.** The number v1 printed was not
-    /// wrong by a percentage; it was a different quantity.
     Profit,
-    /// **P29, scope 8.5 — who took the tips.**
-    ///
-    /// The arithmetic was always right: a tip changes what is DUE, never what
-    /// the bill IS, so it appears in no sales figure and no tax summary. This
-    /// is the half a shop actually asked for — who took them, so they can be
-    /// shared out.
     Tips,
-    /// **P30 — scope 9.8's report half**, which P27 built the boundary for and
-    /// P28 left. Whose shift was this, what did the drawer say, and did it
-    /// match.
     Handover,
 }
 
@@ -136,8 +96,8 @@ pub enum Kind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuyingBy {
     Supplier,
-    /// *"Where does ₹40,000 a month of raw material go?"* — the question the
-    /// whole inventory module exists to answer.
+    /// "Where does ₹40,000 a month of raw material go?" — the question the whole inventory
+    /// module exists to answer.
     Material,
 }
 
@@ -145,12 +105,12 @@ pub enum BuyingBy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpeedBy {
     Station,
-    /// The hour of the day, in the shop's own time (D19's fixed +05:30) — which
-    /// is how a shop finds out that seven o'clock is where it loses people.
+    /// The hour of the day, in the shop's own time — which is how a shop finds out that seven
+    /// o'clock is where it loses people.
     Hour,
 }
 
-/// **The list, and it is the screen.**
+/// The list, and it is the screen.
 pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_day",
@@ -194,8 +154,6 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Section),
     },
-    // P27, scope 11.1. One entry and one column, which is the whole of "a
-    // terminal dimension" â the catalogue is data (P18) and no .tsx changes.
     Entry {
         id: "sales_terminal",
         title: "Sales by till",
@@ -224,9 +182,8 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::ReportsView,
         kind: Kind::StoppedSelling,
     },
-    // Cost and margin are behind `reports.view` too, but the MENU screen keeps
-    // cost behind the same permission (P13) — so this is consistent rather
-    // than a new rule.
+    // Cost and margin are behind `reports.view` too, but the MENU screen keeps cost behind the
+    // same permission — so this is consistent rather than a new rule.
     Entry {
         id: "margin",
         title: "Menu engineering — volume against margin",
@@ -255,10 +212,7 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::ReportsView,
         kind: Kind::Gstr1B2cs,
     },
-    // **Beside the other two, and that is not cosmetic.** The report list
-    // groups by consecutive runs of `group`, so an entry added at the end with
-    // an existing group name draws a SECOND heading with the same word on it.
-    // Found by looking at the list.
+    // Beside the other two, and that is not cosmetic.
     Entry {
         id: "input_credit",
         title: "Input tax credit on purchases",
@@ -273,11 +227,6 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::AuditView,
         kind: Kind::Control,
     },
-    // **P29, and it sits in Control on purpose.** A tip is not revenue, so it
-    // does not belong under Sales — putting it there is exactly the confusion
-    // this report exists to prevent. It is money that passed through the shop
-    // for somebody else, which is the same kind of thing as a void: something
-    // an owner watches rather than something the shop earned.
     Entry {
         id: "tips",
         title: "Tips, and who took them",
@@ -285,9 +234,6 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::ReportsView,
         kind: Kind::Tips,
     },
-    // **P30 — scope 9.8, the half P28 left.** It sits in Control beside the
-    // voids, because a drawer that keeps coming up short on one person's
-    // shift is exactly the kind of thing this group exists to surface.
     Entry {
         id: "handover",
         title: "Shift handovers — every drawer counted",
@@ -295,9 +241,6 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::DayClose,
         kind: Kind::Handover,
     },
-    // **Scope 3.7, and it is the first real measure of kitchen speed this
-    // owner has ever had.** Two rows and no new screen: adding a report is a
-    // line here plus a function in mb-db, which is P18's whole shape.
     Entry {
         id: "kitchen_station",
         title: "Kitchen speed, by station",
@@ -312,13 +255,7 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::ReportsView,
         kind: Kind::KitchenSpeed(SpeedBy::Hour),
     },
-    // **P26 — nine reports and not one `.tsx` file changed.** That is P18's
-    // whole shape: a report is a line here plus a function in mb-db.
-    //
-    // They sit behind `inventory.view` and not `reports.view`, because P25
-    // already decided that reading the stock book is not reading the day's
-    // cash — a chef who may see the buy list is not thereby someone who may see
-    // the takings. The profit statement is the exception and says why.
+    // Nine reports and not one `.tsx` file changed.
     Entry {
         id: "buying_supplier",
         title: "What you bought, by supplier",
@@ -361,8 +298,7 @@ pub const CATALOGUE: &[Entry] = &[
         needs: Permission::InventoryView,
         kind: Kind::CountVariance,
     },
-    // **The one that makes the word "profit" mean something** (audit B14). It
-    // is behind `reports.view` because it puts the day's takings on a screen.
+    // The one that makes the word "profit" mean something.
     Entry {
         id: "profit",
         title: "Profit — sales, food cost and running costs",
@@ -388,11 +324,6 @@ pub struct ReportListView {
 }
 
 /// A one-press period.
-///
-/// **Computed in Rust, and D70 is why it has to be.** "Today" on this screen is
-/// the shop's BUSINESS day — a shop that closes at 1 am has a day that starts at
-/// 5 am, and a browser asked for today's date at half past midnight would answer
-/// with tomorrow. That is audit B1 wearing a third hat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -437,12 +368,6 @@ pub struct ReportEntryView {
 }
 
 /// A period, as the screen asks for one.
-///
-/// **Two `YYYY-MM-DD` strings**, which is what an `<input type="date">`
-/// produces. Not numbers: D58 bans a `bigint` at this boundary anyway, and a
-/// days-since-epoch integer would have to be computed in TypeScript — date
-/// arithmetic on the value every report is keyed by, in the language §6 keeps
-/// arithmetic out of.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -463,8 +388,7 @@ impl PeriodArg {
         let from: BusinessDay = self.from.parse().map_err(|_| bad("from", &self.from))?;
         let to: BusinessDay = self.to.parse().map_err(|_| bad("to", &self.to))?;
         if from.days_until(to) < 0 {
-            // Swapping silently would be a screen guessing. Saying so is one
-            // sentence, and the picker is right there.
+            // Swapping silently would be a screen guessing.
             return Err(UiError::new(
                 "report.period",
                 "The end date is before the start date.",
@@ -474,9 +398,7 @@ impl PeriodArg {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Building one.
-// ---------------------------------------------------------------------------
 
 fn column(header: &str, numeric: bool) -> ReportColumn {
     ReportColumn {
@@ -502,9 +424,7 @@ fn compare(now: Money, before: Money, previous: Period) -> CompareView {
     } else {
         "same"
     };
-    // Percent as an integer, computed on paise. No floats anywhere near money
-    // (D7), and a percentage a shopkeeper reads to one decimal place is a
-    // percentage nobody checks.
+    // Percent as an integer, computed on paise.
     let percent = if before.is_zero() {
         None
     } else {
@@ -515,9 +435,8 @@ fn compare(now: Money, before: Money, previous: Period) -> CompareView {
             .saturating_div(before.paise().abs().max(1)),
         )
     };
-    // "the day before" reads better than "the 1 days before" — which is what
-    // this said until somebody looked at it (§6, and P17's "1 have been
-    // issued" was the same bug).
+    // "the day before" reads better than "the 1 days before" — which is what this said until
+    // somebody looked at it.
     let span = if previous.days() == 1 {
         "the day before".to_owned()
     } else {
@@ -555,15 +474,10 @@ pub fn report_on(app: &App, id: String, period: PeriodArg) -> UiResult<ReportVie
         .with_detail(id));
     };
     guard::require(app, entry.needs)?;
-    // **P21's gate, in the core rather than on the screen.** `report_csv` and
-    // `report_pdf` both come through here, so all three are covered by one
-    // line — and T10 calls this function directly with a not-entitled
-    // entitlement, which is the same shape as `guard`'s own test.
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let period = period.parse()?;
 
-    // **A reader, not the writer.** Scope 16.6: a report must never stand in
-    // front of a bill, and a year-long scan on the writer connection would.
+    // A reader, not the writer.
     app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| build(&mb_db::Repos::new(tx), entry, period))
@@ -621,9 +535,7 @@ fn build(
                 })
                 .collect();
 
-            // **Every column that has figures in it gets a total.** The first
-            // version left Discount and Tax blank, which on a screen reads as
-            // "this is broken" rather than as "we chose not to add these up".
+            // Every column that has figures in it gets a total.
             let mut totals = vec!["Total".to_owned(), bills.to_string()];
             if wants_qty {
                 totals.push(qty.to_string());
@@ -694,7 +606,7 @@ fn build(
             )
         }
 
-        // The offline tool's own columns, in its own order. Import it as is.
+        // The offline tool's own columns, in its own order.
         Kind::Gstr1B2cs => {
             let profile = repos.settings().store_profile(OUTLET)?;
             let buckets = reports.tax_by_rate(OUTLET, period)?;
@@ -709,11 +621,13 @@ fn build(
                 column("Cess Amount", true),
                 column("E-Commerce GSTIN", false),
             ];
-            // **No totals row.** `csv_of` writes it into the file, and the
-            // offline tool reads it as a malformed eighth invoice. The figure
-            // goes in a note instead, which the export does not carry.
+            // No totals row. `csv_of` writes it into the file, and the offline tool reads it as
+            // a malformed eighth invoice.
             if !rows.is_empty() {
-                notes.push(format!("Total taxable value: {}", taxable.to_plain_string()));
+                notes.push(format!(
+                    "Total taxable value: {}",
+                    taxable.to_plain_string()
+                ));
             }
             (columns, rows, None, None)
         }
@@ -809,9 +723,7 @@ fn build(
                         crate::words::when(row.closed_at),
                         row.expected.to_plain_string(),
                         row.counted.to_plain_string(),
-                        // **The difference in words, never a bare minus sign.**
-                        // This column is read at eleven at night by somebody
-                        // tired, and "-340.00" is read wrong eventually.
+                        // The difference in words, never a bare minus sign.
                         crate::dayclose::variance_words(row.variance),
                         row.who_was_on.join(", "),
                         row.note.clone().unwrap_or_default(),
@@ -849,9 +761,8 @@ fn build(
                     ]
                 })
                 .collect();
-            // **The sentence matters more than the table here**, because the
-            // one thing a shop can get wrong about tips is thinking they are
-            // takings. Said once, in Rust, where the report is made (§6).
+            // The sentence matters more than the table here, because the one thing a shop can
+            // get wrong about tips is thinking they are takings.
             notes.push(
                 "A tip is not the shop's money. It is in no sales figure and \
                  no tax figure. Cash tips are already in the drawer, so they \
@@ -880,9 +791,7 @@ fn build(
             let rows = items
                 .iter()
                 .map(|item| {
-                    // The cost of what was SOLD: the item's unit cost times the
-                    // quantity. `Qty::extend` is mb-core's rule for that
-                    // multiplication and this does not invent a second one.
+                    // The cost of what was SOLD: the item's unit cost times the quantity.
                     let cost = item.cost.and_then(|unit| item.qty.extend(unit).ok());
                     let margin = cost.and_then(|c| item.revenue.sub(c).ok());
                     vec![
@@ -922,12 +831,10 @@ fn build(
             (columns, rows, None, None)
         }
 
-        // **Scope 3.7.** Time from "the kitchen was told" to "it came off the
-        // pass", which is the only definition that ties back to a bill (T10).
+        // Time from "the kitchen was told" to "it came off the pass", which is the only
+        // definition that ties back to a bill.
         Kind::KitchenSpeed(by) => {
-            // **The STORED business day**, like every other report here — audit
-            // B1 was a report bucketing by UTC while its filter used local
-            // time, and a new report is exactly where that comes back.
+            // The STORED business day, like every other report here.
             let kitchen = repos.kitchen();
             let speed = match by {
                 SpeedBy::Station => kitchen.speed_by_station(OUTLET, period.from, period.to)?,
@@ -979,7 +886,6 @@ fn build(
             (columns, rows, None, None)
         }
 
-        // -- P26 ------------------------------------------------------------
         Kind::Buying(by) => {
             let buying = repos.buying();
             let list = match by {
@@ -1011,10 +917,7 @@ fn build(
                  you sent back are subtracted."
                     .to_owned(),
             );
-            // **"275 kg", never "275000 g".** P25 found this exact bug on the
-            // buy list — a report that tells somebody they bought five thousand
-            // grams of paneer is one nobody reads. The units come from the
-            // material, so the report has to ask it.
+            // "275 kg", never "275000 g".
             let materials = repos.stock().materials(OUTLET, true)?;
             let rows = list
                 .iter()
@@ -1050,8 +953,7 @@ fn build(
             (columns, rows, Some(totals), None)
         }
 
-        // **The rise is the finding.** A table of rates is something nobody
-        // reads; "onion is up 46%" is something an owner acts on this morning.
+        // The rise is the finding.
         Kind::PriceTrend => {
             let trend = repos.buying().price_trend(OUTLET, period.from, period.to)?;
             let columns = vec![
@@ -1086,7 +988,7 @@ fn build(
             (columns, rows, None, None)
         }
 
-        // **D124 — and the sentence IS the report for most shops.**
+        // And the sentence IS the report for most shops.
         Kind::InputCredit => {
             // Only a regular taxpayer can take the credit back.
             let claims = app_registration(repos)?.charges_gst();
@@ -1208,7 +1110,7 @@ fn build(
                         Money::from_paise(row.material.avg_cost.paise_per_thousand())
                             .to_plain_string(),
                         row.value().to_plain_string(),
-                        // **D115** — "never" is a real answer and this says it.
+                        // "never" is a real answer and this says it.
                         match row.material.last_counted_at {
                             Some(_) => "counted".to_owned(),
                             None => "never counted".to_owned(),
@@ -1270,18 +1172,11 @@ fn build(
             (columns, rows, None, None)
         }
 
-        // **D133 — three blocks, and the double count is named out loud.**
+        // Three blocks, and the double count is named out loud.
         Kind::Profit => {
             let profit = repos.reports().profit(OUTLET, period)?;
             let columns = vec![column("", false), column("Amount", true)];
-            // **The deductions are shown NEGATIVE, and the labels say "less".**
-            //
-            // The first version printed "Found missing when counted 600.00" as
-            // a positive figure between two totals, which reads as if it ADDED
-            // ₹600 to the margin — and the two leading spaces meant to indent
-            // it were collapsed by the browser, so the seven rows looked like
-            // seven equal facts. A column an owner checks by adding it up has
-            // to add up on the page. Found by looking at it.
+            // The deductions are shown NEGATIVE, and the labels say "less".
             let mut rows = vec![
                 vec![
                     "Sales, less the GST on them".to_owned(),
@@ -1316,9 +1211,8 @@ fn build(
                 ]);
             }
             notes.push(
-                // No markdown: a report note is printed as it is, and the first
-                // version showed a shopkeeper literal asterisks. Found by
-                // looking at the screen.
+                // No markdown: a report note is printed as it is, and the first version showed
+                // a shopkeeper literal asterisks.
                 "Money you paid for stock is not a running cost. Rice bought on the \
                  3rd is a cost when it is eaten, not when it is paid for — which is the \
                  whole difference between this number and the one every till prints."
@@ -1354,9 +1248,6 @@ fn build(
 }
 
 /// `8:20` — a duration a shopkeeper reads, not a number of milliseconds.
-///
-/// R8 and crown jewel 14: the formatting happens here so the screen shows a
-/// string, and the CSV, the PDF and the screen can never disagree about it.
 #[allow(
     clippy::integer_division,
     reason = "a clock, not money — the same note logging.rs carries"
@@ -1366,8 +1257,7 @@ fn minutes_and_seconds(millis: i64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
-/// "64.8%" â a margin to one decimal place, from basis points and with no
-/// float in sight (D2 governs the money path, and a margin is on it).
+/// "64.8%" â a margin to one decimal place, from basis points and with no float in sight.
 #[allow(
     clippy::integer_division,
     reason = "basis points to a percent and one decimal, by remainder; a float \n              here would be the only one in the money path"
@@ -1376,9 +1266,8 @@ fn margin_words(bp: i64) -> String {
     format!("{}.{}%", bp / 100, (bp.abs() % 100) / 10)
 }
 
-/// "up 46%", "down 8%", or nothing at all when there is no average to compare
-/// with — **a percentage of nothing is not a number** (P25's `variance_bp` and
-/// D115 said the same in two other places).
+/// "up 46%", "down 8%", or nothing at all when there is no average to compare with — a
+/// percentage of nothing is not a number.
 #[allow(
     clippy::integer_division,
     reason = "basis points to whole percent for a screen; the remainder is \
@@ -1393,16 +1282,12 @@ fn change_words(bp: Option<i64>) -> String {
     }
 }
 
-/// **The B2CS rows, the taxable total, and what had to be said.**
-///
-/// A restaurant's supply is always intra-state (IGST Act s.12(4)), so the place
-/// of supply is the shop's own state on every row.
+/// The B2CS rows, the taxable total, and what had to be said.
 #[allow(
     clippy::integer_division,
     reason = "basis points to whole percent; GST has no fractional-percent rate"
 )]
-/// `500` → `"5"`, `250` → `"2.5"`. `TaxRate` already formats a rate correctly;
-/// the offline tool just does not want the per-cent sign.
+/// `500` → `"5"`, `250` → `"2.5"`.
 fn rate_percent(bp: i64) -> String {
     u32::try_from(bp)
         .ok()
@@ -1418,8 +1303,8 @@ fn b2cs(
     let registration = profile.map_or(mb_core::Registration::Regular, |p| {
         crate::settings::registration_from(&p.registration)
     });
-    // Only a regular taxpayer files a GSTR-1. An empty table with a plain
-    // sentence is the right answer for the other two.
+    // Only a regular taxpayer files a GSTR-1. An empty table with a plain sentence is the right
+    // answer for the other two.
     if !registration.charges_gst() {
         notes.push(
             if matches!(registration, mb_core::Registration::Composition) {
@@ -1462,7 +1347,6 @@ fn b2cs(
                 "OE".to_owned(),
                 place.clone(),
                 // The rate as the tool wants it: a bare number, 2.5 included.
-                // Integer division printed 2.5% as "2".
                 rate_percent(b.rate_bp),
                 String::new(),
                 b.taxable.to_plain_string(),
@@ -1490,8 +1374,7 @@ fn b2cs(
     (rows, taxable, notes)
 }
 
-/// **D124 — a property of the shop.** Read here rather than passed in, because
-/// `build` has the transaction and the store profile is one row.
+/// A property of the shop.
 fn app_registration(repos: &mb_db::Repos<'_>) -> Result<mb_core::Registration, mb_db::DbError> {
     Ok(repos
         .settings()
@@ -1558,13 +1441,7 @@ pub fn list_on(app: &App) -> UiResult<ReportListView> {
     })
 }
 
-/// **One CSV writer** — `export::write_row`, and audit G7 is why.
-///
-/// > *"CSV export builds text by joining with commas. An item name containing
-/// > a comma ("Chicken Biryani, Half") will break the columns of that row."*
-///
-/// The escaping already exists and is already tested. A second writer here is
-/// how that bug was four bugs rather than one.
+/// One CSV writer.
 #[must_use]
 pub fn csv_of(report: &ReportView) -> String {
     let mut out = String::new();
@@ -1581,26 +1458,18 @@ pub fn csv_of(report: &ReportView) -> String {
     out
 }
 
-// ---------------------------------------------------------------------------
 // Today, at a glance — and the list of things that need somebody.
-// ---------------------------------------------------------------------------
 
-/// **The first thing an owner sees**, and the reason it is first.
-///
-/// Audit **G1**: *"the owner's questions — how did today go, what is unusual,
-/// what needs me — are answered by opening four screens and doing arithmetic in
-/// your head."* Thirteen reports do not answer "what needs me" either; they
-/// answer questions you already knew to ask. This answers the one you did not.
+/// The first thing an owner sees, and the reason it is first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardView {
-    /// "Today, so far — 2026-08-09".
+    /// "Today, so far.
     pub title: String,
     pub stats: Vec<StatView>,
     pub compare: Option<CompareView>,
-    /// **Things that need a person.** Empty is the good case and the screen
-    /// says so out loud rather than showing a blank panel.
+    /// Things that need a person.
     pub attention: Vec<AttentionView>,
     pub quiet: String,
 }
@@ -1610,8 +1479,7 @@ pub struct DashboardView {
 #[serde(rename_all = "camelCase")]
 pub struct StatView {
     pub label: String,
-    /// Already formatted, always. Even the counts — R8 does not have an
-    /// exception for small numbers.
+    /// Already formatted, always. Even the counts.
     pub value: String,
     pub note: String,
 }
@@ -1621,8 +1489,7 @@ pub struct StatView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct AttentionView {
-    /// `danger`, `warn` or `info`. The words say it too — colour is never the
-    /// only signal (§2 rule 2).
+    /// `danger`, `warn` or `info`.
     pub tone: String,
     pub title: String,
     /// A whole sentence saying what to do about it.
@@ -1638,12 +1505,6 @@ fn needs_you(tone: &str, title: &str, detail: String) -> AttentionView {
 }
 
 /// Today's figures, and everything that is waiting for a person.
-///
-/// **Every entry on the attention list is read from the thing that already
-/// knows.** The backup headline is `backup::status_on`'s own sentence, the
-/// parked prints are the queue's own snapshot, the reminders are the Spends
-/// screen's. A dashboard that recomputed any of them would be a fifth place
-/// for a figure to disagree — which is audit G1 with more steps.
 pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
     let who = guard::require(app, Permission::ReportsView)?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
@@ -1664,8 +1525,8 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // The average bill, computed here because it is money divided by a count
-    // and TypeScript may do neither.
+    // The average bill, computed here because it is money divided by a count and TypeScript may
+    // do neither.
     let average = if totals.bills > 0 {
         Money::from_paise(totals.net.paise().saturating_div(totals.bills))
     } else {
@@ -1674,8 +1535,8 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
 
     let mut attention = Vec::new();
 
-    // 1. Yesterday, never closed. The one that compounds: a shop that skips a
-    //    close never notices the day it was ₹2,000 short.
+    // Yesterday, never closed. The one that compounds: a shop that skips a close never notices
+    // the day it was ₹2,000 short.
     if !closed_yesterday {
         attention.push(needs_you(
             "warn",
@@ -1687,8 +1548,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         ));
     }
 
-    // 2. Paper that did not come out — audit D4, and the whole reason P07's
-    //    queue parks a job instead of dropping it.
+    // Paper that did not come out.
     let parked = app.with_shop(|shop| {
         Ok(shop
             .queue
@@ -1709,7 +1569,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         ));
     }
 
-    // 3. The backup, in the backup screen's own words (audit A1).
+    // The backup, in the backup screen's own words.
     if who.must(Permission::BackupRun).is_ok()
         && let Ok(backup) = crate::settings::backup::status_on(app)
         && backup.tone != "ok"
@@ -1717,7 +1577,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         attention.push(needs_you(&backup.tone, "Backup", backup.headline));
     }
 
-    // 4. Money owed, and money the shop owes.
+    // Money owed, and money the shop owes.
     if who.must(Permission::CustomersManage).is_ok()
         && let Ok(owing) = crate::credit::who_owes_on(app)
     {
@@ -1766,8 +1626,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         ));
     }
 
-    // 5. **P26** — suppliers who have been waiting, and a store nobody has ever
-    //    counted. Both are D100's shape: the row carries its own fix.
+    // Suppliers who have been waiting, and a store nobody has ever counted.
     if who.must(Permission::PurchasesManage).is_ok()
         && let Ok(buying) = crate::buying::buying_on(app, None)
     {
@@ -1776,9 +1635,6 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         }
     }
 
-    // **D133 on the dashboard.** `None` when the shop has no recipes at all,
-    // because a gross margin computed against a food cost of zero is 100% and
-    // is a lie the tile would tell every day.
     let margin = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
@@ -1791,8 +1647,7 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // The comparison against yesterday, through the same report the screen
-    // would run.
+    // The comparison against yesterday, through the same report the screen would run.
     let compare_view = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
@@ -1840,11 +1695,6 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
                 value: totals.voids.to_plain_string(),
                 note: words::count(totals.voided_bills, "bill", "bills"),
             },
-            // **P26, D133 — and this tile is audit B14's answer in four
-            // words.** "Takings" is what came in; this is what is left after
-            // the food it took to earn it, from the stock ledger rather than
-            // from a guess. A shop with no recipes sees an honest dash instead
-            // of a confident number.
             StatView {
                 label: "Gross margin".to_owned(),
                 value: match margin {
@@ -1874,13 +1724,11 @@ pub fn dashboard(app: tauri::State<'_, App>) -> UiResult<DashboardView> {
     dashboard_on(&app)
 }
 
-// ---------------------------------------------------------------------------
 // Onto paper, and onto disk.
-// ---------------------------------------------------------------------------
 
-/// The report as a printable document — **the same document model the bill
-/// uses** (D29), so a report goes to a PDF, a thermal printer or the on-screen
-/// preview without a second layout engine existing.
+/// The report as a printable document — the same document model the bill uses, so a report goes
+/// to a PDF, a thermal printer or the on-screen preview without a second layout engine
+/// existing.
 #[must_use]
 pub fn to_document(report: &ReportView) -> mb_print::doc::Document {
     use mb_print::doc::{Align, Block, Column, Document, Pattern, Style};
@@ -1891,9 +1739,7 @@ pub fn to_document(report: &ReportView) -> mb_print::doc::Document {
         .text(report.subtitle.clone(), Style::NORMAL, Align::Centre)
         .separator(Pattern::Double);
 
-    // Column widths from the widest cell, header included. The first
-    // non-numeric column takes what is left, so a long item name is the thing
-    // that gets the room rather than the thing that gets cut.
+    // Column widths from the widest cell, header included.
     let widest = |index: usize| {
         report
             .rows
@@ -1959,13 +1805,6 @@ pub struct SavedFileView {
     pub message: String,
 }
 
-/// **A folder in the owner's Documents, and D76 says why it is not
-/// `%APPDATA%`.**
-///
-/// Generalised at P22, which needed the same rule for the diagnostics bundle:
-/// *an export lands where a person can find it*. Two copies of this would be
-/// two answers to "where did my file go", and the second one would be wrong
-/// first.
 pub(crate) fn documents_folder(under: &str) -> std::path::PathBuf {
     if let Some(profile) = std::env::var_os("USERPROFILE") {
         let documents = std::path::PathBuf::from(profile).join("Documents");
@@ -1984,10 +1823,6 @@ pub(crate) fn export_folder() -> std::path::PathBuf {
 }
 
 /// Write a file into the shop's exports folder and say where it went.
-///
-/// `pub(crate)` since P32: the A4 invoice (scope 7.10) saves the same way a
-/// report does, and a second copy of "create the folder, write, say where" is
-/// a second answer to what happens when the disk is full.
 pub(crate) fn save(name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
     let folder = export_folder();
     std::fs::create_dir_all(&folder).map_err(|e| {
@@ -2030,9 +1865,7 @@ fn file_name(report: &ReportView, extension: &str) -> String {
     )
 }
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn report_list(app: tauri::State<'_, App>) -> UiResult<ReportListView> {
@@ -2077,9 +1910,7 @@ pub fn report_pdf(
 mod tests {
     use super::*;
 
-    /// **T11.** Every report in the list exists, and every report is in the
-    /// list — the same both-directions guard P17's catalogue uses, and for the
-    /// same reason: a second list is a list that drifts.
+    /// Every report in the list exists, and every report is in the list.
     #[test]
     fn the_catalogue_has_no_gaps_and_no_ghosts() {
         let mut seen = std::collections::BTreeSet::new();
@@ -2093,8 +1924,7 @@ mod tests {
                 entry.id
             );
         }
-        // Every `SalesBy` is offered. A grouping that exists in mb-db and is
-        // not on this list is a report nobody can run.
+        // Every `SalesBy` is offered.
         for by in [
             SalesBy::Day,
             SalesBy::Hour,
@@ -2129,8 +1959,8 @@ mod tests {
         assert_eq!(up.direction, "up");
         assert!(up.summary.contains("Up 8%"), "{}", up.summary);
         assert!(up.summary.contains("31 days"), "{}", up.summary);
-        // And it names the period, so a person can check what it compared
-        // against rather than trusting the percentage.
+        // And it names the period, so a person can check what it compared against rather than
+        // trusting the percentage.
         assert!(up.period.contains("2026-07-01"), "{}", up.period);
 
         let down = compare(
@@ -2141,8 +1971,8 @@ mod tests {
         assert_eq!(down.direction, "down");
         assert!(down.summary.contains("Down 10%"), "{}", down.summary);
 
-        // Nothing before: a percentage of zero is not a number, and saying
-        // "up infinity%" is worse than saying what happened.
+        // Nothing before: a percentage of zero is not a number, and saying "up infinity%" is
+        // worse than saying what happened.
         let fresh = compare(Money::from_paise(5_000), Money::ZERO, previous);
         assert!(
             fresh.summary.contains("Nothing at all"),
@@ -2151,9 +1981,7 @@ mod tests {
         );
     }
 
-    /// **Found by looking at it.** The dashboard read "Nothing at all in the 1
-    /// days before" — the same bug as P17's "1 have been issued", which is
-    /// also the same bug as "0 bill(s)" three cards to the left of it.
+    /// Found by looking at it.
     #[test]
     fn one_day_is_not_one_days() {
         let yesterday = Period::one_day(BusinessDay::from_ymd(2026, 8, 8));
@@ -2169,8 +1997,8 @@ mod tests {
         assert!(!up.summary.contains("1 days"), "{}", up.summary);
     }
 
-    /// **B2CS is the taxable-supply table**, so liquor must never reach it —
-    /// its VAT is a state return, not GSTR-1.
+    /// B2CS is the taxable-supply table, so liquor must never reach it — its VAT is a state
+    /// return, not GSTR-1.
     #[test]
     fn b2cs_takes_only_taxed_gst_and_a_composition_shop_gets_none() {
         let bucket = |rate_bp, kind: &str, paise| TaxBucket {
@@ -2225,7 +2053,6 @@ mod tests {
         assert!(notes.iter().any(|n| n.contains("CMP-08")), "{notes:?}");
     }
 
-    /// **T4 — audit G7, made impossible.** The one writer escapes it.
     #[test]
     fn a_comma_in_an_item_name_does_not_break_its_row() {
         let mut out = String::new();

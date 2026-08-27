@@ -1,12 +1,5 @@
-//! The rules the schema claims to obey, checked rather than believed:
-//! T4, T8, T9, T10, T11, T12, T17, T19.
-//!
-//! Every one of these is a v1 finding turned into something a future session
-//! cannot quietly undo.
-
-// See clippy.toml (P01): the exemption reaches `#[test]` functions, but the
-// closures passed to `Db::read` and the doc parser at the bottom are not
-// `#[test]` functions themselves.
+// See clippy.toml: the exemption reaches `#[test]` functions, but the closures passed to
+// `Db::read` and the doc parser at the bottom are not `#[test]` functions themselves.
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -20,12 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::Scratch;
 use mb_db::schema;
 
-/// T4. NOT ONE REAL COLUMN, anywhere in the database.
-///
-/// v1 declared nine, and every rupee the product ever touched went through one
-/// of them: `items.price`, `expenses.amount`, `finalized_orders.subtotal`,
-/// `.gst`, `.total`, `customers.credit_balance`, `customer_payments.amount`.
-/// D2 exists because of that list.
+/// NOT ONE REAL COLUMN, anywhere in the database.
 #[test]
 fn t4_there_is_not_one_real_column() {
     let db = Scratch::new("t4").open();
@@ -44,19 +32,16 @@ fn t4_there_is_not_one_real_column() {
     .expect("walk the schema");
 }
 
-/// T9. Three types in the whole schema, and every table is STRICT.
-///
-/// STRICT is what makes this a rule rather than a habit: SQLite refuses to
-/// create a STRICT table declaring `BOOLEAN`, `NUMERIC`, `DECIMAL` or
-/// `VARCHAR`, and it enforces the declared type on every write. v1 declared 51
-/// columns as BOOLEAN — a type SQLite does not have — and two of them defaulted
-/// to NULL, so a "boolean" in that product had three values.
+/// Three types in the whole schema, and every table is STRICT.
 #[test]
 fn t9_every_column_is_text_or_integer_and_every_table_is_strict() {
     let db = Scratch::new("t9").open();
     db.read(|conn| {
         let tables = schema::tables(conn)?;
-        assert!(tables.len() > 30, "the schema should not have shrunk by accident");
+        assert!(
+            tables.len() > 30,
+            "the schema should not have shrunk by accident"
+        );
 
         for table in tables {
             let sql = schema::create_sql(conn, &table)?;
@@ -80,8 +65,8 @@ fn t9_every_column_is_text_or_integer_and_every_table_is_strict() {
     .expect("walk the schema");
 }
 
-/// T10. Every boolean is INTEGER, NOT NULL, and constrained to 0 or 1 — and
-/// then one of them is proved to bite.
+/// Every boolean is INTEGER, NOT NULL, and constrained to 0 or 1 — and then one of them is
+/// proved to bite.
 #[test]
 fn t10_booleans_are_zero_or_one_and_never_null() {
     let scratch = Scratch::new("t10");
@@ -117,7 +102,10 @@ fn t10_booleans_are_zero_or_one_and_never_null() {
         Ok(())
     })
     .expect("walk the schema");
-    assert!(found > 15, "expected the schema to have real booleans in it, found {found}");
+    assert!(
+        found > 15,
+        "expected the schema to have real booleans in it, found {found}"
+    );
 
     // And prove the constraint is not decorative.
     let wrote_two = db.transaction(|tx| {
@@ -130,10 +118,7 @@ fn t10_booleans_are_zero_or_one_and_never_null() {
     assert!(wrote_two.is_err(), "a boolean column accepted 2");
 }
 
-/// T12. Ids are TEXT and there is no AUTOINCREMENT (D13).
-///
-/// Two terminals in one shop collide on an autoincrement id in the same second
-/// and there is no way to repair it afterwards without renumbering history.
+/// Ids are TEXT and there is no AUTOINCREMENT.
 #[test]
 fn t12_ids_are_text_and_nothing_autoincrements() {
     let db = Scratch::new("t12").open();
@@ -148,8 +133,8 @@ fn t12_ids_are_text_and_nothing_autoincrements() {
             for column in schema::columns(conn, &table)? {
                 let looks_like_an_id = column.name == "id"
                     || column.name.ends_with("_id")
-                    // The engine's own ledger is the one integer key in the
-                    // database: a migration version is not a business id.
+                    // The engine's own ledger is the one integer key in the database: a
+                    // migration version is not a business id.
                     && table != "schema_version";
                 if looks_like_an_id && table != "schema_version" {
                     assert_eq!(
@@ -165,12 +150,7 @@ fn t12_ids_are_text_and_nothing_autoincrements() {
     .expect("walk the schema");
 }
 
-/// T11. Every root table carries `outlet_id`, NOT NULL, with a foreign key to
-/// `outlets`.
-///
-/// Scope 11.4. This is the dimension that cannot be retro-fitted: a table added
-/// later is free, but back-filling an outlet across every row after a year of
-/// trading means choosing a value nobody can verify.
+/// Every root table carries `outlet_id`, NOT NULL, with a foreign key to `outlets`.
 #[test]
 fn t11_every_root_table_carries_its_outlet() {
     let db = Scratch::new("t11").open();
@@ -196,12 +176,7 @@ fn t11_every_root_table_carries_its_outlet() {
     .expect("walk the schema");
 }
 
-/// T19. Nothing in the money path cascades on delete — and deleting an order
-/// that has lines fails.
-///
-/// A bill is never deleted. It is voided, which is a state, not an absence.
-/// `ON DELETE CASCADE` from an order to its lines means one wrong DELETE erases
-/// a bill and the evidence for it in the same statement.
+/// Nothing in the money path cascades on delete — and deleting an order that has lines fails.
 #[test]
 fn t19_nothing_in_the_money_path_cascades() {
     let scratch = Scratch::new("t19");
@@ -252,11 +227,7 @@ fn t19_nothing_in_the_money_path_cascades() {
     );
 }
 
-/// T8. Every named index exists.
-///
-/// A report's speed is not a property of the report. If somebody removes an
-/// index because "nothing seemed to use it", this is the test that says which
-/// report just became a full scan.
+/// Every named index exists.
 #[test]
 fn t8_every_named_index_exists() {
     const REQUIRED: &[&str] = &[
@@ -279,8 +250,7 @@ fn t8_every_named_index_exists() {
         "idx_orders_table",
         "idx_orders_token",
         "idx_payments_customer",
-        // P15: one phone number is one customer (scope 5.4), and the ledger
-        // read for one customer.
+        // One phone number is one customer, and the ledger read for one customer.
         "idx_customers_phone_key",
         "idx_credit_adjustments_customer",
         "idx_payments_day_mode",
@@ -288,113 +258,76 @@ fn t8_every_named_index_exists() {
         "idx_reprints_day",
         "idx_reservations_day",
         "idx_sync_outbox_pending",
-        // P19: the authentication path reads the live device register on EVERY
-        // request, because revocation has to bite on the next request and not
-        // on the next login (D77's sibling). Partial, so it is the size of the
-        // phones in use rather than the size of every phone ever paired.
+        // The authentication path reads the live device register on EVERY request, because
+        // revocation has to bite on the next request and not on the next login.
         "idx_lan_devices_live",
-        // P24: the kitchen screen asks "what is outstanding at my station"
-        // several times a minute, and it must not scan a year of tickets to
-        // answer. Partial on `state <> 'bumped'`, so it is the size of the
-        // kitchen's current work rather than of every ticket ever sent.
+        // The kitchen screen asks "what is outstanding at my station" several times a minute,
+        // and it must not scan a year of tickets to answer.
         "idx_kitchen_live",
-        // And the kitchen-speed report (scope 3.7) reads finished tickets by
-        // day. Partial on a bumped_at that exists, because an unfinished
-        // ticket has no time to report.
+        // And the kitchen-speed report reads finished tickets by day.
         "idx_kitchen_done",
-        // P25. One recipe per owner, three partial unique indexes rather than
-        // one constraint, because SQLite treats NULLs as distinct and two of a
-        // recipe's three owner columns are always NULL.
+        // One recipe per owner, three partial unique indexes rather than one constraint,
+        // because SQLite treats NULLs as distinct and two of a recipe's three owner columns are
+        // always NULL.
         "idx_recipes_item",
         "idx_recipes_modifier",
         "idx_recipes_material",
         // "What uses this material?" — asked before deactivating one.
         "idx_recipe_lines_material",
-        // One material's history. Without this, opening a material is a full
-        // scan of the largest table in the module.
+        // One material's history. Without this, opening a material is a full scan of the
+        // largest table in the module.
         "idx_stock_movements_material",
         "idx_stock_movements_day",
-        // **The void path.** D113 finds the rows a bill wrote and negates them,
-        // and must not scan a year of movements to do it.
         "idx_stock_movements_order",
-        // P26. A supplier's ledger, oldest first — read every time somebody
-        // asks "what do I owe him", and it must not scan a year of every
-        // supplier's invoices to answer for one.
+        // A supplier's ledger, oldest first — read every time somebody asks "what do I owe
+        // him", and it must not scan a year of every supplier's invoices to answer for one.
         "idx_purchases_supplier",
-        // Every buying report, on the STORED business day (D5).
+        // Every buying report, on the STORED business day.
         "idx_purchases_day",
-        // "What did I pay for onions, and when did it go up" — the price-trend
-        // report, which is the finding an owner acts on fastest.
+        // "What did I pay for onions, and when did it go up".
         "idx_purchase_lines_material",
         "idx_supplier_payments_supplier",
         "idx_supplier_adjustments_supplier",
         "idx_stock_counts_day",
-        // D132. Finding the photograph of one invoice, and listing what a
-        // backup has to carry. Partial, because most attachments will belong to
-        // something and a row with no subject is a stray this must not index.
+        // Finding the photograph of one invoice, and listing what a backup has to carry.
         "idx_attachments_subject",
-        // P27, **D135's guarantee in the database**. Two tills issuing under
-        // the same prefix is the one way a per-terminal series can still
-        // produce a number twice, so it is a constraint and not a convention.
         "idx_counters_prefix",
-        // P27, D140. One close per drawer per shift, and exactly ONE shop
-        // roll-up per day. Partial rather than a UNIQUE constraint because the
-        // shop row's terminal is NULL and SQLite treats NULLs as distinct —
-        // the same reason the three recipe indexes above exist.
         "idx_day_closes_drawer",
         "idx_day_closes_shop",
-        // P28. Every one of these answers a question a screen asks by name.
-        //
-        // The roster and the attendance are read two ways and both are here:
-        // "what is this person's month" (person, day) for a payslip, and "who
-        // is in today" (day) for the floor — a single composite index serves
-        // only the first, and the second would scan the year.
+        // Every one of these answers a question a screen asks by name.
         "idx_roster_person_day",
         "idx_roster_day",
         "idx_attendance_person_day",
         "idx_attendance_day",
-        // "Who is still clocked in?" — asked at every day close and by the
-        // handover report. Partial, so it costs nothing once people go home:
-        // the index holds only the rows that are still open.
+        // "Who is still clocked in?" — asked at every day close and by the handover report.
         "idx_attendance_open",
         "idx_leave_requests_person",
         // The approval queue, partial for the same reason.
         "idx_leave_requests_pending",
         // The leave calendar: who is away in this window.
         "idx_leave_requests_window",
-        // The balance is SUM(half_days) over these three columns, and it is
-        // read every time a request is made.
+        // The balance is SUM(half_days) over these three columns, and it is read every time a
+        // request is made.
         "idx_leave_ledger_person",
-        // **A request may write exactly one `taken` row, ever.** Partial
-        // unique, which is what makes approving twice a constraint violation
-        // rather than a doubled deduction somebody finds in March.
+        // A request may write exactly one `taken` row, ever.
         "idx_leave_ledger_request",
-        // One structure per person per effective date — a raise on a date
-        // that already has one is an edit, not a second raise.
+        // One structure per person per effective date — a raise on a date that already has one
+        // is an edit, not a second raise.
         "idx_salary_structures_person_from",
         "idx_salary_components_structure",
         "idx_salary_advances_person",
         "idx_advance_recoveries_advance",
-        // **One recovery per advance per run.** The same guard as the leave
-        // one above, in the place the same mistake would cost money.
+        // One recovery per advance per run.
         "idx_advance_recoveries_run",
         "idx_payroll_runs_period",
         // One line per person per run, and a person's payslip history.
         "idx_payroll_lines_run_person",
         "idx_payroll_lines_person",
-        // P29, scope 14.5. "What is this rider carrying" is asked at every
-        // handback and at every day close, and it is a sum over these rows —
-        // never a stored figure (D120), so the index is what makes the
-        // question cheap enough to ask that often.
         "idx_rider_handbacks_rider",
         // And the drawer's own question: what came back today, at all.
         "idx_rider_handbacks_day",
-        // P29, scope 8.3. The day's asks — read by the day close, which is
-        // where a shop finds out that three payments were never confirmed.
         "idx_payment_attempts_day",
         // "What happened on that bill?", asked at the counter mid-argument.
-        // Partial, because an attempt made before the draft existed has no
-        // order to hang on and this index must not hold it.
         "idx_payment_attempts_order",
     ];
 
@@ -404,9 +337,8 @@ fn t8_every_named_index_exists() {
         for name in REQUIRED {
             assert!(present.contains(*name), "index {name} is missing");
         }
-        // And the other direction: an index nobody named should not exist, so
-        // that a stray one gets discussed rather than absorbed. Each index
-        // costs write time on the billing path and bytes against budget M5.
+        // And the other direction: an index nobody named should not exist, so that a stray one
+        // gets discussed rather than absorbed.
         let required: BTreeSet<&str> = REQUIRED.iter().copied().collect();
         for name in &present {
             assert!(
@@ -420,16 +352,6 @@ fn t8_every_named_index_exists() {
     .expect("read the indexes");
 }
 
-/// T17. docs/SCHEMA.md and the database agree, in both directions.
-///
-/// Audit E10: v1 carried dead columns — `bill_font_size`, `logo_opacity`, an
-/// unused `pin`, KOT font settings nothing read — and the fix the auditor asked
-/// for was "start clean; do not carry any of it forward". Starting clean is
-/// easy. STAYING clean is this test: a column cannot be added without writing
-/// down what reads it, and cannot be left behind after its feature is deleted.
-///
-/// A future session will curse this test. That is why the reason is written
-/// here at length.
 #[test]
 fn t17_the_document_and_the_database_agree() {
     let doc = include_str!("../../../../docs/SCHEMA.md");
@@ -478,18 +400,10 @@ fn t17_the_document_and_the_database_agree() {
     .expect("compare the document with the database");
 }
 
-/// Prints the column half of `docs/SCHEMA.md` from the live schema.
-///
-/// Not a test — a generator, so that keeping the document in step with T17 is
-/// mechanical rather than an evening of typing:
 ///
 /// ```text
 /// cargo test -p mb-db --test schema_rules -- --ignored --nocapture dump
 /// ```
-///
-/// The prose against each table stays hand-written. A generated description of
-/// why a column exists would say nothing, and saying nothing is how E10's dead
-/// columns survived two years of review.
 #[test]
 #[ignore = "generator, not a test"]
 fn dump_schema_markdown() {
@@ -509,11 +423,6 @@ fn dump_schema_markdown() {
     .expect("dump");
 }
 
-/// Reads `docs/SCHEMA.md`: a `### table_name` heading, then a markdown table
-/// whose first cell is the column name and second cell the declared type.
-///
-/// Deliberately about twenty lines. If checking the document ever needs a
-/// markdown parser, the document has become too clever to be a reference.
 fn parse_schema_doc(doc: &str) -> BTreeMap<String, BTreeSet<(String, String)>> {
     let mut out: BTreeMap<String, BTreeSet<(String, String)>> = BTreeMap::new();
     let mut current: Option<String> = None;
@@ -526,9 +435,9 @@ fn parse_schema_doc(doc: &str) -> BTreeMap<String, BTreeSet<(String, String)>> {
             out.entry(name).or_default();
             continue;
         }
-        // Any other heading ends the table's section, so the file can carry
-        // prose and summary tables (the index list, the reservations) without
-        // them being read as columns of whatever came last.
+        // Any other heading ends the table's section, so the file can carry prose and summary
+        // tables (the index list, the reservations) without them being read as columns of
+        // whatever came last.
         if line.starts_with("## ") || line.starts_with("# ") {
             current = None;
             continue;
@@ -556,28 +465,22 @@ fn parse_schema_doc(doc: &str) -> BTreeMap<String, BTreeSet<(String, String)>> {
     out
 }
 
-/// **The owner renamed it, and the old word does not come back.**
-///
-/// 2026-08-08: *"its not khata, rename it as credit"*. "Khata" is what a Kirana
-/// shop calls this and it is not what the product says.
-///
-/// This is D40's rule — *the rules that erode are enforced by scripts, not by
-/// agreement* — because a rename is exactly the kind of change that half
-/// happens: one screen keeps the old word, or the next session writes it back
-/// from memory, and then the product says both.
-///
-/// The **audits** keep saying khata on purpose. They quote v1 and the owner's
-/// own words from before the decision, and editing a quotation to match a later
-/// decision is falsifying the record. They are not in this crate.
 #[test]
 fn the_product_says_credit_and_never_khata() {
     use std::path::Path;
 
     let mut offenders = Vec::new();
-    let roots = ["../../crates", "../../src-tauri/src", "../../ui/src", "../../ui/tests"];
+    let roots = [
+        "../../crates",
+        "../../src-tauri/src",
+        "../../ui/src",
+        "../../ui/tests",
+    ];
 
     fn walk(dir: &Path, offenders: &mut Vec<String>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -596,16 +499,16 @@ fn the_product_says_credit_and_never_khata() {
             if path.ends_with("schema_rules.rs") {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             for (n, line) in text.lines().enumerate() {
                 let lower = line.to_lowercase();
                 if !lower.contains("khata") {
                     continue;
                 }
-                // One exemption, and it is narrow: a line may say the old word
-                // while explaining that it IS the old word. That covers this
-                // test, and the comments quoting audit A3 and B12, which are
-                // findings about v1 and mean nothing renamed.
+                // One exemption, and it is narrow: a line may say the old word while explaining
+                // that it IS the old word.
                 let explains = lower.contains("renamed")
                     || lower.contains("v1 ")
                     || lower.contains("audit a3")

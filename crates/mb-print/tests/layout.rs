@@ -1,5 +1,3 @@
-//! T2-T8 and T13: the layout rules, the golden files, and the kitchen delta.
-
 #![allow(
     clippy::expect_used,
     clippy::panic,
@@ -9,23 +7,17 @@
 mod common;
 
 use common::Fixture;
-use mb_core::{LineIdentity, ItemId, Money, OrderType, Qty};
+use mb_core::{ItemId, LineIdentity, Money, OrderType, Qty};
 use mb_print::doc::{Align, Block, Column, Document, Style};
 use mb_print::layout::{Note, layout};
 use mb_print::paper::{Offset, Paper, PaperKind};
 use mb_print::settings::KitchenSettings;
-use mb_print::template::{Copy, KitchenContext, TicketKind, TicketLine, bill_document, kitchen_document};
+use mb_print::template::{
+    Copy, KitchenContext, TicketKind, TicketLine, bill_document, kitchen_document,
+};
 use mb_print::{PrintError, text};
 
-/// T2. GOLDEN FILES.
-///
-/// Render a known bill at every paper size and compare against a committed
-/// snapshot. Reviewing a receipt change becomes reading a diff, which is the
-/// only way a change to a bill ever gets reviewed properly.
-///
-/// Set `MB_UPDATE_GOLDEN=1` to rewrite them, and then **read the diff** — that
-/// is the whole point, and a golden file updated without being read is worse
-/// than no golden file at all.
+/// GOLDEN FILES.
 #[test]
 fn t2_golden_files() {
     let fixture = Fixture::new();
@@ -64,7 +56,7 @@ fn normalise(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
-/// T3. A long name wraps and loses nothing. Rule one.
+/// A long name wraps and loses nothing.
 #[test]
 fn t3_a_long_name_wraps_and_loses_nothing() {
     let name = "Paneer Butter Masala (Half) - Extra Spicy, No Onion";
@@ -92,10 +84,7 @@ fn t3_a_long_name_wraps_and_loses_nothing() {
     assert!(rendered.contains("480.00"), "the amount was lost");
 }
 
-/// T4. The columns always add up to the paper width.
-///
-/// A ragged right edge on a receipt looks like a fault, and the item table is
-/// the block a customer looks at hardest.
+/// The columns always add up to the paper width.
 #[test]
 fn t4_the_item_table_fills_the_paper_exactly() {
     let fixture = Fixture::new();
@@ -115,8 +104,8 @@ fn t4_the_item_table_fills_the_paper_exactly() {
             let doc = bill_document(&common::metrics(kind), &ctx).expect("builds");
             let laid = layout(&doc).expect("lays out");
 
-            // The separator lines are laid to the full usable width, so they
-            // are the honest measure of what the table should match.
+            // The separator lines are laid to the full usable width, so they are the honest
+            // measure of what the table should match.
             let rule_width = laid
                 .lines
                 .iter()
@@ -125,12 +114,9 @@ fn t4_the_item_table_fills_the_paper_exactly() {
                     _ => None,
                 })
                 .expect("a bill has separators");
-            // A rule is DOTS wide since P32, and it spans the whole paper.
-            // A4 has no thermal dots, so its width is its column count at the
-            // base advance — the same fiction `Metrics::dots` reports.
-            let expected = kind.dots().unwrap_or_else(|| {
-                u32::try_from(kind.columns()).unwrap_or(0) * laid.base_advance
-            });
+            let expected = kind
+                .dots()
+                .unwrap_or_else(|| u32::try_from(kind.columns()).unwrap_or(0) * laid.base_advance);
             assert_eq!(
                 rule_width, expected,
                 "{kind:?} hsn={hsn}: the rules do not span the paper"
@@ -148,7 +134,7 @@ fn t4_the_item_table_fills_the_paper_exactly() {
     }
 }
 
-/// T5. **The money wins**, and an amount that cannot fit at all is an error.
+/// The money wins, and an amount that cannot fit at all is an error.
 #[test]
 fn t5_the_money_wins() {
     let mut doc = Document::new(Paper::new(PaperKind::Mm58));
@@ -173,20 +159,8 @@ fn t5_the_money_wins() {
         "the wrap was not recorded"
     );
 
-    // And the last clause of rule three: a right-hand side alone wider than the
-    // paper is an error, not a truncation.
-    //
-    // Worth being honest about how reachable this is. `Money` tops out at
-    // twenty characters, and twenty fits on the narrowest paper we sell, so a
-    // real *amount* cannot trigger it — the layout caps the scale to 1 and it
-    // fits. What CAN trigger it is a template putting something long on the
-    // right of a row, and that is a template bug this guard turns into a clear
-    // error instead of a silently short line. The unit test in `layout.rs`
-    // covers the amount case at a narrower width directly.
-    // **Longer than P32 made it need to be.** The layout now steps the size
-    // down the ladder before it refuses, so a forty-character right-hand side
-    // fits at the smallest size — which is the better outcome and exactly what
-    // rule three asks for. Sixty characters cannot fit at any size.
+    // And the last clause of rule three: a right-hand side alone wider than the paper is an
+    // error, not a truncation.
     let mut impossible = Document::new(Paper::new(PaperKind::Mm58));
     impossible.row(
         "x",
@@ -199,7 +173,7 @@ fn t5_the_money_wins() {
     }
 }
 
-/// T6. The font cap. Crown jewel 18.
+/// The font cap.
 #[test]
 fn t6_a_heading_too_big_is_capped_and_stays_complete() {
     let mut doc = Document::new(Paper::new(PaperKind::Mm58));
@@ -219,17 +193,14 @@ fn t6_a_heading_too_big_is_capped_and_stays_complete() {
             _ => None,
         })
         .expect("the cap was not recorded");
-    // **In cap-height dots since P32.** `Style::new(3, …)` is the top rung of
-    // `Style::LADDER`, and the note says what was asked for and what was used
-    // in the same unit a shop's size setting is in.
     assert_eq!(
         used.0,
         mb_print::Style::LARGEST,
         "it should have been asked for at the largest size"
     );
     assert!(used.1 < used.0, "it should have come down");
-    // And it came down to a size a shop could have picked, not to an arbitrary
-    // number — which is what made five dropdown entries print identically.
+    // And it came down to a size a shop could have picked, not to an arbitrary number — which
+    // is what made five dropdown entries print identically.
     assert!(
         mb_print::Style::LADDER.contains(&used.1),
         "capping landed off the ladder: {used:?}"
@@ -241,7 +212,7 @@ fn t6_a_heading_too_big_is_capped_and_stays_complete() {
     }
 }
 
-/// T7. The print offset — scope 7.11.
+/// The print offset.
 #[test]
 fn t7_the_offset_moves_everything_and_clamps() {
     let fixture = Fixture::new();
@@ -255,9 +226,9 @@ fn t7_the_offset_moves_everything_and_clamps() {
     let plain = build(Offset::none());
     let shifted = build(Offset::new(3, 0));
 
-    // 3 mm on 80 mm paper is 2 columns, and EVERY line moves by the same
-    // amount — a partial shift would mean two sinks disagreeing about the
-    // origin, which is the thing this crate exists to prevent.
+    // 3 mm on 80 mm paper is 2 columns, and EVERY line moves by the same amount — a partial
+    // shift would mean two sinks disagreeing about the origin, which is the thing this crate
+    // exists to prevent.
     let moved = shifted.base_advance * 2;
     for line in &shifted.lines {
         assert_eq!(line.indent_dots, moved, "a line did not move with the rest");
@@ -272,8 +243,6 @@ fn t7_the_offset_moves_everything_and_clamps() {
         );
     }
 
-    // An absurd offset is clamped, and the clamp is recorded so P07's test
-    // print can say so.
     let silly = build(Offset::new(40, 0));
     assert!(silly.was_clamped());
     for line in silly.text_lines() {
@@ -292,11 +261,7 @@ fn t7_the_offset_moves_everything_and_clamps() {
     assert!(left.lines.iter().all(|l| l.indent_dots == 0));
 }
 
-/// T8. The printed GST summary sums to the bill's tax.
-///
-/// Audit B11: v1 *"splits GST 50/50 into CGST/SGST always. No IGST, no
-/// inter-state, no HSN summary, and nothing that can be filed directly."* This
-/// block is what a chartered accountant checks first.
+/// The printed GST summary sums to the bill's tax.
 #[test]
 fn t8_the_printed_tax_summary_sums_to_the_bills_tax() {
     let fixture = Fixture::new();
@@ -339,12 +304,11 @@ fn t8_the_printed_tax_summary_sums_to_the_bills_tax() {
         "the printed SGST rows do not sum to the bill's SGST"
     );
 
-    // And the non-GST value is on the paper, outside every GST total. Scope
-    // 2.3, and it is what lets a bar bill at all.
+    // And the non-GST value is on the paper, outside every GST total.
     assert!(rendered.contains("Non-GST value"));
 }
 
-/// T13. The kitchen ticket is a delta, in cart order.
+/// The kitchen ticket is a delta, in cart order.
 #[test]
 fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
     let settings = KitchenSettings::default();
@@ -401,19 +365,19 @@ fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
     let idli = rendered.find("Idli").expect("idli");
     assert!(dosa < idli, "the ticket was reordered");
 
-    // Two dosa were already printed; the delta says one. The ticket must not
-    // say three — crown jewel 2, and mb-core decided the number, not this
-    // crate.
-    assert!(!rendered.contains(" 3 "), "the ticket printed a total, not a delta");
+    // Two dosa were already printed; the delta says one.
+    assert!(
+        !rendered.contains(" 3 "),
+        "the ticket printed a total, not a delta"
+    );
 
-    // An empty delta is refused rather than printed: a blank ticket wastes
-    // paper and teaches the kitchen to ignore tickets.
+    // An empty delta is refused rather than printed: a blank ticket wastes paper and teaches
+    // the kitchen to ignore tickets.
     let empty = KitchenContext { lines: &[], ..ctx };
     assert!(kitchen_document(Paper::new(PaperKind::Mm80), &empty).is_err());
 }
 
-/// A cancellation slip is the same ticket wearing a different word. Scope 1.19,
-/// P12 decides when to send one.
+/// A cancellation slip is the same ticket wearing a different word.
 #[test]
 fn a_cancellation_slip_says_cancel() {
     let settings = KitchenSettings::default();

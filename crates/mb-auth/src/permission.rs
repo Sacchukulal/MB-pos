@@ -1,24 +1,4 @@
-//! **The vocabulary of "no", and there are no other words.**
-//!
-//! (The count lives in `every_variant_is_in_all` and nowhere else. It was
-//! written into this sentence at P11 and was wrong by P21.)
-//!
-//! > BACKEND-**G7**: *"The staff permission map is free-form. Any key can be
-//! > written; a typo in a permission name silently means 'denied'. There is no
-//! > list of valid permissions anywhere in the database."*
-//!
-//! P04 fixed half of that with a `permissions` table and a foreign key, so a
-//! typo is a constraint violation instead of a silent refusal. This enum is the
-//! other half: the codes exist **once**, in Rust, and
-//! `mb-db`'s `permission_enum_matches_the_seeded_table` test asserts the enum
-//! and the seeded rows are the same set **in both directions**.
-//!
-//! Both directions, because the two failures are different and neither is
-//! visible by reading one file:
-//!
-//! * a variant with no row is a permission that can never be granted;
-//! * a row with no variant is a permission that nothing ever checks — which
-//!   looks like security and is not.
+//! The vocabulary of "no", and there are no other words.
 
 use std::collections::BTreeSet;
 
@@ -27,9 +7,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::AuthError;
 
 /// Everything a person can be allowed to do.
-///
-/// **Do not add a variant without adding its row to migration 0001 in the same
-/// commit.** The test will not let you, which is the point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Permission {
     BillCreate,
@@ -54,100 +31,35 @@ pub enum Permission {
     StaffManage,
     AuditView,
     BackupRun,
-    /// P19. Letting a phone onto the counter is its own decision: the person
-    /// who may take an order is not automatically the person who may add a
-    /// device to the shop's network.
+    /// Letting a phone onto the counter is its own decision: the person who may take an order
+    /// is not automatically the person who may add a device to the shop's network.
     DevicesPair,
-    /// P21. **Audit C1's own list ends with this one**: *"anybody who walks
-    /// behind the counter can open Reports and see the whole day's cash, change
-    /// the bill number, delete menu items, delete credit customers, or
-    /// deactivate the licence."*
-    ///
-    /// READING the account screen is `reports.view` — the plan and the renewal
-    /// date are shop information. Deactivating, transferring, or typing an
-    /// emergency code is this.
     LicenceManage,
-    /// P25. Reading the stock book: what is on the shelf, what a dish costs,
-    /// what went in the bin. Separate from `ReportsView` because an owner who
-    /// wants a chef to see the low-stock list does not thereby want the chef to
-    /// see the day's cash.
+    /// Reading the stock book: what is on the shelf, what a dish costs, what went in the bin.
     InventoryView,
-    /// P25. Changing what a dish is MADE OF, and what a material costs.
-    ///
-    /// The strongest of the four. A recipe decides every stock figure and every
-    /// food-cost figure in the product, so somebody who can edit one can make a
-    /// shortage disappear from the books without touching a single quantity.
+    /// Changing what a dish is MADE OF, and what a material costs.
     InventoryManage,
-    /// P25. Recording wastage — the report that catches theft, and therefore
-    /// the one a cook has to be able to feed. Deliberately weaker than
-    /// `StockAdjust`: writing down that a pan was burnt is a normal evening,
-    /// and a shop where only the owner may do it is a shop where nobody does.
+    /// Recording wastage — the report that catches theft, and therefore the one a cook has to
+    /// be able to feed.
     StockWaste,
-    /// P25. Changing a stock figure with no bill and no bin behind it.
-    ///
-    /// The one that needs watching: an adjustment is how a real correction is
-    /// made and also how a theft is covered up, which is why it is its own
-    /// permission and always writes an audit row.
+    /// Changing a stock figure with no bill and no bin behind it.
     StockAdjust,
-    /// P26. Who the shop buys from, what it owes them, and paying it.
-    ///
-    /// Separate from `PurchasesManage` because they are two different jobs: the
-    /// person at the counter enters the delivery that just arrived, and the
-    /// person who decides which supplier gets paid this week is the owner.
+    /// Who the shop buys from, what it owes them, and paying it.
     SuppliersManage,
-    /// P26. Entering deliveries, returns and purchase orders — a daily job.
+    /// Entering deliveries, returns and purchase orders — a daily job.
     PurchasesManage,
-    /// P26. Walking the store with a clipboard and writing down what is there.
-    ///
-    /// **Approving that count is `StockAdjust`, not this**, because approving is
-    /// adjusting stock by hand at scale. A separate `count.approve` would let a
-    /// shop grant the big power while denying the small one.
+    /// Walking the store with a clipboard and writing down what is there.
     StockCount,
-    /// P28. Marking somebody present or absent, and setting the roster.
-    ///
-    /// A shift supervisor's job, and deliberately weak: a shop where only the
-    /// owner can say who turned up is a shop where nobody records who turned
-    /// up, and then the roster is decoration.
+    /// Marking somebody present or absent, and setting the roster.
     AttendanceMark,
-    /// P28. **Changing a clock-in or a clock-out after the event.**
-    ///
-    /// The one that needs watching, and the reason attendance is split into
-    /// two permissions at all. Clocking yourself IN needs nothing — it is the
-    /// PIN. Editing the time afterwards is how hours get inflated, so it is
-    /// its own permission, it always writes an audit row with before and
-    /// after, and it can never be the person's own row.
+    /// Changing a clock-in or a clock-out after the event.
     AttendanceCorrect,
-    /// P28. Approving or rejecting leave, and adjusting a leave balance.
-    ///
-    /// The adjustment is the sharp half: it is the one row in the leave ledger
-    /// a person writes freehand, so it is also the one somebody could use to
-    /// invent a fortnight's holiday. It carries a required reason for the same
-    /// reason `StockAdjust` does.
+    /// Approving or rejecting leave, and adjusting a leave balance.
     LeaveApprove,
-    /// P28. Seeing what people are paid, and the staff cost.
-    ///
-    /// **Not `ReportsView`.** What a shop took at the till and what it pays
-    /// its people are two different secrets, and an owner who wants a manager
-    /// to watch the day's sales does not thereby want them to know what
-    /// everybody earns.
+    /// Seeing what people are paid, and the staff cost.
     SalaryView,
-    /// P28. Setting salaries, giving advances, and approving a payroll run.
-    ///
-    /// The strongest in this session: approving a run moves real money out of
-    /// the drawer, and it is the owner's decision every time.
+    /// Setting salaries, giving advances, and approving a payroll run.
     SalaryManage,
-    /// P29, scope 14.5. **Sending an order out on a bike, and taking the cash
-    /// back off the rider.**
-    ///
-    /// One permission and not two, because it is one job: the person who
-    /// hands the parcel over is the person the rider hands the money to an
-    /// hour later. Splitting it would mean a counter that can dispatch and
-    /// cannot receipt, which is a counter where the money sits unrecorded.
-    ///
-    /// It is nonetheless a MONEY permission, not a floor one — a handback
-    /// says cash came in, so a false one hides cash that did not. Every
-    /// handback writes an audit row saying what the rider was carrying before
-    /// and after, which is the control that makes one permission safe.
     DeliveryDispatch,
 }
 
@@ -193,8 +105,8 @@ impl Permission {
         Permission::DeliveryDispatch,
     ];
 
-    /// The stored form. **This string is a database value**: changing one is a
-    /// migration, not a rename.
+    /// The stored form. This string is a database value: changing one is a migration, not a
+    /// rename.
     #[must_use]
     pub const fn code(self) -> &'static str {
         match self {
@@ -238,9 +150,7 @@ impl Permission {
         }
     }
 
-    /// What a refusal says out loud — the tail of *"you do not have permission
-    /// to …"*. Written from the cashier's side of the screen (§6), so it is
-    /// "void a bill" rather than "BillVoid" or "bill.void".
+    /// What a refusal says out loud — the tail of "you do not have permission to …".
     #[must_use]
     pub const fn what(self) -> &'static str {
         match self {
@@ -285,10 +195,6 @@ impl Permission {
     }
 
     /// Read one back.
-    ///
-    /// **An unknown code is an error and never a quiet "denied".** A silent
-    /// deny is indistinguishable from a correct refusal, which is exactly why
-    /// v1's typo could not be found from behind the counter.
     pub fn from_code(code: &str) -> Result<Permission, AuthError> {
         Permission::ALL
             .iter()
@@ -300,8 +206,7 @@ impl Permission {
     }
 }
 
-/// What one role grants. Ordered, so two equal sets compare equal and a
-/// permission grid renders the same way twice.
+/// What one role grants.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionSet(BTreeSet<Permission>);
 
@@ -311,8 +216,6 @@ impl PermissionSet {
         PermissionSet(BTreeSet::new())
     }
 
-    /// Everything. What the Owner preset holds, and what the stand-in counter
-    /// user holds on a shop's first day (see `magic-bill`'s `session`).
     #[must_use]
     pub fn everything() -> PermissionSet {
         PermissionSet(Permission::ALL.iter().copied().collect())
@@ -377,12 +280,7 @@ mod tests {
 
     #[test]
     fn every_variant_is_in_all() {
-        // ALL is written by hand, so it is the thing that rots. There is no way
-        // to iterate an enum in Rust without a dependency, and this test is
-        // cheaper than one: a variant added below ALL has no row, no screen and
-        // no check, and nothing else would notice.
-        // 31 at P26; 36 at P28, which added the five employment ones; 37 at
-        // P29, which added the rider dispatch.
+        // ALL is written by hand, so it is the thing that rots.
         assert_eq!(Permission::ALL.len(), 37);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
         assert_eq!(codes.len(), 37, "two permissions share a code");
@@ -397,7 +295,6 @@ mod tests {
 
     #[test]
     fn an_unknown_code_is_an_error_not_a_denial() {
-        // BACKEND-G7. The whole finding is that this used to return "denied".
         let wrong = Permission::from_code("bill.crate");
         assert_eq!(
             wrong,
@@ -422,9 +319,6 @@ mod tests {
 
     #[test]
     fn a_refusal_reads_like_a_sentence() {
-        // UI_GUIDELINES §6: written from the cashier's side of the screen.
-        // Checked crudely on purpose — a test demanding exact phrasing is a
-        // test that stops anybody improving the words (words.rs says the same).
         for p in Permission::ALL {
             let what = p.what();
             assert!(!what.contains('_'), "\"{what}\" reads like a tag");

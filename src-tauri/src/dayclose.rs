@@ -1,39 +1,7 @@
-//! **Closing the day** — requirement 9 of the ten, scope 10.8, audit **B15**.
-//!
-//! > *"No opening cash, no closing cash, no expected vs actual, no Z-report.
-//! > This is how every restaurant actually closes the day and it does not
-//! > exist."*
-//!
-//! Every night a shop counts the drawer. The question it is answering is
-//! "is the money that should be here, here?", and answering it needs three
-//! things v1 had none of: **what the till expected**, **what the person
-//! counted**, and **a record that the two were compared.**
-//!
-//! # The expected figure is not computed here
-//!
-//! It comes from [`mb_db::repo::MoneyRepo::cash_position`], which P16 wrote and
-//! the Spends screen already shows. **One answer to "how much cash should be in
-//! the drawer?"** — a second one here would be the exact disagreement this
-//! screen exists to settle, and a shopkeeper who saw two different figures
-//! would trust neither.
-//!
-//! # Nothing about this screen is arithmetic in TypeScript
-//!
-//! The count crosses as `{ value, count }` pairs, every total comes back
-//! formatted, and the difference comes back as a **sentence** — "Short by
-//! 340.00" — because a minus sign in front of an amount is read wrong by
-//! somebody eventually, and because §6 forbids assembling that sentence on the
-//! screen.
-//!
-//! # And the lock is real
-//!
-//! A closed day refuses a void ([`crate::corrections`] checks it and always
-//! has). The way past it is not a flag: it is **reopening the day**, which
-//! needs `day.close` and writes its own audit action, so an owner asking "who
-//! unlocked Tuesday?" gets an answer. D77.
+//! Closing the day.
 
-use mb_auth::audit::{AuditEntry, action};
 use mb_auth::Permission;
+use mb_auth::audit::{AuditEntry, action};
 use mb_core::Money;
 use mb_db::repo::money::{CashMovement, DayClose, Denomination};
 use serde::{Deserialize, Serialize};
@@ -45,17 +13,9 @@ use crate::ipc::MoneyView;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-// ---------------------------------------------------------------------------
 // What the drawer holds.
-// ---------------------------------------------------------------------------
 
-/// **The notes and coins an Indian till actually contains.**
-///
-/// Paise, largest first, because that is the order a person counts in. The
-/// ₹2,000 note is not here: it was withdrawn in 2023 and a row for it on every
-/// till in the country is a row nobody fills in. A shop that still has one
-/// types the total into the count for ₹500 — which is wrong, and is why the
-/// screen also accepts a plain total (see [`CountArg`]).
+/// The notes and coins an Indian till actually contains.
 const DENOMINATIONS: &[(i32, &str)] = &[
     (50_000, "500"),
     (20_000, "200"),
@@ -69,11 +29,6 @@ const DENOMINATIONS: &[(i32, &str)] = &[
 ];
 
 /// One row of the count, as the screen sends it.
-///
-/// **`i32` paise and a `u32` count** — D58: `ts-rs` renders an `i64` as a
-/// TypeScript `bigint` and `JSON.stringify` throws on one. ₹500 is 50,000
-/// paise, which fits an `i32` with room for a denomination nobody has printed
-/// yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -88,17 +43,14 @@ pub struct CountArg {
 #[serde(rename_all = "camelCase")]
 pub struct DenominationView {
     pub value: i32,
-    /// "500", "50 paise" — the words, so the screen prints no currency of its
-    /// own.
+    /// "500", "50 paise" — the words, so the screen prints no currency of its own.
     pub label: String,
     pub count: u32,
-    /// `count × value`, computed in Rust. R8: the one multiplication on this
-    /// screen is the one TypeScript would most obviously be asked to do.
+    /// `count × value`, computed in Rust.
     pub total: MoneyView,
 }
 
-/// A label and an amount. The takings summary and the drawer summary are both
-/// lists of these, so the screen draws one kind of row and not two.
+/// A label and an amount.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +64,6 @@ pub struct SlipLineView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct DayCloseView {
-    /// "2026-08-09".
     pub day: String,
     /// The day in words, for the heading: "Today, Sunday 9 August".
     pub day_says: String,
@@ -122,11 +73,11 @@ pub struct DayCloseView {
     pub denominations: Vec<DenominationView>,
     pub counted: MoneyView,
     pub variance: MoneyView,
-    /// **The sentence.** "Short by 340.00", "Over by 20.00", "Matches
-    /// exactly." Never a signed number on its own.
+    /// The sentence. "Short by 340.00", "Over by 20.00", "Matches exactly." Never a signed
+    /// number on its own.
     pub variance_says: String,
-    /// `short`, `over` or `exact` — for the shape and the colour, and colour is
-    /// never the only signal.
+    /// `short`, `over` or `exact` — for the shape and the colour, and colour is never the only
+    /// signal.
     pub variance_kind: String,
     /// Whether the reason box is required, and the sentence that says why.
     pub needs_reason: bool,
@@ -136,30 +87,17 @@ pub struct DayCloseView {
     pub is_closed: bool,
     /// "Closed at 11:14 pm by Ravi" — empty when it is not closed.
     pub closed_says: String,
-    /// What carrying the float forward will do, in words. Empty when the shop
-    /// does not carry one.
+    /// What carrying the float forward will do, in words.
     pub carry_says: String,
     /// Whether the person looking may close it, and may reopen it.
     pub may_close: bool,
-    /// **Which tills are in the shop's day, and which are not** (P27, D140).
-    ///
-    /// Empty in a one-till shop, which is every shop until somebody buys a
-    /// second computer. In a two-till shop it is the sentence that stops a
-    /// manager going home believing the day is closed: the shop's total is the
-    /// SUM of the drawers, so a drawer nobody counted is a total that is short
-    /// by whatever is in it.
+    /// Which tills are in the shop's day, and which are not.
     pub tills_say: String,
 }
 
-// ---------------------------------------------------------------------------
 // Reading the day.
-// ---------------------------------------------------------------------------
 
 /// The day close as it stands, with an optional count laid over it.
-///
-/// The same function serves the first paint and every keystroke in the grid:
-/// the screen sends what has been counted so far and gets back the variance and
-/// its sentence. **There is no second variance calculation for the preview.**
 pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseView> {
     let who = guard::require(app, Permission::ReportsView)?;
     let may_close = who.must(Permission::DayClose).is_ok();
@@ -167,44 +105,45 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
     let config = app.shop_config();
 
     app.with_shop(|shop| {
-        // **One trip.** Everything this screen needs, including the closer's
-        // name — see `closed_words` for what looking it up separately cost.
-        let (position, totals, existing, stored_counts, closer, (how_many_tills, still_open)) = shop
-            .db
-            .read_transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let existing = repos.money().find_day_close(OUTLET, day)?;
-                let stored = match &existing {
-                    Some(close) => repos.money().denominations(&close.id)?,
-                    None => Vec::new(),
-                };
-                let closer = match existing.as_ref().and_then(|c| c.closed_by.as_ref()) {
-                    Some(id) => repos
-                        .people()
-                        .find_staff(OUTLET, id.as_str())?
-                        .map(|person| person.name),
-                    None => None,
-                };
-                Ok((
-                    // **This till's own drawer** (D140), never the shop's: the
-                    // person in front of this screen is counting the box under
-                    // THIS till, and showing them the shop total would be a
-                    // variance they cannot act on.
-                    repos.money().cash_position_of(OUTLET, day, Some(app.terminal_id()))?,
-                    repos.corrections().day_totals(OUTLET, day)?,
-                    existing,
-                    stored,
-                    closer.unwrap_or_else(|| "somebody".to_owned()),
-                    (
-                        repos.terminals().count(OUTLET)?,
-                        repos.money().tills_still_open(OUTLET, day)?,
-                    ),
-                ))
-            })
-            .map_err(|e| words::from_db(&e))?;
+        // One trip. Everything this screen needs, including the closer's name — see
+        // `closed_words` for what looking it up separately cost.
+        let (position, totals, existing, stored_counts, closer, (how_many_tills, still_open)) =
+            shop.db
+                .read_transaction(|tx| {
+                    let repos = mb_db::Repos::new(tx);
+                    let existing = repos.money().find_day_close(OUTLET, day)?;
+                    let stored = match &existing {
+                        Some(close) => repos.money().denominations(&close.id)?,
+                        None => Vec::new(),
+                    };
+                    let closer = match existing.as_ref().and_then(|c| c.closed_by.as_ref()) {
+                        Some(id) => repos
+                            .people()
+                            .find_staff(OUTLET, id.as_str())?
+                            .map(|person| person.name),
+                        None => None,
+                    };
+                    Ok((
+                        // This till's own drawer, never the shop's: the person in front of this
+                        // screen is counting the box under THIS till, and showing them the shop
+                        // total would be a variance they cannot act on.
+                        repos
+                            .money()
+                            .cash_position_of(OUTLET, day, Some(app.terminal_id()))?,
+                        repos.corrections().day_totals(OUTLET, day)?,
+                        existing,
+                        stored,
+                        closer.unwrap_or_else(|| "somebody".to_owned()),
+                        (
+                            repos.terminals().count(OUTLET)?,
+                            repos.money().tills_still_open(OUTLET, day)?,
+                        ),
+                    ))
+                })
+                .map_err(|e| words::from_db(&e))?;
 
-        // What is on the screen: what the person is typing, or — if they have
-        // not typed anything — what was counted last time this day was closed.
+        // What is on the screen: what the person is typing, or — if they have not typed
+        // anything — what was counted last time this day was closed.
         let counted_rows: Vec<CountArg> = match counts {
             Some(rows) => rows,
             None => stored_counts
@@ -226,8 +165,8 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
         let expected = position.expected;
         let variance = counted.sub(expected).unwrap_or(Money::ZERO);
         let threshold = config.day.variance_reason_above;
-        // `>` and not `>=`: a threshold of ₹20 means "ask me when it is MORE
-        // than twenty out", and a shop that sets zero is asking every time.
+        // `>` and not `>=`: a threshold of ₹20 means "ask me when it is MORE than twenty out",
+        // and a shop that sets zero is asking every time.
         let needs_reason = variance.abs() > threshold;
 
         Ok(DayCloseView {
@@ -239,17 +178,13 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                 line("Refunded", totals.refunded),
                 line("Net takings", totals.net),
             ],
-            // **Every line that makes the expected figure, and nothing that
-            // does not.** P29 added the last three: before them the list did
-            // not add up to the number underneath it, and a person counting a
-            // drawer against a total they cannot reproduce stops trusting the
-            // total.
+            // Every line that makes the expected figure, and nothing that does not.
             drawer: vec![
                 line("Opening float", position.opening_float),
-                // Tips are split out of the takings line rather than added to
-                // it — a cash tip really is in the drawer, but a 'cash from
-                // bills' figure that quietly includes it will never agree with
-                // the sales report, and the gap is exactly the staff's money.
+                // Tips are split out of the takings line rather than added to it — a cash tip
+                // really is in the drawer, but a 'cash from bills' figure that quietly includes
+                // it will never agree with the sales report, and the gap is exactly the staff's
+                // money.
                 line(
                     "Cash from bills",
                     position
@@ -262,9 +197,7 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
                 line("Spent from the drawer", position.cash_expenses),
                 line("Paid out", position.payouts),
                 line("Sent to the bank", position.bank_drops),
-                // P26, D120 — cash handed to the vegetable man at the door.
                 line("Paid to suppliers", position.suppliers_paid),
-                // P29, scope 14.5 — out on a bike, not in the box.
                 line("Still with the riders", position.with_riders),
             ],
             expected: MoneyView::from(expected),
@@ -290,7 +223,10 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
             } else {
                 String::new()
             },
-            reason: existing.as_ref().and_then(|c| c.note.clone()).unwrap_or_default(),
+            reason: existing
+                .as_ref()
+                .and_then(|c| c.note.clone())
+                .unwrap_or_default(),
             is_closed: existing.as_ref().is_some_and(|c| c.is_locked),
             closed_says: existing
                 .as_ref()
@@ -312,8 +248,8 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
     })
 }
 
-/// **Which tills are in the shop's day** (D140) — and it is silent in a one-till
-/// shop, because there is nothing there worth saying.
+/// Which tills are in the shop's day — and it is silent in a one-till shop, because there is
+/// nothing there worth saying.
 fn tills_say(how_many: u32, still_open: &[String]) -> String {
     if how_many < 2 {
         return String::new();
@@ -340,9 +276,6 @@ fn line(label: &str, amount: Money) -> SlipLineView {
 }
 
 /// The full grid, with whatever has been counted filled in.
-///
-/// Always every denomination, in order, even the ones with no notes: a grid
-/// that grows and shrinks as somebody types moves the box under their finger.
 fn grid(counts: &[CountArg]) -> Vec<DenominationView> {
     DENOMINATIONS
         .iter()
@@ -363,12 +296,7 @@ fn grid(counts: &[CountArg]) -> Vec<DenominationView> {
         .collect()
 }
 
-/// **The difference, in words.**
-/// **The difference in words, never a bare minus sign.**
-///
-/// P30 gave the handover report the same sentence rather than a second one:
-/// a shop that reads "Short by 340.00" on the day close and "-340.00" on the
-/// report is a shop reading two products.
+/// The difference, in words.
 pub(crate) fn variance_words(variance: Money) -> String {
     if variance.is_zero() {
         return "The drawer matches exactly.".to_owned();
@@ -379,29 +307,14 @@ pub(crate) fn variance_words(variance: Money) -> String {
     format!("Over by {}.", variance.to_plain_string())
 }
 
-/// "Closed 9 Aug, 11:14 pm by Ravi."
-///
-/// The name is looked up by the caller rather than here, and passed in: a
-/// `staff_id` on a slip is audit F8, and a person reading it wants "by Ravi".
-///
-/// **It takes the name and not the `App` on purpose.** The first version looked
-/// the name up itself, from inside the closure `App::with_shop` had already
-/// entered — which takes the shop's mutex a second time on the same thread and
-/// hangs the till. Found by the test suite never finishing.
+/// "Closed 9 Aug, 11:14 pm by Ravi.".
 fn closed_words(close: &DayClose, who: &str) -> String {
     format!("Closed {} by {who}.", words::when(close.closed_at))
 }
 
-// ---------------------------------------------------------------------------
 // Closing it.
-// ---------------------------------------------------------------------------
 
-/// **Close the day.** The one write on this screen.
-///
-/// In one transaction: the close row, the counted notes, the audit entry, and
-/// — when the shop carries a float — tomorrow's opening movement. R11 and D23:
-/// a close that recorded the count but not the audit row, or the audit row but
-/// not tomorrow's float, would be worse than one that failed outright.
+/// Close the day. The one write on this screen.
 pub fn close_on(
     app: &App,
     counts: Vec<CountArg>,
@@ -424,41 +337,41 @@ pub fn close_on(
     }
     let reason = reason.trim().to_owned();
     if preview.needs_reason && reason.is_empty() {
-        // **The refusal IS the feature** (D75): the message is the sentence
-        // that explains the threshold, not a generic "a field is required".
-        return Err(UiError::new("day.needs_reason", preview.reason_says.clone()));
+        // The refusal IS the feature: the message is the sentence that explains the threshold,
+        // not a generic "a field is required".
+        return Err(UiError::new(
+            "day.needs_reason",
+            preview.reason_says.clone(),
+        ));
     }
 
     let counted = Money::from_paise(preview.counted.paise);
     let expected = Money::from_paise(preview.expected.paise);
     let variance = Money::from_paise(preview.variance.paise);
-    // **D140 — this press counts ONE DRAWER**, this till's, for this shift.
-    // The shop's day is closed further down, and only when no till is left.
+    // This press counts ONE DRAWER, this till's, for this shift.
     let shift_no = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
-                mb_db::Repos::new(tx).money().next_shift(OUTLET, day, app.terminal_id())
+                mb_db::Repos::new(tx)
+                    .money()
+                    .next_shift(OUTLET, day, app.terminal_id())
             })
             .map_err(|e| words::from_db(&e))
     })?;
     let close = DayClose {
-        id: format!("close_{}_{}_{shift_no}", day.days_since_epoch(), app.terminal_id()),
+        id: format!(
+            "close_{}_{}_{shift_no}",
+            day.days_since_epoch(),
+            app.terminal_id()
+        ),
         terminal: Some(app.terminal_id().to_owned()),
         shift_no,
         business_day: day,
-        opening_float: Money::from_paise(
-            preview
-                .drawer
-                .first()
-                .map_or(0, |row| row.amount.paise),
-        ),
+        opening_float: Money::from_paise(preview.drawer.first().map_or(0, |row| row.amount.paise)),
         expected_cash: expected,
         counted_cash: counted,
         variance,
-        // **A drawer close does not lock the day.** The shop's row does, and
-        // it is written when the last till has counted, because a day that
-        // locked while another till could still send bills into it would have
-        // a total that changed after it was sealed.
+        // A drawer close does not lock the day.
         is_locked: false,
         closed_at: at,
         closed_by: Some(who.staff_id.clone()),
@@ -483,10 +396,7 @@ pub fn close_on(
                         .collect::<Vec<_>>(),
                 )?;
 
-                // **Tomorrow's float, written today.** A `float` movement dated
-                // tomorrow — which is exactly what `cash_position` reads, so
-                // tomorrow's expected figure needs no special case for "was
-                // yesterday closed?".
+                // Tomorrow's float, written today.
                 if let Some(amount) = carried.filter(|m| m.is_positive()) {
                     repos.money().save_cash_movement(
                         OUTLET,
@@ -502,18 +412,7 @@ pub fn close_on(
                     )?;
                 }
 
-                // **D140 — the last till to count closes the shop.**
-                //
-                // The roll-up is the SUM of the drawers and never an
-                // independent query, because two ways to compute one number is
-                // two numbers. And it is only written when no till is left
-                // uncounted: a day that sealed while another till could still
-                // send bills into it would have a total that changed
-                // afterwards, which is the one thing a locked day promises not
-                // to do.
-                //
-                // For a shop with one till this is the same single press it has
-                // always been — that till was the last one.
+                // The last till to count closes the shop.
                 let waiting = repos.money().tills_still_open(OUTLET, day)?;
                 if waiting.is_empty() {
                     let drawers = repos.money().drawer_closes(OUTLET, day)?;
@@ -539,21 +438,27 @@ pub fn close_on(
                     )?;
                 }
 
-                // R11 — the same transaction as the thing it records.
+                // The same transaction as the thing it records.
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(at, day, Some(who.staff_id.clone()), action::DAY_CLOSED, "day")
-                        .about(day.to_string())
-                        .with_after(serde_json::json!({
-                            "terminal": app.terminal_id(),
-                            "shift": shift_no,
-                            "expected_paise": expected.paise(),
-                            "counted_paise": counted.paise(),
-                            "variance_paise": variance.paise(),
-                            "shop_closed": waiting.is_empty(),
-                            "waiting_on": waiting,
-                            "reason": reason,
-                        })),
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::DAY_CLOSED,
+                        "day",
+                    )
+                    .about(day.to_string())
+                    .with_after(serde_json::json!({
+                        "terminal": app.terminal_id(),
+                        "shift": shift_no,
+                        "expected_paise": expected.paise(),
+                        "counted_paise": counted.paise(),
+                        "variance_paise": variance.paise(),
+                        "shop_closed": waiting.is_empty(),
+                        "waiting_on": waiting,
+                        "reason": reason,
+                    })),
                 )?;
                 Ok(())
             })
@@ -561,10 +466,8 @@ pub fn close_on(
     })?;
 
     if print {
-        // A failed print must not un-close the day: the money is counted and
-        // recorded either way, and the slip can be printed again. So this is
-        // reported and not propagated — which is the opposite of silent
-        // failure, because the queue keeps the job and the screen shows it.
+        // A failed print must not un-close the day: the money is counted and recorded either
+        // way, and the slip can be printed again.
         if let Err(e) = print_slip(app, &close, &counts) {
             crate::log_warn!("the closing slip could not be queued: {}", e.message);
         }
@@ -573,14 +476,7 @@ pub fn close_on(
     view_on(app, Some(counts))
 }
 
-/// **Open a closed day again** — the override, and it leaves a mark.
-///
-/// Not a flag on the void. A void into a closed day is refused (P12), and this
-/// is the door: a person with `day.close` reopens the day, makes the
-/// correction, and closes it again. Three audit rows, and an owner can read
-/// exactly what happened. A hidden "manager override" checkbox on the void
-/// would have left one row saying a bill was voided and nothing saying the day
-/// had been sealed when it happened.
+/// Open a closed day again — the override, and it leaves a mark.
 pub fn reopen_on(app: &App, reason: String) -> UiResult<DayCloseView> {
     let who = guard::require(app, Permission::DayClose)?;
     let at = now();
@@ -652,13 +548,12 @@ fn print_slip(app: &App, close: &DayClose, counts: &[CountArg]) -> UiResult<()> 
             total: row.total.text.clone(),
         })
         .collect();
-    // The slip prints the difference in the same words the screen showed, and
-    // in capitals because it is the line a person looks for first.
+    // The slip prints the difference in the same words the screen showed, and in capitals
+    // because it is the line a person looks for first.
     let variance = view.variance_says.to_uppercase();
     let carried = view.carry_says.clone();
 
-    // Wherever a bill would go. `default_printer` is the one rule for that and
-    // this does not invent a second one.
+    // Wherever a bill would go.
     let printer = crate::flows::default_printer(app)?;
 
     let document = mb_print::template::day_close_document(
@@ -666,9 +561,9 @@ fn print_slip(app: &App, close: &DayClose, counts: &[CountArg]) -> UiResult<()> 
         &mb_print::template::DayCloseContext {
             store: &store,
             day: &view.day,
-            // The view already worked out who closed it, and reading it from
-            // there rather than looking the name up again keeps this outside
-            // `with_shop` — which is what the hang was.
+            // The view already worked out who closed it, and reading it from there rather than
+            // looking the name up again keeps this outside `with_shop` — which is what the hang
+            // was.
             closed: &view.closed_says,
             takings: &takings,
             drawer: &[],
@@ -682,20 +577,19 @@ fn print_slip(app: &App, close: &DayClose, counts: &[CountArg]) -> UiResult<()> 
         },
     );
 
-    app.print(mb_print::queue::Job::new(
-                    mb_print::queue::JobKind::DayClose,
-                    &printer.id,
-                    document,
-                    close.business_day,
-                )
-                .because("closing slip".to_owned()),
-            )
-            .map(|_| ())
+    app.print(
+        mb_print::queue::Job::new(
+            mb_print::queue::JobKind::DayClose,
+            &printer.id,
+            document,
+            close.business_day,
+        )
+        .because("closing slip".to_owned()),
+    )
+    .map(|_| ())
 }
 
-// ---------------------------------------------------------------------------
 // The seats.
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn day_close(app: tauri::State<'_, App>) -> UiResult<DayCloseView> {
@@ -703,10 +597,7 @@ pub fn day_close(app: tauri::State<'_, App>) -> UiResult<DayCloseView> {
 }
 
 #[tauri::command]
-pub fn count_cash(
-    app: tauri::State<'_, App>,
-    counts: Vec<CountArg>,
-) -> UiResult<DayCloseView> {
+pub fn count_cash(app: tauri::State<'_, App>, counts: Vec<CountArg>) -> UiResult<DayCloseView> {
     view_on(&app, Some(counts))
 }
 
@@ -729,9 +620,7 @@ pub fn reopen_day(app: tauri::State<'_, App>, reason: String) -> UiResult<DayClo
 mod tests {
     use super::*;
 
-    /// **T7.** The difference is words, and the words are right in all three
-    /// directions. A signed number would be read wrong by somebody eventually,
-    /// and "-340.00" on a slip stapled to a bag of cash is exactly that.
+    /// The difference is words, and the words are right in all three directions.
     #[test]
     fn the_difference_is_said_rather_than_signed() {
         assert_eq!(
@@ -739,18 +628,21 @@ mod tests {
             "Short by 340.00."
         );
         assert_eq!(variance_words(Money::from_paise(2_000)), "Over by 20.00.");
-        assert_eq!(
-            variance_words(Money::ZERO),
-            "The drawer matches exactly."
-        );
+        assert_eq!(variance_words(Money::ZERO), "The drawer matches exactly.");
     }
 
     /// The grid is always the whole grid, and every row multiplies correctly.
     #[test]
     fn the_count_grid_is_complete_and_adds_up() {
         let rows = grid(&[
-            CountArg { value: 50_000, count: 20 },
-            CountArg { value: 1_000, count: 6 },
+            CountArg {
+                value: 50_000,
+                count: 20,
+            },
+            CountArg {
+                value: 1_000,
+                count: 6,
+            },
         ]);
         assert_eq!(rows.len(), DENOMINATIONS.len(), "a row went missing");
         // Largest first, which is the order a person counts in.
@@ -758,8 +650,8 @@ mod tests {
         assert_eq!(rows[0].total.text, "10000.00");
         assert_eq!(rows[5].label, "10");
         assert_eq!(rows[5].total.text, "60.00");
-        // A denomination nobody counted is present and zero, not absent — a
-        // grid that grows as somebody types moves the box under their finger.
+        // A denomination nobody counted is present and zero, not absent — a grid that grows as
+        // somebody types moves the box under their finger.
         assert_eq!(rows[1].count, 0);
         assert_eq!(rows[1].total.text, "0.00");
 
@@ -767,23 +659,18 @@ mod tests {
         assert_eq!(total, 1_006_000);
     }
 
-    /// A count for a denomination this build does not know about is ignored
-    /// rather than silently added. It cannot be typed — the grid is the screen
-    /// — so reaching here means a stale front end, and adding it to the total
-    /// would make the slip disagree with its own rows.
+    /// A count for a denomination this build does not know about is ignored rather than
+    /// silently added.
     #[test]
     fn a_denomination_that_does_not_exist_does_not_reach_the_total() {
-        let rows = grid(&[CountArg { value: 200_000, count: 5 }]);
+        let rows = grid(&[CountArg {
+            value: 200_000,
+            count: 5,
+        }]);
         assert!(rows.iter().all(|r| r.count == 0));
         assert_eq!(rows.iter().map(|r| r.total.paise).sum::<i64>(), 0);
     }
 
-    /// **P27, D140 — the sentence that names the drawers nobody has counted.**
-    ///
-    /// The first assertion is the one that matters most: a one-till shop is
-    /// every shop until somebody buys a second computer, and a night-time
-    /// sentence about "tills" in a shop with one till is noise a person learns
-    /// to skip past — which is how they come to skip past it when it matters.
     #[test]
     fn the_day_close_names_the_tills_that_have_not_counted_and_is_silent_with_one() {
         assert_eq!(tills_say(1, &[]), "");
@@ -794,14 +681,20 @@ mod tests {
         assert!(done.contains("closes the shop's day"), "{done}");
 
         let one = tills_say(2, &["Counter 2".to_owned()]);
-        assert!(one.starts_with("1 till still to count: Counter 2."), "{one}");
-        // **Why it matters, not just that it is true.** A manager who reads
-        // only "1 till still to count" has no reason not to close anyway.
+        assert!(
+            one.starts_with("1 till still to count: Counter 2."),
+            "{one}"
+        );
+        // Why it matters, not just that it is true.
         assert!(one.contains("sum of the drawers"), "{one}");
 
         let three = tills_say(
             4,
-            &["Counter 2".to_owned(), "Counter 3".to_owned(), "Parcel".to_owned()],
+            &[
+                "Counter 2".to_owned(),
+                "Counter 3".to_owned(),
+                "Parcel".to_owned(),
+            ],
         );
         assert!(
             three.contains("Counter 2, Counter 3 and Parcel"),

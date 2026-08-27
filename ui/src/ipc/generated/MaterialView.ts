@@ -9,22 +9,18 @@ export type MaterialView = { id: string, name: string,
 /**
  * `weight`, `volume` or `count`.
  */
-dimension: string, 
-/**
- * "Weight".
- */
-dimensionLabel: string, 
+dimension: string, dimensionLabel: string, 
 /**
  * "g", "ml", "piece".
  */
 baseUnit: string, category: string, 
 /**
- * D116 — where you buy it. The buy list groups by this.
+ * Where you buy it.
  */
 buyFrom: string, 
 /**
- * **"1.712 bag"** — the balance in the biggest unit one of it fits into,
- * which is what a person would say (D108).
+ * "1.712 bag" — the balance in the biggest unit one of it fits into, which is what a
+ * person would say.
  */
 onHand: string, 
 /**
@@ -40,7 +36,7 @@ cost: string,
  */
 costWhen: string, 
 /**
- * D115 — **"never counted"** when nobody has.
+ * "never counted" when nobody has.
  */
 lastCounted: string, isLow: boolean, 
 /**
@@ -48,11 +44,11 @@ lastCounted: string, isLow: boolean,
  */
 buy: string, reorderLevel: string, reorderQty: string, isPerishable: boolean, shelfLifeDays: number | null, 
 /**
- * "has not moved in 6 days" — D117's warning, empty when there is none.
+ * "has not moved in 6 days".
  */
 warning: string, isActive: boolean, 
 /**
- * True when this is a made material: it has a recipe of its own (D111).
+ * True when this is a made material: it has a recipe of its own.
  */
 isMade: boolean, units: Array<UnitView>, purchaseUnit: string, recipeUnit: string, 
 /**

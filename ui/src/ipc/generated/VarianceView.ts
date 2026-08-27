@@ -10,7 +10,7 @@ export type VarianceView = { material: string, theoretical: string, actual: stri
  */
 percent: string, value: MoneyView, isOver: boolean, 
 /**
- * **D115** — "never counted", and the screen says it rather than implying
- * the figure has been checked against a shelf.
+ * "never counted", and the screen says it rather than implying the figure has been checked
+ * against a shelf.
  */
 counted: string, isUnchecked: boolean, };

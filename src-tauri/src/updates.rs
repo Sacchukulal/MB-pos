@@ -1,28 +1,4 @@
-//! **A shop must be able to go back** — audit E9, and it is P22's whole point.
-//!
-//! > *"The update is all-or-nothing with no way back. If a release breaks
-//! > billing at 8 pm on a Saturday, the shop is stuck."*
-//!
-//! And its twin, which is the same failure from the other end:
-//!
-//! > **I1:** *"The updater's 'you are on the latest version' toast and the
-//! > update snackbar can both be dismissed and forgotten — a shop can sit on an
-//! > old, buggy version for months (this already happened: one counter was left
-//! > on 1.4.0)."*
-//!
-//! One says do not push an update at somebody; the other says do not let them
-//! forget it exists. Both are answered by [`Offer`], which respects the shop's
-//! closing time and comes back tomorrow.
-//!
-//! # What this session builds and what it does not
-//!
-//! There is no release server yet. [`Releases`] is the seam — the same shape
-//! P21 gave `Cloud`, and for the same reason: a stub that ships means the paths
-//! built here are the paths that run, rather than being wired up for the first
-//! time by whoever builds the server. **No real HTTP in P22.**
-//!
-//! What IS real: the version arithmetic, the two verifications, the kept
-//! installer, the start counter, the rollback, and the rollout decision.
+//! A shop must be able to go back.
 
 use std::path::{Path, PathBuf};
 
@@ -31,22 +7,10 @@ use ts_rs::TS;
 
 use crate::health::HealthRow;
 
-// ---------------------------------------------------------------------------
-// D96 — a version is a number.
-// ---------------------------------------------------------------------------
+// A version is a number.
 
-/// **A version, as three numbers.**
-///
-/// > **ANDROID-G4:** *"Version comparison is by name, and installing a debug
-/// > build with a real version number permanently strands that phone — it will
-/// > be told it is already up to date. This already cost you version 2.4.3."*
-///
-/// `Ord` is derived, which is the whole fix: `1.10.0 > 1.9.0` because ten is
-/// more than nine, and no string comparison anywhere in this product ever gets
-/// the chance to disagree.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+/// A version, as three numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Version {
     pub major: u32,
     pub minor: u32,
@@ -76,15 +40,9 @@ impl std::str::FromStr for Version {
     type Err = ();
 
     fn from_str(text: &str) -> Result<Version, ()> {
-        // Anything after a `-` or `+` is a pre-release or build tag, and this
-        // product does not use them. Dropping rather than rejecting means a
-        // manifest from a future release that does use them still parses to
-        // something orderable, instead of the counter deciding it has no idea
-        // what version is available.
-        let core = text
-            .split(['-', '+'])
-            .next()
-            .unwrap_or(text);
+        // Anything after a `-` or `+` is a pre-release or build tag, and this product does not
+        // use them.
+        let core = text.split(['-', '+']).next().unwrap_or(text);
         let mut parts = core.split('.');
         let major = parts.next().and_then(|p| p.parse().ok()).ok_or(())?;
         let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
@@ -103,31 +61,23 @@ impl std::fmt::Display for Version {
     }
 }
 
-/// **Is this build a real release?**
-///
-/// G4's other half. A development build carries a real version number and must
-/// never be told it is up to date, because that is the state that stranded a
-/// phone permanently: the counter believes it has the newest version, so it
-/// never offers the real one.
+/// Is this build a real release?
 #[must_use]
 pub const fn is_a_release_build() -> bool {
     !cfg!(debug_assertions)
 }
 
-// ---------------------------------------------------------------------------
 // The manifest.
-// ---------------------------------------------------------------------------
 
-/// What a release says about itself. Signed; see [`check`].
+/// What a release says about itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: Version,
-    /// **Short, and in plain words.** Long release notes buried v1's install
-    /// button; this is shown in a paragraph, not a scrolling pane.
+    /// Short, and in plain words.
     pub notes: String,
     pub url: String,
-    /// Lowercase hex. **ANDROID-G2** — *"the downloaded update is never
-    /// verified against a published fingerprint"*.
+    /// Lowercase hex. ANDROID-G2 — "the downloaded update is never verified against a published
+    /// fingerprint".
     pub sha256: String,
     pub rollout: Rollout,
 }
@@ -135,10 +85,8 @@ pub struct Manifest {
 /// Who gets it first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rollout {
-    /// 0-100.
     pub percent: u32,
-    /// Named shops, whatever the percentage says. For a shop that has reported
-    /// the bug this release fixes.
+    /// Named shops, whatever the percentage says.
     #[serde(default)]
     pub shops: Vec<String>,
 }
@@ -153,12 +101,6 @@ impl Default for Rollout {
 }
 
 impl Rollout {
-    /// **D101 — the decision is STABLE for a given machine.**
-    ///
-    /// A dice rolled on every check flaps: the counter is offered 2.5.0 on
-    /// Monday, told it is up to date on Tuesday, offered it again on Wednesday.
-    /// Hashing the machine id means a shop that is in the first 5% stays in the
-    /// first 5%, and a staged rollout can actually be watched.
     #[must_use]
     pub fn includes(&self, machine: &str, shop: &str) -> bool {
         if self.shops.iter().any(|s| s == shop) {
@@ -170,10 +112,9 @@ impl Rollout {
         if self.percent == 0 {
             return false;
         }
-        // FNV-1a over the machine id: tiny, stable across runs and across
-        // versions of the standard library — which `DefaultHasher` explicitly
-        // is not, and a rollout that changes when Rust updates is the flapping
-        // this exists to avoid.
+        // FNV-1a over the machine id: tiny, stable across runs and across versions of the
+        // standard library — which `DefaultHasher` explicitly is not, and a rollout that
+        // changes when Rust updates is the flapping this exists to avoid.
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in machine.as_bytes() {
             hash ^= u64::from(*byte);
@@ -183,26 +124,15 @@ impl Rollout {
     }
 }
 
-/// The release channel. No HTTP in P22 — see the module note.
 pub trait Releases: Send + Sync + 'static {
     /// The signed manifest, as `(json, signature_base64)`.
-    ///
-    /// # Errors
-    ///
-    /// A sentence, when the channel cannot be reached.
     fn latest(&self) -> Result<(String, String), String>;
 
     /// The package itself.
-    ///
-    /// # Errors
-    ///
-    /// A sentence.
     fn fetch(&self, url: &str) -> Result<Vec<u8>, String>;
 }
 
-/// Keys this build accepts a manifest from. P34/CI mints the real one; until
-/// then the development key `mb-license` already carries is reused, because a
-/// second development key is a second thing to remember to delete.
+/// Keys this build accepts a manifest from.
 #[must_use]
 pub fn trusted_keys() -> Vec<Vec<u8>> {
     mb_license::snapshot::trusted_keys()
@@ -211,7 +141,7 @@ pub fn trusted_keys() -> Vec<Vec<u8>> {
 /// Errors a person can be told about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
-    /// The signature did not check out. **We did not publish this.**
+    /// The signature did not check out.
     NotOurs,
     /// The download does not match the manifest's hash.
     Damaged,
@@ -239,34 +169,17 @@ impl Refused {
     }
 }
 
-/// **Check the manifest's signature and hand back what it says.**
-///
-/// # Errors
-///
-/// [`Refused`] — and nothing on disk has been touched, which is the point of
-/// doing this first.
+/// Check the manifest's signature and hand back what it says.
 pub fn check(json: &str, signature: &str) -> Result<Manifest, Refused> {
     mb_license::verify_detached(json.as_bytes(), signature, &trusted_keys())
         .map_err(|_| Refused::NotOurs)?;
     serde_json::from_str(json).map_err(|_| Refused::Unreadable)
 }
 
-/// **And the package's hash, which answers a different question.**
-///
-/// The signature says *we published this release*. The hash says *this file is
-/// the release, all of it*. A truncated download passes the first and fails the
-/// second, which is exactly ANDROID-G2.
-///
-/// # Errors
-///
-/// [`Refused::Damaged`].
+/// And the package's hash, which answers a different question.
 pub fn check_package(bytes: &[u8], manifest: &Manifest) -> Result<(), Refused> {
     let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
-    let hex: String = digest
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let hex: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
     if hex.eq_ignore_ascii_case(&manifest.sha256) {
         Ok(())
     } else {
@@ -274,25 +187,18 @@ pub fn check_package(bytes: &[u8], manifest: &Manifest) -> Result<(), Refused> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// D98 — two failed starts roll back, and the counter counts them.
-// ---------------------------------------------------------------------------
+// Two failed starts roll back, and the counter counts them.
 
 /// What is on disk beside the config, in `updates\starts.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Starts {
-    /// The version these attempts belong to. A new version resets the count —
-    /// otherwise a shop that had one bad start a year ago would roll back the
-    /// first time anything else went wrong.
+    /// The version these attempts belong to.
     pub version: String,
     pub attempts: u32,
 }
 
-/// **Two.** Not one, not three.
-///
-/// One is a fluke: a Windows update rebooting mid-start, a power cut, somebody
-/// double-clicking twice. Three is a Saturday night with a queue at the till.
+/// Two. Not one, not three.
 pub const ATTEMPTS_BEFORE_ROLLBACK: u32 = 2;
 
 impl Starts {
@@ -332,12 +238,9 @@ impl Starts {
         starts.save(dir);
     }
 
-    /// **Called once the counter is genuinely up**, which means the window is
-    /// visible AND the shop is open — or the first-run state was reached, which
-    /// is a working counter with no shop yet.
-    ///
-    /// Clearing it any earlier would mean an app that starts, paints, and then
-    /// falls over on the first bill never rolls back.
+    /// Called once the counter is genuinely up, which means the window is visible AND the shop
+    /// is open — or the first-run state was reached, which is a working counter with no shop
+    /// yet.
     pub fn healthy(dir: &Path) {
         let path = Starts::path(dir);
         let _ = std::fs::remove_file(path);
@@ -364,13 +267,8 @@ impl Previous {
         dir.join("updates").join("previous")
     }
 
-    /// Where the installer for the version **currently running** is kept, if we
-    /// were the ones who installed it.
-    ///
-    /// **This is the piece that makes rollback possible at all**, and it is why
-    /// the first update after a hand-installed build has nothing to go back to:
-    /// we can only keep an installer we downloaded. `going_back_says` puts that
-    /// in words rather than greying a button out.
+    /// Where the installer for the version currently running is kept, if we were the ones who
+    /// installed it.
     #[must_use]
     pub fn installed_folder(dir: &Path) -> PathBuf {
         dir.join("updates").join("installed")
@@ -392,32 +290,14 @@ impl Previous {
     }
 }
 
-/// **Take a verified package and put it where it can be run — keeping what is
-/// there now.**
-///
-/// The order is the whole of E9: the package is checked, the version currently
-/// installed is moved aside to `previous/`, and only then is the new one
-/// written. A failure at any step leaves the shop on what it already had.
-///
-/// Returns the installer to run. **It does not run it** — launching a process
-/// that replaces this one is `main`'s business and Phase 8's, and separating
-/// them is what lets this be tested.
-///
-/// # Errors
-///
-/// [`Refused`] when the package does not match its manifest, which is checked
-/// **before anything on disk is touched**.
-pub fn keep_and_place(
-    dir: &Path,
-    manifest: &Manifest,
-    package: &[u8],
-) -> Result<PathBuf, Refused> {
+/// Take a verified package and put it where it can be run — keeping what is there now.
+pub fn keep_and_place(dir: &Path, manifest: &Manifest, package: &[u8]) -> Result<PathBuf, Refused> {
     check_package(package, manifest)?;
 
     let installed = Previous::installed_folder(dir);
     let previous = Previous::folder(dir);
 
-    // 1. Whatever we installed last time becomes the way back.
+    // Whatever we installed last time becomes the way back.
     if let Ok(text) = std::fs::read_to_string(installed.join("installed.json"))
         && let Ok(current) = serde_json::from_str::<Previous>(&text)
         && current.installer.exists()
@@ -438,7 +318,7 @@ pub fn keep_and_place(
         }
     }
 
-    // 2. The new one goes down.
+    // The new one goes down.
     let _ = std::fs::create_dir_all(&installed);
     let name = format!("magic-bill-{}-setup.exe", manifest.version);
     let path = installed.join(&name);
@@ -448,8 +328,8 @@ pub fn keep_and_place(
         installer: path.clone(),
     }
     .write(&installed);
-    // `write` puts it in `previous.json`; the installed folder wants its own
-    // name so the two cannot be confused when somebody looks in the folder.
+    // `write` puts it in `previous.json`; the installed folder wants its own name so the two
+    // cannot be confused when somebody looks in the folder.
     let _ = std::fs::rename(
         installed.join("previous.json"),
         installed.join("installed.json"),
@@ -458,12 +338,7 @@ pub fn keep_and_place(
     Ok(path)
 }
 
-/// **A cloud that is not there yet, and a stub that ships.**
-///
-/// Same reasoning as P21's `cloud::Stub`: what ships is what was tested, so
-/// Phase 8 replaces one constructor rather than wiring these paths up for the
-/// first time. It answers "no update" by default, which is the honest state of
-/// a product with no release server.
+/// A cloud that is not there yet, and a stub that ships.
 pub struct NoReleaseServerYet;
 
 impl Releases for NoReleaseServerYet {
@@ -476,12 +351,7 @@ impl Releases for NoReleaseServerYet {
     }
 }
 
-/// **The sentence for "go back", including the case where there is nothing to
-/// go back to.**
-///
-/// A greyed-out button with no explanation is the thing a shopkeeper phones
-/// about at eight on a Saturday, which is the exact moment this feature is
-/// supposed to help.
+/// The sentence for "go back", including the case where there is nothing to go back to.
 #[must_use]
 pub fn going_back_says(previous: Option<&Previous>) -> String {
     match previous {
@@ -496,9 +366,7 @@ pub fn going_back_says(previous: Option<&Previous>) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// D99 — never by surprise, never forgotten.
-// ---------------------------------------------------------------------------
+// Never by surprise, never forgotten.
 
 /// What the counter knows about updates right now.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -508,8 +376,7 @@ pub struct UpdateState {
     /// The version on offer, if any.
     pub available: Option<String>,
     pub notes: String,
-    /// The business day it was last dismissed on, as `YYYY-MM-DD`. A dismissal
-    /// lasts until the next day and no longer — I1.
+    /// The business day it was last dismissed on, as `YYYY-MM-DD`.
     pub dismissed_on: Option<String>,
     /// How many days this counter has been on its current version.
     pub days_on_this_version: u32,
@@ -517,16 +384,14 @@ pub struct UpdateState {
     pub is_dev_build: bool,
 }
 
-/// **How long is too long on one version.** I1's counter sat on 1.4.0 for
-/// months; thirty days is a release cycle and a half.
+/// How long is too long on one version.
 pub const STALE_AFTER_DAYS: u32 = 30;
 
-/// The health panel's row. Everything I1 asks for is here: an available update
-/// is always visible, and an old version says so in words.
+/// The health panel's row.
 #[must_use]
 pub fn health_row(state: &UpdateState) -> HealthRow {
     if state.is_dev_build {
-        // G4: a development build is never told it is up to date.
+        // A development build is never told it is up to date.
         return HealthRow::warn(
             "update",
             "Version",
@@ -561,19 +426,16 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
             ),
         );
     }
-    HealthRow::ok("update", "Version", format!("Version {}, up to date.", state.running))
+    HealthRow::ok(
+        "update",
+        "Version",
+        format!("Version {}, up to date.", state.running),
+    )
 }
 
-// ---------------------------------------------------------------------------
-// The bodies, and the seats. D46: each takes `&App`.
-// ---------------------------------------------------------------------------
+// The bodies, and the seats.
 
-/// **Is a dismissal still standing?**
-///
-/// I1's whole content: a dismissal lasts until the shop's next business day and
-/// no longer. The **business** day, not midnight — a shop that closes at 1 a.m.
-/// dismissing an update at half past midnight has not dismissed it for four
-/// minutes.
+/// Is a dismissal still standing?
 #[must_use]
 pub fn is_dismissed(state: &UpdateState, today: mb_core::BusinessDay) -> bool {
     state
@@ -599,8 +461,7 @@ pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<Update
     crate::guard::require(app, mb_auth::Permission::ReportsView)?;
     let mut state = app.updates();
 
-    // Everything below needs a release server. Until Phase 8 there is none, and
-    // saying so beats pretending to have looked.
+    // Everything below needs a release server.
     match app.releases().latest() {
         Ok((json, signature)) => match check(&json, &signature) {
             Ok(manifest) => {
@@ -611,8 +472,8 @@ pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<Update
                 if newer && mine {
                     state.available = Some(manifest.version.to_string());
                     state.notes = manifest.notes;
-                    // A NEW version clears an old dismissal: the thing that was
-                    // waved away is not the thing being offered now.
+                    // A NEW version clears an old dismissal: the thing that was waved away is
+                    // not the thing being offered now.
                     state.dismissed_on = None;
                 } else {
                     state.available = None;
@@ -630,7 +491,6 @@ pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<Update
     Ok(state)
 }
 
-/// **I1's fix, and the reason it is a business day.**
 pub fn dismiss_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
     let mut state = app.updates();
@@ -640,11 +500,6 @@ pub fn dismiss_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState
 }
 
 /// Go back to the version before this one.
-///
-/// # Errors
-///
-/// When there is nothing to go back to — and the message says so in words
-/// rather than the button being greyed out with no explanation.
 pub fn go_back_on(app: &crate::state::App) -> crate::words::UiResult<String> {
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
     let dir = crate::config::AppConfig::directory();
@@ -659,24 +514,28 @@ pub fn go_back_on(app: &crate::state::App) -> crate::words::UiResult<String> {
         previous.version,
         previous.installer.display()
     );
-    // **Running it is deliberately not done here.** Launching a process that
-    // replaces this one is `main`'s business; this returns the path so the
-    // screen can confirm, and so this is testable.
+    // Running it is deliberately not done here.
     Ok(going_back_says(Some(&previous)))
 }
 
 #[tauri::command]
-pub fn look_for_an_update(app: tauri::State<'_, crate::state::App>) -> crate::words::UiResult<UpdateState> {
+pub fn look_for_an_update(
+    app: tauri::State<'_, crate::state::App>,
+) -> crate::words::UiResult<UpdateState> {
     look_for_one_on(&app)
 }
 
 #[tauri::command]
-pub fn dismiss_update(app: tauri::State<'_, crate::state::App>) -> crate::words::UiResult<UpdateState> {
+pub fn dismiss_update(
+    app: tauri::State<'_, crate::state::App>,
+) -> crate::words::UiResult<UpdateState> {
     dismiss_on(&app)
 }
 
 #[tauri::command]
-pub fn go_back_a_version(app: tauri::State<'_, crate::state::App>) -> crate::words::UiResult<String> {
+pub fn go_back_a_version(
+    app: tauri::State<'_, crate::state::App>,
+) -> crate::words::UiResult<String> {
     go_back_on(&app)
 }
 
@@ -684,7 +543,6 @@ pub fn go_back_a_version(app: tauri::State<'_, crate::state::App>) -> crate::wor
 mod tests {
     use super::*;
 
-    /// **T4, and it is ANDROID-G4 by name.**
     #[test]
     fn versions_compare_as_numbers_and_never_as_names() {
         let v = |s: &str| s.parse::<Version>().expect("parses");
@@ -693,15 +551,18 @@ mod tests {
         assert!(v("1.9.0") > v("1.8.9"));
         assert!(v("2.0.0") > v("1.99.99"));
         assert!(v("1.10.1") > v("1.10.0"));
-        // And a string sort really would get it wrong, which is why this is a
-        // number: "1.10.0" < "1.9.0" alphabetically.
+        // And a string sort really would get it wrong, which is why this is a number: "1.10.0"
+        // < "1.9.0" alphabetically.
         assert!("1.10.0" < "1.9.0");
     }
 
     #[test]
     fn an_equal_version_is_never_newer() {
         let running = Version::new(1, 4, 4);
-        assert!(Version::new(1, 4, 4) <= running, "an equal version is not newer");
+        assert!(
+            Version::new(1, 4, 4) <= running,
+            "an equal version is not newer"
+        );
         assert!(Version::new(1, 4, 5) > running);
     }
 
@@ -719,7 +580,7 @@ mod tests {
         assert!("latest".parse::<Version>().is_err());
     }
 
-    /// **G4's other half.** A dev build is never told it is up to date.
+    /// G4's other half. A dev build is never told it is up to date.
     #[test]
     fn a_development_build_is_told_what_it_is() {
         let state = UpdateState {
@@ -733,7 +594,7 @@ mod tests {
         assert!(!row.says.contains("up to date"));
     }
 
-    /// **I1.** A counter left on one version for months says so.
+    /// A counter left on one version for months says so.
     #[test]
     fn an_old_version_says_how_long_it_has_been_old() {
         let state = UpdateState {
@@ -757,11 +618,13 @@ mod tests {
             ..UpdateState::default()
         };
         let row = health_row(&state);
-        assert!(!row.is_ok(), "a dismissed update vanished from health — that is I1");
+        assert!(
+            !row.is_ok(),
+            "a dismissed update vanished from health — that is I1"
+        );
         assert!(row.says.contains("1.5.0"));
     }
 
-    /// **T12 — the rollout decision is stable.**
     #[test]
     fn a_staged_rollout_gives_one_machine_the_same_answer_every_time() {
         let rollout = Rollout {
@@ -773,8 +636,8 @@ mod tests {
         for _ in 0..50 {
             assert_eq!(rollout.includes(machine, "shop_1"), first);
         }
-        // And different machines do not all get the same answer, or the
-        // percentage would mean nothing.
+        // And different machines do not all get the same answer, or the percentage would mean
+        // nothing.
         let answers: Vec<bool> = (0..200)
             .map(|n| rollout.includes(&format!("machine-{n}"), "shop_1"))
             .collect();
@@ -809,15 +672,13 @@ mod tests {
         }
     }
 
-    /// **T1, the second half.** A truncated download passes the signature and
-    /// fails the hash, which is why there are two checks.
     #[test]
     fn a_damaged_package_is_refused() {
         let manifest = Manifest {
             version: Version::new(1, 5, 0),
             notes: "Faster reports.".to_owned(),
             url: "https://example.invalid/mb.exe".to_owned(),
-            // sha256 of "the real package"
+            // Sha256 of "the real package".
             sha256: {
                 let d = ring::digest::digest(&ring::digest::SHA256, b"the real package");
                 d.as_ref().iter().map(|b| format!("{b:02x}")).collect()
@@ -829,13 +690,14 @@ mod tests {
             check_package(b"the real pack", &manifest),
             Err(Refused::Damaged)
         );
-        // And the refusal says nothing was changed, which is the fact the
-        // shopkeeper needs.
-        assert!(Refused::Damaged.says().contains("Nothing on this computer has changed"));
+        // And the refusal says nothing was changed, which is the fact the shopkeeper needs.
+        assert!(
+            Refused::Damaged
+                .says()
+                .contains("Nothing on this computer has changed")
+        );
     }
 
-    /// **T1, the first half.** An unsigned or wrongly signed manifest is
-    /// refused, and refused before anything is downloaded.
     #[test]
     fn a_manifest_we_did_not_sign_is_refused() {
         let manifest = Manifest {
@@ -848,8 +710,8 @@ mod tests {
         let json = serde_json::to_string(&manifest).expect("serialises");
         assert_eq!(check(&json, "bm90IGEgc2lnbmF0dXJl"), Err(Refused::NotOurs));
 
-        // Signed with our key, it is accepted — so the test above is testing
-        // the signature and not the plumbing.
+        // Signed with our key, it is accepted — so the test above is testing the signature and
+        // not the plumbing.
         let key = mb_license::snapshot::development_keypair().expect("a key");
         let signature = mb_license::snapshot::sign_detached(json.as_bytes(), &key);
         assert_eq!(
@@ -858,7 +720,7 @@ mod tests {
         );
     }
 
-    /// **T3.** Two failed starts roll back; one does not; a good start clears.
+    /// Two failed starts roll back; one does not; a good start clears.
     #[test]
     fn two_failed_starts_roll_back_and_one_does_not() {
         let dir = std::env::temp_dir().join(format!("mb-starts-{}", std::process::id()));
@@ -867,20 +729,29 @@ mod tests {
         let version = Version::new(1, 5, 0);
 
         Starts::attempted(&dir, version);
-        assert!(!Starts::should_roll_back(&dir, version), "one bad start is a fluke");
+        assert!(
+            !Starts::should_roll_back(&dir, version),
+            "one bad start is a fluke"
+        );
 
         Starts::attempted(&dir, version);
-        assert!(!Starts::should_roll_back(&dir, version), "two is the limit, not past it");
+        assert!(
+            !Starts::should_roll_back(&dir, version),
+            "two is the limit, not past it"
+        );
 
         Starts::attempted(&dir, version);
-        assert!(Starts::should_roll_back(&dir, version), "three starts with no healthy one");
+        assert!(
+            Starts::should_roll_back(&dir, version),
+            "three starts with no healthy one"
+        );
 
         // A start that reaches a working counter clears the count.
         Starts::healthy(&dir);
         assert!(!Starts::should_roll_back(&dir, version));
 
-        // And a NEW version starts its own count, so an old bad night does not
-        // roll back a good release a year later.
+        // And a NEW version starts its own count, so an old bad night does not roll back a good
+        // release a year later.
         Starts::attempted(&dir, version);
         Starts::attempted(&dir, version);
         Starts::attempted(&dir, version);
@@ -910,19 +781,15 @@ mod tests {
         }
     }
 
-    /// **T2 — the way back exists because the way forward kept it.**
-    ///
-    /// Install 1.5.0, then 1.6.0, and 1.5.0's installer is what "go back"
-    /// runs. The first install has nothing to keep, which is the honest state
-    /// of a hand-installed build and the case `going_back_says` puts in words.
+    /// The way back exists because the way forward kept it.
     #[test]
     fn installing_keeps_the_version_it_replaced() {
         let dir = scratch("keep");
 
         // The first update after a hand-installed build: nothing to go back to.
         let first = b"the 1.5.0 package";
-        let path = keep_and_place(&dir, &a_manifest(Version::new(1, 5, 0), first), first)
-            .expect("placed");
+        let path =
+            keep_and_place(&dir, &a_manifest(Version::new(1, 5, 0), first), first).expect("placed");
         assert!(path.exists());
         assert!(
             Previous::load(&dir).is_none(),
@@ -931,8 +798,7 @@ mod tests {
 
         // The second one keeps the first.
         let second = b"the 1.6.0 package";
-        keep_and_place(&dir, &a_manifest(Version::new(1, 6, 0), second), second)
-            .expect("placed");
+        keep_and_place(&dir, &a_manifest(Version::new(1, 6, 0), second), second).expect("placed");
         let previous = Previous::load(&dir).expect("1.5.0 was kept");
         assert_eq!(previous.version, Version::new(1, 5, 0));
         assert_eq!(
@@ -944,8 +810,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **T1, and the ordering that makes it matter.** A damaged package is
-    /// refused BEFORE anything on disk is replaced.
     #[test]
     fn a_damaged_package_never_reaches_the_disk() {
         let dir = scratch("damaged");
@@ -976,10 +840,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **T11 — I1's fix, both halves.**
-    ///
-    /// A dismissal lasts until the shop's next BUSINESS day and no longer, and
-    /// the health panel shows the update the whole time.
     #[test]
     fn an_update_dismissed_today_comes_back_tomorrow() {
         let today = mb_core::BusinessDay::from_ymd(2026, 8, 10);
@@ -1000,8 +860,6 @@ mod tests {
         // And it never interrupts: the offer says so.
         assert!(back.contains("will not interrupt you"), "{back}");
 
-        // **The panel shows it the whole time**, which is the half v1's
-        // swiped-away snackbar did not have.
         assert!(!health_row(&state).is_ok());
     }
 
@@ -1016,7 +874,6 @@ mod tests {
         assert!(health_row(&state).is_ok());
     }
 
-    /// **T2's other half.** No previous version says so, in words.
     #[test]
     fn there_is_a_sentence_for_having_nothing_to_go_back_to() {
         let says = going_back_says(None);

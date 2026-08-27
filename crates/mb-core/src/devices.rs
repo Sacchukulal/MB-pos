@@ -1,62 +1,20 @@
-//! **What the machines plugged into a counter are saying** — P29.
-//!
-//! A scanner, a scale, and the barcodes a scale prints. Every function here is
-//! pure: bytes and timings in, a decision out. The transports live in
-//! `src-tauri`, because a serial port is an operating system's business and a
-//! protocol is not.
-//!
-//! # Why this is worth a module of its own
-//!
-//! **None of these devices exists on the machine this was written on.** No
-//! scanner, no scale, no pole display. So the only honest way to build them is
-//! to put every decision that can be made from data into a pure function and
-//! test it exhaustively — and leave the part that genuinely needs hardware as a
-//! thin transport that does nothing but move bytes.
-//!
-//! What that buys: when the owner finally plugs a scale in and it does not
-//! work, the question is *"what is it sending?"* rather than *"where is the
-//! bug?"* — and the device manager screen answers the first one by showing the
-//! raw bytes.
+//! What the machines plugged into a counter are saying.
 
 use serde::{Deserialize, Serialize};
 
 use crate::money::Money;
 use crate::qty::Qty;
 
-// ===========================================================================
-// Telling a SCAN from TYPING
-// ===========================================================================
+// Telling a SCAN from TYPING.
 
 /// How fast characters have to arrive to be a scanner rather than a person.
-///
-/// **A barcode scanner is a keyboard.** It emulates one, types the code, and
-/// presses Enter — so the billing search box gets exactly what a fast cashier
-/// typing "dosa" gets, and has to tell them apart or it will look up a menu
-/// item called `8901234567890`.
-///
-/// The signal is the GAP between keystrokes. A scanner emits characters a few
-/// milliseconds apart, evenly; a human, however fast, cannot hold under about
-/// 40 ms for a whole word, and their gaps vary wildly because some letter pairs
-/// are easy and some are not.
-///
-/// **The failure that matters is the wrong one.** Missing a scan costs a
-/// cashier one re-scan. Misreading a fast typist as a scan throws away what
-/// they typed and searches for a barcode that does not exist — so every
-/// threshold here is chosen to be safe in that direction, and
-/// `a_fast_human_typist_is_never_read_as_a_scan` is the test that says so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScanRule {
-    /// The longest average gap, in milliseconds, that still counts as a
-    /// machine. 25 ms is roughly 480 characters a minute sustained — about
-    /// twice what a very fast typist manages, and half what a slow scanner
-    /// does.
+    /// The longest average gap, in milliseconds, that still counts as a machine.
     pub max_average_gap_ms: u32,
     /// A single gap longer than this ends the burst, whatever the average.
-    /// Somebody typing, pausing to think, and typing again must not have the
-    /// two halves joined into one "scan".
     pub max_single_gap_ms: u32,
-    /// Shorter than this and it is not a barcode at all. The shortest real
-    /// symbology in a shop is EAN-8.
+    /// Shorter than this and it is not a barcode at all.
     pub min_length: usize,
 }
 
@@ -71,14 +29,10 @@ impl Default for ScanRule {
 }
 
 /// What arrived in the search box, and when.
-///
-/// The caller collects `(character, milliseconds since the previous one)` and
-/// hands the run over when Enter is pressed. Keeping the timing OUT of this
-/// module's own clock is what makes it testable: a test supplies the gaps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keystrokes {
     pub text: String,
-    /// One gap per character after the first. `text.len() - 1` entries.
+    /// One gap per character after the first.
     pub gaps_ms: Vec<u32>,
 }
 
@@ -91,7 +45,7 @@ pub enum Typed {
     Person,
 }
 
-/// **Scan, or person?**
+/// Scan, or person?
 #[must_use]
 #[allow(
     clippy::integer_division,
@@ -103,17 +57,20 @@ pub fn how_it_arrived(keys: &Keystrokes, rule: ScanRule) -> Typed {
     if count < rule.min_length {
         return Typed::Person;
     }
-    // A code is digits, or digits and a letter or two. A word with spaces in it
-    // is somebody searching, however fast they typed it.
+    // A code is digits, or digits and a letter or two.
     if keys.text.contains(' ') {
         return Typed::Person;
     }
-    if !keys.text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if !keys
+        .text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return Typed::Person;
     }
     if keys.gaps_ms.is_empty() {
-        // Every character arrived in the same instant — a paste, or a scanner
-        // fast enough that the clock could not tell. Either way not typing.
+        // Every character arrived in the same instant — a paste, or a scanner fast enough that
+        // the clock could not tell.
         return Typed::Scan;
     }
     if keys.gaps_ms.iter().any(|gap| *gap > rule.max_single_gap_ms) {
@@ -128,24 +85,13 @@ pub fn how_it_arrived(keys: &Keystrokes, rule: ScanRule) -> Typed {
     }
 }
 
-// ===========================================================================
-// Weight-encoded barcodes
-// ===========================================================================
+// Weight-encoded barcodes.
 
 /// What a scale's printed label means.
-///
-/// **Extremely common in Indian retail** and the reason this is worth a type:
-/// a sweet shop weighs 450 g of laddu, the scale prints a label, and the
-/// barcode on it carries both the item and either the weight or the price.
-///
-/// The convention is a 13-digit EAN with a reserved prefix — usually 2x — then
-/// an item code, then the embedded value, then a check digit. **Which digits
-/// mean what is not standardised**, so it is a per-shop setting rather than a
-/// guess; this type is the shape, and [`EmbeddedRule`] is the shop's answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScannedLabel {
-    /// The code that identifies the item — matched against a menu item's
-    /// barcode, not against the whole 13 digits.
+    /// The code that identifies the item — matched against a menu item's barcode, not against
+    /// the whole 13 digits.
     pub item_code: String,
     /// What was embedded.
     pub embedded: Embedded,
@@ -154,23 +100,17 @@ pub struct ScannedLabel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Embedded {
-    /// Grams, millilitres or pieces — the item's own dimension decides which,
-    /// exactly as it does everywhere else in this product.
+    /// Grams, millilitres or pieces — the item's own dimension decides which, exactly as it
+    /// does everywhere else in this product.
     Quantity(Qty),
-    /// The money the scale worked out. **The shop's own price is still used to
-    /// bill**; this is compared against it, and a disagreement is worth saying
-    /// out loud rather than silently trusting a label printed last Tuesday.
+    /// The money the scale worked out.
     Price(Money),
 }
 
 /// How one shop's scale labels are laid out.
-///
-/// Positions are zero-based indices into the digits, and every one of them
-/// differs by brand — which is why this is data a dealer sets and not a
-/// constant somebody has to recompile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmbeddedRule {
-    /// The leading digits that mark a label as one of these. "21", "22", "20".
+    /// The leading digits that mark a label as one of these.
     pub prefix: String,
     /// Where the item code starts and how long it is.
     pub item_from: usize,
@@ -180,9 +120,7 @@ pub struct EmbeddedRule {
     pub value_len: usize,
     /// Whether the embedded number is a quantity or a price.
     pub value_is_price: bool,
-    /// How many of the value's digits are after the decimal point. A weight in
-    /// grams printed as `00450` with `value_decimals: 3` is 0.450 kg; a price
-    /// printed as `01250` with `2` is ₹12.50.
+    /// How many of the value's digits are after the decimal point.
     pub value_decimals: u32,
 }
 
@@ -198,11 +136,7 @@ pub enum LabelError {
     OutOfRange,
 }
 
-/// **Read a scale's label.**
-///
-/// Pure, so it is fully testable without a scale — which matters, because
-/// there is no scale on the machine this was written on and there may not be
-/// one for months.
+/// Read a scale's label.
 #[allow(
     clippy::integer_division,
     reason = "scaling a label's digits down to paise or thousandths: the division 
@@ -226,9 +160,7 @@ pub fn read_label(code: &str, rule: &EmbeddedRule) -> Result<ScannedLabel, Label
         });
     }
 
-    let slice = |from: usize, len: usize| -> String {
-        digits[from..from + len].iter().collect()
-    };
+    let slice = |from: usize, len: usize| -> String { digits[from..from + len].iter().collect() };
 
     let item_code = slice(rule.item_from, rule.item_len);
     let raw: i64 = slice(rule.value_from, rule.value_len)
@@ -236,8 +168,8 @@ pub fn read_label(code: &str, rule: &EmbeddedRule) -> Result<ScannedLabel, Label
         .map_err(|_| LabelError::OutOfRange)?;
 
     let embedded = if rule.value_is_price {
-        // Paise. Two decimals is the ordinary case; anything else is scaled to
-        // paise here so the rest of the product never sees a different unit.
+        // Paise. Two decimals is the ordinary case; anything else is scaled to paise here so
+        // the rest of the product never sees a different unit.
         let paise = match rule.value_decimals {
             0 => raw.checked_mul(100),
             1 => raw.checked_mul(10),
@@ -247,8 +179,8 @@ pub fn read_label(code: &str, rule: &EmbeddedRule) -> Result<ScannedLabel, Label
         .ok_or(LabelError::OutOfRange)?;
         Embedded::Price(Money::from_paise(paise))
     } else {
-        // `Qty` is thousandths (P01), so a value with three decimals is already
-        // in its unit and anything else is scaled to it.
+        // `Qty` is thousandths, so a value with three decimals is already in its unit and
+        // anything else is scaled to it.
         let thousandths = match rule.value_decimals {
             0 => raw.checked_mul(1_000),
             1 => raw.checked_mul(100),
@@ -266,30 +198,17 @@ pub fn read_label(code: &str, rule: &EmbeddedRule) -> Result<ScannedLabel, Label
     })
 }
 
-// ===========================================================================
-// The scale itself
-// ===========================================================================
+// The scale itself.
 
 /// One line a scale sent down the wire.
-///
-/// **Every brand differs**, which is why the protocol is a per-scale setting
-/// and not a guess. Two are shipped and a third mode shows the raw bytes, so a
-/// dealer can work out an unknown scale without a code change — and without a
-/// phone call to us.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScaleProtocol {
-    /// `ST,GS,+  1.234kg` — a status word, then a signed number and a unit.
-    /// The commonest shape on Indian counter scales.
+    /// `ST,GS,+ 1.234kg` — a status word, then a signed number and a unit.
     StatusThenWeight,
-    /// A bare number and unit per line: `1.234 kg`. Some cheap scales send
-    /// nothing else at all, and then STABILITY has to come from the reading
-    /// not changing rather than from the scale saying so — see
-    /// [`Reading::stable`].
+    /// A bare number and unit per line: `1.234 kg`.
     WeightOnly,
-    /// Show the bytes and decide nothing. **Not a fallback — a tool.** It is
-    /// how an unknown scale gets configured, and it is the difference between
-    /// "we support your scale" and "we support scales".
+    /// Show the bytes and decide nothing.
     Raw,
 }
 
@@ -299,20 +218,12 @@ pub struct Reading {
     pub qty: Qty,
     /// The unit as the scale said it: "kg", "g", "l".
     pub unit: String,
-    /// **Whether the scale says the weight has settled.**
-    ///
-    /// A bouncing weight is the single thing that makes a scale integration
-    /// untrustworthy: a shop puts a bag down, the software grabs 0.2 kg on the
-    /// way to 1.4, and a customer is undercharged for ever. So a reading is
-    /// only ever taken when this is true (T4).
-    ///
-    /// On a protocol that does not report it, the caller compares consecutive
-    /// readings instead — the honest fallback, and it is slower on purpose.
+    /// Whether the scale says the weight has settled.
     pub stable: bool,
 }
 
-/// A thousand kilogrammes. A counter scale that reports more than this is a
-/// counter scale that has come unplugged.
+/// A thousand kilogrammes. A counter scale that reports more than this is a counter scale that
+/// has come unplugged.
 const MAX_THOUSANDTHS: f64 = 1_000_000.0;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -323,7 +234,7 @@ pub enum ScaleError {
     Negative,
 }
 
-/// **Read one line from a scale.**
+/// Read one line from a scale.
 #[allow(
     clippy::float_arithmetic,
     reason = "the ONE boundary where a decimal arrives from outside this 
@@ -338,13 +249,11 @@ pub fn read_scale(line: &str, protocol: ScaleProtocol) -> Result<Reading, ScaleE
 
     let (stable, rest) = match protocol {
         ScaleProtocol::StatusThenWeight => {
-            // `ST` is settled, `US` is unsettled. Everything before the last
-            // comma is status; what follows is the number.
+            // `ST` is settled, `US` is unsettled.
             let (status, rest) = line.rsplit_once(',').ok_or(ScaleError::Unreadable)?;
             (status.to_ascii_uppercase().starts_with("ST"), rest)
         }
-        // Nothing in the line says whether it settled, so this alone can never
-        // claim it did. The caller decides by watching two readings agree.
+        // Nothing in the line says whether it settled, so this alone can never claim it did.
         ScaleProtocol::WeightOnly => (false, line),
         ScaleProtocol::Raw => return Err(ScaleError::Unreadable),
     };
@@ -363,15 +272,8 @@ pub fn read_scale(line: &str, protocol: ScaleProtocol) -> Result<Reading, ScaleE
         return Err(ScaleError::Negative);
     }
 
-    // **Float here and integer everywhere after**, deliberately: the scale sent
-    // decimal TEXT and something has to parse it. The moment it becomes a
-    // quantity it becomes thousandths (P01) and no float touches it again —
-    // which is the whole of D2's argument, applied at the one boundary where a
-    // decimal genuinely arrives from outside.
-    //
-    // The range check is not ceremony: a scale that has been unplugged and is
-    // sending noise can produce a number that does not fit, and `as` would
-    // wrap it into a plausible-looking weight rather than refusing.
+    // Float here and integer everywhere after, deliberately: the scale sent decimal TEXT and
+    // something has to parse it.
     let scaled = (value * 1_000.0).round();
     if !scaled.is_finite() || scaled > MAX_THOUSANDTHS {
         return Err(ScaleError::Unreadable);
@@ -393,11 +295,7 @@ pub fn read_scale(line: &str, protocol: ScaleProtocol) -> Result<Reading, ScaleE
     })
 }
 
-/// **Two readings agreeing is what stability means on a scale that will not
-/// say.**
-///
-/// Slower than asking, and honest about it: a shop with a cheap scale waits
-/// half a second longer, and never gets a weight taken on the way up.
+/// Two readings agreeing is what stability means on a scale that will not say.
 #[must_use]
 pub fn settled(previous: Option<&Reading>, current: &Reading) -> bool {
     if current.stable {
@@ -417,7 +315,7 @@ mod tests {
         }
     }
 
-    // -- scan or person ----------------------------------------------------
+    // Scan or person.
 
     #[test]
     fn a_scanner_burst_is_a_scan() {
@@ -428,9 +326,7 @@ mod tests {
         );
     }
 
-    /// **The failure that matters.** Missing a scan costs one re-scan;
-    /// misreading a typist throws away what they typed and looks up a barcode
-    /// that does not exist.
+    /// The failure that matters.
     #[test]
     fn a_fast_human_typist_is_never_read_as_a_scan() {
         // 60 ms a character is about 200 characters a minute — genuinely fast.
@@ -452,7 +348,7 @@ mod tests {
 
     #[test]
     fn a_pause_in_the_middle_ends_the_burst() {
-        // Typed fast, thought about it, typed fast again. Not one scan.
+        // Typed fast, thought about it, typed fast again.
         let mut k = keys("89012345678", 5);
         k.gaps_ms[4] = 400;
         assert_eq!(how_it_arrived(&k, ScanRule::default()), Typed::Person);
@@ -460,7 +356,10 @@ mod tests {
 
     #[test]
     fn something_too_short_to_be_a_barcode_is_typing() {
-        assert_eq!(how_it_arrived(&keys("890123", 3), ScanRule::default()), Typed::Person);
+        assert_eq!(
+            how_it_arrived(&keys("890123", 3), ScanRule::default()),
+            Typed::Person
+        );
     }
 
     #[test]
@@ -472,7 +371,7 @@ mod tests {
         assert_eq!(how_it_arrived(&pasted, ScanRule::default()), Typed::Scan);
     }
 
-    // -- scale labels ------------------------------------------------------
+    // Scale labels.
 
     fn weight_rule() -> EmbeddedRule {
         // `21` + five item digits + five weight digits + check digit.
@@ -489,10 +388,13 @@ mod tests {
 
     #[test]
     fn a_weight_label_reads_as_an_item_and_a_quantity() {
-        // 21 · 12345 · 00450 · 6  →  item 12345, 0.450
+        // 21 · 12345 · 00450 · 6 → item 12345, 0.450.
         let label = read_label("2112345004506", &weight_rule()).expect("reads");
         assert_eq!(label.item_code, "12345");
-        assert_eq!(label.embedded, Embedded::Quantity(Qty::from_thousandths(450)));
+        assert_eq!(
+            label.embedded,
+            Embedded::Quantity(Qty::from_thousandths(450))
+        );
     }
 
     #[test]
@@ -502,15 +404,14 @@ mod tests {
             value_decimals: 2,
             ..weight_rule()
         };
-        // 21 · 12345 · 01250 · 6  →  item 12345, ₹12.50
+        // 21 · 12345 · 01250 · 6 → item 12345, ₹12.50.
         let label = read_label("2112345012506", &rule).expect("reads");
         assert_eq!(label.embedded, Embedded::Price(Money::from_paise(1_250)));
     }
 
     #[test]
     fn a_label_that_is_not_ours_says_so_rather_than_guessing() {
-        // An ordinary product barcode, not a scale label. Guessing would bill
-        // somebody 890 kg of something.
+        // An ordinary product barcode, not a scale label.
         assert_eq!(
             read_label("8901234567890", &weight_rule()),
             Err(LabelError::NotOurs)
@@ -525,7 +426,7 @@ mod tests {
         ));
     }
 
-    // -- the scale ---------------------------------------------------------
+    // The scale.
 
     #[test]
     fn a_settled_reading_reads() {
@@ -535,7 +436,7 @@ mod tests {
         assert!(r.stable);
     }
 
-    /// **T4.** A weight on its way up is never taken.
+    /// A weight on its way up is never taken.
     #[test]
     fn a_bouncing_weight_is_never_taken() {
         let moving =
@@ -549,23 +450,24 @@ mod tests {
         let different = read_scale("0.850 kg", ScaleProtocol::WeightOnly).expect("reads");
         assert!(!settled(None, &first), "one reading is never settled");
         assert!(!settled(Some(&first), &different), "it was still moving");
-        assert!(settled(Some(&first), &second), "two agreeing readings settled");
+        assert!(
+            settled(Some(&first), &second),
+            "two agreeing readings settled"
+        );
     }
 
     #[test]
     fn a_negative_weight_says_what_to_do_about_it() {
-        // A scale that was tared with something on it. The message tells a
-        // shopkeeper what to do rather than reporting a minus sign (§6).
-        let err = read_scale("ST,GS,-  0.500kg", ScaleProtocol::StatusThenWeight)
-            .expect_err("refused");
+        // A scale that was tared with something on it.
+        let err =
+            read_scale("ST,GS,-  0.500kg", ScaleProtocol::StatusThenWeight).expect_err("refused");
         assert_eq!(err, ScaleError::Negative);
         assert!(err.to_string().contains("take everything off it"));
     }
 
     #[test]
     fn raw_mode_decides_nothing_because_that_is_its_job() {
-        // It exists so a dealer can SEE what an unknown scale sends. A reading
-        // out of it would be a guess dressed as a fact.
+        // It exists so a dealer can SEE what an unknown scale sends.
         assert_eq!(
             read_scale("ST,GS,+  1.234kg", ScaleProtocol::Raw),
             Err(ScaleError::Unreadable)

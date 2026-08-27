@@ -1,21 +1,4 @@
-//! **The sign-in sequence, driven end to end against a real database.**
-//!
-//! # Why this file exists
-//!
-//! *"RUN IT AND LOOK AT IT"* has been part of the method since P08, and it has
-//! earned its place: P08 shipped two visible bugs with every test green, P09
-//! two, P10 **seven**. Every one was wiring rather than logic, and no unit test
-//! was ever going to see them.
-//!
-//! P11's risk is the same shape and worse, because its bugs lock a shop out of
-//! its own till. But its flows are *sequences* — set the first PIN, get locked
-//! out, sign in, switch user, lock, come back — and a sequence that can only be
-//! checked by clicking is a sequence that gets checked once.
-//!
-//! So the commands' bodies take `&App` (`ipc.rs`, "the command wrappers"), and
-//! this file drives the real ones against a real SQLite file on disk. It is not
-//! a substitute for looking at the window. It is a substitute for looking at
-//! the window **twice**.
+//! The sign-in sequence, driven end to end against a real database.
 
 #![allow(
     clippy::expect_used,
@@ -50,7 +33,7 @@ impl Scratch {
         Scratch { dir }
     }
 
-    /// Where a test may put a database. `menu_tests` opens its own shop here.
+    /// Where a test may put a database.
     pub(crate) fn dir(&self) -> &std::path::Path {
         &self.dir
     }
@@ -62,8 +45,8 @@ impl Drop for Scratch {
     }
 }
 
-/// An app with a real shop open — which is what `open_shop` does at start-up,
-/// including seeding the roles and deciding whether to lock.
+/// An app with a real shop open — which is what `open_shop` does at start-up, including seeding
+/// the roles and deciding whether to lock.
 fn a_shop(scratch: &Scratch) -> App {
     let path = scratch.dir.join("shop.db");
     let db = Db::open(&DbConfig::new(path.clone())).expect("open");
@@ -73,10 +56,6 @@ fn a_shop(scratch: &Scratch) -> App {
 }
 
 /// Add somebody with a role, the way the Staff screen does.
-///
-/// `pub(crate)` so `floor_tests` can use it: proving that a waiter cannot
-/// arrange the room needs a waiter, and a second copy of this in that file is
-/// a second place for "what a Waiter may do" to drift.
 pub(crate) fn hire(app: &App, id: &str, name: &str, role: RolePreset) {
     save_staff_member_on(
         app,
@@ -91,50 +70,47 @@ pub(crate) fn hire(app: &App, id: &str, name: &str, role: RolePreset) {
     .expect("hired");
 }
 
-/// **The whole first day of a shop, in order.**
+/// The whole first day of a shop, in order.
 #[test]
 fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
     let scratch = Scratch::new("first_day");
     let app = a_shop(&scratch);
 
-    // 1. Nobody has a PIN. The counter is NOT locked — requirement 3, a shop
-    //    must be able to bill on its first day — and the banner is on.
+    // Nobody has a PIN.
     let state = lock_state_on(&app).expect("state");
     assert!(state.nobody_has_a_pin, "a new shop should not be locked");
     assert_eq!(state.signed_in_as.as_deref(), Some("Counter"));
     assert!(state.people.is_empty(), "nobody can sign in yet");
     assert!(!state.can_recover, "there is no recovery code yet either");
 
-    // 2. The owner adds themselves and gives themselves a PIN.
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     let recovery =
         set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin set");
     let recovery = recovery.expect("the first PIN issues a recovery code");
     assert_eq!(recovery.len(), 11, "ten characters and a dash: {recovery}");
 
-    // 3. **Setting the first PIN locks the app then and there** — proving it
-    //    works while that person is still standing at the counter.
+    // Setting the first PIN locks the app then and there — proving it works while that person
+    // is still standing at the counter.
     let state = lock_state_on(&app).expect("state");
     assert!(!state.nobody_has_a_pin);
     assert_eq!(state.signed_in_as, None, "the counter did not lock itself");
     assert_eq!(state.people.len(), 1, "the owner can now sign in");
     assert!(state.can_recover);
 
-    // 4. The wrong PIN is refused, in Rust, in words.
+    // The wrong PIN is refused, in Rust, in words.
     let refused = login_on(&app, "staff_owner".to_owned(), "1111".to_owned())
         .expect_err("the wrong PIN was accepted");
     assert_eq!(refused.code, "auth.wrong_pin");
     assert!(lock_state_on(&app).expect("state").signed_in_as.is_none());
 
-    // 5. The right one is not.
+    // The right one is not.
     let state =
         login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner signs in");
     assert_eq!(state.signed_in_as.as_deref(), Some("Sachin"));
     assert_eq!(state.role.as_deref(), Some("Owner"));
     assert!(state.permissions.contains(&"staff.manage".to_owned()));
 
-    // 6. And the history says all of it. **Read back off the disk**, because
-    //    the screen saying "signed in" is the thing being tested.
+    // And the history says all of it.
     let history = audit_trail_on(&app, None, None, None).expect("the history");
     assert!(history.tampered.is_none(), "{:?}", history.tampered);
     let what: Vec<&str> = history.entries.iter().map(|e| e.what.as_str()).collect();
@@ -151,8 +127,8 @@ fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
     );
 }
 
-/// **T12.** Five wrong PINs cost real time, and it survives a restart —
-/// which an in-memory counter would not.
+/// Five wrong PINs cost real time, and it survives a restart — which an in-memory counter would
+/// not.
 #[test]
 fn the_lockout_is_real_and_outlives_the_process() {
     let scratch = Scratch::new("lockout");
@@ -169,8 +145,7 @@ fn the_lockout_is_real_and_outlives_the_process() {
             }
         }
 
-        // The fifth failure has started the wait, and even the RIGHT PIN is
-        // refused now.
+        // The fifth failure has started the wait, and even the RIGHT PIN is refused now.
         let refused = login_on(&app, "staff_owner".to_owned(), "2468".to_owned())
             .expect_err("the lockout let somebody straight in");
         assert_eq!(refused.code, "auth.locked_out");
@@ -193,39 +168,27 @@ fn the_lockout_is_real_and_outlives_the_process() {
         .expect_err("restarting cleared the lockout");
     assert_eq!(refused.code, "auth.locked_out");
 
-    // The lock screen shows the wait against that person, so nobody stands
-    // there typing into a pad that cannot succeed.
+    // The lock screen shows the wait against that person, so nobody stands there typing into a
+    // pad that cannot succeed.
     let state = lock_state_on(&app).expect("state");
     assert!(state.people[0].locked_out.is_some());
 }
 
-/// **Four digits, at every door that takes a PIN.**
-///
-/// The owner, 2026-08-22: *"make sure login pin is only 4 numbers not more …
-/// not even for this test laptop login or anything else … (not just for test
-/// laptop login, in future any new user in any other restaurant too)."*
-///
-/// `mb_auth::pin` has the unit tests for the rule itself. This one is about
-/// **reach**, because reach is where it went wrong: the rule was already four
-/// on the way in and eight on the way out, and the screen quietly used the
-/// eight. There are three commands in this product that accept a typed PIN —
-/// sign in, set somebody's PIN, and spend the recovery code — and a rule that
-/// only two of them enforce is not a rule. Every one of them is named here, so
-/// a fourth door added later has an obvious place to be added too.
+/// Four digits, at every door that takes a PIN.
 #[test]
 fn a_pin_longer_than_four_digits_is_refused_by_every_command_that_takes_one() {
     let scratch = Scratch::new("pin_length");
     let app = a_shop(&scratch);
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
 
-    // 1. Setting one. Five digits and eight, because eight was the old ceiling
-    //    and is the number that would come back if anybody restored it.
+    // Setting one. Five digits and eight, because eight was the old ceiling and is the number
+    // that would come back if anybody restored it.
     for too_long in ["12345", "12345678"] {
         let refused = set_staff_pin_on(&app, "staff_owner".to_owned(), Some(too_long.to_owned()))
             .expect_err("a long PIN was accepted");
         assert_eq!(refused.code, "auth.pin_shape", "{too_long}");
-        // And the sentence is the rule that is actually in force — this said
-        // "6 to 8 digits" for five days after the rule became four.
+        // And the sentence is the rule that is actually in force — this said "6 to 8 digits"
+        // for five days after the rule became four.
         assert!(refused.message.contains("4 digits"), "{}", refused.message);
     }
     assert!(
@@ -237,16 +200,16 @@ fn a_pin_longer_than_four_digits_is_refused_by_every_command_that_takes_one() {
         .expect("four digits is a PIN")
         .expect("a code");
 
-    // 2. Signing in. A long PIN cannot even be offered for checking, so it
-    //    never reaches Argon2 and never costs a lockout attempt.
+    // Signing in. A long PIN cannot even be offered for checking, so it never reaches Argon2
+    // and never costs a lockout attempt.
     let refused = login_on(&app, "staff_owner".to_owned(), "246813".to_owned())
         .expect_err("a long PIN was checked");
     assert_eq!(refused.code, "auth.pin_shape");
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("four digits signs in");
 
-    // 3. The recovery code. This is the door that MUST hold: it is the one
-    //    somebody reaches when they are already locked out, and a long PIN set
-    //    here would be a PIN that can never be typed again afterwards.
+    // The recovery code. This is the door that MUST hold: it is the one somebody reaches when
+    // they are already locked out, and a long PIN set here would be a PIN that can never be
+    // typed again afterwards.
     lock_now_on(&app).expect("locked");
     let refused = recover_with_code_on(
         &app,
@@ -257,32 +220,14 @@ fn a_pin_longer_than_four_digits_is_refused_by_every_command_that_takes_one() {
     .expect_err("the recovery code set a six-digit PIN");
     assert_eq!(refused.code, "auth.pin_shape");
 
-    // The refusal must not have spent the code. A shape mistake at the very
-    // last step of the way back in cannot be allowed to burn the slip.
+    // The refusal must not have spent the code.
     let fresh = recover_with_code_on(&app, code, "staff_owner".to_owned(), "1357".to_owned())
         .expect("four digits, and the code still works");
     assert_eq!(fresh.len(), 11, "{fresh}");
     login_on(&app, "staff_owner".to_owned(), "1357".to_owned()).expect("the new PIN works");
 }
 
-/// **The forgotten-PIN screen must be able to reach somebody with no PIN.**
-///
-/// The lock screen's `people` list is *who can sign in*, so it holds only staff
-/// who already have one. The recovery screen was drawing its list from that,
-/// and the two questions are not the same question — which is a way to be shut
-/// out of your own shop permanently:
-///
-/// 1. A shop has an owner and a cashier, both with PINs.
-/// 2. The owner taps **Remove the PIN** on themselves. Perfectly allowed.
-/// 3. The cashier still has one, so the counter still locks.
-/// 4. The owner is not on `people`, so the recovery code — the one thing that
-///    exists for this — has nobody it can be spent on. The shop is now a
-///    restored backup or a support visit.
-///
-/// `LockState::recoverable` is built from the permission instead of from the
-/// pad, so it holds the owner in step 4. It is the same rule
-/// `recover_with_code_on` enforces, which is the point: one rule, sent up, and
-/// no second copy of it in TypeScript to drift.
+/// The forgotten-PIN screen must be able to reach somebody with no PIN.
 #[test]
 fn the_recovery_list_holds_a_manager_who_has_no_pin() {
     let scratch = Scratch::new("recoverable");
@@ -290,9 +235,7 @@ fn the_recovery_list_holds_a_manager_who_has_no_pin() {
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
 
-    // The shop's one recovery code, issued with the first manager's PIN. There
-    // is never a second — a new code would silently retire the slip already in
-    // the drawer — so it is caught here and used at the end.
+    // The shop's one recovery code, issued with the first manager's PIN.
     let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
         .expect("pin")
         .expect("the shop's first recovery code");
@@ -312,7 +255,6 @@ fn the_recovery_list_holds_a_manager_who_has_no_pin() {
         "a cashier is not somebody the recovery code may touch"
     );
 
-    // The owner removes their own PIN — step 2 above.
     set_staff_pin_on(&app, "staff_owner".to_owned(), None).expect("pin removed");
     let state = lock_state_on(&app).expect("state");
 
@@ -339,36 +281,22 @@ fn the_recovery_list_holds_a_manager_who_has_no_pin() {
         "and the recovery code has nobody to help — this is the lockout"
     );
 
-    // And the code really does work on somebody who is on one list and not the
-    // other — the half a screen-only fix would have missed. This is the shop in
-    // step 4, with the owner shut out and the slip in their hand.
+    // And the code really does work on somebody who is on one list and not the other — the half
+    // a screen-only fix would have missed.
     lock_now_on(&app).expect("locked");
     recover_with_code_on(&app, code, "staff_owner".to_owned(), "9999".to_owned())
         .expect("the recovery code set a PIN for a manager who had none");
     login_on(&app, "staff_owner".to_owned(), "9999".to_owned()).expect("and they are back in");
 }
 
-/// **The recovery code goes on PAPER, both times it is issued.**
-///
-/// This is the same shape of bug as `closing_the_day_with_the_slip_actually_
-/// queues_it`, and it hid for the same reason. `mb_auth::recovery` said the
-/// code was *"shown once, and printed on the shop's own printer"*; the audit
-/// log read back **"New recovery code printed"**; and nothing anywhere put it
-/// on a printer. A shop that pressed *I have written it down* without a pen to
-/// hand had lost its only way back into its own counter, and its own history
-/// said a slip had come out.
-///
-/// The print failure is deliberately swallowed — the PIN and the new code hash
-/// are already committed when it runs, so a printer that is off must not turn a
-/// successful recovery into an error. **That swallow is right and stays. This
-/// is the test that says the thing being swallowed is not happening.**
+/// The recovery code goes on PAPER, both times it is issued.
 #[test]
 fn issuing_a_recovery_code_actually_queues_the_slip() {
     let scratch = Scratch::new("recovery_slip");
     let app = a_shop(&scratch);
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
 
-    // 1. The shop's first code, issued with the first manager's PIN.
+    // The shop's first code, issued with the first manager's PIN.
     let before = app.print_queue_snapshot().len();
     let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
         .expect("pin set")
@@ -385,8 +313,8 @@ fn issuing_a_recovery_code_actually_queues_the_slip() {
         after.iter().map(|j| j.what.clone()).collect::<Vec<_>>()
     );
 
-    // 2. And again when the code is SPENT, which is the half that matters more:
-    //    somebody using it is somebody who has already lost the first slip.
+    // And again when the code is SPENT, which is the half that matters more: somebody using it
+    // is somebody who has already lost the first slip.
     let before = app.print_queue_snapshot().len();
     let fresh = recover_with_code_on(&app, code, "staff_owner".to_owned(), "1357".to_owned())
         .expect("recovered");
@@ -397,8 +325,7 @@ fn issuing_a_recovery_code_actually_queues_the_slip() {
     );
 }
 
-/// **The way back in.** And the shape of it: it needs somebody who manages
-/// staff, and it retires itself.
+/// The way back in.
 #[test]
 fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
     let scratch = Scratch::new("recovery");
@@ -409,8 +336,7 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
         .expect("pin set")
         .expect("a code");
 
-    // Not for a waiter. Otherwise the code is a way to hand somebody a PIN and
-    // the run of the shop with it.
+    // Not for a waiter.
     let refused = recover_with_code_on(
         &app,
         code.clone(),
@@ -440,7 +366,6 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
     .expect("recovered");
     assert_ne!(fresh, code, "the same code came back");
 
-    // The new PIN works and the old one does not.
     assert!(login_on(&app, "staff_owner".to_owned(), "9999".to_owned()).is_ok());
     lock_now_on(&app).expect("locked");
     assert!(login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).is_err());
@@ -453,8 +378,6 @@ fn the_recovery_code_sets_a_new_pin_and_then_stops_working() {
     );
 }
 
-/// **T13, through the real command.** The rollback is the part worth checking:
-/// a refusal that left the shop half-changed would be worse than the change.
 #[test]
 fn the_last_person_who_can_manage_staff_cannot_be_removed() {
     let scratch = Scratch::new("last_admin");
@@ -487,8 +410,6 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
         .expect("the owner");
     assert_eq!(owner.status, "active", "the rollback did not happen");
 
-    // Taking the permission off the Owner role is the same refusal by another
-    // route — which is why the check asks the database rather than predicting.
     let mut role = crate::ipc::list_roles_on(&app)
         .expect("roles")
         .into_iter()
@@ -526,8 +447,8 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
     .expect("with somebody else able to manage staff, the owner may leave");
 }
 
-/// **T3.** Deactivating somebody takes effect on the next action, not the next
-/// shift — and their history stays (scope 9.15: nobody is ever deleted).
+/// Deactivating somebody takes effect on the next action, not the next shift — and their
+/// history stays.
 #[test]
 fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     let scratch = Scratch::new("left");
@@ -535,9 +456,6 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
     set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
-    // **The first PIN locks the counter**, so the owner signs in with it before
-    // setting anybody else's — which is the point of locking there and then,
-    // and is the flow a real owner walks.
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner proves it");
     set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
     lock_now_on(&app).expect("locked");
@@ -563,8 +481,8 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
         .expect_err("somebody who has left signed in");
     assert_eq!(refused.code, "auth.not_active");
 
-    // She is off the lock screen, still on the staff list, and still in the
-    // history — all three at once.
+    // She is off the lock screen, still on the staff list, and still in the history — all three
+    // at once.
     assert!(
         lock_state_on(&app)
             .expect("state")
@@ -585,7 +503,7 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     assert!(!history.entries.is_empty(), "her history went with her");
 }
 
-/// **T7.** Locking loses nothing, and switching user keeps the order.
+/// Locking loses nothing, and switching user keeps the order.
 #[test]
 fn locking_and_switching_user_do_not_touch_the_cart() {
     let scratch = Scratch::new("switch");
@@ -593,9 +511,6 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
     hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
     set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
-    // **The first PIN locks the counter**, so the owner signs in with it before
-    // setting anybody else's — which is the point of locking there and then,
-    // and is the flow a real owner walks.
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner proves it");
     set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
     lock_now_on(&app).expect("locked");
@@ -623,8 +538,8 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
     .expect("the cart survived the shift change");
 }
 
-/// The four roles are seeded once, and a shop that has edited them keeps its
-/// edits when it reopens.
+/// The four roles are seeded once, and a shop that has edited them keeps its edits when it
+/// reopens.
 #[test]
 fn the_starting_roles_are_seeded_once_and_never_put_back() {
     let scratch = Scratch::new("roles");
@@ -653,8 +568,8 @@ fn the_starting_roles_are_seeded_once_and_never_put_back() {
     assert_eq!(steward.max_discount_percent.as_deref(), Some("2.5%"));
 }
 
-/// A PIN with no role is somebody who can sign in and do nothing, which looks
-/// like a broken app rather than a locked one.
+/// A PIN with no role is somebody who can sign in and do nothing, which looks like a broken app
+/// rather than a locked one.
 #[test]
 fn a_pin_needs_a_role_behind_it() {
     let scratch = Scratch::new("pin_no_role");
@@ -679,11 +594,7 @@ fn a_pin_needs_a_role_behind_it() {
     );
 }
 
-/// The stand-in counter user has no permissions **in the database** — its
-/// authority is the in-memory session, and only while no PIN exists.
-///
-/// Otherwise `active_administrators` would count somebody who can never sign
-/// in, and the last-administrator rule would be satisfied by nobody.
+/// The stand-in counter user has no permissions in the database.
 #[test]
 fn the_stand_in_user_holds_no_permissions_on_disk() {
     let scratch = Scratch::new("stand_in");
@@ -701,14 +612,7 @@ fn the_stand_in_user_holds_no_permissions_on_disk() {
     );
 }
 
-/// **C3 — the cashier's name on the bill, on the real document.**
-///
-/// > *"The bill always says 'Cashier: Admin'. Even though a staff list exists."*
-///
-/// Until P11 this path queued P07's test slip. It now builds P06's real bill,
-/// which is the first time that template has rendered a real settled order in
-/// the app — and it does it on a shop that has filled nothing in, because that
-/// is every shop on its first day.
+/// The cashier's name on the bill, on the real document.
 #[test]
 fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
     use mb_core::{
@@ -720,9 +624,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
     let app = a_shop(&scratch);
     hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
 
-    // A line points at a menu row, so there has to be one. Found by running
-    // this: "FOREIGN KEY constraint failed" from `order_lines.item_id`, which
-    // is P04's schema doing its job.
+    // A line points at a menu row, so there has to be one.
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -810,8 +712,8 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
         })
         .expect("the shop");
 
-    // The whole point: this must not fail on a shop with no store profile, no
-    // logo and no GSTIN — which is every shop on day one.
+    // The whole point: this must not fail on a shop with no store profile, no logo and no GSTIN
+    // — which is every shop on day one.
     crate::flows::queue_bill_print(&app, "0001", &settled, &bill, "Rekha")
         .expect("the real bill could not be built");
 
@@ -823,9 +725,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// P12 — the four ways a shop takes something back, driven end to end.
-// ---------------------------------------------------------------------------
+// The four ways a shop takes something back, driven end to end.
 
 use crate::corrections::{
     cancel_order_on, day_totals_on, list_bills_on, refund_on, reprint_bill_on, void_bill_on,
@@ -902,7 +802,6 @@ fn settle_the_cart(app: &App) -> String {
     crate::flows::complete_bill_on(app).expect("settled")
 }
 
-/// **T1, T2, T3 and T9 — one walk through a shop's afternoon.**
 #[test]
 fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     let scratch = Scratch::new("void_day");
@@ -924,7 +823,7 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     assert_eq!(before.voids.paise, 0);
     assert_eq!(before.net.paise, before.gross.paise);
 
-    // T1: a void with no reason is refused, by Rust, on a direct call.
+    // A void with no reason is refused, by Rust, on a direct call.
     let target = bills[0].order_id.clone();
     let refused = void_bill_on(&app, target.clone(), "   ".to_owned(), None, None)
         .expect_err("a void with no reason was allowed");
@@ -933,7 +832,7 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     let after_void =
         void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
 
-    // T2: it keeps its number and STAYS IN THE LIST.
+    // It keeps its number and STAYS IN THE LIST.
     let voided = after_void
         .iter()
         .find(|b| b.order_id == target)
@@ -942,7 +841,7 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     assert_eq!(voided.state, "voided");
     assert_eq!(voided.void_reason.as_deref(), Some("Billed twice"));
 
-    // T3: gross - voids = net.
+    // Gross - voids = net.
     let after = day_totals_on(&app).expect("totals");
     println!(
         "\n  gross {}   voids {}   net {}   ({} bills, {} voided)",
@@ -960,7 +859,7 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
         "gross - voids != net"
     );
 
-    // T9: in the history, with before and after.
+    // In the history, with before and after.
     let history = crate::ipc::audit_trail_on(&app, None, None, None).expect("history");
     let entry = history
         .entries
@@ -988,7 +887,7 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     assert_eq!(again.code, "void.not_settled");
 }
 
-/// **T10.** The manager PIN is enforced in Rust, four ways.
+/// The manager PIN is enforced in Rust, four ways.
 #[test]
 fn a_big_void_needs_a_second_person() {
     let scratch = Scratch::new("void_approval");
@@ -1022,9 +921,7 @@ fn a_big_void_needs_a_second_person() {
     assert_eq!(refused.code, "void.needs_approval");
     assert!(refused.message.contains("manager"), "{}", refused.message);
 
-    // (b) an approver who may not void. The owner gets a PIN first, because
-    // the FIRST PIN in a shop locks the counter (P11 item 9) and everything
-    // after it would be refused as `auth.locked`.
+    // (b) an approver who may not void.
     set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
         .expect("a PIN for the owner");
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("signed back in");
@@ -1062,8 +959,7 @@ fn a_big_void_needs_a_second_person() {
     .expect("an approved void was still refused");
 }
 
-/// **T11.** Money only goes back against a voided bill, and never more than
-/// came in.
+/// Money only goes back against a voided bill, and never more than came in.
 #[test]
 fn money_goes_back_only_after_a_void() {
     let scratch = Scratch::new("refund_flow");
@@ -1126,8 +1022,6 @@ fn money_goes_back_only_after_a_void() {
     assert_eq!(totals.voids.paise, total);
 }
 
-/// **T7 and T8.** A reprint is counted and marked, and a voided bill reprints
-/// as voided rather than as a duplicate.
 #[test]
 fn a_reprint_says_which_copy_it_is() {
     let scratch = Scratch::new("reprint_flow");
@@ -1158,8 +1052,7 @@ fn a_reprint_says_which_copy_it_is() {
         "the copy did not reach the printer: {jobs:?}"
     );
 
-    // And a voided bill reprints as VOIDED — the more important fact about
-    // that piece of paper.
+    // And a voided bill reprints as VOIDED — the more important fact about that piece of paper.
     void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
     reprint_bill_on(&app, target, "Customer asked for a copy".to_owned())
         .expect("a voided bill could not be reprinted");
@@ -1171,11 +1064,7 @@ fn a_reprint_says_which_copy_it_is() {
     );
 }
 
-/// **T6.** A cancel frees the table; a void does not touch one.
-///
-/// This is also the test that proves an OPEN order reaches the disk at all —
-/// before P12 it never did, and `cancel_order` was a command that could not
-/// find anything to cancel.
+/// A cancel frees the table; a void does not touch one.
 #[test]
 fn a_cancel_frees_the_table_and_a_void_does_not() {
     let scratch = Scratch::new("free_table");
@@ -1265,8 +1154,6 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
     );
 }
 
-/// **T4 and T5.** Voiding a told item prints a slip for exactly that item, and
-/// the line is never re-sent.
 #[test]
 fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
     let scratch = Scratch::new("void_line");
@@ -1279,7 +1166,7 @@ fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
     let view = void_line_on(&app, 0, "Ordered by mistake".to_owned()).expect("voided");
     assert!(view.lines.is_empty(), "the line is still on the bill");
 
-    // T4: exactly one slip, and it is a cancellation.
+    // Exactly one slip, and it is a cancellation.
     let jobs = app.print_queue_snapshot();
     assert_eq!(
         jobs.len(),
@@ -1291,8 +1178,7 @@ fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
             .any(|j| j.reason.as_deref() == Some("cancellation"))
     );
 
-    // T5: nothing comes back. There is nothing pending and nothing over-told,
-    // so a second ticket has nothing to say.
+    // Nothing comes back.
     let nothing = crate::flows::print_kitchen_ticket_on(&app)
         .expect_err("a voided line was sent to the kitchen again");
     assert_eq!(nothing.code, "kitchen.nothing");

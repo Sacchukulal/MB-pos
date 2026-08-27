@@ -1,20 +1,4 @@
-//! **The payslip** — scope 9.14's third part, built at P30.
-//!
-//! P28 built the payroll and named this as not done. It is the piece the
-//! person being paid actually holds, so it is not decoration: a shop that
-//! cannot hand somebody a slip settles every argument about pay by memory.
-//!
-//! # It prints the arithmetic, not the answer
-//!
-//! Every figure that made the net is on the paper, in the order it was worked
-//! out, because **payroll an owner cannot check by hand is payroll they will
-//! keep doing in a notebook** — which is the reason `payroll_lines` stores one
-//! column per step rather than a total (see `SCHEMA.md`).
-//!
-//! # Everything here is already a string
-//!
-//! Same rule as every other template: the caller formats, this arranges. D2
-//! lives in mb-core and no money type reaches the paper.
+//! The payslip.
 
 use crate::doc::{Align, Document, Pattern, Style};
 use crate::paper::Paper;
@@ -24,8 +8,7 @@ use crate::paper::Paper;
 pub struct PaySlipLine {
     pub label: String,
     pub amount: String,
-    /// True for a figure that comes OFF the pay. Printed with a minus so the
-    /// column can be added up by eye.
+    /// True for a figure that comes OFF the pay.
     pub takes_away: bool,
 }
 
@@ -46,9 +29,7 @@ pub struct PayslipContext<'a> {
     pub net: &'a str,
     /// "Cash", "Bank".
     pub paid_by: &'a str,
-    /// Set when a person changed a figure by hand before approving. **It is on
-    /// the paper**, because a slip that hides it is a slip that cannot be
-    /// argued with.
+    /// Set when a person changed a figure by hand before approving.
     pub edited: bool,
 }
 
@@ -70,8 +51,7 @@ pub fn payslip_document(paper: Paper, ctx: &PayslipContext<'_>) -> Document {
     doc.row("Worked", ctx.worked_says, Style::NORMAL);
 
     doc.separator(Pattern::Dashed);
-    // **The arithmetic, one step per line.** A slip that showed only the net
-    // would be a number somebody has to trust.
+    // The arithmetic, one step per line.
     for line in ctx.lines {
         let amount = if line.takes_away {
             format!("-{}", line.amount)
@@ -94,8 +74,7 @@ pub fn payslip_document(paper: Paper, ctx: &PayslipContext<'_>) -> Document {
         );
     }
 
-    // Two lines to sign on. A payslip nobody signed is a payslip that proves
-    // nothing was handed over.
+    // Two lines to sign on.
     doc.spacer(2);
     doc.row("Received", "____________________", Style::NORMAL);
     doc.row("Paid by", "____________________", Style::NORMAL);
@@ -155,14 +134,17 @@ mod tests {
         c.lines = &lines;
         let text = text_of(&payslip_document(Paper::new(PaperKind::Mm80), &c));
 
-        assert!(text.contains("Advance recovered -\u{20b9}2,000.00"), "{text}");
+        assert!(
+            text.contains("Advance recovered -\u{20b9}2,000.00"),
+            "{text}"
+        );
         assert!(text.contains("Earned \u{20b9}23,000.00"), "{text}");
         assert!(text.contains("NET PAY \u{20b9}21,500.00"), "{text}");
     }
 
     #[test]
     fn an_edited_figure_is_on_the_paper() {
-        // **A slip that hides it is a slip that cannot be argued with.**
+        // A slip that hides it is a slip that cannot be argued with.
         let mut c = ctx();
         c.edited = true;
         let text = text_of(&payslip_document(Paper::new(PaperKind::Mm80), &c));

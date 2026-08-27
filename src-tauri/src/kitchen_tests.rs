@@ -1,10 +1,4 @@
-﻿//! **P24's tests, against a real database and the real command bodies.**
-//!
-//! `mb-core`'s `kitchen_delivery` proves the state machine in isolation. These
-//! prove the counter: that a ticket reaches the right station, that a cook's
-//! tap survives a reload, that a cancellation cannot be waved away, and — the
-//! two that matter most — that **the kitchen never goes blind and is never told
-//! twice**.
+//! `mb-core`'s `kitchen_delivery` proves the state machine in isolation.
 
 #![allow(
     clippy::expect_used,
@@ -32,8 +26,7 @@ fn a_kitchen(scratch: &Scratch, name: &str) -> App {
     app
 }
 
-/// The menu, the room and the two stations. Shared by the tests and by the
-/// demo, so what a session looks at is what the tests assert about.
+/// The menu, the room and the two stations.
 fn seed(app: &App) {
     let at = crate::flows::now();
 
@@ -41,8 +34,8 @@ fn seed(app: &App) {
         shop.db
             .transaction(|tx| {
                 let repos = Repos::new(tx);
-                // A real table, so the card says "Table 5" the way a cook
-                // reads it rather than an id.
+                // A real table, so the card says "Table 5" the way a cook reads it rather than
+                // an id.
                 repos.floor().save_section(
                     OUTLET,
                     &mb_db::repo::floor::Section {
@@ -84,9 +77,27 @@ fn seed(app: &App) {
                     )?;
                 }
                 for (id, name, category, prep, course) in [
-                    ("itm_naan", "Butter Naan", "cat_tandoor", Some(6), Some("Main")),
-                    ("itm_tikka", "Paneer Tikka", "cat_tandoor", Some(14), Some("Starter")),
-                    ("itm_noodles", "Hakka Noodles", "cat_chinese", Some(9), Some("Main")),
+                    (
+                        "itm_naan",
+                        "Butter Naan",
+                        "cat_tandoor",
+                        Some(6),
+                        Some("Main"),
+                    ),
+                    (
+                        "itm_tikka",
+                        "Paneer Tikka",
+                        "cat_tandoor",
+                        Some(14),
+                        Some("Starter"),
+                    ),
+                    (
+                        "itm_noodles",
+                        "Hakka Noodles",
+                        "cat_chinese",
+                        Some(9),
+                        Some("Main"),
+                    ),
                     ("itm_lassi", "Lassi", "cat_drinks", Some(2), None),
                 ] {
                     repos.menu().save_item(
@@ -118,20 +129,14 @@ fn seed(app: &App) {
 }
 
 /// Seat an order on a table with real menu snapshots, then tell the kitchen.
-///
-/// `kitchen::send` is exactly what the counter's "print kitchen ticket" button
-/// calls — going through the button itself would drag in a printer and a
-/// signed-in cashier, and would be testing P12 rather than P24. The snapshots
-/// are built by `billing::snapshot_for`, so the station, the course and the
-/// prep minutes travel the way they really do (crown jewel 4).
 fn order(app: &App, items: &[&str]) -> String {
     let id = seat(app, items);
     kitchen::send(app, &id, None).expect("the kitchen was told");
     id
 }
 
-/// Seat the order without telling the kitchen anything — for the course tests,
-/// which fire one course at a time.
+/// Seat the order without telling the kitchen anything — for the course tests, which fire one
+/// course at a time.
 fn seat(app: &App, items: &[&str]) -> String {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -198,11 +203,9 @@ fn tickets(app: &App, station: &str) -> Vec<kitchen::KitchenTicket> {
     kitchen::look(app, station).tickets
 }
 
-// ---------------------------------------------------------------------------
-// T1 — the right station, and nowhere else.
-// ---------------------------------------------------------------------------
+// The right station, and nowhere else.
 
-/// **T1.** The tandoor screen shows tandoor food. The wok screen does not.
+/// The tandoor screen shows tandoor food.
 #[test]
 fn a_ticket_reaches_its_own_station_and_no_other() {
     let scratch = Scratch::new("kds_station");
@@ -214,8 +217,8 @@ fn a_ticket_reaches_its_own_station_and_no_other() {
     assert_eq!(tandoor.len(), 1, "the tandoor got one ticket");
     assert_eq!(chinese.len(), 1, "the wok got one ticket");
 
-    // And each shows only its own food — a cook must not read past dishes that
-    // are not theirs to find the one that is.
+    // And each shows only its own food — a cook must not read past dishes that are not theirs
+    // to find the one that is.
     let tandoor_names: Vec<&str> = tandoor[0].lines.iter().map(|l| l.name.as_str()).collect();
     assert!(tandoor_names.contains(&"Butter Naan"));
 
@@ -224,13 +227,8 @@ fn a_ticket_reaches_its_own_station_and_no_other() {
     assert_eq!(tickets(&app, kitchen::DEFAULT_STATION).len(), 1);
 }
 
-// ---------------------------------------------------------------------------
-// T5 — BOTH DIRECTIONS. The heart of the session.
-// ---------------------------------------------------------------------------
+// BOTH DIRECTIONS.
 
-/// **T5, direction one — the kitchen must never go blind.**
-///
-/// No screen draws the ticket, so the counter prints it.
 #[test]
 fn a_ticket_no_screen_drew_goes_to_paper() {
     let scratch = Scratch::new("kds_paper");
@@ -251,11 +249,6 @@ fn a_ticket_no_screen_drew_goes_to_paper() {
     assert_eq!(after[0].tone, "printed");
 }
 
-/// **T5, direction two — and this is the one every implementation gets wrong.**
-///
-/// The tablet's power saver froze the tab. The counter printed. The tablet
-/// wakes up and acks. If that ack were honoured the ticket becomes new work
-/// while the paper is on the rail, and the kitchen cooks it twice.
 #[test]
 fn a_screen_that_comes_back_does_not_make_printed_work_new_again() {
     let scratch = Scratch::new("kds_return");
@@ -303,12 +296,10 @@ fn a_screen_that_draws_it_stops_the_printer() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// T4 — bump and recall, both levels, and they survive a reload.
-// ---------------------------------------------------------------------------
+// Bump and recall, both levels, and they survive a reload.
 
-/// **T4.** Clearing a card, and bringing it back — because a cook bumping the
-/// wrong ticket is not an edge case, it is Tuesday.
+/// Clearing a card, and bringing it back — because a cook bumping the wrong ticket is not an
+/// edge case, it is Tuesday.
 #[test]
 fn a_card_can_be_cleared_and_brought_back() {
     let scratch = Scratch::new("kds_bump");
@@ -320,9 +311,7 @@ fn a_card_can_be_cleared_and_brought_back() {
     kitchen::bump_on(&app, id.clone()).expect("cleared");
     assert!(tickets(&app, "Tandoor").is_empty(), "a cleared card stayed");
 
-    // **The way back must be reachable.** The card left the screen the moment
-    // it was cleared, so an undo that lives on the card is an undo nobody can
-    // press — the view has to offer it, and name it.
+    // The way back must be reachable.
     let bar = kitchen::look(&app, "Tandoor");
     let offered = bar.last_cleared.expect("no way to bring the card back");
     assert_eq!(offered.id, id);
@@ -342,8 +331,6 @@ fn a_card_can_be_cleared_and_brought_back() {
     );
 }
 
-/// **T4's other half, and the owner asked for it by name:** tick one dish as it
-/// comes off the pass, and tick it again to undo.
 #[test]
 fn one_dish_can_be_ticked_off_and_unticked() {
     let scratch = Scratch::new("kds_line");
@@ -360,19 +347,12 @@ fn one_dish_can_be_ticked_off_and_unticked() {
         "ticking one dish ticked another"
     );
 
-    // **Pressing it again unticks it.** An undo behind a different button is
-    // an undo a cook does not find.
+    // Pressing it again unticks it.
     kitchen::bump_line_on(&app, ticket.id.clone(), key.clone()).expect("unticked");
-    assert!(
-        tickets(&app, "Tandoor")[0]
-            .lines
-            .iter()
-            .all(|l| !l.is_done)
-    );
+    assert!(tickets(&app, "Tandoor")[0].lines.iter().all(|l| !l.is_done));
 }
 
-/// **Bump state is on disk, not in the screen.** A tablet reloads and the
-/// ticket must not come back.
+/// Bump state is on disk, not in the screen.
 #[test]
 fn a_cooks_tap_survives_the_screen_reloading() {
     let scratch = Scratch::new("kds_reload");
@@ -386,12 +366,8 @@ fn a_cooks_tap_survives_the_screen_reloading() {
     assert!(kitchen::look(&app, "Tandoor").tickets.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// T3 — a cancellation cannot be dismissed, only acknowledged.
-// ---------------------------------------------------------------------------
+// A cancellation cannot be dismissed, only acknowledged.
 
-/// **T3, and D107.** Food already cooking gets thrown away; food not started
-/// gets cooked for nobody. So it stays until somebody presses "Got it".
 #[test]
 fn a_cancellation_stays_until_somebody_says_they_saw_it() {
     let scratch = Scratch::new("kds_cancel");
@@ -412,26 +388,28 @@ fn a_cancellation_stays_until_somebody_says_they_saw_it() {
     .expect("cancelled");
 
     let shown = tickets(&app, "Tandoor");
-    assert_eq!(shown.len(), 1, "a cancelled ticket vanished — a cook is still cooking it");
+    assert_eq!(
+        shown.len(),
+        1,
+        "a cancelled ticket vanished — a cook is still cooking it"
+    );
     assert!(shown[0].is_cancelled);
     assert_eq!(shown[0].tone, "cancelled");
     assert!(shown[0].says.contains("CANCELLED"));
 
-    // **It beats late**, which is the only other thing that shouts. A cook
-    // whose screen is all red does not know which one to look at.
+    // It beats late, which is the only other thing that shouts.
     let hours_later = kitchen::look_at(&app, "Tandoor", later(9_999));
     assert_eq!(hours_later.tickets[0].tone, "cancelled");
 
     kitchen::acknowledge_on(&app, id).expect("got it");
     let after = tickets(&app, "Tandoor");
-    assert!(!after[0].is_cancelled, "it kept shouting after being acknowledged");
+    assert!(
+        !after[0].is_cancelled,
+        "it kept shouting after being acknowledged"
+    );
 }
 
-// ---------------------------------------------------------------------------
-// T6 — courses.
-// ---------------------------------------------------------------------------
-
-/// **T6.** Firing the mains does not re-show the starters.
+/// Firing the mains does not re-show the starters.
 #[test]
 fn firing_the_next_course_does_not_re_show_the_first() {
     let scratch = Scratch::new("kds_course");
@@ -443,7 +421,11 @@ fn firing_the_next_course_does_not_re_show_the_first() {
     let starters = tickets(&app, "Tandoor");
     assert_eq!(starters.len(), 1, "the starters did not go");
     let started: Vec<&str> = starters[0].lines.iter().map(|l| l.name.as_str()).collect();
-    assert_eq!(started, vec!["Paneer Tikka"], "the mains went with the starters");
+    assert_eq!(
+        started,
+        vec!["Paneer Tikka"],
+        "the mains went with the starters"
+    );
 
     // The waiter clears the plates and fires the mains.
     let waiting = kitchen::look(&app, "Tandoor").waiting_courses;
@@ -458,18 +440,20 @@ fn firing_the_next_course_does_not_re_show_the_first() {
         .into_iter()
         .filter(|t| t.course == "Main")
         .collect();
-    assert_eq!(mains.len(), 1, "the mains were not fired as their own ticket");
+    assert_eq!(
+        mains.len(),
+        1,
+        "the mains were not fired as their own ticket"
+    );
     let names: Vec<&str> = mains[0].lines.iter().map(|l| l.name.as_str()).collect();
-    assert_eq!(names, vec!["Butter Naan"], "the starters came back with the mains");
+    assert_eq!(
+        names,
+        vec!["Butter Naan"],
+        "the starters came back with the mains"
+    );
 }
 
-/// **A firing that named no course covered the whole order, so nothing on it
-/// may be fired again.**
-///
-/// Found by running the app and looking at it: the screen offered "Main" on
-/// three orders whose food had already gone to the tandoor, because a send-all
-/// stores no course name and nothing read that as "everything". Pressing it
-/// would have cooked the order twice.
+/// A firing that named no course covered the whole order, so nothing on it may be fired again.
 #[test]
 fn a_course_that_already_went_is_never_offered_again() {
     let scratch = Scratch::new("kds_refire");
@@ -486,8 +470,8 @@ fn a_course_that_already_went_is_never_offered_again() {
     assert!(refused.is_err(), "the kitchen was told twice");
 }
 
-/// The same rule the other way round: firing the starters must not hide the
-/// mains, which have not gone anywhere.
+/// The same rule the other way round: firing the starters must not hide the mains, which have
+/// not gone anywhere.
 #[test]
 fn firing_one_course_leaves_the_others_on_offer() {
     let scratch = Scratch::new("kds_partial");
@@ -499,9 +483,7 @@ fn firing_one_course_leaves_the_others_on_offer() {
     let courses: Vec<&str> = waiting.iter().map(|w| w.course.as_str()).collect();
     assert_eq!(courses, vec!["Main"], "the wrong courses are on offer");
 
-    // **And the button says which table AND which bill.** Two parties share a
-    // table often enough that "Table 5 · Main" three times is three ways to
-    // fire the wrong one.
+    // And the button says which table AND which bill.
     assert!(
         waiting[0].place.contains("Table 5") && waiting[0].place.contains('#'),
         "the fire button does not say which order: {}",
@@ -509,9 +491,7 @@ fn firing_one_course_leaves_the_others_on_offer() {
     );
 }
 
-/// **The card says the table's LABEL, never its id.** A cook shouts "table
-/// five" — `tbl_5` on the kitchen wall is what a customer would see and call
-/// broken.
+/// The card says the table's LABEL, never its id.
 #[test]
 fn a_card_names_the_table_the_way_a_cook_says_it() {
     let scratch = Scratch::new("kds_label");
@@ -522,8 +502,7 @@ fn a_card_names_the_table_the_way_a_cook_says_it() {
     assert_eq!(place, "Table 5", "the raw id reached the kitchen wall");
 }
 
-/// **A shop that does not use courses never sees one.** Every dish with no
-/// course fires together, exactly as it does today.
+/// A shop that does not use courses never sees one.
 #[test]
 fn a_menu_with_no_courses_fires_everything_at_once() {
     let scratch = Scratch::new("kds_nocourse");
@@ -539,12 +518,8 @@ fn a_menu_with_no_courses_fires_everything_at_once() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Timers.
-// ---------------------------------------------------------------------------
-
-/// **The dish's own prep time decides late** (scope 3.6), and the ticket's
-/// target is its slowest dish — the order is ready when the last thing is.
+/// The dish's own prep time decides late, and the ticket's target is its slowest dish — the
+/// order is ready when the last thing is.
 #[test]
 fn the_target_is_the_slowest_dish_on_the_ticket() {
     let scratch = Scratch::new("kds_target");
@@ -555,14 +530,8 @@ fn the_target_is_the_slowest_dish_on_the_ticket() {
     assert_eq!(ticket.expected, "14 min");
 }
 
-// ---------------------------------------------------------------------------
-// D55 — a session must be able to SEE the screen it built.
-// ---------------------------------------------------------------------------
-
-/// **Build a shop the real app can be opened on, so this screen can be looked
-/// at rather than only asserted about.**
-///
-/// Ignored, so it never runs in the suite. Run it deliberately:
+/// Build a shop the real app can be opened on, so this screen can be looked at rather than only
+/// asserted about.
 ///
 /// ```text
 /// $env:MB_DEMO="C:\some\scratch\demo"
@@ -570,9 +539,6 @@ fn the_target_is_the_slowest_dish_on_the_ticket() {
 /// $env:APPDATA="C:\some\scratch\demo"   # the app's whole world, isolated
 /// cargo run -p magic-bill
 /// ```
-///
-/// `APPDATA` is what `mb_db::locate::default_config_dir` reads, so pointing it
-/// at a scratch folder means a demo can never touch a real shop's data.
 #[test]
 #[ignore = "D55: run by hand to look at the screen, not part of the suite"]
 fn demo_kitchen() {
@@ -589,26 +555,26 @@ fn demo_kitchen() {
     app.open_shop(db, db_path.clone());
     seed(&app);
 
-    // Several tables of food, each at a different point in its life, so every
-    // state on the screen is on screen at once.
+    // Several tables of food, each at a different point in its life, so every state on the
+    // screen is on screen at once.
     let hot = order(&app, &["itm_naan", "itm_tikka"]);
     let started = order(&app, &["itm_noodles"]);
     let doomed = order(&app, &["itm_naan"]);
     let _quiet = order(&app, &["itm_lassi"]);
 
-    // A table part way through its meal: the starters have gone, the mains
-    // are waiting for the waiter to fire them (scope 3.5).
+    // A table part way through its meal: the starters have gone, the mains are waiting for the
+    // waiter to fire them.
     let courses = seat(&app, &["itm_tikka", "itm_naan"]);
     kitchen::send(&app, &courses, Some("Starter")).expect("starters away");
 
-    for id in kitchen::look(&app, "Tandoor").tickets.iter().map(|t| t.id.clone()) {
+    for id in kitchen::look(&app, "Tandoor")
+        .tickets
+        .iter()
+        .map(|t| t.id.clone())
+    {
         kitchen::shown_on(&app, id).expect("drawn");
     }
-    kitchen::shown_on(
-        &app,
-        kitchen::look(&app, "Chinese").tickets[0].id.clone(),
-    )
-    .expect("drawn");
+    kitchen::shown_on(&app, kitchen::look(&app, "Chinese").tickets[0].id.clone()).expect("drawn");
 
     // One order cancelled, so the loudest state is visible too.
     app.with_shop(|shop| {
@@ -631,11 +597,14 @@ fn demo_kitchen() {
 
     println!("demo ready: {}", db_path.display());
     println!("hot={hot} started={started} cancelled={doomed}");
-    println!("now: $env:APPDATA=\"{}\"; cargo run -p magic-bill", root.display());
+    println!(
+        "now: $env:APPDATA=\"{}\"; cargo run -p magic-bill",
+        root.display()
+    );
 }
 
-/// **A ticket that has gone past its own target shouts** — and it shouts on
-/// the dish's own time, not on one number for the whole menu (scope 3.6).
+/// A ticket that has gone past its own target shouts — and it shouts on the dish's own time,
+/// not on one number for the whole menu.
 #[test]
 fn a_ticket_goes_amber_and_then_red_on_its_own_time() {
     let scratch = Scratch::new("kds_late");
@@ -644,13 +613,23 @@ fn a_ticket_goes_amber_and_then_red_on_its_own_time() {
     order(&app, &["itm_naan"]);
 
     let fresh = kitchen::look(&app, "Tandoor").tickets.remove(0);
-    assert_eq!(fresh.tone, "new", "a ticket one second old was already late");
+    assert_eq!(
+        fresh.tone, "new",
+        "a ticket one second old was already late"
+    );
 
-    let five = kitchen::look_at(&app, "Tandoor", later(5 * 60)).tickets.remove(0);
+    let five = kitchen::look_at(&app, "Tandoor", later(5 * 60))
+        .tickets
+        .remove(0);
     assert_ne!(five.tone, "late", "it went red before its own target");
 
-    let seven = kitchen::look_at(&app, "Tandoor", later(7 * 60)).tickets.remove(0);
-    assert_eq!(seven.tone, "late", "six-minute naan was not late after seven");
+    let seven = kitchen::look_at(&app, "Tandoor", later(7 * 60))
+        .tickets
+        .remove(0);
+    assert_eq!(
+        seven.tone, "late",
+        "six-minute naan was not late after seven"
+    );
     assert!(
         seven.waiting.contains("min"),
         "the card does not say how long it has been waiting: {}",
@@ -658,18 +637,7 @@ fn a_ticket_goes_amber_and_then_red_on_its_own_time() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Scope 3.1 — the tandoor's food goes to the tandoor's printer.
-//
-// The owner, 2026-08-17: *"below catogory wise items selection printer, and
-// more importently just not show off, make it functional also, cross check
-// weather its functions working or not."*
-//
-// They were right to ask. `route_category` had written a row per category
-// since P17 and the settings screen had drawn a dropdown per category, and
-// **no print path had ever read either.** `print_kitchen_ticket_on` asked
-// `default_printer` and sent every ticket there.
-// ---------------------------------------------------------------------------
+// The tandoor's food goes to the tandoor's printer.
 
 /// Put a printer on this shop and hand back its id.
 fn a_station(app: &App, name: &str) -> String {
@@ -697,11 +665,7 @@ fn a_station(app: &App, name: &str) -> String {
         .clone()
 }
 
-/// **Two stations, two rolls, and the right food on each.**
-///
-/// This drives `print_kitchen_ticket_on` — the actual button — rather than
-/// `kitchen::send`, because the routing being tested lives on the paper path
-/// and not on the screen path.
+/// Two stations, two rolls, and the right food on each.
 #[test]
 fn each_category_goes_to_its_own_printer() {
     let scratch = Scratch::new("kitchen_routing");
@@ -755,12 +719,7 @@ fn each_category_goes_to_its_own_printer() {
     );
 }
 
-/// **And a shop with no routes still gets exactly one ticket.**
-///
-/// The grouping is by PRINTER, not by category, and getting that wrong would
-/// be a worse bug than the one being fixed: three categories on a bill would
-/// become three rolls of paper, which a cook reads as the counter sending
-/// duplicates.
+/// And a shop with no routes still gets exactly one ticket.
 #[test]
 fn an_unrouted_shop_still_prints_one_ticket() {
     let scratch = Scratch::new("kitchen_one_ticket");
@@ -801,42 +760,15 @@ fn an_unrouted_shop_still_prints_one_ticket() {
     assert_eq!(tickets[0].printer, "Counter");
 }
 
-/// **Ageing is done by moving the clock, not by rewriting the row.**
-///
-/// `look_at` and `print_what_nobody_drew_at` take the time they should judge
-/// against, so "twenty-one seconds later" and "an hour later" cost a
-/// millisecond each. Editing `sent_at` behind the code's back would test a
-/// database, not the rule.
+/// Ageing is done by moving the clock, not by rewriting the row.
 fn later(seconds: i64) -> mb_core::Timestamp {
-    mb_core::Timestamp::from_millis(
-        crate::flows::now().millis().saturating_add(seconds * 1_000),
-    )
+    mb_core::Timestamp::from_millis(crate::flows::now().millis().saturating_add(seconds * 1_000))
 }
 
-// ---------------------------------------------------------------------------
-// FIX PLAN 1 — the owner's round of 22 August 2026.
-//
-// **One press made two rolls of paper.** The button prints the ticket and also
-// tells the kitchen screen; twenty seconds later, when no screen had drawn it,
-// the fallback printed the SAME ORDER again. It asked `default_printer` — the
-// BILL printer — and it printed the whole cart instead of what the kitchen had
-// not seen. Both are the opposite of what the button does.
-//
-// What a shop actually suffers depends on how its printers are set up, and
-// both endings are bad:
-//
-//   one printer, role "both"   -> the whole order printed a second time
-//   separate bill and kitchen  -> the queue REFUSES a kitchen job on a bill
-//                                 printer, so the ticket is silently lost and
-//                                 the delivery is still marked "printed"
-//
-// It survived 1,344 tests because every kitchen test drove `kitchen::send`
-// directly, never the button, and used one printer whose role was "both" —
-// the one arrangement where choosing the bill printer cannot be seen.
-// ---------------------------------------------------------------------------
+// FIX PLAN 1.
 
-/// A printer with a stated ROLE, so "the bill printer" and "the kitchen
-/// printer" can be two different machines and the wrong one can be caught.
+/// A printer with a stated ROLE, so "the bill printer" and "the kitchen printer" can be two
+/// different machines and the wrong one can be caught.
 fn a_printer(app: &App, name: &str, role: &str, is_default: bool) -> String {
     let view = crate::settings::printers::save_printer_on(
         app,
@@ -888,11 +820,6 @@ fn kitchen_paper(app: &App) -> Vec<crate::state::PrintJobView> {
         .collect()
 }
 
-/// **The owner's bug, in the owner's own shop.** One printer that does both
-/// jobs — the commonest small-shop counter — and one press of the button.
-///
-/// Before the fix this printed the naan, and then printed the whole order
-/// again twenty seconds later, because nothing had drawn it on a screen.
 #[test]
 fn one_press_makes_one_ticket_when_one_printer_does_both_jobs() {
     let scratch = Scratch::new("fix1_one_press_both");
@@ -901,7 +828,11 @@ fn one_press_makes_one_ticket_when_one_printer_does_both_jobs() {
     a_naan_on_table_5(&app);
 
     crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
-    assert_eq!(kitchen_paper(&app).len(), 1, "the press itself printed twice");
+    assert_eq!(
+        kitchen_paper(&app).len(),
+        1,
+        "the press itself printed twice"
+    );
 
     // Nobody draws it, and the fallback comes round.
     let printed = kitchen::print_what_nobody_drew_at(&app, later(ACK_SECONDS + 1));
@@ -913,26 +844,14 @@ fn one_press_makes_one_ticket_when_one_printer_does_both_jobs() {
         "the fallback printed the order a second time: {paper:?}"
     );
 
-    // **And it says nothing went to paper, because nothing did.**
-    //
-    // This counts what the fallback actually printed, and the counter reads
-    // that number. Found on the owner's counter the morning after the fix: the
-    // duplicate was gone, but the log still said "went to paper (printed)"
-    // twenty seconds after every press, which is the exact sentence the bug
-    // used to write. A log that cries wolf about a bug that has been fixed is
-    // its own defect.
+    // And it says nothing went to paper, because nothing did.
     assert_eq!(
         printed, 0,
         "the fallback reported paper for a ticket the counter had already printed"
     );
 }
 
-/// **And a kitchen ticket is never lost in a shop with two machines.**
-///
-/// Here the fallback has real work: lines the kitchen has not seen, with no
-/// paper behind them — the shape a fired course leaves. Before the fix it
-/// asked for the bill printer, the queue refused the job, and the delivery was
-/// marked "printed" all the same. The kitchen went blind and nothing said so.
+/// And a kitchen ticket is never lost in a shop with two machines.
 #[test]
 fn a_pending_ticket_reaches_the_kitchen_printer_and_is_not_lost() {
     let scratch = Scratch::new("fix1_not_lost");
@@ -948,12 +867,19 @@ fn a_pending_ticket_reaches_the_kitchen_printer_and_is_not_lost() {
         .expect("a cart")
         .expect("parked");
     kitchen::send(&app, &order_id, None).expect("the screen was told");
-    assert!(kitchen_paper(&app).is_empty(), "nothing should be on paper yet");
+    assert!(
+        kitchen_paper(&app).is_empty(),
+        "nothing should be on paper yet"
+    );
 
     let _ = kitchen::print_what_nobody_drew_at(&app, later(ACK_SECONDS + 1));
 
     let paper = kitchen_paper(&app);
-    assert_eq!(paper.len(), 1, "the pending ticket never reached paper: {paper:?}");
+    assert_eq!(
+        paper.len(),
+        1,
+        "the pending ticket never reached paper: {paper:?}"
+    );
     assert_eq!(
         paper[0].printer, "Kitchen printer",
         "a kitchen ticket went to the wrong machine: {:?}",
@@ -974,11 +900,7 @@ fn a_pending_ticket_reaches_the_kitchen_printer_and_is_not_lost() {
     );
 }
 
-/// **A cancellation slip is a kitchen ticket, so it goes to the kitchen.**
-///
-/// It carries the words "stop cooking this", and it was being sent to the
-/// counter's bill printer — where, in a shop with a real kitchen printer, the
-/// queue refuses it outright and the cook keeps cooking.
+/// A cancellation slip is a kitchen ticket, so it goes to the kitchen.
 #[test]
 fn a_cancellation_slip_goes_to_the_kitchen_printer() {
     let scratch = Scratch::new("fix1_cancel");
@@ -998,7 +920,11 @@ fn a_cancellation_slip_goes_to_the_kitchen_printer() {
         .expect("cancelled");
 
     let paper = kitchen_paper(&app);
-    assert_eq!(paper.len(), before + 1, "no cancellation slip was printed: {paper:?}");
+    assert_eq!(
+        paper.len(),
+        before + 1,
+        "no cancellation slip was printed: {paper:?}"
+    );
     let slip = paper.last().expect("a slip");
     assert_eq!(
         slip.printer, "Kitchen printer",
@@ -1010,14 +936,7 @@ fn a_cancellation_slip_goes_to_the_kitchen_printer() {
     );
 }
 
-/// **A dine-in order with no table is refused BEFORE the paper** — FIX PLAN 1,
-/// C1.
-///
-/// The rule existed. It sat in `park_open_order`, which the kitchen flow calls
-/// at step 2b — *after* the tickets have already been queued. So the paper went
-/// out, the cook started cooking, and only then did the counter say the order
-/// could not be saved. At the till the same rule fired only at settle, which is
-/// after the customer has paid.
+/// A dine-in order with no table is refused BEFORE the paper.
 #[test]
 fn a_dine_in_order_with_no_table_prints_nothing() {
     let scratch = Scratch::new("fix1_no_table");
