@@ -12,23 +12,27 @@
   min-height: 0;
 }
 
-/* The left column: the top row, then the floor with the processing list beside it. */
+/*
+ * The left column: the search row over the floor, and beside them the processing head over its
+ * list. The list's column keeps its width; only the list folds, up and down.
+ */
 .mb-billing__side {
   grid-column: 1;
   grid-row: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-field);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--queue-width);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--gap-field) var(--space-4);
   min-width: 0;
   min-height: 0;
 }
 
-/* The top row: the search box, New order, and the processing head at the far end. */
+/* The top row: the search box and New order. */
 .mb-billbar {
   display: flex;
-  flex: none;
   align-items: center;
   gap: var(--gap-field);
+  min-width: 0;
 }
 
 /* The search box is FIRST, and it is one width. */
@@ -36,30 +40,6 @@
   flex: none;
   width: var(--find-width);
   position: relative;
-}
-
-.mb-billbar > .mb-processing__head {
-  margin-left: auto;
-}
-
-/*
- * The floor and the processing list. The list's column goes to nothing when folded, with the
- * product's own motion, and the tiles reflow as it moves.
- */
-.mb-billing__floorrow {
-  display: grid;
-  flex: 1;
-  grid-template-columns: minmax(0, 1fr) 0;
-  column-gap: 0;
-  min-height: 0;
-  transition:
-    grid-template-columns var(--motion-normal) var(--ease),
-    column-gap var(--motion-normal) var(--ease);
-}
-
-.mb-billing__floorrow--open {
-  grid-template-columns: minmax(0, 1fr) var(--queue-width);
-  column-gap: var(--space-4);
 }
 
 /* The order type takes the cart's column, hard against its right edge. */
@@ -428,11 +408,12 @@
 
 /* Processing orders: sent to the kitchen, not yet billed. */
 
-/* The head lives in the top row whether the list is open or folded. */
+/* The head lives in the top row, as wide as its list, whether the list is open or folded. */
 .mb-processing__head {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--gap-inline);
+  width: 100%;
   height: var(--target-min);
   padding: 0 var(--space-3);
   background: var(--surface);
@@ -457,10 +438,14 @@
 }
 
 .mb-processing__title {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* The list folds UP into its head: no rows when folded, and the column beside it closes too. */
+/* The list folds UP into its head, with the product's own motion: no rows when folded. */
 .mb-processing__fold {
   display: grid;
   grid-template-rows: 0fr;
@@ -470,21 +455,26 @@
   transition: grid-template-rows var(--motion-normal) var(--ease);
 }
 
-.mb-billing__floorrow--open .mb-processing__fold {
+.mb-processing__fold--open {
   grid-template-rows: 1fr;
 }
 
-/* Keeps its width while the column moves, so the rows do not re-wrap on the way. */
+/* Fades as it folds, so a folded panel leaves no edge under the head. */
 .mb-processing__panel {
   display: flex;
   flex-direction: column;
-  min-width: var(--queue-width);
   min-height: 0;
   overflow: hidden;
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--level-raised);
+  opacity: 0;
+  transition: opacity var(--motion-normal) var(--ease);
+}
+
+.mb-processing__fold--open .mb-processing__panel {
+  opacity: 1;
 }
 
 /* Small right pad: the scrollbar sits inside it. */

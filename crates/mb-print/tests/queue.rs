@@ -999,3 +999,41 @@ fn the_typeface_survives_being_parked_and_picked_up_again() {
     );
     second.shutdown();
 }
+
+/// One press for every parked job: all back in, or all gone.
+#[test]
+fn every_parked_job_can_be_retried_or_dismissed_at_once() {
+    let fake = Arc::new(Recorder::default());
+    fake.fail_first.store(u32::MAX, Ordering::SeqCst);
+    let queue = Queue::start_with_transports(
+        vec![printer("kitchen")],
+        Arc::new(MemoryStore::new()),
+        font(),
+        quick(),
+        Arc::new(FakeTransports::new(vec![("kitchen", Arc::clone(&fake))])),
+    );
+    let parked = |queue: &Queue, ids: &[&String]| {
+        let seen = queue.snapshot();
+        ids.iter()
+            .all(|id| seen.iter().any(|s| s.id == **id && s.state == JobState::Parked))
+    };
+
+    let first = queue.enqueue(ticket("kitchen")).expect("queued");
+    let second = queue.enqueue(ticket("kitchen")).expect("queued");
+    assert!(until(|| parked(&queue, &[&first, &second])));
+
+    // The printer is on now: one press puts both back, and both print.
+    fake.fail_first.store(0, Ordering::SeqCst);
+    assert_eq!(queue.retry_parked().expect("retried"), 2);
+    assert!(until(|| fake.sent.lock().unwrap().len() == 2));
+    assert!(until(|| queue.snapshot().is_empty()), "printed means gone");
+
+    // And when it is not: one press throws both away.
+    fake.fail_first.store(u32::MAX, Ordering::SeqCst);
+    let third = queue.enqueue(ticket("kitchen")).expect("queued");
+    let fourth = queue.enqueue(ticket("kitchen")).expect("queued");
+    assert!(until(|| parked(&queue, &[&third, &fourth])));
+    assert_eq!(queue.dismiss_parked().expect("dismissed"), 2);
+    assert!(queue.snapshot().is_empty());
+    queue.shutdown();
+}

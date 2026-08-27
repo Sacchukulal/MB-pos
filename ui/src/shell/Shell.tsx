@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, Icon, Modal, useToast, type IconName } from '../kit';
+import { Button, Icon, Modal, plural, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -341,6 +341,24 @@ export function Shell() {
     [toast],
   );
 
+  /** One press for every job that did not print. */
+  const onRetryAll = useCallback(async () => {
+    try {
+      const put = await call('retry_parked_print_jobs');
+      toast.show('info', `Trying ${plural(put, 'print')} again.`);
+    } catch (cause) {
+      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+    }
+  }, [toast]);
+
+  const onDismissAll = useCallback(async () => {
+    try {
+      await call('dismiss_parked_print_jobs');
+    } catch (cause) {
+      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+    }
+  }, [toast]);
+
   // Everything this person may open.
   const held = lock?.permissions ?? [];
   const allowed = SCREENS.filter((item) => {
@@ -477,6 +495,8 @@ export function Shell() {
         onClose={() => setQueueOpen(false)}
         onRetry={onRetry}
         onDismiss={onDismiss}
+        onRetryAll={onRetryAll}
+        onDismissAll={onDismissAll}
       />
 
       {/*
@@ -795,21 +815,42 @@ function window_removeEscape(handler: (event: KeyboardEvent) => void) {
   document.removeEventListener('keydown', handler);
 }
 
-function PrintQueuePanel({
+export function PrintQueuePanel({
   open,
   jobs,
   onClose,
   onRetry,
   onDismiss,
+  onRetryAll,
+  onDismissAll,
 }: {
   open: boolean;
   jobs: readonly PrintJobView[];
   onClose: () => void;
   onRetry: (id: string) => void;
   onDismiss: (id: string) => void;
+  /** The same two things, for every parked job at once. */
+  onRetryAll: () => void;
+  onDismissAll: () => void;
 }) {
+  const parked = jobs.filter((job) => job.needsAttention).length;
   return (
-    <Modal open={open} title="Printing" onClose={onClose} wide>
+    <Modal
+      open={open}
+      title="Printing"
+      onClose={onClose}
+      wide
+      actions={
+        parked > 1 ? (
+          <>
+            <Button variant="quiet" onClick={onDismissAll}>
+              Give up on all {parked}
+            </Button>
+            <Button onClick={onRetryAll}>Try all {parked} again</Button>
+          </>
+        ) : undefined
+      }
+    >
       <div className="mb-queue__panel">
         {jobs.length === 0 ? (
           <span className="mb-muted">Everything has printed.</span>

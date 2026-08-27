@@ -3,6 +3,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import type { PrintJobView } from '../src/ipc/generated/PrintJobView';
+
 // The title bar draws its own minimise/maximise/close, so it asks Tauri for the window.
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
@@ -28,7 +30,7 @@ vi.mock('../src/ipc/call', () => ({
 /** How many people are signed in, from the shell's point of view. */
 let signedInAs: string | null = null;
 
-const { Shell } = await import('../src/shell/Shell');
+const { Shell, PrintQueuePanel } = await import('../src/shell/Shell');
 const { ToastProvider } = await import('../src/kit');
 const { ThemeProvider } = await import('../src/theme/ThemeProvider');
 
@@ -153,4 +155,49 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
     target: { value: 'dosa' },
   });
   expect(await screen.findByRole('option', { name: /Masala Dosa/ })).toBeTruthy();
+});
+
+/** Two parked jobs or more get one press for all of them; one does not need it. */
+it('offers one press for every job that did not print', () => {
+  const parked = (id: string): PrintJobView => ({
+    id,
+    printer: 'TVS',
+    what: 'Kitchen ticket',
+    state: 'NOT PRINTED — needs you',
+    needsAttention: true,
+    reason: `table ${id}`,
+    lastError: 'the printer did not finish within 90 seconds',
+  });
+  const onRetryAll = vi.fn();
+  const onDismissAll = vi.fn();
+  const { rerender } = render(
+    <PrintQueuePanel
+      open
+      jobs={[parked('3'), parked('4')]}
+      onClose={vi.fn()}
+      onRetry={vi.fn()}
+      onDismiss={vi.fn()}
+      onRetryAll={onRetryAll}
+      onDismissAll={onDismissAll}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Try all 2 again' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Give up on all 2' }));
+  expect(onRetryAll).toHaveBeenCalledTimes(1);
+  expect(onDismissAll).toHaveBeenCalledTimes(1);
+  // Each job keeps its own two, so one can still be treated differently.
+  expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(2);
+
+  rerender(
+    <PrintQueuePanel
+      open
+      jobs={[parked('3')]}
+      onClose={vi.fn()}
+      onRetry={vi.fn()}
+      onDismiss={vi.fn()}
+      onRetryAll={onRetryAll}
+      onDismissAll={onDismissAll}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: /Try all/ })).toBeNull();
 });

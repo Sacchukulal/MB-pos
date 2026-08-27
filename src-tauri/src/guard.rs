@@ -51,7 +51,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // Making a customer's invoice out of a bill that already exists is reading, not billing —
     // the same authority as looking at the bill list.
     ("bill_pdf", Access::Needs(Permission::ReportsView)),
-    ("preview_kitchen", Access::Needs(Permission::BillCreate)),
     ("current_cart", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
     ("cart_set_qty", Access::Needs(Permission::BillCreate)),
@@ -91,6 +90,8 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // therefore a thing it permits.
     ("retry_print_job", Access::Needs(Permission::BillReprint)),
     ("dismiss_print_job", Access::Needs(Permission::BillReprint)),
+    ("retry_parked_print_jobs", Access::Needs(Permission::BillReprint)),
+    ("dismiss_parked_print_jobs", Access::Needs(Permission::BillReprint)),
     ("list_staff", Access::Needs(Permission::StaffManage)),
     ("save_staff_member", Access::Needs(Permission::StaffManage)),
     ("set_staff_pin", Access::Needs(Permission::StaffManage)),

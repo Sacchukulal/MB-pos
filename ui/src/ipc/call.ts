@@ -119,7 +119,6 @@ export interface Commands {
   /** The REAL bill for the REAL order, before it prints. */
   preview_order: { args: { orderId: string | null }; returns: PreviewDoc };
   /** The kitchen ticket that would print right now — the delta, as sent. */
-  preview_kitchen: { args: { orderId: string | null }; returns: PreviewDoc };
   retry_print_job: { args: { id: string }; returns: void };
 
   // The billing screen.
@@ -166,6 +165,8 @@ export interface Commands {
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
+  retry_parked_print_jobs: { args: void; returns: number };
+  dismiss_parked_print_jobs: { args: void; returns: number };
 
   // Signing in, the people and the history.
   lock_state: { args: void; returns: LockState };

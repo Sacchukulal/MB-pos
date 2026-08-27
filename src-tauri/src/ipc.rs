@@ -214,6 +214,30 @@ pub fn dismiss_print_job(app: tauri::State<'_, App>, id: String) -> UiResult<()>
     app.with_shop(|shop| shop.queue.dismiss(&id).map_err(|e| words::from_print(&e)))
 }
 
+/// Every job that did not print, back in the queue in one press.
+#[tauri::command]
+pub fn retry_parked_print_jobs(app: tauri::State<'_, App>) -> UiResult<u32> {
+    guard::require(&app, Permission::BillReprint)?;
+    app.with_shop(|shop| {
+        shop.queue
+            .retry_parked()
+            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+            .map_err(|e| words::from_print(&e))
+    })
+}
+
+/// Every job that did not print, given up on in one press.
+#[tauri::command]
+pub fn dismiss_parked_print_jobs(app: tauri::State<'_, App>) -> UiResult<u32> {
+    guard::require(&app, Permission::BillReprint)?;
+    app.with_shop(|shop| {
+        shop.queue
+            .dismiss_parked()
+            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+            .map_err(|e| words::from_print(&e))
+    })
+}
+
 /// The queue's vocabulary, turned into words.
 pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
     use mb_print::queue::{JobKind as K, JobState as S};
@@ -296,9 +320,10 @@ macro_rules! commands {
             $crate::ipc::list_print_jobs,
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
+            $crate::ipc::retry_parked_print_jobs,
+            $crate::ipc::dismiss_parked_print_jobs,
             $crate::ipc::preview_test_page,
             $crate::ipc::preview_order,
-            $crate::ipc::preview_kitchen,
             $crate::ipc::current_cart,
             $crate::ipc::cart_add,
             $crate::ipc::cart_set_qty,
@@ -585,15 +610,6 @@ pub fn preview_order(
     order_id: Option<String>,
 ) -> UiResult<crate::preview::PreviewDoc> {
     crate::flows::preview_order_on(&app, order_id)
-}
-
-/// The kitchen ticket that would print right now, for the same reason.
-#[tauri::command]
-pub fn preview_kitchen(
-    app: tauri::State<'_, App>,
-    order_id: Option<String>,
-) -> UiResult<crate::preview::PreviewDoc> {
-    crate::flows::preview_kitchen_on(&app, order_id)
 }
 
 // The billing screen.

@@ -7,16 +7,11 @@ import { call } from '../ipc/call';
 import type { PreviewDoc } from '../ipc/generated/PreviewDoc';
 import { Receipt } from './Receipt';
 
-/** Which of the two pieces of paper this counter makes. */
-export type Paper = 'bill' | 'kitchen';
-
 export function Before({
-  what,
   open,
   onClose,
   onPrint,
 }: {
-  what: Paper;
   open: boolean;
   onClose: () => void;
   /** What the button under the paper does. */
@@ -30,8 +25,7 @@ export function Before({
     setDoc(null);
     setTrouble(null);
     try {
-      const command = what === 'bill' ? 'preview_order' : 'preview_kitchen';
-      setDoc(await call(command, { orderId: null }));
+      setDoc(await call('preview_order', { orderId: null }));
     } catch (cause) {
       // It says why, in the words Rust chose.
       setTrouble(
@@ -41,7 +35,7 @@ export function Before({
       );
       report(cause);
     }
-  }, [what, report]);
+  }, [report]);
 
   useEffect(() => {
     if (open) void draw();
@@ -50,7 +44,7 @@ export function Before({
   return (
     <Modal
       open={open}
-      title={what === 'bill' ? 'The bill, before it prints' : 'The kitchen ticket'}
+      title="The bill, before it prints"
       onClose={onClose}
       actions={
         onPrint ? (

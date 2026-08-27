@@ -484,6 +484,33 @@ impl Queue {
         Ok(())
     }
 
+    /// Every parked job, back in the queue — one press when the printer is back. How many.
+    pub fn retry_parked(&self) -> Result<usize, PrintError> {
+        let parked = self.parked();
+        for id in &parked {
+            self.retry(id)?;
+        }
+        Ok(parked.len())
+    }
+
+    /// Every parked job, thrown away — one press when the paper was done another way. How many.
+    pub fn dismiss_parked(&self) -> Result<usize, PrintError> {
+        let parked = self.parked();
+        for id in &parked {
+            self.dismiss(id)?;
+        }
+        Ok(parked.len())
+    }
+
+    /// The ids a person has to decide about.
+    fn parked(&self) -> Vec<String> {
+        self.snapshot()
+            .into_iter()
+            .filter(|status| status.state == JobState::Parked)
+            .map(|status| status.id)
+            .collect()
+    }
+
     /// Stop every worker and wait for the job in hand to finish.
     pub fn shutdown(self) {
         for sender in self.senders.values() {

@@ -41,3 +41,4 @@ logs/
 
 # Claude local settings
 .claude/settings.local.json
+/target-verify/

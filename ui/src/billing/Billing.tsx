@@ -50,7 +50,7 @@ import { Processing, ProcessingHead, processingOrders } from './Processing';
 import { SeparateBill } from './SeparateBill';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
-import { Before, type Paper } from '../preview/Before';
+import { Before } from '../preview/Before';
 import { keep, remember } from '../remember';
 
 import './billing.css';
@@ -69,7 +69,7 @@ export function Billing() {
   // its number and pressing Enter.
   const filter = '';
   // See it before it prints.
-  const [preview, setPreview] = useState<Paper | null>(null);
+  const [preview, setPreview] = useState(false);
   /** The line somebody is voiding, once the kitchen has been told. */
   const [voidingLine, setVoidingLine] = useState<{ index: number; name: string } | null>(null);
   /** The line whose quantity is being typed, and what has been typed so far. */
@@ -660,21 +660,16 @@ export function Billing() {
             New order
             <kbd className="mb-kbd">Esc</kbd>
           </Button>
-
-          <ProcessingHead
-            count={processing.length}
-            open={processingOpen}
-            controls={processingId}
-            onToggle={() => setProcessingOpen((was) => !was)}
-          />
         </div>
 
-        <div
-          className={cx(
-            'mb-billing__floorrow',
-            processingOpen && 'mb-billing__floorrow--open',
-          )}
-        >
+        {/* Over its own column, as wide as the list under it. */}
+        <ProcessingHead
+          count={processing.length}
+          open={processingOpen}
+          controls={processingId}
+          onToggle={() => setProcessingOpen((was) => !was)}
+        />
+
         <Scroller inset className="mb-billing__floor">
           {/* The set-up list is not on this screen any more. */}
           {tables.length === 0 && menu.length === 0 ? (
@@ -705,14 +700,17 @@ export function Billing() {
           {/* THE MENU GRID IS NOT ON THIS SCREEN. */}
         </Scroller>
 
-        {/* Folded: no height and no width, and nothing in it can take focus. */}
-        <div id={processingId} className="mb-processing__fold" inert={!processingOpen}>
+        {/* Folds up under its head. Folded: no height, and nothing in it can take focus. */}
+        <div
+          id={processingId}
+          className={cx('mb-processing__fold', processingOpen && 'mb-processing__fold--open')}
+          inert={!processingOpen}
+        >
           <div className="mb-processing__panel">
             <Scroller inset className="mb-processing__body">
               <Processing orders={processing} onOpen={openTable} />
             </Scroller>
           </div>
-        </div>
         </div>
       </div>
 
@@ -962,18 +960,9 @@ export function Billing() {
 
         {/* The rest, in two lines: the paper first, then what changes the bill. */}
         <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
-          <Button small disabled={!cart || cart.isEmpty} onClick={() => setPreview('bill')}>
+          <Button small disabled={!cart || cart.isEmpty} onClick={() => setPreview(true)}>
             Preview bill
           </Button>
-          {cart?.kitchenTicketOff ? null : (
-            <Button
-              small
-              disabled={!cart || cart.isEmpty}
-              onClick={() => setPreview('kitchen')}
-            >
-              Preview ticket
-            </Button>
-          )}
           {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
           {cart?.orderId && !cart.kitchenTicketOff ? (
             <Button small onClick={() => act(reprintKitchen)}>
@@ -1041,16 +1030,7 @@ export function Billing() {
       ) : null}
 
       {/* The paper, before it is paper. */}
-      <Before
-        what={preview ?? 'bill'}
-        open={preview !== null}
-        onClose={() => setPreview(null)}
-        onPrint={
-          preview === 'kitchen'
-            ? () => act(printKitchen)
-            : () => act(completeBill)
-        }
-      />
+      <Before open={preview} onClose={() => setPreview(false)} onPrint={() => act(completeBill)} />
 
       {/* The order is in the books, so cancelling it is a correction. */}
       {cancelReason && cart?.orderId ? (
