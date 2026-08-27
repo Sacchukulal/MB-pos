@@ -1,23 +1,31 @@
-/* The billing screen. Four regions that never move. */
+/* The billing screen. Four regions that never move: search, floor, processing orders, cart. */
 
 /*
  * `Page` supplies the margin and the flex column; this only says how the billing screen divides
- * what it is given.
+ * what it is given: the left column (search, floor, the processing panel) and the cart's column.
  */
 .mb-billing {
   display: grid;
-  grid-template-rows: auto 1fr;
-  gap: var(--gap-field);
+  grid-template-columns: minmax(0, 1fr) var(--cart-width);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--gap-field) var(--space-4);
   min-height: 0;
 }
 
-/* Top bar: search, order type, lock. */
+/* The left column is the kit's SideFold: search and floor, with the processing panel on the end. */
+.mb-billing__side {
+  --sidefold-width: var(--queue-width);
+  grid-column: 1;
+  grid-row: 1 / -1;
+}
 
-.mb-billbar {
-  display: grid;
-  grid-template-columns: 1fr var(--cart-width);
-  align-items: center;
+/* The same gaps as the page grid, so the floor's top lines up with the cart's. */
+.mb-billing__side.mb-sidefold {
   gap: var(--space-4);
+}
+
+.mb-billing__side > .mb-sidefold__main {
+  gap: var(--gap-field);
 }
 
 /* The search box is FIRST, and it is one width. */
@@ -29,29 +37,27 @@
 
 /* The order type takes the cart's column, hard against its right edge. */
 .mb-billbar__type {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-3);
 }
 
-/* The two columns. The cart is PERMANENT: it never moves, never hides. */
-
-.mb-billing__body {
-  display: grid;
-  grid-template-columns: 1fr var(--cart-width);
-  gap: var(--space-4);
-  min-height: 0;
-}
-
 .mb-billing__floor {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
 }
 
+/* THE CART IS PERMANENT: it never moves, never hides. */
+
 .mb-billing__cart {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -69,7 +75,7 @@
   box-shadow: var(--level-raised);
 }
 
-/* The table grid — the ONLY view of open orders. */
+/* The table grid — the floor's view of the open orders. */
 
 .mb-floor__section {
   display: flex;
@@ -195,10 +201,6 @@
 }
 
 /*
- * The table number is the thing the tile exists to say, and it was `--text-lg` inside a 4.5rem
- * box.
- */
-/*
  * Nothing on the face shrinks — the tile height is fixed, and flex was squashing the label to
  * nothing to make room.
  */
@@ -206,6 +208,7 @@
   flex: none;
 }
 
+/* The table number is the thing the tile exists to say. */
 .mb-tile__label {
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
@@ -328,7 +331,7 @@
   border: var(--border-width-thick) solid var(--border-strong);
   border-radius: var(--radius-pill);
   cursor: pointer;
-  /* Hidden until the tile is hovered — see the reveal rule below. */
+  /* Hidden until the tile is hovered — see the reveal rule above. */
   opacity: 0;
   transition: opacity var(--motion-fast) var(--ease);
 }
@@ -373,10 +376,7 @@
   color: var(--danger);
 }
 
-/*
- * "food 18m" — scope 14.2's second timer, quieter than the table timer because it is the second
- * question, not the first.
- */
+/* "food 18m" — the second timer, quieter than the table timer because it is the second question. */
 .mb-tile__food {
   display: inline-flex;
   align-items: center;
@@ -395,7 +395,168 @@
   border-radius: var(--radius-pill);
 }
 
+/* WAITING: the same stripe in warn, and no fill. */
+.mb-tile--waiting {
+  box-shadow: inset var(--space-1) 0 0 0 var(--warn);
+}
+
+/* Processing orders: sent to the kitchen, not yet billed. */
+
+.mb-processing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The order, and the print mark beside it. */
+.mb-processing__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* One order: where it is and how long, then its number and how much. */
+.mb-processing__order {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0 var(--gap-inline);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
+}
+
+.mb-processing__order:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+/* The same stripes as the tile — amber waiting, red late — so it is a shape before a colour. */
+.mb-processing__order--waiting {
+  box-shadow: inset var(--space-1) 0 0 0 var(--warn);
+}
+
+.mb-processing__order--late {
+  border-color: var(--danger);
+  box-shadow: inset var(--space-1) 0 0 0 var(--danger);
+}
+
+/* The one the cart is on. */
+.mb-processing__order--on,
+.mb-processing__order--on:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.mb-processing__where {
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mb-processing__timer {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mb-processing__timer--late {
+  font-weight: var(--weight-bold);
+  color: var(--danger);
+}
+
+/* The bill number, and the kitchen timer beside it. */
+.mb-processing__no {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mb-processing__food {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.mb-processing__amount {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Print the bill and carry it over — the tile's corner mark, beside the row. */
+.mb-processing__print {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--tile-button);
+  height: var(--tile-button);
+  padding: 0;
+  background: transparent;
+  color: var(--text-faint);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mb-processing__print:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
 /* The cart region. */
+
+/* Where the bill is, and its number, over the lines. */
+.mb-cart__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-inline);
+  padding: 0 var(--space-2);
+}
+
+.mb-cart__where {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mb-cart__no {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 
 /*
  * The list gives way FIRST — shrink 50 against the totals block's 1. Its basis is the floor it
@@ -404,7 +565,7 @@
 .mb-cart__lines {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0;
   flex: 1 50 var(--cart-lines-min);
   /* It gives way FIRST, but it does not disappear. */
 }
@@ -415,12 +576,12 @@
   }
 }
 
+/* One line: what, the stepper, how much, and the way off the bill. */
 .mb-cartline {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
+  display: flex;
+  align-items: center;
   gap: var(--space-2);
-  align-items: start;
-  padding: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
 }
 
@@ -428,76 +589,95 @@
   background: var(--surface-2);
 }
 
+/* A hairline between lines, so a long bill reads as rows without a box round each. */
+.mb-cartline + .mb-cartline {
+  border-top: var(--border-width) solid var(--border);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.mb-cartline__what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .mb-cartline__name {
   /* Long names WRAP. They never ellipsise. */
+  overflow-wrap: anywhere;
+  font-weight: var(--weight-medium);
+  line-height: var(--line-tight);
+}
+
+/* Under the name: the price of one, the tax rate, the extras, any money off. */
+.mb-cartline__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--gap-inline);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.mb-cartline__detail > * {
+  white-space: nowrap;
+}
+
+.mb-cartline__price {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "extra cheese, no onion" may be long — it wraps, the figures beside it do not. */
+.mb-cartline__extras {
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .mb-cartline__note {
   font-size: var(--text-xs);
+  font-style: italic;
   color: var(--text-muted);
-}
-
-.mb-cartline__rate {
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
-.mb-cartline__qty {
-  display: flex;
-  align-items: center;
-  /* No gap, and the buttons are square. */
-  gap: 0;
-}
-
-.mb-cartline__qty .mb-button {
-  min-width: var(--cart-step-size);
-  padding-inline: 0;
-}
-
-/*
- * The number is a button, because tapping it is how you say "make it seven" without pressing +
- * five times.
- */
-.mb-cartline__qty-value {
-  min-width: var(--space-6);
-  padding: 0;
-  font-family: var(--font-mono);
-  font-size: inherit;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  color: inherit;
-  background: none;
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-}
-
-.mb-cartline__qty-value:hover {
-  border-color: var(--border);
-}
-
-/*
- * Exactly where the number was, and exactly as wide, so the line does not jump when it turns
- * into a box.
- */
-.mb-cartline__qty-input {
-  width: var(--space-9);
-  padding: 0;
-  font-family: var(--font-mono);
-  font-size: inherit;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  color: var(--text);
-  background: var(--surface);
-  border: var(--border-width) solid var(--focus);
-  border-radius: var(--radius-xs);
+  overflow-wrap: anywhere;
 }
 
 .mb-cartline__amount {
+  flex: none;
+  min-width: var(--space-8);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-weight: var(--weight-medium);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The small marks on a line: the scale while typing a weight, and the way off the bill. */
+.mb-cartline__tool {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--tile-button);
+  height: var(--tile-button);
+  padding: 0;
+  background: transparent;
+  color: var(--text-faint);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mb-cartline__tool:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* Taking a line off is destructive, so its hover is the semantic colour, never the accent. */
+.mb-cartline__tool--remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 /* Totals: a feature, not a footer. */
@@ -576,6 +756,39 @@
   gap: var(--space-2);
 }
 
+/* The three ways to pay are the kit's segmented control; the arrow beside it keeps credit. */
+.mb-payment__modes {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.mb-payment__reveal {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--target-min);
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.mb-payment__reveal:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.mb-payment__credit[hidden] {
+  display: none;
+}
+
 /* The one box a cashier types money into, with Rust's answer beside it. */
 .mb-payment__cash {
   display: flex;
@@ -600,118 +813,12 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The mode that is lit. */
-.mb-payment__mode--on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: var(--weight-bold);
-}
-
-.mb-payment__modes {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr) auto;
-  gap: var(--space-1);
-}
-
-.mb-payment__reveal {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-6);
-  background: transparent;
-  color: var(--text-muted);
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease),
-    color var(--motion-fast) var(--ease);
-}
-
-.mb-payment__reveal:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.mb-payment__credit[hidden] {
-  display: none;
-}
-
-/*
- * The tick sits beside the word rather than replacing it — a button that swaps its label for a
- * symbol is a button whose meaning you have to remember.
- */
-.mb-payment__mode {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-}
-
-/* A mode that has taken money says so, even while it is disabled. */
-.mb-payment__mode--taken,
-.mb-payment__mode--taken:disabled {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: var(--weight-bold);
-  opacity: 1;
-}
-
-/* Why the modes are off. */
-.mb-payment__settled {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.mb-payment__taken {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--text-sm);
-}
-
 .mb-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   flex: 0 0 auto;
   column-gap: var(--space-2);
   row-gap: var(--space-1);
-}
-
-/* The fold under the two main buttons: three columns, one job each. */
-.mb-actions--more {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  flex: 0 0 auto;
-  gap: var(--space-2);
-}
-
-.mb-actions--more[hidden] {
-  display: none;
-}
-
-.mb-actions__group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.mb-actions__title {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-}
-
-/* Where the bill is, over the lines. */
-.mb-cart__where {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
 }
 
 /*
@@ -739,7 +846,82 @@
   color: var(--text);
 }
 
-/* The keyboard: suggestions, quantity, help. */
+/* The fold under the two main buttons: a row per job, and each row wraps rather than overflows. */
+.mb-actions--more {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+}
+
+.mb-actions--more[hidden] {
+  display: none;
+}
+
+.mb-actions__group {
+  display: grid;
+  grid-template-columns: var(--actions-title-width) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mb-actions__title {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.mb-actions__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* "What do we each owe?" — a question, answered in place beside the stepper. */
+.mb-eachpays__label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-eachpays__says {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+}
+
+/* What the floor did while this bill was being typed. */
+.mb-cart__floor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.mb-cart__floorsays {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* A very long bill. */
+.mb-cart__long {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+/* The keyboard: suggestions, the busy-table chooser, help. */
 
 .mb-suggestions {
   position: absolute;
@@ -771,6 +953,15 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.mb-suggestion__name {
+  overflow-wrap: anywhere;
+}
+
+.mb-suggestion__rate {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
 }
 
 /* A price in the suggestion list. */
@@ -823,76 +1014,7 @@
   white-space: nowrap;
 }
 
-/* WAITING: the same stripe in warn, and no fill. */
-.mb-tile--waiting {
-  box-shadow: inset var(--space-1) 0 0 0 var(--warn);
-}
-
-/* What the floor did while this bill was being typed. */
-.mb-cart__floor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--accent-line);
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-}
-
-.mb-cart__floorsays {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--text-sm);
-  line-height: var(--line-normal);
-}
-
-/* A very long bill. */
-.mb-cart__long {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
-}
-
-/* Splitting a bill. */
-
-.mb-split__covers {
-  margin-bottom: var(--gap-group);
-}
-
-.mb-split__heading {
-  margin: var(--gap-group) 0 var(--space-1);
-  font-size: var(--type-section);
-  font-weight: var(--type-section-weight);
-}
-
-.mb-split__note {
-  margin: 0 0 var(--space-3);
-  color: var(--text-muted);
-  font-size: var(--type-caption);
-}
-
-/* − 4 ways + on one line. */
-.mb-split__ways {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-inline);
-}
-
-.mb-split__count {
-  min-width: var(--space-8);
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.mb-split__shares {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: var(--space-2) 0 0;
-}
+/* Putting some of a bill on its own bill. */
 
 .mb-split__lines {
   display: flex;
@@ -915,34 +1037,4 @@
 
 .mb-split__name {
   overflow-wrap: anywhere;
-}
-
-/* "What do we each owe?". */
-
-.mb-eachpays {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: var(--target-min);
-}
-
-.mb-eachpays__label {
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.mb-eachpays__count {
-  min-width: var(--space-5);
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-bold);
-  text-align: center;
-}
-
-.mb-eachpays__says {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  text-align: right;
 }

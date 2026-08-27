@@ -35,8 +35,8 @@ export function Suggestions({
             // Touch reaches the same place Enter does.
             onClick={() => onPick(index)}
           >
-            <span className="mb-cartline__name">{item.name}</span>
-            <span className="mb-cartline__rate">{item.rateLabel}</span>
+            <span className="mb-suggestion__name">{item.name}</span>
+            <span className="mb-suggestion__rate">{item.rateLabel}</span>
             {/* Its own class, not the table tile's. */}
             <span className="mb-suggestion__price">{item.price.text}</span>
           </button>

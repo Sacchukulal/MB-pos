@@ -1,6 +1,14 @@
 /** The billing screen — the heart of the product. */
 
-import { useCallback, useEffect, useId, useReducer, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   Button,
@@ -11,7 +19,9 @@ import {
   Page,
   Scroller,
   SearchField,
+  SideFold,
   Spinner,
+  Stepper,
   useAction,
   useReport,
   useToast,
@@ -37,14 +47,19 @@ type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
 import { DiscountDialog } from './Discount';
+import { Processing, processingOrders } from './Processing';
 import { SeparateBill } from './SeparateBill';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
 import { Before, type Paper } from '../preview/Before';
+import { keep, remember } from '../remember';
 
 import './billing.css';
 
 const ORDER_TYPES = ['Dine in', 'Parcel', 'Self service', 'Delivery'] as const;
+
+/** Whether the processing panel is open — a look preference, kept on this computer. */
+const PROCESSING_KEY = 'mb.billing.processing';
 
 export function Billing() {
   const toast = useToast();
@@ -82,6 +97,13 @@ export function Billing() {
   /** Everything under the cart's two main buttons, folded away until asked for. */
   const [moreActions, setMoreActions] = useState(false);
   const moreActionsId = useId();
+  /** The processing panel beside the floor, as it was last left. */
+  const [processingOpen, setProcessingOpen] = useState(
+    () => remember(PROCESSING_KEY, 'open') !== 'folded',
+  );
+  useEffect(() => {
+    keep(PROCESSING_KEY, processingOpen ? 'open' : 'folded');
+  }, [processingOpen]);
 
   // ONE shared clock (§5 rule 10).
   const tick = useTick();
@@ -184,6 +206,13 @@ export function Billing() {
   useEffect(() => {
     void refreshFloor();
   }, [refreshFloor, tick]);
+
+  // The same list the grid draws, narrowed to what the kitchen has. A settled order leaves it
+  // the moment the floor is re-read.
+  const processing = useMemo(
+    () => processingOrders(tables, cart?.kitchenTicketOff ?? false),
+    [tables, cart?.kitchenTicketOff],
+  );
 
   const addItem = useCallback(
     async (itemId: string, qty: string | null = null) => {
@@ -626,7 +655,24 @@ export function Billing() {
      * permanent.
      */
     <Page scroll={false} className="mb-billing">
-      <div className="mb-billbar">
+      {/*
+        The left column: the search box over the floor, with the processing panel folded against
+        the cart. The floor's tiles reflow into whatever the panel leaves.
+      */}
+      <SideFold
+        className="mb-billing__side"
+        side="end"
+        icon="flame"
+        label="Processing orders"
+        count={processing.length}
+        dense
+        open={processingOpen}
+        onOpen={() => setProcessingOpen(true)}
+        onFold={() => setProcessingOpen(false)}
+        panel={
+          <Processing orders={processing} onOpen={openTable} onPrintBill={printTheBill} />
+        }
+      >
         <div className="mb-billbar__search">
           <SearchField
             what="Item or table number"
@@ -647,29 +693,7 @@ export function Billing() {
           />
         </div>
 
-        <div className="mb-billbar__type">
-          {cart?.orderTypeLocked ? null : (
-          <div className="mb-segment" role="group" aria-label="Order type">
-            {ORDER_TYPES.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                className="mb-segment__option"
-                aria-pressed={cart?.orderType === kind}
-                onClick={() => void setOrderType(kind)}
-              >
-                {kind}
-              </button>
-            ))}
-          </div>
-          )}
-
-        </div>
-      </div>
-
-      <div className="mb-billing__body">
         <Scroller inset className="mb-billing__floor">
-
           {/* The set-up list is not on this screen any more. */}
           {tables.length === 0 && menu.length === 0 ? (
             <EmptyState
@@ -698,239 +722,258 @@ export function Billing() {
 
           {/* THE MENU GRID IS NOT ON THIS SCREEN. */}
         </Scroller>
+      </SideFold>
 
+      <div className="mb-billbar__type">
+        {cart?.orderTypeLocked ? null : (
+          <div className="mb-segment" role="group" aria-label="Order type">
+            {ORDER_TYPES.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className="mb-segment__option"
+                aria-pressed={cart?.orderType === kind}
+                onClick={() => void setOrderType(kind)}
+              >
+                {kind}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-        {/* THE CART IS PERMANENT. */}
-        <div className="mb-billing__cart">
+      {/* THE CART IS PERMANENT. */}
+      <div className="mb-billing__cart">
 
-          {/* A very long bill says so. */}
-          {cart && cart.lengthSays ? (
-            <p className="mb-cart__long">{cart.lengthSays}</p>
-          ) : null}
+        {/* A very long bill says so. */}
+        {cart && cart.lengthSays ? (
+          <p className="mb-cart__long">{cart.lengthSays}</p>
+        ) : null}
 
-          {/* What the floor did while this was being typed. */}
-          {cart && cart.fromTheFloor.length > 0 ? (
-            <div className="mb-cart__floor">
-              {cart.fromTheFloor.map((change) => (
-                // The whole sentence, written in Rust.
-                <p className="mb-cart__floorsays" key={`${change.itemId}-${change.qty}`}>
-                  {change.says}
-                </p>
-              ))}
-              <div className="mb-row--end">
-                <Button
-                  small
-                  variant="quiet"
-                  onClick={() => {
-                    call('dismiss_the_floors_items').then(setCart).catch(report);
-                  }}
+        {/* What the floor did while this was being typed. */}
+        {cart && cart.fromTheFloor.length > 0 ? (
+          <div className="mb-cart__floor">
+            {cart.fromTheFloor.map((change) => (
+              // The whole sentence, written in Rust.
+              <p className="mb-cart__floorsays" key={`${change.itemId}-${change.qty}`}>
+                {change.says}
+              </p>
+            ))}
+            <div className="mb-row--end">
+              <Button
+                small
+                variant="quiet"
+                onClick={() => {
+                  call('dismiss_the_floors_items').then(setCart).catch(report);
+                }}
+              >
+                Not now
+              </Button>
+              <Button
+                small
+                variant="primary"
+                onClick={() => {
+                  call('take_the_floors_items').then(setCart).catch(report);
+                }}
+              >
+                Add them to this bill
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Where this bill is, and its number once it has one. */}
+        {cart && (cart.table || cart.billNumber) ? (
+          <div className="mb-cart__head">
+            <span className="mb-cart__where">
+              {cart.table ? `Table ${cart.table}` : cart.orderType}
+            </span>
+            {cart.billNumber ? <span className="mb-cart__no">{cart.billNumber}</span> : null}
+          </div>
+        ) : null}
+
+        <Scroller inset className="mb-cart__lines">
+          {cart && cart.lines.length > 0 ? (
+            cart.lines.map((line) => (
+              <div className="mb-cartline" key={line.index}>
+                <div className="mb-cartline__what">
+                  <span className="mb-cartline__name">{line.name}</span>
+                  {/* The price of one, its tax rate, the extras on it, and any money off. */}
+                  <span className="mb-cartline__detail">
+                    <span className="mb-cartline__price">{line.unitPrice.text}</span>
+                    <span>{line.rateLabel}</span>
+                    {line.modifiers.length > 0 ? (
+                      <span className="mb-cartline__extras">{line.modifiers.join(', ')}</span>
+                    ) : null}
+                    {line.discount.paise > 0n ? (
+                      <span className="mb-cartline__price">−{line.discount.text}</span>
+                    ) : null}
+                  </span>
+                  {line.note ? <span className="mb-cartline__note">{line.note}</span> : null}
+                </div>
+                {/*
+                  − qty + and then ✕, in that order, because the quantity is what a cashier
+                  changes forty times a shift and the removal is what they do once.
+                */}
+                <Stepper
+                  label={`Quantity of ${line.name}`}
+                  what={line.name}
+                  onLess={() => void step(line, -1)}
+                  onMore={() => void step(line, +1)}
                 >
-                  Not now
-                </Button>
-                <Button
-                  small
-                  variant="primary"
-                  onClick={() => {
-                    call('take_the_floors_items').then(setCart).catch(report);
-                  }}
+                  {typingQty?.index === line.index ? (
+                    <input
+                      className="mb-stepper__value"
+                      autoFocus
+                      inputMode="decimal"
+                      aria-label={`Quantity of ${line.name}`}
+                      value={typingQty.text}
+                      onChange={(e) =>
+                        setTypingQty({
+                          index: line.index,
+                          // Digits and one dot.
+                          text: onlyAmount(e.target.value),
+                        })
+                      }
+                      onBlur={() => void commitQty()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void commitQty();
+                        if (e.key === 'Escape') setTypingQty(null);
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="mb-stepper__value"
+                      aria-label={`Change the quantity of ${line.name}`}
+                      onClick={() => setTypingQty({ index: line.index, text: line.qty })}
+                    >
+                      {line.qty}
+                    </button>
+                  )}
+                </Stepper>
+                {typingQty?.index === line.index && hasScale ? (
+                  <button
+                    type="button"
+                    className="mb-cartline__tool"
+                    title="Take the weight from the scale"
+                    aria-label="Take the weight from the scale"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      call('read_scale_once')
+                        .then((answer) => {
+                          if (!answer.answered) {
+                            toast.show('warn', answer.says);
+                            return;
+                          }
+                          // "1.234 kg" — the number is the quantity.
+                          const [amount] = answer.says.split(' ');
+                          if (amount) setTypingQty({ index: line.index, text: amount });
+                        })
+                        .catch(report);
+                    }}
+                  >
+                    <Icon name="scale" size="sm" />
+                  </button>
+                ) : null}
+                <span className="mb-cartline__amount">{line.amount.text}</span>
+                <button
+                  type="button"
+                  className="mb-cartline__tool mb-cartline__tool--remove"
+                  title={`Remove ${line.name}`}
+                  aria-label={`Remove ${line.name}`}
+                  onClick={() => void takeOffTheBill(line)}
                 >
-                  Add them to this bill
-                </Button>
+                  <Icon name="x" size="sm" />
+                </button>
               </div>
+            ))
+          ) : (
+            <EmptyState
+              small
+              title="Nothing on this bill yet"
+              body="Press an item to add it."
+            />
+          )}
+        </Scroller>
+
+        <div className="mb-payment">
+          <PaymentModes
+            mode={payMode}
+            onPick={setPayMode}
+            onCredit={() => setOnAccount(true)}
+          />
+
+          {/*
+            The one box a cashier types money into, and only for the one thing that is counted
+            by hand.
+          */}
+          {payMode === 'Cash' ? (
+            <div className="mb-payment__cash">
+              <MoneyInput
+                label="Cash given"
+                value={cashGiven}
+                onChange={setCashGiven}
+                onBlur={() => void commitCash(cashGiven)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void commitCash(cashGiven);
+                }}
+              />
+              {cart && cart.change.paise > 0n ? (
+                <span className="mb-payment__answer">
+                  Change <strong>{cart.change.text}</strong>
+                </span>
+              ) : cart && cart.payments.length > 0 && cart.balance.paise > 0n ? (
+                <span className="mb-payment__answer">
+                  Still owing <strong>{cart.balance.text}</strong>
+                </span>
+              ) : null}
             </div>
           ) : null}
+        </div>
 
-          {/* Where this bill is, and its number once it has one. */}
-          {cart && (cart.table || cart.billNumber) ? (
-            <p className="mb-cart__where">
-              {cart.table ? `Table ${cart.table}` : cart.orderType}
-              {cart.billNumber ? ` · ${cart.billNumber}` : ''}
-            </p>
-          ) : null}
+        {cart && !cart.isEmpty ? <Totals bill={cart.bill} /> : null}
 
-          <Scroller inset className="mb-cart__lines">
-            {cart && cart.lines.length > 0 ? (
-              cart.lines.map((line) => (
-                <div className="mb-cartline" key={line.index}>
-                  <div>
-                    <div className="mb-cartline__name">{line.name}</div>
-                    {line.note ? (
-                      <div className="mb-cartline__note">{line.note}</div>
-                    ) : null}
-                    <div className="mb-cartline__rate">{line.rateLabel}</div>
-                  </div>
-                  {/*
-                    − qty + and then ✕, in that order, because the quantity is what a cashier
-                    changes forty times a shift and the removal is what they do once.
-                  */}
-                  <div className="mb-cartline__qty">
-                    <Button
-                      small
-                      variant="quiet"
-                      onClick={() => void step(line, -1)}
-                      aria-label={`One less ${line.name}`}
-                    >
-                      <Icon name="minus" size="sm" />
-                    </Button>
-                    {typingQty?.index === line.index ? (
-                      <input
-                        className="mb-cartline__qty-input"
-                        autoFocus
-                        inputMode="decimal"
-                        aria-label={`Quantity of ${line.name}`}
-                        value={typingQty.text}
-                        onChange={(e) =>
-                          setTypingQty({
-                            index: line.index,
-                            // Digits and one dot.
-                            text: onlyAmount(e.target.value),
-                          })
-                        }
-                        onBlur={() => void commitQty()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void commitQty();
-                          if (e.key === 'Escape') setTypingQty(null);
-                        }}
-                      />
-                    ) : null}
-                    {typingQty?.index === line.index && hasScale ? (
-                      <Button
-                        small
-                        variant="quiet"
-                        aria-label="Take the weight from the scale"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          call('read_scale_once')
-                            .then((answer) => {
-                              if (!answer.answered) {
-                                toast.show('warn', answer.says);
-                                return;
-                              }
-                              // "1.234 kg" — the number is the quantity.
-                              const [amount] = answer.says.split(' ');
-                              if (amount) setTypingQty({ index: line.index, text: amount });
-                            })
-                            .catch(report);
-                        }}
-                      >
-                        <Icon name="scale" size="sm" />
-                      </Button>
-                    ) : null}
-                    {typingQty?.index === line.index ? null : (
-                      <button
-                        type="button"
-                        className="mb-cartline__qty-value"
-                        aria-label={`Change the quantity of ${line.name}`}
-                        onClick={() => setTypingQty({ index: line.index, text: line.qty })}
-                      >
-                        {line.qty}
-                      </button>
-                    )}
-                    <Button
-                      small
-                      variant="quiet"
-                      onClick={() => void step(line, +1)}
-                      aria-label={`One more ${line.name}`}
-                    >
-                      <Icon name="plus" size="sm" />
-                    </Button>
-                    <Button
-                      small
-                      variant="quiet"
-                      onClick={() => void takeOffTheBill(line)}
-                      aria-label={`Remove ${line.name}`}
-                    >
-                      <Icon name="x" size="sm" />
-                    </Button>
-                  </div>
-                  <span className="mb-cartline__amount">{line.amount.text}</span>
-                </div>
-              ))
-            ) : (
-              <EmptyState
-                small
-                title="Nothing on this bill yet"
-                body="Press an item to add it."
-              />
-            )}
-          </Scroller>
+        {/* Two buttons, and a fold. */}
+        <div className="mb-actions">
+          {cart?.kitchenTicketOff ? null : (
+          <Button
+            disabled={!cart || cart.isEmpty || acting}
+            onClick={() => act(printKitchen)}
+          >
+            Kitchen ticket
+          </Button>
+          )}
+          <Button
+            variant="primary"
+            disabled={!cart || cart.isEmpty || acting}
+            onClick={() => act(completeBill)}
+          >
+            Complete bill
+          </Button>
 
-          <div className="mb-payment">
-            <PaymentModes
-              mode={payMode}
-              onPick={setPayMode}
-              onCredit={() => setOnAccount(true)}
+          <button
+            type="button"
+            className="mb-actions__toggle"
+            aria-expanded={moreActions}
+            aria-controls={moreActionsId}
+            title={moreActions ? 'Hide the rest' : 'The rest of the actions'}
+            onClick={() => setMoreActions((was) => !was)}
+          >
+            <Icon
+              name={moreActions ? 'chevron-up' : 'chevron-down'}
+              size="sm"
+              label={moreActions ? 'Hide the rest' : 'The rest of the actions'}
             />
+          </button>
+        </div>
 
-            {/*
-              The one box a cashier types money into, and only for the one thing that is counted
-              by hand.
-            */}
-            {payMode === 'Cash' ? (
-              <div className="mb-payment__cash">
-                <MoneyInput
-                  label="Cash given"
-                  value={cashGiven}
-                  onChange={setCashGiven}
-                  onBlur={() => void commitCash(cashGiven)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') void commitCash(cashGiven);
-                  }}
-                />
-                {cart && cart.change.paise > 0n ? (
-                  <span className="mb-payment__answer">
-                    Change <strong>{cart.change.text}</strong>
-                  </span>
-                ) : cart && cart.payments.length > 0 && cart.balance.paise > 0n ? (
-                  <span className="mb-payment__answer">
-                    Still owing <strong>{cart.balance.text}</strong>
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          {cart && !cart.isEmpty ? <Totals bill={cart.bill} /> : null}
-
-          {/* Two buttons, and a fold. */}
-          <div className="mb-actions">
-            {cart?.kitchenTicketOff ? null : (
-            <Button
-              disabled={!cart || cart.isEmpty || acting}
-              onClick={() => act(printKitchen)}
-            >
-              Kitchen ticket
-            </Button>
-            )}
-            <Button
-              variant="primary"
-              disabled={!cart || cart.isEmpty || acting}
-              onClick={() => act(completeBill)}
-            >
-              Complete bill
-            </Button>
-
-            <button
-              type="button"
-              className="mb-actions__toggle"
-              aria-expanded={moreActions}
-              aria-controls={moreActionsId}
-              title={moreActions ? 'Hide the rest' : 'The rest of the actions'}
-              onClick={() => setMoreActions((was) => !was)}
-            >
-              <Icon
-                name={moreActions ? 'chevron-up' : 'chevron-down'}
-                size="sm"
-                label={moreActions ? 'Hide the rest' : 'The rest of the actions'}
-              />
-            </button>
-          </div>
-
-          <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
-            <div className="mb-actions__group" role="group" aria-label="Paper">
-              <span className="mb-actions__title">Paper</span>
+        <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
+          <div className="mb-actions__group" role="group" aria-label="Paper">
+            <span className="mb-actions__title">Paper</span>
+            <div className="mb-actions__row">
               <Button
-                variant="quiet"
+                small
                 disabled={!cart || cart.isEmpty}
                 onClick={() => setPreview('bill')}
               >
@@ -938,7 +981,7 @@ export function Billing() {
               </Button>
               {cart?.kitchenTicketOff ? null : (
                 <Button
-                  variant="quiet"
+                  small
                   disabled={!cart || cart.isEmpty}
                   onClick={() => setPreview('kitchen')}
                 >
@@ -947,14 +990,14 @@ export function Billing() {
               )}
               {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
               {cart?.orderId && !cart.kitchenTicketOff ? (
-                <Button variant="quiet" onClick={() => act(reprintKitchen)}>
+                <Button small onClick={() => act(reprintKitchen)}>
                   Send ticket again
                 </Button>
               ) : null}
               {/* Only when this shop has a label printer. */}
               {hasLabels ? (
                 <Button
-                  variant="quiet"
+                  small
                   disabled={!cart || cart.isEmpty}
                   onClick={() => {
                     const first = cart?.lines[0];
@@ -971,57 +1014,50 @@ export function Billing() {
                 </Button>
               ) : null}
             </div>
+          </div>
 
-            <div className="mb-actions__group" role="group" aria-label="Bill">
-              <span className="mb-actions__title">Bill</span>
+          <div className="mb-actions__group" role="group" aria-label="Bill">
+            <span className="mb-actions__title">Bill</span>
+            <div className="mb-actions__row">
               {/* "What do we each owe?" — a question, answered in place. */}
-              <div className="mb-eachpays">
-                <span className="mb-eachpays__label">Each pays</span>
-                <Button
-                  small
-                  variant="quiet"
-                  disabled={ways <= 2}
-                  onClick={() => void setPeople(ways - 1)}
-                  aria-label="One fewer person"
-                >
-                  <Icon name="minus" size="sm" />
-                </Button>
-                <span className="mb-eachpays__count">{ways}</span>
-                <Button
-                  small
-                  variant="quiet"
-                  disabled={ways >= 50}
-                  onClick={() => void setPeople(ways + 1)}
-                  aria-label="One more person"
-                >
-                  <Icon name="plus" size="sm" />
-                </Button>
-                <span className="mb-eachpays__says">{even ? even.note : ''}</span>
-              </div>
+              <span className="mb-eachpays__label">Each pays</span>
+              <Stepper
+                label="How many are sharing the bill"
+                what="person"
+                lessDisabled={ways <= 2}
+                moreDisabled={ways >= 50}
+                onLess={() => void setPeople(ways - 1)}
+                onMore={() => void setPeople(ways + 1)}
+              >
+                <span className="mb-stepper__value">{ways}</span>
+              </Stepper>
+              <span className="mb-eachpays__says">{even ? even.note : ''}</span>
               <Button
-                variant="quiet"
+                small
                 disabled={!cart || cart.isEmpty}
                 onClick={() => setDiscounting(true)}
               >
                 {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
               </Button>
               <Button
-                variant="quiet"
+                small
                 disabled={!cart || cart.isEmpty || !cart.orderId}
                 onClick={() => setSplitting(true)}
               >
                 Separate bill
               </Button>
             </div>
+          </div>
 
-            <div className="mb-actions__group" role="group" aria-label="Order">
-              <span className="mb-actions__title">Order</span>
-              <Button variant="quiet" onClick={() => void newOrder()}>
+          <div className="mb-actions__group" role="group" aria-label="Order">
+            <span className="mb-actions__title">Order</span>
+            <div className="mb-actions__row">
+              <Button small onClick={() => void newOrder()}>
                 New order
               </Button>
               {/* A parked order is cancelled with a reason; a typed one simply goes. */}
               <Button
-                variant="quiet"
+                small
                 disabled={!cart || cart.isEmpty}
                 onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
               >
@@ -1031,7 +1067,6 @@ export function Billing() {
           </div>
         </div>
       </div>
-
 
       {keys.mode.kind === 'table-busy' ? (
         <BusyTable
@@ -1173,19 +1208,20 @@ export function PaymentModes({
   return (
     <>
       <div className="mb-payment__modes">
-        {['Cash', 'Card', 'UPI'].map((label) => (
-          <Button
-            key={label}
-            small
-            className={
-              mode === label ? 'mb-payment__mode mb-payment__mode--on' : 'mb-payment__mode'
-            }
-            aria-pressed={mode === label}
-            onClick={() => onPick(label)}
-          >
-            {label}
-          </Button>
-        ))}
+        {/* Exactly one of these, so it is the kit's segmented control. */}
+        <div className="mb-segment mb-segment--fill" role="group" aria-label="Paid by">
+          {['Cash', 'Card', 'UPI'].map((label) => (
+            <button
+              key={label}
+              type="button"
+              className="mb-segment__option"
+              aria-pressed={mode === label}
+              onClick={() => onPick(label)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           className="mb-payment__reveal"
@@ -1207,7 +1243,7 @@ export function PaymentModes({
         here rather than on another screen.
       */}
       <div id={creditId} className="mb-payment__credit" hidden={!showCredit}>
-        <Button small wide variant="quiet" className="mb-payment__mode" onClick={onCredit}>
+        <Button small wide onClick={onCredit}>
           Credit
         </Button>
       </div>

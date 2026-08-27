@@ -1,7 +1,8 @@
-import { render, screen, cleanup, within, act } from '@testing-library/react';
+import { render, screen, cleanup, within, act, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModes } from '../src/billing/Billing';
+import { Processing, processingOrders } from '../src/billing/Processing';
 import { DENSE_ABOVE, TableGrid } from '../src/billing/TableGrid';
 import { Totals } from '../src/billing/Totals';
 import type { BillView } from '../src/ipc/generated/BillView';
@@ -300,3 +301,78 @@ describe('the payment modes (2026-08-23)', () => {
   });
 });
 
+
+/** The processing panel: the kitchen's orders, drawn from the same list as the grid. */
+describe('the processing orders (2026-08-27)', () => {
+  const cooking = (over: Partial<TableView> & Pick<TableView, 'id' | 'label'>) =>
+    table({
+      state: 'occupied',
+      orderId: `ord_${over.id}`,
+      total: money(16_800, '168.00'),
+      billNumber: 'B-104',
+      minutes: 12,
+      ...over,
+    });
+
+  it('lists only what the kitchen has, oldest first', () => {
+    const shown = processingOrders(
+      [
+        table({ id: '1', label: '1' }),
+        cooking({ id: '2', label: '2', minutes: 5 }),
+        cooking({ id: '3', label: '3', minutes: 40, state: 'late' }),
+        // Open, but the kitchen has not been told: the tile's amber dot, not this list.
+        cooking({ id: '4', label: '4', kitchenTold: false }),
+        cooking({ id: 'p', label: 'Parcel', section: null, minutes: 20 }),
+      ],
+      false,
+    );
+    expect(shown.map((t) => t.label)).toEqual(['3', 'Parcel', '2']);
+  });
+
+  it('counts every open order for a shop with no kitchen ticket', () => {
+    const shown = processingOrders(
+      [table({ id: '1', label: '1' }), cooking({ id: '4', label: '4', kitchenTold: false })],
+      true,
+    );
+    expect(shown.map((t) => t.label)).toEqual(['4']);
+  });
+
+  it('opens the order with the same press as the tile, and prints its bill', () => {
+    const onOpen = vi.fn();
+    const onPrintBill = vi.fn();
+    const order = cooking({ id: '3', label: '3', section: 'AC' });
+    render(<Processing orders={[order]} onOpen={onOpen} onPrintBill={onPrintBill} />);
+    fireEvent.click(screen.getByRole('button', { name: /Table 3/ }));
+    expect(onOpen).toHaveBeenCalledWith(order);
+    fireEvent.click(screen.getByRole('button', { name: 'Print the bill for 3' }));
+    expect(onPrintBill).toHaveBeenCalledWith(order);
+  });
+
+  it('says where, how long, which bill and how much — and marks the one in the cart', () => {
+    render(
+      <Processing
+        orders={[
+          cooking({ id: '3', label: '3', selected: true, kitchenMinutes: 8 }),
+          cooking({ id: 'p', label: 'Parcel', section: null, minutes: 70, state: 'late' }),
+        ]}
+        onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
+      />,
+    );
+    const three = screen.getByRole('button', { name: /Table 3/ });
+    expect(three.getAttribute('aria-pressed')).toBe('true');
+    expect(three.textContent).toContain('12m');
+    expect(three.textContent).toContain('B-104');
+    expect(three.textContent).toContain('168.00');
+    expect(three.textContent).toContain('8m');
+    // A parcel names itself, and a late one carries the form as well as the colour.
+    const parcel = screen.getByRole('button', { name: /^Parcel/ });
+    expect(parcel.className).toContain('mb-processing__order--late');
+    expect(parcel.textContent).toContain('1h 10m');
+  });
+
+  it('says so when nothing is cooking', () => {
+    render(<Processing orders={[]} onOpen={vi.fn()} onPrintBill={vi.fn()} />);
+    expect(screen.getByText('Nothing cooking')).toBeInTheDocument();
+  });
+});

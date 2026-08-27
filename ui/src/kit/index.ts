@@ -41,6 +41,7 @@ export {
   Radio,
   SearchField,
   Select,
+  Stepper,
 } from './controls';
 export type {
   ButtonProps,
@@ -48,6 +49,7 @@ export type {
   MoneyInputProps,
   PhoneInputProps,
   SelectProps,
+  StepperProps,
 } from './controls';
 
 export { useAction, type Action } from './action';

@@ -22,6 +22,7 @@ import {
   type Theme,
   type ThemeId,
 } from './themes';
+import { keep, remember } from '../remember';
 
 interface ThemeState {
   readonly theme: Theme;
@@ -38,23 +39,6 @@ const ThemeContext = createContext<ThemeState | null>(null);
 const THEME_KEY = 'mb.theme';
 const TEXT_SIZE_KEY = 'mb.textSize';
 
-function read(key: string, fallback: string): string {
-  try {
-    return window.localStorage.getItem(key) ?? fallback;
-  } catch {
-    // A webview with storage disabled still has to open and still has to be readable.
-    return fallback;
-  }
-}
-
-function write(key: string, value: string): void {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // See above. Never throw out of a look preference.
-  }
-}
-
 /** Put the look on the document. */
 function apply(themeId: string, textSize: string): void {
   const root = document.documentElement;
@@ -67,15 +51,15 @@ function apply(themeId: string, textSize: string): void {
 
 /** Paint the remembered look before React mounts, so the window never flashes the wrong colours. */
 export function applyRememberedLook(): void {
-  apply(read(THEME_KEY, DEFAULT_THEME), read(TEXT_SIZE_KEY, DEFAULT_TEXT_SIZE));
+  apply(remember(THEME_KEY, DEFAULT_THEME), remember(TEXT_SIZE_KEY, DEFAULT_TEXT_SIZE));
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeId, setThemeId] = useState<ThemeId>(() =>
-    read(THEME_KEY, DEFAULT_THEME),
+    remember(THEME_KEY, DEFAULT_THEME),
   );
   const [textSize, setTextSizeId] = useState<string>(() =>
-    read(TEXT_SIZE_KEY, DEFAULT_TEXT_SIZE),
+    remember(TEXT_SIZE_KEY, DEFAULT_TEXT_SIZE),
   );
 
   const theme = themeById(themeId) ?? LIGHT;
@@ -84,12 +68,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = useCallback((id: ThemeId) => {
     setThemeId(id);
-    write(THEME_KEY, id);
+    keep(THEME_KEY, id);
   }, []);
 
   const setTextSize = useCallback((id: string) => {
     setTextSizeId(id);
-    write(TEXT_SIZE_KEY, id);
+    keep(TEXT_SIZE_KEY, id);
   }, []);
 
   const toggle = useCallback(() => {

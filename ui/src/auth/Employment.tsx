@@ -10,6 +10,7 @@ import {
   Input,
   Modal,
   MoneyInput,
+  Numeric,
   Panel,
   PhoneInput,
   Row,
@@ -79,17 +80,17 @@ export function Attendance({ staffId }: { staffId?: string }) {
   const columns: Column<ShiftView>[] = [
     { key: 'who', header: 'Who', render: (s) => s.staffName },
     { key: 'day', header: 'Day', render: (s) => s.day },
-    { key: 'in', header: 'In', render: (s) => <span className="mb-mono">{s.started}</span> },
+    { key: 'in', header: 'In', render: (s) => <Numeric>{s.started}</Numeric> },
     {
       key: 'out',
       header: 'Out',
-      render: (s) => <span className="mb-mono">{s.ended || '—'}</span>,
+      render: (s) => <Numeric>{s.ended || '—'}</Numeric>,
     },
     {
       key: 'worked',
       header: 'Worked',
       numeric: true,
-      render: (s) => <span className="mb-mono">{s.worked}</span>,
+      render: (s) => <Numeric>{s.worked}</Numeric>,
     },
     {
       key: 'verdict',
@@ -656,20 +657,20 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
                 key: 'amount',
                 header: 'Amount',
                 numeric: true,
-                render: (a) => <span className="mb-mono">{a.amount.text}</span>,
+                render: (a) => <Numeric>{a.amount.text}</Numeric>,
               },
               {
                 key: 'recovered',
                 header: 'Come back',
                 numeric: true,
-                render: (a) => <span className="mb-mono">{a.recovered.text}</span>,
+                render: (a) => <Numeric>{a.recovered.text}</Numeric>,
               },
               {
                 key: 'outstanding',
                 header: 'Still owed',
                 numeric: true,
                 render: (a) => (
-                  <strong className="mb-mono">{a.outstanding.text}</strong>
+                  <strong className="mb-numeric">{a.outstanding.text}</strong>
                 ),
               },
               {
@@ -889,11 +890,11 @@ export function Payroll() {
           <Row gap="group">
             <Stack gap="inline">
               <span className="mb-muted">Wages</span>
-              <strong className="mb-mono">{cost.wages.text}</strong>
+              <strong className="mb-numeric">{cost.wages.text}</strong>
             </Stack>
             <Stack gap="inline">
               <span className="mb-muted">Takings</span>
-              <strong className="mb-mono">{cost.revenue.text}</strong>
+              <strong className="mb-numeric">{cost.revenue.text}</strong>
             </Stack>
             <Stack gap="inline">
               <span className="mb-muted">Wages as a share</span>
@@ -924,7 +925,7 @@ export function Payroll() {
                 key: 'total',
                 header: 'Total',
                 numeric: true,
-                render: (r) => <span className="mb-mono">{r.total.text}</span>,
+                render: (r) => <Numeric>{r.total.text}</Numeric>,
               },
               {
                 key: 'state',
@@ -1013,34 +1014,34 @@ function RunSheet({
               key: 'earned',
               header: 'Earned',
               numeric: true,
-              render: (l) => <span className="mb-mono">{l.earned.text}</span>,
+              render: (l) => <Numeric>{l.earned.text}</Numeric>,
             },
             {
               key: 'allow',
               header: 'Allowances',
               numeric: true,
-              render: (l) => <span className="mb-mono">{l.allowances.text}</span>,
+              render: (l) => <Numeric>{l.allowances.text}</Numeric>,
             },
             {
               key: 'unpaid',
               header: 'Unpaid leave',
               numeric: true,
               render: (l) => (
-                <span className="mb-mono">{l.unpaidLeaveDeduction.text}</span>
+                <Numeric>{l.unpaidLeaveDeduction.text}</Numeric>
               ),
             },
             {
               key: 'advance',
               header: 'Advance',
               numeric: true,
-              render: (l) => <span className="mb-mono">{l.advanceRecovered.text}</span>,
+              render: (l) => <Numeric>{l.advanceRecovered.text}</Numeric>,
             },
             {
               key: 'net',
               header: 'To hand over',
               numeric: true,
               render: (l) => (
-                <strong className="mb-mono">
+                <strong className="mb-numeric">
                   {l.net.text}
                   {l.edited ? ' *' : ''}
                 </strong>
@@ -1092,7 +1093,7 @@ function RunSheet({
         />
 
         <Row end gap="field">
-          <strong className="mb-mono">{run.total.text}</strong>
+          <strong className="mb-numeric">{run.total.text}</strong>
         </Row>
 
         {run.state === 'draft' && run.mayManage ? (

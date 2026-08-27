@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import { cx } from './cx';
+import { Icon } from './Icon';
 import { InfoTip } from './InfoTip';
 
 type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
@@ -321,6 +322,56 @@ export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
     );
   },
 );
+
+export interface StepperProps {
+  /** What the group is called for a screen reader — "Quantity of Masala Dosa". */
+  label: string;
+  /** The thing being counted, for the two buttons — "Masala Dosa", "person". */
+  what: string;
+  onLess: () => void;
+  onMore: () => void;
+  lessDisabled?: boolean;
+  moreDisabled?: boolean;
+  /** The figure between the buttons: a `.mb-stepper__value` span, button or input. */
+  children: ReactNode;
+  className?: string;
+}
+
+/** − n +. The one stepper in the product. */
+export function Stepper({
+  label,
+  what,
+  onLess,
+  onMore,
+  lessDisabled,
+  moreDisabled,
+  children,
+  className,
+}: StepperProps) {
+  return (
+    <div className={cx('mb-stepper', className)} role="group" aria-label={label}>
+      <button
+        type="button"
+        className="mb-stepper__step"
+        onClick={onLess}
+        disabled={lessDisabled}
+        aria-label={`One less ${what}`}
+      >
+        <Icon name="minus" size="sm" />
+      </button>
+      {children}
+      <button
+        type="button"
+        className="mb-stepper__step"
+        onClick={onMore}
+        disabled={moreDisabled}
+        aria-label={`One more ${what}`}
+      >
+        <Icon name="plus" size="sm" />
+      </button>
+    </div>
+  );
+}
 
 export interface KeypadProps {
   onPress: (key: string) => void;

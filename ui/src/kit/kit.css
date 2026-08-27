@@ -80,8 +80,9 @@
   filter: brightness(1.08);
 }
 
+/* Inside a row. Shorter than a full button, never taller. */
 .mb-button--small {
-  min-height: var(--space-7);
+  min-height: var(--target-small);
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-sm);
 }
@@ -137,6 +138,89 @@
   color: var(--accent);
   font-weight: var(--weight-bold);
   box-shadow: var(--level-raised);
+}
+
+/* The same control, filling the width it is given — the cart's payment row. */
+.mb-segment--fill {
+  display: flex;
+  width: 100%;
+}
+
+.mb-segment--fill .mb-segment__option {
+  flex: 1;
+  min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+/* Stepper: − n +, one shape. */
+
+.mb-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--target-small);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.mb-stepper__step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--stepper-step);
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.mb-stepper__step:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.mb-stepper__step:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/*
+ * The figure between the buttons. A span, a button (tap to type) or the box it is typed into
+ * all wear this, so the row does not jump when one turns into the next.
+ */
+.mb-stepper__value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--space-6);
+  padding: 0 var(--space-1);
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-inline: var(--border-width) solid var(--border);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+button.mb-stepper__value {
+  cursor: pointer;
+}
+
+button.mb-stepper__value:hover {
+  background: var(--surface-2);
+}
+
+input.mb-stepper__value {
+  width: var(--space-8);
+  background: var(--accent-soft);
 }
 
 .mb-field {

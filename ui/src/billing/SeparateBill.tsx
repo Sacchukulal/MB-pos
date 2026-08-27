@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { Button, Modal, Notice, onlyAmount, Input } from '../kit';
+import { Button, Modal, Notice, Numeric, onlyAmount, Input } from '../kit';
 import { call } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 
@@ -44,7 +44,7 @@ export function SeparateBill({
             {cart.lines.map((line) => (
               <li key={line.index} className="mb-split__line">
                 <span className="mb-split__name">{line.name}</span>
-                <span className="mb-mono">{line.qty}</span>
+                <Numeric>{line.qty}</Numeric>
                 <Input
                   label="Move"
                   value={moving[line.index] ?? ''}

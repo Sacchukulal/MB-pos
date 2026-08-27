@@ -15,10 +15,92 @@ import {
   Input,
   Modal,
   Money,
+  SideFold,
+  Stepper,
   Table,
 } from '../src/kit';
 
 afterEach(cleanup);
+
+/** − n +, once. */
+describe('Stepper', () => {
+  it('names both buttons after the thing being counted', () => {
+    const onLess = vi.fn();
+    const onMore = vi.fn();
+    render(
+      <Stepper label="Quantity of Masala Dosa" what="Masala Dosa" onLess={onLess} onMore={onMore}>
+        <span className="mb-stepper__value">2</span>
+      </Stepper>,
+    );
+    expect(screen.getByRole('group', { name: 'Quantity of Masala Dosa' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'One less Masala Dosa' }));
+    fireEvent.click(screen.getByRole('button', { name: 'One more Masala Dosa' }));
+    expect(onLess).toHaveBeenCalledTimes(1);
+    expect(onMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('can hold either end', () => {
+    render(
+      <Stepper label="People" what="person" onLess={vi.fn()} onMore={vi.fn()} lessDisabled>
+        <span className="mb-stepper__value">2</span>
+      </Stepper>,
+    );
+    expect(screen.getByRole('button', { name: 'One less person' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'One more person' })).toBeEnabled();
+  });
+
+  it('is the only stepper: no screen draws − + buttons of its own', () => {
+    // A hand-rolled pair drifts in size the moment the kit's changes. The cart, "each pays" and
+    // the kitchen all go through the one component.
+    const files = ['billing/Billing.tsx', 'floor/Floor.tsx', 'kitchen/Kitchen.tsx'];
+    for (const file of files) {
+      const source = readFileSync(`src/${file}`, 'utf8');
+      expect(source, `${file} draws its own minus button`).not.toMatch(
+        /<Button[^>]*>\s*<Icon name="minus"/,
+      );
+    }
+  });
+});
+
+/** The panel on the other side. */
+describe('SideFold on the end side', () => {
+  it('puts the panel AFTER the main column, in the DOM too', () => {
+    const { container } = render(
+      <SideFold side="end" label="Processing orders" open onOpen={vi.fn()} onFold={vi.fn()} panel={<span>rows</span>}>
+        <span>floor</span>
+      </SideFold>,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain('mb-sidefold--end');
+    expect(root.lastElementChild?.tagName).toBe('ASIDE');
+    expect(root.firstElementChild?.className).toContain('mb-sidefold__main');
+    // The fold arrow points the way the panel goes.
+    expect(screen.getByRole('button', { name: 'Close Processing orders' })).toBeInTheDocument();
+  });
+
+  it('keeps the count in sight when folded', () => {
+    const onOpen = vi.fn();
+    render(
+      <SideFold side="end" label="Processing orders" count={3} open={false} onOpen={onOpen} onFold={vi.fn()} panel={null}>
+        <span>floor</span>
+      </SideFold>,
+    );
+    const strip = screen.getByRole('button', { name: 'Processing orders, 3' });
+    expect(strip.textContent).toBe('3');
+    fireEvent.click(strip);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the count beside the title when open', () => {
+    render(
+      <SideFold side="end" label="Processing orders" count={3} open onOpen={vi.fn()} onFold={vi.fn()} panel={<span>rows</span>}>
+        <span>floor</span>
+      </SideFold>,
+    );
+    const head = screen.getByRole('complementary', { name: 'Processing orders' });
+    expect(head.querySelector('.mb-badge')?.textContent).toBe('3');
+  });
+});
 
 describe('Button', () => {
   it('is reachable and pressable by keyboard alone', async () => {

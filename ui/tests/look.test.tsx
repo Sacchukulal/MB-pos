@@ -383,3 +383,38 @@ describe('check-ids.mjs', () => {
     expect(out).toContain('ids: clean');
   });
 });
+
+/** The cart's controls, after the 2026-08-27 round: nothing in a row is taller than a button. */
+describe('the cart controls', () => {
+  const strip = (raw: string) => raw.replace(new RegExp('/\\*[\\s\\S]*?\\*/', 'g'), '');
+  const kit = strip(readFileSync(join('src', 'kit', 'kit.css'), 'utf8'));
+  const billing = strip(readFileSync(join('src', 'billing', 'billing.css'), 'utf8'));
+  const block = (css: string, rule: string) => {
+    const at = css.indexOf(rule);
+    expect(at, `${rule} is missing`).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf('}', at));
+  };
+
+  it('makes a small button SMALLER than a full one, by its own token', () => {
+    // It was `--space-7` — three rem, taller than the 44px it was meant to sit under.
+    const small = block(kit, '.mb-button--small {');
+    expect(small).toContain('min-height: var(--target-small)');
+    expect(small).not.toContain('min-height: var(--space-');
+  });
+
+  it('pays through the segmented control, not three styled buttons', () => {
+    expect(billing).not.toContain('.mb-payment__mode {');
+    expect(billing).not.toContain('.mb-payment__mode--on');
+    expect(kit).toContain('.mb-segment--fill');
+  });
+
+  it('wraps each row of the fold rather than letting it run into the next group', () => {
+    expect(block(billing, '.mb-actions__row {')).toContain('flex-wrap: wrap');
+    expect(block(billing, '.mb-actions--more {')).not.toContain('repeat(3');
+  });
+
+  it('gives the processing panel its width from one token', () => {
+    expect(block(billing, '.mb-billing__side {')).toContain('--sidefold-width: var(--queue-width)');
+    expect(readFileSync(join('src', 'theme', 'tokens.css'), 'utf8')).toContain('--queue-width:');
+  });
+});

@@ -1,6 +1,7 @@
 import { forwardRef, type ReactNode } from 'react';
 
 import { cx } from './cx';
+import { Badge } from './display';
 import { Icon, type IconName } from './Icon';
 import { InfoTip } from './InfoTip';
 
@@ -97,6 +98,11 @@ export function SideFold({
   panel,
   children,
   allowed = true,
+  side = 'start',
+  icon = 'plus',
+  count,
+  dense = false,
+  className,
 }: {
   open: boolean;
   /** What the panel is, and its heading. */
@@ -107,48 +113,65 @@ export function SideFold({
   panel: ReactNode;
   children: ReactNode;
   allowed?: boolean;
+  /** Which side of the screen the panel is on. */
+  side?: 'start' | 'end';
+  /** What the folded button shows. */
+  icon?: IconName;
+  /** How many things are in the panel — shown open and folded, so nothing is out of sight. */
+  count?: number;
+  /** A list rather than a form: the body keeps only a small margin. */
+  dense?: boolean;
+  className?: string;
 }) {
   const showing = allowed && open;
+  const named = count === undefined ? label : `${label}, ${count}`;
+  const fold = !allowed ? null : showing ? (
+    <aside className="mb-sidefold__panel" aria-label={label}>
+      <div className="mb-sidefold__head">
+        <h2 className="mb-sidefold__title">{label}</h2>
+        {count === undefined ? null : <Badge tone="accent">{count}</Badge>}
+        <button
+          type="button"
+          className="mb-sidefold__fold"
+          title={`Close ${label}`}
+          aria-label={`Close ${label}`}
+          aria-expanded
+          onClick={onFold}
+        >
+          <Icon name={side === 'start' ? 'chevron-left' : 'chevron-right'} size="sm" />
+        </button>
+      </div>
+      <Scroller inset className={cx('mb-sidefold__body', dense && 'mb-sidefold__body--dense')}>
+        {panel}
+      </Scroller>
+    </aside>
+  ) : (
+    <button
+      type="button"
+      className="mb-sidefold__strip"
+      title={named}
+      aria-label={named}
+      aria-expanded={false}
+      onClick={onOpen}
+    >
+      <Icon name={icon} size="sm" />
+      {count === undefined ? null : <Badge tone="accent">{count}</Badge>}
+    </button>
+  );
   return (
     <div
       className={cx(
         'mb-sidefold',
+        `mb-sidefold--${side}`,
         showing && 'mb-sidefold--open',
         !allowed && 'mb-sidefold--none',
+        className,
       )}
     >
-      {!allowed ? null : showing ? (
-        <aside className="mb-sidefold__panel" aria-label={label}>
-          <div className="mb-sidefold__head">
-            <h2 className="mb-sidefold__title">{label}</h2>
-            <button
-              type="button"
-              className="mb-sidefold__fold"
-              title={`Close ${label}`}
-              aria-label={`Close ${label}`}
-              aria-expanded
-              onClick={onFold}
-            >
-              <Icon name="chevron-left" size="sm" />
-            </button>
-          </div>
-          <Scroller inset className="mb-sidefold__body">
-            {panel}
-          </Scroller>
-        </aside>
-      ) : (
-        <button
-          type="button"
-          className="mb-sidefold__strip"
-          title={label}
-          aria-label={label}
-          aria-expanded={false}
-          onClick={onOpen}
-        >
-          <Icon name="plus" size="sm" />
-        </button>
-      )}
+      {/* The panel first on the start side, last on the end side — in the DOM too, for Tab. */}
+      {side === 'start' ? fold : null}
       <div className="mb-sidefold__main">{children}</div>
+      {side === 'end' ? fold : null}
     </div>
   );
 }

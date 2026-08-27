@@ -296,7 +296,7 @@ function describe(table: TableView, picked?: boolean): string {
  * "12m", "1h 05m". Not a duration library — this is the only place in the product that formats
  * one, and it is nine lines.
  */
-function formatMinutes(minutes: number): string {
+export function formatMinutes(minutes: number): string {
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;

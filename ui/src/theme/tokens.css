@@ -127,6 +127,10 @@
    * a touch monitor.
    */
   --target-min: 44px;
+  /* A control that sits inside a row — a stepper, a chip, a row's own button. */
+  --target-small: 2.25rem;
+  /* How wide the − and + of a stepper are. */
+  --stepper-step: 2rem;
 
   /*
    * Component widths. Here rather than in a component, because "the rail is too narrow" and
@@ -158,9 +162,9 @@
   /* The totals breakdown scrolls past this, so the item list keeps its room. */
   --totals-breakdown-max: 7.5rem;
   /* The processing-orders panel, between the floor and the cart. */
-  /* How wide the minus and plus on a cart line are. */
-  --cart-step-size: 1.75rem;
-  --billbar-lock-size: 1.5rem;
+  --queue-width: 17rem;
+  /* The "Paper / Bill / Order" word beside each row of the cart's fold. */
+  --actions-title-width: 3.25rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
   --tile-height: 6.5rem;

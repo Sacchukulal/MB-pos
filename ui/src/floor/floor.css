@@ -10,18 +10,6 @@
   overflow: hidden;
 }
 
-.mb-floor__bar {
-  flex-wrap: wrap;
-}
-
-/*
- * Pushes the filters to the right of the sections without either of them needing to know how
- * many the other has.
- */
-.mb-floor__spacer {
-  flex: 1 1 auto;
-}
-
 /* Small, one line, glanceable. */
 /* The line an owner glances at (scope 14.3). */
 
