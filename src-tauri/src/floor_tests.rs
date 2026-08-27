@@ -875,6 +875,83 @@ fn a_second_party_gets_its_own_tile_and_the_table_keeps_its_first() {
     assert_eq!(opened.order_id.as_deref(), Some(first.as_str()));
 }
 
+/// A second party in the cart is on the table, but not on the table's own tile.
+#[test]
+fn only_the_party_in_the_cart_is_marked_never_its_table_as_well() {
+    let scratch = Scratch::new("selected_seat");
+    let app = a_shop_with_a_room(&scratch);
+    seat(&app, "ord_a", "tbl_2", &[("itm_dosa", 12_000, 1)], None);
+    let second = a_second_party(&app, "tbl_2");
+
+    crate::ipc::open_order_on(&app, second.as_str().to_owned()).expect("opened 2B");
+    let marked = marked_labels(&crate::ipc::open_orders_on(&app).expect("the floor"));
+    assert_eq!(marked, ["2B"], "the table's own tile lit up with its second party");
+
+    // And the other way round: the first party marks the table, not the seat.
+    crate::ipc::open_table_on(&app, "tbl_2".to_owned()).expect("opened 2");
+    let marked = marked_labels(&crate::ipc::open_orders_on(&app).expect("the floor"));
+    assert_eq!(marked, ["2"]);
+}
+
+/// When the first party has paid, the second keeps its letter and the table is free again.
+#[test]
+fn a_second_party_keeps_its_letter_after_the_first_has_paid() {
+    let scratch = Scratch::new("seat_outlives");
+    let app = a_shop_with_a_room(&scratch);
+    let second = a_second_party(&app, "tbl_2");
+
+    let tiles = crate::ipc::open_orders_on(&app).expect("the floor");
+    let table = tiles.iter().find(|t| t.id == "tbl_2").expect("table 2's own tile");
+    assert_eq!(table.label, "2");
+    assert_eq!(
+        table.state,
+        crate::billing::TableState::Free,
+        "the second party was drawn as the table's own order"
+    );
+    assert!(table.order_id.is_none());
+    let party = tiles.iter().find(|t| t.id == second.as_str()).expect("2B's tile");
+    assert_eq!(party.label, "2B", "the letter was lost");
+    assert_eq!(party.order_id.as_deref(), Some(second.as_str()));
+
+    // Pressing the table starts a new first party; the second is untouched.
+    let opened = crate::ipc::open_table_on(&app, "tbl_2".to_owned()).expect("opened");
+    assert!(opened.order_id.is_none());
+    assert_eq!(opened.table.as_deref(), Some("2"));
+}
+
+/// A party with a letter, parked with one line — the + on the tile, then a ticket.
+fn a_second_party(app: &App, table: &str) -> OrderId {
+    crate::ipc::join_table_on(app, table.to_owned(), None).expect("seated");
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .add(
+                snapshot("itm_tea", 2_000),
+                Qty::from_whole(1).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a tea");
+    let parked = crate::flows::park_open_order(app).expect("parked");
+    app.with_cart_mut(|state| {
+        *state = crate::billing::CartState::default();
+        Ok(())
+    })
+    .expect("cleared");
+    parked.core.id
+}
+
+fn marked_labels(tiles: &[crate::billing::TableView]) -> Vec<String> {
+    tiles
+        .iter()
+        .filter(|t| t.selected)
+        .map(|t| t.label.clone())
+        .collect()
+}
+
 /// Typed items join a busy table's bill without being written until the counter parks them.
 #[test]
 fn typed_items_join_the_bill_on_a_busy_table() {

@@ -109,11 +109,15 @@ export function reduce(state: State, event: Event): [State, Command[]] {
       return [{ ...state, tables: event.tables }, []];
 
     case 'processing': {
-      // A highlight that outlives its row goes back to the box.
+      // A highlight past the end of a shorter list moves onto its last row; an empty list
+      // sends it back to the box.
+      const count = event.orders.length;
       const mode =
-        state.mode.kind === 'processing' && state.mode.index >= event.orders.length
-          ? { kind: 'searching' as const }
-          : state.mode;
+        state.mode.kind !== 'processing' || state.mode.index < count
+          ? state.mode
+          : count > 0
+            ? { kind: 'processing' as const, index: count - 1 }
+            : { kind: 'searching' as const };
       return [{ ...state, processing: event.orders, mode }, []];
     }
 
@@ -233,8 +237,12 @@ function key(state: State, pressed: string): [State, Command[]] {
     if (pressed === 'Enter') {
       const order = state.processing[at];
       if (!order) return [cleared(state), [{ do: 'focus-search' }]];
-      // Into the cart. The next Enter, on an empty box, completes it.
-      return [cleared(state), [openCommand(order), { do: 'focus-search' }]];
+      // Already in the cart: this Enter completes it. Otherwise into the cart — and the
+      // highlight stays on the row, so the arrows carry on from here.
+      if (order.selected && state.cartHasItems) {
+        return [state, [{ do: 'complete-bill' }]];
+      }
+      return [state, [openCommand(order), { do: 'focus-search' }]];
     }
     return [state, []];
   }
@@ -266,9 +274,11 @@ function key(state: State, pressed: string): [State, Command[]] {
       ];
     }
     // Down on an empty box with nothing suggested moves into the processing orders — which is
-    // how a cashier reaches a bill to complete without the mouse.
+    // how a cashier reaches a bill to complete without the mouse. It starts on the order that
+    // is in the cart, when one is, so a tap on a row is where the arrows carry on from.
     if (state.text === '' && state.processing.length > 0) {
-      return [{ ...state, mode: { kind: 'processing', index: 0 } }, []];
+      const on = state.processing.findIndex((order) => order.selected);
+      return [{ ...state, mode: { kind: 'processing', index: on >= 0 ? on : 0 } }, []];
     }
     return [state, []];
   }

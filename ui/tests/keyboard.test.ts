@@ -357,10 +357,30 @@ describe('the processing orders by keyboard (step 4)', () => {
   it('Enter opens the highlighted order in the cart, and the next Enter completes it', () => {
     let [state, commands] = run(initial(), cooking(...two), press('ArrowDown'), press('Enter'));
     expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_3' }, { do: 'focus-search' }]);
-    expect(state.mode.kind).toBe('searching');
-    // In the cart now, and the kitchen already has everything on it.
-    [state, commands] = run(state, cart(true, true), press('Enter'));
+    // The highlight STAYS on the row, so the arrows carry on from here.
+    expect(state.mode).toEqual({ kind: 'processing', index: 0 });
+    // In the cart now (the floor says so), and the kitchen already has everything on it.
+    const inCart = [{ ...two[0], selected: true }, two[1]] as TableView[];
+    [state, commands] = run(state, cooking(...inCart), cart(true, true), press('Enter'));
     expect(commands).toEqual([{ do: 'complete-bill' }]);
+    // Or from the box, the same second Enter.
+    [, commands] = run(state, press('Escape'), cooking(...inCart), cart(true, true), press('Enter'));
+    expect(commands).toEqual([{ do: 'complete-bill' }]);
+  });
+
+  it('the arrows carry on from the order that is in the cart, however it got there', () => {
+    // A tap on a row, or on its tile, put it in the cart: Down goes to it, not to the top.
+    const inCart = [two[0], { ...two[1], selected: true }] as TableView[];
+    const [state] = run(initial(), cooking(...inCart), press('ArrowDown'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 1 });
+  });
+
+  it('a highlight past the end of a shorter list moves onto its last row', () => {
+    // The row above was billed and left the list; the arrows are still in the list.
+    let [state] = run(initial(), cooking(...two), press('ArrowDown'), press('ArrowDown'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 1 });
+    [state] = run(state, cooking(two[1] as TableView));
+    expect(state.mode).toEqual({ kind: 'processing', index: 0 });
   });
 
   it('a parcel in the list is its own order', () => {
@@ -374,14 +394,8 @@ describe('the processing orders by keyboard (step 4)', () => {
     expect(commands).toEqual([{ do: 'open-order', orderId: 'ord_Parcel' }, { do: 'focus-search' }]);
   });
 
-  it('a highlight whose row was billed goes back to the box', () => {
-    const [state] = run(
-      initial(),
-      cooking(...two),
-      press('ArrowDown'),
-      press('ArrowDown'),
-      cooking(two[0] as TableView),
-    );
+  it('a highlight whose whole list was billed goes back to the box', () => {
+    const [state] = run(initial(), cooking(...two), press('ArrowDown'), cooking());
     expect(state.mode.kind).toBe('searching');
   });
 });
@@ -448,7 +462,13 @@ describe('the whole counter flow, by keyboard alone', () => {
     // 3. Later: down into the processing orders, Enter to open, Enter to bill.
     [state, commands] = run(state, press('ArrowDown'), press('Enter'));
     expect(commands[0]).toEqual({ do: 'open-table', tableId: 'tbl_Parcel' });
-    [, commands] = run(state, cart(true, true), press('Enter'));
+    // The floor comes back saying that order is the one in the cart.
+    [, commands] = run(
+      state,
+      cooking({ ...table('Parcel', true), selected: true }),
+      cart(true, true),
+      press('Enter'),
+    );
     expect(commands).toEqual([{ do: 'complete-bill' }]);
   });
 });

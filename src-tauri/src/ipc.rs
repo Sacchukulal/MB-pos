@@ -1043,11 +1043,12 @@ pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
 /// The floor — the only view of open orders.
 pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     guard::require(app, Permission::BillCreate)?;
-    // Both halves of "where is the cashier" — see `TableView::selected`.
-    let (loaded, on_table) = app.with_cart(|state| {
+    // All three halves of "where is the cashier" — see `TableView::selected`.
+    let (loaded, on_table, on_seat) = app.with_cart(|state| {
         Ok((
             state.order_id().map(str::to_owned),
             state.table_id().map(str::to_owned),
+            state.seat().map(str::to_owned),
         ))
     })?;
     // The same two thresholds the floor screen uses, from the same place — a billing grid and a
@@ -1076,6 +1077,7 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
                 cart_is_on: Some(crate::billing::CartIsOn {
                     order: loaded.as_deref(),
                     table: on_table.as_deref(),
+                    seat: on_seat.as_deref(),
                 }),
                 now: crate::flows::now(),
                 warn_after: warn,
@@ -1338,8 +1340,8 @@ fn table_and_its_order(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let label = repos.floor().find_table(table)?.map(|t| t.label);
-                let found = match repos.floor().open_order_at(table)? {
-                    Some((order_id, _)) => repos.orders().find(&OrderId::new(order_id))?,
+                let found = match repos.floor().first_party_at(table)? {
+                    Some(order_id) => repos.orders().find(&OrderId::new(order_id))?,
                     None => None,
                 };
                 Ok((label, found))

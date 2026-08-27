@@ -378,6 +378,21 @@ impl<'a> FloorRepo<'a> {
             .optional()?)
     }
 
+    /// The table's OWN party — the open order there with no letter. A second party with a
+    /// letter is its own tile and never stands in for the table.
+    pub fn first_party_at(&self, table: &TableId) -> Result<Option<String>, DbError> {
+        Ok(self
+            .tx
+            .query_row(
+                "SELECT id FROM orders
+                  WHERE table_id = ?1 AND sub_table IS NULL AND state IN ('draft', 'open')
+                  ORDER BY created_at LIMIT 1",
+                [table.as_str()],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// Take a table off the floor, or put it back.
     pub fn set_active(
         &self,

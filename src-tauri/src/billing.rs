@@ -125,6 +125,15 @@ impl CartState {
         self.table.as_ref().map(|t| t.id.as_str())
     }
 
+    /// The letter, when the cart is a second party on its table.
+    #[must_use]
+    pub fn seat(&self) -> Option<&str> {
+        self.table
+            .as_ref()
+            .and_then(|t| t.seat.as_ref())
+            .map(mb_core::SubTable::as_str)
+    }
+
     #[must_use]
     pub fn order_id(&self) -> Option<&str> {
         self.origin.as_ref().map(|o| o.id.as_str())
@@ -612,6 +621,8 @@ pub struct CartIsOn<'a> {
     pub order: Option<&'a str>,
     /// The table the cart is on, order or no order.
     pub table: Option<&'a str>,
+    /// And the letter, when it is a second party there — the table's own tile is not it.
+    pub seat: Option<&'a str>,
 }
 
 pub fn floor_view(
@@ -629,8 +640,8 @@ pub fn floor_view(
     } = room;
     // Split out once. A screen with no cart marks nothing, and every comparison below is
     // against `None`, which nothing matches.
-    let (loaded_order, loaded_table) =
-        cart_is_on.map_or((None, None), |cart| (cart.order, cart.table));
+    let (loaded_order, loaded_table, loaded_seat) =
+        cart_is_on.map_or((None, None, None), |cart| (cart.order, cart.table, cart.seat));
     let mut out = Vec::with_capacity(tables.len() + open.len());
 
     for table in tables.iter().filter(|t| t.is_active) {
@@ -640,7 +651,8 @@ pub fn floor_view(
                 .find(|s| &s.id == id)
                 .map(|s| s.name.clone())
         });
-        // Every party on this table: the first is the table's own tile, the rest are seats.
+        // Every party on this table. The one with no letter is the table's own tile; every
+        // lettered one is its own tile beside it — and stays so when the first party has paid.
         let mut here: Vec<&AnyOrder> = open
             .iter()
             .filter(|o| {
@@ -650,13 +662,14 @@ pub fn floor_view(
             })
             .collect();
         here.sort_by_key(|o| o.core().seat().map(|s| s.as_str().to_owned()));
-        let order = here.first().copied();
+        let order = here.iter().find(|o| o.core().seat().is_none()).copied();
 
-        // Decided here, where both halves are in scope, and nowhere else.
-        let selected = loaded_table == Some(table.id.as_str())
+        // Decided here, where both halves are in scope, and nowhere else. A cart on 2B is on
+        // table 2, but it is not on table 2's own tile.
+        let selected = (loaded_table == Some(table.id.as_str()) && loaded_seat.is_none())
             || order.is_some_and(|o| loaded_order == Some(o.core().id.as_str()));
 
-        for party in here.iter().skip(1) {
+        for party in here.iter().filter(|o| o.core().seat().is_some()) {
             let seat = party.core().seat().map_or("", |s| s.as_str());
             out.push(tile_for(
                 party,
