@@ -421,8 +421,13 @@ describe('the cart controls', () => {
     expect(block(billing, '.mb-billing__floorrow--open {')).toContain('var(--queue-width)');
     // Two steps: folding, the column waits for the list; opening, the list waits for the column.
     const waits = 'var(--motion-normal) var(--ease) var(--motion-normal)';
-    expect(block(billing, '.mb-billing__floorrow {')).toContain(`grid-template-columns ${waits}`);
     expect(block(billing, '.mb-processing__fold--open {')).toContain(`grid-template-rows ${waits}`);
+    // The column itself is never animated: tiles cannot move smoothly, so it changes in one
+    // step, after the list has folded.
+    const row = block(billing, '.mb-billing__floorrow {');
+    expect(row).toContain('grid-template-columns 0s linear var(--motion-normal)');
+    expect(row).not.toContain('grid-template-columns var(--motion');
+    expect(block(billing, '.mb-billing__floorrow--open {')).toContain('transition: none');
     // Never a number of milliseconds here.
     for (const rule of ['.mb-billing__floorrow {', '.mb-billing__floorrow--open {', '.mb-processing__fold {']) {
       expect(block(billing, rule), rule).not.toMatch(/\d+ms/);

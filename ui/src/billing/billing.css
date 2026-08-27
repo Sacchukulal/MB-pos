@@ -40,10 +40,11 @@
 }
 
 /*
- * The floor and the processing list. Folding is two steps, each with the product's own
- * motion: the list folds up under its head, THEN its column closes and the tiles take the
- * room. Opening is the same two steps the other way round — the column opens, then the list
- * drops. Nothing ever slides sideways.
+ * The floor and the processing list. Folding is two steps: the list folds up under its head
+ * with the product's own motion, THEN its column closes in one step and the tiles take the
+ * room. The column is never animated — tiles cannot move smoothly, so a column that shrinks
+ * over time makes them jump through every layout on the way. One reflow, after the fold.
+ * Opening is the other way round: the column opens at once, then the list drops.
  */
 .mb-billing__floorrow {
   display: grid;
@@ -52,16 +53,14 @@
   column-gap: 0;
   min-height: 0;
   transition:
-    grid-template-columns var(--motion-normal) var(--ease) var(--motion-normal),
-    column-gap var(--motion-normal) var(--ease) var(--motion-normal);
+    grid-template-columns 0s linear var(--motion-normal),
+    column-gap 0s linear var(--motion-normal);
 }
 
 .mb-billing__floorrow--open {
   grid-template-columns: minmax(0, 1fr) var(--queue-width);
   column-gap: var(--space-4);
-  transition:
-    grid-template-columns var(--motion-normal) var(--ease),
-    column-gap var(--motion-normal) var(--ease);
+  transition: none;
 }
 
 /* The order type takes the cart's column, hard against its right edge. */
