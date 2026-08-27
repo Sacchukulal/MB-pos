@@ -144,16 +144,12 @@ fn update_row(app: &App) -> HealthRow {
 }
 
 fn printers_row(app: &App) -> HealthRow {
+    // The same jobs, judged the same way, as the bar in the title.
     let stuck = app
-        .with_shop(|shop| {
-            Ok(shop
-                .queue
-                .snapshot()
-                .iter()
-                .filter(|job| matches!(job.state, mb_print::queue::JobState::Parked))
-                .count())
-        })
-        .unwrap_or(0);
+        .print_queue_snapshot()
+        .iter()
+        .filter(|job| job.needs_attention)
+        .count();
     if stuck == 0 {
         return HealthRow::ok(
             "printers",

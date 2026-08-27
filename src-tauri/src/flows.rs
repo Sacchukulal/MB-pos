@@ -330,7 +330,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
                     None,
                     None,
                 )?;
-                crate::kitchen::send_in(&repos, &order_id, None, at)?;
+                crate::kitchen::send_in(&repos, &app.shop_config(), &order_id, None, at)?;
                 Ok(())
             })
             .map_err(|e| words::from_db(&e))

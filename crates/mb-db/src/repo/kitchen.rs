@@ -143,7 +143,7 @@ impl<'a> KitchenRepo<'a> {
     pub fn outstanding(&self, outlet: &str, station: &str) -> Result<Vec<Ticket>, DbError> {
         let mut stmt = self.tx.prepare(&format!(
             "SELECT {COLUMNS} FROM kitchen_deliveries
-             WHERE outlet_id = ?1 AND station = ?2 AND state <> 'bumped'
+             WHERE outlet_id = ?1 AND station = ?2 AND state NOT IN ('bumped', 'closed')
              ORDER BY sent_at",
         ))?;
         let mut rows = stmt.query(rusqlite::params![outlet, station])?;
@@ -211,6 +211,27 @@ impl<'a> KitchenRepo<'a> {
                 SET cancelled_at = ?2
               WHERE order_id = ?1 AND cancelled_at IS NULL",
             rusqlite::params![order_id, at.millis()],
+        )?;
+        Ok(changed)
+    }
+
+    /// Nothing more for the kitchen on this order: a void, or a cancellation somebody saw.
+    pub fn close_order(&self, order_id: &str) -> Result<usize, DbError> {
+        let changed = self.tx.execute(
+            "UPDATE kitchen_deliveries SET state = 'closed'
+              WHERE order_id = ?1 AND state NOT IN ('bumped', 'closed')",
+            rusqlite::params![order_id],
+        )?;
+        Ok(changed)
+    }
+
+    /// Every ticket still up for an order the counter has finished — the day close's sweep.
+    pub fn close_finished(&self, outlet: &str) -> Result<usize, DbError> {
+        let changed = self.tx.execute(
+            "UPDATE kitchen_deliveries SET state = 'closed'
+              WHERE outlet_id = ?1 AND state NOT IN ('bumped', 'closed')
+                AND order_id IN (SELECT id FROM orders WHERE state <> 'open')",
+            rusqlite::params![outlet],
         )?;
         Ok(changed)
     }
@@ -325,6 +346,7 @@ fn state_code(state: State) -> &'static str {
         State::Shown => "shown",
         State::Bumped => "bumped",
         State::Printed => "printed",
+        State::Closed => "closed",
     }
 }
 
@@ -334,6 +356,7 @@ fn state_from(code: &str) -> State {
         "shown" => State::Shown,
         "bumped" => State::Bumped,
         "printed" => State::Printed,
+        "closed" => State::Closed,
         _ => State::Pending,
     }
 }

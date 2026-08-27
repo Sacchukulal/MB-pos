@@ -1723,6 +1723,16 @@ pub const CATALOG: &[Entry] = &[
         ["kot", "disable", "off", "no kitchen"],
         billing.kitchen_ticket_off
     ),
+    flag!(
+        "billing.kitchen_screen",
+        Billing,
+        Row,
+        "The kitchen has a screen",
+        "Orders go to the Kitchen screen. If nobody sees one there in 20 seconds, it \
+         prints instead.",
+        ["kds", "screen", "display", "kitchen"],
+        billing.kitchen_screen
+    ),
     number!("billing.service_charge_bp", Billing, Row, "Service charge",
         "In hundredths of a percent, so 500 is 5%. 0 means you do not charge it. \
          Added to dine-in bills only.",
@@ -2086,6 +2096,7 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.locked_order_type", "At the counter"),
     ("billing.confirm_", "Before it prints"),
     ("billing.kitchen_ticket_off", "Before it prints"),
+    ("billing.kitchen_screen", "Before it prints"),
     ("billing.idle_lock_minutes", "At the counter"),
     ("billing.service_charge", "Charges you add"),
     ("billing.packing_charge", "Charges you add"),

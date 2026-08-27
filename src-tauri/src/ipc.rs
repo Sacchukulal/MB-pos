@@ -60,6 +60,8 @@ pub struct AppStatus {
     pub licence: String,
     /// `ok`, `warn` or `danger`.
     pub licence_tone: String,
+    /// Orders go to a Kitchen screen, so the shell shows one.
+    pub kitchen_screen: bool,
 }
 
 #[tauri::command]
@@ -80,6 +82,7 @@ pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
                 .unwrap_or_default()
         },
         licence_tone: crate::licensing::tone_for(app.entitlement().standing).to_owned(),
+        kitchen_screen: app.shop_config().billing.kitchen_screen,
     }
 }
 

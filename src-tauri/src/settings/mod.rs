@@ -171,6 +171,8 @@ pub struct Billing {
     pub confirm_before_kitchen: bool,
     pub confirm_before_bill: bool,
     pub kitchen_ticket_off: bool,
+    /// Orders go to the Kitchen screen; paper only when nobody sees them in time.
+    pub kitchen_screen: bool,
     /// 0 means never. Read by `session::IDLE_LOCK`'s caller.
     pub idle_lock_minutes: u32,
     /// Basis points, so 5% is 500 — and 0 means the shop does not charge it, which is why there
@@ -195,6 +197,7 @@ impl Default for Billing {
             confirm_before_kitchen: false,
             confirm_before_bill: false,
             kitchen_ticket_off: false,
+            kitchen_screen: false,
             idle_lock_minutes: 10,
             // Every charge off by default.
             service_charge_bp: 0,

@@ -344,6 +344,7 @@ export function Shell() {
   // Everything this person may open.
   const held = lock?.permissions ?? [];
   const allowed = SCREENS.filter((item) => {
+    if (item.id === 'kitchen' && !status?.kitchenScreen) return false;
     if (item.needs && !held.includes(item.needs)) return false;
     if (item.needsAny && !item.needsAny.some((need) => held.includes(need))) return false;
     return true;

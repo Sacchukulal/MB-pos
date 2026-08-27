@@ -52,6 +52,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0005_placement",
         sql: include_str!("migrations/0005_placement.sql"),
     },
+    // Old kitchen tickets for finished orders are closed.
+    Migration {
+        version: 6,
+        name: "0006_kitchen_closed",
+        sql: include_str!("migrations/0006_kitchen_closed.sql"),
+    },
 ];
 
 /// The highest version this build understands.

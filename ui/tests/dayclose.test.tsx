@@ -42,6 +42,8 @@ const view: DayCloseView = {
   carrySays: '',
   mayClose: true,
   tillsSay: '',
+  openOrders: [],
+  openSays: '',
 };
 
 /** What Rust sends back once twenty ₹500 notes are counted. */

@@ -17,4 +17,8 @@ licence: string,
 /**
  * `ok`, `warn` or `danger`.
  */
-licenceTone: string, };
+licenceTone: string, 
+/**
+ * Orders go to a Kitchen screen, so the shell shows one.
+ */
+kitchenScreen: boolean, };

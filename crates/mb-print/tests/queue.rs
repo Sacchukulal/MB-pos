@@ -172,6 +172,7 @@ fn quick() -> QueueConfig {
         // Milliseconds instead of seconds.
         backoff: Duration::from_millis(2),
         connect_timeout: Duration::from_millis(50),
+        job_deadline: Duration::from_millis(300),
     }
 }
 
@@ -410,6 +411,108 @@ fn t6_a_queued_ticket_survives_the_process_that_queued_it() {
         .transaction(|tx| Repos::new(tx).print_jobs().count(common::OUTLET))
         .expect("counts");
     assert_eq!(left, 0, "the spool is not a log");
+}
+
+/// A printer that hangs mid-write parks its job and frees the queue behind it.
+#[test]
+fn a_printer_that_never_answers_parks_its_job_instead_of_the_queue() {
+    let gate = Arc::new(Gate::default());
+    let hung = Arc::new(Recorder {
+        gate: Some(Arc::clone(&gate)),
+        ..Recorder::default()
+    });
+    let queue = Queue::start_with_transports(
+        vec![printer("bill")],
+        Arc::new(MemoryStore::new()),
+        font(),
+        quick(),
+        Arc::new(FakeTransports::new(vec![("bill", Arc::clone(&hung))])),
+    );
+    let id = queue.enqueue(ticket("bill")).expect("queued");
+
+    assert!(
+        until(|| queue
+            .snapshot()
+            .iter()
+            .any(|j| j.id == id && j.state == JobState::Parked)),
+        "a hung printer held its job for ever — the three-day 'printing' row"
+    );
+    let status = queue
+        .snapshot()
+        .into_iter()
+        .find(|j| j.id == id)
+        .expect("still listed");
+    assert!(
+        status
+            .last_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("did not finish"),
+        "{:?}",
+        status.last_error
+    );
+
+    // The next job on the same printer is not behind the hung one.
+    let next = queue.enqueue(ticket("bill")).expect("queued");
+    assert!(
+        until(|| queue
+            .snapshot()
+            .iter()
+            .any(|j| j.id == next && j.state != JobState::Pending)),
+        "the queue stayed stuck behind the hung job"
+    );
+    gate.release();
+    queue.shutdown();
+}
+
+/// A row left in 'printing' by a power cut is parked, not printed again: nobody knows
+/// whether the paper came out.
+#[test]
+fn a_job_the_counter_died_on_is_parked_and_not_printed_twice() {
+    let store = Arc::new(MemoryStore::new());
+    store
+        .save(&StoredJob {
+            id: "job_cut".to_owned(),
+            printer_id: "bill".to_owned(),
+            kind: "bill".to_owned(),
+            state: "printing".to_owned(),
+            copies: 1,
+            priority: 10,
+            attempts: 1,
+            payload: "{}".to_owned(),
+            reason: Some("table 6".to_owned()),
+            last_error: None,
+            engine_used: None,
+            business_day: 20_669,
+            created_at: 1,
+        })
+        .expect("saved");
+    let on = Arc::new(Recorder::default());
+    let queue = Queue::start_with_transports(
+        vec![printer("bill")],
+        Arc::clone(&store) as Arc<dyn JobStore>,
+        font(),
+        quick(),
+        Arc::new(FakeTransports::new(vec![("bill", Arc::clone(&on))])),
+    );
+    let status = queue
+        .snapshot()
+        .into_iter()
+        .find(|j| j.id == "job_cut")
+        .expect("listed");
+    assert_eq!(status.state, JobState::Parked);
+    assert!(
+        status
+            .last_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("closed while this was printing"),
+        "{:?}",
+        status.last_error
+    );
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(on.sent.lock().unwrap().is_empty(), "it was printed again");
+    queue.shutdown();
 }
 
 /// A printer that cannot raster prints as text, and the job says so.

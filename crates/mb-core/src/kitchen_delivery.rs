@@ -9,6 +9,8 @@
 //!   Printed ──────────────────────► (arrives at the screen marked
 //!                                     already-printed: visible, greyed,
 //!                                     silent, NOT new work)
+//!
+//!   any but Bumped ── close ──► Closed   (the counter is done with the order)
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -30,6 +32,8 @@ pub enum State {
     Bumped,
     /// Nobody acked in time, so it went to paper.
     Printed,
+    /// The counter is done with the order: voided, cancelled and seen, or the day closed.
+    Closed,
 }
 
 impl State {
@@ -115,7 +119,7 @@ impl Delivery {
                 }
             }
             // Shown: a cook can see it.
-            State::Shown | State::Bumped | State::Printed => Action::Settled,
+            State::Shown | State::Bumped | State::Printed | State::Closed => Action::Settled,
         }
     }
 
@@ -125,7 +129,7 @@ impl Delivery {
             State::Printed => Err(DeliveryError::AlreadyPrinted),
             // Idempotent: a second ack for the same draw changes nothing, which is what lets
             // the screen ack freely without coordinating.
-            State::Shown | State::Bumped => Ok(()),
+            State::Shown | State::Bumped | State::Closed => Ok(()),
             State::Pending => {
                 self.state = State::Shown;
                 self.shown_at = Some(at);
@@ -145,7 +149,7 @@ impl Delivery {
     pub fn bump(&mut self, at: Timestamp) -> Result<(), DeliveryError> {
         match self.state {
             State::Pending => Err(DeliveryError::NotShown),
-            State::Bumped => Ok(()),
+            State::Bumped | State::Closed => Ok(()),
             State::Shown | State::Printed => {
                 self.state = State::Bumped;
                 self.bumped_at = Some(at);
@@ -167,6 +171,13 @@ impl Delivery {
         };
         self.bumped_at = None;
         Ok(())
+    }
+
+    /// Nothing more for the kitchen. A bumped card stays bumped: the cook's time is a fact.
+    pub fn close(&mut self) {
+        if self.state != State::Bumped {
+            self.state = State::Closed;
+        }
     }
 
     /// How long the kitchen took, once it is done.
@@ -203,6 +214,23 @@ mod tests {
 
         ticket.bump(at(400)).expect("a cook bumped it");
         assert_eq!(ticket.took_millis(), Some(400_000));
+    }
+
+    #[test]
+    fn a_closed_ticket_is_nothing_more_for_the_kitchen() {
+        let mut ticket = a_ticket();
+        ticket.close();
+        assert_eq!(ticket.state, State::Closed);
+        assert!(!ticket.state.is_new_work());
+        assert_eq!(ticket.decide(at(9_999), ACK_SECONDS), Action::Settled);
+        assert!(ticket.shown(at(1)).is_ok());
+        assert_eq!(ticket.state, State::Closed, "a late draw brought it back");
+
+        let mut done = a_ticket();
+        done.shown(at(1)).expect("drawn");
+        done.bump(at(300)).expect("bumped");
+        done.close();
+        assert_eq!(done.state, State::Bumped, "closing erased the cook's time");
     }
 
     #[test]

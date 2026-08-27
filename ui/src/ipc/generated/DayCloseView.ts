@@ -44,4 +44,12 @@ mayClose: boolean,
 /**
  * Which tills are in the shop's day, and which are not.
  */
-tillsSay: string, };
+tillsSay: string, 
+/**
+ * "Table 7 #12", "Parcel #13" — the orders nobody has finished.
+ */
+openOrders: Array<string>, 
+/**
+ * The same as one sentence, or empty.
+ */
+openSays: string, };

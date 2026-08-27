@@ -395,3 +395,23 @@ fn the_handover_report_names_the_shift_the_person_and_the_difference() {
         report.notes
     );
 }
+
+/// An open table cannot slip into tomorrow: the day will not close over it.
+#[test]
+fn a_day_with_an_open_order_will_not_close() {
+    let scratch = Scratch::new("dayclose_open");
+    let app = a_shop(&scratch, "open");
+    app.with_cart_mut(|state| {
+        state.set_order_type(mb_core::OrderType::Parcel);
+        Ok(())
+    })
+    .expect("a parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), None, None).expect("a dosa");
+    crate::flows::park_open_order(&app).expect("parked");
+
+    let view = view_on(&app, None).expect("the screen");
+    assert_eq!(view.open_orders.len(), 1, "{:?}", view.open_orders);
+    assert!(view.open_says.contains("Parcel"), "{}", view.open_says);
+    let refused = close_on(&app, count_of(0), String::new(), false).expect_err("it closed");
+    assert_eq!(refused.code, "day.open_orders");
+}

@@ -10,6 +10,7 @@ import {
   Icon,
   Input,
   Modal,
+  Notice,
   Scroller,
   SectionHeader,
   Spinner,
@@ -102,6 +103,12 @@ export function DayClose() {
         <Card className="mb-dayclose__tills">
           <p className="mb-dayclose__closed">{view.tillsSay}</p>
         </Card>
+      ) : null}
+
+      {view.openSays ? (
+        <Notice tone="warn" icon="warning">
+          <p>{view.openSays}</p>
+        </Notice>
       ) : null}
 
       {view.isClosed ? (
@@ -230,7 +237,7 @@ export function DayClose() {
 
       {view.carrySays ? <p className="mb-dayclose__carry">{view.carrySays}</p> : null}
 
-      {!view.isClosed && view.mayClose ? (
+      {!view.isClosed && view.mayClose && !view.openSays ? (
         <div className="mb-dayclose__actions">
           <Button variant="primary" onClick={() => setConfirming(true)}>
             Close the day

@@ -23,6 +23,9 @@ fn a_kitchen(scratch: &Scratch, name: &str) -> App {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, path);
     seed(&app);
+    let mut config = crate::settings::ShopConfig::default();
+    config.billing.kitchen_screen = true;
+    app.publish_shop_config(config);
     app
 }
 
@@ -400,11 +403,11 @@ fn a_cancellation_stays_until_somebody_says_they_saw_it() {
     let hours_later = kitchen::look_at(&app, "Tandoor", later(9_999));
     assert_eq!(hours_later.tickets[0].tone, "cancelled");
 
+    // Seen, so it leaves the screen: nobody is cooking it now.
     kitchen::acknowledge_on(&app, id).expect("got it");
-    let after = tickets(&app, "Tandoor");
     assert!(
-        !after[0].is_cancelled,
-        "it kept shouting after being acknowledged"
+        tickets(&app, "Tandoor").is_empty(),
+        "it stayed on the screen after being acknowledged"
     );
 }
 

@@ -265,6 +265,7 @@ pub fn void_bill_on(
                         }),
                     ),
                 )?;
+                repos.kitchen().close_order(voided.core.id.as_str())?;
                 Ok(())
             })
             .map_err(|e| words::from_db(&e))

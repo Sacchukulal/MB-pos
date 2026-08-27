@@ -144,13 +144,7 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                             }
                             waiting.push(WaitingCourse {
                                 order_id: core.id.as_str().to_owned(),
-                                // The token as well as the table.
-                                place: match order.token() {
-                                    Some(t) => {
-                                        format!("{} #{}", place_of(&order, &tables), t.formatted)
-                                    }
-                                    None => place_of(&order, &tables),
-                                },
+                                place: place_and_token(&order, &tables),
                                 what: words::count(count, "dish", "dishes"),
                                 course,
                             });
@@ -264,6 +258,17 @@ fn place_of(order: &AnyOrder, tables: &[mb_db::repo::floor::DiningTable]) -> Str
             format!("Table {label}")
         },
     )
+}
+
+/// "Table 7 #12", "Parcel #13" — the place and the token, the way the counter says it.
+pub(crate) fn place_and_token(
+    order: &AnyOrder,
+    tables: &[mb_db::repo::floor::DiningTable],
+) -> String {
+    match order.token() {
+        Some(t) => format!("{} #{}", place_of(order, tables), t.formatted),
+        None => place_of(order, tables),
+    }
 }
 
 /// Each course on an order, and how many dishes are in it.
@@ -465,6 +470,8 @@ pub fn acknowledge_on(app: &App, id: String) -> UiResult<KitchenView> {
     let at = now();
     let station = with_ticket(app, &id, |ticket| {
         ticket.acked_at = Some(at);
+        // Seen, so it leaves the screen.
+        ticket.delivery.close();
         Ok(ticket.delivery.station.clone())
     })?;
     crate::log_info!(
@@ -533,20 +540,26 @@ fn with_ticket<T>(
 /// Send an order to the kitchen screen.
 pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String> {
     let at = now();
+    let config = app.shop_config();
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| send_in(&mb_db::Repos::new(tx), order_id, course, at))
+            .transaction(|tx| send_in(&mb_db::Repos::new(tx), &config, order_id, course, at))
             .map_err(|e| words::from_db(&e))
     })
 }
 
-/// The same, inside a transaction somebody else opened.
+/// The same, inside a transaction somebody else opened. A shop with no screen gets no
+/// screen ticket: the paper the counter printed is the whole story.
 pub fn send_in(
     repos: &mb_db::Repos<'_>,
+    config: &crate::settings::ShopConfig,
     order_id: &str,
     course: Option<&str>,
     at: Timestamp,
 ) -> Result<String, mb_db::DbError> {
+    if !config.billing.kitchen_screen {
+        return Ok(DEFAULT_STATION.to_owned());
+    }
     let id = format!("{}_{order_id}", crate::newid::fresh_at("kds", at));
     let order = repos.orders().find(&OrderId::new(order_id.to_owned()))?;
     let categories = repos.menu().list_categories(OUTLET)?;

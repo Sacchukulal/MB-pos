@@ -93,6 +93,10 @@ pub struct DayCloseView {
     pub may_close: bool,
     /// Which tills are in the shop's day, and which are not.
     pub tills_say: String,
+    /// "Table 7 #12", "Parcel #13" — the orders nobody has finished.
+    pub open_orders: Vec<String>,
+    /// The same as one sentence, or empty.
+    pub open_says: String,
 }
 
 // Reading the day.
@@ -107,40 +111,56 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
     app.with_shop(|shop| {
         // One trip. Everything this screen needs, including the closer's name — see
         // `closed_words` for what looking it up separately cost.
-        let (position, totals, existing, stored_counts, closer, (how_many_tills, still_open)) =
-            shop.db
-                .read_transaction(|tx| {
-                    let repos = mb_db::Repos::new(tx);
-                    let existing = repos.money().find_day_close(OUTLET, day)?;
-                    let stored = match &existing {
-                        Some(close) => repos.money().denominations(&close.id)?,
-                        None => Vec::new(),
-                    };
-                    let closer = match existing.as_ref().and_then(|c| c.closed_by.as_ref()) {
-                        Some(id) => repos
-                            .people()
-                            .find_staff(OUTLET, id.as_str())?
-                            .map(|person| person.name),
-                        None => None,
-                    };
-                    Ok((
-                        // This till's own drawer, never the shop's: the person in front of this
-                        // screen is counting the box under THIS till, and showing them the shop
-                        // total would be a variance they cannot act on.
-                        repos
-                            .money()
-                            .cash_position_of(OUTLET, day, Some(app.terminal_id()))?,
-                        repos.corrections().day_totals(OUTLET, day)?,
-                        existing,
-                        stored,
-                        closer.unwrap_or_else(|| "somebody".to_owned()),
-                        (
-                            repos.terminals().count(OUTLET)?,
-                            repos.money().tills_still_open(OUTLET, day)?,
-                        ),
-                    ))
-                })
-                .map_err(|e| words::from_db(&e))?;
+        let (
+            position,
+            totals,
+            existing,
+            stored_counts,
+            closer,
+            (how_many_tills, still_open),
+            open_orders,
+        ) = shop
+            .db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let tables = repos.floor().list_tables(OUTLET)?;
+                let open_orders: Vec<String> = repos
+                    .orders()
+                    .list_open(OUTLET)?
+                    .iter()
+                    .map(|order| crate::kitchen::place_and_token(order, &tables))
+                    .collect();
+                let existing = repos.money().find_day_close(OUTLET, day)?;
+                let stored = match &existing {
+                    Some(close) => repos.money().denominations(&close.id)?,
+                    None => Vec::new(),
+                };
+                let closer = match existing.as_ref().and_then(|c| c.closed_by.as_ref()) {
+                    Some(id) => repos
+                        .people()
+                        .find_staff(OUTLET, id.as_str())?
+                        .map(|person| person.name),
+                    None => None,
+                };
+                Ok((
+                    // This till's own drawer, never the shop's: the person in front of this
+                    // screen is counting the box under THIS till, and showing them the shop
+                    // total would be a variance they cannot act on.
+                    repos
+                        .money()
+                        .cash_position_of(OUTLET, day, Some(app.terminal_id()))?,
+                    repos.corrections().day_totals(OUTLET, day)?,
+                    existing,
+                    stored,
+                    closer.unwrap_or_else(|| "somebody".to_owned()),
+                    (
+                        repos.terminals().count(OUTLET)?,
+                        repos.money().tills_still_open(OUTLET, day)?,
+                    ),
+                    open_orders,
+                ))
+            })
+            .map_err(|e| words::from_db(&e))?;
 
         // What is on the screen: what the person is typing, or — if they have not typed
         // anything — what was counted last time this day was closed.
@@ -244,8 +264,26 @@ pub fn view_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DayCloseVie
             },
             may_close,
             tills_say: tills_say(how_many_tills, &still_open),
+            open_says: open_words(&open_orders),
+            open_orders,
         })
     })
+}
+
+/// The orders nobody has finished, as one sentence — or nothing.
+fn open_words(open: &[String]) -> String {
+    if open.is_empty() {
+        return String::new();
+    }
+    format!(
+        "{} still open: {}. Settle or cancel them before closing the day.",
+        words::count(
+            i64::try_from(open.len()).unwrap_or(0),
+            "order is",
+            "orders are"
+        ),
+        open.join(", ")
+    )
 }
 
 /// Which tills are in the shop's day — and it is silent in a one-till shop, because there is
@@ -334,6 +372,9 @@ pub fn close_on(
             "This day has already been closed. Open it again first if you need \
              to change the count.",
         ));
+    }
+    if !preview.open_orders.is_empty() {
+        return Err(UiError::new("day.open_orders", preview.open_says.clone()));
     }
     let reason = reason.trim().to_owned();
     if preview.needs_reason && reason.is_empty() {
@@ -436,6 +477,8 @@ pub fn close_on(
                             note: (!reason.is_empty()).then(|| reason.clone()),
                         },
                     )?;
+                    // Nobody will bump a finished order's ticket tomorrow.
+                    repos.kitchen().close_finished(OUTLET)?;
                 }
 
                 // The same transaction as the thing it records.

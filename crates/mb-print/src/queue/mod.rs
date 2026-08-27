@@ -6,7 +6,7 @@ pub mod store;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -255,6 +255,8 @@ pub struct QueueConfig {
     pub backoff: Duration,
     /// How long to wait for a socket.
     pub connect_timeout: Duration,
+    /// How long one attempt may take before the job is parked and the printer's thread freed.
+    pub job_deadline: Duration,
 }
 
 impl Default for QueueConfig {
@@ -266,6 +268,9 @@ impl Default for QueueConfig {
             max_attempts: 5,
             backoff: Duration::from_secs(1),
             connect_timeout: Duration::from_secs(3),
+            // A long raster bill on a slow serial port needs a minute; a hung printer must not
+            // hold the bills behind it for days.
+            job_deadline: Duration::from_secs(90),
         }
     }
 }
@@ -498,10 +503,7 @@ impl Queue {
             return;
         };
         for job in jobs {
-            if self.printers.contains_key(&job.printer_id) {
-                self.shared.set_status(&job, JobState::Pending);
-                self.dispatch(job);
-            } else {
+            if !self.printers.contains_key(&job.printer_id) {
                 self.shared.park(
                     &job,
                     &format!(
@@ -509,6 +511,16 @@ impl Queue {
                         job.printer_id
                     ),
                 );
+            } else if job.state == JobState::Printing.as_str() {
+                // Nobody knows whether the paper came out. A person does.
+                self.shared.park(
+                    &job,
+                    "Magic Bill closed while this was printing. Check the paper, then press \
+                     Try again or Dismiss",
+                );
+            } else {
+                self.shared.set_status(&job, JobState::Pending);
+                self.dispatch(job);
             }
         }
     }
@@ -664,7 +676,7 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
             attempt,
         });
 
-        match print_once(shared, printer, &job, &payload) {
+        match print_within(shared, printer, &job, &payload) {
             Ok(engine) => {
                 job.engine_used = Some(engine_name(engine).to_owned());
                 // Printed means gone.
@@ -714,6 +726,51 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
                 std::thread::sleep(wait);
             }
         }
+    }
+}
+
+/// `print_once` with the worker's thread back after `job_deadline`: a printer that hangs
+/// mid-write parks its job instead of holding every job behind it.
+fn print_within(
+    shared: &Arc<Shared>,
+    printer: &PrinterConfig,
+    job: &StoredJob,
+    payload: &Payload,
+) -> Result<Engine, Failure> {
+    let deadline = shared.config.job_deadline;
+    let name = format!("mb-print-{}-job", printer.id);
+    let (tx, rx) = channel::<Result<Engine, Failure>>();
+    let (shared, printer, job, payload) = (
+        Arc::clone(shared),
+        printer.clone(),
+        job.clone(),
+        payload.clone(),
+    );
+    let spawned = std::thread::Builder::new().name(name).spawn(move || {
+        // A receiver that gave up is a job already parked; the answer has nowhere to go.
+        let _ = tx.send(print_once(&shared, &printer, &job, &payload));
+    });
+    if spawned.is_err() {
+        return Err(Failure {
+            message: "a thread for the printer could not be started".to_owned(),
+            permanent: false,
+        });
+    }
+    match rx.recv_timeout(deadline) {
+        Ok(result) => result,
+        Err(RecvTimeoutError::Disconnected) => Err(Failure {
+            message: "the printer's thread stopped without answering".to_owned(),
+            permanent: false,
+        }),
+        // Parked, not retried: the bytes may still be on their way, and a retry could print
+        // the bill twice.
+        Err(RecvTimeoutError::Timeout) => Err(Failure {
+            message: format!(
+                "the printer did not finish within {} seconds. Check it, then press Try again",
+                deadline.as_secs()
+            ),
+            permanent: true,
+        }),
     }
 }
 
