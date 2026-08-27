@@ -414,15 +414,18 @@ describe('the cart controls', () => {
     expect(fold).not.toContain('repeat(3');
   });
 
-  it('gives the processing column its width from one token, and folds only up and down', () => {
-    expect(block(billing, '.mb-billing__side {')).toContain('var(--queue-width)');
+  it('folds the processing list up, then gives the tiles its column, on the product motion', () => {
     expect(readFileSync(join('src', 'theme', 'tokens.css'), 'utf8')).toContain('--queue-width:');
-    // The head is as wide as the list under it.
-    expect(block(billing, '.mb-processing__head {')).toContain('width: 100%');
-    // Rows fold, with the product's own motion — never a number of milliseconds here.
-    const fold = block(billing, '.mb-processing__fold {');
-    expect(fold).toContain('transition: grid-template-rows var(--motion-normal) var(--ease)');
-    expect(fold).not.toMatch(/\d+ms/);
-    expect(billing).not.toContain('grid-template-columns var(--motion');
+    // The head and the list are one width.
+    expect(block(billing, '.mb-processing__head {')).toContain('width: var(--queue-width)');
+    expect(block(billing, '.mb-billing__floorrow--open {')).toContain('var(--queue-width)');
+    // Two steps: folding, the column waits for the list; opening, the list waits for the column.
+    const waits = 'var(--motion-normal) var(--ease) var(--motion-normal)';
+    expect(block(billing, '.mb-billing__floorrow {')).toContain(`grid-template-columns ${waits}`);
+    expect(block(billing, '.mb-processing__fold--open {')).toContain(`grid-template-rows ${waits}`);
+    // Never a number of milliseconds here.
+    for (const rule of ['.mb-billing__floorrow {', '.mb-billing__floorrow--open {', '.mb-processing__fold {']) {
+      expect(block(billing, rule), rule).not.toMatch(/\d+ms/);
+    }
   });
 });

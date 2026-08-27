@@ -660,16 +660,26 @@ export function Billing() {
             New order
             <kbd className="mb-kbd">Esc</kbd>
           </Button>
+
+          {/* At the far end, as wide as the list under it. */}
+          <ProcessingHead
+            count={processing.length}
+            open={processingOpen}
+            controls={processingId}
+            onToggle={() => setProcessingOpen((was) => !was)}
+          />
         </div>
 
-        {/* Over its own column, as wide as the list under it. */}
-        <ProcessingHead
-          count={processing.length}
-          open={processingOpen}
-          controls={processingId}
-          onToggle={() => setProcessingOpen((was) => !was)}
-        />
-
+        {/*
+          The floor and the list. Folding is two steps: the list folds up, then its column
+          closes and the tiles take the room; opening is the same steps the other way round.
+        */}
+        <div
+          className={cx(
+            'mb-billing__floorrow',
+            processingOpen && 'mb-billing__floorrow--open',
+          )}
+        >
         <Scroller inset className="mb-billing__floor">
           {/* The set-up list is not on this screen any more. */}
           {tables.length === 0 && menu.length === 0 ? (
@@ -711,6 +721,7 @@ export function Billing() {
               <Processing orders={processing} onOpen={openTable} />
             </Scroller>
           </div>
+        </div>
         </div>
       </div>
 
