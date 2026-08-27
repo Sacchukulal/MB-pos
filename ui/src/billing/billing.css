@@ -15,7 +15,7 @@
 
 .mb-billbar {
   display: grid;
-  grid-template-columns: 1fr var(--queue-width) var(--cart-width);
+  grid-template-columns: 1fr var(--cart-width);
   align-items: center;
   gap: var(--space-4);
 }
@@ -27,22 +27,12 @@
   position: relative;
 }
 
-/* The order type and the lock share the cart's column, hard against its right edge. */
+/* The order type takes the cart's column, hard against its right edge. */
 .mb-billbar__type {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-3);
-}
-
-/* The lock, as a picture. */
-.mb-billbar__lock {
-  flex: none;
-  width: var(--billbar-lock-size);
-  height: var(--billbar-lock-size);
-  min-height: var(--billbar-lock-size);
-  padding: 0;
-  border-radius: var(--radius-sm);
 }
 
 /* The two columns. The cart is PERMANENT: it never moves, never hides. */
@@ -52,14 +42,6 @@
   grid-template-columns: 1fr var(--cart-width);
   gap: var(--space-4);
   min-height: 0;
-}
-
-/*
- * With the queue open the floor is simply given less; its grid packs with auto-fill, so the
- * tiles re-flow into what is left without being told.
- */
-.mb-billing__body--queue {
-  grid-template-columns: 1fr var(--queue-width) var(--cart-width);
 }
 
 .mb-billing__floor {
@@ -85,122 +67,6 @@
    * one thing on this screen that never moves.
    */
   box-shadow: var(--level-raised);
-}
-
-/* Processing orders: the open ones, on their own. */
-
-.mb-queuepanel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-height: 0;
-  overflow: hidden;
-  padding: var(--space-3);
-  background: var(--surface);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--level-raised);
-}
-
-.mb-queuepanel__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-height: 0;
-}
-
-/* One order, one line: where it is, its bill number, how long, how much. */
-.mb-queueline {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: baseline;
-  gap: 0 var(--gap-inline);
-  padding: var(--space-1) var(--space-2);
-  background: transparent;
-  color: var(--text);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease),
-    border-color var(--motion-fast) var(--ease);
-}
-
-.mb-queueline:hover {
-  background: var(--surface-2);
-}
-
-.mb-queueline--on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-.mb-queueline__where {
-  font-weight: var(--weight-bold);
-}
-
-.mb-queueline__amount {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-bold);
-  text-align: right;
-}
-
-.mb-queueline__no,
-.mb-queueline__when {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-
-.mb-queueline__when {
-  text-align: right;
-}
-
-.mb-processing__head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-inline);
-  width: 100%;
-  height: var(--target-min);
-  padding: 0 var(--gap-field);
-  background: var(--surface);
-  color: var(--text);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  font: inherit;
-  font-size: var(--type-label);
-  font-weight: var(--type-label-weight);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease),
-    border-color var(--motion-fast) var(--ease);
-}
-
-/* The name takes the room so the count sits at the far end of the button. */
-.mb-processing__head > .mb-icon {
-  order: 2;
-  margin-left: auto;
-}
-
-.mb-processing__head[aria-expanded='true'] {
-  border-color: var(--accent);
-}
-
-.mb-processing__head:hover {
-  background: var(--surface-2);
-}
-
-.mb-processing__count {
-  min-width: var(--space-5);
-  padding: 0 var(--space-2);
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: var(--radius-pill);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
 }
 
 /* The table grid — the ONLY view of open orders. */
@@ -639,20 +505,17 @@
 .mb-totals {
   display: flex;
   flex-direction: column;
-  /* Content-sized, and gives way only after the item list has (shrink 1 against its 50). */
-  flex: 0 1 auto;
-  min-height: 0;
-  /* The breakdown scrolls; TOTAL and the buttons do not. */
-  overflow: hidden;
+  /* NEVER gives way: a cashier must never lose the total. The item list shrinks instead. */
+  flex: 0 0 auto;
   gap: var(--space-1);
 }
 
-/* Only the breakdown scrolls. */
+/* Only the breakdown scrolls, and it is kept short so the list keeps its room. */
 .mb-totals__breakdown {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  min-height: 0;
+  max-height: var(--totals-breakdown-max);
 }
 
 .mb-totals__row {
@@ -818,14 +681,37 @@
   row-gap: var(--space-1);
 }
 
-/* The fold under the two main buttons. */
+/* The fold under the two main buttons: three columns, one job each. */
 .mb-actions--more {
-  border-top: none;
-  padding-top: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  flex: 0 0 auto;
+  gap: var(--space-2);
 }
 
 .mb-actions--more[hidden] {
   display: none;
+}
+
+.mb-actions__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-actions__title {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+
+/* Where the bill is, over the lines. */
+.mb-cart__where {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
 }
 
 /*
@@ -898,24 +784,6 @@
 .mb-suggestion--on {
   background: var(--accent-soft);
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
-}
-
-.mb-quantity {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.mb-quantity__value {
-  flex: 1;
-  /*
-   * A flex item will not shrink below its intrinsic width without this, and an <input> claims
-   * about twenty characters — so the "+" button was pushed off the edge of the dialog and the
-   * whole thing grew a scrollbar.
-   */
-  min-width: 0;
-  font-size: var(--text-xl);
-  text-align: center;
 }
 
 .mb-busy__choices {

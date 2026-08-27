@@ -17,8 +17,12 @@ pub enum MatchMode {
 /// How well a name matched, best first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Rank {
+    /// The short code, exactly — what a cashier who knows the menu types.
+    Code,
     /// "dos" in "Dosa" — the name starts with what was typed.
     NameStart,
+    /// The code starts with it: "d1" finds "d12".
+    CodeStart,
     /// "but" in "Paneer Butter Masala" — a word starts with it.
     WordStart,
     /// "utter" in "Butter" — it is in there somewhere.
@@ -41,7 +45,7 @@ pub fn search(
 
     let mut hits: Vec<(Rank, usize, &mb_db::repo::menu::MenuItem)> = items
         .iter()
-        .filter_map(|item| rank(&item.name, &needle, mode).map(|r| (r, item.name.len(), item)))
+        .filter_map(|item| rank(item, &needle, mode).map(|r| (r, item.name.len(), item)))
         .collect();
 
     // Rank, then the shorter name — because a cashier scanning a list picks the first thing
@@ -56,10 +60,17 @@ pub fn search(
     hits.iter().map(|(_, _, item)| menu_view(item)).collect()
 }
 
-fn rank(name: &str, needle: &str, mode: MatchMode) -> Option<Rank> {
-    let haystack = name.to_lowercase();
+fn rank(item: &mb_db::repo::menu::MenuItem, needle: &str, mode: MatchMode) -> Option<Rank> {
+    let code = item.short_code.as_deref().map(str::to_lowercase);
+    if code.as_deref() == Some(needle) {
+        return Some(Rank::Code);
+    }
+    let haystack = item.name.to_lowercase();
     if haystack.starts_with(needle) {
         return Some(Rank::NameStart);
+    }
+    if code.is_some_and(|c| c.starts_with(needle)) {
+        return Some(Rank::CodeStart);
     }
     if mode == MatchMode::StartsWith {
         return None;
@@ -119,6 +130,26 @@ mod tests {
         assert_eq!(
             names(&found),
             ["Butter Naan", "Paneer Butter Masala", "Rebuttal Special"]
+        );
+    }
+
+    /// A code is what a cashier who knows the menu types, and it wins outright.
+    #[test]
+    fn a_short_code_beats_every_name() {
+        let mut coded = item("Dosa");
+        coded.short_code = Some("D1".to_owned());
+        let mut longer = item("Dosa Special");
+        longer.short_code = Some("D12".to_owned());
+        let menu = [item("D1 Sauce"), longer, coded];
+        assert_eq!(
+            names(&search(&menu, "d1", MatchMode::Contains)),
+            ["Dosa", "D1 Sauce", "Dosa Special"],
+            "the exact code, then the name, then the code that starts with it"
+        );
+        assert_eq!(
+            names(&search(&menu, "d12", MatchMode::StartsWith))[0],
+            "Dosa Special",
+            "a code is found in either mode"
         );
     }
 

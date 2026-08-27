@@ -155,6 +155,7 @@ export interface Commands {
   };
   open_table: { args: { tableId: string }; returns: CartView };
   open_order: { args: { orderId: string }; returns: CartView };
+  join_table: { args: { tableId: string; seat: string | null }; returns: CartView };
   /** The delta only, from the order's own ledger. */
   print_kitchen_ticket: { args: void; returns: string };
   /** The cook lost the paper. */

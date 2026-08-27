@@ -1,13 +1,11 @@
 /** The billing screen — the heart of the product. */
 
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useReducer, useRef, useState } from 'react';
 
 import {
   Button,
-  ConfirmDialog,
   EmptyState,
   Icon,
-  Money,
   MoneyInput,
   onlyAmount,
   Page,
@@ -25,7 +23,7 @@ import type { EvenSplitView } from '../ipc/generated/EvenSplitView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
-import { BusyTable, HelpSheet, QuantityPopup, Suggestions, takenLetters } from './Keys';
+import { BusyTable, HelpSheet, Suggestions, takenLetters } from './Keys';
 import {
   initial as initialKeys,
   reduce as reduceKeys,
@@ -56,8 +54,6 @@ export function Billing() {
   // The grid is unfiltered: the search box is for the menu, and a table is reached by typing
   // its number and pressing Enter.
   const filter = '';
-  const [locked, setLocked] = useState(false);
-  const [confirmCancel, setConfirmCancel] = useState(false);
   // See it before it prints.
   const [preview, setPreview] = useState<Paper | null>(null);
   /** The line somebody is voiding, once the kitchen has been told. */
@@ -86,14 +82,6 @@ export function Billing() {
   /** Everything under the cart's two main buttons, folded away until asked for. */
   const [moreActions, setMoreActions] = useState(false);
   const moreActionsId = useId();
-  /** The orders being cooked right now, folded away until asked for. */
-  const [processing, setProcessing] = useState(false);
-  const processingId = useId();
-
-  const openOrders = useMemo(
-    () => tables.filter((table) => table.orderId !== null),
-    [tables],
-  );
 
   // ONE shared clock (§5 rule 10).
   const tick = useTick();
@@ -296,14 +284,14 @@ export function Billing() {
 
   const newOrder = useCallback(async () => {
     try {
-      // The order-type LOCK: a parcel counter should not be re-selecting the type forty times
-      // an hour.
-      setCart(await call('cart_clear', { keepType: locked }));
+      // The type stays: a parcel counter should not re-pick it forty times an hour. The shop's
+      // lock, when it is on, is applied in Rust.
+      setCart(await call('cart_clear', { keepType: true }));
       await refreshFloor();
     } catch (cause) {
       report(cause);
     }
-  }, [locked, refreshFloor, report]);
+  }, [refreshFloor, report]);
 
   /** Enter, with a burst of characters in the box: ask Rust whether that was a machine. */
   const handledAsScan = useCallback(async (): Promise<boolean> => {
@@ -393,9 +381,10 @@ export function Billing() {
     }
   }, [payMode, refreshFloor, report, toast]);
 
-  /** The cash box, committed. */
+  /** The cash box, committed — and never onto an empty cart, which is what a blur after settling would do. */
   const commitCash = useCallback(
     async (typed: string) => {
+      if (!cart || cart.isEmpty) return;
       try {
         setCart(
           typed.trim() === ''
@@ -406,7 +395,7 @@ export function Billing() {
         report(cause);
       }
     },
-    [report],
+    [cart, report],
   );
 
   // A tap goes through the SAME reducer a key does, so touch and keyboard cannot drift apart.
@@ -503,9 +492,6 @@ export function Billing() {
         case 'new-order':
           await newOrder();
           return;
-        case 'confirm-new-order':
-          setConfirmCancel(true);
-          return;
         case 'focus-search':
           searchBox.current?.focus();
           return;
@@ -518,15 +504,35 @@ export function Billing() {
           act(completeBill);
           return;
         case 'merge-into':
-          await openTableById(command.tableId);
-          toast.show('info', 'Merged. Only the new items will go to the kitchen.');
+          try {
+            setCart(await call('join_table', { tableId: command.tableId, seat: null }));
+            await refreshFloor();
+            toast.show('ok', 'On that table’s bill. Only the new items go to the kitchen.');
+          } catch (cause) {
+            report(cause);
+          }
           return;
         case 'sub-table':
-          toast.show('info', `Sub-table ${command.letter} needs the settle flow — still to come.`);
+          try {
+            setCart(await call('join_table', { tableId: command.tableId, seat: command.letter }));
+          } catch (cause) {
+            report(cause);
+          }
           return;
       }
     },
-    [addItem, completeBill, newOrder, openOrderById, openTableById, printKitchen, setOrderType, toast],
+    [
+      addItem,
+      completeBill,
+      newOrder,
+      openOrderById,
+      openTableById,
+      printKitchen,
+      refreshFloor,
+      report,
+      setOrderType,
+      toast,
+    ],
   );
 
   // Perform one batch per committed dispatch.
@@ -551,8 +557,10 @@ export function Billing() {
   }, [cart]);
 
   useEffect(() => {
-    if (cart?.orderType) dispatch({ kind: 'order-type', value: cart.orderType });
-  }, [cart?.orderType]);
+    if (cart?.orderType) {
+      dispatch({ kind: 'order-type', value: cart.orderType, locked: cart.orderTypeLocked });
+    }
+  }, [cart?.orderType, cart?.orderTypeLocked]);
 
   // The search box has focus from the moment the screen opens.
   useEffect(() => {
@@ -639,18 +647,6 @@ export function Billing() {
           />
         </div>
 
-        <button
-          type="button"
-          className="mb-processing__head"
-          aria-expanded={processing}
-          aria-controls={processingId}
-          onClick={() => setProcessing((was) => !was)}
-        >
-          <Icon name={processing ? 'chevron-up' : 'chevron-down'} size="sm" />
-          Processing orders
-          <span className="mb-processing__count">{openOrders.length}</span>
-        </button>
-
         <div className="mb-billbar__type">
           {cart?.orderTypeLocked ? null : (
           <div className="mb-segment" role="group" aria-label="Order type">
@@ -668,26 +664,10 @@ export function Billing() {
           </div>
           )}
 
-        {/* The lock is a picture now, not a pill. */}
-        <Button
-          className="mb-billbar__lock"
-          variant={locked ? 'primary' : 'quiet'}
-          onClick={() => setLocked((was) => !was)}
-          aria-pressed={locked}
-          title={
-            locked
-              ? 'Type locked — press to let the order type change again'
-              : 'Keep this order type for the next order'
-          }
-        >
-          <Icon name="lock" size="sm" label={locked ? 'Type locked' : 'Lock type'} />
-        </Button>
         </div>
       </div>
 
-      <div
-        className={processing ? 'mb-billing__body mb-billing__body--queue' : 'mb-billing__body'}
-      >
+      <div className="mb-billing__body">
         <Scroller inset className="mb-billing__floor">
 
           {/* The set-up list is not on this screen any more. */}
@@ -719,38 +699,6 @@ export function Billing() {
           {/* THE MENU GRID IS NOT ON THIS SCREEN. */}
         </Scroller>
 
-        {processing ? (
-          <div className="mb-queuepanel" id={processingId}>
-            <Scroller inset className="mb-queuepanel__list">
-              {openOrders.length === 0 ? (
-                <EmptyState small title="Nothing being cooked" body="Sent orders show here." />
-              ) : null}
-              {openOrders.map((order) => (
-                <button
-                  type="button"
-                  key={order.id}
-                  className={
-                    order.selected ? 'mb-queueline mb-queueline--on' : 'mb-queueline'
-                  }
-                  aria-pressed={order.selected}
-                  onClick={() => openTable(order)}
-                >
-                  {/* A real table says so; parcel and self service already name themselves. */}
-                  <span className="mb-queueline__where">
-                    {order.section === null ? order.label : `Table ${order.label}`}
-                  </span>
-                  <span className="mb-queueline__amount">
-                    {order.total ? <Money value={order.total} symbol /> : ''}
-                  </span>
-                  <span className="mb-queueline__no">{order.billNumber ?? '—'}</span>
-                  <span className="mb-queueline__when">
-                    {order.minutes === null ? '' : `${order.minutes}m`}
-                  </span>
-                </button>
-              ))}
-            </Scroller>
-          </div>
-        ) : null}
 
         {/* THE CART IS PERMANENT. */}
         <div className="mb-billing__cart">
@@ -790,6 +738,14 @@ export function Billing() {
                 </Button>
               </div>
             </div>
+          ) : null}
+
+          {/* Where this bill is, and its number once it has one. */}
+          {cart && (cart.table || cart.billNumber) ? (
+            <p className="mb-cart__where">
+              {cart.table ? `Table ${cart.table}` : cart.orderType}
+              {cart.billNumber ? ` · ${cart.billNumber}` : ''}
+            </p>
           ) : null}
 
           <Scroller inset className="mb-cart__lines">
@@ -836,7 +792,31 @@ export function Billing() {
                           if (e.key === 'Escape') setTypingQty(null);
                         }}
                       />
-                    ) : (
+                    ) : null}
+                    {typingQty?.index === line.index && hasScale ? (
+                      <Button
+                        small
+                        variant="quiet"
+                        aria-label="Take the weight from the scale"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          call('read_scale_once')
+                            .then((answer) => {
+                              if (!answer.answered) {
+                                toast.show('warn', answer.says);
+                                return;
+                              }
+                              // "1.234 kg" — the number is the quantity.
+                              const [amount] = answer.says.split(' ');
+                              if (amount) setTypingQty({ index: line.index, text: amount });
+                            })
+                            .catch(report);
+                        }}
+                      >
+                        <Icon name="scale" size="sm" />
+                      </Button>
+                    ) : null}
+                    {typingQty?.index === line.index ? null : (
                       <button
                         type="button"
                         className="mb-cartline__qty-value"
@@ -910,7 +890,7 @@ export function Billing() {
             ) : null}
           </div>
 
-          {cart ? <Totals bill={cart.bill} /> : null}
+          {cart && !cart.isEmpty ? <Totals bill={cart.bill} /> : null}
 
           {/* Two buttons, and a fold. */}
           <div className="mb-actions">
@@ -946,135 +926,112 @@ export function Billing() {
             </button>
           </div>
 
-          <div
-            id={moreActionsId}
-            className="mb-actions mb-actions--more"
-            hidden={!moreActions}
-          >
-            {/* "What do we each owe?" — a question, answered in place. */}
-            <div className="mb-eachpays">
-              <span className="mb-eachpays__label">Each pays</span>
-              <Button
-                small
-                variant="quiet"
-                disabled={ways <= 2}
-                onClick={() => void setPeople(ways - 1)}
-                aria-label="One fewer person"
-              >
-                <Icon name="minus" size="sm" />
-              </Button>
-              <span className="mb-eachpays__count">{ways}</span>
-              <Button
-                small
-                variant="quiet"
-                disabled={ways >= 50}
-                onClick={() => void setPeople(ways + 1)}
-                aria-label="One more person"
-              >
-                <Icon name="plus" size="sm" />
-              </Button>
-              <span className="mb-eachpays__says">{even ? even.note : ''}</span>
-            </div>
-
-            <Button
-              variant="quiet"
-              disabled={!cart || cart.isEmpty}
-              onClick={() => setPreview('bill')}
-            >
-              Preview bill
-            </Button>
-            {cart?.kitchenTicketOff ? null : (
-            <Button
-              variant="quiet"
-              disabled={!cart || cart.isEmpty}
-              onClick={() => setPreview('kitchen')}
-            >
-              Preview ticket
-            </Button>
-            )}
-            {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
-            {cart?.orderId && !cart.kitchenTicketOff ? (
-              <Button variant="quiet" onClick={() => act(reprintKitchen)}>
-                Send ticket again
-              </Button>
-            ) : null}
-            <Button variant="quiet" onClick={() => void newOrder()}>
-              New order
-            </Button>
-            {/*
-              Only when this shop has a label printer: a button for hardware nobody owns is a
-              promise that fails when pressed.
-            */}
-            {hasLabels ? (
+          <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
+            <div className="mb-actions__group" role="group" aria-label="Paper">
+              <span className="mb-actions__title">Paper</span>
               <Button
                 variant="quiet"
                 disabled={!cart || cart.isEmpty}
-                onClick={() => {
-                  const first = cart?.lines[0];
-                  if (!first) return;
-                  call('print_label', {
-                    line: `${first.qty} x ${first.name}`,
-                    token: cart?.table ?? 'Parcel',
-                  })
-                    .then(() => toast.show('ok', 'The label is printing.'))
-                    .catch(report);
-                }}
+                onClick={() => setPreview('bill')}
               >
-                Label
+                Preview bill
               </Button>
-            ) : null}
-            <Button
-              variant="quiet"
-              disabled={!cart || cart.isEmpty}
-              onClick={() => setDiscounting(true)}
-            >
-              {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
-            </Button>
-            <Button
-              variant="quiet"
-              disabled={!cart || cart.isEmpty || !cart.orderId}
-              onClick={() => setSplitting(true)}
-            >
-              Separate bill
-            </Button>
-            <Button
-              variant="quiet"
-              disabled={!cart || cart.isEmpty}
-              onClick={() => (cart?.orderId ? setCancelReason(true) : setConfirmCancel(true))}
-            >
-              Cancel order
-            </Button>
+              {cart?.kitchenTicketOff ? null : (
+                <Button
+                  variant="quiet"
+                  disabled={!cart || cart.isEmpty}
+                  onClick={() => setPreview('kitchen')}
+                >
+                  Preview ticket
+                </Button>
+              )}
+              {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
+              {cart?.orderId && !cart.kitchenTicketOff ? (
+                <Button variant="quiet" onClick={() => act(reprintKitchen)}>
+                  Send ticket again
+                </Button>
+              ) : null}
+              {/* Only when this shop has a label printer. */}
+              {hasLabels ? (
+                <Button
+                  variant="quiet"
+                  disabled={!cart || cart.isEmpty}
+                  onClick={() => {
+                    const first = cart?.lines[0];
+                    if (!first) return;
+                    call('print_label', {
+                      line: `${first.qty} x ${first.name}`,
+                      token: cart?.table ?? 'Parcel',
+                    })
+                      .then(() => toast.show('ok', 'The label is printing.'))
+                      .catch(report);
+                  }}
+                >
+                  Label
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="mb-actions__group" role="group" aria-label="Bill">
+              <span className="mb-actions__title">Bill</span>
+              {/* "What do we each owe?" — a question, answered in place. */}
+              <div className="mb-eachpays">
+                <span className="mb-eachpays__label">Each pays</span>
+                <Button
+                  small
+                  variant="quiet"
+                  disabled={ways <= 2}
+                  onClick={() => void setPeople(ways - 1)}
+                  aria-label="One fewer person"
+                >
+                  <Icon name="minus" size="sm" />
+                </Button>
+                <span className="mb-eachpays__count">{ways}</span>
+                <Button
+                  small
+                  variant="quiet"
+                  disabled={ways >= 50}
+                  onClick={() => void setPeople(ways + 1)}
+                  aria-label="One more person"
+                >
+                  <Icon name="plus" size="sm" />
+                </Button>
+                <span className="mb-eachpays__says">{even ? even.note : ''}</span>
+              </div>
+              <Button
+                variant="quiet"
+                disabled={!cart || cart.isEmpty}
+                onClick={() => setDiscounting(true)}
+              >
+                {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
+              </Button>
+              <Button
+                variant="quiet"
+                disabled={!cart || cart.isEmpty || !cart.orderId}
+                onClick={() => setSplitting(true)}
+              >
+                Separate bill
+              </Button>
+            </div>
+
+            <div className="mb-actions__group" role="group" aria-label="Order">
+              <span className="mb-actions__title">Order</span>
+              <Button variant="quiet" onClick={() => void newOrder()}>
+                New order
+              </Button>
+              {/* A parked order is cancelled with a reason; a typed one simply goes. */}
+              <Button
+                variant="quiet"
+                disabled={!cart || cart.isEmpty}
+                onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
+              >
+                Cancel order
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
-      {keys.mode.kind === 'quantity' ? (
-        <QuantityPopup
-          mode={keys.mode}
-          onType={(text) => dispatch({ kind: 'typed', text })}
-          onConfirm={() => dispatch({ kind: 'key', key: 'Enter' })}
-          onCancel={() => dispatch({ kind: 'key', key: 'Escape' })}
-          onWeigh={
-            hasScale
-              ? () => {
-                  call('read_scale_once')
-                    .then((answer) => {
-                      if (!answer.answered) {
-                        toast.show('warn', answer.says);
-                        return;
-                      }
-                      // "1.234 kg" — the number is the quantity, the unit is the scale's own
-                      // word for it.
-                      const [amount] = answer.says.split(' ');
-                      if (amount) dispatch({ kind: 'typed', text: amount });
-                      toast.show('ok', answer.says);
-                    })
-                    .catch(report);
-                }
-              : undefined
-          }
-        />
-      ) : null}
 
       {keys.mode.kind === 'table-busy' ? (
         <BusyTable
@@ -1106,20 +1063,6 @@ export function Billing() {
             ? () => act(printKitchen)
             : () => act(completeBill)
         }
-      />
-
-      <ConfirmDialog
-        open={confirmCancel}
-        title="Cancel this order?"
-        body="Everything on this bill will be cleared. This cannot be undone."
-        confirmLabel="Cancel the order"
-        cancelLabel="Keep it"
-        destructive
-        onConfirm={() => {
-          setConfirmCancel(false);
-          void newOrder();
-        }}
-        onCancel={() => setConfirmCancel(false)}
       />
 
       {/* The order is in the books, so cancelling it is a correction. */}

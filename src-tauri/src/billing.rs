@@ -40,6 +40,8 @@ pub struct CartState {
     order_type: OrderType,
     table: Option<TableSeat>,
     pub origin: Option<Origin>,
+    /// The bill number the order claimed when it was parked.
+    pub bill_number: Option<String>,
     pub settlement: Settlement,
     pub bill_discount: Option<DiscountEntry>,
     pub kitchen: mb_core::KitchenLedger,
@@ -68,6 +70,7 @@ impl CartState {
             order_type,
             table: None,
             origin: None,
+            bill_number: None,
             settlement: Settlement::new(),
             bill_discount: None,
             kitchen: mb_core::KitchenLedger::new(),
@@ -90,6 +93,7 @@ impl CartState {
                 label: table_label.unwrap_or_else(|| id.as_str().to_owned()),
                 seat: core.seat().cloned(),
             }),
+            bill_number: order.bill_number().map(|b| b.formatted.clone()),
             origin: Some(Origin {
                 id: core.id.clone(),
                 created_at: core.created_at,
@@ -121,10 +125,6 @@ impl CartState {
         self.table.as_ref().map(|t| t.id.as_str())
     }
 
-    #[must_use]
-    pub fn table_label(&self) -> Option<&str> {
-        self.table.as_ref().map(|t| t.label.as_str())
-    }
 
     #[must_use]
     pub fn order_id(&self) -> Option<&str> {
@@ -265,6 +265,8 @@ pub struct CartView {
     pub covers: Option<u32>,
     /// The order's id, once it has one.
     pub order_id: Option<String>,
+    /// The bill number it claimed when it was parked, as it will print.
+    pub bill_number: Option<String>,
     /// What the floor did to this order while the cashier had it open.
     pub from_the_floor: Vec<crate::orders::FloorChange>,
     /// A very long order, mentioned rather than refused.
@@ -456,7 +458,9 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         lines,
         bill: bill_view(&bill)?,
         order_type: order_type_label(state.order_type).to_owned(),
-        table: state.table_label().map(str::to_owned),
+        table: state
+            .table()
+            .map(|t| format!("{}{}", t.label, t.seat.as_ref().map_or("", |s| s.as_str()))),
         payments: state
             .settlement
             .payments()
@@ -480,6 +484,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         kitchen_told: !state.kitchen.told().is_empty(),
         covers: state.covers,
         order_id: state.order_id().map(str::to_owned),
+        bill_number: state.bill_number.clone(),
         from_the_floor: state.from_the_floor.clone(),
         length_says: state.cart.length_says().unwrap_or_default(),
         order_type_locked: config.billing.lock_order_type,
@@ -636,15 +641,38 @@ pub fn floor_view(
                 .find(|s| &s.id == id)
                 .map(|s| s.name.clone())
         });
-        let order = open.iter().find(|o| {
-            o.core()
-                .table()
-                .is_some_and(|t| t.as_str() == table.id.as_str())
-        });
+        // Every party on this table: the first is the table's own tile, the rest are seats.
+        let mut here: Vec<&AnyOrder> = open
+            .iter()
+            .filter(|o| {
+                o.core()
+                    .table()
+                    .is_some_and(|t| t.as_str() == table.id.as_str())
+            })
+            .collect();
+        here.sort_by_key(|o| o.core().seat().map(|s| s.as_str().to_owned()));
+        let order = here.first().copied();
 
         // Decided here, where both halves are in scope, and nowhere else.
         let selected = loaded_table == Some(table.id.as_str())
             || order.is_some_and(|o| loaded_order == Some(o.core().id.as_str()));
+
+        for party in here.iter().skip(1) {
+            let seat = party.core().seat().map_or("", |s| s.as_str());
+            out.push(tile_for(
+                party,
+                Seat {
+                    label: format!("{}{seat}", table.label),
+                    section: section.clone(),
+                    seats: 0,
+                    selected: loaded_order == Some(party.core().id.as_str()),
+                    now,
+                    warn_after,
+                    late_after,
+                    config,
+                },
+            ));
+        }
 
         out.push(match order {
             Some(order) => tile_for(
@@ -756,7 +784,12 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         kitchen_minutes: None,
         order_id: Some(id.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
-        id: core.table().map_or(id, |t| t.as_str().to_owned()),
+        // A table's tile is the table; a second party's tile, and a tile with no table, is the
+        // order itself.
+        id: match core.table() {
+            Some(table) if core.seat().is_none() => table.as_str().to_owned(),
+            _ => id,
+        },
         label,
         section,
         seats: crate::ipc::count(seats),

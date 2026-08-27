@@ -3,9 +3,7 @@
  * the help sheet.
  */
 
-import { useEffect, useRef } from 'react';
-
-import { Button, Icon, Modal } from '../kit';
+import { Button, Modal } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import { SHORTCUTS, SUB_TABLE_LETTERS, type Mode } from './keyboard';
 import type { TableView } from '../ipc/generated/TableView';
@@ -46,85 +44,6 @@ export function Suggestions({
       ))}
     </ul>
   );
-}
-
-/** The quantity popup. */
-export function QuantityPopup({
-  mode,
-  onType,
-  onConfirm,
-  onCancel,
-  onWeigh,
-}: {
-  mode: Extract<Mode, { kind: 'quantity' }>;
-  onType: (text: string) => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-  onWeigh?: () => void;
-}) {
-  const box = useRef<HTMLInputElement>(null);
-
-  // The quantity field takes focus, and it has to win a fight to get it.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => box.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, []);
-
-  const shown = mode.typed === '' ? '1' : mode.typed;
-  return (
-    <Modal
-      open
-      title={mode.item.name}
-      onClose={onCancel}
-      actions={
-        <>
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button variant="primary" onClick={onConfirm}>
-            Add
-          </Button>
-        </>
-      }
-    >
-      <div className="mb-quantity">
-        <Button
-          onClick={() => onType(step(shown, -1))}
-          aria-label="One fewer"
-        >
-          −
-        </Button>
-        <input
-          className="mb-input mb-input--number mb-quantity__value"
-          ref={box}
-          value={mode.typed}
-          placeholder="1"
-          inputMode="decimal"
-          aria-label="Quantity"
-          data-keys="engine"
-          onChange={(event) => onType(event.target.value)}
-        />
-        <Button onClick={() => onType(step(shown, 1))} aria-label="One more">
-          +
-        </Button>
-        {onWeigh ? (
-          <Button onClick={onWeigh} aria-label="Take the weight from the scale">
-            <Icon name="scale" size="sm" />
-            Weigh
-          </Button>
-        ) : null}
-      </div>
-      <span className="mb-field__hint">
-        Type a quantity — 2, or 0.5 for half a kilo. Blank means one.
-      </span>
-    </Modal>
-  );
-}
-
-/** Plus and minus, on a quantity — which is a count, not money. */
-function step(current: string, by: number): string {
-  const asNumber = Number(current);
-  if (!Number.isFinite(asNumber)) return '1';
-  const next = Math.max(0, asNumber + by);
-  return next === 0 ? '' : String(Number(next.toFixed(3)));
 }
 
 /** A busy table: merge, or take a sub-table letter. */

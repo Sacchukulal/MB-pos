@@ -39,6 +39,10 @@ covers: number | null,
  */
 orderId: string | null, 
 /**
+ * The bill number it claimed when it was parked, as it will print.
+ */
+billNumber: string | null, 
+/**
  * What the floor did to this order while the cashier had it open.
  */
 fromTheFloor: Array<FloorChange>, 

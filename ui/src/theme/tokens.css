@@ -155,8 +155,9 @@
 
   /* The billing screen. */
   --cart-width: 24rem;
+  /* The totals breakdown scrolls past this, so the item list keeps its room. */
+  --totals-breakdown-max: 7.5rem;
   /* The processing-orders panel, between the floor and the cart. */
-  --queue-width: 17rem;
   /* How wide the minus and plus on a cart line are. */
   --cart-step-size: 1.75rem;
   --billbar-lock-size: 1.5rem;

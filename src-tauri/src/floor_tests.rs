@@ -853,3 +853,94 @@ fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
         );
     }
 }
+
+/// A second party sits beside the first, gets its own tile, and pressing the table still opens
+/// the first.
+#[test]
+fn a_second_party_gets_its_own_tile_and_the_table_keeps_its_first() {
+    let scratch = Scratch::new("join_seat");
+    let app = a_shop_with_a_room(&scratch);
+    let first = seat(&app, "ord_first", "tbl_1", &[("itm_dosa", 12_000, 2)], None);
+
+    // Typed at the counter, then put beside the first party as 1B.
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .add(
+                snapshot("itm_tea", 2_000),
+                Qty::from_whole(1).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a tea");
+    let view =
+        crate::ipc::join_table_on(&app, "tbl_1".to_owned(), Some("b".to_owned())).expect("seated");
+    assert_eq!(view.table.as_deref(), Some("1B"));
+    assert_eq!(view.lines.len(), 1, "the typed line came along");
+    let second = crate::flows::park_open_order(&app).expect("parked");
+    assert_eq!(second.core.seat().map(|s| s.as_str()), Some("B"));
+
+    let tiles = crate::ipc::open_orders_on(&app).expect("the floor");
+    let seat_tile = tiles
+        .iter()
+        .find(|t| t.label == "1B")
+        .expect("a tile for 1B");
+    assert_eq!(
+        seat_tile.id,
+        second.core.id.as_str(),
+        "a seat's tile is its order"
+    );
+    let table_tile = tiles
+        .iter()
+        .find(|t| t.label == "1")
+        .expect("the table's tile");
+    assert_eq!(table_tile.id, "tbl_1");
+    assert_eq!(table_tile.order_id.as_deref(), Some(first.as_str()));
+
+    // The same letter twice is refused; pressing the table opens the first party.
+    let refused = crate::ipc::join_table_on(&app, "tbl_1".to_owned(), Some("B".to_owned()))
+        .expect_err("two parties on one letter");
+    assert_eq!(refused.code, "table.seat_taken");
+    let opened = crate::ipc::open_table_on(&app, "tbl_1".to_owned()).expect("opened");
+    assert_eq!(opened.order_id.as_deref(), Some(first.as_str()));
+}
+
+/// Typed items join a busy table's bill without being written until the counter parks them.
+#[test]
+fn typed_items_join_the_bill_on_a_busy_table() {
+    let scratch = Scratch::new("join_merge");
+    let app = a_shop_with_a_room(&scratch);
+    let first = seat(
+        &app,
+        "ord_busy",
+        "tbl_2",
+        &[("itm_dosa", 12_000, 2)],
+        Some(2),
+    );
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .add(
+                snapshot("itm_tea", 2_000),
+                Qty::from_whole(3).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a tea");
+
+    let view = crate::ipc::join_table_on(&app, "tbl_2".to_owned(), None).expect("joined");
+    assert_eq!(view.order_id.as_deref(), Some(first.as_str()));
+    assert_eq!(view.lines.len(), 2, "the dosa and the tea");
+    assert!(!view.kitchen_up_to_date, "the tea is new to the kitchen");
+    assert_eq!(
+        read(&app, &first).core().cart.lines().len(),
+        1,
+        "nothing was written yet"
+    );
+}

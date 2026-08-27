@@ -7,8 +7,6 @@ import type { TableView } from '../ipc/generated/TableView';
 
 export type Mode =
   | { kind: 'searching' }
-  /** The quantity popup. Everything else is inert while it is open. */
-  | { kind: 'quantity'; item: MenuItemView; typed: string }
   /** Moving around the table grid. */
   | { kind: 'grid'; index: number }
   /** The chosen table is busy: merge, or take a sub-table letter (1.6). */
@@ -52,8 +50,8 @@ export type Event =
   | { kind: 'suggestions'; items: readonly MenuItemView[] }
   | { kind: 'tables'; tables: readonly TableView[] }
   | { kind: 'cart'; hasItems: boolean; kitchenUpToDate: boolean }
-  | { kind: 'order-type'; value: string }
-  | { kind: 'toggle-lock' }
+  /** The order type, and whether the shop's settings lock it. */
+  | { kind: 'order-type'; value: string; locked: boolean }
   /** A tap. Touch reaches everything the keyboard does. */
   | { kind: 'tap-suggestion'; index: number }
   | { kind: 'tap-tile'; index: number }
@@ -68,7 +66,6 @@ export type Command =
   | { do: 'print-kitchen' }
   | { do: 'complete-bill' }
   | { do: 'new-order' }
-  | { do: 'confirm-new-order' }
   | { do: 'set-order-type'; value: string }
   | { do: 'focus-search' }
   | { do: 'merge-into'; tableId: string }
@@ -121,15 +118,9 @@ export function reduce(state: State, event: Event): [State, Command[]] {
       ];
 
     case 'order-type':
-      return [{ ...state, orderType: event.value }, []];
-
-    case 'toggle-lock':
-      return [{ ...state, orderTypeLocked: !state.orderTypeLocked }, []];
+      return [{ ...state, orderType: event.value, orderTypeLocked: event.locked }, []];
 
     case 'typed': {
-      if (state.mode.kind === 'quantity') {
-        return [{ ...state, mode: { ...state.mode, typed: event.text } }, []];
-      }
       return [
         { ...state, text: event.text, mode: { kind: 'searching' } },
         [{ do: 'search', text: event.text }],
@@ -139,11 +130,8 @@ export function reduce(state: State, event: Event): [State, Command[]] {
     case 'tap-suggestion': {
       const item = state.suggestions[event.index];
       if (!item) return [state, []];
-      // A tap opens the same popup Enter does — one path, two ways in.
-      return [
-        { ...state, mode: { kind: 'quantity', item, typed: '' } },
-        [],
-      ];
+      // A tap adds one, the same as Enter — the quantity is changed on the line.
+      return addOne(state, item);
     }
 
     case 'tap-tile': {
@@ -161,25 +149,15 @@ export function reduce(state: State, event: Event): [State, Command[]] {
   }
 }
 
-function key(state: State, pressed: string): [State, Command[]] {
-  // The popup owns everything while it is open.
-  if (state.mode.kind === 'quantity') {
-    const popup = state.mode;
-    if (pressed === 'Escape') {
-      return [{ ...state, mode: { kind: 'searching' } }, []];
-    }
-    if (pressed === 'Enter') {
-      // Blank means one. Typing a quantity is optional, which is what makes "name, Enter,
-      // Enter" two keystrokes.
-      const qty = popup.typed.trim() === '' ? '1' : popup.typed.trim();
-      return [
-        { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 },
-        [{ do: 'add-item', itemId: popup.item.id, qty }],
-      ];
-    }
-    return [state, []];
-  }
+/** One of it, and the box is clear for the next: the most frequent action is one keystroke. */
+function addOne(state: State, item: MenuItemView): [State, Command[]] {
+  return [
+    { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 },
+    [{ do: 'add-item', itemId: item.id, qty: '1' }],
+  ];
+}
 
+function key(state: State, pressed: string): [State, Command[]] {
   if (state.mode.kind === 'help') {
     if (pressed === 'Escape' || pressed === '?') {
       return [{ ...state, mode: { kind: 'searching' } }, []];
@@ -263,8 +241,9 @@ function key(state: State, pressed: string): [State, Command[]] {
         [{ do: 'search', text: '' }],
       ];
     }
-    // Never destroys work silently: with a cart, it asks.
-    return [state, [{ do: state.cartHasItems ? 'confirm-new-order' : 'new-order' }]];
+    // A typed cart is nothing in the books yet, so it goes without a question; a parked order
+    // is cancelled with a reason, from the actions.
+    return [state, [{ do: 'new-order' }]];
   }
 
   const hasSuggestions = state.suggestions.length > 0;
@@ -309,9 +288,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     // A highlighted suggestion wins.
     if (hasSuggestions && state.highlighted >= 0) {
       const item = state.suggestions[state.highlighted];
-      if (item) {
-        return [{ ...state, mode: { kind: 'quantity', item, typed: '' } }, []];
-      }
+      if (item) return addOne(state, item);
     }
 
     // Type a table name and press Enter — the trick, and it takes precedence over item search
@@ -405,14 +382,12 @@ export const SHORTCUTS: readonly {
 }[] = [
   { group: 'Searching', keys: 'type', what: 'Search the menu' },
   { group: 'Searching', keys: '↑ ↓', what: 'Move through the suggestions' },
-  { group: 'Searching', keys: 'Enter', what: 'Choose the highlighted item' },
+  { group: 'Searching', keys: 'Enter', what: 'Add one of the highlighted item' },
   { group: 'Searching', keys: 'Esc', what: 'Clear the search' },
-  { group: 'Quantity', keys: 'type', what: 'Type a quantity — 2, or 0.5' },
-  { group: 'Quantity', keys: 'Enter', what: 'Add it (blank means one)' },
-  { group: 'Quantity', keys: 'Esc', what: 'Cancel' },
+  { group: 'The order', keys: 'press the quantity', what: 'Change how many, on the line' },
   { group: 'The order', keys: 'Enter', what: 'On an empty box: print the kitchen ticket, then complete the bill' },
   { group: 'The order', keys: 'table number, Enter', what: "Open that table's order" },
-  { group: 'The order', keys: '← →', what: 'Change the order type (unless it is locked)' },
+  { group: 'The order', keys: '← →', what: 'Change the order type (unless the shop locks it)' },
   { group: 'The order', keys: 'Esc', what: 'Start a new order' },
   { group: 'The floor', keys: '↓', what: 'From an empty box, move into the table grid' },
   { group: 'The floor', keys: '← ↑ → ↓', what: 'Move around the grid' },

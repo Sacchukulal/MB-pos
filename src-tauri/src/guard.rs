@@ -75,6 +75,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("search_items", Access::Needs(Permission::BillCreate)),
     ("open_table", Access::Needs(Permission::BillCreate)),
     ("open_order", Access::Needs(Permission::BillCreate)),
+    ("join_table", Access::Needs(Permission::BillCreate)),
     (
         "print_kitchen_ticket",
         Access::Needs(Permission::BillCreate),
@@ -637,7 +638,7 @@ mod tests {
 
         app.with_cart(|state| {
             assert_eq!(state.table_id(), Some("tbl_7"));
-            assert_eq!(state.table_label(), Some("7"));
+            assert_eq!(state.table().map(|t| t.label.as_str()), Some("7"));
             assert_eq!(state.order_type(), mb_core::OrderType::DineIn);
             Ok(())
         })

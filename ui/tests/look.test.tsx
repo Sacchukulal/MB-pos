@@ -299,16 +299,15 @@ describe('the cart column', () => {
   });
 
   /**
-   * The item list gives way before the totals do — a number's only job here is to be bigger
-   * than the other one.
+   * The item list gives way; the totals never do — a cashier must never lose the total.
    */
-  it('gives the item list a much higher shrink than the totals', () => {
+  it('lets the item list shrink and never the totals', () => {
     const lines = css.slice(css.indexOf('.mb-cart__lines {'));
     const linesShrink = /flex:\s*1\s+(\d+)/.exec(lines)?.[1];
     const totals = css.slice(css.indexOf('.mb-totals {'));
     expect(linesShrink).toBeDefined();
     expect(Number(linesShrink)).toBeGreaterThan(10);
-    expect(totals).toContain('flex: 0 1 auto');
+    expect(totals).toContain('flex: 0 0 auto');
   });
 });
 

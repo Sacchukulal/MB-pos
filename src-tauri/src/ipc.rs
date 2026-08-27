@@ -313,6 +313,7 @@ macro_rules! commands {
             $crate::ipc::search_items,
             $crate::ipc::open_table,
             $crate::ipc::open_order,
+            $crate::ipc::join_table,
             $crate::ipc::cart_set_discount,
             $crate::ipc::cart_clear_discount,
             $crate::flows::print_kitchen_ticket,
@@ -1267,25 +1268,7 @@ pub fn search_items_on(
 pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
     let table = TableId::new(table_id);
-    let (label, found) = app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let label = repos.floor().find_table(&table)?.map(|t| t.label);
-                let found = match repos.floor().open_order_at(&table)? {
-                    Some((order_id, _)) => repos.orders().find(&OrderId::new(order_id))?,
-                    None => None,
-                };
-                Ok((label, found))
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-    let Some(label) = label else {
-        return Err(UiError::new(
-            "table.unknown",
-            "That table is not on the floor any more.",
-        ));
-    };
+    let (label, found) = table_and_its_order(app, &table)?;
 
     app.with_cart_mut(|state| {
         *state = match found {
@@ -1299,6 +1282,112 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
         };
         cart_view(state, &app.shop_config())
     })
+}
+
+/// A table's label and the order on it, or a refusal if the table is gone.
+fn table_and_its_order(
+    app: &App,
+    table: &TableId,
+) -> UiResult<(String, Option<mb_core::AnyOrder>)> {
+    let (label, found) = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let label = repos.floor().find_table(table)?.map(|t| t.label);
+                let found = match repos.floor().open_order_at(table)? {
+                    Some((order_id, _)) => repos.orders().find(&OrderId::new(order_id))?,
+                    None => None,
+                };
+                Ok((label, found))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    let Some(label) = label else {
+        return Err(UiError::new(
+            "table.unknown",
+            "That table is not on the floor any more.",
+        ));
+    };
+    Ok((label, found))
+}
+
+/// The cart goes to a busy table: onto its bill, or beside it as a second party with a letter.
+pub fn join_table_on(app: &App, table_id: String, seat: Option<String>) -> UiResult<CartView> {
+    guard::require(app, Permission::BillCreate)?;
+    let table = TableId::new(table_id.clone());
+    let (label, found) = table_and_its_order(app, &table)?;
+    let config = app.shop_config();
+
+    if let Some(letter) = seat {
+        let seat = mb_core::SubTable::parse(&letter).map_err(|e| {
+            UiError::new("table.seat", "A seat is one letter, A to Z.").with_detail(e.to_string())
+        })?;
+        let taken = app.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| mb_db::Repos::new(tx).orders().list_open(OUTLET))
+                .map_err(|e| words::from_db(&e))
+        })?;
+        if taken
+            .iter()
+            .any(|o| o.core().table() == Some(&table) && o.core().seat() == Some(&seat))
+        {
+            return Err(UiError::new(
+                "table.seat_taken",
+                format!(
+                    "Table {label}{} already has a party. Choose another letter.",
+                    seat.as_str()
+                ),
+            )
+            .quietly());
+        }
+        return app.with_cart_mut(|state| {
+            state.place_on(table.clone(), label.clone(), Some(seat));
+            cart_view(state, &config)
+        });
+    }
+
+    let Some(order) = found else {
+        // A free table is simply opened.
+        return open_table_on(app, table_id);
+    };
+    let into = order.core().id.as_str().to_owned();
+
+    // A bill that is already on the floor is merged as one, never retyped.
+    let parked = app.with_cart(|state| Ok(state.order_id().map(str::to_owned)))?;
+    if let Some(from) = parked {
+        if from != into {
+            crate::flows::park_open_order(app)?;
+            crate::floor::merge_orders_on(app, from, into.clone())?;
+        }
+        return open_order_on(app, into);
+    }
+
+    // Typed and not yet parked: the lines go onto that table's bill, and the kitchen ledger
+    // that comes with it knows they are new.
+    app.with_cart_mut(|state| {
+        let mut joined = CartState::load(&order, Some(label.clone()));
+        for line in state.cart.lines() {
+            joined.cart.push(line.clone()).map_err(|e| {
+                UiError::new(
+                    "cart.join",
+                    "These items could not go onto that table's bill.",
+                )
+                .with_detail(e.to_string())
+            })?;
+        }
+        *state = joined;
+        cart_view(state, &config)
+    })
+}
+
+#[tauri::command]
+pub fn join_table(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    table_id: String,
+    seat: Option<String>,
+) -> UiResult<CartView> {
+    shown(&handle, join_table_on(&app, table_id, seat))
 }
 
 /// Open an order that has no table — a parcel or a self-service order on the floor.

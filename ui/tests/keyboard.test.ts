@@ -101,70 +101,29 @@ describe('searching', () => {
     expect(state.highlighted).toBe(2);
   });
 
-  it('Enter on a suggestion opens the quantity popup', () => {
-    const [state] = run(
-      initial(),
-      type('dos'),
-      suggest(item('itm_dosa', 'Masala Dosa')),
-      press('Enter'),
-    );
-    expect(state.mode.kind).toBe('quantity');
-  });
-});
-
-describe('the quantity popup', () => {
-  it('adds the item, and a blank quantity means one', () => {
+  it('Enter on a suggestion adds ONE, and clears the box for the next', () => {
     const [state, commands] = run(
       initial(),
       type('dos'),
       suggest(item('itm_dosa', 'Masala Dosa')),
       press('Enter'),
-      press('Enter'),
     );
     expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }]);
-    // And the box is cleared, ready for the next item — no keystroke wasted.
     expect(state.text).toBe('');
     expect(state.mode.kind).toBe('searching');
   });
 
-  it('takes a typed quantity, including a fractional one', () => {
-    // 0.5 kg of sweets is a real sale.
+  it('a tap on a suggestion does the same', () => {
     const [, commands] = run(
       initial(),
-      type('kaju'),
-      suggest(item('itm_sweet', 'Kaju Katli')),
-      press('Enter'),
-      type('0.5'),
-      press('Enter'),
-    );
-    expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_sweet', qty: '0.5' }]);
-  });
-
-  it('Esc cancels without adding anything', () => {
-    const [state, commands] = run(
-      initial(),
       type('dos'),
       suggest(item('itm_dosa', 'Masala Dosa')),
-      press('Enter'),
-      press('Escape'),
+      { kind: 'tap-suggestion', index: 0 },
     );
-    expect(state.mode.kind).toBe('searching');
-    expect(commands).toEqual([]);
-  });
-
-  it('swallows everything else while it is open', () => {
-    // The popup owns the keyboard; an arrow key must not move a suggestion behind it.
-    const [state] = run(
-      initial(),
-      type('dos'),
-      suggest(item('itm_dosa', 'Masala Dosa')),
-      press('Enter'),
-      press('ArrowDown'),
-    );
-    expect(state.mode.kind).toBe('quantity');
-    expect(state.highlighted).toBe(0);
+    expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }]);
   });
 });
+
 
 describe('T2 — Enter on an empty box, all four cases (audit 2.3)', () => {
   it('prints the kitchen ticket when the kitchen has not seen everything', () => {
@@ -249,7 +208,7 @@ describe('the order type, and the lock (crown jewel 1)', () => {
     // lose it to a stray arrow key either.
     const [state, commands] = run(
       initial(),
-      { kind: 'toggle-lock' },
+      { kind: 'order-type', value: 'Dine in', locked: true },
       press('ArrowRight'),
     );
     expect(state.orderType).toBe('Dine in');
@@ -287,10 +246,9 @@ describe('Esc unwinds one layer at a time (correction (b))', () => {
     expect(commands).toEqual([{ do: 'new-order' }]);
   });
 
-  it('ASKS before throwing away a cart with something in it', () => {
-    // Esc never destroys work silently.
+  it('starts a new order over a typed cart without asking — nothing is in the books yet', () => {
     const [, commands] = run(initial(), cart(true), press('Escape'));
-    expect(commands).toEqual([{ do: 'confirm-new-order' }]);
+    expect(commands).toEqual([{ do: 'new-order' }]);
   });
 });
 
@@ -488,7 +446,7 @@ describe('the help sheet (audit F4)', () => {
     // The sheet is generated from this table, so an undocumented key is impossible rather than
     // unlikely.
     const groups = new Set(SHORTCUTS.map((s) => s.group));
-    for (const group of ['Searching', 'Quantity', 'The order', 'The floor']) {
+    for (const group of ['Searching', 'The order', 'The floor']) {
       expect(groups.has(group), `nothing documented for "${group}"`).toBe(true);
     }
     expect(SHORTCUTS.length).toBeGreaterThan(12);
@@ -501,8 +459,7 @@ describe('the whole thing, end to end, by keyboard alone', () => {
     let commands: Command[];
 
     [state] = run(state, type('dos'), suggest(item('itm_dosa', 'Masala Dosa')));
-    [state] = run(state, press('Enter'));       // quantity popup
-    [state, commands] = run(state, press('Enter')); // blank means one
+    [state, commands] = run(state, press('Enter')); // one keystroke, one dosa
     expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }]);
 
     [state] = run(state, cart(true, false));

@@ -371,7 +371,7 @@ impl<'a> FloorRepo<'a> {
             .query_row(
                 "SELECT id, coalesce(token_formatted, bill_number_formatted, id)
                    FROM orders WHERE table_id = ?1 AND state IN ('draft', 'open')
-                  ORDER BY created_at LIMIT 1",
+                  ORDER BY (sub_table IS NOT NULL), created_at LIMIT 1",
                 [table.as_str()],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
