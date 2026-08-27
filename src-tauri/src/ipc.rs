@@ -22,6 +22,7 @@ pub struct MoneyView {
 }
 
 /// A rate from whole percent, for the demo shop's fixed menu.
+#[cfg(debug_assertions)]
 fn demo_rate(percent: u32) -> mb_core::TaxRate {
     mb_core::TaxRate::from_percent(percent).unwrap_or(mb_core::TaxRate::ZERO)
 }
