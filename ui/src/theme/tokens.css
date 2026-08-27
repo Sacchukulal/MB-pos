@@ -59,6 +59,10 @@
   --icon-sm: 1rem;
   --icon-md: 1.25rem;
   --icon-lg: 1.75rem;
+  /* The Magic Bill mark: in the title bar, beside a heading, on a screen of its own. */
+  --logo-sm: 2rem;
+  --logo-md: 3rem;
+  --logo-lg: 5rem;
   --icon-stroke: 1.75;
 
   /* How narrow a kitchen ticket may get before it wraps. */

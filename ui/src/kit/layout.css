@@ -385,6 +385,26 @@
   height: var(--icon-lg);
 }
 
+/* The Magic Bill mark. */
+.mb-logo {
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
+  user-select: none;
+}
+.mb-logo--sm {
+  width: var(--logo-sm);
+  height: var(--logo-sm);
+}
+.mb-logo--md {
+  width: var(--logo-md);
+  height: var(--logo-md);
+}
+.mb-logo--lg {
+  width: var(--logo-lg);
+  height: var(--logo-lg);
+}
+
 /* The side panel. */
 
 /* A column beside the screen. */

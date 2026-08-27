@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput, Scroller, Select, NumberInput } from '../kit';
+import { Button, Checkbox, freshId, Icon, Input, Logo, MoneyInput, Notice, PhoneInput, Scroller, Select, NumberInput } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
@@ -323,6 +323,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'shop' ? (
           <section className="mb-firstrun__body">
+            <Logo size="lg" />
             <h1 className="mb-firstrun__title">Welcome to Magic Bill</h1>
             {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
             <p className="mb-firstrun__lede">

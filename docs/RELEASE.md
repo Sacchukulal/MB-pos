@@ -90,6 +90,18 @@ Until that box is ticked, assume the worst case.
 }
 ```
 
+### The logo
+
+One picture, three places, all made from it:
+
+* `ui/src/kit/logo.png` (256 px) — what the screens show, through the kit's
+  `<Logo />`. Nothing else may carry its own copy.
+* `src-tauri/icons/icon.ico` — the program, the window, the taskbar and the
+  installer. Made with `cargo tauri icon <logo.png> -o <some folder>`; copy
+  its `icon.ico` here and its `128x128@2x.png` to the kit.
+* `src-tauri/icons/installer-*.bmp` — the installer's sidebar and header.
+  `node scripts/installer-art.mjs` redraws them from the kit's PNG.
+
 ---
 
 ## 3. Staging a release

@@ -26,6 +26,10 @@ export { freshId } from './ids';
 export { Icon } from './Icon';
 export type { IconName, IconProps } from './Icon';
 
+/** The brand mark. */
+export { Logo } from './Logo';
+export type { LogoProps } from './Logo';
+
 export {
   Button,
   Checkbox,

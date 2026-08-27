@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { Scroller } from '../kit';
+import { Logo, Scroller } from '../kit';
 import { subscribe } from '../ipc/call';
 
 import './display.css';
@@ -57,6 +57,12 @@ export function Display() {
           </div>
         </>
       )}
+
+      {/* Whose counter this is, quietly, in the corner. */}
+      <p className="mb-display__by">
+        <Logo size="sm" />
+        <span>Magic Bill</span>
+      </p>
     </div>
   );
 }

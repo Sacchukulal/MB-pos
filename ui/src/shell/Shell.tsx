@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, Icon, Modal, plural, useToast, type IconName } from '../kit';
+import { Button, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -533,7 +533,7 @@ function BareBar() {
     <header className="mb-topbar" data-tauri-drag-region>
       <div className="mb-topbar__brand" data-tauri-drag-region>
         <span className="mb-topbar__mark" aria-hidden="true">
-          <Icon name="receipt" size="sm" />
+          <Logo size="sm" />
         </span>
         <span className="mb-topbar__name">Magic Bill</span>
       </div>
@@ -634,7 +634,7 @@ function TopBar({
     <header className="mb-topbar" data-tauri-drag-region>
       <div className="mb-topbar__brand" data-tauri-drag-region title={shopPath ?? undefined}>
         <span className="mb-topbar__mark" aria-hidden="true">
-          <Icon name="receipt" size="sm" />
+          <Logo size="sm" />
         </span>
         <span className="mb-topbar__name">Magic Bill</span>
       </div>

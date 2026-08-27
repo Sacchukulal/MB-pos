@@ -66,9 +66,6 @@
   justify-content: center;
   width: var(--space-6);
   height: var(--space-6);
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 

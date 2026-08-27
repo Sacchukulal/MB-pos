@@ -13,6 +13,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Input,
+  Logo,
   Modal,
   Money,
   Stepper,
@@ -309,5 +310,15 @@ describe('a dialog and the caret (§1, keyboard-first)', () => {
       </Modal>,
     );
     expect((document.activeElement as HTMLElement).getAttribute('role')).toBe('dialog');
+  });
+});
+
+/** The brand mark. */
+describe('Logo', () => {
+  it('is the one picture, named, at the size asked for', () => {
+    render(<Logo size="sm" />);
+    const mark = screen.getByRole('img', { name: 'Magic Bill' });
+    expect(mark).toHaveClass('mb-logo', 'mb-logo--sm');
+    expect(mark.getAttribute('src')).toMatch(/logo/);
   });
 });

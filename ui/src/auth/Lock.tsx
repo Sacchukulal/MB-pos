@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 
-import { Button, Input, Keypad, Scroller } from '../kit';
+import { Button, Input, Keypad, Logo, Scroller } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import {
@@ -93,6 +93,7 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
   return (
     <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Sign in">
       <div className="mb-lock__card">
+        <Logo size="lg" />
         {mode.kind === 'recovered' ? (
           <Recovered code={mode.freshCode} onDone={() => dispatch({ kind: 'done' })} />
         ) : mode.kind === 'recover' ? (

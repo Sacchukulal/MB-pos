@@ -67,6 +67,17 @@
   font-size: var(--text-xl);
 }
 
+/* The mark, in the corner, out of the way of the bill. */
+.mb-display__by {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gap-inline);
+  margin: 0;
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+}
+
 .mb-display__grand {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
