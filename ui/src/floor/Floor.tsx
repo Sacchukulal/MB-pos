@@ -23,7 +23,7 @@ import {
   useReport,
   useToast,
 } from '../kit';
-import { call } from '../ipc/call';
+import { call, subscribe } from '../ipc/call';
 /* The one table tile in the product. */
 import { Tile } from '../billing/TableGrid';
 import type { FloorView } from '../ipc/generated/FloorView';
@@ -70,6 +70,18 @@ export function Floor() {
   }, [arrived, report]);
 
   useEffect(load, [load]);
+  // A change arrives by push — a settle at the counter, a phone, a merge on another till.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    subscribe((message) => {
+      if (message.kind === 'floor') load();
+    })
+      .then((off) => {
+        stop = off;
+      })
+      .catch(() => undefined);
+    return () => stop?.();
+  }, [load]);
 
   /** Carry the bill to this table, from the Floor screen too. */
   const printTheBill = useCallback(

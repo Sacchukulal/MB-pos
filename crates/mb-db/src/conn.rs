@@ -1,8 +1,9 @@
 //! Opening the shop's data file, and the rules that keep a report from ever standing in front
 //! of a cashier.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use rusqlite::{Connection, Transaction};
 
@@ -51,12 +52,23 @@ impl DbConfig {
     }
 }
 
+/// Told after every commit which tables it changed.
+pub type Watcher = Arc<dyn Fn(&BTreeSet<String>) + Send + Sync>;
+
 /// The shop's data file: one writer, a small pool of readers.
-#[derive(Debug)]
 pub struct Db {
     path: PathBuf,
     writer: Mutex<Connection>,
     readers: ReaderPool,
+    /// The tables the write in hand has touched, noted by SQLite itself.
+    touched: Arc<Mutex<BTreeSet<String>>>,
+    watcher: Mutex<Option<Watcher>>,
+}
+
+impl std::fmt::Debug for Db {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Db").field("path", &self.path).finish()
+    }
 }
 
 impl Db {
@@ -92,6 +104,16 @@ impl Db {
 
         migrate::apply_all(&mut writer)?;
 
+        // Every row the writer changes names its table here, so a watcher can be told after
+        // the commit without any caller having to remember to say so.
+        let touched: Arc<Mutex<BTreeSet<String>>> = Arc::default();
+        let noting = Arc::clone(&touched);
+        writer.update_hook(Some(
+            move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
+                lock(&noting).insert(table.to_owned());
+            },
+        ));
+
         let mut readers = Vec::with_capacity(config.readers);
         for _ in 0..config.readers {
             readers.push(open_one(&config.path, config)?);
@@ -101,7 +123,14 @@ impl Db {
             path: config.path.clone(),
             writer: Mutex::new(writer),
             readers: ReaderPool::new(readers),
+            touched,
+            watcher: Mutex::new(None),
         })
+    }
+
+    /// Be told, after each commit, which tables it changed.
+    pub fn watch(&self, watcher: Watcher) {
+        *lock(&self.watcher) = Some(watcher);
     }
 
     #[must_use]
@@ -141,18 +170,25 @@ impl Db {
     ) -> Result<T, DbError> {
         let mut writer = lock(&self.writer);
         let tx = writer.transaction()?;
-        match f(&tx) {
-            Ok(value) => {
-                tx.commit()?;
-                Ok(value)
-            }
-            Err(e) => {
-                // Dropping the transaction rolls it back; being explicit means a rollback
-                // failure is not swallowed by a destructor.
-                tx.rollback()?;
-                Err(e)
-            }
+        let outcome = match f(&tx) {
+            Ok(value) => tx.commit().map(|()| value).map_err(DbError::from),
+            // Dropping the transaction rolls it back; being explicit means a rollback failure
+            // is not swallowed by a destructor.
+            Err(e) => match tx.rollback() {
+                Ok(()) => Err(e),
+                Err(rollback) => Err(rollback.into()),
+            },
+        };
+        let touched = std::mem::take(&mut *lock(&self.touched));
+        // The lock goes first: a watcher must never wait on the counter.
+        drop(writer);
+        if outcome.is_ok()
+            && !touched.is_empty()
+            && let Some(watcher) = lock(&self.watcher).clone()
+        {
+            watcher(&touched);
         }
+        outcome
     }
 
     /// Writes the WAL back into the main file.

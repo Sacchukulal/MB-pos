@@ -230,6 +230,9 @@ fn main() {
         .invoke_handler(commands!())
         .setup(move |app| {
             // Rust pushes; React subscribes.
+            if let Some(state) = app.handle().try_state::<App>() {
+                state.attach_window(app.handle().clone());
+            }
             push::pump_print_queue(app.handle());
             push::emit_print_queue(app.handle());
             // The idle lock.

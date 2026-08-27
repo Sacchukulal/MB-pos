@@ -48,6 +48,8 @@ pub struct App {
     updates: Mutex<crate::updates::UpdateState>,
     /// Which till this machine is.
     terminal_id: String,
+    /// The window, once there is one, so a shop opened later is watched too.
+    window: Mutex<Option<tauri::AppHandle>>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -93,7 +95,20 @@ impl App {
                 ..crate::updates::UpdateState::default()
             }),
             terminal_id: crate::terminals::me(&AppConfig::directory()).terminal_id,
+            window: Mutex::new(None),
         })
+    }
+
+    /// The window is up: from now on the shop's data tells it what changed.
+    pub fn attach_window(&self, handle: tauri::AppHandle) {
+        *lock(&self.window) = Some(handle.clone());
+        crate::push::watch_the_shop(&handle);
+    }
+
+    /// The open shop's data file, if there is one.
+    #[must_use]
+    pub fn shop_db(&self) -> Option<Arc<Db>> {
+        lock(&self.shop).as_ref().map(|shop| Arc::clone(&shop.db))
     }
 
     /// Which till this machine is.
@@ -311,16 +326,15 @@ impl App {
         // After the shop is in place, because reading the settings needs a shop to read them
         // from.
         self.reload_shop_config();
+        if let Some(handle) = lock(&self.window).clone() {
+            crate::push::watch_the_shop(&handle);
+        }
         log_info!("the shop at {} is open", path.display());
     }
 
     pub fn rebuild_queue(&self) {
-        let db = {
-            let shop = lock(&self.shop);
-            match shop.as_ref() {
-                Some(shop) => Arc::clone(&shop.db),
-                None => return,
-            }
+        let Some(db) = self.shop_db() else {
+            return;
         };
         let fresh = self.build_queue(&db);
         let old = {
@@ -771,6 +785,10 @@ pub enum Pushed {
     },
     /// The floor changed the order the cashier has open.
     FloorChanged { waiting: u32 },
+    /// An order, a table or a payment changed somewhere: re-read the floor.
+    Floor,
+    /// A kitchen ticket or an order changed: re-read the kitchen.
+    Kitchen,
     /// This till is holding bills the main till has not taken yet.
     Tills {
         /// How many bills are queued here.

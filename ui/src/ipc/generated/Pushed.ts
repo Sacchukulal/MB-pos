@@ -18,7 +18,7 @@ stand_in: boolean, } | { "kind": "pairing",
 /**
  * How many phones are waiting for somebody to press Allow.
  */
-waiting: number, } | { "kind": "floorChanged", waiting: number, } | { "kind": "tills", 
+waiting: number, } | { "kind": "floorChanged", waiting: number, } | { "kind": "floor" } | { "kind": "kitchen" } | { "kind": "tills", 
 /**
  * How many bills are queued here.
  */

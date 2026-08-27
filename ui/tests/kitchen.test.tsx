@@ -8,6 +8,7 @@ vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   inApp: () => true,
   isUiError: () => false,
+  subscribe: () => Promise.resolve(() => undefined),
 }));
 
 const { Kitchen } = await import('../src/kitchen/Kitchen');

@@ -1,5 +1,8 @@
 //! Rust pushes. React subscribes.
 
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::log_warn;
@@ -70,6 +73,41 @@ pub fn emit_pairing(app: &AppHandle) {
     });
     if let Err(e) = app.emit(CHANNEL, Pushed::Pairing { waiting }) {
         log_warn!("the pairing panel could not be told: {e}");
+    }
+}
+
+/// The shop's data tells the window what changed, after every commit, whoever wrote it — a
+/// cashier, a phone, the kitchen, a timer.
+pub fn watch_the_shop(app: &AppHandle) {
+    let Some(db) = app.try_state::<App>().and_then(|state| state.shop_db()) else {
+        return;
+    };
+    let handle = app.clone();
+    db.watch(Arc::new(move |tables| emit_changes(&handle, tables)));
+}
+
+/// Which tables mean which screen.
+fn emit_changes(app: &AppHandle, tables: &BTreeSet<String>) {
+    const FLOOR: &[&str] = &[
+        "orders",
+        "order_lines",
+        "payments",
+        "dining_tables",
+        "sections",
+        "reservations",
+        "waitlist",
+    ];
+    const KITCHEN: &[&str] = &["orders", "order_lines", "kitchen_deliveries"];
+    let touched = |names: &[&str]| names.iter().any(|name| tables.contains(*name));
+    if touched(FLOOR)
+        && let Err(e) = app.emit(CHANNEL, Pushed::Floor)
+    {
+        log_warn!("the floor could not be told it changed: {e}");
+    }
+    if touched(KITCHEN)
+        && let Err(e) = app.emit(CHANNEL, Pushed::Kitchen)
+    {
+        log_warn!("the kitchen could not be told it changed: {e}");
     }
 }
 

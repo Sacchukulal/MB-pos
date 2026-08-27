@@ -29,7 +29,7 @@ thiserror = "2"
 #
 # Size cost: roughly 1.5 MB in the release binary, against S4's 20 MB installer
 # budget in docs/PERFORMANCE.md.
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
 
 # P24. The kitchen ticket keeps its individually-bumped lines as a small JSON
 # array in its own row — read and written only with that row, never queried

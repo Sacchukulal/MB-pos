@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button, Scroller, useReport } from '../kit';
-import { call, inApp } from '../ipc/call';
+import { call, inApp, subscribe } from '../ipc/call';
 import type { KitchenTicket } from '../ipc/generated/KitchenTicket';
 import type { KitchenView } from '../ipc/generated/KitchenView';
 import { useTick } from '../clock';
@@ -32,8 +32,20 @@ export function Kitchen() {
       });
   }, [station]);
 
-  // Re-read on every tick.
+  // The tick moves the minutes; a change arrives by push.
   useEffect(load, [load, tick]);
+  useEffect(() => {
+    if (!inApp()) return undefined;
+    let stop: (() => void) | undefined;
+    subscribe((message) => {
+      if (message.kind === 'kitchen') load();
+    })
+      .then((off) => {
+        stop = off;
+      })
+      .catch(() => undefined);
+    return () => stop?.();
+  }, [load]);
 
   /** Tell the counter this screen DREW the ticket — not that it arrived. */
   useEffect(() => {

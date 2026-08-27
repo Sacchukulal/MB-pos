@@ -179,10 +179,9 @@ export function Billing() {
         call('current_cart')
           .then(setCart)
           .catch(() => undefined);
-        // Same push, same source: whatever changed the floor changed which orders are open, so
-        // the queue follows it instead of the clock.
-        void refreshFloor();
       }
+      // The data says an order, a table or a payment changed — whoever changed it.
+      if (message.kind === 'floorChanged' || message.kind === 'floor') void refreshFloor();
     })
       .then((off) => {
         stop = off;
@@ -192,8 +191,8 @@ export function Billing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The floor re-reads on every tick, which is how a timer that lives on the ORDER reaches the
-  // screen without the screen counting anything itself.
+  // The tick is for the timers only: a timer lives on the ORDER, so the screen re-reads rather
+  // than counting. Changes arrive by push, above.
   useEffect(() => {
     void refreshFloor();
   }, [refreshFloor, tick]);

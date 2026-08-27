@@ -7,6 +7,7 @@ const call = vi.fn();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   isUiError: () => false,
+  subscribe: () => Promise.resolve(() => undefined),
 }));
 
 const { Floor } = await import('../src/floor/Floor');
