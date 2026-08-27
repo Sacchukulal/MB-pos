@@ -269,6 +269,10 @@ pub struct CartView {
     pub from_the_floor: Vec<crate::orders::FloorChange>,
     /// A very long order, mentioned rather than refused.
     pub length_says: String,
+    /// The shop always bills as one order type, so the switch is not shown.
+    pub order_type_locked: bool,
+    /// The shop has no kitchen ticket, so its buttons are not shown.
+    pub kitchen_ticket_off: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -478,7 +482,22 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         order_id: state.order_id().map(str::to_owned),
         from_the_floor: state.from_the_floor.clone(),
         length_says: state.cart.length_says().unwrap_or_default(),
+        order_type_locked: config.billing.lock_order_type,
+        kitchen_ticket_off: config.billing.kitchen_ticket_off,
     })
+}
+
+/// What a fresh cart starts as: the locked type, or the one the counter was on.
+#[must_use]
+pub fn starting_order_type(
+    config: &crate::settings::ShopConfig,
+    previous: mb_core::OrderType,
+) -> mb_core::OrderType {
+    if config.billing.lock_order_type {
+        config.billing.locked_order_type
+    } else {
+        previous
+    }
 }
 
 fn bill_view(bill: &Bill) -> UiResult<BillView> {

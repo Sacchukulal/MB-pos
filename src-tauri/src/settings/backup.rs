@@ -211,8 +211,60 @@ fn remember_verify(app: &App, path: &str, words_for_screen: &str) {
 
 pub fn back_up_now_on(app: &App) -> UiResult<BackupView> {
     let who = guard::require(app, Permission::BackupRun)?;
+    take_backup(app, &app.shop_config(), &who.name)?;
+    status_on(app)
+}
+
+/// The schedule: a backup every `every_hours`, taken quietly, kept to `keep_count`.
+pub fn watch(handle: &tauri::AppHandle) {
+    use tauri::Manager as _;
+
+    let handle = handle.clone();
+    std::thread::Builder::new()
+        .name("mb-backup".to_owned())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                let Some(app) = handle.try_state::<App>() else {
+                    return;
+                };
+                if let Err(e) = take_if_due(&app) {
+                    log_warn!("the scheduled backup failed: {}", e.message);
+                }
+            }
+        })
+        .ok();
+}
+
+/// A backup, if the newest one is older than the shop asked for. True when one was taken.
+pub fn take_if_due(app: &App) -> UiResult<bool> {
     let config = app.shop_config();
+    let hours = i64::from(config.backup.every_hours);
+    if hours == 0 || !app.has_shop() {
+        return Ok(false);
+    }
     let folder = folder_for(app, &config);
+    let newest = mb_db::backup::list(&folder)
+        .unwrap_or_default()
+        .iter()
+        .map(|b| b.manifest.taken_at_ms)
+        .max()
+        .unwrap_or(0);
+    let age = crate::flows::now().millis().saturating_sub(newest);
+    if age < hours.saturating_mul(3_600_000) {
+        return Ok(false);
+    }
+    take_backup(app, &config, "the schedule")?;
+    Ok(true)
+}
+
+/// One backup, by a person or by the clock: taken, copied to the second folder, pruned.
+fn take_backup(
+    app: &App,
+    config: &super::ShopConfig,
+    who: &str,
+) -> UiResult<mb_db::backup::Backup> {
+    let folder = folder_for(app, config);
 
     let at = crate::flows::now();
     // **id-lint-ok: this is a FILE NAME, and the time in it is the point.**
@@ -241,14 +293,15 @@ pub fn back_up_now_on(app: &App) -> UiResult<BackupView> {
     }
 
     // Keep only as many as the shop asked for.
-    match mb_db::backup::prune(&folder, at.millis()) {
+    let keep = usize::try_from(config.backup.keep_count).unwrap_or(30);
+    match mb_db::backup::prune(&folder, keep) {
         Ok(gone) if !gone.is_empty() => log_info!("{} old backup(s) removed", gone.len()),
         Ok(_) => {}
         Err(e) => log_warn!("old backups could not be tidied: {e}"),
     }
 
-    log_info!("{} took a backup to {}", who.name, backup.path.display());
-    status_on(app)
+    log_info!("{who} took a backup to {}", backup.path.display());
+    Ok(backup)
 }
 
 pub fn verify_on(app: &App, path: String) -> UiResult<VerifyView> {

@@ -18,23 +18,10 @@ pub struct WindowState {
     pub maximised: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct AppConfig {
     pub window: WindowState,
-    /// Applied before the first paint so the window never flashes light and then goes dark.
-    pub theme: String,
-    pub text_size: String,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        AppConfig {
-            window: WindowState::default(),
-            theme: "light".to_owned(),
-            text_size: "normal".to_owned(),
-        }
-    }
 }
 
 impl AppConfig {
@@ -127,8 +114,6 @@ mod tests {
                 y: Some(40),
                 maximised: true,
             },
-            theme: "dark".to_owned(),
-            text_size: "large".to_owned(),
         };
         config.save_to(&path).expect("saves");
         assert_eq!(AppConfig::load_from(&path), config);
@@ -138,7 +123,6 @@ mod tests {
     #[test]
     fn a_missing_config_is_the_defaults_and_not_an_error() {
         let config = AppConfig::load_from(Path::new("nowhere-at-all.json"));
-        assert_eq!(config.theme, "light");
         assert!(!config.window.maximised);
     }
 
@@ -157,17 +141,5 @@ mod tests {
         assert!(path.with_extension("broken.json").exists());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("broken.json"));
-    }
-
-    #[test]
-    fn an_unknown_theme_name_is_not_rejected_here() {
-        // A theme is data.
-        let path = scratch("unknown-theme");
-        std::fs::write(&path, r#"{"theme":"midnight-blue-that-p17-added"}"#).expect("writes");
-        assert_eq!(
-            AppConfig::load_from(&path).theme,
-            "midnight-blue-that-p17-added"
-        );
-        let _ = std::fs::remove_file(&path);
     }
 }

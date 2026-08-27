@@ -373,10 +373,9 @@ fn t5_newer_is_refused_and_older_is_migrated_forward() {
     );
 }
 
-/// Retention keeps 7 daily and 4 weekly — and never prunes the newest, including when the clock
-/// jumps backwards.
+/// Retention keeps the newest N — and never none.
 #[test]
-fn t6_retention_keeps_the_right_backups_and_never_the_newest() {
+fn t6_retention_keeps_the_newest_and_never_none() {
     const DAY_MS: i64 = 86_400_000;
 
     let scratch = Scratch::new("t6");
@@ -391,27 +390,22 @@ fn t6_retention_keeps_the_right_backups_and_never_the_newest() {
         backdate(&taken, now - (29 - n) * DAY_MS);
     }
 
-    let pruned = backup::prune(&dir, now).expect("prune");
+    let pruned = backup::prune(&dir, 5).expect("prune");
     let left = backup::list(&dir).expect("list");
-
-    assert!(!pruned.is_empty(), "nothing was pruned in 30 days");
-    assert!(
-        left.len() <= 11,
-        "retention kept {} backups, more than 7 daily + 4 weekly",
-        left.len()
-    );
+    assert_eq!(pruned.len(), 25);
+    assert_eq!(left.len(), 5);
     assert!(
         left.iter().any(|b| b.path.ends_with("b29.db")),
         "the newest backup was pruned"
     );
-
-    // The clock jumps backwards — a real thing on a counter PC whose time syncs after a reboot.
-    let pruned_again = backup::prune(&dir, now - 10 * DAY_MS).expect("prune again");
-    let left_again = backup::list(&dir).expect("list");
     assert!(
-        left_again.iter().any(|b| b.path.ends_with("b29.db")),
-        "a backwards clock pruned the newest backup (pruned {pruned_again:?})"
+        !left.iter().any(|b| b.path.ends_with("b00.db")),
+        "the oldest survived"
     );
+
+    // Asked to keep none, it keeps one: a shop is never left without a copy.
+    backup::prune(&dir, 0).expect("prune again");
+    assert_eq!(backup::list(&dir).expect("list").len(), 1);
 }
 
 fn backdate(taken: &backup::Backup, to_ms: i64) {

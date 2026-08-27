@@ -30,7 +30,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // Works while locked, and has to.
     ("app_status", Access::Public),
     // The theme toggle is on the lock screen.
-    ("set_appearance", Access::Public),
     // "send me the log" must be a button, and support asks for it precisely when nobody can get
     // in.
     ("reveal_logs", Access::Public),

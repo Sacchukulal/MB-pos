@@ -1084,3 +1084,25 @@ fn a_kitchen_only_printer_does_not_get_the_bills() {
         "a bill was sent to a kitchen-tickets-only printer"
     );
 }
+
+/// The schedule takes a backup when the newest one is old, and leaves a fresh one alone.
+#[test]
+fn the_schedule_backs_up_when_the_newest_one_is_old() {
+    let scratch = Scratch::new("backup_schedule");
+    let app = a_shop(&scratch, "schedule");
+    let copies = scratch.dir().join("copies");
+    let mut config = ShopConfig::default();
+    config.backup.every_hours = 1;
+    config.backup.folder = copies.display().to_string();
+    app.publish_shop_config(config);
+
+    assert!(
+        crate::settings::backup::take_if_due(&app).expect("taken"),
+        "no backup yet, so one was due"
+    );
+    assert!(
+        !crate::settings::backup::take_if_due(&app).expect("checked"),
+        "a fresh backup was taken again"
+    );
+    assert_eq!(mb_db::backup::list(&copies).expect("list").len(), 1);
+}

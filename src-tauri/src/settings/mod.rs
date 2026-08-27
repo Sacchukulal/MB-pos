@@ -168,8 +168,6 @@ pub struct Billing {
     pub rounding: mb_core::RoundingMode,
     pub lock_order_type: bool,
     pub locked_order_type: mb_core::OrderType,
-    pub confirm_before_kitchen: bool,
-    pub confirm_before_bill: bool,
     pub kitchen_ticket_off: bool,
     /// Orders go to the Kitchen screen; paper only when nobody sees them in time.
     pub kitchen_screen: bool,
@@ -194,8 +192,6 @@ impl Default for Billing {
             rounding: mb_core::RoundingMode::NearestRupee,
             lock_order_type: false,
             locked_order_type: mb_core::OrderType::DineIn,
-            confirm_before_kitchen: false,
-            confirm_before_bill: false,
             kitchen_ticket_off: false,
             kitchen_screen: false,
             idle_lock_minutes: 10,
@@ -291,22 +287,6 @@ impl Day {
     }
 }
 
-/// 11 and 13.12 — the look and the language.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Appearance {
-    /// `en`, `hi` or `kn`.
-    pub language: String,
-}
-
-impl Default for Appearance {
-    fn default() -> Self {
-        Appearance {
-            language: "en".to_owned(),
-        }
-    }
-}
-
 /// Where backups go and how many are kept.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -317,8 +297,6 @@ pub struct BackupPolicy {
     /// 0 means only when somebody presses the button.
     pub every_hours: u32,
     pub keep_count: u32,
-    /// May we be told when the counter stops unexpectedly?
-    pub send_crash_reports: bool,
 }
 
 impl Default for BackupPolicy {
@@ -328,9 +306,6 @@ impl Default for BackupPolicy {
             second_folder: String::new(),
             every_hours: 24,
             keep_count: 30,
-            // Off. Consent is given, not assumed — and the report exists on this computer
-            // whichever way this is set.
-            send_crash_reports: false,
         }
     }
 }
@@ -346,7 +321,6 @@ pub struct ShopConfig {
     pub day: Day,
     pub stock: Stock,
     pub backup: BackupPolicy,
-    pub appearance: Appearance,
     /// The scanner, the scale, the customer display and the label printer — every one of them
     /// optional.
     pub devices: Devices,

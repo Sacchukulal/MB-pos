@@ -442,3 +442,54 @@ fn a_capped_size_is_reported_as_a_number_a_shop_can_pick() {
     // And below the smallest is still the smallest anybody can ask for.
     assert_eq!(super::size_label(4), "1");
 }
+
+/// A setting nobody reads is a promise the screen cannot keep.
+#[test]
+fn every_setting_has_a_reader() {
+    fn gather(dir: &std::path::Path, into: &mut String) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                gather(&path, into);
+                continue;
+            }
+            let name = path.to_string_lossy().replace('\\', "/");
+            // The catalogue names every field; a reader is anywhere else, the settings module
+            // included (a charge is read through a method on its own struct).
+            let is_the_catalogue =
+                name.ends_with("/settings/catalog.rs") || name.ends_with("/settings/tests.rs");
+            let is_a_test = name.contains("/tests/") || name.ends_with("_tests.rs");
+            if is_the_catalogue || is_a_test || name.contains("/generated/") {
+                continue;
+            }
+            let source_code = matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("rs" | "ts" | "tsx")
+            );
+            if source_code && let Ok(text) = std::fs::read_to_string(&path) {
+                into.push_str(&text);
+            }
+        }
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut sources = String::new();
+    for dir in ["src-tauri/src", "crates", "ui/src"] {
+        gather(&root.join(dir), &mut sources);
+    }
+    let unread: Vec<&str> = CATALOG
+        .iter()
+        .filter(|entry| {
+            let field = entry.key.rsplit('.').next().unwrap_or(entry.key);
+            !sources.contains(&format!(".{field}"))
+        })
+        .map(|entry| entry.key)
+        .collect();
+    assert!(
+        unread.is_empty(),
+        "nothing reads these settings: {unread:?}"
+    );
+}

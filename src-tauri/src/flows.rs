@@ -254,10 +254,23 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
     Ok(queued)
 }
 
+/// A shop that said it has no kitchen ticket does not print one.
+fn kitchen_ticket_allowed(app: &App) -> UiResult<()> {
+    if app.shop_config().billing.kitchen_ticket_off {
+        return Err(UiError::new(
+            "kitchen.off",
+            "This shop has no kitchen ticket. Turn it on under Settings › Billing.",
+        )
+        .quietly());
+    }
+    Ok(())
+}
+
 /// Print what the kitchen has not seen — the delta, never the order.
 pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
     crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+    kitchen_ticket_allowed(app)?;
     let at = now();
 
     // The order goes on disk BEFORE the paper.
@@ -349,6 +362,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
 pub fn reprint_kitchen_ticket_on(app: &App) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
     crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+    kitchen_ticket_allowed(app)?;
 
     let (lines, order_type, table) = app.with_cart(|state| {
         let lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)> = state
@@ -507,8 +521,12 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
         );
     }
 
+    let config = app.shop_config();
     app.with_cart_mut(|state| {
-        *state = crate::billing::CartState::new_order(state.order_type());
+        *state = crate::billing::CartState::new_order(crate::billing::starting_order_type(
+            &config,
+            state.order_type(),
+        ));
         Ok(())
     })?;
 
@@ -700,6 +718,7 @@ pub fn preview_kitchen_on(
     app: &App,
     order_id: Option<String>,
 ) -> UiResult<crate::preview::PreviewDoc> {
+    kitchen_ticket_allowed(app)?;
     let printer = printer_for(app, Role::Kitchen)?;
     let config = app.shop_config();
     let (metrics, engine) = app.metrics_for(JobKind::Kitchen, &printer);

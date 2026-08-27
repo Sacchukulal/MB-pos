@@ -50,8 +50,6 @@ pub struct AppStatus {
     /// False on a first run.
     pub has_shop: bool,
     pub shop_path: Option<String>,
-    pub theme: String,
-    pub text_size: String,
     pub version: String,
     /// Where the logs are, so "send me the log" is a button and not a phone call about file
     /// paths.
@@ -66,14 +64,11 @@ pub struct AppStatus {
 
 #[tauri::command]
 pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
-    let config = app.config();
     AppStatus {
         has_shop: app.has_shop(),
         shop_path: app
             .with_shop(|shop| Ok(shop.path.display().to_string()))
             .ok(),
-        theme: config.theme,
-        text_size: config.text_size,
         version: env!("CARGO_PKG_VERSION").to_owned(),
         logs_path: crate::logging::directory().map(|p| p.display().to_string()),
         licence: {
@@ -84,16 +79,6 @@ pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
         licence_tone: crate::licensing::tone_for(app.entitlement().standing).to_owned(),
         kitchen_screen: app.shop_config().billing.kitchen_screen,
     }
-}
-
-/// The look, saved. Applied before the first paint on the next start, so the window never
-/// flashes light and then goes dark.
-#[tauri::command]
-pub fn set_appearance(app: tauri::State<'_, App>, theme: String, text_size: String) {
-    app.update_config(|config| {
-        config.theme = theme.clone();
-        config.text_size = text_size.clone();
-    });
 }
 
 /// "there is nothing to read".
@@ -306,7 +291,6 @@ macro_rules! commands {
     () => {
         tauri::generate_handler![
             $crate::ipc::app_status,
-            $crate::ipc::set_appearance,
             $crate::ipc::reveal_logs,
             $crate::ipc::print_test_page,
             $crate::ipc::list_print_jobs,
@@ -752,13 +736,15 @@ pub fn cart_remove(
 /// re-selecting it forty times an hour.
 pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
+    let config = app.shop_config();
     app.with_cart_mut(|state| {
-        *state = CartState::new_order(if keep_type {
+        let previous = if keep_type {
             state.order_type()
         } else {
             mb_core::OrderType::DineIn
-        });
-        cart_view(state, &app.shop_config())
+        };
+        *state = CartState::new_order(crate::billing::starting_order_type(&config, previous));
+        cart_view(state, &config)
     })
 }
 
@@ -775,9 +761,20 @@ pub fn cart_set_order_type(
             format!("\"{order_type}\" is not an order type."),
         )
     })?;
+    let config = app.shop_config();
+    if config.billing.lock_order_type && kind != config.billing.locked_order_type {
+        return Err(UiError::new(
+            "cart.order_type_locked",
+            format!(
+                "This counter always bills as {}. Change that under Settings › Billing.",
+                crate::billing::order_type_label(config.billing.locked_order_type)
+            ),
+        )
+        .quietly());
+    }
     let view = app.with_cart_mut(|state| {
         state.set_order_type(kind);
-        cart_view(state, &app.shop_config())
+        cart_view(state, &config)
     });
     shown(&handle, view)
 }

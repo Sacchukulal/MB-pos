@@ -652,6 +652,7 @@ export function Billing() {
         </button>
 
         <div className="mb-billbar__type">
+          {cart?.orderTypeLocked ? null : (
           <div className="mb-segment" role="group" aria-label="Order type">
             {ORDER_TYPES.map((kind) => (
               <button
@@ -665,6 +666,7 @@ export function Billing() {
               </button>
             ))}
           </div>
+          )}
 
         {/* The lock is a picture now, not a pill. */}
         <Button
@@ -912,12 +914,14 @@ export function Billing() {
 
           {/* Two buttons, and a fold. */}
           <div className="mb-actions">
+            {cart?.kitchenTicketOff ? null : (
             <Button
               disabled={!cart || cart.isEmpty || acting}
               onClick={() => act(printKitchen)}
             >
               Kitchen ticket
             </Button>
+            )}
             <Button
               variant="primary"
               disabled={!cart || cart.isEmpty || acting}
@@ -979,6 +983,7 @@ export function Billing() {
             >
               Preview bill
             </Button>
+            {cart?.kitchenTicketOff ? null : (
             <Button
               variant="quiet"
               disabled={!cart || cart.isEmpty}
@@ -986,8 +991,9 @@ export function Billing() {
             >
               Preview ticket
             </Button>
+            )}
             {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
-            {cart?.orderId ? (
+            {cart?.orderId && !cart.kitchenTicketOff ? (
               <Button variant="quiet" onClick={() => act(reprintKitchen)}>
                 Send ticket again
               </Button>

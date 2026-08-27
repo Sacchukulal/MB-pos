@@ -326,6 +326,14 @@ impl App {
         // After the shop is in place, because reading the settings needs a shop to read them
         // from.
         self.reload_shop_config();
+        // A locked counter starts on its type, not on the default.
+        let config = self.shop_config();
+        if config.billing.lock_order_type {
+            let mut cart = lock(&self.cart);
+            if cart.cart.is_empty() {
+                *cart = CartState::new_order(config.billing.locked_order_type);
+            }
+        }
         if let Some(handle) = lock(&self.window).clone() {
             crate::push::watch_the_shop(&handle);
         }
@@ -453,10 +461,6 @@ impl App {
     pub fn face_named(&self, key: &str) -> Arc<Font> {
         use mb_print::font::Typefaces;
         self.faces.face(Some(key))
-    }
-
-    pub fn config(&self) -> AppConfig {
-        lock(&self.config).clone()
     }
 
     /// Change the stored configuration and write it, atomically.

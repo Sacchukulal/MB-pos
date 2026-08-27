@@ -4,7 +4,7 @@ export type AppStatus = {
 /**
  * False on a first run.
  */
-hasShop: boolean, shopPath: string | null, theme: string, textSize: string, version: string, 
+hasShop: boolean, shopPath: string | null, version: string, 
 /**
  * Where the logs are, so "send me the log" is a button and not a phone call about file
  * paths.

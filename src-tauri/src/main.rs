@@ -237,6 +237,8 @@ fn main() {
             push::emit_print_queue(app.handle());
             // The idle lock.
             push::watch_for_idle(app.handle());
+            // The backup schedule.
+            settings::backup::watch(app.handle());
             // The kitchen must never go blind.
             kitchen::watch_for_undrawn_tickets(app.handle());
             // Last, because it is the only thing here that opens a socket — and it never stops

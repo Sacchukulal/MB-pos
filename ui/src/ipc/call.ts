@@ -110,7 +110,6 @@ export interface Commands {
   first_run: { args: void; returns: FirstRunView };
   create_shop: { args: { folder: string }; returns: FirstRunView };
   use_existing_shop: { args: { path: string }; returns: FirstRunView };
-  set_appearance: { args: { theme: string; textSize: string }; returns: void };
   reveal_logs: { args: void; returns: string };
   print_test_page: { args: { printerId: string }; returns: string };
   list_print_jobs: { args: void; returns: PrintJobView[] };

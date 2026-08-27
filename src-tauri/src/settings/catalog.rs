@@ -370,21 +370,6 @@ const REGISTRATIONS: &[Choice] = &[
     },
 ];
 
-const LANGUAGES: &[Choice] = &[
-    Choice {
-        value: "en",
-        label: "English",
-    },
-    Choice {
-        value: "hi",
-        label: "Hindi — not installed yet (P23)",
-    },
-    Choice {
-        value: "kn",
-        label: "Kannada — not installed yet (P23)",
-    },
-];
-
 const GST_RATES: &[Choice] = &[
     Choice {
         value: "0",
@@ -1697,24 +1682,6 @@ pub const CATALOG: &[Entry] = &[
         ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
         billing.idle_lock_minutes),
     flag!(
-        "billing.confirm_before_kitchen",
-        Billing,
-        Row,
-        "Ask before printing a kitchen ticket",
-        "",
-        ["confirm", "kot", "ask"],
-        billing.confirm_before_kitchen
-    ),
-    flag!(
-        "billing.confirm_before_bill",
-        Billing,
-        Row,
-        "Ask before printing a bill",
-        "",
-        ["confirm", "bill", "ask"],
-        billing.confirm_before_bill
-    ),
-    flag!(
         "billing.kitchen_ticket_off",
         Billing,
         Row,
@@ -1881,38 +1848,6 @@ pub const CATALOG: &[Entry] = &[
         "Older ones are deleted to save disk space.",
         ["backup", "keep", "retention", "delete", "old"], 1..=365 "backups", u32,
         backup.keep_count),
-    flag!(
-        "backup.send_crash_reports",
-        Backup,
-        Row,
-        "Tell us if the counter stops unexpectedly",
-        "Sends us what went wrong — the version, what the counter was doing, and \
-         nothing else. Never your bills, your customers or your licence key. \
-         A record is kept on this computer whichever way you set this, so you \
-         can always send it yourself with Copy diagnostics.",
-        [
-            "crash",
-            "report",
-            "telemetry",
-            "send",
-            "error",
-            "diagnostics",
-            "privacy"
-        ],
-        backup.send_crash_reports
-    ),
-    // How it looks (scope 13.11, 13.12)
-    pick_text!(
-        "appearance.language",
-        Appearance,
-        Row,
-        "Language",
-        "English is the only one installed today. Hindi and Kannada need a \
-         second typeface and a text shaper, which is P23.",
-        ["language", "hindi", "kannada", "english", "bhasha"],
-        LANGUAGES,
-        appearance.language
-    ),
     flag!(
         "receipt.bill_barcode",
         Receipt,
@@ -2094,7 +2029,6 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.rounding", "At the counter"),
     ("billing.lock_order_type", "At the counter"),
     ("billing.locked_order_type", "At the counter"),
-    ("billing.confirm_", "Before it prints"),
     ("billing.kitchen_ticket_off", "Before it prints"),
     ("billing.kitchen_screen", "Before it prints"),
     ("billing.idle_lock_minutes", "At the counter"),

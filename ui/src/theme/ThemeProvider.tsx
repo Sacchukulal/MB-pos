@@ -1,4 +1,4 @@
-/** Applying a theme, and that is all this does. */
+/** Applying a theme, and that is all this does. The machine's browser storage is the one store. */
 
 import {
   createContext,
@@ -55,6 +55,21 @@ function write(key: string, value: string): void {
   }
 }
 
+/** Put the look on the document. */
+function apply(themeId: string, textSize: string): void {
+  const root = document.documentElement;
+  root.setAttribute('data-theme', (themeById(themeId as ThemeId) ?? LIGHT).id);
+  const size = TEXT_SIZES.find((s) => s.id === textSize) ?? NORMAL_TEXT;
+  // One variable. Every type size in tokens.css is calc()'d from it, so this reaches the cart,
+  // the dialogs and the receipt preview at once.
+  root.style.setProperty('--type-scale', String(size.scale));
+}
+
+/** Paint the remembered look before React mounts, so the window never flashes the wrong colours. */
+export function applyRememberedLook(): void {
+  apply(read(THEME_KEY, DEFAULT_THEME), read(TEXT_SIZE_KEY, DEFAULT_TEXT_SIZE));
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeId, setThemeId] = useState<ThemeId>(() =>
     read(THEME_KEY, DEFAULT_THEME),
@@ -65,14 +80,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const theme = themeById(themeId) ?? LIGHT;
 
-  useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute('data-theme', theme.id);
-    const size = TEXT_SIZES.find((s) => s.id === textSize) ?? NORMAL_TEXT;
-    // One variable. Every type size in tokens.css is calc()'d from it, so this reaches the
-    // cart, the dialogs and the receipt preview at once.
-    root.style.setProperty('--type-scale', String(size.scale));
-  }, [theme.id, textSize]);
+  useEffect(() => apply(theme.id, textSize), [theme.id, textSize]);
 
   const setTheme = useCallback((id: ThemeId) => {
     setThemeId(id);

@@ -45,4 +45,12 @@ fromTheFloor: Array<FloorChange>,
 /**
  * A very long order, mentioned rather than refused.
  */
-lengthSays: string, };
+lengthSays: string, 
+/**
+ * The shop always bills as one order type, so the switch is not shown.
+ */
+orderTypeLocked: boolean, 
+/**
+ * The shop has no kitchen ticket, so its buttons are not shown.
+ */
+kitchenTicketOff: boolean, };

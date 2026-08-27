@@ -4,10 +4,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import './theme/tokens.css';
-import { ThemeProvider } from './theme/ThemeProvider';
+import { ThemeProvider, applyRememberedLook } from './theme/ThemeProvider';
 import { ToastProvider } from './kit';
 import { Shell } from './shell/Shell';
 import { Display } from './display/Display';
+
+// Before the first paint, from the same store the provider reads.
+applyRememberedLook();
 
 const facingTheCustomer =
   typeof window !== 'undefined' &&

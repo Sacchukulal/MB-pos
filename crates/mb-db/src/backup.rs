@@ -610,53 +610,13 @@ fn verify_structure(path: &Path) -> Result<bool, DbError> {
     Ok(rows.next()?.is_none())
 }
 
-/// Keep 7 daily and 4 weekly, prune the rest.
-pub fn prune(dir: &Path, now_ms: i64) -> Result<Vec<PathBuf>, DbError> {
-    const DAY_MS: i64 = 86_400_000;
-    const KEEP_DAILY: i64 = 7;
-    const KEEP_WEEKLY: i64 = 4;
-
-    let _ = now_ms;
-
+/// Keep the newest `keep` backups and remove the rest — and never the last one.
+pub fn prune(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, DbError> {
     let mut backups = list(dir)?;
-    if backups.is_empty() {
-        return Ok(Vec::new());
-    }
     // Newest first.
     backups.sort_by(|a, b| b.manifest.taken_at_ms.cmp(&a.manifest.taken_at_ms));
-
-    let mut keep = std::collections::BTreeSet::new();
-    // Rule zero, applied before anything else can reason its way out of it: the newest is never
-    // pruned.
-    keep.insert(backups[0].path.clone());
-
-    // Counted, not windowed. "The last 7 daily and the last 4 weekly" is a count of backups,
-    // and expressing it as an age window makes the answer depend on how often the scheduler
-    // happened to fire.
-    let daily_slots = usize::try_from(KEEP_DAILY).unwrap_or(0);
-    let weekly_slots = usize::try_from(KEEP_WEEKLY).unwrap_or(0);
-    let mut seen_days = std::collections::BTreeSet::new();
-    let mut seen_weeks = std::collections::BTreeSet::new();
-    for backup in &backups {
-        let day = backup.manifest.taken_at_ms.div_euclid(DAY_MS);
-        let week = day.div_euclid(7);
-
-        let is_new_daily = seen_days.len() < daily_slots && seen_days.insert(day);
-        let is_new_weekly = !is_new_daily
-            && seen_weeks.len() < weekly_slots
-            && !seen_days.contains(&day)
-            && seen_weeks.insert(week);
-
-        if is_new_daily || is_new_weekly {
-            keep.insert(backup.path.clone());
-        }
-    }
-
     let mut pruned = Vec::new();
-    for backup in backups {
-        if keep.contains(&backup.path) {
-            continue;
-        }
+    for backup in backups.into_iter().skip(keep.max(1)) {
         let _ = std::fs::remove_file(backup.manifest_path());
         std::fs::remove_file(&backup.path).map_err(|e| {
             DbError::invariant(format!("could not prune {}: {e}", backup.path.display()))
