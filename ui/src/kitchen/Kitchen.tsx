@@ -222,7 +222,7 @@ function Card({
         ) : (
           <Button variant="primary" wide onClick={onBump}>
             Done
-            {shortcut ? <kbd className="mb-kds__key">{shortcut}</kbd> : null}
+            {shortcut ? <kbd className="mb-kbd">{shortcut}</kbd> : null}
           </Button>
         )}
       </footer>

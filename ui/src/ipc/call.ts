@@ -33,7 +33,6 @@ import type { ComboEdit } from './generated/ComboEdit';
 import type { FloorView } from './generated/FloorView';
 import type { TableEdit } from './generated/TableEdit';
 import type { SplitRequest } from './generated/SplitRequest';
-import type { EvenSplitView } from './generated/EvenSplitView';
 import type { CustomerView } from './generated/CustomerView';
 import type { CustomerEdit } from './generated/CustomerEdit';
 import type { AccountView } from './generated/AccountView';
@@ -312,8 +311,6 @@ export interface Commands {
   merge_orders: { args: { fromOrder: string; intoOrder: string }; returns: FloorView };
   split_order: { args: { request: SplitRequest }; returns: FloorView };
   /** Answers "what do we each owe?" — it does not create n bills. */
-  even_split: { args: { ways: number }; returns: EvenSplitView };
-  set_covers: { args: { covers: number | null }; returns: void };
 
   // Customers and what they owe.
   customers: { args: void; returns: CustomerView[] };

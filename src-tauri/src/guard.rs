@@ -174,8 +174,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("move_order", Access::Needs(Permission::BillCreate)),
     ("merge_orders", Access::Needs(Permission::BillCreate)),
     ("split_order", Access::Needs(Permission::BillCreate)),
-    ("even_split", Access::Needs(Permission::BillCreate)),
-    ("set_covers", Access::Needs(Permission::BillCreate)),
     // Customers and what they owe.
     ("customers", Access::Needs(Permission::CustomersManage)),
     (

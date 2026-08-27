@@ -389,8 +389,6 @@
 
 /* A column beside the screen. */
 .mb-sidefold {
-  /* How wide the panel is when open; a screen may name a different token. */
-  --sidefold-width: var(--arrange-width);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--gap-field);
@@ -399,17 +397,8 @@
 }
 
 .mb-sidefold--open {
-  grid-template-columns: var(--sidefold-width) minmax(0, 1fr);
+  grid-template-columns: var(--arrange-width) minmax(0, 1fr);
   gap: var(--gap-group);
-}
-
-/* The panel on the right: the same two columns the other way round. */
-.mb-sidefold--end {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.mb-sidefold--end.mb-sidefold--open {
-  grid-template-columns: minmax(0, 1fr) var(--sidefold-width);
 }
 
 .mb-sidefold--none {
@@ -446,14 +435,9 @@
 
 .mb-sidefold__title {
   margin: 0;
-  flex: 0 1 auto;
-  min-width: 0;
   font-size: var(--type-section);
   font-weight: var(--type-section-weight);
   line-height: var(--line-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /*
@@ -465,22 +449,15 @@
   padding: var(--gap-group) var(--space-1) var(--gap-group) var(--gap-group);
 }
 
-/* A list keeps only a small margin, so the rows get the width. */
-.mb-sidefold__body--dense {
-  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-2);
-}
-
 /* The way in when folded: a small button at the top of the column the panel opens into. */
 .mb-sidefold__strip {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   align-self: start;
-  gap: var(--space-1);
   width: var(--target-min);
-  min-height: var(--target-min);
-  padding: var(--space-1) 0;
+  height: var(--target-min);
+  padding: 0;
   background: var(--surface);
   color: var(--text-muted);
   border: var(--border-width) solid var(--border);
@@ -498,8 +475,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* At the far end, whatever sits between it and the title. */
-  margin-left: auto;
   padding: var(--space-1);
   background: none;
   color: var(--text-faint);

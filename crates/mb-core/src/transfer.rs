@@ -21,8 +21,6 @@ pub enum TransferError {
     MoreThanTheLineHas,
     #[error("nothing was chosen to move")]
     NothingChosen,
-    #[error("a bill cannot be split fewer than two ways")]
-    TooFewWays,
     #[error("that would leave the order empty — move the whole order instead")]
     WouldEmptyTheOrder,
 }
@@ -117,21 +115,6 @@ pub fn merge_into(survivor: &mut Portion, absorbed: Portion) -> Result<()> {
 /// How a bill-level discount follows a split.
 pub fn split_bill_discount(amount: Money, nets: &[Money]) -> Result<Vec<Money>> {
     Ok(crate::discount::spread(amount, nets)?)
-}
-
-/// An even split, n ways.
-pub fn even_shares(total: Money, ways: u32) -> Result<Vec<Money>> {
-    if ways < 2 {
-        return Err(TransferError::TooFewWays);
-    }
-    let ways = i64::from(ways);
-    let paise = total.paise();
-    let base = paise.div_euclid(ways);
-    let over = paise.rem_euclid(ways);
-
-    Ok((0..ways)
-        .map(|n| Money::from_paise(if n < over { base + 1 } else { base }))
-        .collect())
 }
 
 impl Portion {
@@ -350,35 +333,6 @@ mod tests {
     }
 
     #[test]
-    fn an_even_split_assigns_the_remainder_and_never_drops_it() {
-        let shares = even_shares(Money::from_paise(10_001), 3).expect("shares");
-        assert_eq!(
-            shares,
-            [
-                Money::from_paise(3_334),
-                Money::from_paise(3_334),
-                Money::from_paise(3_333)
-            ],
-        );
-        assert_eq!(
-            Money::try_sum(shares.iter().copied()).expect("sum"),
-            Money::from_paise(10_001),
-        );
-
-        // Every bill from 1 paisa to 20 rupees, every way from 2 to 8, adds back exactly.
-        for paise in 1..=2_000_i64 {
-            for ways in 2..=8_u32 {
-                let shares = even_shares(Money::from_paise(paise), ways).expect("shares");
-                assert_eq!(
-                    Money::try_sum(shares.iter().copied()).expect("sum").paise(),
-                    paise,
-                    "{paise} split {ways} ways",
-                );
-            }
-        }
-    }
-
-    #[test]
     fn a_split_bill_adds_back_to_the_original_rate_by_rate() {
         use crate::bill::{BillInput, compute_bill};
         use crate::discount::{Discount, DiscountEntry};
@@ -487,14 +441,6 @@ mod tests {
             "splitting must not move real money: {} vs {}",
             paid.to_plain_string(),
             whole.grand_total.to_plain_string(),
-        );
-    }
-
-    #[test]
-    fn a_bill_cannot_be_split_fewer_than_two_ways() {
-        assert_eq!(
-            even_shares(Money::from_paise(100), 1),
-            Err(TransferError::TooFewWays)
         );
     }
 }

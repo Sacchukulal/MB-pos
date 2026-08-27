@@ -181,8 +181,6 @@ pub enum JobState {
     Printing,
     Failed,
     Parked,
-    /// Never stored: a done job has no row.
-    Done,
 }
 
 impl JobState {
@@ -193,7 +191,6 @@ impl JobState {
             JobState::Printing => "printing",
             JobState::Failed => "failed",
             JobState::Parked => "parked",
-            JobState::Done => "done",
         }
     }
 }
@@ -679,9 +676,9 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
         match print_within(shared, printer, &job, &payload) {
             Ok(engine) => {
                 job.engine_used = Some(engine_name(engine).to_owned());
-                // Printed means gone.
+                // Printed means gone — from the store, and from what a screen is shown.
                 let _ = shared.store.remove(&job.id);
-                shared.set_status(&job, JobState::Done);
+                lock(&shared.statuses).remove(&job.id);
                 shared.publish(&QueueEvent::Printed {
                     id: job.id.clone(),
                     engine,

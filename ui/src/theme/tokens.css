@@ -163,8 +163,6 @@
   --totals-breakdown-max: 7.5rem;
   /* The processing-orders panel, between the floor and the cart. */
   --queue-width: 17rem;
-  /* The "Paper / Bill / Order" word beside each row of the cart's fold. */
-  --actions-title-width: 3.25rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
   --tile-height: 6.5rem;

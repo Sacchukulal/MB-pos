@@ -12,6 +12,7 @@ import {
 
 import {
   Button,
+  cx,
   EmptyState,
   Icon,
   MoneyInput,
@@ -19,7 +20,6 @@ import {
   Page,
   Scroller,
   SearchField,
-  SideFold,
   Spinner,
   Stepper,
   useAction,
@@ -29,7 +29,6 @@ import {
 import { call, inApp, subscribe } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
-import type { EvenSplitView } from '../ipc/generated/EvenSplitView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
@@ -47,7 +46,7 @@ type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
 import { DiscountDialog } from './Discount';
-import { Processing, processingOrders } from './Processing';
+import { Processing, ProcessingHead, processingOrders } from './Processing';
 import { SeparateBill } from './SeparateBill';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
@@ -82,9 +81,6 @@ export function Billing() {
    * still needs a screen.
    */
   const [splitting, setSplitting] = useState(false);
-  /** How many are sharing this bill, and what Rust says each one owes. */
-  const [ways, setWays] = useState(2);
-  const [even, setEven] = useState<EvenSplitView | null>(null);
   /** Money off this bill. */
   const [discounting, setDiscounting] = useState(false);
   // The customer picker for a bill going on an account.
@@ -101,6 +97,7 @@ export function Billing() {
   const [processingOpen, setProcessingOpen] = useState(
     () => remember(PROCESSING_KEY, 'open') !== 'folded',
   );
+  const processingId = useId();
   useEffect(() => {
     keep(PROCESSING_KEY, processingOpen ? 'open' : 'folded');
   }, [processingOpen]);
@@ -428,30 +425,6 @@ export function Billing() {
   );
 
   // A tap goes through the SAME reducer a key does, so touch and keyboard cannot drift apart.
-  /** How many people are sharing it. */
-  const setPeople = useCallback(async (howMany: number) => {
-    setWays(howMany);
-    try {
-      setEven(await call('even_split', { ways: howMany }));
-      await call('set_covers', { covers: howMany });
-    } catch {
-      // A split nobody can work out is a blank line, not a toast: the cashier asked a question,
-      // and the answer is simply not there.
-      setEven(null);
-    }
-  }, []);
-
-  // Asked only while the fold is open, and only ever a question — even_split creates nothing.
-  useEffect(() => {
-    if (!moreActions || !cart || cart.isEmpty) {
-      setEven(null);
-      return;
-    }
-    call('even_split', { ways })
-      .then(setEven)
-      .catch(() => setEven(null));
-  }, [moreActions, ways, cart]);
-
   const openTable = useCallback(
     (table: TableView) => {
       const index = tables.findIndex((t) => t.id === table.id);
@@ -656,43 +629,52 @@ export function Billing() {
      */
     <Page scroll={false} className="mb-billing">
       {/*
-        The left column: the search box over the floor, with the processing panel folded against
-        the cart. The floor's tiles reflow into whatever the panel leaves.
+        The left column: the top row holds the search box, New order and the processing
+        panel's head; under it the floor, with the processing list folding down beside it. The
+        floor's tiles reflow into whatever the list leaves.
       */}
-      <SideFold
-        className="mb-billing__side"
-        side="end"
-        icon="flame"
-        label="Processing orders"
-        count={processing.length}
-        dense
-        open={processingOpen}
-        onOpen={() => setProcessingOpen(true)}
-        onFold={() => setProcessingOpen(false)}
-        panel={
-          <Processing orders={processing} onOpen={openTable} onPrintBill={printTheBill} />
-        }
-      >
-        <div className="mb-billbar__search">
-          <SearchField
-            what="Item or table number"
-            value={keys.text}
-            ref={searchBox}
-            data-keys="engine"
-            // The box searches the MENU and accepts a table number.
-            onChange={(event) => {
-              // The timing, for the scan-or-person question.
-              noteKeystroke(event.target.value);
-              dispatch({ kind: 'typed', text: event.target.value });
-            }}
-          />
-          <Suggestions
-            items={keys.suggestions}
-            highlighted={keys.highlighted}
-            onPick={(index) => dispatch({ kind: 'tap-suggestion', index })}
+      <div className="mb-billing__side">
+        <div className="mb-billbar">
+          <div className="mb-billbar__search">
+            <SearchField
+              what="Item or table number"
+              value={keys.text}
+              ref={searchBox}
+              data-keys="engine"
+              // The box searches the MENU and accepts a table number.
+              onChange={(event) => {
+                // The timing, for the scan-or-person question.
+                noteKeystroke(event.target.value);
+                dispatch({ kind: 'typed', text: event.target.value });
+              }}
+            />
+            <Suggestions
+              items={keys.suggestions}
+              highlighted={keys.highlighted}
+              onPick={(index) => dispatch({ kind: 'tap-suggestion', index })}
+            />
+          </div>
+
+          {/* Esc from an empty box does the same — see the keyboard engine. */}
+          <Button onClick={() => void newOrder()}>
+            New order
+            <kbd className="mb-kbd">Esc</kbd>
+          </Button>
+
+          <ProcessingHead
+            count={processing.length}
+            open={processingOpen}
+            controls={processingId}
+            onToggle={() => setProcessingOpen((was) => !was)}
           />
         </div>
 
+        <div
+          className={cx(
+            'mb-billing__floorrow',
+            processingOpen && 'mb-billing__floorrow--open',
+          )}
+        >
         <Scroller inset className="mb-billing__floor">
           {/* The set-up list is not on this screen any more. */}
           {tables.length === 0 && menu.length === 0 ? (
@@ -722,7 +704,17 @@ export function Billing() {
 
           {/* THE MENU GRID IS NOT ON THIS SCREEN. */}
         </Scroller>
-      </SideFold>
+
+        {/* Folded: no height and no width, and nothing in it can take focus. */}
+        <div id={processingId} className="mb-processing__fold" inert={!processingOpen}>
+          <div className="mb-processing__panel">
+            <Scroller inset className="mb-processing__body">
+              <Processing orders={processing} onOpen={openTable} />
+            </Scroller>
+          </div>
+        </div>
+        </div>
+      </div>
 
       <div className="mb-billbar__type">
         {cart?.orderTypeLocked ? null : (
@@ -968,103 +960,63 @@ export function Billing() {
           </button>
         </div>
 
+        {/* The rest, in two lines: the paper first, then what changes the bill. */}
         <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
-          <div className="mb-actions__group" role="group" aria-label="Paper">
-            <span className="mb-actions__title">Paper</span>
-            <div className="mb-actions__row">
-              <Button
-                small
-                disabled={!cart || cart.isEmpty}
-                onClick={() => setPreview('bill')}
-              >
-                Preview bill
-              </Button>
-              {cart?.kitchenTicketOff ? null : (
-                <Button
-                  small
-                  disabled={!cart || cart.isEmpty}
-                  onClick={() => setPreview('kitchen')}
-                >
-                  Preview ticket
-                </Button>
-              )}
-              {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
-              {cart?.orderId && !cart.kitchenTicketOff ? (
-                <Button small onClick={() => act(reprintKitchen)}>
-                  Send ticket again
-                </Button>
-              ) : null}
-              {/* Only when this shop has a label printer. */}
-              {hasLabels ? (
-                <Button
-                  small
-                  disabled={!cart || cart.isEmpty}
-                  onClick={() => {
-                    const first = cart?.lines[0];
-                    if (!first) return;
-                    call('print_label', {
-                      line: `${first.qty} x ${first.name}`,
-                      token: cart?.table ?? 'Parcel',
-                    })
-                      .then(() => toast.show('ok', 'The label is printing.'))
-                      .catch(report);
-                  }}
-                >
-                  Label
-                </Button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mb-actions__group" role="group" aria-label="Bill">
-            <span className="mb-actions__title">Bill</span>
-            <div className="mb-actions__row">
-              {/* "What do we each owe?" — a question, answered in place. */}
-              <span className="mb-eachpays__label">Each pays</span>
-              <Stepper
-                label="How many are sharing the bill"
-                what="person"
-                lessDisabled={ways <= 2}
-                moreDisabled={ways >= 50}
-                onLess={() => void setPeople(ways - 1)}
-                onMore={() => void setPeople(ways + 1)}
-              >
-                <span className="mb-stepper__value">{ways}</span>
-              </Stepper>
-              <span className="mb-eachpays__says">{even ? even.note : ''}</span>
-              <Button
-                small
-                disabled={!cart || cart.isEmpty}
-                onClick={() => setDiscounting(true)}
-              >
-                {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
-              </Button>
-              <Button
-                small
-                disabled={!cart || cart.isEmpty || !cart.orderId}
-                onClick={() => setSplitting(true)}
-              >
-                Separate bill
-              </Button>
-            </div>
-          </div>
-
-          <div className="mb-actions__group" role="group" aria-label="Order">
-            <span className="mb-actions__title">Order</span>
-            <div className="mb-actions__row">
-              <Button small onClick={() => void newOrder()}>
-                New order
-              </Button>
-              {/* A parked order is cancelled with a reason; a typed one simply goes. */}
-              <Button
-                small
-                disabled={!cart || cart.isEmpty}
-                onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
-              >
-                Cancel order
-              </Button>
-            </div>
-          </div>
+          <Button small disabled={!cart || cart.isEmpty} onClick={() => setPreview('bill')}>
+            Preview bill
+          </Button>
+          {cart?.kitchenTicketOff ? null : (
+            <Button
+              small
+              disabled={!cart || cart.isEmpty}
+              onClick={() => setPreview('kitchen')}
+            >
+              Preview ticket
+            </Button>
+          )}
+          {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
+          {cart?.orderId && !cart.kitchenTicketOff ? (
+            <Button small onClick={() => act(reprintKitchen)}>
+              Reprint ticket
+            </Button>
+          ) : null}
+          {/* Only when this shop has a label printer. */}
+          {hasLabels ? (
+            <Button
+              small
+              disabled={!cart || cart.isEmpty}
+              onClick={() => {
+                const first = cart?.lines[0];
+                if (!first) return;
+                call('print_label', {
+                  line: `${first.qty} x ${first.name}`,
+                  token: cart?.table ?? 'Parcel',
+                })
+                  .then(() => toast.show('ok', 'The label is printing.'))
+                  .catch(report);
+              }}
+            >
+              Label
+            </Button>
+          ) : null}
+          <Button small disabled={!cart || cart.isEmpty} onClick={() => setDiscounting(true)}>
+            {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
+          </Button>
+          <Button
+            small
+            disabled={!cart || cart.isEmpty || !cart.orderId}
+            onClick={() => setSplitting(true)}
+          >
+            Separate bill
+          </Button>
+          {/* A parked order is cancelled with a reason; a typed one simply goes. */}
+          <Button
+            small
+            disabled={!cart || cart.isEmpty}
+            onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
+          >
+            Cancel order
+          </Button>
         </div>
       </div>
 

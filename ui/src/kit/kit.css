@@ -152,6 +152,18 @@
   padding-inline: var(--space-2);
 }
 
+/* A key, said as a key — beside a button's word, or on a kitchen card. */
+.mb-kbd {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid currentcolor;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--line-normal);
+  opacity: 0.8;
+}
+
 /* Stepper: − n +, one shape. */
 
 .mb-stepper {

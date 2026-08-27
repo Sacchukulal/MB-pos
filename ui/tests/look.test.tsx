@@ -408,13 +408,20 @@ describe('the cart controls', () => {
     expect(kit).toContain('.mb-segment--fill');
   });
 
-  it('wraps each row of the fold rather than letting it run into the next group', () => {
-    expect(block(billing, '.mb-actions__row {')).toContain('flex-wrap: wrap');
-    expect(block(billing, '.mb-actions--more {')).not.toContain('repeat(3');
+  it('wraps the fold rather than letting a button run into the next', () => {
+    const fold = block(billing, '.mb-actions--more {');
+    expect(fold).toContain('flex-wrap: wrap');
+    expect(fold).not.toContain('repeat(3');
   });
 
-  it('gives the processing panel its width from one token', () => {
-    expect(block(billing, '.mb-billing__side {')).toContain('--sidefold-width: var(--queue-width)');
+  it('gives the processing list its width from one token, and folds with the product motion', () => {
+    expect(block(billing, '.mb-billing__floorrow--open {')).toContain('var(--queue-width)');
     expect(readFileSync(join('src', 'theme', 'tokens.css'), 'utf8')).toContain('--queue-width:');
+    for (const rule of ['.mb-billing__floorrow {', '.mb-processing__fold {']) {
+      const moved = block(billing, rule);
+      expect(moved, `${rule} has no transition`).toContain('transition:');
+      expect(moved).toContain('var(--motion-normal) var(--ease)');
+      expect(moved).not.toMatch(/\d+ms/);
+    }
   });
 });

@@ -2,7 +2,7 @@
 //! on a table (1.21, 1.22, 1.23).
 
 use mb_auth::Permission;
-use mb_core::{Money, Qty, TableId, Timestamp};
+use mb_core::{Qty, TableId, Timestamp};
 use mb_db::repo::floor::{DiningTable, Range, Section};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -10,7 +10,6 @@ use ts_rs::TS;
 use crate::billing::{TableView, floor_view};
 use crate::flows::{now, today};
 use crate::guard;
-use crate::ipc::MoneyView;
 use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
@@ -865,60 +864,6 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
     floor_on(app)
 }
 
-/// What an even split comes to, per guest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(export, export_to = "../../ui/src/ipc/generated/")]
-#[serde(rename_all = "camelCase")]
-pub struct EvenSplitView {
-    pub total: MoneyView,
-    pub ways: u32,
-    pub shares: Vec<MoneyView>,
-    /// "₹33.34 each, and one of you pays a paisa more" — said out loud, because a remainder
-    /// nobody mentions looks like a rounding bug.
-    pub note: String,
-}
-
-pub fn even_split_on(app: &App, ways: u32) -> UiResult<EvenSplitView> {
-    guard::require(app, Permission::BillCreate)?;
-    let total = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))?;
-
-    let shares = mb_core::even_shares(total, ways).map_err(|e| {
-        UiError::new(
-            "floor.even_split",
-            format!("That split is not possible: {e}"),
-        )
-    })?;
-
-    let biggest = shares.first().copied().unwrap_or(Money::ZERO);
-    let smallest = shares.last().copied().unwrap_or(Money::ZERO);
-    let note = if biggest == smallest {
-        format!("{} each", biggest.to_plain_string())
-    } else {
-        format!(
-            "{} each — the first {} pay {} so nothing is lost",
-            smallest.to_plain_string(),
-            shares.iter().filter(|s| **s == biggest).count(),
-            biggest.to_plain_string(),
-        )
-    };
-
-    Ok(EvenSplitView {
-        total: MoneyView::from(total),
-        ways,
-        shares: shares.into_iter().map(MoneyView::from).collect(),
-        note,
-    })
-}
-
-/// How many are eating.
-pub fn set_covers_on(app: &App, covers: Option<u32>) -> UiResult<()> {
-    guard::require(app, Permission::BillCreate)?;
-    app.with_cart_mut(|state| {
-        state.covers = covers;
-        Ok(())
-    })
-}
-
 // The seats.
 
 #[tauri::command]
@@ -1023,12 +968,3 @@ pub fn split_order(app: tauri::State<'_, App>, request: SplitRequest) -> UiResul
     split_order_on(&app, request)
 }
 
-#[tauri::command]
-pub fn even_split(app: tauri::State<'_, App>, ways: u32) -> UiResult<EvenSplitView> {
-    even_split_on(&app, ways)
-}
-
-#[tauri::command]
-pub fn set_covers(app: tauri::State<'_, App>, covers: Option<u32>) -> UiResult<()> {
-    set_covers_on(&app, covers)
-}

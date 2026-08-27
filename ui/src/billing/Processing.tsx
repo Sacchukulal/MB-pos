@@ -1,6 +1,6 @@
 /** The orders the kitchen has, until they are billed. Drawn from the same list as the grid. */
 
-import { cx, EmptyState, Icon } from '../kit';
+import { Badge, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 import { formatMinutes } from './TableGrid';
 
@@ -15,16 +15,43 @@ export function processingOrders(
     .sort((a, b) => (b.minutes ?? -1) - (a.minutes ?? -1));
 }
 
+/** The panel's head: always in the top row, with the count, whether the list is open or not. */
+export function ProcessingHead({
+  count,
+  open,
+  controls,
+  onToggle,
+}: {
+  count: number;
+  open: boolean;
+  /** The id of the list it folds. */
+  controls: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="mb-processing__head"
+      aria-expanded={open}
+      aria-controls={controls}
+      title={open ? 'Fold the processing orders away' : 'Show the processing orders'}
+      onClick={onToggle}
+    >
+      <Icon name="flame" size="sm" />
+      <span className="mb-processing__title">Processing orders</span>
+      <Badge tone="accent">{count}</Badge>
+      <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" />
+    </button>
+  );
+}
+
 export function Processing({
   orders,
   onOpen,
-  onPrintBill,
 }: {
   orders: readonly TableView[];
   /** Put it in the cart — the same press as the tile. */
   onOpen: (order: TableView) => void;
-  /** Carry the bill to the table — the same press as the tile's corner. */
-  onPrintBill: (order: TableView) => void;
 }) {
   if (orders.length === 0) {
     return (
@@ -38,7 +65,7 @@ export function Processing({
   return (
     <ul className="mb-processing">
       {orders.map((order) => (
-        <li className="mb-processing__item" key={order.id}>
+        <li key={order.id}>
           <button
             type="button"
             className={cx(
@@ -76,15 +103,6 @@ export function Processing({
               )}
             </span>
             <span className="mb-processing__amount">{order.total ? order.total.text : ''}</span>
-          </button>
-          <button
-            type="button"
-            className="mb-processing__print"
-            onClick={() => onPrintBill(order)}
-            title={`Print the bill for ${order.label}`}
-            aria-label={`Print the bill for ${order.label}`}
-          >
-            <Icon name="printer" size="sm" />
           </button>
         </li>
       ))}

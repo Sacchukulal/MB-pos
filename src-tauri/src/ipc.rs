@@ -239,7 +239,6 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             S::Failed => format!("Did not print — trying again ({})", status.attempts),
             // The one a person has to act on, and it says so in words.
             S::Parked => "NOT PRINTED — needs you".to_owned(),
-            S::Done => "Printed".to_owned(),
         },
         needs_attention: matches!(status.state, S::Parked),
         reason: status.reason.clone(),
@@ -376,8 +375,6 @@ macro_rules! commands {
             $crate::floor::move_order,
             $crate::floor::merge_orders,
             $crate::floor::split_order,
-            $crate::floor::even_split,
-            $crate::floor::set_covers,
             $crate::credit::customers,
             $crate::credit::customer_account,
             $crate::credit::save_customer,

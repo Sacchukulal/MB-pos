@@ -700,7 +700,8 @@ function TopBar({
           </button>
         ) : null}
 
-        {/* The print queue. PERSISTENT. */}
+        {/* The print queue: only while something is printing, or did not print. */}
+        {jobs.length === 0 ? null : (
         <button
           type="button"
           className={['mb-queue', needsAttention ? 'mb-queue--attention' : '']
@@ -727,6 +728,7 @@ function TopBar({
                 : 'Printing'}
           </span>
         </button>
+        )}
 
         <button
           type="button"

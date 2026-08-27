@@ -15,7 +15,7 @@ use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::{Db, DbConfig, Repos};
 
 use crate::floor::{
-    SplitRequest, even_split_on, floor_on, merge_orders_on, move_order_on, save_thresholds_on,
+    SplitRequest, floor_on, merge_orders_on, move_order_on, save_thresholds_on,
     split_order_on,
 };
 use crate::signin_tests::Scratch;
@@ -491,39 +491,6 @@ fn the_two_timers_come_from_settings() {
     // quietly repaired every read.
     assert!(save_thresholds_on(&app, 30, 30).is_err());
     assert!(save_thresholds_on(&app, 0, 10).is_err());
-}
-
-/// An even split assigns every paisa, and says so out loud.
-#[test]
-fn an_even_split_says_who_pays_the_extra_paisa() {
-    let scratch = Scratch::new("even");
-    let app = a_shop_with_a_room(&scratch);
-
-    // A bill in the cart.
-    app.with_cart_mut(|state| {
-        state
-            .cart
-            .add(
-                snapshot("itm_dosa", 10_001),
-                Qty::from_whole(1).expect("one"),
-                None,
-                Vec::new(),
-            )
-            .expect("added");
-        Ok(())
-    })
-    .expect("a cart");
-
-    let split = even_split_on(&app, 3).expect("three ways");
-    assert_eq!(split.shares.len(), 3);
-    let sum: i64 = split.shares.iter().map(|s| s.paise).sum();
-    assert_eq!(
-        sum, split.total.paise,
-        "the shares add back to the bill exactly"
-    );
-    assert!(!split.note.is_empty(), "and the remainder is said out loud");
-
-    assert!(even_split_on(&app, 1).is_err(), "one way is not a split");
 }
 
 /// The fallback is not a degraded mode.

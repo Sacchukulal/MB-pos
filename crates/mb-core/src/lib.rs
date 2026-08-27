@@ -72,5 +72,5 @@ pub use tax::{
 };
 pub use taxclass::{TaxClass, TaxClassId, starting_classes};
 pub use time::{TimeError, Timestamp, UtcOffset};
-pub use transfer::{Pick, Portion, TransferError, even_shares, merge_into, take_lines};
+pub use transfer::{Pick, Portion, TransferError, merge_into, take_lines};
 pub use units::{Dimension, Pack, UnitCost, UnitError, Units};

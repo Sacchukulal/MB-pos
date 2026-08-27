@@ -2,7 +2,7 @@ import { render, screen, cleanup, within, act, fireEvent } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModes } from '../src/billing/Billing';
-import { Processing, processingOrders } from '../src/billing/Processing';
+import { Processing, ProcessingHead, processingOrders } from '../src/billing/Processing';
 import { DENSE_ABOVE, TableGrid } from '../src/billing/TableGrid';
 import { Totals } from '../src/billing/Totals';
 import type { BillView } from '../src/ipc/generated/BillView';
@@ -337,15 +337,29 @@ describe('the processing orders (2026-08-27)', () => {
     expect(shown.map((t) => t.label)).toEqual(['4']);
   });
 
-  it('opens the order with the same press as the tile, and prints its bill', () => {
+  it('opens the order with the same press as the tile, and offers nothing else', () => {
     const onOpen = vi.fn();
-    const onPrintBill = vi.fn();
     const order = cooking({ id: '3', label: '3', section: 'AC' });
-    render(<Processing orders={[order]} onOpen={onOpen} onPrintBill={onPrintBill} />);
+    render(<Processing orders={[order]} onOpen={onOpen} />);
     fireEvent.click(screen.getByRole('button', { name: /Table 3/ }));
     expect(onOpen).toHaveBeenCalledWith(order);
-    fireEvent.click(screen.getByRole('button', { name: 'Print the bill for 3' }));
-    expect(onPrintBill).toHaveBeenCalledWith(order);
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('keeps the count in its head, open or folded', () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <ProcessingHead count={3} open controls="list" onToggle={onToggle} />,
+    );
+    const head = screen.getByRole('button', { name: /Processing orders/ });
+    expect(head.getAttribute('aria-expanded')).toBe('true');
+    expect(head.getAttribute('aria-controls')).toBe('list');
+    expect(head.textContent).toContain('3');
+    fireEvent.click(head);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    rerender(<ProcessingHead count={3} open={false} controls="list" onToggle={onToggle} />);
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain('3');
   });
 
   it('says where, how long, which bill and how much — and marks the one in the cart', () => {
@@ -356,7 +370,6 @@ describe('the processing orders (2026-08-27)', () => {
           cooking({ id: 'p', label: 'Parcel', section: null, minutes: 70, state: 'late' }),
         ]}
         onOpen={vi.fn()}
-        onPrintBill={vi.fn()}
       />,
     );
     const three = screen.getByRole('button', { name: /Table 3/ });
@@ -372,7 +385,7 @@ describe('the processing orders (2026-08-27)', () => {
   });
 
   it('says so when nothing is cooking', () => {
-    render(<Processing orders={[]} onOpen={vi.fn()} onPrintBill={vi.fn()} />);
+    render(<Processing orders={[]} onOpen={vi.fn()} />);
     expect(screen.getByText('Nothing cooking')).toBeInTheDocument();
   });
 });

@@ -15,7 +15,6 @@ import {
   Input,
   Modal,
   Money,
-  SideFold,
   Stepper,
   Table,
 } from '../src/kit';
@@ -62,45 +61,6 @@ describe('Stepper', () => {
   });
 });
 
-/** The panel on the other side. */
-describe('SideFold on the end side', () => {
-  it('puts the panel AFTER the main column, in the DOM too', () => {
-    const { container } = render(
-      <SideFold side="end" label="Processing orders" open onOpen={vi.fn()} onFold={vi.fn()} panel={<span>rows</span>}>
-        <span>floor</span>
-      </SideFold>,
-    );
-    const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain('mb-sidefold--end');
-    expect(root.lastElementChild?.tagName).toBe('ASIDE');
-    expect(root.firstElementChild?.className).toContain('mb-sidefold__main');
-    // The fold arrow points the way the panel goes.
-    expect(screen.getByRole('button', { name: 'Close Processing orders' })).toBeInTheDocument();
-  });
-
-  it('keeps the count in sight when folded', () => {
-    const onOpen = vi.fn();
-    render(
-      <SideFold side="end" label="Processing orders" count={3} open={false} onOpen={onOpen} onFold={vi.fn()} panel={null}>
-        <span>floor</span>
-      </SideFold>,
-    );
-    const strip = screen.getByRole('button', { name: 'Processing orders, 3' });
-    expect(strip.textContent).toBe('3');
-    fireEvent.click(strip);
-    expect(onOpen).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows the count beside the title when open', () => {
-    render(
-      <SideFold side="end" label="Processing orders" count={3} open onOpen={vi.fn()} onFold={vi.fn()} panel={<span>rows</span>}>
-        <span>floor</span>
-      </SideFold>,
-    );
-    const head = screen.getByRole('complementary', { name: 'Processing orders' });
-    expect(head.querySelector('.mb-badge')?.textContent).toBe('3');
-  });
-});
 
 describe('Button', () => {
   it('is reachable and pressable by keyboard alone', async () => {

@@ -18,6 +18,21 @@ use crate::ipc::{
 };
 use crate::state::{App, OUTLET};
 
+/// Every job the queue took in while `act` ran. The spool forgets a printed job at once, so
+/// a test proves a slip existed by listening, never by counting what is left.
+pub fn queue_took<T>(app: &App, act: impl FnOnce() -> T) -> (T, Vec<mb_print::queue::JobKind>) {
+    let events = app.subscribe_to_queue().expect("a shop with a queue");
+    let out = act();
+    let kinds = events
+        .try_iter()
+        .filter_map(|event| match event {
+            mb_print::queue::QueueEvent::Queued { kind, .. } => Some(kind),
+            _ => None,
+        })
+        .collect();
+    (out, kinds)
+}
+
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct Scratch {
@@ -297,31 +312,25 @@ fn issuing_a_recovery_code_actually_queues_the_slip() {
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
 
     // The shop's first code, issued with the first manager's PIN.
-    let before = app.print_queue_snapshot().len();
-    let code = set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
-        .expect("pin set")
-        .expect("a code");
-
-    let after = app.print_queue_snapshot();
+    let (code, took) = queue_took(&app, || {
+        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
+    });
+    let code = code.expect("pin set").expect("a code");
     assert!(
-        after.len() > before,
-        "a recovery code was issued and no slip reached the queue"
-    );
-    assert!(
-        after.iter().any(|job| job.what == "Recovery code"),
-        "the queue shows what each job IS: {:?}",
-        after.iter().map(|j| j.what.clone()).collect::<Vec<_>>()
+        took.contains(&mb_print::queue::JobKind::Recovery),
+        "a recovery code was issued and no slip reached the queue: {took:?}"
     );
 
     // And again when the code is SPENT, which is the half that matters more: somebody using it
     // is somebody who has already lost the first slip.
-    let before = app.print_queue_snapshot().len();
-    let fresh = recover_with_code_on(&app, code, "staff_owner".to_owned(), "1357".to_owned())
-        .expect("recovered");
+    let (fresh, took) = queue_took(&app, || {
+        recover_with_code_on(&app, code, "staff_owner".to_owned(), "1357".to_owned())
+    });
+    let fresh = fresh.expect("recovered");
     assert_ne!(fresh.len(), 0);
     assert!(
-        app.print_queue_snapshot().len() > before,
-        "the code was replaced and the new one was never printed"
+        took.contains(&mb_print::queue::JobKind::Recovery),
+        "the code was replaced and the new one was never printed: {took:?}"
     );
 }
 

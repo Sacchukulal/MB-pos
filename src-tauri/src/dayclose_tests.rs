@@ -10,7 +10,7 @@ use mb_db::{Db, DbConfig, Repos};
 
 use crate::dayclose::{CountArg, close_on, reopen_on, view_on};
 use crate::expenses::save_movement_on;
-use crate::signin_tests::Scratch;
+use crate::signin_tests::{Scratch, queue_took};
 use crate::state::{App, OUTLET};
 
 fn a_shop(scratch: &Scratch, name: &str) -> App {
@@ -330,18 +330,13 @@ fn closing_the_day_with_the_slip_actually_queues_it() {
     let app = a_shop(&scratch, "slip");
     let expected = a_cash_sale(&app).paise();
 
-    let before = app.print_queue_snapshot().len();
-    close_on(&app, count_of(expected), String::new(), true).expect("closed");
-
-    let after = app.print_queue_snapshot();
+    let (closed, took) = queue_took(&app, || {
+        close_on(&app, count_of(expected), String::new(), true)
+    });
+    closed.expect("closed");
     assert!(
-        after.len() > before,
-        "the day closed and no slip reached the queue — which is exactly how          a broken CHECK constraint hid for twelve sessions"
-    );
-    assert!(
-        after.iter().any(|job| job.what == "Closing slip"),
-        "the queue shows what each job IS, and this one is the Z-report: {:?}",
-        after.iter().map(|j| j.what.clone()).collect::<Vec<_>>()
+        took.contains(&mb_print::queue::JobKind::DayClose),
+        "the day closed and no slip reached the queue — which is exactly how a broken CHECK          constraint hid for twelve sessions: {took:?}"
     );
 }
 
