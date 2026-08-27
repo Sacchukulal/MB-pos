@@ -125,7 +125,6 @@ impl CartState {
         self.table.as_ref().map(|t| t.id.as_str())
     }
 
-
     #[must_use]
     pub fn order_id(&self) -> Option<&str> {
         self.origin.as_ref().map(|o| o.id.as_str())

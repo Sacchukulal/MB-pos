@@ -112,7 +112,17 @@ export interface Column<Row> {
   numeric?: boolean;
   /** The column disappears when no row has one. */
   optional?: boolean;
+  /** Never wraps — a time, a number that is not money. */
+  nowrap?: boolean;
   render: (row: Row) => ReactNode;
+}
+
+/** The classes a cell wears for its column. */
+function cellClass<Row>(column: Column<Row>): string | undefined {
+  const classes = [column.numeric ? 'mb-numeric' : '', column.nowrap ? 'mb-nowrap' : '']
+    .filter(Boolean)
+    .join(' ');
+  return classes === '' ? undefined : classes;
 }
 
 /** What `optional` counts as nothing. */
@@ -126,6 +136,7 @@ export function Table<Row>({
   rowKey,
   empty,
   footer,
+  dense = false,
 }: {
   columns: readonly Column<Row>[];
   rows: readonly Row[];
@@ -133,6 +144,8 @@ export function Table<Row>({
   empty?: ReactNode;
   /** The totals row, and it belongs to the table. */
   footer?: readonly ReactNode[];
+  /** Tighter rows, for a list that runs to hundreds — a menu. */
+  dense?: boolean;
 }) {
   if (rows.length === 0 && empty) return <>{empty}</>;
 
@@ -149,13 +162,13 @@ export function Table<Row>({
     // The wrapper is what stops a squeezed table shredding: below the floor width it scrolls
     // sideways in its own box instead of wrapping a cell to one word per line.
     <div className="mb-table__wrap">
-    <table className="mb-table">
+    <table className={cx('mb-table', dense && 'mb-table--dense')}>
       <thead>
         <tr>
           {shown.map((column) => (
             <th
               key={column.key}
-              className={column.numeric ? 'mb-numeric' : undefined}
+              className={cellClass(column)}
             >
               {column.header}
             </th>
@@ -169,10 +182,7 @@ export function Table<Row>({
               if (!keep[index]) return null;
               const cell = cells[rowIndex]?.[index];
               return (
-                <td
-                  key={column.key}
-                  className={column.numeric ? 'mb-numeric' : undefined}
-                >
+                <td key={column.key} className={cellClass(column)}>
                   {column.optional && blank(cell) ? '—' : cell}
                 </td>
               );

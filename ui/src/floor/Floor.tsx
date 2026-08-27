@@ -143,8 +143,8 @@ export function Floor() {
   /** What a tile can do, written once for the plan and for every room's grid. */
   const onTile = {
     picked,
-    onPress: (tile: TableView) =>
-      pickable && isATable(tile.id) ? undefined : setMoving(tile),
+    // Pressing a tile is about its order, for everybody; ticking is the circle.
+    onPress: (tile: TableView) => setMoving(tile),
     onTick: (tile: TableView) => toggle(tile.id),
     onEdit: (tile: TableView) => setEditing(rowFor(tile.id)),
     onDelete: (tile: TableView) => setDeletingOne(rowFor(tile.id)),
@@ -670,7 +670,7 @@ function Grid({
           key={tile.id}
           table={tile}
           picked={canTick(tile) ? picked.includes(tile.id) : undefined}
-          onOpen={canTick(tile) ? undefined : () => onPress(tile)}
+          onOpen={() => onPress(tile)}
           onTick={canTick(tile) ? () => onTick(tile) : undefined}
           onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
           onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
@@ -740,7 +740,7 @@ function Plan({
               <Tile
                 table={tile}
                 picked={canTick(tile) ? picked.includes(tile.id) : undefined}
-                onOpen={canTick(tile) ? undefined : () => onPress(tile)}
+                onOpen={() => onPress(tile)}
                 onTick={canTick(tile) ? () => onTick(tile) : undefined}
                 onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
                 onDelete={canTick(tile) ? () => onDelete(tile) : undefined}

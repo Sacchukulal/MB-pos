@@ -1,22 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  freshId,
-  Input,
-  Modal,
-  MoneyInput,
-  onlyAmount,
-  PhoneInput,
-  Select,
-  Table,
-  Tabs,
-  useToast,
-  type Column,
-} from '../kit';
+import { Badge, Button, Card, EmptyState, freshId, Input, Modal, MoneyInput, onlyAmount, PhoneInput, Select, Table, Tabs, useToast, type Column, InfoTip } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { BuyingView } from '../ipc/generated/BuyingView';
 import type { BuyMaterialView } from '../ipc/generated/BuyMaterialView';
@@ -188,7 +172,10 @@ export function Buying() {
           </Card>
           <Card>
             <div className="mb-buying__figure">
-              <span className="mb-buying__label">Bought in 30 days</span>
+              <span className="mb-buying__label">
+                Bought in 30 days
+                <InfoTip label="About the food cost">{view.taxNote}</InfoTip>
+              </span>
               <span className="mb-mono mb-buying__value">{view.bought.text}</span>
             </div>
           </Card>
@@ -212,8 +199,6 @@ export function Buying() {
         </div>
       ))}
 
-      <p className="mb-buying__note">{view.taxNote}</p>
-
       <Tabs
         active={tab}
         onChange={setTab}
@@ -228,7 +213,7 @@ export function Buying() {
         view.purchases.length === 0 ? (
           <EmptyState
             title="No deliveries yet"
-            body="Enter what arrives and this becomes your food cost, your supplier balance and the money that left the drawer — all from one entry."
+            body="Enter what arrives: it becomes your food cost, your supplier balance and the money that left the drawer."
           />
         ) : (
           <Table rows={view.purchases} columns={purchaseColumns} rowKey={(p) => p.id} />
@@ -265,7 +250,7 @@ export function Buying() {
           {view.suppliers.length === 0 ? (
             <EmptyState
               title="No suppliers yet"
-              body="A supplier is who you buy from. Even 'Vegetable market' is worth adding once — it is what lets the counter tell you what you owe and how old it is."
+              body="Add who you buy from — even 'Vegetable market' — and the counter can say what you owe."
             />
           ) : (
             <Table rows={view.suppliers} columns={supplierColumns} rowKey={(s) => s.id} />
@@ -277,7 +262,7 @@ export function Buying() {
         view.orders.length === 0 ? (
           <EmptyState
             title="No orders"
-            body="A purchase order is optional. You never have to raise one — enter what arrives and nothing here will ever ask about it."
+            body="Optional. Enter what arrives and nothing here will ask about it."
           />
         ) : (
           <Table

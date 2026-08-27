@@ -174,12 +174,17 @@ it('will not move on until the recovery code is written down', async () => {
   expect(await screen.findByText('What you sell')).toBeTruthy();
 });
 
-/** The last step says plainly that it can be skipped, and it is ONE button. */
-it('offers one way out of the optional step, and says it is optional', async () => {
+/** Every optional step says plainly that it can be skipped, and each is ONE button. */
+it('offers one way out of each optional step, and says it is optional', async () => {
   wire({ hasShop: true, hasDetails: true, hasPin: true });
   const done = vi.fn();
   render(<FirstRun onDone={done} />);
 
+  // The items, the tables, the printer — three skips, one button each.
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip this — next' }));
+  expect(await screen.findByRole('heading', { name: 'Your tables' })).toBeTruthy();
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip this — next' }));
+  expect(await screen.findByRole('heading', { name: 'Your printer' })).toBeTruthy();
   const out = await screen.findByRole('button', { name: 'Skip this — start billing' });
   expect(screen.queryByRole('button', { name: 'I will do this later' })).toBeNull();
   fireEvent.click(out);

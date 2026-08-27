@@ -191,10 +191,14 @@
 
 .mb-audit__change {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
+  max-width: var(--panel-width);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .mb-audit__before {

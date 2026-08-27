@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput, Scroller, Select } from '../kit';
+import { Button, Checkbox, freshId, Icon, Input, MoneyInput, Notice, PhoneInput, Scroller, Select, NumberInput } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
@@ -16,7 +16,8 @@ const STEPS = [
   { id: 'details', label: 'Shop name', must: true },
   { id: 'pin', label: 'Your PIN', must: true },
   { id: 'menu', label: 'Your items', must: false },
-  { id: 'done', label: 'Ready', must: false },
+  { id: 'tables', label: 'Your tables', must: false },
+  { id: 'printer', label: 'Your printer', must: false },
 ] as const;
 
 /** `code` is a screen without a dot, and that is deliberate. */
@@ -58,6 +59,12 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   /** Where the shop's data will go. */
   const [folder, setFolder] = useState('');
 
+  // The room: how many tables, numbered from one.
+  const [tableCount, setTableCount] = useState('');
+  // The printer: one of the ones Windows knows about.
+  const [windowsPrinters, setWindowsPrinters] = useState<readonly string[]>([]);
+  const [printerName, setPrinterName] = useState('');
+
   const complain = useCallback((cause: unknown) => {
     const said = isUiError(cause) ? cause.message : String(cause);
     // Rust writes its refusals as fragments — "a PIN is 6 to 8 digits" — because most of them
@@ -87,6 +94,15 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         setItemClass((was) => (was === '' && list[0] ? list[0].id : was));
       })
       .catch(() => undefined);
+  }, [step]);
+
+  // The printers Windows knows about are read when the printer step opens.
+  useEffect(() => {
+    if (step !== 'printer') return;
+    Promise.resolve()
+      .then(() => call('printer_setup'))
+      .then((setup) => setWindowsPrinters(setup?.windows ?? []))
+      .catch(() => setWindowsPrinters([]));
   }, [step]);
 
   if (!view) return <div className="mb-firstrun" />;
@@ -193,6 +209,54 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .finally(() => setBusy(false));
   };
 
+  /** Tables 1 to N, four seats each, in no room — or none, and on to the printer. */
+  const addTables = () => {
+    const count = Number(tableCount);
+    if (!(count > 0)) {
+      setStep('printer');
+      return;
+    }
+    setBusy(true);
+    setProblem('');
+    call('add_dining_tables', {
+      sectionId: null,
+      prefix: '',
+      from: 1,
+      to: Math.min(Math.floor(count), 200),
+      seats: 4,
+    })
+      .then(() => setStep('printer'))
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  /** The chosen printer becomes the default for bills and tickets alike — or none does. */
+  const usePrinter = () => {
+    if (printerName === '') {
+      onDone();
+      return;
+    }
+    setBusy(true);
+    setProblem('');
+    call('save_printer', {
+      edit: {
+        id: '',
+        name: printerName,
+        kind: 'spooler',
+        address: printerName,
+        paperMm: 80,
+        isDefault: true,
+        role: 'both',
+        engine: 'raster',
+        isBoldDark: false,
+        canKickDrawer: false,
+      },
+    })
+      .then(() => onDone())
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
   const addItem = () => {
     if (itemName.trim() === '' || itemPrice.trim() === '') return;
     setBusy(true);
@@ -233,7 +297,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       <div className="mb-firstrun__panel">
         {/* Where you are, and how much is left. */}
         <ol className="mb-firstrun__steps" aria-label="Setting up">
-          {STEPS.slice(0, 4).map((s, n) => (
+          {STEPS.map((s, n) => (
             <li
               key={s.id}
               className={[
@@ -529,8 +593,63 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
             {/* One button, because there is only one outcome. */}
             <div className="mb-firstrun__actions">
-              <Button variant="primary" onClick={onDone}>
-                {added.length > 0 ? 'Start billing' : 'Skip this — start billing'}
+              <Button variant="primary" onClick={() => setStep('tables')}>
+                {added.length > 0 ? 'Next' : 'Skip this — next'}
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
+        {step === 'tables' ? (
+          <section className="mb-firstrun__body">
+            <h1 className="mb-firstrun__title">Your tables</h1>
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
+            <p className="mb-firstrun__lede">
+              How many tables does the room have? They are numbered from 1; the
+              Floor screen renames and arranges them later.
+            </p>
+            <div className="mb-firstrun__fields">
+              <NumberInput
+                label="Tables"
+                autoFocus
+                value={tableCount}
+                placeholder="12"
+                onChange={(e) => setTableCount(e.target.value.replace(/[^0-9]/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addTables();
+                }}
+              />
+            </div>
+            <div className="mb-firstrun__actions">
+              <Button variant="primary" disabled={busy} onClick={addTables}>
+                {Number(tableCount) > 0 ? 'Add them — next' : 'Skip this — next'}
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
+        {step === 'printer' ? (
+          <section className="mb-firstrun__body">
+            <h1 className="mb-firstrun__title">Your printer</h1>
+            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
+            <p className="mb-firstrun__lede">
+              Bills and kitchen tickets go to this one. Settings › Printers adds
+              more, and a second printer for the kitchen.
+            </p>
+            <div className="mb-firstrun__fields">
+              <Select
+                label="Printer"
+                value={printerName}
+                onChange={(e) => setPrinterName(e.target.value)}
+                options={[
+                  { value: '', label: 'No printer yet' },
+                  ...windowsPrinters.map((name) => ({ value: name, label: name })),
+                ]}
+              />
+            </div>
+            <div className="mb-firstrun__actions">
+              <Button variant="primary" disabled={busy} onClick={usePrinter}>
+                {printerName === '' ? 'Skip this — start billing' : 'Use it — start billing'}
               </Button>
             </div>
           </section>

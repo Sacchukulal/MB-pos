@@ -47,6 +47,7 @@ export function Staff() {
     <Page className="mb-screen">
       <PageHeader
         title="Staff"
+        note="Nobody is ever deleted. Somebody who leaves is marked as having left, so their name stays on their bills and in the history."
       />
       <Tabs
         tabs={[
@@ -165,11 +166,6 @@ function People() {
       </div>
 
       <Table rows={people} columns={columns} rowKey={(p) => p.id} />
-
-      <p className="mb-muted">
-        Nobody is ever deleted. Somebody who leaves is marked as having left, so
-        their name stays on the bills they took and in the history.
-      </p>
 
       {editing ? (
         <EditPerson

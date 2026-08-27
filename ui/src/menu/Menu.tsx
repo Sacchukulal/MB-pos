@@ -2,29 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import {
-  Badge,
-  Button,
-  Checkbox,
-  EmptyState,
-  Foot,
-  freshId,
-  Icon,
-  Input,
-  Modal,
-  MoneyInput,
-  Page,
-  plural,
-  Scroller,
-  SearchField,
-  SectionHeader,
-  Select,
-  SideFold,
-  Toolbar,
-  Table,
-  useToast,
-  type Column,
-} from '../kit';
+import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, plural, Scroller, SearchField, SectionHeader, Select, SideFold, Toolbar, Table, useToast, type Column, Spinner } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
@@ -44,7 +22,8 @@ export function Menu() {
   const [editing, setEditing] = useState<MenuRowView | null>(null);
   const [madeOf, setMadeOf] = useState<MenuRowView | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
+  /** The spreadsheet somebody chose, waiting to be looked at. */
+  const [importing, setImporting] = useState<string | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
   const toast = useToast();
 
@@ -187,23 +166,31 @@ export function Menu() {
             <Button variant="secondary" onClick={() => setBulkOpen(true)}>
               Change prices
             </Button>
-            <Button variant="secondary" onClick={() => setImportOpen(true)}>
+            {/* A label wearing the kit's button, over a hidden file input — one way in. */}
+            <label className="mb-button mb-button--secondary">
               <Icon name="upload" size="sm" />
-              Import
-            </Button>
+              Import a file
+              <input
+                className="mb-visually-hidden"
+                type="file"
+                accept="text/csv,.csv,.txt"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = '';
+                  if (file) file.text().then(setImporting).catch(report);
+                }}
+              />
+            </label>
             <Button
               variant="secondary"
               onClick={() => {
                 call('export_menu')
-                  .then((text) => {
-                    void navigator.clipboard.writeText(text);
-                    toast.show('ok', 'The menu is on the clipboard — paste it into a spreadsheet.');
-                  })
+                  .then((path) => toast.show('ok', 'The menu was saved as a spreadsheet.', path))
                   .catch(report);
               }}
             >
               <Icon name="download" size="sm" />
-              Export
+              Save as a file
             </Button>
           </>
         }
@@ -296,7 +283,7 @@ export function Menu() {
             }
           />
         ) : (
-          <Table rows={shown} columns={columns} rowKey={(r) => r.id} />
+          <Table dense rows={shown} columns={columns} rowKey={(r) => r.id} />
         )}
 
         <TaxClasses classes={classes} onChanged={load} onFailed={report} />
@@ -331,11 +318,12 @@ export function Menu() {
         />
       ) : null}
 
-      {importOpen ? (
+      {importing !== null ? (
         <ImportMenu
-          onClose={() => setImportOpen(false)}
+          csv={importing}
+          onClose={() => setImporting(null)}
           onDone={async (said) => {
-            setImportOpen(false);
+            setImporting(null);
             toast.show('ok', said);
             await load();
           }}
@@ -785,10 +773,6 @@ function BulkPrices({
         autoFocus
         onChange={(e) => setPercent(e.target.value.replace(/[^0-9.-]/g, ''))}
       />
-      <p className="mb-muted">
-        Every price is worked out in Rust, to the paisa, and every change goes
-        into the history with your name on it.
-      </p>
       <div className="mb-row mb-row--end">
         <Button variant="quiet" onClick={onClose}>
           Cancel
@@ -813,42 +797,25 @@ function BulkPrices({
 
 /** The spreadsheet. */
 function ImportMenu({
+  csv,
   onClose,
   onDone,
   onFailed,
 }: {
+  csv: string;
   onClose: () => void;
   onDone: (said: string) => void | Promise<void>;
   onFailed: (cause: unknown) => void;
 }) {
-  const [csv, setCsv] = useState('');
   const [plan, setPlan] = useState<ImportPlanView | null>(null);
 
-  const look = () => {
-    setPlan(null);
-    call('plan_menu_import', { csv })
-      .then(setPlan)
-      .catch(onFailed);
-  };
+  // Looked at as soon as it is chosen; nothing is written until Import is pressed.
+  useEffect(() => {
+    call('plan_menu_import', { csv }).then(setPlan).catch(onFailed);
+  }, [csv, onFailed]);
 
   return (
     <Modal open title="Import a menu" onClose={onClose} wide>
-      <p className="mb-muted">
-        Paste a spreadsheet here — the first line names the columns. Export the
-        menu first if you want the shape. Nothing is written until you have seen
-        what it would do.
-      </p>
-      <textarea
-        className="mb-import__box"
-        value={csv}
-        onChange={(event) => {
-          setCsv(event.target.value);
-          setPlan(null);
-        }}
-        placeholder="name,price_paise,tax_class"
-        aria-label="The spreadsheet"
-      />
-
       {plan ? (
         <div className="mb-import__plan">
           <strong>{plan.summary}</strong>
@@ -860,14 +827,13 @@ function ImportMenu({
             </ul>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <Spinner label="Reading the file" />
+      )}
 
       <div className="mb-row mb-row--end">
         <Button variant="quiet" onClick={onClose}>
           Cancel
-        </Button>
-        <Button onClick={look} disabled={csv.trim() === ''}>
-          See what it would do
         </Button>
         <Button
           variant="primary"

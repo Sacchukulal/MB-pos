@@ -147,7 +147,7 @@ export function Bills() {
         note="A voided bill keeps its number and stays on this list. A gap in the bill book is evidence; a missing bill is a question nobody can answer."
       />
 
-      {totals ? (
+      {totals && bills.length > 0 ? (
         <div className="mb-bills__stats">
           <StatCard label="Taken today" value={totals.gross.text} />
           <StatCard label="Voided" value={totals.voids.text} />

@@ -752,13 +752,23 @@ pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
 }
 
 /// The whole menu as a spreadsheet.
+/// The menu, as a spreadsheet file beside the shop's data. Answers with the path.
 pub fn export_menu_on(app: &App) -> UiResult<String> {
     guard::require(app, Permission::MenuManage)?;
-    app.with_shop(|shop| {
+    let csv = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).menu_csv().export(OUTLET))
             .map_err(|e| words::from_db(&e))
-    })
+    })?;
+    let path = crate::settings::ipc::beside_the_shop(app, "magic-bill-menu.csv");
+    std::fs::write(&path, csv).map_err(|e| {
+        UiError::new(
+            "menu.export",
+            format!("The menu could not be written to {}.", path.display()),
+        )
+        .with_detail(e.to_string())
+    })?;
+    Ok(path.display().to_string())
 }
 
 #[tauri::command]

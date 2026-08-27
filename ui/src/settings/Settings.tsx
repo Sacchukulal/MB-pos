@@ -223,7 +223,7 @@ export function Settings() {
         moved === 0 ? 'info' : 'warn',
         moved === 0
           ? 'Nothing in this section has been changed from standard.'
-          : `${moved} setting${moved === 1 ? '' : 's'} put back to standard. Nothing is saved until you press Save.`,
+          : `${moved} setting${moved === 1 ? '' : 's'} reset. Nothing is saved until you press Save.`,
       );
     } catch (cause) {
       if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
@@ -311,14 +311,14 @@ export function Settings() {
               void call('reload_settings')
                 .then((fresh) => {
                   setView(fresh);
-                  toast.show('ok', 'Read again from this shop’s data file.');
+                  toast.show('ok', 'Reloaded.');
                 })
                 .catch((cause) => {
                   if (isUiError(cause)) toast.show('danger', cause.message);
                 })
             }
           >
-            Read these settings again
+            Reload
           </Button>
           <Button
             small
@@ -327,14 +327,14 @@ export function Settings() {
             onClick={() =>
               void call('export_settings')
                 .then((path) =>
-                  toast.show('ok', 'These settings have been written out.', path),
+                  toast.show('ok', 'Saved.', path),
                 )
                 .catch((cause) => {
                   if (isUiError(cause)) toast.show('danger', cause.message);
                 })
             }
           >
-            Write these settings out
+            Save to a file
           </Button>
           {/* A label wearing the kit's button, over a hidden file input. */}
           <label className="mb-button mb-button--secondary mb-settings__load">
@@ -526,7 +526,7 @@ function Section({
         action={
           section.canEdit ? (
             <Button small variant="quiet" onClick={onReset}>
-              Put this section back to standard
+              Reset this section
             </Button>
           ) : null
         }

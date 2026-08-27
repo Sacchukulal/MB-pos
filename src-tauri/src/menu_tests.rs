@@ -294,7 +294,7 @@ fn the_menu_survives_a_trip_through_a_spreadsheet() {
     let scratch = Scratch::new("csv");
     let app = a_shop_with_a_menu(&scratch);
 
-    let csv = export_menu_on(&app).expect("exported");
+    let csv = std::fs::read_to_string(export_menu_on(&app).expect("exported")).expect("the file");
     assert!(csv.contains("Masala dosa"), "the menu is in it");
 
     // The file carries paise, not rupees — a spreadsheet that rounds 120.00 to 120 is a

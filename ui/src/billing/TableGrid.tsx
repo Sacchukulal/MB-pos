@@ -157,8 +157,13 @@ export function Tile({
               number that catches a forgotten table.
             */}
             {table.kitchenMinutes === null ? null : (
-              <span className="mb-tile__food">
-                food {formatMinutes(table.kitchenMinutes)}
+              <span
+                className="mb-tile__food"
+                title="Since the kitchen was last told"
+                aria-label={`Kitchen ${formatMinutes(table.kitchenMinutes)}`}
+              >
+                <Icon name="flame" size="sm" />
+                {formatMinutes(table.kitchenMinutes)}
               </span>
             )}
             {table.orderId && !table.kitchenTold ? (
@@ -193,9 +198,7 @@ export function Tile({
           role="checkbox"
           aria-checked={picked === true}
           title={`Tick table ${table.label}`}
-          // The whole description: this is the only thing on the tile a keyboard or a screen
-          // reader presses.
-          aria-label={describe(table, picked)}
+          aria-label={`Tick table ${table.label}`}
         />
       ) : null}
 

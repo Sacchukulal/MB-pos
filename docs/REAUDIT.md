@@ -6,6 +6,24 @@ and the shop's database was checked against what the screens said. Nothing was c
 
 The rule for every fix below: **fix the root, delete the duplicate, never patch.**
 
+## 0. Where this stands (end of 27 August 2026)
+
+Phases A to F of §9 were built the same day, one commit each on main:
+
+| Phase | Commit | Done |
+|---|---|---|
+| A — the order is one thing | `72b9683` | placement is one type; re-parking keeps time, day and number; one bill function, one paper builder, one clock; merges leave the cancel counts alone; dead code and the half-built updater install path gone |
+| B — nothing gets stuck | `f418a7f` | kitchen tickets close on void / seen cancellation / day close; screen tickets only when the shop says it has a screen; print jobs get a 90 s deadline and a job the counter died on is parked, not reprinted; Health judges the queue like the bar; the day will not close over an open order |
+| C — push, don't poll | `1a03ad7` | the data file names the tables each commit changed; the floor and the kitchen re-read on the word; the tick only moves clocks |
+| D — settings tell the truth | `ff82e57` | a setting nobody reads fails the build; order-type lock and "no kitchen ticket" obeyed; backups on the schedule, kept to the count; four dead settings deleted; one theme store, painted before the first frame |
+| E — the counter flow | `db193ce` | one Enter adds one; totals never leave the screen; actions grouped by job; no confirm for a typed cart; the grid is the only list of open orders; codes are searched; sub-tables finished; the cart names its place and bill number |
+| F — the rest of the screens | see git log | explaining text became tips; owner words on buttons; History names things and stops wrapping; Menu is dense with one import and one export; a tile press means one thing; first run asks for tables and a printer |
+
+Still open: §7 (the missing features — each needs an owner decision), the custom title bar (§6.1),
+and the 1024-wide top bar, which was not verified on screen in this round.
+
+---
+
 ---
 
 ## 1. The verdict, on one page

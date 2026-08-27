@@ -88,7 +88,7 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         actions={
           <Button variant="secondary" onClick={load}>
             <Icon name="refresh" size="sm" />
-            Look again
+            Check again
           </Button>
         }
       />
@@ -97,11 +97,6 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         <div className="mb-health__top mb-row">
           <p className="mb-health__headline">{view.headline}</p>
           <Badge tone={TONES[view.tone] ?? 'neutral'}>{CHIPS[view.tone] ?? view.tone}</Badge>
-        </div>
-        <div className="mb-health__actions mb-row mb-row--end">
-          <Button variant="quiet" onClick={load}>
-            Look again
-          </Button>
         </div>
       </Card>
 

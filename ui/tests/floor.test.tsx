@@ -157,7 +157,7 @@ describe('the floor (scope 14.1–14.3)', () => {
     await screen.findByText('4 seats');
 
     // Table 2 is busy; tick it and move its order to table 1, which the view says is free.
-    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Move or merge' }));
 
     fireEvent.change(await screen.findByLabelText('To table'), {
@@ -174,7 +174,7 @@ describe('the floor (scope 14.1–14.3)', () => {
     show();
     await screen.findByText('4 seats');
 
-    fireEvent.click(screen.getByLabelText(/^Table 1\b/));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     // It ticks, like any other table — free tables are the ones you delete.
     expect(await screen.findByText('1 ticked')).toBeTruthy();
     // But there is no order on it, so nothing about an order is offered ON THE BAR.
@@ -223,13 +223,13 @@ describe('arranging the room (2026-08-22)', () => {
     show();
     await screen.findByText('4 seats');
 
-    fireEvent.click(screen.getByLabelText(/^Table 1\b/));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     expect(await screen.findByText('1 ticked')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
     expect(await screen.findByText('2 ticked')).toBeTruthy();
 
-    // Pressing a ticked table again unticks it.
-    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    // Ticking a ticked table again unticks it.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
     expect(await screen.findByText('1 ticked')).toBeTruthy();
 
     // "Section wise" — the room segment narrows what is shown, and this ticks all of what a
@@ -244,8 +244,8 @@ describe('arranging the room (2026-08-22)', () => {
     show();
     await screen.findByText('4 seats');
 
-    fireEvent.click(screen.getByLabelText(/^Table 1\b/));
-    fireEvent.click(screen.getByLabelText(/^Table 2\b/));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
     // Scoped to the bar.
     const bar = await screen.findByRole('group', {
       name: 'What to do with the ticked tables',

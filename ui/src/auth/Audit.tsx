@@ -51,7 +51,7 @@ export function Audit() {
   }, []);
 
   const columns: Column<AuditEntryView>[] = [
-    { key: 'when', header: 'When', render: (e) => e.when },
+    { key: 'when', header: 'When', nowrap: true, render: (e) => e.when },
     { key: 'who', header: 'Who', render: (e) => e.who },
     { key: 'what', header: 'What', render: (e) => e.what },
     { key: 'about', header: 'Which one', render: (e) => e.about ?? '—' },

@@ -355,7 +355,7 @@
 .mb-tile__meta {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
   overflow: hidden;
   gap: 0 var(--space-2);
@@ -378,10 +378,10 @@
  * question, not the first.
  */
 .mb-tile__food {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--text-muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

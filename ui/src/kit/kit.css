@@ -676,6 +676,12 @@
   overflow-wrap: anywhere;
 }
 
+/* A time, or a count: one line, even in the first column. */
+.mb-table td.mb-nowrap,
+.mb-table th.mb-nowrap {
+  white-space: nowrap;
+}
+
 /* A column header is a LABEL, not a figure. */
 .mb-table td.mb-numeric,
 .mb-table th.mb-numeric {
@@ -691,6 +697,12 @@
 .mb-table th:last-child:empty {
   width: 1%;
   white-space: nowrap;
+}
+
+/* A menu of three hundred items is read at a glance, not a screen at a time. */
+.mb-table--dense td {
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
 }
 
 .mb-table tbody tr:hover {

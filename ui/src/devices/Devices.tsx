@@ -4,7 +4,6 @@ import {
   Badge,
   Button,
   Icon,
-  Notice,
   Page,
   PageHeader,
   Panel,
@@ -82,6 +81,7 @@ export function Devices() {
     <Page className="mb-devices">
       <PageHeader
         title="Devices"
+        note={view.says}
         count={view.devices.filter((d) => d.setUp).length}
         actions={
           <Button variant="secondary" onClick={load}>
@@ -90,10 +90,6 @@ export function Devices() {
           </Button>
         }
       />
-
-      <Notice tone="info" icon="plug">
-        {view.says}
-      </Notice>
 
       {/* One list, not six cards. */}
       <Panel title="What is plugged in" flush>

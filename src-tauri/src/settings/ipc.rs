@@ -518,6 +518,11 @@ pub struct ConfigPlanView {
 
 /// Where the file goes.
 fn config_file(app: &App) -> std::path::PathBuf {
+    beside_the_shop(app, "magic-bill-settings.json")
+}
+
+/// A file a shop can find: next to its data file.
+pub(crate) fn beside_the_shop(app: &App, file_name: &str) -> std::path::PathBuf {
     app.with_shop(|shop| {
         Ok(shop
             .path
@@ -526,9 +531,9 @@ fn config_file(app: &App) -> std::path::PathBuf {
                 || std::path::PathBuf::from("."),
                 std::path::Path::to_path_buf,
             )
-            .join("magic-bill-settings.json"))
+            .join(file_name))
     })
-    .unwrap_or_else(|_| mb_db::locate::default_config_dir().join("magic-bill-settings.json"))
+    .unwrap_or_else(|_| mb_db::locate::default_config_dir().join(file_name))
 }
 
 /// Export. Every setting as `key: value`, sorted, with a version line.

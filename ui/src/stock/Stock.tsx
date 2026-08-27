@@ -238,7 +238,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         shown.length === 0 ? (
           <EmptyState
             title="No materials yet"
-            body="A material is something the kitchen uses — rice, oil, paneer. Add them, then say what each dish is made of, and every bill will take the right amount off the shelf."
+            body="Add what the kitchen uses — rice, oil, paneer — then say what each dish is made of."
           />
         ) : (
           <>
@@ -377,7 +377,7 @@ function BuyList({ view, onReport }: { view: InventoryView; onReport: (cause: un
     return (
       <EmptyState
         title="Nothing to buy"
-        body="Everything is above its reorder level. Set a reorder level on a material and it will appear here when it runs low."
+        body="Set a reorder level on a material and it appears here when it runs low."
       />
     );
   }
@@ -468,7 +468,7 @@ function Problems({
     return (
       <EmptyState
         title="Nothing needs a look"
-        body="When a bill cannot take something off the shelf — a dish with no recipe, a material that ran below zero — it is listed here. The bill always goes through."
+        body="A bill that could not take something off the shelf is listed here. The bill always goes through."
       />
     );
   }
@@ -1034,7 +1034,7 @@ function Variance({ onReport }: { onReport: (cause: unknown) => void }) {
       {rows !== null && rows.length === 0 ? (
         <EmptyState
           title="Nothing to compare yet"
-          body="This needs two things: recipes, so the counter knows what a dish should have used, and a stock count, so it knows what is really there. Do a count and come back."
+          body="Needs recipes and a stock count. Do a count and come back."
         />
       ) : (
         <Table

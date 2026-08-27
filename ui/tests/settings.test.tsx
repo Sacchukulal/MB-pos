@@ -203,7 +203,7 @@ describe('the settings screen', () => {
     expect(tick.disabled).toBe(true);
     // And no reset button, because there is nothing this person may reset.
     expect(
-      screen.queryByRole('button', { name: /back to standard/ }),
+      screen.queryByRole('button', { name: /Reset this section/ }),
     ).toBeNull();
   });
 
@@ -404,7 +404,7 @@ describe('the settings screen', () => {
   it('does not save a reset — it fills the boxes and waits', async () => {
     draw();
     await screen.findByLabelText('Shop name');
-    fireEvent.click(screen.getByRole('button', { name: /back to standard/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Reset this section/ }));
 
     await waitFor(() => expect(screen.getByLabelText('Shop name')).toHaveValue(''));
     expect(call).not.toHaveBeenCalledWith('save_settings', expect.anything());

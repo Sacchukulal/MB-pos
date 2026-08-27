@@ -2270,6 +2270,27 @@ pub fn audit_trail_on(
                         limit: 200,
                     },
                 )?;
+                // Whatever an entry is about is named, never shown as an id.
+                let mut names: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
+                for person in repos.people().list_staff(OUTLET)? {
+                    names.insert(person.id.as_str().to_owned(), person.name);
+                }
+                for item in repos.menu().list_items(OUTLET, false)? {
+                    names.insert(item.id.as_str().to_owned(), item.name);
+                }
+                for table in repos.floor().list_tables(OUTLET)? {
+                    names.insert(
+                        table.id.as_str().to_owned(),
+                        format!("Table {}", table.label),
+                    );
+                }
+                for customer in repos.money().list_customers(OUTLET)? {
+                    names.insert(customer.id.as_str().to_owned(), customer.name);
+                }
+                for material in repos.stock().materials(OUTLET, true)? {
+                    names.insert(material.id.as_str().to_owned(), material.name);
+                }
                 let tampered = repos.audit().verify(OUTLET)?.err().map(|b| {
                     format!(
                         "This shop's history has been changed outside Magic Bill — {b}. \
@@ -2277,7 +2298,7 @@ pub fn audit_trail_on(
                     )
                 });
                 Ok(AuditView {
-                    entries: rows.iter().map(entry_view).collect(),
+                    entries: rows.iter().map(|row| entry_view(row, &names)).collect(),
                     tampered,
                     actions: action::ALL
                         .iter()
@@ -2289,7 +2310,10 @@ pub fn audit_trail_on(
     })
 }
 
-fn entry_view(row: &mb_auth::AuditRow) -> AuditEntryView {
+fn entry_view(
+    row: &mb_auth::AuditRow,
+    names: &std::collections::HashMap<String, String>,
+) -> AuditEntryView {
     AuditEntryView {
         seq: row.seq,
         when: crate::words::when(Timestamp::from_millis(row.at)),
@@ -2298,7 +2322,10 @@ fn entry_view(row: &mb_auth::AuditRow) -> AuditEntryView {
             .clone()
             .unwrap_or_else(|| "Somebody not on the staff list".to_owned()),
         what: action::words(&row.action).to_owned(),
-        about: row.entity_id.clone(),
+        about: row
+            .entity_id
+            .as_ref()
+            .map(|id| names.get(id).cloned().unwrap_or_else(|| id.clone())),
         before: row.before_json.as_deref().map(readable_change),
         after: row.after_json.as_deref().map(readable_change),
     }

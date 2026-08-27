@@ -171,7 +171,7 @@ export function Count() {
       {view.id === null ? (
         <EmptyState
           title="Nothing is being counted"
-          body="Print the sheet, walk the store and write down what is actually there. Then type it in here — the difference in rupees is what tells you where the food is going."
+          body="Print the sheet, count the store, type it in here."
         />
       ) : (
         <>
@@ -218,7 +218,7 @@ export function Count() {
           {view.lines.length === 0 ? (
             <EmptyState
               title="Nothing written down yet"
-              body="Pick a material, type what is on the shelf, press Enter. You do not have to count everything — only what you counted is adjusted."
+              body="Pick a material, type what is on the shelf, press Enter. Only what you count is adjusted."
             />
           ) : (
             <>
