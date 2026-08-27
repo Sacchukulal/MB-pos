@@ -395,12 +395,20 @@ impl App {
         );
 
         let store: Arc<dyn JobStore> = Arc::new(SqliteStore::new(Arc::clone(db), OUTLET));
-        Queue::start(
+        let queue = Queue::start(
             printers,
             store,
             Arc::clone(&self.faces) as Arc<dyn mb_print::font::Typefaces>,
             QueueConfig::default(),
-        )
+        );
+        if queue.purged_stale() > 0 {
+            log_info!(
+                "{} of our print job(s) from an earlier run were still in Windows' queue and were \
+                 cleared",
+                queue.purged_stale()
+            );
+        }
+        queue
     }
 
     /// A queue with nowhere to store anything, for the moments there is no shop: a first run,

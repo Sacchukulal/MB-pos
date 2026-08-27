@@ -19,6 +19,7 @@ use mb_print::font::Font;
 use mb_print::paper::{Paper, PaperKind};
 use mb_print::printer::{PrinterConfig, Target};
 use mb_print::queue::JobStore;
+use mb_print::transport::Interrupt;
 use mb_print::queue::sqlite::SqliteStore;
 use mb_print::queue::{
     Job, JobKind, JobState, MemoryStore, Queue, QueueConfig, QueueEvent, StoredJob,
@@ -36,6 +37,8 @@ struct Recorder {
     permanent: Mutex<bool>,
     /// When set, `send` blocks until released.
     gate: Option<Arc<Gate>>,
+    /// How many times a blocked send was stopped from outside.
+    interrupted: AtomicU32,
 }
 
 #[derive(Debug, Default)]
@@ -141,6 +144,27 @@ impl Transport for FakeTransport {
 
     fn describe(&self) -> String {
         "fake printer".to_owned()
+    }
+
+    fn interrupter(&self) -> Option<Arc<dyn Interrupt>> {
+        Some(Arc::new(FakeInterrupt {
+            recorder: Arc::clone(&self.recorder),
+        }))
+    }
+}
+
+/// Stopping a blocked fake send: the gate is opened, and the stop is counted.
+#[derive(Debug)]
+struct FakeInterrupt {
+    recorder: Arc<Recorder>,
+}
+
+impl Interrupt for FakeInterrupt {
+    fn interrupt(&self) {
+        self.recorder.interrupted.fetch_add(1, Ordering::SeqCst);
+        if let Some(gate) = &self.recorder.gate {
+            gate.release();
+        }
     }
 }
 
@@ -452,13 +476,14 @@ fn a_printer_that_never_answers_parks_its_job_instead_of_the_queue() {
         status.last_error
     );
 
-    // The next job on the same printer is not behind the hung one.
+    // The next job on the same printer is not behind the hung one: it is taken up at once —
+    // and, the stopped send having freed the fake, it prints and is gone.
     let next = queue.enqueue(ticket("bill")).expect("queued");
     assert!(
         until(|| queue
             .snapshot()
             .iter()
-            .any(|j| j.id == next && j.state != JobState::Pending)),
+            .all(|j| j.id != next || j.state != JobState::Pending)),
         "the queue stayed stuck behind the hung job"
     );
     gate.release();
@@ -1033,7 +1058,130 @@ fn every_parked_job_can_be_retried_or_dismissed_at_once() {
     let third = queue.enqueue(ticket("kitchen")).expect("queued");
     let fourth = queue.enqueue(ticket("kitchen")).expect("queued");
     assert!(until(|| parked(&queue, &[&third, &fourth])));
-    assert_eq!(queue.dismiss_parked().expect("dismissed"), 2);
+    assert_eq!(queue.dismiss_all().expect("dismissed"), 2);
     assert!(queue.snapshot().is_empty());
+    queue.shutdown();
+}
+
+/// A printer that never answers: at the deadline its job is parked AND the blocked send is
+/// stopped, so the printer is not left holding a document and the worker is free.
+#[test]
+fn a_hung_send_is_stopped_at_the_deadline_and_the_printer_is_freed() {
+    let gate = Arc::new(Gate::default());
+    let hung = Arc::new(Recorder {
+        gate: Some(Arc::clone(&gate)),
+        ..Recorder::default()
+    });
+    let queue = Queue::start_with_transports(
+        vec![printer("bill")],
+        Arc::new(MemoryStore::new()),
+        font(),
+        quick(),
+        Arc::new(FakeTransports::new(vec![("bill", Arc::clone(&hung))])),
+    );
+    let id = queue.enqueue(ticket("bill")).expect("queued");
+    assert!(until(|| queue
+        .snapshot()
+        .iter()
+        .any(|j| j.id == id && j.state == JobState::Parked)));
+
+    // The stop reached the transport, which is what deletes the Windows job for real.
+    assert_eq!(hung.interrupted.load(Ordering::SeqCst), 1, "the blocked write was not stopped");
+    let parked = queue.snapshot().into_iter().find(|j| j.id == id).expect("parked");
+    assert!(
+        parked.last_error.as_deref().unwrap_or("").contains("cancelled"),
+        "{:?}",
+        parked.last_error
+    );
+    // And the stopped send ended: the fake's gate was opened, so it went through to the end.
+    assert!(until(|| hung.sent.lock().unwrap().len() == 1));
+    queue.shutdown();
+}
+
+/// Giving up on a job the printer is holding stops it, and whatever comes back is forgotten.
+#[test]
+fn giving_up_on_a_job_in_flight_stops_it_and_forgets_it() {
+    let gate = Arc::new(Gate::default());
+    let held = Arc::new(Recorder {
+        gate: Some(Arc::clone(&gate)),
+        ..Recorder::default()
+    });
+    let queue = Queue::start_with_transports(
+        vec![printer("bill")],
+        Arc::new(MemoryStore::new()),
+        font(),
+        QueueConfig {
+            // Long enough that the deadline plays no part here.
+            job_deadline: Duration::from_secs(30),
+            ..quick()
+        },
+        Arc::new(FakeTransports::new(vec![("bill", Arc::clone(&held))])),
+    );
+    let events = queue.subscribe();
+    let id = queue.enqueue(ticket("bill")).expect("queued");
+    assert!(until(|| queue
+        .snapshot()
+        .iter()
+        .any(|j| j.id == id && j.state == JobState::Printing)));
+
+    queue.dismiss(&id).expect("dismissed");
+    assert_eq!(held.interrupted.load(Ordering::SeqCst), 1, "the write in flight was not stopped");
+    assert!(queue.snapshot().is_empty(), "a dismissed job is gone at once");
+
+    // The send finishes late (the gate opened); nothing about it may come back.
+    assert!(until(|| held.sent.lock().unwrap().len() == 1));
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(queue.snapshot().is_empty(), "the late answer brought the job back");
+    let after: Vec<QueueEvent> = events.try_iter().collect();
+    assert!(
+        after.iter().any(|e| matches!(e, QueueEvent::Dismissed { id: gone } if *gone == id)),
+        "no Dismissed event"
+    );
+    assert!(
+        !after
+            .iter()
+            .any(|e| matches!(e, QueueEvent::Printed { id: late, .. } | QueueEvent::Parked { id: late, .. } if *late == id)),
+        "the printer's late answer was announced: {after:?}"
+    );
+    queue.shutdown();
+}
+
+/// One press for everything that has not printed — waiting, printing or parked alike.
+#[test]
+fn giving_up_on_all_covers_every_state() {
+    let gate = Arc::new(Gate::default());
+    let held = Arc::new(Recorder {
+        gate: Some(Arc::clone(&gate)),
+        ..Recorder::default()
+    });
+    let queue = Queue::start_with_transports(
+        vec![printer("bill")],
+        Arc::new(MemoryStore::new()),
+        font(),
+        QueueConfig {
+            job_deadline: Duration::from_secs(30),
+            ..quick()
+        },
+        Arc::new(FakeTransports::new(vec![("bill", Arc::clone(&held))])),
+    );
+    let first = queue.enqueue(ticket("bill")).expect("queued");
+    let second = queue.enqueue(ticket("bill")).expect("queued");
+    let third = queue.enqueue(ticket("bill")).expect("queued");
+    // One printing (held), two waiting behind it.
+    assert!(until(|| queue
+        .snapshot()
+        .iter()
+        .any(|j| j.id == first && j.state == JobState::Printing)));
+    assert_eq!(queue.snapshot().len(), 3);
+
+    assert_eq!(queue.dismiss_all().expect("dismissed"), 3);
+    assert!(queue.snapshot().is_empty());
+    assert!(until(|| held.sent.lock().unwrap().len() == 1));
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(
+        queue.snapshot().is_empty(),
+        "a job came back after everything was given up on"
+    );
+    let _ = (second, third);
     queue.shutdown();
 }

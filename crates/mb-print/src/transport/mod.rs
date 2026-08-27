@@ -6,7 +6,7 @@ pub mod serial;
 pub mod spooler;
 
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::printer::Target;
@@ -52,6 +52,24 @@ pub trait Transport: Send + fmt::Debug {
 
     /// Where this goes, in words, for the status stream.
     fn describe(&self) -> String;
+
+    /// A handle that can stop a send from another thread, when the transport has one.
+    fn interrupter(&self) -> Option<Arc<dyn Interrupt>> {
+        None
+    }
+
+    /// Delete what an earlier run left in the operating system's own queue under this document
+    /// name, and say how many went. A hung job at the head of that queue blocks every job
+    /// behind it for ever.
+    fn purge_stale(&self, document_prefix: &str) -> usize {
+        let _ = document_prefix;
+        0
+    }
+}
+
+/// Stops a send that is blocked — a Windows job deleted out from under `WritePrinter`.
+pub trait Interrupt: Send + Sync + fmt::Debug {
+    fn interrupt(&self);
 }
 
 /// Open a transport for a target.

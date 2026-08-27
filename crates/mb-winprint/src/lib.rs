@@ -66,13 +66,65 @@ pub fn default_printer() -> Result<Option<String>, WinPrintError> {
 
 /// Send bytes to a printer through the spooler, as RAW.
 pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinPrintError> {
+    write_raw_reporting(printer, document, bytes, |_| {})
+}
+
+/// The same, saying which Windows job the bytes became the moment it exists — so a caller on
+/// another thread can delete it if the write never returns.
+pub fn write_raw_reporting(
+    printer: &str,
+    document: &str,
+    bytes: &[u8],
+    on_job: impl FnMut(u32),
+) -> Result<(), WinPrintError> {
     #[cfg(windows)]
     {
-        spooler::write_raw(printer, document, bytes)
+        spooler::write_raw(printer, document, bytes, on_job)
     }
     #[cfg(not(windows))]
     {
-        let _ = (printer, document, bytes);
+        let _ = (printer, document, bytes, on_job);
+        Err(WinPrintError::Unsupported("the Windows print spooler"))
+    }
+}
+
+/// Delete one job from a printer's Windows queue — even one the port is holding, which is what
+/// frees a write that has hung.
+pub fn cancel_job(printer: &str, job_id: u32) -> Result<(), WinPrintError> {
+    #[cfg(windows)]
+    {
+        spooler::cancel_job(printer, job_id)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (printer, job_id);
+        Err(WinPrintError::Unsupported("the Windows print spooler"))
+    }
+}
+
+/// Delete every job in a printer's Windows queue whose document name starts with `prefix`, and
+/// say how many went. Only our own documents are ever named.
+pub fn purge_jobs(printer: &str, prefix: &str) -> Result<usize, WinPrintError> {
+    #[cfg(windows)]
+    {
+        spooler::purge_jobs(printer, prefix)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (printer, prefix);
+        Err(WinPrintError::Unsupported("the Windows print spooler"))
+    }
+}
+
+/// What Windows says is wrong with a printer, in words — or nothing when it reports no trouble.
+pub fn printer_trouble(printer: &str) -> Result<Option<String>, WinPrintError> {
+    #[cfg(windows)]
+    {
+        spooler::trouble(printer)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = printer;
         Err(WinPrintError::Unsupported("the Windows print spooler"))
     }
 }

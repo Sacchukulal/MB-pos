@@ -226,13 +226,13 @@ pub fn retry_parked_print_jobs(app: tauri::State<'_, App>) -> UiResult<u32> {
     })
 }
 
-/// Every job that did not print, given up on in one press.
+/// Every job that has not printed, given up on in one press — whatever state it is in.
 #[tauri::command]
-pub fn dismiss_parked_print_jobs(app: tauri::State<'_, App>) -> UiResult<u32> {
+pub fn dismiss_all_print_jobs(app: tauri::State<'_, App>) -> UiResult<u32> {
     guard::require(&app, Permission::BillReprint)?;
     app.with_shop(|shop| {
         shop.queue
-            .dismiss_parked()
+            .dismiss_all()
             .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
             .map_err(|e| words::from_print(&e))
     })
@@ -321,7 +321,7 @@ macro_rules! commands {
             $crate::ipc::retry_print_job,
             $crate::ipc::dismiss_print_job,
             $crate::ipc::retry_parked_print_jobs,
-            $crate::ipc::dismiss_parked_print_jobs,
+            $crate::ipc::dismiss_all_print_jobs,
             $crate::ipc::preview_test_page,
             $crate::ipc::preview_order,
             $crate::ipc::current_cart,

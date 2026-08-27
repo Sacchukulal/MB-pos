@@ -166,7 +166,7 @@ export interface Commands {
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
   retry_parked_print_jobs: { args: void; returns: number };
-  dismiss_parked_print_jobs: { args: void; returns: number };
+  dismiss_all_print_jobs: { args: void; returns: number };
 
   // Signing in, the people and the history.
   lock_state: { args: void; returns: LockState };

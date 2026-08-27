@@ -353,7 +353,7 @@ export function Shell() {
 
   const onDismissAll = useCallback(async () => {
     try {
-      await call('dismiss_parked_print_jobs');
+      await call('dismiss_all_print_jobs');
     } catch (cause) {
       if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
     }
@@ -841,12 +841,12 @@ export function PrintQueuePanel({
       onClose={onClose}
       wide
       actions={
-        parked > 1 ? (
+        jobs.length > 1 ? (
           <>
             <Button variant="quiet" onClick={onDismissAll}>
-              Give up on all {parked}
+              Give up on all {jobs.length}
             </Button>
-            <Button onClick={onRetryAll}>Try all {parked} again</Button>
+            {parked > 1 ? <Button onClick={onRetryAll}>Try all {parked} again</Button> : null}
           </>
         ) : undefined
       }
@@ -877,16 +877,17 @@ export function PrintQueuePanel({
                   <span className="mb-field__hint">{job.lastError}</span>
                 ) : null}
               </div>
-              {job.needsAttention ? (
-                <div className="mb-row">
+              {/* Any job can be given up on; only a parked one can be tried again. */}
+              <div className="mb-row">
+                {job.needsAttention ? (
                   <Button small onClick={() => onRetry(job.id)}>
                     Try again
                   </Button>
-                  <Button small variant="quiet" onClick={() => onDismiss(job.id)}>
-                    Give up
-                  </Button>
-                </div>
-              ) : null}
+                ) : null}
+                <Button small variant="quiet" onClick={() => onDismiss(job.id)}>
+                  Give up
+                </Button>
+              </div>
             </div>
           ))
         )}

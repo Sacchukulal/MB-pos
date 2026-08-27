@@ -4,7 +4,7 @@ pub mod sqlite;
 pub mod store;
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
@@ -23,7 +23,10 @@ use crate::layout::layout_for;
 use crate::metrics::Metrics;
 use crate::printer::{Engine, PrinterConfig};
 use crate::raster::{RasterOptions, to_raster};
-use crate::transport::{RealTransports, TransportError, TransportFactory};
+use crate::transport::{Interrupt, RealTransports, TransportError, TransportFactory};
+
+/// Every document this queue sends is named so, and so is every one it may delete.
+const OUR_DOCUMENTS: &str = "Magic Bill";
 
 pub use store::{JobStore, MemoryStore, StoreError, StoredJob};
 
@@ -279,6 +282,8 @@ pub struct Queue {
     senders: BTreeMap<String, Sender<Message>>,
     workers: Vec<JoinHandle<()>>,
     shared: Arc<Shared>,
+    /// How many of our own documents an earlier run had left in the operating system's queues.
+    purged: usize,
 }
 
 #[derive(Debug)]
@@ -290,6 +295,10 @@ struct Shared {
     faces: Arc<dyn Typefaces>,
     config: QueueConfig,
     transports: Arc<dyn TransportFactory>,
+    /// The send in flight, by job, when its transport can be stopped from outside.
+    interrupts: Mutex<BTreeMap<String, Arc<dyn Interrupt>>>,
+    /// Given up on while a worker had it: whatever the printer answers is thrown away.
+    cancelled: Mutex<BTreeSet<String>>,
 }
 
 #[derive(Debug)]
@@ -332,7 +341,23 @@ impl Queue {
             faces,
             transports,
             config,
+            interrupts: Mutex::new(BTreeMap::new()),
+            cancelled: Mutex::new(BTreeSet::new()),
         });
+
+        // Whatever an earlier run left in the operating system's own queues is deleted before
+        // anything new is sent: a job hung at the head of one blocks every job behind it, and
+        // it was ours to begin with.
+        let purged: usize = printers
+            .values()
+            .filter_map(|p| {
+                shared
+                    .transports
+                    .open(&p.target, shared.config.connect_timeout)
+                    .ok()
+            })
+            .map(|transport| transport.purge_stale(OUR_DOCUMENTS))
+            .sum();
 
         let mut senders = BTreeMap::new();
         let mut workers = Vec::new();
@@ -355,9 +380,17 @@ impl Queue {
             senders,
             workers,
             shared,
+            purged,
         };
         queue.resume();
         queue
+    }
+
+    /// How many of our own documents an earlier run had left behind in the operating system's
+    /// queues, and which were deleted at start.
+    #[must_use]
+    pub const fn purged_stale(&self) -> usize {
+        self.purged
     }
 
     /// Everything the billing thread does.
@@ -472,16 +505,10 @@ impl Queue {
         Ok(())
     }
 
-    /// Throw a parked job away.
+    /// Throw a job away, whatever state it is in. One that is mid-print is stopped where it
+    /// can be, and whatever the printer answers afterwards is ignored.
     pub fn dismiss(&self, id: &str) -> Result<(), PrintError> {
-        self.shared
-            .store
-            .remove(id)
-            .map_err(|e| PrintError::invalid(e.to_string()))?;
-        lock(&self.shared.statuses).remove(id);
-        self.shared
-            .publish(&QueueEvent::Dismissed { id: id.to_owned() });
-        Ok(())
+        self.shared.dismiss(id)
     }
 
     /// Every parked job, back in the queue — one press when the printer is back. How many.
@@ -493,13 +520,14 @@ impl Queue {
         Ok(parked.len())
     }
 
-    /// Every parked job, thrown away — one press when the paper was done another way. How many.
-    pub fn dismiss_parked(&self) -> Result<usize, PrintError> {
-        let parked = self.parked();
-        for id in &parked {
+    /// Every unfinished job, thrown away — one press when the paper was done another way, or
+    /// the printer is going to be replaced. How many.
+    pub fn dismiss_all(&self) -> Result<usize, PrintError> {
+        let ids: Vec<String> = lock(&self.shared.statuses).keys().cloned().collect();
+        for id in &ids {
             self.dismiss(id)?;
         }
-        Ok(parked.len())
+        Ok(ids.len())
     }
 
     /// The ids a person has to decide about.
@@ -584,6 +612,26 @@ impl Shared {
             },
         };
         lock(&self.statuses).insert(job.id.clone(), status);
+    }
+
+    /// Throw a job away, whatever state it is in.
+    fn dismiss(&self, id: &str) -> Result<(), PrintError> {
+        // Marked before it is stopped, so a worker answering in the meantime finds it gone.
+        lock(&self.cancelled).insert(id.to_owned());
+        if let Some(interrupt) = lock(&self.interrupts).remove(id) {
+            interrupt.interrupt();
+        }
+        self.store
+            .remove(id)
+            .map_err(|e| PrintError::invalid(e.to_string()))?;
+        lock(&self.statuses).remove(id);
+        self.publish(&QueueEvent::Dismissed { id: id.to_owned() });
+        Ok(())
+    }
+
+    /// True once, for a job that was given up on while a worker had it.
+    fn gave_up(&self, id: &str) -> bool {
+        lock(&self.cancelled).remove(id)
     }
 
     /// Give up, visibly. Never silently.
@@ -689,6 +737,9 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
 
     let mut attempt = 0_i64;
     loop {
+        if shared.gave_up(&job.id) {
+            return;
+        }
         attempt += 1;
         job.attempts = attempt;
         let _ = shared
@@ -700,7 +751,12 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
             attempt,
         });
 
-        match print_within(shared, printer, &job, &payload) {
+        let outcome = print_within(shared, printer, &job, &payload);
+        // Given up on while the printer had it: nothing it answers now is anybody's business.
+        if shared.gave_up(&job.id) {
+            return;
+        }
+        match outcome {
             Ok(engine) => {
                 job.engine_used = Some(engine_name(engine).to_owned());
                 // Printed means gone — from the store, and from what a screen is shown.
@@ -763,8 +819,9 @@ fn print_within(
 ) -> Result<Engine, Failure> {
     let deadline = shared.config.job_deadline;
     let name = format!("mb-print-{}-job", printer.id);
+    let job_id = job.id.clone();
     let (tx, rx) = channel::<Result<Engine, Failure>>();
-    let (shared, printer, job, payload) = (
+    let (worker_shared, printer, job, payload) = (
         Arc::clone(shared),
         printer.clone(),
         job.clone(),
@@ -772,7 +829,7 @@ fn print_within(
     );
     let spawned = std::thread::Builder::new().name(name).spawn(move || {
         // A receiver that gave up is a job already parked; the answer has nowhere to go.
-        let _ = tx.send(print_once(&shared, &printer, &job, &payload));
+        let _ = tx.send(print_once(&worker_shared, &printer, &job, &payload));
     });
     if spawned.is_err() {
         return Err(Failure {
@@ -787,14 +844,22 @@ fn print_within(
             permanent: false,
         }),
         // Parked, not retried: the bytes may still be on their way, and a retry could print
-        // the bill twice.
-        Err(RecvTimeoutError::Timeout) => Err(Failure {
-            message: format!(
-                "the printer did not finish within {} seconds. Check it, then press Try again",
-                deadline.as_secs()
-            ),
-            permanent: true,
-        }),
+        // the bill twice. The send is STOPPED where it can be — a Windows job deleted out from
+        // under the write — so the printer is not left holding a document for ever, and every
+        // job behind it is not stuck too.
+        Err(RecvTimeoutError::Timeout) => {
+            if let Some(interrupt) = lock(&shared.interrupts).remove(&job_id) {
+                interrupt.interrupt();
+            }
+            Err(Failure {
+                message: format!(
+                    "the printer did not finish within {} seconds, so its job was cancelled. \
+                     Check the printer, then press Try again",
+                    deadline.as_secs()
+                ),
+                permanent: true,
+            })
+        }
     }
 }
 
@@ -869,7 +934,13 @@ fn print_once(
         .transports
         .open(&printer.target, shared.config.connect_timeout)
         .map_err(to_failure)?;
-    transport.send(&stream, &name).map_err(to_failure)?;
+    // Registered while the send is in flight, so the deadline and a dismissal can stop it.
+    if let Some(interrupt) = transport.interrupter() {
+        lock(&shared.interrupts).insert(job.id.clone(), interrupt);
+    }
+    let sent = transport.send(&stream, &name);
+    lock(&shared.interrupts).remove(&job.id);
+    sent.map_err(to_failure)?;
     Ok(engine)
 }
 
@@ -883,8 +954,8 @@ fn to_failure(e: TransportError) -> Failure {
 /// The job name a shop sees in the Windows print queue window.
 fn describe_job(job: &StoredJob, printer: &PrinterConfig) -> String {
     match &job.reason {
-        Some(reason) => format!("Magic Bill — {} ({reason}) — {}", job.kind, printer.name),
-        None => format!("Magic Bill — {} — {}", job.kind, printer.name),
+        Some(reason) => format!("{OUR_DOCUMENTS} — {} ({reason}) — {}", job.kind, printer.name),
+        None => format!("{OUR_DOCUMENTS} — {} — {}", job.kind, printer.name),
     }
 }
 

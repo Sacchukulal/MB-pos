@@ -20,6 +20,20 @@ pub const PRINTER_ATTRIBUTE_DEFAULT: Dword = 0x0000_0004;
 /// The buffer was too small; `needed` says by how much.
 pub const ERROR_INSUFFICIENT_BUFFER: Dword = 122;
 
+/// `SetJob` with this command deletes the job, even one the port is holding.
+pub const JOB_CONTROL_DELETE: Dword = 5;
+
+/// `PRINTER_INFO_2.Status` bits a shop can act on.
+pub const PRINTER_STATUS_PAUSED: Dword = 0x0000_0001;
+pub const PRINTER_STATUS_ERROR: Dword = 0x0000_0002;
+pub const PRINTER_STATUS_PAPER_JAM: Dword = 0x0000_0008;
+pub const PRINTER_STATUS_PAPER_OUT: Dword = 0x0000_0010;
+pub const PRINTER_STATUS_PAPER_PROBLEM: Dword = 0x0000_0040;
+pub const PRINTER_STATUS_OFFLINE: Dword = 0x0000_0080;
+pub const PRINTER_STATUS_NOT_AVAILABLE: Dword = 0x0000_1000;
+pub const PRINTER_STATUS_USER_INTERVENTION: Dword = 0x0010_0000;
+pub const PRINTER_STATUS_DOOR_OPEN: Dword = 0x0040_0000;
+
 // CreateFile, for the serial port.
 pub const GENERIC_WRITE: Dword = 0x4000_0000;
 pub const GENERIC_READ: Dword = 0x8000_0000;
@@ -51,6 +65,66 @@ pub struct DocInfo1W {
     pub doc_name: *const u16,
     pub output_file: *const u16,
     pub datatype: *const u16,
+}
+
+/// `SYSTEMTIME`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemTime {
+    pub year: u16,
+    pub month: u16,
+    pub day_of_week: u16,
+    pub day: u16,
+    pub hour: u16,
+    pub minute: u16,
+    pub second: u16,
+    pub milliseconds: u16,
+}
+
+/// `JOB_INFO_1W`: one job in a printer's queue.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct JobInfo1W {
+    pub job_id: Dword,
+    pub printer_name: *mut u16,
+    pub machine_name: *mut u16,
+    pub user_name: *mut u16,
+    pub document: *mut u16,
+    pub datatype: *mut u16,
+    pub status_text: *mut u16,
+    pub status: Dword,
+    pub priority: Dword,
+    pub position: Dword,
+    pub total_pages: Dword,
+    pub pages_printed: Dword,
+    pub submitted: SystemTime,
+}
+
+/// `PRINTER_INFO_2W`: the printer's own state, of which only `status` is read.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct PrinterInfo2W {
+    pub server_name: *mut u16,
+    pub printer_name: *mut u16,
+    pub share_name: *mut u16,
+    pub port_name: *mut u16,
+    pub driver_name: *mut u16,
+    pub comment: *mut u16,
+    pub location: *mut u16,
+    pub dev_mode: *mut c_void,
+    pub sep_file: *mut u16,
+    pub print_processor: *mut u16,
+    pub datatype: *mut u16,
+    pub parameters: *mut u16,
+    pub security_descriptor: *mut c_void,
+    pub attributes: Dword,
+    pub priority: Dword,
+    pub default_priority: Dword,
+    pub start_time: Dword,
+    pub until_time: Dword,
+    pub status: Dword,
+    pub jobs: Dword,
+    pub average_ppm: Dword,
 }
 
 /// `DCB` — the serial line settings.
@@ -118,6 +192,33 @@ unsafe extern "system" {
         buffer: *const u8,
         bytes: Dword,
         written: *mut Dword,
+    ) -> Bool;
+
+    pub fn EnumJobsW(
+        printer: Handle,
+        first: Dword,
+        count: Dword,
+        level: Dword,
+        buffer: *mut u8,
+        buffer_bytes: Dword,
+        needed: *mut Dword,
+        returned: *mut Dword,
+    ) -> Bool;
+
+    pub fn SetJobW(
+        printer: Handle,
+        job: Dword,
+        level: Dword,
+        info: *mut u8,
+        command: Dword,
+    ) -> Bool;
+
+    pub fn GetPrinterW(
+        printer: Handle,
+        level: Dword,
+        buffer: *mut u8,
+        buffer_bytes: Dword,
+        needed: *mut Dword,
     ) -> Bool;
 }
 

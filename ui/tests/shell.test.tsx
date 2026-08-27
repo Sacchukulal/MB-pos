@@ -157,7 +157,7 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
   expect(await screen.findByRole('option', { name: /Masala Dosa/ })).toBeTruthy();
 });
 
-/** Two parked jobs or more get one press for all of them; one does not need it. */
+/** Two jobs or more get one press to give up on all of them; one does not need it. */
 it('offers one press for every job that did not print', () => {
   const parked = (id: string): PrintJobView => ({
     id,
@@ -187,6 +187,25 @@ it('offers one press for every job that did not print', () => {
   expect(onDismissAll).toHaveBeenCalledTimes(1);
   // Each job keeps its own two, so one can still be treated differently.
   expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: 'Give up' })).toHaveLength(2);
+
+  // A job still waiting or printing can be given up on too — that is the one that wedges a
+  // printer — but only a parked one is offered another try.
+  rerender(
+    <PrintQueuePanel
+      open
+      jobs={[{ ...parked('3'), state: 'Printing', needsAttention: false }, parked('4')]}
+      onClose={vi.fn()}
+      onRetry={vi.fn()}
+      onDismiss={vi.fn()}
+      onRetryAll={onRetryAll}
+      onDismissAll={onDismissAll}
+    />,
+  );
+  expect(screen.getAllByRole('button', { name: 'Give up' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Give up on all 2' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Try all/ })).toBeNull();
 
   rerender(
     <PrintQueuePanel

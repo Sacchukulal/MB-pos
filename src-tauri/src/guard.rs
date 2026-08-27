@@ -91,7 +91,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("retry_print_job", Access::Needs(Permission::BillReprint)),
     ("dismiss_print_job", Access::Needs(Permission::BillReprint)),
     ("retry_parked_print_jobs", Access::Needs(Permission::BillReprint)),
-    ("dismiss_parked_print_jobs", Access::Needs(Permission::BillReprint)),
+    ("dismiss_all_print_jobs", Access::Needs(Permission::BillReprint)),
     ("list_staff", Access::Needs(Permission::StaffManage)),
     ("save_staff_member", Access::Needs(Permission::StaffManage)),
     ("set_staff_pin", Access::Needs(Permission::StaffManage)),

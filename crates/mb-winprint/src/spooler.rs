@@ -146,19 +146,11 @@ pub fn default_name() -> Result<Option<String>, WinPrintError> {
     Ok((!name.is_empty()).then_some(name))
 }
 
-pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinPrintError> {
+/// Open a printer by the name Windows gives it.
+fn open(printer: &str) -> Result<Printer, WinPrintError> {
     let name = sys::wide(printer).ok_or_else(|| WinPrintError::BadName {
         name: printer.to_owned(),
     })?;
-    let doc_name = sys::wide(document).ok_or_else(|| WinPrintError::BadName {
-        name: document.to_owned(),
-    })?;
-    // "RAW" is the whole point: it tells the driver these bytes are already the printer's own
-    // language and must be passed through untouched.
-    let raw = sys::wide("RAW").ok_or_else(|| WinPrintError::BadName {
-        name: "RAW".to_owned(),
-    })?;
-
     let mut handle: Handle = ptr::null_mut();
     // SAFETY: `name` is NUL-terminated and outlives the call; `handle` is
     // writable; a null `defaults` means "the printer's own settings".
@@ -179,7 +171,27 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
             }
         });
     }
-    let printer_handle = Printer(handle);
+    Ok(Printer(handle))
+}
+
+/// Send bytes as one RAW document, telling `on_job` which Windows job they became the moment
+/// it exists — so another thread can delete it if the port never takes them.
+pub fn write_raw(
+    printer: &str,
+    document: &str,
+    bytes: &[u8],
+    mut on_job: impl FnMut(u32),
+) -> Result<(), WinPrintError> {
+    let doc_name = sys::wide(document).ok_or_else(|| WinPrintError::BadName {
+        name: document.to_owned(),
+    })?;
+    // "RAW" is the whole point: it tells the driver these bytes are already the printer's own
+    // language and must be passed through untouched.
+    let raw = sys::wide("RAW").ok_or_else(|| WinPrintError::BadName {
+        name: "RAW".to_owned(),
+    })?;
+
+    let printer_handle = open(printer)?;
 
     let info = sys::DocInfo1W {
         doc_name: doc_name.as_ptr(),
@@ -192,6 +204,7 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     if job == 0 {
         return Err(last_error("StartDocPrinter"));
     }
+    on_job(job);
     // From here on the document must be ended however this function leaves, so it is a guard
     // rather than a pair of calls somebody can return between.
     let mut open = Document {
@@ -230,4 +243,161 @@ pub fn write_raw(printer: &str, document: &str, bytes: &[u8]) -> Result<(), WinP
     drop(open);
     drop(printer_handle);
     Ok(())
+}
+
+/// Delete one job from the printer's queue. This is what frees a `WritePrinter` that the port
+/// is not answering: the blocked call returns with an error, and the thread behind it ends.
+pub fn cancel_job(printer: &str, job_id: u32) -> Result<(), WinPrintError> {
+    let printer_handle = open(printer)?;
+    // SAFETY: the handle is open; level 0 with no job info is the documented form of a call
+    // that only carries a command.
+    let ok = unsafe {
+        sys::SetJobW(
+            printer_handle.0,
+            job_id,
+            0,
+            ptr::null_mut(),
+            sys::JOB_CONTROL_DELETE,
+        )
+    };
+    if ok == FALSE {
+        return Err(last_error("SetJob (delete)"));
+    }
+    Ok(())
+}
+
+/// Delete every job in the printer's queue whose document name starts with `prefix`, and say
+/// how many went. A job hung at the head of a queue blocks every job behind it for ever, and
+/// only our own documents are ever touched.
+pub fn purge_jobs(printer: &str, prefix: &str) -> Result<usize, WinPrintError> {
+    let printer_handle = open(printer)?;
+    let level = 1;
+    // Sizing call: expected to fail with ERROR_INSUFFICIENT_BUFFER and say how many bytes.
+    let mut needed: Dword = 0;
+    let mut returned: Dword = 0;
+    // SAFETY: a zero-length buffer with a zero length is the documented way to ask for the
+    // size; `needed` and `returned` are valid to write.
+    let ok = unsafe {
+        sys::EnumJobsW(
+            printer_handle.0,
+            0,
+            Dword::MAX,
+            level,
+            ptr::null_mut(),
+            0,
+            &raw mut needed,
+            &raw mut returned,
+        )
+    };
+    if ok == FALSE {
+        // SAFETY: no arguments.
+        let code = unsafe { sys::GetLastError() };
+        if code != sys::ERROR_INSUFFICIENT_BUFFER {
+            return Err(WinPrintError::Api {
+                what: "EnumJobs (sizing)",
+                code,
+            });
+        }
+    }
+    if needed == 0 {
+        return Ok(0);
+    }
+
+    // `u64`s, so the JOB_INFO_1W records at the front of the buffer are aligned for reading.
+    let mut buffer = vec![0_u64; (needed as usize).div_ceil(size_of::<u64>())];
+    // SAFETY: the buffer is at least `needed` bytes and writable for that whole length.
+    let ok = unsafe {
+        sys::EnumJobsW(
+            printer_handle.0,
+            0,
+            Dword::MAX,
+            level,
+            buffer.as_mut_ptr().cast::<u8>(),
+            needed,
+            &raw mut needed,
+            &raw mut returned,
+        )
+    };
+    if ok == FALSE {
+        return Err(last_error("EnumJobs"));
+    }
+
+    let records = buffer.as_ptr().cast::<sys::JobInfo1W>();
+    let mut gone = 0_usize;
+    for index in 0..(returned as usize) {
+        // SAFETY: the spooler filled `returned` records at the front of the buffer, which is
+        // still alive and aligned.
+        let job = unsafe { records.add(index).read() };
+        // SAFETY: `document` is null or a NUL-terminated UTF-16 string inside the buffer.
+        let document = unsafe { sys::from_wide(job.document) };
+        if !document.starts_with(prefix) {
+            continue;
+        }
+        // SAFETY: the handle is open; a command-only call.
+        let ok = unsafe {
+            sys::SetJobW(
+                printer_handle.0,
+                job.job_id,
+                0,
+                ptr::null_mut(),
+                sys::JOB_CONTROL_DELETE,
+            )
+        };
+        if ok != FALSE {
+            gone += 1;
+        }
+    }
+    Ok(gone)
+}
+
+/// What Windows says is wrong with the printer, in a shopkeeper's words — or nothing.
+pub fn trouble(printer: &str) -> Result<Option<String>, WinPrintError> {
+    let printer_handle = open(printer)?;
+    let level = 2;
+    let mut needed: Dword = 0;
+    // SAFETY: the documented sizing call — a null buffer with a zero size.
+    let _ = unsafe { sys::GetPrinterW(printer_handle.0, level, ptr::null_mut(), 0, &raw mut needed) };
+    if needed == 0 {
+        return Err(last_error("GetPrinter (sizing)"));
+    }
+    let mut buffer = vec![0_u64; (needed as usize).div_ceil(size_of::<u64>())];
+    // SAFETY: the buffer is at least `needed` bytes and writable for that whole length.
+    let ok = unsafe {
+        sys::GetPrinterW(
+            printer_handle.0,
+            level,
+            buffer.as_mut_ptr().cast::<u8>(),
+            needed,
+            &raw mut needed,
+        )
+    };
+    if ok == FALSE {
+        return Err(last_error("GetPrinter"));
+    }
+    // SAFETY: level 2 fills a PRINTER_INFO_2W at the front of the buffer, which is aligned.
+    let info = unsafe { buffer.as_ptr().cast::<sys::PrinterInfo2W>().read() };
+    Ok(describe_status(printer, info.status))
+}
+
+/// The status bits a shop can act on, as one sentence.
+fn describe_status(printer: &str, status: Dword) -> Option<String> {
+    let words: Vec<&str> = [
+        (sys::PRINTER_STATUS_OFFLINE, "is offline"),
+        (sys::PRINTER_STATUS_PAUSED, "is paused in Windows"),
+        (sys::PRINTER_STATUS_PAPER_OUT, "is out of paper"),
+        (sys::PRINTER_STATUS_PAPER_JAM, "has a paper jam"),
+        (sys::PRINTER_STATUS_PAPER_PROBLEM, "has a paper problem"),
+        (sys::PRINTER_STATUS_DOOR_OPEN, "has its cover open"),
+        (sys::PRINTER_STATUS_USER_INTERVENTION, "needs attention"),
+        (sys::PRINTER_STATUS_NOT_AVAILABLE, "is not available"),
+        (sys::PRINTER_STATUS_ERROR, "reports an error"),
+    ]
+    .into_iter()
+    .filter(|(bit, _)| status & bit != 0)
+    .map(|(_, words)| words)
+    .collect();
+    if words.is_empty() {
+        return None;
+    }
+    Some(format!("the printer \"{printer}\" {}", words.join(" and ")))
 }
