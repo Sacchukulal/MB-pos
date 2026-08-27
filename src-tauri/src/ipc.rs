@@ -790,6 +790,17 @@ pub fn cart_add_payment_on(
 ) -> UiResult<CartView> {
     // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
+    take_payment(app, mode, amount_paise, reference)
+}
+
+/// The payment itself, for a caller that already holds the counter — never take the action lock
+/// here: a lock taken twice on one thread is a counter that freezes.
+pub fn take_payment(
+    app: &App,
+    mode: String,
+    amount_paise: i64,
+    reference: Option<String>,
+) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
     let mode = match mode.as_str() {
         "Cash" => mb_core::PaymentMode::Cash,

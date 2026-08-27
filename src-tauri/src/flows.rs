@@ -427,7 +427,8 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
             })
         })?;
         if balance.is_positive() {
-            crate::ipc::cart_add_payment_on(app, mode, balance.paise(), None)?;
+            // Not `cart_add_payment_on`: this thread already holds the counter.
+            crate::ipc::take_payment(app, mode, balance.paise(), None)?;
         }
     }
 

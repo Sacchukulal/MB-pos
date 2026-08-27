@@ -461,3 +461,23 @@ fn a_zero_payment_is_refused_without_asking_the_provider() {
         "payment.invalid",
     );
 }
+
+/// Pressing Complete with a mode lit and nothing taken yet is the everyday settle — and it is
+/// one thread taking the counter once, not twice (a second take froze the counter on 27 August).
+#[test]
+fn complete_bill_takes_the_balance_in_the_lit_mode() {
+    let scratch = Scratch::new("pay_complete_lit");
+    let app = a_shop(&scratch, "lit");
+    as_owner(&app, "staff_boss", "Meena");
+
+    let total = one_dosa(&app);
+    let number = crate::flows::complete_bill_on(&app, Some("UPI".to_owned())).expect("settled");
+    assert!(!number.is_empty());
+
+    let view = payments_on(&app).expect("the payments screen");
+    assert_eq!(
+        view.unconfirmed.len(),
+        1,
+        "the UPI payment for {total} was taken"
+    );
+}
