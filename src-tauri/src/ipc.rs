@@ -1290,22 +1290,41 @@ pub fn search_items_on(
 }
 
 /// Press a table: its running order comes into the cart, or a new order starts on it.
+/// The cart goes to a table. Lines typed at the counter and not yet in the books go with it —
+/// onto a free table as its order, onto a busy table's bill as new items for the kitchen.
 pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
     let table = TableId::new(table_id);
     let (label, found) = table_and_its_order(app, &table)?;
+    let config = app.shop_config();
 
     app.with_cart_mut(|state| {
-        *state = match found {
-            Some(order) => CartState::load(&order, Some(label)),
+        let typed = state.order_id().is_none() && !state.cart.lines().is_empty();
+        match found {
+            Some(order) if typed => {
+                // The kitchen ledger that comes with the order knows these lines are new.
+                let mut joined = CartState::load(&order, Some(label));
+                for line in state.cart.lines() {
+                    joined.cart.push(line.clone()).map_err(|e| {
+                        UiError::new(
+                            "cart.join",
+                            "These items could not go onto that table's bill.",
+                        )
+                        .with_detail(e.to_string())
+                    })?;
+                }
+                *state = joined;
+            }
+            Some(order) => *state = CartState::load(&order, Some(label)),
+            None if typed => state.place_on(table.clone(), label, None),
             // A free table: "press the table and start typing" is the flow.
             None => {
                 let mut fresh = CartState::new_order(mb_core::OrderType::DineIn);
                 fresh.place_on(table.clone(), label, None);
-                fresh
+                *state = fresh;
             }
-        };
-        cart_view(state, &app.shop_config())
+        }
+        cart_view(state, &config)
     })
 }
 
@@ -1336,71 +1355,61 @@ fn table_and_its_order(
     Ok((label, found))
 }
 
-/// The cart goes to a busy table: onto its bill, or beside it as a second party with a letter.
+/// A second party on a table, with its own letter: the one given, or the next free one. What
+/// was typed at the counter goes with it; a parked order in the cart stays where it is.
 pub fn join_table_on(app: &App, table_id: String, seat: Option<String>) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
-    let table = TableId::new(table_id.clone());
-    let (label, found) = table_and_its_order(app, &table)?;
+    let table = TableId::new(table_id);
+    let (label, _) = table_and_its_order(app, &table)?;
     let config = app.shop_config();
 
-    if let Some(letter) = seat {
-        let seat = mb_core::SubTable::parse(&letter).map_err(|e| {
-            UiError::new("table.seat", "A seat is one letter, A to Z.").with_detail(e.to_string())
-        })?;
-        let taken = app.with_shop(|shop| {
+    let taken: Vec<mb_core::SubTable> = app
+        .with_shop(|shop| {
             shop.db
                 .transaction(|tx| mb_db::Repos::new(tx).orders().list_open(OUTLET))
                 .map_err(|e| words::from_db(&e))
-        })?;
-        if taken
-            .iter()
-            .any(|o| o.core().table() == Some(&table) && o.core().seat() == Some(&seat))
-        {
-            return Err(UiError::new(
-                "table.seat_taken",
-                format!(
-                    "Table {label}{} already has a party. Choose another letter.",
-                    seat.as_str()
-                ),
-            )
-            .quietly());
-        }
-        return app.with_cart_mut(|state| {
-            state.place_on(table.clone(), label.clone(), Some(seat));
-            cart_view(state, &config)
-        });
-    }
+        })?
+        .iter()
+        .filter(|o| o.core().table() == Some(&table))
+        .filter_map(|o| o.core().seat().cloned())
+        .collect();
 
-    let Some(order) = found else {
-        // A free table is simply opened.
-        return open_table_on(app, table_id);
-    };
-    let into = order.core().id.as_str().to_owned();
-
-    // A bill that is already on the floor is merged as one, never retyped.
-    let parked = app.with_cart(|state| Ok(state.order_id().map(str::to_owned)))?;
-    if let Some(from) = parked {
-        if from != into {
-            crate::flows::park_open_order(app)?;
-            crate::floor::merge_orders_on(app, from, into.clone())?;
-        }
-        return open_order_on(app, into);
-    }
-
-    // Typed and not yet parked: the lines go onto that table's bill, and the kitchen ledger
-    // that comes with it knows they are new.
-    app.with_cart_mut(|state| {
-        let mut joined = CartState::load(&order, Some(label.clone()));
-        for line in state.cart.lines() {
-            joined.cart.push(line.clone()).map_err(|e| {
-                UiError::new(
-                    "cart.join",
-                    "These items could not go onto that table's bill.",
-                )
-                .with_detail(e.to_string())
+    let seat = match seat {
+        Some(letter) => {
+            let seat = mb_core::SubTable::parse(&letter).map_err(|e| {
+                UiError::new("table.seat", "A seat is one letter, A to Z.")
+                    .with_detail(e.to_string())
             })?;
+            if taken.contains(&seat) {
+                return Err(UiError::new(
+                    "table.seat_taken",
+                    format!(
+                        "Table {label}{} already has a party. Choose another letter.",
+                        seat.as_str()
+                    ),
+                )
+                .quietly());
+            }
+            seat
         }
-        *state = joined;
+        // A is the table's own party; the next party takes the first free letter after it.
+        None => ('B'..='Z')
+            .filter_map(|letter| mb_core::SubTable::parse(&letter.to_string()).ok())
+            .find(|candidate| !taken.contains(candidate))
+            .ok_or_else(|| {
+                UiError::new(
+                    "table.full",
+                    format!("Table {label} already has every letter from B to Z in use."),
+                )
+            })?,
+    };
+
+    app.with_cart_mut(|state| {
+        // A parked order stays on its own table; the new party starts from nothing.
+        if state.order_id().is_some() {
+            *state = CartState::new_order(mb_core::OrderType::DineIn);
+        }
+        state.place_on(table.clone(), label.clone(), Some(seat));
         cart_view(state, &config)
     })
 }

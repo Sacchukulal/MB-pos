@@ -283,6 +283,29 @@
   border-color: var(--border-strong);
 }
 
+/* The + for another party, under the print mark. Always there: a hand on a screen has no hover. */
+.mb-tile__split {
+  position: absolute;
+  right: var(--space-1);
+  bottom: var(--space-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tile-button);
+  height: var(--tile-button);
+  padding: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mb-tile__split:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* The tile's tools, and what "ticked" looks like. */
 
 /* Edit and delete, on hover. */
@@ -559,6 +582,12 @@
 .mb-processing__order--on:hover {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+/* The one the arrow keys are on: a ring on the edge, the same ring focus draws. */
+.mb-processing__order--highlighted {
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: var(--focus-ring-inset);
 }
 
 .mb-processing__where {
@@ -1027,10 +1056,60 @@
   box-shadow: inset var(--space-1) 0 0 0 var(--accent);
 }
 
-.mb-busy__choices {
+/* How many: the same box the suggestions pop in, with one number to type. */
+.mb-ask {
+  position: absolute;
+  z-index: var(--layer-panel);
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-2);
+  width: 100%;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: var(--border-width) solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+}
+
+.mb-ask__what {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-inline);
+}
+
+.mb-ask__name {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.mb-ask__price {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mb-ask__row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+}
+
+.mb-ask__box {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+}
+
+.mb-ask__keys {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 .mb-help {

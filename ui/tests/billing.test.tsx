@@ -389,3 +389,18 @@ describe('the processing orders (2026-08-27)', () => {
     expect(screen.getByText('Nothing cooking')).toBeInTheDocument();
   });
 });
+
+/** The arrow keys walk the processing orders; the row they are on is marked, in form. */
+describe('the processing orders under the arrow keys', () => {
+  it('marks the highlighted row and no other', () => {
+    const busy = (id: string) =>
+      table({ id, label: id, state: 'occupied', orderId: `ord_${id}`, minutes: 5 });
+    render(
+      <Processing orders={[busy('3'), busy('4')]} highlighted={1} onOpen={vi.fn()} />,
+    );
+    const rows = screen.getAllByRole('button');
+    expect(rows[0]?.className).not.toContain('--highlighted');
+    expect(rows[1]?.className).toContain('mb-processing__order--highlighted');
+    expect(rows[1]?.getAttribute('aria-current')).toBe('true');
+  });
+});

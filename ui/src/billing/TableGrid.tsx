@@ -16,12 +16,15 @@ export function TableGrid({
   filter,
   onOpen,
   onPrintBill,
+  onSplit,
 }: {
   tables: readonly TableView[];
   filter: string;
   onOpen: (table: TableView) => void;
   /** Carry the bill to this table. */
   onPrintBill: (table: TableView) => void;
+  /** A second party beside a busy table — the + on its tile. */
+  onSplit?: (table: TableView) => void;
 }) {
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -77,6 +80,7 @@ export function TableGrid({
                 dense={dense}
                 onOpen={() => onOpen(table)}
                 onPrintBill={() => onPrintBill(table)}
+                onSplit={onSplit ? () => onSplit(table) : undefined}
               />
             ))}
           </Scroller>
@@ -92,6 +96,7 @@ export function Tile({
   dense = false,
   onOpen,
   onPrintBill,
+  onSplit,
   picked,
   onTick,
   onEdit,
@@ -104,6 +109,8 @@ export function Tile({
   onOpen?: () => void;
   /** Carry the bill to this table. */
   onPrintBill?: () => void;
+  /** A second party beside this table, with the next free letter. */
+  onSplit?: () => void;
   /**
    * Ticked for a bulk action on the Floor screen — a different fact from `table.selected`, and
    * a separate prop on purpose.
@@ -212,6 +219,22 @@ export function Tile({
           aria-label={`Print the bill for table ${table.label}`}
         >
           <Icon name="printer" size="sm" />
+        </button>
+      ) : null}
+
+      {/*
+        The + : another party on the same table. Only on the table's own tile — a second
+        party's tile is its order, not the table — and only once the table is busy.
+      */}
+      {onSplit && table.orderId && table.id !== table.orderId ? (
+        <button
+          type="button"
+          className="mb-tile__split"
+          onClick={onSplit}
+          title={`Another party on table ${table.label}`}
+          aria-label={`Another party on table ${table.label}`}
+        >
+          <Icon name="plus" size="sm" />
         </button>
       ) : null}
 

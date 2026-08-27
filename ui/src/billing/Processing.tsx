@@ -1,5 +1,7 @@
 /** The orders the kitchen has, until they are billed. Drawn from the same list as the grid. */
 
+import { useEffect, useRef } from 'react';
+
 import { Badge, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 import { formatMinutes } from './TableGrid';
@@ -47,12 +49,24 @@ export function ProcessingHead({
 
 export function Processing({
   orders,
+  highlighted = -1,
   onOpen,
 }: {
   orders: readonly TableView[];
+  /** The row the arrow keys are on, or none. */
+  highlighted?: number;
   /** Put it in the cart — the same press as the tile. */
   onOpen: (order: TableView) => void;
 }) {
+  const list = useRef<HTMLUListElement>(null);
+  // The arrows never leave the highlighted row out of sight.
+  useEffect(() => {
+    if (highlighted < 0) return;
+    const row = list.current?.querySelectorAll('.mb-processing__order')[highlighted];
+    // A test's DOM has no scrolling to do.
+    if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+  }, [highlighted]);
+
   if (orders.length === 0) {
     return (
       <EmptyState
@@ -63,8 +77,8 @@ export function Processing({
     );
   }
   return (
-    <ul className="mb-processing">
-      {orders.map((order) => (
+    <ul className="mb-processing" ref={list}>
+      {orders.map((order, index) => (
         <li key={order.id}>
           <button
             type="button"
@@ -73,8 +87,10 @@ export function Processing({
               order.state === 'waiting' && 'mb-processing__order--waiting',
               order.state === 'late' && 'mb-processing__order--late',
               order.selected && 'mb-processing__order--on',
+              index === highlighted && 'mb-processing__order--highlighted',
             )}
             aria-pressed={order.selected}
+            aria-current={index === highlighted ? 'true' : undefined}
             onClick={() => onOpen(order)}
           >
             {/* A real table says so; parcel and self service already name themselves. */}

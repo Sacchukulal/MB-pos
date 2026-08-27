@@ -7,10 +7,10 @@ import type { TableView } from '../ipc/generated/TableView';
 
 export type Mode =
   | { kind: 'searching' }
-  /** Moving around the table grid. */
-  | { kind: 'grid'; index: number }
-  /** The chosen table is busy: merge, or take a sub-table letter (1.6). */
-  | { kind: 'table-busy'; table: TableView; choice: number }
+  /** An item was chosen; how many of it is being typed. */
+  | { kind: 'quantity'; item: MenuItemView; text: string }
+  /** Moving through the processing orders. */
+  | { kind: 'processing'; index: number }
   /** The shortcut sheet. */
   | { kind: 'help' };
 
@@ -23,6 +23,8 @@ export interface State {
   suggestions: readonly MenuItemView[];
   /** The floor, so Enter on a typed table name can resolve it. */
   tables: readonly TableView[];
+  /** The orders the kitchen has, in the order the panel shows them. */
+  processing: readonly TableView[];
   /** And the LOCK is what stops a parcel counter re-picking it. */
   orderType: string;
   orderTypeLocked: boolean;
@@ -47,8 +49,11 @@ export const ORDER_TYPES = [
 export type Event =
   | { kind: 'key'; key: string; shift?: boolean }
   | { kind: 'typed'; text: string }
+  /** What is in the quantity box. */
+  | { kind: 'typed-qty'; text: string }
   | { kind: 'suggestions'; items: readonly MenuItemView[] }
   | { kind: 'tables'; tables: readonly TableView[] }
+  | { kind: 'processing'; orders: readonly TableView[] }
   | { kind: 'cart'; hasItems: boolean; kitchenUpToDate: boolean }
   /** The order type, and whether the shop's settings lock it. */
   | { kind: 'order-type'; value: string; locked: boolean }
@@ -67,12 +72,7 @@ export type Command =
   | { do: 'complete-bill' }
   | { do: 'new-order' }
   | { do: 'set-order-type'; value: string }
-  | { do: 'focus-search' }
-  | { do: 'merge-into'; tableId: string }
-  | { do: 'sub-table'; tableId: string; letter: string };
-
-/** B to H — seven second parties on one table is more than anybody needs. */
-export const SUB_TABLE_LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+  | { do: 'focus-search' };
 
 export function initial(orderType = 'Dine in'): State {
   return {
@@ -81,6 +81,7 @@ export function initial(orderType = 'Dine in'): State {
     highlighted: -1,
     suggestions: [],
     tables: [],
+    processing: [],
     orderType,
     orderTypeLocked: false,
     cartHasItems: false,
@@ -107,6 +108,15 @@ export function reduce(state: State, event: Event): [State, Command[]] {
     case 'tables':
       return [{ ...state, tables: event.tables }, []];
 
+    case 'processing': {
+      // A highlight that outlives its row goes back to the box.
+      const mode =
+        state.mode.kind === 'processing' && state.mode.index >= event.orders.length
+          ? { kind: 'searching' as const }
+          : state.mode;
+      return [{ ...state, processing: event.orders, mode }, []];
+    }
+
     case 'cart':
       return [
         {
@@ -127,11 +137,14 @@ export function reduce(state: State, event: Event): [State, Command[]] {
       ];
     }
 
+    case 'typed-qty':
+      if (state.mode.kind !== 'quantity') return [state, []];
+      return [{ ...state, mode: { ...state.mode, text: event.text } }, []];
+
     case 'tap-suggestion': {
       const item = state.suggestions[event.index];
       if (!item) return [state, []];
-      // A tap adds one, the same as Enter — the quantity is changed on the line.
-      return addOne(state, item);
+      return ask(state, item);
     }
 
     case 'tap-tile': {
@@ -149,76 +162,79 @@ export function reduce(state: State, event: Event): [State, Command[]] {
   }
 }
 
-/** One of it, and the box is clear for the next: the most frequent action is one keystroke. */
-function addOne(state: State, item: MenuItemView): [State, Command[]] {
-  return [
-    { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 },
-    [{ do: 'add-item', itemId: item.id, qty: '1' }],
-  ];
+/** An item was chosen: ask how many, with one already written in. */
+function ask(state: State, item: MenuItemView): [State, Command[]] {
+  return [{ ...state, mode: { kind: 'quantity', item, text: '1' } }, []];
+}
+
+/** "2", "0.5", "1.25" — or one, when nothing usable was typed. */
+export function quantityOf(text: string): string {
+  const n = Number(text.trim());
+  return Number.isFinite(n) && n > 0 ? text.trim() : '1';
+}
+
+/** One more or one fewer, never below one whole. */
+function stepQuantity(text: string, by: number): string {
+  const n = Number(text.trim());
+  const now = Number.isFinite(n) && n > 0 ? n : 1;
+  const next = Math.round((now + by) * 1000) / 1000;
+  return String(next >= 1 ? next : now);
+}
+
+/** Back to the box, with nothing typed in it — the counter is ready for the next thing. */
+function cleared(state: State): State {
+  return { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 };
 }
 
 function key(state: State, pressed: string): [State, Command[]] {
   if (state.mode.kind === 'help') {
     if (pressed === 'Escape' || pressed === '?') {
-      return [{ ...state, mode: { kind: 'searching' } }, []];
-    }
-    return [state, []];
-  }
-
-  // The busy-table chooser.
-  if (state.mode.kind === 'table-busy') {
-    const busy = state.mode;
-    // 0 is "merge"; 1..7 are the letters B to H.
-    const options = 1 + SUB_TABLE_LETTERS.length;
-    if (pressed === 'Escape') {
-      return [{ ...state, mode: { kind: 'searching' } }, []];
-    }
-    if (pressed === 'ArrowRight' || pressed === 'ArrowDown') {
-      return [
-        { ...state, mode: { ...busy, choice: (busy.choice + 1) % options } },
-        [],
-      ];
-    }
-    if (pressed === 'ArrowLeft' || pressed === 'ArrowUp') {
-      return [
-        {
-          ...state,
-          mode: { ...busy, choice: (busy.choice - 1 + options) % options },
-        },
-        [],
-      ];
-    }
-    if (pressed === 'Enter') {
-      if (busy.choice === 0) {
-        return [
-          { ...state, mode: { kind: 'searching' } },
-          [{ do: 'merge-into', tableId: busy.table.id }],
-        ];
-      }
-      const letter = SUB_TABLE_LETTERS[busy.choice - 1];
-      if (!letter) return [state, []];
-      return [
-        { ...state, mode: { kind: 'searching' } },
-        [{ do: 'sub-table', tableId: busy.table.id, letter }],
-      ];
-    }
-    return [state, []];
-  }
-
-  // The grid.
-  if (state.mode.kind === 'grid') {
-    const grid = state.mode;
-    if (pressed === 'Escape') {
       return [{ ...state, mode: { kind: 'searching' } }, [{ do: 'focus-search' }]];
     }
-    const moved = moveInGrid(grid.index, pressed, state.tables.length);
-    if (moved !== null) {
-      return [{ ...state, mode: { kind: 'grid', index: moved } }, []];
+    return [state, []];
+  }
+
+  // How many of the chosen item.
+  if (state.mode.kind === 'quantity') {
+    const asking = state.mode;
+    if (pressed === 'Escape') {
+      // Nothing was added; the suggestions are still there to choose from.
+      return [{ ...state, mode: { kind: 'searching' } }, [{ do: 'focus-search' }]];
     }
     if (pressed === 'Enter') {
-      const table = state.tables[grid.index];
-      if (!table) return [state, []];
-      return openTile(state, table);
+      return [
+        cleared(state),
+        [
+          { do: 'add-item', itemId: asking.item.id, qty: quantityOf(asking.text) },
+          { do: 'focus-search' },
+        ],
+      ];
+    }
+    if (pressed === 'ArrowUp' || pressed === 'ArrowDown') {
+      const text = stepQuantity(asking.text, pressed === 'ArrowUp' ? 1 : -1);
+      return [{ ...state, mode: { ...asking, text } }, []];
+    }
+    return [state, []];
+  }
+
+  // The processing orders.
+  if (state.mode.kind === 'processing') {
+    const at = state.mode.index;
+    const count = state.processing.length;
+    if (pressed === 'Escape') {
+      return [cleared(state), [{ do: 'new-order' }, { do: 'focus-search' }]];
+    }
+    if (pressed === 'ArrowDown' && count > 0) {
+      return [{ ...state, mode: { kind: 'processing', index: (at + 1) % count } }, []];
+    }
+    if (pressed === 'ArrowUp' && count > 0) {
+      return [{ ...state, mode: { kind: 'processing', index: (at - 1 + count) % count } }, []];
+    }
+    if (pressed === 'Enter') {
+      const order = state.processing[at];
+      if (!order) return [cleared(state), [{ do: 'focus-search' }]];
+      // Into the cart. The next Enter, on an empty box, completes it.
+      return [cleared(state), [openCommand(order), { do: 'focus-search' }]];
     }
     return [state, []];
   }
@@ -234,16 +250,10 @@ function key(state: State, pressed: string): [State, Command[]] {
   }
 
   if (pressed === 'Escape') {
-    // Unwinds ONE layer at a time.
-    if (state.suggestions.length > 0 || state.text !== '') {
-      return [
-        { ...state, text: '', suggestions: [], highlighted: -1 },
-        [{ do: 'search', text: '' }],
-      ];
-    }
-    // A typed cart is nothing in the books yet, so it goes without a question; a parked order
-    // is cancelled with a reason, from the actions.
-    return [state, [{ do: 'new-order' }]];
+    // From anywhere: a fresh order, and the box ready to type into. A typed cart is nothing
+    // in the books yet, so it goes without a question; a parked order is cancelled with a
+    // reason, from the actions.
+    return [cleared(state), [{ do: 'new-order' }, { do: 'focus-search' }]];
   }
 
   const hasSuggestions = state.suggestions.length > 0;
@@ -255,10 +265,10 @@ function key(state: State, pressed: string): [State, Command[]] {
         [],
       ];
     }
-    // Down on an empty box with nothing suggested enters the grid — which is how a cashier gets
-    // to the floor without the mouse.
-    if (state.text === '' && state.tables.length > 0) {
-      return [{ ...state, mode: { kind: 'grid', index: 0 } }, []];
+    // Down on an empty box with nothing suggested moves into the processing orders — which is
+    // how a cashier reaches a bill to complete without the mouse.
+    if (state.text === '' && state.processing.length > 0) {
+      return [{ ...state, mode: { kind: 'processing', index: 0 } }, []];
     }
     return [state, []];
   }
@@ -285,27 +295,26 @@ function key(state: State, pressed: string): [State, Command[]] {
   }
 
   if (pressed === 'Enter') {
-    // A highlighted suggestion wins.
-    if (hasSuggestions && state.highlighted >= 0) {
-      const item = state.suggestions[state.highlighted];
-      if (item) return addOne(state, item);
-    }
-
-    // Type a table name and press Enter — the trick, and it takes precedence over item search
-    // because a cashier types "6" far more often than they mean an item called 6.
+    // Type a table name and press Enter — the trick, and it comes BEFORE the suggestions
+    // because a cashier types "6" far more often than they mean an item with a 6 in its name.
     if (state.text !== '') {
       const table = matchTable(state.tables, state.text);
       if (table) {
-        return [
-          { ...state, text: '', suggestions: [], highlighted: -1 },
-          [{ do: 'open-table', tableId: table.id }],
-        ];
+        return [{ ...state, text: '', suggestions: [], highlighted: -1 }, [openCommand(table)]];
       }
-      // Not a table: fall through to search, which is already happening.
-      return [state, []];
     }
 
-    // ENTER ON AN EMPTY BOX.
+    // Then a highlighted suggestion.
+    if (hasSuggestions && state.highlighted >= 0) {
+      const item = state.suggestions[state.highlighted];
+      if (item) return ask(state, item);
+    }
+
+    // Not a table and nothing suggested: the search is already happening.
+    if (state.text !== '') return [state, []];
+
+    // ENTER ON AN EMPTY BOX. The kitchen ticket first — the order then waits in the processing
+    // orders — and the bill once the kitchen has everything.
     if (state.cartHasItems) {
       return [
         state,
@@ -322,46 +331,20 @@ function key(state: State, pressed: string): [State, Command[]] {
   return [state, []];
 }
 
-/** A tile was chosen, by key or by tap. */
+/** A tile was chosen, by key or by tap. Typed items go with the cashier — Rust sees to that. */
 function openTile(state: State, table: TableView): [State, Command[]] {
-  // A busy table with a dine-in order in the cart is the sub-table question.
-  if (table.orderId !== null && state.cartHasItems) {
-    return [
-      { ...state, mode: { kind: 'table-busy', table, choice: 0 } },
-      [],
-    ];
-  }
   return [
-    { ...state, mode: { kind: 'searching' }, text: '', suggestions: [] },
+    { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 },
     [openCommand(table)],
   ];
 }
 
-/** A tile with a table opens the table; a parcel or self-service tile IS its order. */
+/** A tile with a table opens the table; a parcel, a self-service order or a second party IS its order. */
 function openCommand(table: TableView): Command {
   if (table.orderId !== null && table.id === table.orderId) {
     return { do: 'open-order', orderId: table.orderId };
   }
   return { do: 'open-table', tableId: table.id };
-}
-
-/** Two-dimensional movement over a grid that wraps. */
-export const GRID_COLUMNS = 6;
-
-function moveInGrid(index: number, pressed: string, count: number): number | null {
-  if (count === 0) return null;
-  switch (pressed) {
-    case 'ArrowRight':
-      return (index + 1) % count;
-    case 'ArrowLeft':
-      return (index - 1 + count) % count;
-    case 'ArrowDown':
-      return (index + GRID_COLUMNS) % count;
-    case 'ArrowUp':
-      return (index - GRID_COLUMNS + count * GRID_COLUMNS) % count;
-    default:
-      return null;
-  }
 }
 
 /** Does this text name a table? */
@@ -380,19 +363,19 @@ export const SHORTCUTS: readonly {
   what: string;
   group: string;
 }[] = [
-  { group: 'Searching', keys: 'type', what: 'Search the menu' },
+  { group: 'Searching', keys: 'type', what: 'Search the menu — from anywhere on the screen' },
   { group: 'Searching', keys: '↑ ↓', what: 'Move through the suggestions' },
-  { group: 'Searching', keys: 'Enter', what: 'Add one of the highlighted item' },
-  { group: 'Searching', keys: 'Esc', what: 'Clear the search' },
+  { group: 'Searching', keys: 'Enter', what: 'Choose the highlighted item, then say how many' },
+  { group: 'Searching', keys: '↑ ↓ / Enter / Esc', what: 'How many: one more or fewer, add it, or leave it' },
   { group: 'The order', keys: 'press the quantity', what: 'Change how many, on the line' },
-  { group: 'The order', keys: 'Enter', what: 'On an empty box: print the kitchen ticket, then complete the bill' },
-  { group: 'The order', keys: 'table number, Enter', what: "Open that table's order" },
+  { group: 'The order', keys: 'Enter', what: 'On an empty box: print the kitchen ticket — the order waits under Processing orders' },
+  { group: 'The order', keys: 'Enter', what: 'On an order from Processing orders: complete the bill' },
+  { group: 'The order', keys: 'table number, Enter', what: "Open that table's order — typed items go with you" },
   { group: 'The order', keys: '← →', what: 'Change the order type (unless the shop locks it)' },
-  { group: 'The order', keys: 'Esc', what: 'Start a new order' },
-  { group: 'The floor', keys: '↓', what: 'From an empty box, move into the table grid' },
-  { group: 'The floor', keys: '← ↑ → ↓', what: 'Move around the grid' },
-  { group: 'The floor', keys: 'Enter', what: 'Open the highlighted table' },
-  { group: 'The floor', keys: 'Esc', what: 'Back to the search box' },
+  { group: 'The order', keys: 'Esc', what: 'New order, from anywhere' },
+  { group: 'Processing orders', keys: '↓', what: 'From an empty box, into the processing orders' },
+  { group: 'Processing orders', keys: '↑ ↓', what: 'Move through them' },
+  { group: 'Processing orders', keys: 'Enter', what: 'Open it in the cart; Enter again completes the bill' },
   { group: 'Help', keys: '?', what: 'Show this sheet' },
   // The key is handled by the shell rather than by this reducer — it must work on every screen,
   // not only on this one — but it is documented HERE, because the help sheet is generated from

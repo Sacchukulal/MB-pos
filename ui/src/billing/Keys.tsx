@@ -1,12 +1,10 @@
-/**
- * The keyboard, on screen: the suggestion list, the quantity popup, the busy-table chooser and
- * the help sheet.
- */
+/** The keyboard, on screen: the suggestion list, the how-many box and the help sheet. */
 
-import { Button, Modal } from '../kit';
+import { useEffect, useRef } from 'react';
+
+import { Button, Modal, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
-import { SHORTCUTS, SUB_TABLE_LETTERS, type Mode } from './keyboard';
-import type { TableView } from '../ipc/generated/TableView';
+import { SHORTCUTS, type Mode } from './keyboard';
 
 export function Suggestions({
   items,
@@ -46,57 +44,52 @@ export function Suggestions({
   );
 }
 
-/** A busy table: merge, or take a sub-table letter. */
-export function BusyTable({
+/**
+ * How many of the chosen item. A box under the search box, not a dialog: the keyboard engine
+ * owns every key in it (Enter adds, arrows step, Esc leaves), so nothing here decides.
+ */
+export function HowMany({
   mode,
-  taken,
-  onChoose,
-  onCancel,
+  onChange,
+  onAdd,
 }: {
-  mode: Extract<Mode, { kind: 'table-busy' }>;
-  taken: readonly string[];
-  onChoose: (choice: number) => void;
-  onCancel: () => void;
+  mode: Extract<Mode, { kind: 'quantity' }>;
+  onChange: (text: string) => void;
+  /** The button, for a hand on the screen — the same as Enter. */
+  onAdd: () => void;
 }) {
+  const box = useRef<HTMLInputElement>(null);
+  // The "1" is selected, so typing a number replaces it and Enter alone keeps it.
+  useEffect(() => {
+    box.current?.focus();
+    box.current?.select();
+  }, []);
   return (
-    <Modal
-      open
-      title={`Table ${mode.table.label} is busy`}
-      onClose={onCancel}
-      wide
-    >
-      <div className="mb-stack">
-        <span>
-          Add these items to the order already on that table, or start a second
-          one beside it.
-        </span>
-        <div className="mb-busy__choices">
-          <Button
-            variant={mode.choice === 0 ? 'primary' : 'secondary'}
-            onClick={() => onChoose(0)}
-          >
-            Merge into {mode.table.label}
-          </Button>
-          {SUB_TABLE_LETTERS.map((letter, index) => (
-            <Button
-              key={letter}
-              variant={mode.choice === index + 1 ? 'primary' : 'secondary'}
-              // A letter already in use is refused rather than hidden, so the floor's shape
-              // stays legible.
-              disabled={taken.includes(letter)}
-              onClick={() => onChoose(index + 1)}
-            >
-              {mode.table.label}
-              {letter}
-            </Button>
-          ))}
-        </div>
-        <span className="mb-field__hint">
-          Arrows move, Enter chooses, Esc goes back. Only the new items go to
-          the kitchen.
-        </span>
+    <div className="mb-ask" role="dialog" aria-label={`How many ${mode.item.name}`}>
+      <div className="mb-ask__what">
+        <span className="mb-ask__name">{mode.item.name}</span>
+        <span className="mb-ask__price">{mode.item.price.text}</span>
       </div>
-    </Modal>
+      <div className="mb-ask__row">
+        <input
+          ref={box}
+          className="mb-input mb-input--number mb-ask__box"
+          data-keys="engine"
+          inputMode="decimal"
+          autoComplete="off"
+          aria-label="How many"
+          value={mode.text}
+          onChange={(event) => onChange(onlyAmount(event.target.value))}
+        />
+        <Button variant="primary" onMouseDown={(event) => event.preventDefault()} onClick={onAdd}>
+          Add
+        </Button>
+      </div>
+      <span className="mb-ask__keys">
+        <kbd className="mb-kbd">↑ ↓</kbd> more or fewer <kbd className="mb-kbd">Enter</kbd> add{' '}
+        <kbd className="mb-kbd">Esc</kbd> leave it
+      </span>
+    </div>
   );
 }
 
@@ -133,14 +126,4 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
       </div>
     </Modal>
   );
-}
-
-/** Which sub-table letters are already in use on a table. */
-export function takenLetters(
-  tables: readonly TableView[],
-  label: string,
-): string[] {
-  return tables
-    .filter((t) => t.label.startsWith(label) && t.label.length === label.length + 1)
-    .map((t) => t.label.slice(label.length));
 }

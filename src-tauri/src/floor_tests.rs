@@ -901,7 +901,8 @@ fn typed_items_join_the_bill_on_a_busy_table() {
     })
     .expect("a tea");
 
-    let view = crate::ipc::join_table_on(&app, "tbl_2".to_owned(), None).expect("joined");
+    // Typing the table's number is enough: there is no question to answer.
+    let view = crate::ipc::open_table_on(&app, "tbl_2".to_owned()).expect("joined");
     assert_eq!(view.order_id.as_deref(), Some(first.as_str()));
     assert_eq!(view.lines.len(), 2, "the dosa and the tea");
     assert!(!view.kitchen_up_to_date, "the tea is new to the kitchen");
@@ -910,4 +911,68 @@ fn typed_items_join_the_bill_on_a_busy_table() {
         1,
         "nothing was written yet"
     );
+}
+
+/// Typed items go WITH the cashier to a free table — they were never on the floor to lose.
+#[test]
+fn typed_items_go_with_the_cashier_to_a_free_table() {
+    let scratch = Scratch::new("open_free_typed");
+    let app = a_shop_with_a_room(&scratch);
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .add(
+                snapshot("itm_tea", 2_000),
+                Qty::from_whole(2).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a tea");
+
+    let view = crate::ipc::open_table_on(&app, "tbl_3".to_owned()).expect("opened");
+    assert_eq!(view.table.as_deref(), Some("3"));
+    assert_eq!(view.lines.len(), 1, "the tea came along");
+    assert!(view.order_id.is_none(), "and nothing was written yet");
+}
+
+/// The + on a busy table: each press is the next free letter, and a parked order never moves.
+#[test]
+fn the_next_free_letter_is_chosen_when_none_is_given() {
+    let scratch = Scratch::new("join_next");
+    let app = a_shop_with_a_room(&scratch);
+    let first = seat(&app, "ord_first", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
+
+    // The first party is A, so the first press is B.
+    let b = crate::ipc::join_table_on(&app, "tbl_1".to_owned(), None).expect("seated");
+    assert_eq!(b.table.as_deref(), Some("1B"));
+    assert!(b.is_empty, "a new party starts from nothing");
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .add(
+                snapshot("itm_tea", 2_000),
+                Qty::from_whole(1).expect("qty"),
+                None,
+                Vec::new(),
+            )
+            .expect("added");
+        Ok(())
+    })
+    .expect("a tea");
+    let parked_b = crate::flows::park_open_order(&app).expect("parked");
+    assert_eq!(parked_b.core.seat().map(|s| s.as_str()), Some("B"));
+
+    // With B taken and B's order still open in the cart, the next press is C — and B stays B.
+    let c = crate::ipc::join_table_on(&app, "tbl_1".to_owned(), None).expect("seated");
+    assert_eq!(c.table.as_deref(), Some("1C"));
+    assert!(c.order_id.is_none(), "the parked order was not carried to the new seat");
+    let still_b = read(&app, &parked_b.core.id);
+    assert_eq!(still_b.core().seat().map(|s| s.as_str()), Some("B"));
+
+    // Pressing the table itself still opens the first party.
+    let opened = crate::ipc::open_table_on(&app, "tbl_1".to_owned()).expect("opened");
+    assert_eq!(opened.order_id.as_deref(), Some(first.as_str()));
 }

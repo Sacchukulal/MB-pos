@@ -32,7 +32,7 @@ import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
-import { BusyTable, HelpSheet, Suggestions, takenLetters } from './Keys';
+import { HelpSheet, HowMany, Suggestions } from './Keys';
 import {
   initial as initialKeys,
   reduce as reduceKeys,
@@ -365,19 +365,37 @@ export function Billing() {
     [report],
   );
 
-  /** The delta only — never the whole order. */
+  /**
+   * The delta only — never the whole order. The ticket parks the order, which then waits under
+   * Processing orders; the counter is clear for the next customer at once.
+   */
   const printKitchen = useCallback(async () => {
     try {
       await call('print_kitchen_ticket');
-      setCart(await call('current_cart'));
+      setCart(await call('cart_clear', { keepType: true }));
       // The ticket is what turns a cart into an open order, so the floor is re-read here rather
       // than on the next tick fifteen seconds later.
       await refreshFloor();
+      searchBox.current?.focus();
       toast.show('ok', 'Kitchen ticket sent.');
     } catch (cause) {
       report(cause);
     }
   }, [refreshFloor, report, toast]);
+
+  /** The + on a busy table: a second party beside it, with the next free letter. */
+  const splitTable = useCallback(
+    async (table: TableView) => {
+      try {
+        setCart(await call('join_table', { tableId: table.id, seat: null }));
+        await refreshFloor();
+        searchBox.current?.focus();
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [refreshFloor, report],
+  );
 
   /** The cook lost the paper. */
   const reprintKitchen = useCallback(async () => {
@@ -505,36 +523,9 @@ export function Billing() {
         case 'complete-bill':
           act(completeBill);
           return;
-        case 'merge-into':
-          try {
-            setCart(await call('join_table', { tableId: command.tableId, seat: null }));
-            await refreshFloor();
-            toast.show('ok', 'On that table’s bill. Only the new items go to the kitchen.');
-          } catch (cause) {
-            report(cause);
-          }
-          return;
-        case 'sub-table':
-          try {
-            setCart(await call('join_table', { tableId: command.tableId, seat: command.letter }));
-          } catch (cause) {
-            report(cause);
-          }
-          return;
       }
     },
-    [
-      addItem,
-      completeBill,
-      newOrder,
-      openOrderById,
-      openTableById,
-      printKitchen,
-      refreshFloor,
-      report,
-      setOrderType,
-      toast,
-    ],
+    [addItem, completeBill, newOrder, openOrderById, openTableById, printKitchen, setOrderType],
   );
 
   // Perform one batch per committed dispatch.
@@ -547,6 +538,10 @@ export function Billing() {
   useEffect(() => {
     dispatch({ kind: 'tables', tables });
   }, [tables]);
+
+  useEffect(() => {
+    dispatch({ kind: 'processing', orders: processing });
+  }, [processing]);
 
   useEffect(() => {
     dispatch({
@@ -583,6 +578,19 @@ export function Billing() {
         event.target instanceof HTMLTextAreaElement;
       // Only the boxes that belong to the keyboard engine feed it.
       if (editing && (event.target as HTMLElement).dataset.keys !== 'engine') return;
+      // A character typed anywhere on the screen lands in the search box: after a tap on a
+      // tile or a button, nobody has to click into the box first.
+      if (
+        !editing &&
+        event.key.length === 1 &&
+        event.key !== '?' &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey
+      ) {
+        searchBox.current?.focus();
+        return;
+      }
       const interesting = [
         'Enter', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '?',
       ];
@@ -648,11 +656,19 @@ export function Billing() {
                 dispatch({ kind: 'typed', text: event.target.value });
               }}
             />
-            <Suggestions
-              items={keys.suggestions}
-              highlighted={keys.highlighted}
-              onPick={(index) => dispatch({ kind: 'tap-suggestion', index })}
-            />
+            {keys.mode.kind === 'quantity' ? (
+              <HowMany
+                mode={keys.mode}
+                onChange={(text) => dispatch({ kind: 'typed-qty', text })}
+                onAdd={() => dispatch({ kind: 'key', key: 'Enter' })}
+              />
+            ) : (
+              <Suggestions
+                items={keys.suggestions}
+                highlighted={keys.highlighted}
+                onPick={(index) => dispatch({ kind: 'tap-suggestion', index })}
+              />
+            )}
           </div>
 
           {/* Esc from an empty box does the same — see the keyboard engine. */}
@@ -704,6 +720,7 @@ export function Billing() {
               filter={filter}
               onOpen={openTable}
               onPrintBill={printTheBill}
+              onSplit={(table) => void splitTable(table)}
             />
           )}
 
@@ -718,7 +735,11 @@ export function Billing() {
         >
           <div className="mb-processing__panel">
             <Scroller inset className="mb-processing__body">
-              <Processing orders={processing} onOpen={openTable} />
+              <Processing
+                orders={processing}
+                highlighted={keys.mode.kind === 'processing' ? keys.mode.index : -1}
+                onOpen={openTable}
+              />
             </Scroller>
           </div>
         </div>
@@ -1019,22 +1040,6 @@ export function Billing() {
           </Button>
         </div>
       </div>
-
-      {keys.mode.kind === 'table-busy' ? (
-        <BusyTable
-          mode={keys.mode}
-          taken={takenLetters(tables, keys.mode.table.label)}
-          onChoose={(choice) => {
-            // Tap and key take the same road: move the highlight, then Enter.
-            const steps = choice - (keys.mode.kind === 'table-busy' ? keys.mode.choice : 0);
-            for (let n = 0; n < Math.abs(steps); n += 1) {
-              dispatch({ kind: 'key', key: steps > 0 ? 'ArrowRight' : 'ArrowLeft' });
-            }
-            dispatch({ kind: 'key', key: 'Enter' });
-          }}
-          onCancel={() => dispatch({ kind: 'key', key: 'Escape' })}
-        />
-      ) : null}
 
       {keys.mode.kind === 'help' ? (
         <HelpSheet onClose={() => dispatch({ kind: 'key', key: 'Escape' })} />

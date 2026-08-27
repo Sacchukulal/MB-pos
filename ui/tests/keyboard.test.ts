@@ -6,8 +6,8 @@ import {
   MAX_SUGGESTIONS,
   ORDER_TYPES,
   SHORTCUTS,
-  SUB_TABLE_LETTERS,
   initial,
+  quantityOf,
   reduce,
   type Command,
   type Event,
@@ -62,16 +62,20 @@ const suggest = (...items: MenuItemView[]): Event => ({
   items,
 });
 const floor = (...tables: TableView[]): Event => ({ kind: 'tables', tables });
+const cooking = (...orders: TableView[]): Event => ({ kind: 'processing', orders });
 const cart = (hasItems: boolean, kitchenUpToDate = true): Event => ({
   kind: 'cart',
   hasItems,
   kitchenUpToDate,
 });
 
+/** Typed, suggested, chosen: the state a cashier is in the moment the how-many box opens. */
+const chosen = (): State =>
+  run(initial(), type('dos'), suggest(item('itm_dosa', 'Masala Dosa')), press('Enter'))[0];
+
 describe('searching', () => {
   it('typing searches, and the first result is highlighted', () => {
-    // Highlighted immediately, so Enter is always one keystroke away — that is what makes
-    // "name, Enter, Enter" the whole interaction.
+    // Highlighted immediately, so Enter is always one keystroke away.
     const [state, commands] = run(
       initial(),
       type('dos'),
@@ -85,8 +89,6 @@ describe('searching', () => {
   });
 
   it('never offers more than ten suggestions', () => {
-    // Not a performance limit: a list you can choose from without reading is faster than a list
-    // that is complete.
     const many = Array.from({ length: 40 }, (_, n) => item(`i${n}`, `Item ${n}`));
     const [state] = run(initial(), suggest(...many));
     expect(state.suggestions).toHaveLength(MAX_SUGGESTIONS);
@@ -101,31 +103,72 @@ describe('searching', () => {
     expect(state.highlighted).toBe(2);
   });
 
-  it('Enter on a suggestion adds ONE, and clears the box for the next', () => {
+  it('Enter on a suggestion asks how many, with one written in, and adds nothing yet', () => {
     const [state, commands] = run(
       initial(),
       type('dos'),
       suggest(item('itm_dosa', 'Masala Dosa')),
       press('Enter'),
     );
-    expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }]);
-    expect(state.text).toBe('');
-    expect(state.mode.kind).toBe('searching');
+    expect(commands).toEqual([]);
+    expect(state.mode).toEqual({ kind: 'quantity', item: item('itm_dosa', 'Masala Dosa'), text: '1' });
+    // The search is still there behind it, for Esc to come back to.
+    expect(state.text).toBe('dos');
   });
 
   it('a tap on a suggestion does the same', () => {
-    const [, commands] = run(
-      initial(),
-      type('dos'),
-      suggest(item('itm_dosa', 'Masala Dosa')),
-      { kind: 'tap-suggestion', index: 0 },
-    );
-    expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }]);
+    const [byKey] = run(initial(), type('dos'), suggest(item('itm_dosa', 'Masala Dosa')), press('Enter'));
+    const [byTap] = run(initial(), type('dos'), suggest(item('itm_dosa', 'Masala Dosa')), {
+      kind: 'tap-suggestion',
+      index: 0,
+    });
+    expect(byTap.mode).toEqual(byKey.mode);
   });
 });
 
+describe('how many (step 2 of the counter flow)', () => {
+  it('Enter alone adds one, and clears the box for the next item', () => {
+    const [state, commands] = run(chosen(), press('Enter'));
+    expect(commands).toEqual([
+      { do: 'add-item', itemId: 'itm_dosa', qty: '1' },
+      { do: 'focus-search' },
+    ]);
+    expect(state.mode.kind).toBe('searching');
+    expect(state.text).toBe('');
+    expect(state.suggestions).toHaveLength(0);
+  });
 
-describe('T2 — Enter on an empty box, all four cases (audit 2.3)', () => {
+  it('a typed number replaces the one', () => {
+    const [, commands] = run(chosen(), { kind: 'typed-qty', text: '3' }, press('Enter'));
+    expect(commands[0]).toEqual({ do: 'add-item', itemId: 'itm_dosa', qty: '3' });
+  });
+
+  it('the arrows step it, never below one', () => {
+    let [state] = run(chosen(), press('ArrowUp'), press('ArrowUp'));
+    expect(state.mode).toMatchObject({ kind: 'quantity', text: '3' });
+    [state] = run(state, press('ArrowDown'), press('ArrowDown'), press('ArrowDown'));
+    expect(state.mode).toMatchObject({ kind: 'quantity', text: '1' });
+    // A weight steps by whole ones too.
+    [state] = run(chosen(), { kind: 'typed-qty', text: '0.5' }, press('ArrowUp'));
+    expect(state.mode).toMatchObject({ kind: 'quantity', text: '1.5' });
+  });
+
+  it('Esc leaves without adding, and the suggestions are still there', () => {
+    const [state, commands] = run(chosen(), press('Escape'));
+    expect(commands).toEqual([{ do: 'focus-search' }]);
+    expect(state.mode.kind).toBe('searching');
+    expect(state.suggestions).toHaveLength(1);
+  });
+
+  it('nothing usable typed means one', () => {
+    expect(quantityOf('')).toBe('1');
+    expect(quantityOf('0')).toBe('1');
+    expect(quantityOf('.')).toBe('1');
+    expect(quantityOf('2.5')).toBe('2.5');
+  });
+});
+
+describe('Enter on an empty box (step 3)', () => {
   it('prints the kitchen ticket when the kitchen has not seen everything', () => {
     const [, commands] = run(initial(), cart(true, false), press('Enter'));
     expect(commands).toEqual([{ do: 'print-kitchen' }]);
@@ -137,8 +180,6 @@ describe('T2 — Enter on an empty box, all four cases (audit 2.3)', () => {
   });
 
   it('opens the first running order when the cart is empty', () => {
-    // The case that matters more than it looks: it is how a cashier gets back to work without
-    // touching the mouse.
     const [, commands] = run(
       initial(),
       cart(false),
@@ -154,31 +195,61 @@ describe('T2 — Enter on an empty box, all four cases (audit 2.3)', () => {
   });
 });
 
-describe('T3 — a table name loads its order; anything else falls through', () => {
+describe('a table name loads its order; anything else falls through', () => {
   it('opens the table when the text names one', () => {
+    const [state, commands] = run(initial(), floor(table('6', true)), type('6'), press('Enter'));
+    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_6' }]);
+    expect(state.text).toBe('');
+  });
+
+  it('opens a BUSY table with typed items without asking — the items go with you', () => {
+    // The question that used to pop up here is gone: Rust puts the typed lines on that
+    // table's bill, and a second party is the + on the tile.
     const [state, commands] = run(
       initial(),
+      cart(true),
       floor(table('6', true)),
       type('6'),
       press('Enter'),
     );
     expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_6' }]);
-    expect(state.text).toBe('');
+    expect(state.mode.kind).toBe('searching');
+  });
+
+  it('a tap on a busy tile does the same', () => {
+    const [state, commands] = run(initial(), cart(true), floor(table('6', true)), {
+      kind: 'tap-tile',
+      index: 0,
+    });
+    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_6' }]);
+    expect(state.mode.kind).toBe('searching');
+  });
+
+  it('a second party is its own order, and a tap opens THAT', () => {
+    const party = { ...table('6B', true), id: 'ord_6B', orderId: 'ord_6B' };
+    const [, commands] = run(initial(), floor(table('6', true), party), type('6b'), press('Enter'));
+    expect(commands).toEqual([{ do: 'open-order', orderId: 'ord_6B' }]);
+  });
+
+  it('a table number beats a menu item that happens to match it', () => {
+    // "2" found "Gulab Jamun (2 pc)" on a real menu, and Enter asked how many jamuns.
+    const [state, commands] = run(
+      initial(),
+      floor(table('2')),
+      type('2'),
+      suggest(item('itm_jamun', 'Gulab Jamun (2 pc)')),
+      press('Enter'),
+    );
+    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_2' }]);
+    expect(state.mode.kind).toBe('searching');
   });
 
   it('falls through to item search when it does not', () => {
-    const [, commands] = run(
-      initial(),
-      floor(table('6', true)),
-      type('dosa'),
-      press('Enter'),
-    );
+    const [, commands] = run(initial(), floor(table('6', true)), type('dosa'), press('Enter'));
     expect(commands).toEqual([]);
   });
 
   it('matches a table EXACTLY, so "1" is not table 12', () => {
-    // A prefix match here would make "1" ambiguous on a busy floor, and the cashier who typed
-    // it meant table one.
     const [, commands] = run(
       initial(),
       floor(table('1'), table('12', true)),
@@ -189,7 +260,7 @@ describe('T3 — a table name loads its order; anything else falls through', () 
   });
 });
 
-describe('the order type, and the lock (crown jewel 1)', () => {
+describe('the order type, and the lock', () => {
   it('arrows cycle it both ways', () => {
     let [state, commands] = run(initial(), press('ArrowRight'));
     expect(state.orderType).toBe('Parcel');
@@ -204,8 +275,6 @@ describe('the order type, and the lock (crown jewel 1)', () => {
   });
 
   it('the LOCK stops them, which is the entire point of it', () => {
-    // A parcel counter should not be re-selecting the type forty times an hour, and should not
-    // lose it to a stray arrow key either.
     const [state, commands] = run(
       initial(),
       { kind: 'order-type', value: 'Dine in', locked: true },
@@ -216,8 +285,6 @@ describe('the order type, and the lock (crown jewel 1)', () => {
   });
 
   it('arrows belong to the suggestions when there are any', () => {
-    // Correction (a): the surface is decided by what is on screen, not by where a caret happens
-    // to be.
     const [state] = run(
       initial(),
       type('a'),
@@ -228,145 +295,98 @@ describe('the order type, and the lock (crown jewel 1)', () => {
   });
 });
 
-describe('Esc unwinds one layer at a time (correction (b))', () => {
-  it('clears the search first', () => {
+describe('Esc is a new order, from anywhere (step 1)', () => {
+  const fresh = [{ do: 'new-order' }, { do: 'focus-search' }];
+
+  it('with a search half typed', () => {
     const [state, commands] = run(
       initial(),
       type('dos'),
       suggest(item('itm_dosa', 'Masala Dosa')),
       press('Escape'),
     );
+    expect(commands).toEqual(fresh);
     expect(state.text).toBe('');
     expect(state.suggestions).toHaveLength(0);
-    expect(commands).toEqual([{ do: 'search', text: '' }]);
   });
 
-  it('starts a new order once there is nothing left to clear', () => {
-    const [, commands] = run(initial(), cart(false), press('Escape'));
-    expect(commands).toEqual([{ do: 'new-order' }]);
-  });
-
-  it('starts a new order over a typed cart without asking — nothing is in the books yet', () => {
+  it('over a typed cart, without asking — nothing is in the books yet', () => {
     const [, commands] = run(initial(), cart(true), press('Escape'));
-    expect(commands).toEqual([{ do: 'new-order' }]);
-  });
-});
-
-describe('T5 — the grid is reachable and nothing is a dead end', () => {
-  const many = Array.from({ length: 22 }, (_, n) => table(`${n + 1}`));
-
-  it('Down on an empty box enters the grid', () => {
-    const [state] = run(initial(), floor(...many), press('ArrowDown'));
-    expect(state.mode).toEqual({ kind: 'grid', index: 0 });
+    expect(commands).toEqual(fresh);
   });
 
-  it('Esc comes back to the search box', () => {
+  it('from the processing orders', () => {
     const [state, commands] = run(
       initial(),
-      floor(...many),
+      cooking(table('6', true)),
       press('ArrowDown'),
       press('Escape'),
     );
+    expect(commands).toEqual(fresh);
     expect(state.mode.kind).toBe('searching');
-    expect(commands).toEqual([{ do: 'focus-search' }]);
   });
 
-  it('reaches EVERY tile, across sections and into "No table"', () => {
-    // Walked rather than reasoned about: if any tile is unreachable, a cashier cannot get to
-    // that table without the mouse.
-    const mixed = [
-      ...many,
-      { ...table('Parcel', true), section: null, id: 'ord_p' },
-    ];
-    let [state] = run(initial(), floor(...mixed), press('ArrowDown'));
-
-    const seen = new Set<number>();
-    for (let step = 0; step < mixed.length * 4; step += 1) {
-      if (state.mode.kind !== 'grid') break;
-      seen.add(state.mode.index);
-      [state] = run(state, press('ArrowRight'));
-    }
-    expect(seen.size).toBe(mixed.length);
-  });
-
-  it('Enter on a free tile opens it', () => {
-    const [, commands] = run(
-      initial(),
-      floor(table('1')),
-      press('ArrowDown'),
-      press('Enter'),
-    );
-    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_1' }]);
+  it('but the help sheet and the how-many box only close — one layer is theirs', () => {
+    const [help, closed] = run(initial(), press('?'), press('Escape'));
+    expect(help.mode.kind).toBe('searching');
+    expect(closed).toEqual([{ do: 'focus-search' }]);
+    const [, left] = run(chosen(), press('Escape'));
+    expect(left).toEqual([{ do: 'focus-search' }]);
   });
 });
 
-describe('T6 — a busy table offers merge or a sub-table letter (scope 1.6)', () => {
-  it('asks rather than silently merging', () => {
+describe('the processing orders by keyboard (step 4)', () => {
+  const two = [table('3', true), { ...table('Parcel', true), section: null, id: 'ord_Parcel' }];
+
+  it('Down on an empty box moves into them, and the arrows wrap', () => {
+    let [state] = run(initial(), cooking(...two), press('ArrowDown'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 0 });
+    [state] = run(state, press('ArrowDown'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 1 });
+    [state] = run(state, press('ArrowDown'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 0 });
+    [state] = run(state, press('ArrowUp'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 1 });
+  });
+
+  it('does not move when there is nothing cooking', () => {
+    const [state] = run(initial(), floor(table('1')), press('ArrowDown'));
+    expect(state.mode.kind).toBe('searching');
+  });
+
+  it('Enter opens the highlighted order in the cart, and the next Enter completes it', () => {
+    let [state, commands] = run(initial(), cooking(...two), press('ArrowDown'), press('Enter'));
+    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_3' }, { do: 'focus-search' }]);
+    expect(state.mode.kind).toBe('searching');
+    // In the cart now, and the kitchen already has everything on it.
+    [state, commands] = run(state, cart(true, true), press('Enter'));
+    expect(commands).toEqual([{ do: 'complete-bill' }]);
+  });
+
+  it('a parcel in the list is its own order', () => {
+    const [, commands] = run(
+      initial(),
+      cooking(...two),
+      press('ArrowDown'),
+      press('ArrowDown'),
+      press('Enter'),
+    );
+    expect(commands).toEqual([{ do: 'open-order', orderId: 'ord_Parcel' }, { do: 'focus-search' }]);
+  });
+
+  it('a highlight whose row was billed goes back to the box', () => {
     const [state] = run(
       initial(),
-      cart(true),
-      floor(table('6', true)),
+      cooking(...two),
       press('ArrowDown'),
-      press('Enter'),
-    );
-    expect(state.mode.kind).toBe('table-busy');
-  });
-
-  it('merge is the first choice, because it is the common one', () => {
-    const [, commands] = run(
-      initial(),
-      cart(true),
-      floor(table('6', true)),
       press('ArrowDown'),
-      press('Enter'),
-      press('Enter'),
-    );
-    expect(commands).toEqual([{ do: 'merge-into', tableId: 'tbl_6' }]);
-  });
-
-  it('the letters B to H open a second party on the same table', () => {
-    // "this solves a real problem — two parties on one table — that most POS systems handle
-    // badly.".
-    const [, commands] = run(
-      initial(),
-      cart(true),
-      floor(table('6', true)),
-      press('ArrowDown'),
-      press('Enter'),
-      press('ArrowRight'),
-      press('Enter'),
-    );
-    expect(commands).toEqual([
-      { do: 'sub-table', tableId: 'tbl_6', letter: SUB_TABLE_LETTERS[0] },
-    ]);
-  });
-
-  it('Esc backs out and changes nothing', () => {
-    const [state, commands] = run(
-      initial(),
-      cart(true),
-      floor(table('6', true)),
-      press('ArrowDown'),
-      press('Enter'),
-      press('Escape'),
+      cooking(two[0] as TableView),
     );
     expect(state.mode.kind).toBe('searching');
-    expect(commands).toEqual([]);
-  });
-
-  it('does not ask when the cart is empty — it just opens the order', () => {
-    const [, commands] = run(
-      initial(),
-      cart(false),
-      floor(table('6', true)),
-      press('ArrowDown'),
-      press('Enter'),
-    );
-    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_6' }]);
   });
 });
 
-describe('T4 — focus is never stolen (v1 stole it from custom controls)', () => {
+describe('focus is never stolen', () => {
   it('a click on nothing returns the caret to the search box', () => {
     const [, commands] = run(initial(), {
       kind: 'click-empty',
@@ -376,59 +396,18 @@ describe('T4 — focus is never stolen (v1 stole it from custom controls)', () =
     expect(commands).toEqual([{ do: 'focus-search' }]);
   });
 
-  it('but NOT while text is selected', () => {
-    const [, commands] = run(initial(), {
-      kind: 'click-empty',
-      textSelected: true,
-      controlFocused: false,
-    });
-    expect(commands).toEqual([]);
-  });
-
-  it('and NOT while a control has focus', () => {
-    const [, commands] = run(initial(), {
-      kind: 'click-empty',
-      textSelected: false,
-      controlFocused: true,
-    });
-    expect(commands).toEqual([]);
+  it('but NOT while text is selected, and NOT while a control has focus', () => {
+    for (const [textSelected, controlFocused] of [
+      [true, false],
+      [false, true],
+    ] as const) {
+      const [, commands] = run(initial(), { kind: 'click-empty', textSelected, controlFocused });
+      expect(commands).toEqual([]);
+    }
   });
 });
 
-describe('T10 — touch reaches everything the keyboard does (scope 1.28)', () => {
-  it('tapping a suggestion opens the same popup Enter does', () => {
-    const [byKey] = run(
-      initial(),
-      type('dos'),
-      suggest(item('itm_dosa', 'Masala Dosa')),
-      press('Enter'),
-    );
-    const [byTap] = run(
-      initial(),
-      type('dos'),
-      suggest(item('itm_dosa', 'Masala Dosa')),
-      { kind: 'tap-suggestion', index: 0 },
-    );
-    expect(byTap.mode).toEqual(byKey.mode);
-  });
-
-  it('tapping a busy tile asks the same question arrowing to it does', () => {
-    const [byKey] = run(
-      initial(),
-      cart(true),
-      floor(table('6', true)),
-      press('ArrowDown'),
-      press('Enter'),
-    );
-    const [byTap] = run(initial(), cart(true), floor(table('6', true)), {
-      kind: 'tap-tile',
-      index: 0,
-    });
-    expect(byTap.mode.kind).toBe(byKey.mode.kind);
-  });
-});
-
-describe('the help sheet (audit F4)', () => {
+describe('the help sheet', () => {
   it('opens on "?" and closes on Esc', () => {
     let [state] = run(initial(), press('?'));
     expect(state.mode.kind).toBe('help');
@@ -437,37 +416,39 @@ describe('the help sheet (audit F4)', () => {
   });
 
   it('does not open while somebody is typing a search', () => {
-    // "?" is a character in a search box before it is a shortcut.
     const [state] = run(initial(), type('idl'), press('?'));
     expect(state.mode.kind).toBe('searching');
   });
 
   it('documents every group the state machine actually implements', () => {
-    // The sheet is generated from this table, so an undocumented key is impossible rather than
-    // unlikely.
     const groups = new Set(SHORTCUTS.map((s) => s.group));
-    for (const group of ['Searching', 'The order', 'The floor']) {
+    for (const group of ['Searching', 'The order', 'Processing orders']) {
       expect(groups.has(group), `nothing documented for "${group}"`).toBe(true);
     }
     expect(SHORTCUTS.length).toBeGreaterThan(12);
   });
 });
 
-describe('the whole thing, end to end, by keyboard alone', () => {
-  it('types an item, adds it, and completes the bill without a mouse', () => {
+describe('the whole counter flow, by keyboard alone', () => {
+  it('item, how many, ticket, then the bill from the processing orders', () => {
     let state = initial();
     let commands: Command[];
 
-    [state] = run(state, type('dos'), suggest(item('itm_dosa', 'Masala Dosa')));
-    [state, commands] = run(state, press('Enter')); // one keystroke, one dosa
-    expect(commands).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }]);
+    // 1. Type, choose, say how many.
+    [state] = run(state, type('dos'), suggest(item('itm_dosa', 'Masala Dosa')), press('Enter'));
+    [state, commands] = run(state, { kind: 'typed-qty', text: '2' }, press('Enter'));
+    expect(commands[0]).toEqual({ do: 'add-item', itemId: 'itm_dosa', qty: '2' });
 
+    // 2. Enter on the empty box: the kitchen ticket. The screen then clears the cart.
     [state] = run(state, cart(true, false));
-    [state, commands] = run(state, press('Enter'));  // kitchen ticket
+    [state, commands] = run(state, press('Enter'));
     expect(commands).toEqual([{ do: 'print-kitchen' }]);
+    [state] = run(state, cart(false), cooking(table('Parcel', true)));
 
-    [state] = run(state, cart(true, true));
-    [, commands] = run(state, press('Enter'));       // and then the bill
+    // 3. Later: down into the processing orders, Enter to open, Enter to bill.
+    [state, commands] = run(state, press('ArrowDown'), press('Enter'));
+    expect(commands[0]).toEqual({ do: 'open-table', tableId: 'tbl_Parcel' });
+    [, commands] = run(state, cart(true, true), press('Enter'));
     expect(commands).toEqual([{ do: 'complete-bill' }]);
   });
 });
