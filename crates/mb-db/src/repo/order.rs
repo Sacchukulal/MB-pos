@@ -84,8 +84,8 @@ impl<'a> OrderRepo<'a> {
                 encode::business_day_to_sql(core.business_day),
                 encode::timestamp_to_sql(core.created_at),
                 core.created_by.as_str(),
-                encode::order_type_to_sql(core.order_type),
-                core.table.as_ref().map(TableId::as_str),
+                encode::order_type_to_sql(core.order_type()),
+                core.table().map(TableId::as_str),
                 core.note,
                 token.map(claimed_value).transpose()?,
                 token.map(|c| c.formatted.clone()),
@@ -106,7 +106,7 @@ impl<'a> OrderRepo<'a> {
                 voided.as_ref().map(|(_, by, _)| by.as_str().to_owned()),
                 voided.as_ref().map(|(_, _, why)| why.clone()),
                 // Which seat of a shared table and how many are eating (1.24).
-                core.sub_table.as_ref().map(|s| s.as_str().to_owned()),
+                core.seat().map(|s| s.as_str().to_owned()),
                 core.covers,
             ],
         )?;
@@ -137,18 +137,18 @@ impl<'a> OrderRepo<'a> {
         // Cloned rather than moved: `header` is still needed below for the state-specific
         // columns, and a partial move would make the borrow checker's complaint the thing a
         // reader notices instead of the shape of the match.
+        let seat = header
+            .sub_table
+            .as_deref()
+            .map(mb_core::SubTable::parse)
+            .transpose()
+            .map_err(|e| DbError::invariant(format!("orders.sub_table: {e}")))?;
         let core = OrderCore {
             id: id.clone(),
             business_day: header.business_day,
             created_at: header.created_at,
-            order_type: header.order_type,
-            table: header.table.clone(),
-            sub_table: header
-                .sub_table
-                .as_deref()
-                .map(mb_core::SubTable::parse)
-                .transpose()
-                .map_err(|e| DbError::invariant(format!("orders.sub_table: {e}")))?,
+            placement: mb_core::Placement::new(header.order_type, header.table.clone(), seat)
+                .map_err(|e| DbError::invariant(format!("order {}: {e}", id.as_str())))?,
             covers: header.covers,
             cart,
             created_by: header.created_by.clone(),

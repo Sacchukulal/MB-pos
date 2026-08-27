@@ -112,7 +112,8 @@ impl App {
         }
     }
 
-    /// Put a different provider in place — a real one at start-up, a stand-in in a test.
+    /// Put a stand-in provider in place.
+    #[cfg(test)]
     pub fn use_provider(&self, provider: Arc<dyn mb_core::provider::Provider>) {
         match self.provider.write() {
             Ok(mut guard) => *guard = provider,
@@ -134,7 +135,7 @@ impl App {
         lock(&self.updates).clone()
     }
 
-    /// Replace it — after a check, or after a dismissal.
+    /// Replace it, after a check.
     pub fn set_updates(&self, state: crate::updates::UpdateState) {
         *lock(&self.updates) = state;
     }
@@ -754,9 +755,7 @@ pub fn printer_config_for(row: &mb_db::repo::settings::Printer) -> PrinterConfig
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Pushed {
     /// The print queue changed.
-    PrintQueue {
-        jobs: Vec<PrintJobView>,
-    },
+    PrintQueue { jobs: Vec<PrintJobView> },
     /// The screen locked itself, or somebody signed in or out.
     Session {
         /// `None` when the screen is locked.
@@ -765,21 +764,13 @@ pub enum Pushed {
         /// True while nobody has a PIN — the shell's undismissable banner.
         stand_in: bool,
     },
-    Licence {
-        state: String,
-    },
-    Sync {
-        state: String,
-    },
     /// A phone is asking to join.
     Pairing {
         /// How many phones are waiting for somebody to press Allow.
         waiting: u32,
     },
     /// The floor changed the order the cashier has open.
-    FloorChanged {
-        waiting: u32,
-    },
+    FloorChanged { waiting: u32 },
     /// This till is holding bills the main till has not taken yet.
     Tills {
         /// How many bills are queued here.
@@ -868,16 +859,17 @@ impl App {
         f(&mut lock(&self.cart))
     }
 
-    /// One menu row, by id.
+    /// One menu row, by id — and only one that is on the menu right now.
     pub fn find_menu_item(&self, id: &str) -> UiResult<mb_db::repo::menu::MenuItem> {
         self.with_shop(|shop| {
-            let items = shop
-                .db
-                .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
-                .map_err(|e| crate::words::from_db(&e))?;
-            items
-                .into_iter()
-                .find(|item| item.id.as_str() == id)
+            shop.db
+                .transaction(|tx| {
+                    mb_db::Repos::new(tx)
+                        .menu()
+                        .find_item(&mb_core::ItemId::new(id))
+                })
+                .map_err(|e| crate::words::from_db(&e))?
+                .filter(|item| item.is_available)
                 .ok_or_else(|| {
                     UiError::new(
                         "menu.unknown",

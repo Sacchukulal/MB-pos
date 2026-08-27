@@ -517,8 +517,13 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
 
     login_on(&app, "staff_cashier".to_owned(), "1357".to_owned()).expect("Rekha signs in");
     app.with_cart_mut(|state| {
-        state.table = Some("tbl_7".to_owned());
-        state.opened_by = Some(mb_core::StaffId::new("staff_cashier"));
+        state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
+        state.origin = Some(crate::billing::Origin {
+            id: mb_core::OrderId::new("ord_open"),
+            created_at: crate::flows::now(),
+            business_day: crate::flows::today(crate::flows::now()),
+            opened_by: mb_core::StaffId::new("staff_cashier"),
+        });
         Ok(())
     })
     .expect("a table is open");
@@ -527,9 +532,9 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner takes over");
 
     app.with_cart(|state| {
-        assert_eq!(state.table.as_deref(), Some("tbl_7"));
+        assert_eq!(state.table_id(), Some("tbl_7"));
         assert_eq!(
-            state.opened_by.as_ref().map(mb_core::StaffId::as_str),
+            state.origin.as_ref().map(|o| o.opened_by.as_str()),
             Some("staff_cashier"),
             "the order changed hands instead of changing owner"
         );
@@ -690,14 +695,14 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
         mb_core::OrderId::new("ord_tea"),
         crate::flows::today(at),
         at,
-        OrderType::Parcel,
+        mb_core::Placement::Parcel,
         mb_core::StaffId::new("staff_cashier"),
     );
     draft.core.cart = cart;
 
     let settled = app
         .with_shop(|shop| {
-            let till = mb_db::Till::new(OUTLET, crate::billing::TERMINAL);
+            let till = mb_db::Till::new(OUTLET, crate::terminals::TERMINAL);
             let open = mb_db::open_draft(&shop.db, till, draft).expect("opened");
             Ok(mb_db::settle(
                 &shop.db,
@@ -714,8 +719,14 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
 
     // The whole point: this must not fail on a shop with no store profile, no logo and no GSTIN
     // — which is every shop on day one.
-    crate::flows::queue_bill_print(&app, "0001", &settled, &bill, "Rekha")
-        .expect("the real bill could not be built");
+    crate::flows::queue_bill(
+        &app,
+        &mb_core::AnyOrder::Settled(settled.clone()),
+        &bill,
+        "Rekha",
+        mb_print::template::Copy::Original,
+    )
+    .expect("the real bill could not be built");
 
     let jobs = app.print_queue_snapshot();
     assert!(
@@ -770,10 +781,7 @@ fn a_trading_shop(scratch: &Scratch) -> App {
 fn order_teas(app: &App, qty: u32) {
     let item = app.find_menu_item("itm_tea").expect("on the menu");
     app.with_cart_mut(|state| {
-        *state = crate::billing::CartState {
-            order_type: mb_core::OrderType::Parcel,
-            ..crate::billing::CartState::default()
-        };
+        *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel);
         state
             .cart
             .add(
@@ -799,7 +807,7 @@ fn settle_the_cart(app: &App) -> String {
         Ok(())
     })
     .expect("paid");
-    crate::flows::complete_bill_on(app).expect("settled")
+    crate::flows::complete_bill_on(app, None).expect("settled")
 }
 
 #[test]
@@ -1104,12 +1112,8 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
 
     let item = app.find_menu_item("itm_tea").expect("on the menu");
     app.with_cart_mut(|state| {
-        *state = crate::billing::CartState {
-            order_type: mb_core::OrderType::DineIn,
-            table: Some("tbl_7".to_owned()),
-            table_label: Some("7".to_owned()),
-            ..crate::billing::CartState::default()
-        };
+        *state = crate::billing::CartState::default();
+        state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
         state
             .cart
             .add(
@@ -1126,7 +1130,7 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
     // Telling the kitchen is what puts the order on the floor.
     crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
     let order_id = app
-        .with_cart(|state| Ok(state.order_id.clone()))
+        .with_cart(|state| Ok(state.order_id().map(str::to_owned)))
         .expect("cart")
         .expect("the order was never parked");
 

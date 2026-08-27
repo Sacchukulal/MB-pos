@@ -123,7 +123,7 @@ fn settle_one(
         OrderId::new(id),
         day(),
         at(1),
-        OrderType::Parcel,
+        mb_core::Placement::Parcel,
         StaffId::new("staff_1"),
     );
     draft.core.cart = cart;

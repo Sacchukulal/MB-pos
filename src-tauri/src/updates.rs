@@ -127,9 +127,6 @@ impl Rollout {
 pub trait Releases: Send + Sync + 'static {
     /// The signed manifest, as `(json, signature_base64)`.
     fn latest(&self) -> Result<(String, String), String>;
-
-    /// The package itself.
-    fn fetch(&self, url: &str) -> Result<Vec<u8>, String>;
 }
 
 /// Keys this build accepts a manifest from.
@@ -143,8 +140,6 @@ pub fn trusted_keys() -> Vec<Vec<u8>> {
 pub enum Refused {
     /// The signature did not check out.
     NotOurs,
-    /// The download does not match the manifest's hash.
-    Damaged,
     /// The manifest could not be read.
     Unreadable,
 }
@@ -156,10 +151,6 @@ impl Refused {
             Refused::NotOurs => {
                 "That update was not published by us, so it has not been \
                  installed. Nothing on this computer has changed."
-            }
-            Refused::Damaged => {
-                "The update did not download properly, so it has not been \
-                 installed. Nothing on this computer has changed. Try again."
             }
             Refused::Unreadable => {
                 "We could not read what the update server sent. Nothing on this \
@@ -174,17 +165,6 @@ pub fn check(json: &str, signature: &str) -> Result<Manifest, Refused> {
     mb_license::verify_detached(json.as_bytes(), signature, &trusted_keys())
         .map_err(|_| Refused::NotOurs)?;
     serde_json::from_str(json).map_err(|_| Refused::Unreadable)
-}
-
-/// And the package's hash, which answers a different question.
-pub fn check_package(bytes: &[u8], manifest: &Manifest) -> Result<(), Refused> {
-    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
-    let hex: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
-    if hex.eq_ignore_ascii_case(&manifest.sha256) {
-        Ok(())
-    } else {
-        Err(Refused::Damaged)
-    }
 }
 
 // Two failed starts roll back, and the counter counts them.
@@ -267,13 +247,6 @@ impl Previous {
         dir.join("updates").join("previous")
     }
 
-    /// Where the installer for the version currently running is kept, if we were the ones who
-    /// installed it.
-    #[must_use]
-    pub fn installed_folder(dir: &Path) -> PathBuf {
-        dir.join("updates").join("installed")
-    }
-
     /// What is kept, if anything.
     #[must_use]
     pub fn load(dir: &Path) -> Option<Previous> {
@@ -281,61 +254,6 @@ impl Previous {
         let previous: Previous = serde_json::from_str(&text).ok()?;
         previous.installer.exists().then_some(previous)
     }
-
-    fn write(&self, folder: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(folder)?;
-        let text = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(folder.join("previous.json"), text)
-    }
-}
-
-/// Take a verified package and put it where it can be run — keeping what is there now.
-pub fn keep_and_place(dir: &Path, manifest: &Manifest, package: &[u8]) -> Result<PathBuf, Refused> {
-    check_package(package, manifest)?;
-
-    let installed = Previous::installed_folder(dir);
-    let previous = Previous::folder(dir);
-
-    // Whatever we installed last time becomes the way back.
-    if let Ok(text) = std::fs::read_to_string(installed.join("installed.json"))
-        && let Ok(current) = serde_json::from_str::<Previous>(&text)
-        && current.installer.exists()
-    {
-        let _ = std::fs::create_dir_all(&previous);
-        let landing = previous.join(
-            current
-                .installer
-                .file_name()
-                .unwrap_or_else(|| std::ffi::OsStr::new("previous-setup.exe")),
-        );
-        if std::fs::rename(&current.installer, &landing).is_ok() {
-            let _ = Previous {
-                version: current.version,
-                installer: landing,
-            }
-            .write(&previous);
-        }
-    }
-
-    // The new one goes down.
-    let _ = std::fs::create_dir_all(&installed);
-    let name = format!("magic-bill-{}-setup.exe", manifest.version);
-    let path = installed.join(&name);
-    std::fs::write(&path, package).map_err(|_| Refused::Damaged)?;
-    let _ = Previous {
-        version: manifest.version,
-        installer: path.clone(),
-    }
-    .write(&installed);
-    // `write` puts it in `previous.json`; the installed folder wants its own name so the two
-    // cannot be confused when somebody looks in the folder.
-    let _ = std::fs::rename(
-        installed.join("previous.json"),
-        installed.join("installed.json"),
-    );
-
-    Ok(path)
 }
 
 /// A cloud that is not there yet, and a stub that ships.
@@ -343,11 +261,7 @@ pub struct NoReleaseServerYet;
 
 impl Releases for NoReleaseServerYet {
     fn latest(&self) -> Result<(String, String), String> {
-        Err("there is no release server yet — Phase 8 builds it".to_owned())
-    }
-
-    fn fetch(&self, _url: &str) -> Result<Vec<u8>, String> {
-        Err("there is no release server yet — Phase 8 builds it".to_owned())
+        Err("there is no release server yet".to_owned())
     }
 }
 
@@ -376,8 +290,6 @@ pub struct UpdateState {
     /// The version on offer, if any.
     pub available: Option<String>,
     pub notes: String,
-    /// The business day it was last dismissed on, as `YYYY-MM-DD`.
-    pub dismissed_on: Option<String>,
     /// How many days this counter has been on its current version.
     pub days_on_this_version: u32,
     pub running: String,
@@ -435,28 +347,6 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
 
 // The bodies, and the seats.
 
-/// Is a dismissal still standing?
-#[must_use]
-pub fn is_dismissed(state: &UpdateState, today: mb_core::BusinessDay) -> bool {
-    state
-        .dismissed_on
-        .as_deref()
-        .is_some_and(|on| on == today.to_string())
-}
-
-/// What the shell shows, if anything.
-#[must_use]
-pub fn offer(state: &UpdateState, today: mb_core::BusinessDay) -> Option<String> {
-    let available = state.available.as_ref()?;
-    if is_dismissed(state, today) {
-        return None;
-    }
-    Some(format!(
-        "Version {available} is ready to install. It will not interrupt you — \
-         install it after closing."
-    ))
-}
-
 pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
     crate::guard::require(app, mb_auth::Permission::ReportsView)?;
     let mut state = app.updates();
@@ -472,9 +362,6 @@ pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<Update
                 if newer && mine {
                     state.available = Some(manifest.version.to_string());
                     state.notes = manifest.notes;
-                    // A NEW version clears an old dismissal: the thing that was waved away is
-                    // not the thing being offered now.
-                    state.dismissed_on = None;
                 } else {
                     state.available = None;
                 }
@@ -487,14 +374,6 @@ pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<Update
         Err(why) => crate::log_info!("no update check: {why}"),
     }
 
-    app.set_updates(state.clone());
-    Ok(state)
-}
-
-pub fn dismiss_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
-    crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
-    let mut state = app.updates();
-    state.dismissed_on = Some(crate::flows::today(crate::flows::now()).to_string());
     app.set_updates(state.clone());
     Ok(state)
 }
@@ -523,13 +402,6 @@ pub fn look_for_an_update(
     app: tauri::State<'_, crate::state::App>,
 ) -> crate::words::UiResult<UpdateState> {
     look_for_one_on(&app)
-}
-
-#[tauri::command]
-pub fn dismiss_update(
-    app: tauri::State<'_, crate::state::App>,
-) -> crate::words::UiResult<UpdateState> {
-    dismiss_on(&app)
 }
 
 #[tauri::command]
@@ -613,8 +485,6 @@ mod tests {
         let state = UpdateState {
             running: "1.4.4".to_owned(),
             available: Some("1.5.0".to_owned()),
-            // Even having been dismissed today.
-            dismissed_on: Some("2026-08-10".to_owned()),
             ..UpdateState::default()
         };
         let row = health_row(&state);
@@ -670,32 +540,6 @@ mod tests {
             assert!(all.includes(&m, "s"));
             assert!(!none.includes(&m, "s"));
         }
-    }
-
-    #[test]
-    fn a_damaged_package_is_refused() {
-        let manifest = Manifest {
-            version: Version::new(1, 5, 0),
-            notes: "Faster reports.".to_owned(),
-            url: "https://example.invalid/mb.exe".to_owned(),
-            // Sha256 of "the real package".
-            sha256: {
-                let d = ring::digest::digest(&ring::digest::SHA256, b"the real package");
-                d.as_ref().iter().map(|b| format!("{b:02x}")).collect()
-            },
-            rollout: Rollout::default(),
-        };
-        assert!(check_package(b"the real package", &manifest).is_ok());
-        assert_eq!(
-            check_package(b"the real pack", &manifest),
-            Err(Refused::Damaged)
-        );
-        // And the refusal says nothing was changed, which is the fact the shopkeeper needs.
-        assert!(
-            Refused::Damaged
-                .says()
-                .contains("Nothing on this computer has changed")
-        );
     }
 
     #[test]
@@ -759,119 +603,6 @@ mod tests {
         assert!(!Starts::should_roll_back(&dir, Version::new(1, 6, 0)));
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    fn scratch(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("mb-updates-{}-{label}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::create_dir_all(&dir);
-        dir
-    }
-
-    fn a_manifest(version: Version, package: &[u8]) -> Manifest {
-        Manifest {
-            version,
-            notes: "Faster reports.".to_owned(),
-            url: "https://example.invalid/mb.exe".to_owned(),
-            sha256: {
-                let d = ring::digest::digest(&ring::digest::SHA256, package);
-                d.as_ref().iter().map(|b| format!("{b:02x}")).collect()
-            },
-            rollout: Rollout::default(),
-        }
-    }
-
-    /// The way back exists because the way forward kept it.
-    #[test]
-    fn installing_keeps_the_version_it_replaced() {
-        let dir = scratch("keep");
-
-        // The first update after a hand-installed build: nothing to go back to.
-        let first = b"the 1.5.0 package";
-        let path =
-            keep_and_place(&dir, &a_manifest(Version::new(1, 5, 0), first), first).expect("placed");
-        assert!(path.exists());
-        assert!(
-            Previous::load(&dir).is_none(),
-            "there was nothing installed by us before, so there is nothing to go back to"
-        );
-
-        // The second one keeps the first.
-        let second = b"the 1.6.0 package";
-        keep_and_place(&dir, &a_manifest(Version::new(1, 6, 0), second), second).expect("placed");
-        let previous = Previous::load(&dir).expect("1.5.0 was kept");
-        assert_eq!(previous.version, Version::new(1, 5, 0));
-        assert_eq!(
-            std::fs::read(&previous.installer).expect("readable"),
-            first,
-            "the kept installer is not the one that was there"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_damaged_package_never_reaches_the_disk() {
-        let dir = scratch("damaged");
-        let good = b"the 1.5.0 package";
-        keep_and_place(&dir, &a_manifest(Version::new(1, 5, 0), good), good).expect("placed");
-        let before: Vec<_> = std::fs::read_dir(Previous::installed_folder(&dir))
-            .expect("readable")
-            .flatten()
-            .map(|e| e.file_name())
-            .collect();
-
-        let manifest = a_manifest(Version::new(1, 6, 0), b"what was published");
-        assert_eq!(
-            keep_and_place(&dir, &manifest, b"what actually arrived"),
-            Err(Refused::Damaged)
-        );
-
-        let after: Vec<_> = std::fs::read_dir(Previous::installed_folder(&dir))
-            .expect("readable")
-            .flatten()
-            .map(|e| e.file_name())
-            .collect();
-        assert_eq!(before, after, "a refused package changed something on disk");
-        assert!(
-            Previous::load(&dir).is_none(),
-            "a refused package moved the running version aside"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn an_update_dismissed_today_comes_back_tomorrow() {
-        let today = mb_core::BusinessDay::from_ymd(2026, 8, 10);
-        let tomorrow = today.next();
-        let state = UpdateState {
-            running: "1.4.4".to_owned(),
-            available: Some("1.5.0".to_owned()),
-            dismissed_on: Some(today.to_string()),
-            ..UpdateState::default()
-        };
-
-        assert!(is_dismissed(&state, today));
-        assert!(offer(&state, today).is_none(), "it was dismissed today");
-
-        assert!(!is_dismissed(&state, tomorrow));
-        let back = offer(&state, tomorrow).expect("it came back");
-        assert!(back.contains("1.5.0"));
-        // And it never interrupts: the offer says so.
-        assert!(back.contains("will not interrupt you"), "{back}");
-
-        assert!(!health_row(&state).is_ok());
-    }
-
-    #[test]
-    fn nothing_is_offered_when_there_is_nothing_to_offer() {
-        let today = mb_core::BusinessDay::from_ymd(2026, 8, 10);
-        let state = UpdateState {
-            running: "1.4.4".to_owned(),
-            ..UpdateState::default()
-        };
-        assert!(offer(&state, today).is_none());
-        assert!(health_row(&state).is_ok());
     }
 
     #[test]

@@ -339,7 +339,8 @@ impl<'a> CorrectionsRepo<'a> {
 
         let cancelled_orders: i64 = self.tx.query_row(
             "SELECT COUNT(*) FROM orders
-              WHERE outlet_id = ?1 AND business_day = ?2 AND state = 'cancelled'",
+              WHERE outlet_id = ?1 AND business_day = ?2 AND state = 'cancelled'
+                AND merged_into IS NULL",
             rusqlite::params![outlet, day],
             |row| row.get(0),
         )?;

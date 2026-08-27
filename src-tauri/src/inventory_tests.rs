@@ -747,7 +747,7 @@ fn demo_stock() {
 /// One bill of one item, for the demo.
 fn sell(app: &App, item: &str, n: u32) {
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -763,14 +763,14 @@ fn sell(app: &App, item: &str, n: u32) {
         })
     })
     .expect("paid");
-    crate::flows::complete_bill_on(app)
+    crate::flows::complete_bill_on(app, None)
         .unwrap_or_else(|e| panic!("bill {n} did not settle: {e:?}"));
 }
 
 /// One bill, through the real billing path.
 fn sell_one(app: &App, n: u32) {
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -787,6 +787,6 @@ fn sell_one(app: &App, n: u32) {
         })
     })
     .expect("paid");
-    crate::flows::complete_bill_on(app)
+    crate::flows::complete_bill_on(app, None)
         .unwrap_or_else(|e| panic!("bill {n} did not settle: {e:?}"));
 }

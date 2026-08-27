@@ -95,10 +95,7 @@ pub(crate) fn licence_in(
 fn a_bill_is_taken(app: &App) -> String {
     let item = app.find_menu_item("itm_tea").expect("on the menu");
     app.with_cart_mut(|state| {
-        *state = crate::billing::CartState {
-            order_type: mb_core::OrderType::Parcel,
-            ..crate::billing::CartState::default()
-        };
+        *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel);
         state
             .cart
             .add(
@@ -122,7 +119,7 @@ fn a_bill_is_taken(app: &App) -> String {
     })
     .expect("paid");
 
-    let number = crate::flows::complete_bill_on(app).expect("the shop billed");
+    let number = crate::flows::complete_bill_on(app, None).expect("the shop billed");
 
     // And the row really is there.
     let count = app

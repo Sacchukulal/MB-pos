@@ -17,6 +17,7 @@ use crate::{guard, log_warn};
 const OUTLET: &str = "outlet_default";
 
 /// Build the licensing subsystem.
+#[cfg(not(test))]
 #[must_use]
 pub fn start() -> Licensing {
     let dir = crate::config::AppConfig::directory();
@@ -60,6 +61,7 @@ pub fn gate(app: &App, feature: Feature) -> UiResult<()> {
     }
 }
 
+#[cfg(test)]
 pub const GATED: &[(&str, Feature)] = &[
     // The reports screen and its exports.
     ("report_list", Feature::Reports),
@@ -362,18 +364,6 @@ pub fn refresh_on(app: &App) -> UiResult<LicenceView> {
         log_warn!("the licence could not be checked: {e}");
     }
     Ok(view_on(app))
-}
-
-/// The background check. Called from `main` after the window is up, never before.
-pub fn refresh_quietly(app: &App) {
-    let at = now();
-    let outcome = app.with_licensing(|licensing| {
-        let _ = licensing.tick(at);
-        licensing.refresh(at, mb_license::deadline::DEADLINE)
-    });
-    if let Err(e) = outcome {
-        log_warn!("the background licence check did not complete: {e}");
-    }
 }
 
 // The seats.

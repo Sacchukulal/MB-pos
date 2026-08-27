@@ -57,10 +57,9 @@ fn one_dosa() -> (mb_core::Bill, AnyOrder) {
         OrderId::new("ord"),
         day,
         AT,
-        OrderType::DineIn,
+        mb_core::Placement::on_table(TableId::new("6")),
         StaffId::new("s"),
     )
-    .on_table(TableId::new("6"))
     .core;
     let open = OpenOrder {
         core,

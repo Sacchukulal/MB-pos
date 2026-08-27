@@ -126,22 +126,18 @@ fn a_development_build_shows_in_health() {
 }
 
 #[test]
-fn a_dismissed_update_still_shows_in_health() {
+fn an_available_update_shows_in_health() {
     let scratch = Scratch::new("health_update");
     let app = a_shop(&scratch, "update");
     app.set_updates(crate::updates::UpdateState {
         running: "1.4.4".to_owned(),
         available: Some("1.5.0".to_owned()),
-        dismissed_on: Some(crate::flows::today(crate::flows::now()).to_string()),
         is_dev_build: false,
         ..crate::updates::UpdateState::default()
     });
     let view = crate::health::look(&app);
     let update = row(&view, "update");
-    assert!(
-        !update.is_ok(),
-        "a dismissed update vanished — that is audit I1"
-    );
+    assert!(!update.is_ok(), "an available update vanished from health");
     assert!(update.says.contains("1.5.0"));
 }
 

@@ -53,7 +53,7 @@ pub use money::{Money, MoneyError, RoundingMode};
 pub use numbering::{Claimed, Counter, Numbering};
 pub use order::{
     AnyOrder, CancelledOrder, DraftOrder, KitchenLedger, OpenOrder, OrderCore, OrderError,
-    SettledOrder, VoidedOrder,
+    Placement, SettledOrder, VoidedOrder,
 };
 pub use payment::{Payment, PaymentError, PaymentMode, Settlement};
 pub use phone::{PHONE_DIGITS, Phone, PhoneError};

@@ -254,8 +254,8 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
 /// "Table 7", "Parcel" — what a cook shouts across the kitchen.
 fn place_of(order: &AnyOrder, tables: &[mb_db::repo::floor::DiningTable]) -> String {
     let core = order.core();
-    core.table.as_ref().map_or_else(
-        || crate::billing::order_type_label(core.order_type).to_owned(),
+    core.table().map_or_else(
+        || crate::billing::order_type_label(core.order_type()).to_owned(),
         |table| {
             let label = tables
                 .iter()
@@ -533,68 +533,74 @@ fn with_ticket<T>(
 /// Send an order to the kitchen screen.
 pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String> {
     let at = now();
-    let id = format!("{}_{order_id}", crate::newid::fresh_at("kds", at));
-
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let order = repos.orders().find(&OrderId::new(order_id.to_owned()))?;
-                let categories = repos.menu().list_categories(OUTLET)?;
-
-                // The station comes from the CATEGORY of the food.
-                let mut by_station: BTreeMap<String, Option<u32>> = BTreeMap::new();
-                if let Some(order) = &order {
-                    for line in order.core().cart.lines() {
-                        if let Some(wanted) = course
-                            && line.snapshot.course.as_deref() != Some(wanted)
-                        {
-                            continue;
-                        }
-                        let station = line
-                            .snapshot
-                            .station
-                            .clone()
-                            .or_else(|| {
-                                line.snapshot.category_id.as_ref().and_then(|c| {
-                                    categories
-                                        .iter()
-                                        .find(|cat| &cat.id == c)
-                                        .and_then(|cat| cat.station.clone())
-                                })
-                            })
-                            .filter(|s| !s.trim().is_empty())
-                            .unwrap_or_else(|| DEFAULT_STATION.to_owned());
-                        // The target is the SLOWEST dish: the order is ready when the last
-                        // thing on it is.
-                        let slowest = by_station.entry(station).or_insert(None);
-                        if let Some(minutes) = line.snapshot.prep_minutes {
-                            *slowest = Some(slowest.unwrap_or(0).max(minutes));
-                        }
-                    }
-                }
-                if by_station.is_empty() {
-                    by_station.insert(DEFAULT_STATION.to_owned(), None);
-                }
-
-                let mut first = DEFAULT_STATION.to_owned();
-                for (index, (station, expected)) in by_station.iter().enumerate() {
-                    if index == 0 {
-                        first = station.clone();
-                    }
-                    let delivery = Delivery::new(&format!("{id}_{station}"), order_id, station, at);
-                    // The order's OWN business day, not today's.
-                    let day = order
-                        .as_ref()
-                        .map_or_else(|| crate::flows::today(at), |o| o.core().business_day);
-                    repos
-                        .kitchen()
-                        .send(OUTLET, &delivery, course, *expected, day)?;
-                }
-                Ok(first)
-            })
+            .transaction(|tx| send_in(&mb_db::Repos::new(tx), order_id, course, at))
             .map_err(|e| words::from_db(&e))
     })
+}
+
+/// The same, inside a transaction somebody else opened.
+pub fn send_in(
+    repos: &mb_db::Repos<'_>,
+    order_id: &str,
+    course: Option<&str>,
+    at: Timestamp,
+) -> Result<String, mb_db::DbError> {
+    let id = format!("{}_{order_id}", crate::newid::fresh_at("kds", at));
+    let order = repos.orders().find(&OrderId::new(order_id.to_owned()))?;
+    let categories = repos.menu().list_categories(OUTLET)?;
+
+    // The station comes from the CATEGORY of the food.
+    let mut by_station: BTreeMap<String, Option<u32>> = BTreeMap::new();
+    if let Some(order) = &order {
+        for line in order.core().cart.lines() {
+            if let Some(wanted) = course
+                && line.snapshot.course.as_deref() != Some(wanted)
+            {
+                continue;
+            }
+            let station = line
+                .snapshot
+                .station
+                .clone()
+                .or_else(|| {
+                    line.snapshot.category_id.as_ref().and_then(|c| {
+                        categories
+                            .iter()
+                            .find(|cat| &cat.id == c)
+                            .and_then(|cat| cat.station.clone())
+                    })
+                })
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_STATION.to_owned());
+            // The target is the SLOWEST dish: the order is ready when the last
+            // thing on it is.
+            let slowest = by_station.entry(station).or_insert(None);
+            if let Some(minutes) = line.snapshot.prep_minutes {
+                *slowest = Some(slowest.unwrap_or(0).max(minutes));
+            }
+        }
+    }
+    if by_station.is_empty() {
+        by_station.insert(DEFAULT_STATION.to_owned(), None);
+    }
+
+    let mut first = DEFAULT_STATION.to_owned();
+    for (index, (station, expected)) in by_station.iter().enumerate() {
+        if index == 0 {
+            first = station.clone();
+        }
+        let delivery = Delivery::new(&format!("{id}_{station}"), order_id, station, at);
+        // The order's OWN business day, not today's.
+        let day = order
+            .as_ref()
+            .map_or_else(|| crate::flows::today(at), |o| o.core().business_day);
+        repos
+            .kitchen()
+            .send(OUTLET, &delivery, course, *expected, day)?;
+    }
+    Ok(first)
 }
 
 /// The paper fallback. Called on a timer by `main`.

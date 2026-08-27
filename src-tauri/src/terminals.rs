@@ -13,6 +13,9 @@ use crate::guard;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
+/// The shop's first till, and the id every single-till shop runs under.
+pub const TERMINAL: &str = "terminal_default";
+
 // Who this machine is.
 
 /// This till's own identity, kept beside the config and never in the database.
@@ -51,7 +54,7 @@ pub fn me(config_dir: &Path) -> Me {
     // `terminal_default`, which is the row migration 0001 seeded and the one every existing
     // bill already points at.
     let me = Me {
-        terminal_id: crate::billing::TERMINAL.to_owned(),
+        terminal_id: crate::terminals::TERMINAL.to_owned(),
         master: None,
     };
     let _ = write_me(config_dir, &me);

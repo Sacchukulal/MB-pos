@@ -107,7 +107,7 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
 fn bill(app: &App, items: &[(&str, &str)], mode: &str) -> (String, Money) {
     crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -119,7 +119,7 @@ fn bill(app: &App, items: &[(&str, &str)], mode: &str) -> (String, Money) {
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
     cart_add_payment_on(app, mode.to_owned(), total.paise(), None).expect("paid");
-    let number = crate::flows::complete_bill_on(app).expect("settled");
+    let number = crate::flows::complete_bill_on(app, None).expect("settled");
     (number, total)
 }
 
@@ -336,7 +336,7 @@ fn settling_the_same_cart_twice_bills_once() {
     let app = a_shop(&scratch, "twice");
 
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -347,8 +347,8 @@ fn settling_the_same_cart_twice_bills_once() {
         .expect("bill");
     cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("paid");
 
-    let first = crate::flows::complete_bill_on(&app).expect("settled");
-    let second = crate::flows::complete_bill_on(&app);
+    let first = crate::flows::complete_bill_on(&app, None).expect("settled");
+    let second = crate::flows::complete_bill_on(&app, None);
 
     assert!(!first.is_empty());
     assert!(
@@ -418,7 +418,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
 
     crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -428,7 +428,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
     crate::credit::put_on_account_on(&app, "cus_arun".to_owned(), false).expect("on account");
-    crate::flows::complete_bill_on(&app).expect("settled on account");
+    crate::flows::complete_bill_on(&app, None).expect("settled on account");
 
     let owing = crate::credit::who_owes_on(&app).expect("who owes");
     let arun = owing
@@ -475,7 +475,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
     let before_the_tip = totals(&app).gross;
     crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -499,7 +499,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
         None,
     )
     .expect("paid with a tip");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     let drawer = cash(&app);
     assert_eq!(
@@ -516,9 +516,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
     crate::delivery::set_rider_on(&app, "staff_boss".to_owned(), true).expect("a rider");
     crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Delivery;
-        state.table = None;
-        state.table_label = None;
+        state.set_order_type(mb_core::OrderType::Delivery);
         Ok(())
     })
     .expect("delivery");
@@ -528,7 +526,7 @@ fn credit_a_riders_cash_and_a_tip_each_reconcile_two_ways() {
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
     cart_add_payment_on(&app, "Cash".to_owned(), cod.paise(), None).expect("paid");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     let before = cash(&app).expected;
     let order_id = crate::delivery::board_on(&app, None)
@@ -588,7 +586,7 @@ fn a_restart_mid_service_keeps_the_open_orders() {
         let app = a_shop_at(&scratch, &path);
         crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
         app.with_cart_mut(|state| {
-            state.order_type = mb_core::OrderType::Parcel;
+            state.set_order_type(mb_core::OrderType::Parcel);
             Ok(())
         })
         .expect("parcel");
@@ -601,7 +599,7 @@ fn a_restart_mid_service_keeps_the_open_orders() {
             .with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
             .expect("the cart");
         (
-            app.with_cart(|state| Ok(state.order_id.clone()))
+            app.with_cart(|state| Ok(state.order_id().map(str::to_owned)))
                 .expect("an order id")
                 .expect("the order was saved"),
             cart.lines.len(),
@@ -621,7 +619,8 @@ fn a_restart_mid_service_keeps_the_open_orders() {
         "…with its money"
     );
 
-    crate::ipc::open_table_on(&app, found.id.clone()).expect("reopened");
+    // A parcel has no table: its tile is its order.
+    crate::ipc::open_order_on(&app, order_id.clone()).expect("reopened");
     let cart = app
         .with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
         .expect("the cart");
@@ -753,7 +752,7 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
     let app = a_shop(&scratch, "resettle");
 
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -763,7 +762,7 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
     cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("paid");
-    let first = crate::flows::complete_bill_on(&app).expect("settled");
+    let first = crate::flows::complete_bill_on(&app, None).expect("settled");
 
     // The order that was just settled.
     let settled_id = app
@@ -782,8 +781,13 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
 
     // A cart still pointing at it — what the losing press is holding.
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
-        state.order_id = Some(settled_id);
+        state.set_order_type(mb_core::OrderType::Parcel);
+        state.origin = Some(crate::billing::Origin {
+            id: mb_core::OrderId::new(settled_id),
+            created_at: crate::flows::now(),
+            business_day: crate::flows::today(crate::flows::now()),
+            opened_by: mb_core::StaffId::new(crate::state::DEFAULT_STAFF),
+        });
         Ok(())
     })
     .expect("the second press still holds the order");
@@ -794,7 +798,7 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
         .expect("bill");
     cart_add_payment_on(&app, "Cash".to_owned(), again.paise(), None).expect("paid");
 
-    let second = crate::flows::complete_bill_on(&app);
+    let second = crate::flows::complete_bill_on(&app, None);
 
     assert!(!first.is_empty());
     assert!(
@@ -818,7 +822,7 @@ fn a_second_action_waits_while_the_counter_is_busy() {
     let scratch = Scratch::new("acceptance_one_at_a_time");
     let app = a_shop(&scratch, "one_at_a_time");
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -861,7 +865,7 @@ fn two_settles_at_the_same_instant_make_one_bill() {
     let app = a_shop(&scratch, "race_settle");
 
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -879,7 +883,7 @@ fn two_settles_at_the_same_instant_make_one_bill() {
         for _ in 0..2 {
             threads.spawn(|| {
                 gate.wait();
-                let out = crate::flows::complete_bill_on(&app);
+                let out = crate::flows::complete_bill_on(&app, None);
                 outcomes.lock().expect("not poisoned").push(out.is_ok());
             });
         }

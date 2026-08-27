@@ -134,11 +134,27 @@ impl<'a> FloorRepo<'a> {
     }
 
     pub fn list_tables(&self, outlet: &str) -> Result<Vec<DiningTable>, DbError> {
-        let mut stmt = self.tx.prepare_cached(
+        self.tables_where("outlet_id = ?1 ORDER BY sort_order, label", [outlet])
+    }
+
+    /// One table, by id.
+    pub fn find_table(&self, id: &TableId) -> Result<Option<DiningTable>, DbError> {
+        Ok(self
+            .tables_where("id = ?1", [id.as_str()])?
+            .into_iter()
+            .next())
+    }
+
+    fn tables_where(
+        &self,
+        predicate: &str,
+        params: [&str; 1],
+    ) -> Result<Vec<DiningTable>, DbError> {
+        let mut stmt = self.tx.prepare_cached(&format!(
             "SELECT id, section_id, label, seats, pos_x, pos_y, sort_order, is_active
-               FROM dining_tables WHERE outlet_id = ?1 ORDER BY sort_order, label",
-        )?;
-        let rows = stmt.query_map([outlet], |row| {
+               FROM dining_tables WHERE {predicate}"
+        ))?;
+        let rows = stmt.query_map(params, |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,

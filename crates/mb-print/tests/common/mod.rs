@@ -174,10 +174,9 @@ pub fn order(bill: Bill, settlement: Settlement) -> AnyOrder {
         OrderId::new("ord_0001"),
         day,
         Timestamp::from_millis(1_770_000_000_000),
-        OrderType::DineIn,
+        mb_core::Placement::on_table(TableId::new("6")),
         StaffId::new("staff_1"),
     )
-    .on_table(TableId::new("6"))
     .core;
 
     let open = OpenOrder {

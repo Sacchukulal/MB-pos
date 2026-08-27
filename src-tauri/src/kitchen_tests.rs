@@ -159,10 +159,9 @@ fn seat(app: &App, items: &[&str]) -> String {
         mb_core::OrderId::new(id.clone()),
         day,
         crate::flows::now(),
-        mb_core::OrderType::DineIn,
+        mb_core::Placement::on_table(mb_core::TableId::new("tbl_5")),
         mb_core::StaffId::new(crate::state::DEFAULT_STAFF),
-    )
-    .on_table(mb_core::TableId::new("tbl_5"));
+    );
     draft.core.cart = cart;
 
     app.with_shop(|shop| {
@@ -171,20 +170,20 @@ fn seat(app: &App, items: &[&str]) -> String {
                 let token = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Token,
                     day,
                 )?;
                 let bill_number = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Bill,
                     day,
                 )?;
                 Repos::new(tx).orders().save(
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     &mb_core::AnyOrder::Open(mb_core::OpenOrder {
                         core: draft.core.clone(),
                         token,
@@ -691,7 +690,7 @@ fn each_category_goes_to_its_own_printer() {
                 )
                 .expect("added");
         }
-        state.table = Some("tbl_5".to_owned());
+        state.place_on(mb_core::TableId::new("tbl_5"), "5".to_owned(), None);
         Ok(())
     })
     .expect("a cart");
@@ -740,7 +739,7 @@ fn an_unrouted_shop_still_prints_one_ticket() {
                 )
                 .expect("added");
         }
-        state.table = Some("tbl_5".to_owned());
+        state.place_on(mb_core::TableId::new("tbl_5"), "5".to_owned(), None);
         Ok(())
     })
     .expect("a cart");
@@ -807,7 +806,7 @@ fn a_naan_on_table_5(app: &App) {
                 Vec::new(),
             )
             .expect("added");
-        state.table = Some("tbl_5".to_owned());
+        state.place_on(mb_core::TableId::new("tbl_5"), "5".to_owned(), None);
         Ok(())
     })
     .expect("a cart");
@@ -863,7 +862,7 @@ fn a_pending_ticket_reaches_the_kitchen_printer_and_is_not_lost() {
     // Parked, and the screen told — but no paper has been printed for it.
     crate::flows::park_open_order(&app).expect("parked");
     let order_id = app
-        .with_cart(|state| Ok(state.order_id.clone()))
+        .with_cart(|state| Ok(state.order_id().map(str::to_owned)))
         .expect("a cart")
         .expect("parked");
     kitchen::send(&app, &order_id, None).expect("the screen was told");
@@ -911,7 +910,7 @@ fn a_cancellation_slip_goes_to_the_kitchen_printer() {
 
     crate::flows::print_kitchen_ticket_on(&app).expect("the kitchen was told");
     let order_id = app
-        .with_cart(|state| Ok(state.order_id.clone()))
+        .with_cart(|state| Ok(state.order_id().map(str::to_owned)))
         .expect("a cart")
         .expect("parked");
     let before = kitchen_paper(&app).len();
@@ -954,8 +953,7 @@ fn a_dine_in_order_with_no_table_prints_nothing() {
                 Vec::new(),
             )
             .expect("added");
-        state.order_type = mb_core::OrderType::DineIn;
-        state.table = None;
+        state.set_order_type(mb_core::OrderType::DineIn);
         Ok(())
     })
     .expect("a cart with no table");

@@ -2,7 +2,6 @@
 
 // A desktop app should not also open a console window behind itself.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![allow(dead_code, reason = "P08's Rust half landed before its React half")]
 
 /// A whole trading day, and everything has to reconcile — where two figures are computed by
 /// different code, they are asserted equal.

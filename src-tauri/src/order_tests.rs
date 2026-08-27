@@ -110,7 +110,7 @@ fn open_one(app: &App, table: Option<&str>) -> String {
             &format!("open_{}", mb_auth::random_token(8)),
             None,
             What::OpenOrder {
-                order_type: "parcel".to_owned(),
+                order_type: if table.is_some() { "dine_in" } else { "parcel" }.to_owned(),
                 table_id: table.map(ToOwned::to_owned),
                 covers: None,
             },
@@ -193,8 +193,8 @@ fn the_counters_figure_wins_over_anything_a_phone_sends() {
 
     match go(&app, &lying) {
         Outcome::Ok { total, lines, .. } => {
-            // Two dosas at 120.00 is 240.00, from the counter's own menu.
-            assert_eq!(total, "240.00", "the phone's number reached the bill");
+            // Two dosas at 120.00 is 240.00 plus the menu's 5% tax, from the counter's own menu.
+            assert_eq!(total, "252.00", "the phone's number reached the bill");
             assert_eq!(lines.len(), 1);
             assert_eq!(lines[0].amount, "240.00");
         }
@@ -433,7 +433,12 @@ fn a_phone_cannot_wipe_what_the_cashier_is_typing() {
 
     // The cashier has that order open and has typed a payment into it.
     app.with_cart_mut(|state| {
-        state.order_id = Some(order.clone());
+        state.origin = Some(crate::billing::Origin {
+            id: mb_core::OrderId::new(order.clone()),
+            created_at: crate::flows::now(),
+            business_day: crate::flows::today(crate::flows::now()),
+            opened_by: mb_core::StaffId::new(crate::state::DEFAULT_STAFF),
+        });
         state
             .settlement
             .add(
@@ -739,4 +744,110 @@ fn the_catalogue_version_tracks_what_a_phone_can_see() {
 fn a_phone_clock_running_fast_is_not_stale() {
     let now = Timestamp::from_millis(10_000_000_000);
     assert!(!orders::is_stale(now.millis() + 60_000, now));
+}
+
+/// The waiter's phone and the counter show one total: charges, tax and rounding included.
+#[test]
+fn the_phone_and_the_counter_agree_on_the_total() {
+    let scratch = Scratch::new("p20_total");
+    let app = a_shop(&scratch, "total");
+    let mut config = crate::settings::ShopConfig::default();
+    config.billing.packing_charge = mb_core::Money::from_paise(1_000);
+    config.billing.packing_charge_tax_bp = 500;
+    app.publish_shop_config(config.clone());
+
+    let order = open_one(&app, None);
+    let out = go(
+        &app,
+        &intent(
+            "add_dosa",
+            Some(&order),
+            What::AddItem {
+                item_id: "itm_dosa".to_owned(),
+                qty: "2".to_owned(),
+                note: None,
+                modifiers: vec![],
+            },
+        ),
+    );
+    let Outcome::Ok { total, .. } = out else {
+        panic!("the dosa did not go on: {out:?}");
+    };
+
+    let stored = crate::flows::find_order(&app, &mb_core::OrderId::new(&order))
+        .expect("read")
+        .expect("on disk");
+    let counter = crate::billing::bill_for(
+        &stored.core().cart,
+        stored.core().order_type(),
+        None,
+        &config,
+    )
+    .expect("the counter's bill");
+    assert_eq!(total, counter.grand_total.to_plain_string());
+    // 240 + 5% tax + 10 packing + 5% on it, rounded to the rupee.
+    assert_eq!(total, "263.00");
+}
+
+/// Parking an order again keeps its time and its day: the floor's timer never restarts.
+#[test]
+fn parking_twice_keeps_the_time_and_the_day() {
+    let scratch = Scratch::new("p20_park");
+    let app = a_shop(&scratch, "park");
+    app.with_cart_mut(|state| {
+        state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
+        Ok(())
+    })
+    .expect("a table");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), None, None).expect("a dosa");
+    let first = crate::flows::park_open_order(&app).expect("parked");
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    crate::ipc::cart_add_on(&app, "itm_coffee".to_owned(), None, None).expect("a coffee");
+    let second = crate::flows::park_open_order(&app).expect("parked again");
+
+    assert_eq!(
+        second.core.id, first.core.id,
+        "a second park is the same order"
+    );
+    assert_eq!(
+        second.core.created_at, first.core.created_at,
+        "the time moved"
+    );
+    assert_eq!(
+        second.core.business_day, first.core.business_day,
+        "the day moved"
+    );
+    assert_eq!(second.bill_number, first.bill_number, "the number moved");
+    assert_eq!(second.core.cart.lines().len(), 2, "the cart did not follow");
+    assert!(
+        crate::flows::now().millis() > first.core.created_at.millis(),
+        "the clock stood still, so the test proved nothing"
+    );
+}
+
+/// A parcel cannot be on a table, and a dine-in cart with no table cannot become an order.
+#[test]
+fn a_table_and_a_parcel_cannot_meet() {
+    let mut state = crate::billing::CartState::default();
+    let by = StaffId::new("staff_default");
+    let refused = state
+        .to_core(crate::flows::now(), &by, "t1")
+        .expect_err("no table");
+    assert_eq!(refused.code, "bill.no_table");
+
+    state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
+    state.set_order_type(mb_core::OrderType::Parcel);
+    assert!(state.table().is_none(), "a parcel kept its table");
+    let core = state
+        .to_core(crate::flows::now(), &by, "t1")
+        .expect("a parcel");
+    assert_eq!(core.placement, mb_core::Placement::Parcel);
+
+    state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
+    assert_eq!(
+        state.order_type(),
+        mb_core::OrderType::DineIn,
+        "a table makes it dine-in"
+    );
 }

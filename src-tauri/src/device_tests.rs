@@ -71,7 +71,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 /// One whole bill, through the real path.
 fn a_bill(app: &App) -> String {
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -80,7 +80,7 @@ fn a_bill(app: &App) -> String {
         .with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total))
         .expect("bill");
     crate::ipc::cart_add_payment_on(app, "Cash".to_owned(), total.paise(), None).expect("paid");
-    crate::flows::complete_bill_on(app).expect("settled")
+    crate::flows::complete_bill_on(app, None).expect("settled")
 }
 
 // Nothing plugged in.

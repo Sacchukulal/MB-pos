@@ -221,6 +221,18 @@ export function Billing() {
     [refreshFloor, report],
   );
 
+  const openOrderById = useCallback(
+    async (orderId: string) => {
+      try {
+        setCart(await call('open_order', { orderId }));
+        await refreshFloor();
+      } catch (cause) {
+        report(cause);
+      }
+    },
+    [refreshFloor, report],
+  );
+
   const removeLine = useCallback(
     async (index: number) => {
       try {
@@ -340,26 +352,6 @@ export function Billing() {
     [report],
   );
 
-  const takeTheBalance = useCallback(
-    async (mode: string) => {
-      if (!cart) return;
-      try {
-        // The amount is the balance Rust computed.
-        setCart(
-          await call('cart_add_payment', {
-            mode,
-            // The wire carries a JSON number; MoneyView types the field as the i64 it is in
-            // Rust.
-            amountPaise: Number(cart.balance.paise),
-          }),
-        );
-      } catch (cause) {
-        report(cause);
-      }
-    },
-    [cart, report],
-  );
-
   /** The delta only — never the whole order. */
   const printKitchen = useCallback(async () => {
     try {
@@ -390,9 +382,9 @@ export function Billing() {
    */
   const completeBill = useCallback(async () => {
     try {
-      // Whatever is still owing goes down in the mode that is lit.
-      if (cart && cart.balance.paise > 0n) await takeTheBalance(payMode);
-      const number = await call('complete_bill');
+      // Whatever is still owing goes down in the mode that is lit — Rust takes it and settles
+      // in one command.
+      const number = await call('complete_bill', { mode: payMode });
       setCart(await call('current_cart'));
       setCashGiven('');
       await refreshFloor();
@@ -400,7 +392,7 @@ export function Billing() {
     } catch (cause) {
       report(cause);
     }
-  }, [cart, payMode, refreshFloor, report, takeTheBalance, toast]);
+  }, [payMode, refreshFloor, report, toast]);
 
   /** The cash box, committed. */
   const commitCash = useCallback(
@@ -503,6 +495,9 @@ export function Billing() {
         case 'open-table':
           await openTableById(command.tableId);
           return;
+        case 'open-order':
+          await openOrderById(command.orderId);
+          return;
         case 'set-order-type':
           await setOrderType(command.value);
           return;
@@ -532,7 +527,7 @@ export function Billing() {
           return;
       }
     },
-    [addItem, completeBill, newOrder, openTableById, printKitchen, setOrderType, toast],
+    [addItem, completeBill, newOrder, openOrderById, openTableById, printKitchen, setOrderType, toast],
   );
 
   // Perform one batch per committed dispatch.

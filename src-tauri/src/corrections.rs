@@ -2,7 +2,7 @@
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
-use mb_core::{AnyOrder, BusinessDay, Money, OrderId, StaffId, Timestamp};
+use mb_core::{AnyOrder, BusinessDay, Money, OrderId, StaffId};
 use mb_db::repo::corrections::{Reason, Refund};
 use serde::Serialize;
 use ts_rs::TS;
@@ -131,8 +131,8 @@ fn bill_row(
             .map(|n| n.formatted.clone())
             .unwrap_or_default(),
         at: words::when(core.created_at),
-        table: core.table.as_ref().map(|t| t.as_str().to_owned()),
-        order_type: crate::billing::order_type_label(core.order_type).to_owned(),
+        table: core.table().map(|t| t.as_str().to_owned()),
+        order_type: crate::billing::order_type_label(core.order_type()).to_owned(),
         total: MoneyView::from(total),
         cashier,
         state: state.to_owned(),
@@ -387,7 +387,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
 
     // The kitchen first — while the order still says what it was told.
     let told: Vec<(mb_core::LineIdentity, mb_core::Qty)> = open.core.kitchen.told().to_vec();
-    let table = open.core.table.as_ref().map(|t| t.as_str().to_owned());
+    let table = open.core.table().cloned();
 
     let cancelled = open
         .clone()
@@ -417,7 +417,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
                     )
                     .about(order_id.clone())
                     .changed(
-                        serde_json::json!({ "state": "open", "table": table }),
+                        serde_json::json!({ "state": "open", "table": table.as_ref().map(mb_core::TableId::as_str) }),
                         serde_json::json!({ "state": "cancelled", "reason": reason }),
                     ),
                 )?;
@@ -432,7 +432,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
             app,
             &open.core,
             &told,
-            table.as_deref(),
+            table.as_ref(),
             Some(&mb_core::AnyOrder::Open(open.clone())),
         )
     {
@@ -457,7 +457,7 @@ fn print_cancellation(
     app: &App,
     core: &mb_core::OrderCore,
     lines: &[(mb_core::LineIdentity, mb_core::Qty)],
-    table: Option<&str>,
+    table: Option<&mb_core::TableId>,
     // The order, when the caller has one — so the slip carries the same token and bill number
     // the ticket that started the cooking did.
     order: Option<&mb_core::AnyOrder>,
@@ -466,7 +466,7 @@ fn print_cancellation(
     crate::flows::queue_kitchen_lines(
         app,
         mb_print::template::TicketKind::Cancellation,
-        core.order_type,
+        core.order_type(),
         table,
         order,
         crate::flows::ticket_lines(&core.cart, lines),
@@ -490,7 +490,11 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
         let line = state.cart.lines().get(index).ok_or_else(|| {
             UiError::new("void_line.gone", "That line is not on this bill any more.")
         })?;
-        Ok((line.snapshot.name.clone(), line.qty, state.order_id.clone()))
+        Ok((
+            line.snapshot.name.clone(),
+            line.qty,
+            state.order_id().map(str::to_owned),
+        ))
     })?;
 
     // Off the order.
@@ -506,13 +510,21 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
             )
             .with_detail(e.to_string())
         })?;
-        Ok((cancel, state.to_core_for_printing()))
+        Ok((cancel, state.to_core(at, &who.staff_id, app.terminal_id())))
     })?;
+    // The kitchen's slip does not need a table to exist yet, so a dine-in cart with no table is
+    // not refused here — there is no paper without a ledger, and no ledger without a park.
+    let core = core.ok();
 
     // The paper, before the ledger.
     if !cancel.is_empty() {
-        let table = app.with_cart(|state| Ok(state.table_label.clone()))?;
-        if let Err(e) = print_cancellation(app, &core, &cancel, table.as_deref(), None) {
+        let Some(core) = core.as_ref() else {
+            return Err(UiError::new(
+                "void_line.no_table",
+                "This is a dine-in order with no table, so no kitchen slip can be printed.",
+            ));
+        };
+        if let Err(e) = print_cancellation(app, core, &cancel, core.table(), None) {
             // Deliberately not fatal, and deliberately loud: the line IS off the bill, so the
             // customer is not charged.
             log_warn!("a line was voided but the kitchen slip failed: {e}");
@@ -617,7 +629,7 @@ pub fn reprint_bill_on(app: &App, order_id: String, reason: String) -> UiResult<
         None => mb_print::template::Copy::Duplicate { number: copy },
     };
 
-    crate::flows::queue_bill_copy(app, &order, &bill, &who.name, marking)?;
+    crate::flows::queue_bill(app, &order, &bill, &who.name, marking)?;
 
     log_info!("bill {order_id} reprinted as copy {copy} by {}", who.name);
     Ok(format!("Copy {copy} is printing."))
@@ -685,12 +697,6 @@ pub fn refund_on(
         who.name
     );
     list_bills_on(app)
-}
-
-#[allow(dead_code, reason = "kept beside the flows it serves")]
-fn stamp() -> (Timestamp, BusinessDay) {
-    let at = now();
-    (at, today(at))
 }
 
 // The command seats.

@@ -9,7 +9,8 @@ use mb_auth::{Actor, Permission};
 use crate::state::App;
 use crate::words::{UiError, UiResult};
 
-/// What a command needs.
+/// What a command needs — the record the classification test reads.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
     /// Anybody, including nobody: these work on the lock screen.
@@ -24,6 +25,7 @@ pub enum Access {
 }
 
 /// Every command in the product, and what it needs.
+#[cfg(test)]
 pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // Works while locked, and has to.
     ("app_status", Access::Public),
@@ -59,7 +61,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("cart_remove", Access::Needs(Permission::BillCreate)),
     ("cart_clear", Access::Needs(Permission::BillCreate)),
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),
-    ("cart_add_payment", Access::Needs(Permission::BillCreate)),
     ("cart_clear_payments", Access::Needs(Permission::BillCreate)),
     ("cart_cash_given", Access::Needs(Permission::BillCreate)),
     (
@@ -74,6 +75,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("menu_items", Access::Needs(Permission::BillCreate)),
     ("search_items", Access::Needs(Permission::BillCreate)),
     ("open_table", Access::Needs(Permission::BillCreate)),
+    ("open_order", Access::Needs(Permission::BillCreate)),
     (
         "print_kitchen_ticket",
         Access::Needs(Permission::BillCreate),
@@ -170,7 +172,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         Access::Needs(Permission::TablesManage),
     ),
     ("move_order", Access::Needs(Permission::BillCreate)),
-    ("merge_orders", Access::Needs(Permission::BillVoid)),
+    ("merge_orders", Access::Needs(Permission::BillCreate)),
     ("split_order", Access::Needs(Permission::BillCreate)),
     ("even_split", Access::Needs(Permission::BillCreate)),
     ("set_covers", Access::Needs(Permission::BillCreate)),
@@ -368,7 +370,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("write_diagnostics", Access::Needs(Permission::BackupRun)),
     // Looking for an update is reading.
     ("look_for_an_update", Access::Needs(Permission::ReportsView)),
-    ("dismiss_update", Access::Needs(Permission::SettingsStore)),
     (
         "go_back_a_version",
         Access::Needs(Permission::SettingsStore),
@@ -546,15 +547,6 @@ fn capitalise(sentence: &str) -> String {
     }
 }
 
-/// What a command needs, or `None` if nobody has said.
-#[must_use]
-pub fn access_for(command: &str) -> Option<Access> {
-    COMMAND_ACCESS
-        .iter()
-        .find(|(name, _)| *name == command)
-        .map(|(_, access)| *access)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,9 +629,7 @@ mod tests {
         let app = an_app();
         app.sessions().begin(a_waiter(), crate::flows::now(), false);
         app.with_cart_mut(|state| {
-            state.table = Some("tbl_7".to_owned());
-            state.table_label = Some("7".to_owned());
-            state.order_type = mb_core::OrderType::Parcel;
+            state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
             Ok(())
         })
         .expect("the cart takes a table");
@@ -647,9 +637,9 @@ mod tests {
         app.sessions().end();
 
         app.with_cart(|state| {
-            assert_eq!(state.table.as_deref(), Some("tbl_7"));
-            assert_eq!(state.table_label.as_deref(), Some("7"));
-            assert_eq!(state.order_type, mb_core::OrderType::Parcel);
+            assert_eq!(state.table_id(), Some("tbl_7"));
+            assert_eq!(state.table_label(), Some("7"));
+            assert_eq!(state.order_type(), mb_core::OrderType::DineIn);
             Ok(())
         })
         .expect("the cart is where it was");

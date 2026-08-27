@@ -312,17 +312,12 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
             d,
             at(n + 1),
             if n % 4 == 0 {
-                OrderType::Parcel
+                mb_core::Placement::Parcel
             } else {
-                OrderType::DineIn
+                mb_core::Placement::on_table(TableId::new(format!("tbl_{}", n % 6 + 1)))
             },
             StaffId::new("staff_1"),
         );
-        let draft = if n % 4 == 0 {
-            draft
-        } else {
-            draft.on_table(TableId::new(format!("tbl_{}", (n % 6) + 1)))
-        };
 
         // Every fifth order is left as a draft: an order still being typed is a real state and
         // a backup that loses it loses somebody's work.

@@ -519,7 +519,7 @@ fn a_bill_opened_by_one_person_and_settled_by_another_records_both() {
         mb_core::OrderId::new("ord_shift_change"),
         day(),
         at(1),
-        OrderType::Parcel,
+        mb_core::Placement::Parcel,
         opener.clone(),
     );
     let mut draft = draft;

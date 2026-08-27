@@ -49,7 +49,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 /// produced rather than one the test typed.
 fn a_cash_sale(app: &App) -> mb_core::Money {
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -66,7 +66,7 @@ fn a_cash_sale(app: &App) -> mb_core::Money {
         })
     })
     .expect("paid");
-    crate::flows::complete_bill_on(app).expect("settled");
+    crate::flows::complete_bill_on(app, None).expect("settled");
     total
 }
 

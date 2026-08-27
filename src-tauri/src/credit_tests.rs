@@ -105,7 +105,7 @@ fn a_bill_goes_on_the_account_and_money_comes_back_later() {
 
     // A bill in the cart.
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -126,7 +126,7 @@ fn a_bill_goes_on_the_account_and_money_comes_back_later() {
     assert_eq!(cart.balance.paise, 0, "the bill is covered by the account");
 
     // Settle it, so it becomes a real sale.
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     let account = account_on(&app, "cus_regular".to_owned()).expect("account");
     assert_eq!(account.movements.len(), 1);

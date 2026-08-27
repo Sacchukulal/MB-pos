@@ -9,10 +9,6 @@ export type UpdateState = {
  */
 available: string | null, notes: string, 
 /**
- * The business day it was last dismissed on, as `YYYY-MM-DD`.
- */
-dismissedOn: string | null, 
-/**
  * How many days this counter has been on its current version.
  */
 daysOnThisVersion: number, running: string, isDevBuild: boolean, };

@@ -16,7 +16,6 @@ use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
-    Debug,
     Info,
     Warn,
     Error,
@@ -25,7 +24,6 @@ pub enum Level {
 impl fmt::Display for Level {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Level::Debug => "DEBUG",
             Level::Info => "INFO ",
             Level::Warn => "WARN ",
             Level::Error => "ERROR",

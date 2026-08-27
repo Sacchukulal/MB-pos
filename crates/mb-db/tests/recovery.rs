@@ -452,7 +452,7 @@ fn t7_a_backup_during_active_billing_is_consistent() {
                     id,
                     mb_core::BusinessDay::from_days_since_epoch(20_600),
                     Timestamp::from_millis(1_770_000_000_000 + n),
-                    mb_core::OrderType::Parcel,
+                    mb_core::Placement::Parcel,
                     StaffId::new("staff_1"),
                 );
                 // Real lines, not an empty order: the assertion below is that no order was

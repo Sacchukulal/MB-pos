@@ -209,21 +209,6 @@ fn a_gstin_that_does_not_match_its_state_is_refused() {
     assert_eq!(error.key, Some("store.gstin"));
 }
 
-/// Reset says what it will do, and does only that.
-#[test]
-fn resetting_one_section_leaves_the_others_alone() {
-    let mut config = ShopConfig::default();
-    config.receipt.footer = "Come back soon".to_owned();
-    config.billing.idle_lock_minutes = 45;
-
-    let after = super::reset_group(&config, Group::Receipt);
-    assert_eq!(after.receipt.footer, ShopConfig::default().receipt.footer);
-    assert_eq!(
-        after.billing.idle_lock_minutes, 45,
-        "the billing section moved"
-    );
-}
-
 #[test]
 fn a_configuration_survives_being_written_out_and_read_back() {
     let mut config = ShopConfig::default();

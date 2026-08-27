@@ -14,7 +14,7 @@ who: string | null, role: string | null,
 /**
  * True while nobody has a PIN — the shell's undismissable banner.
  */
-stand_in: boolean, } | { "kind": "licence", state: string, } | { "kind": "sync", state: string, } | { "kind": "pairing", 
+stand_in: boolean, } | { "kind": "pairing", 
 /**
  * How many phones are waiting for somebody to press Allow.
  */

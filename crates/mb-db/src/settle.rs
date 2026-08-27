@@ -54,12 +54,6 @@ pub fn open_draft(
     let (outlet, terminal) = (till.outlet, till.terminal);
     let day = draft.core.business_day;
 
-    if draft.core.order_type == mb_core::OrderType::DineIn && draft.core.table.is_none() {
-        return Err(DbError::invariant(
-            "a dine-in order needs a table before it can be opened",
-        ));
-    }
-
     db.transaction(|tx| {
         let token = numbering::claim(tx, outlet, terminal, CounterKind::Token, day)?;
         let bill_number = numbering::claim(tx, outlet, terminal, CounterKind::Bill, day)?;

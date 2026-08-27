@@ -546,7 +546,7 @@ fn seed_settled_bills(app: &App) -> usize {
     let mut done = 0;
     for (item, qty, mode) in SETTLED {
         app.with_cart_mut(|state| {
-            state.order_type = OrderType::Parcel;
+            state.set_order_type(OrderType::Parcel);
             Ok(())
         })
         .expect("parcel");
@@ -575,7 +575,7 @@ fn seed_settled_bills(app: &App) -> usize {
             })
         })
         .expect("paid");
-        crate::flows::complete_bill_on(app).expect("settled");
+        crate::flows::complete_bill_on(app, None).expect("settled");
         done += 1;
     }
     done
@@ -618,10 +618,9 @@ fn seed_open_orders(app: &App) {
             OrderId::new(format!("ord_demo_{n}")),
             day,
             at,
-            OrderType::DineIn,
+            mb_core::Placement::on_table(TableId::new(*table)),
             StaffId::new(crate::state::DEFAULT_STAFF),
-        )
-        .on_table(TableId::new(*table));
+        );
         draft.core.cart = cart;
 
         if let Some(told) = told {
@@ -671,7 +670,7 @@ fn seed_open_orders(app: &App) {
             OrderId::new(format!("ord_demo_nt_{n}")),
             day,
             at,
-            *kind,
+            mb_core::Placement::new(*kind, None, None).expect("no table"),
             StaffId::new(crate::state::DEFAULT_STAFF),
         );
         draft.core.cart = cart;
@@ -688,20 +687,20 @@ fn save_open(app: &App, draft: DraftOrder) {
                 let token = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Token,
                     day,
                 )?;
                 let bill_number = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Bill,
                     day,
                 )?;
                 repos.orders().save(
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     &AnyOrder::Open(mb_core::OpenOrder {
                         core: draft.core.clone(),
                         token,
@@ -777,7 +776,7 @@ fn seed_credit(app: &App) {
         ("cus_arvind", "itm_veg_pulao", 4, false),
     ] {
         app.with_cart_mut(|state| {
-            state.order_type = OrderType::Parcel;
+            state.set_order_type(OrderType::Parcel);
             Ok(())
         })
         .expect("parcel");
@@ -791,7 +790,7 @@ fn seed_credit(app: &App) {
             .expect("cleared");
             continue;
         }
-        crate::flows::complete_bill_on(app).expect("on account");
+        crate::flows::complete_bill_on(app, None).expect("on account");
     }
 }
 
@@ -1479,9 +1478,7 @@ fn seed_delivery(app: &App) {
         // A parked order stays in the cart.
         crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
         app.with_cart_mut(|state| {
-            state.order_type = OrderType::Delivery;
-            state.table = None;
-            state.table_label = None;
+            state.set_order_type(OrderType::Delivery);
             Ok(())
         })
         .expect("delivery");
@@ -1503,7 +1500,7 @@ fn seed_delivery(app: &App) {
                 })
             })
             .expect("paid");
-            crate::flows::complete_bill_on(app).expect("settled");
+            crate::flows::complete_bill_on(app, None).expect("settled");
         } else {
             crate::flows::park_open_order(app).expect("held");
         }
@@ -1571,7 +1568,7 @@ fn seed_unconfirmed(app: &App) {
     // have turned a failed delivery into a settled parcel.
     crate::ipc::cart_clear_on(app, false).expect("a fresh cart");
     app.with_cart_mut(|state| {
-        state.order_type = OrderType::Parcel;
+        state.set_order_type(OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -1587,7 +1584,7 @@ fn seed_unconfirmed(app: &App) {
         Some("UPI/4477112233".to_owned()),
     )
     .expect("taken");
-    crate::flows::complete_bill_on(app).expect("settled");
+    crate::flows::complete_bill_on(app, None).expect("settled");
 }
 
 fn day_ahead(day: BusinessDay, n: i32) -> BusinessDay {

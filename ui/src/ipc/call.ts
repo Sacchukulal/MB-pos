@@ -139,10 +139,6 @@ export interface Commands {
   cart_remove: { args: { index: number }; returns: CartView };
   cart_clear: { args: { keepType: boolean }; returns: CartView };
   cart_set_order_type: { args: { orderType: string }; returns: CartView };
-  cart_add_payment: {
-    args: { mode: string; amountPaise: number };
-    returns: CartView;
-  };
   cart_clear_payments: { args: void; returns: CartView };
   cart_cash_given: { args: { amount: string }; returns: CartView };
   /** Money off this bill. */
@@ -159,12 +155,13 @@ export interface Commands {
     returns: MenuItemView[];
   };
   open_table: { args: { tableId: string }; returns: CartView };
+  open_order: { args: { orderId: string }; returns: CartView };
   /** The delta only, from the order's own ledger. */
   print_kitchen_ticket: { args: void; returns: string };
   /** The cook lost the paper. */
   reprint_kitchen_ticket: { args: void; returns: string };
   /** settle() — one transaction — and THEN the print. */
-  complete_bill: { args: void; returns: string };
+  complete_bill: { args: { mode: string | null }; returns: string };
   /** The bill a waiter carries to the table, before anybody has paid. */
   print_open_bill: { args: { orderId: string }; returns: string };
   /** Development only — the command does not exist in a release build. */
@@ -649,7 +646,6 @@ export interface Commands {
   kitchen_acknowledge: { args: { id: string }; returns: KitchenView };
   kitchen_fire: { args: { orderId: string; course: string }; returns: KitchenView };
   look_for_an_update: { args: void; returns: UpdateState };
-  dismiss_update: { args: void; returns: UpdateState };
   go_back_a_version: { args: void; returns: string };
   diagnostics_plan: { args: void; returns: BundlePlanView };
   write_diagnostics: { args: void; returns: string };

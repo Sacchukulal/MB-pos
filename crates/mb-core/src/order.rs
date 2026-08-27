@@ -36,6 +36,8 @@ pub enum OrderError {
     ReasonRequired,
     #[error("a dine-in order needs a table")]
     TableRequired,
+    #[error("only a dine-in order sits at a table")]
+    TableOnParcel,
     #[error("this bill is not fully paid yet")]
     NotFullyPaid,
     #[error("that settlement is not valid: {0}")]
@@ -46,19 +48,78 @@ pub enum OrderError {
 
 type Result<T> = std::result::Result<T, OrderError>;
 
+/// Where an order is and what kind it is — one value, so a table without dine-in cannot exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Placement {
+    DineIn {
+        table: TableId,
+        /// The `6A` / `6B` letter, when two parties share one table.
+        #[serde(default)]
+        seat: Option<SubTable>,
+    },
+    Parcel,
+    SelfService,
+    Delivery,
+}
+
+impl Placement {
+    /// Build one from the three stored parts; a table on a non-dine-in order is refused.
+    pub fn new(
+        order_type: OrderType,
+        table: Option<TableId>,
+        seat: Option<SubTable>,
+    ) -> Result<Placement> {
+        match (order_type, table) {
+            (OrderType::DineIn, Some(table)) => Ok(Placement::DineIn { table, seat }),
+            (OrderType::DineIn, None) => Err(OrderError::TableRequired),
+            (_, Some(_)) => Err(OrderError::TableOnParcel),
+            (OrderType::Parcel, None) => Ok(Placement::Parcel),
+            (OrderType::SelfService, None) => Ok(Placement::SelfService),
+            (OrderType::Delivery, None) => Ok(Placement::Delivery),
+        }
+    }
+
+    #[must_use]
+    pub const fn on_table(table: TableId) -> Placement {
+        Placement::DineIn { table, seat: None }
+    }
+
+    #[must_use]
+    pub const fn order_type(&self) -> OrderType {
+        match self {
+            Placement::DineIn { .. } => OrderType::DineIn,
+            Placement::Parcel => OrderType::Parcel,
+            Placement::SelfService => OrderType::SelfService,
+            Placement::Delivery => OrderType::Delivery,
+        }
+    }
+
+    #[must_use]
+    pub const fn table(&self) -> Option<&TableId> {
+        match self {
+            Placement::DineIn { table, .. } => Some(table),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn seat(&self) -> Option<&SubTable> {
+        match self {
+            Placement::DineIn { seat, .. } => seat.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// What every order carries, in every state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderCore {
     pub id: OrderId,
-    /// Decision D5 — stamped once, at creation, and never re-derived.
+    /// Stamped once, at creation, and never re-derived.
     pub business_day: BusinessDay,
     pub created_at: Timestamp,
-    pub order_type: OrderType,
-    /// Set for a dine-in order.
-    pub table: Option<TableId>,
-    /// The `6A` / `6B` letter, when two parties share one table.
-    #[serde(default)]
-    pub sub_table: Option<SubTable>,
+    pub placement: Placement,
     /// How many people are eating.
     #[serde(default)]
     pub covers: Option<u32>,
@@ -66,6 +127,23 @@ pub struct OrderCore {
     pub created_by: StaffId,
     pub note: Option<String>,
     pub kitchen: KitchenLedger,
+}
+
+impl OrderCore {
+    #[must_use]
+    pub const fn order_type(&self) -> OrderType {
+        self.placement.order_type()
+    }
+
+    #[must_use]
+    pub const fn table(&self) -> Option<&TableId> {
+        self.placement.table()
+    }
+
+    #[must_use]
+    pub const fn seat(&self) -> Option<&SubTable> {
+        self.placement.seat()
+    }
 }
 
 /// An order still being typed.
@@ -197,7 +275,7 @@ impl DraftOrder {
         id: OrderId,
         business_day: BusinessDay,
         created_at: Timestamp,
-        order_type: OrderType,
+        placement: Placement,
         created_by: StaffId,
     ) -> Self {
         DraftOrder {
@@ -205,9 +283,7 @@ impl DraftOrder {
                 id,
                 business_day,
                 created_at,
-                order_type,
-                table: None,
-                sub_table: None,
+                placement,
                 covers: None,
                 cart: Cart::new(),
                 created_by,
@@ -215,19 +291,6 @@ impl DraftOrder {
                 kitchen: KitchenLedger::new(),
             },
         }
-    }
-
-    #[must_use]
-    pub fn on_table(mut self, table: TableId) -> Self {
-        self.core.table = Some(table);
-        self
-    }
-
-    /// The `6A` half of a shared table.
-    #[must_use]
-    pub fn on_seat(mut self, sub: SubTable) -> Self {
-        self.core.sub_table = Some(sub);
-        self
     }
 
     /// How many are eating.
@@ -239,9 +302,6 @@ impl DraftOrder {
 
     /// Put the order on the floor: claim its token and bill number.
     pub fn open(self, numbering: &mut Numbering) -> Result<OpenOrder> {
-        if self.core.order_type == OrderType::DineIn && self.core.table.is_none() {
-            return Err(OrderError::TableRequired);
-        }
         let (token, bill_number) = numbering.claim_for_new_order(self.core.business_day);
         Ok(OpenOrder {
             core: self.core,
@@ -455,42 +515,42 @@ mod tests {
         )
     }
 
-    fn draft(order_type: OrderType) -> DraftOrder {
-        DraftOrder::new(OrderId::new("ord_1"), day(), at(1_000), order_type, staff())
+    fn draft(placement: Placement) -> DraftOrder {
+        DraftOrder::new(OrderId::new("ord_1"), day(), at(1_000), placement, staff())
     }
 
     fn open_parcel() -> (OpenOrder, Numbering) {
         let mut numbering = Numbering::new();
-        let order = draft(OrderType::Parcel)
+        let order = draft(Placement::Parcel)
             .open(&mut numbering)
             .expect("opens");
         (order, numbering)
     }
 
     #[test]
-    fn a_dine_in_order_cannot_open_without_a_table() {
-        let mut numbering = Numbering::new();
-        let no_table = draft(OrderType::DineIn);
-        assert!(no_table.core.table.is_none(), "a draft may be incomplete");
+    fn a_table_only_exists_on_a_dine_in_order() {
         assert_eq!(
-            draft(OrderType::DineIn).open(&mut numbering).err(),
+            Placement::new(OrderType::DineIn, None, None).err(),
             Some(OrderError::TableRequired)
         );
+        assert_eq!(
+            Placement::new(OrderType::Parcel, Some(TableId::new("tbl_6")), None).err(),
+            Some(OrderError::TableOnParcel)
+        );
+        let placed = Placement::new(OrderType::DineIn, Some(TableId::new("tbl_6")), None)
+            .expect("a table on a dine-in order");
+        assert_eq!(placed.table(), Some(&TableId::new("tbl_6")));
+        assert_eq!(placed.order_type(), OrderType::DineIn);
 
-        // With a table it opens.
-        let opened = draft(OrderType::DineIn)
-            .on_table(TableId::new("tbl_6"))
-            .open(&mut numbering)
-            .expect("opens");
-        assert_eq!(opened.core.table, Some(TableId::new("tbl_6")));
-
-        // Parcel and self-service need no table at all.
-        for order_type in [
-            OrderType::Parcel,
-            OrderType::SelfService,
-            OrderType::Delivery,
+        let mut numbering = Numbering::new();
+        let opened = draft(placed).open(&mut numbering).expect("opens");
+        assert_eq!(opened.core.table(), Some(&TableId::new("tbl_6")));
+        for placement in [
+            Placement::Parcel,
+            Placement::SelfService,
+            Placement::Delivery,
         ] {
-            assert!(draft(order_type).open(&mut numbering).is_ok());
+            assert!(draft(placement).open(&mut numbering).is_ok());
         }
     }
 
@@ -502,7 +562,7 @@ mod tests {
             OrderId::new("ord_late"),
             BusinessDay::from_ymd(2026, 8, 1),
             at(0),
-            OrderType::Parcel,
+            Placement::Parcel,
             staff(),
         )
         .open(&mut numbering)
@@ -1041,7 +1101,7 @@ mod tests {
             .expect("voids");
 
         let all = vec![
-            AnyOrder::Draft(draft(OrderType::Parcel)),
+            AnyOrder::Draft(draft(Placement::Parcel)),
             AnyOrder::Open(open),
             AnyOrder::Settled(settled),
             AnyOrder::Cancelled(cancelled),

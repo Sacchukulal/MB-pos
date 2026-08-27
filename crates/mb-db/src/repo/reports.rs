@@ -421,7 +421,7 @@ impl<'a> ReportsRepo<'a> {
                FROM orders o
           LEFT JOIN staff s ON s.id = o.cancelled_by
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
-                AND o.state = 'cancelled'
+                AND o.state = 'cancelled' AND o.merged_into IS NULL
              UNION ALL
              SELECT r.business_day, r.refunded_at, 'refund',
                     COALESCE(o.bill_number_formatted, r.order_id),

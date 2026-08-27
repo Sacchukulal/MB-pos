@@ -17,9 +17,6 @@ use serde::{Deserialize, Serialize};
 use crate::search::MatchMode;
 use value::{Invalid, Value};
 
-/// What one ESC/POS multiplier step is worth, in dots.
-pub const BASE_CELL_PX: u16 = 24;
-
 /// Is this one of the sizes the screen offers?
 #[must_use]
 pub fn is_a_size(px: u16) -> bool {
@@ -612,22 +609,6 @@ pub fn describe(value: &Value) -> String {
     }
 }
 
-/// Put one section back to how it shipped.
-#[must_use]
-pub fn reset_group(config: &ShopConfig, group: catalog::Group) -> ShopConfig {
-    let defaults = ShopConfig::default();
-    let mut out = config.clone();
-    for entry in catalog::CATALOG {
-        if entry.group != group {
-            continue;
-        }
-        // A default cannot fail its own validation, and if one ever did the catalogue is wrong
-        // — which `every_default_is_valid` fails the build over.
-        let _ = (entry.write)(&mut out, &(entry.read)(&defaults));
-    }
-    out
-}
-
 /// Where a setting is kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Storage {
@@ -752,12 +733,6 @@ pub fn plan_import(
         wanted = current.clone();
     }
     (wanted, plan)
-}
-
-/// Every catalogue entry's default, as a fresh configuration would hold it.
-#[must_use]
-pub fn defaults() -> ShopConfig {
-    ShopConfig::default()
 }
 
 /// Refuse a value, with the key attached.

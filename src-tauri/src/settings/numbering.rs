@@ -5,10 +5,10 @@ use mb_db::CounterKind;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::billing::TERMINAL;
 use crate::guard;
 use crate::log_info;
 use crate::state::{App, OUTLET};
+use crate::terminals::TERMINAL;
 use crate::words::{self, UiError, UiResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

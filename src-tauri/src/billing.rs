@@ -1,10 +1,8 @@
 //! The cart lives here, in Rust.
 
-use std::sync::Mutex;
-
 use mb_core::{
-    AnyOrder, Bill, BillInput, Cart, DiscountEntry, ItemSnapshot, Money, OrderType, Settlement,
-    Timestamp, compute_bill,
+    AnyOrder, Bill, BillInput, BusinessDay, Cart, DiscountEntry, ItemSnapshot, Money, OrderCore,
+    OrderId, OrderType, Placement, Settlement, StaffId, SubTable, TableId, Timestamp, compute_bill,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -14,22 +12,37 @@ use crate::words::{UiError, UiResult};
 
 // The cart, as the process holds it.
 
+/// The table a dine-in cart sits at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableSeat {
+    pub id: TableId,
+    /// What the cashier calls it — "7", not "tbl_7".
+    pub label: String,
+    /// The 6A / 6B letter, when two parties share the table.
+    pub seat: Option<SubTable>,
+}
+
+/// The order this cart already is on disk. Set once, when the cart is parked or an order is
+/// opened; the time and the day never change after that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub id: OrderId,
+    pub created_at: Timestamp,
+    pub business_day: BusinessDay,
+    pub opened_by: StaffId,
+}
+
 /// One counter's work in progress.
 #[derive(Debug)]
 pub struct CartState {
     pub cart: Cart,
-    pub order_type: OrderType,
-    /// The table this cart belongs to, when it is a dine-in order.
-    pub table: Option<String>,
-    /// What the cashier calls that table — "7", not "tbl_7".
-    pub table_label: Option<String>,
-    /// The order being edited, when an existing one was opened.
-    pub order_id: Option<String>,
+    // Private, with two setters, so a table can never sit on a parcel.
+    order_type: OrderType,
+    table: Option<TableSeat>,
+    pub origin: Option<Origin>,
     pub settlement: Settlement,
     pub bill_discount: Option<DiscountEntry>,
     pub kitchen: mb_core::KitchenLedger,
-    /// Which half of a shared table this order is.
-    pub sub_table: Option<mb_core::SubTable>,
     /// Whose account this bill went on, when it went on one.
     pub customer: Option<String>,
     /// How many are eating.
@@ -38,59 +51,192 @@ pub struct CartState {
     pub note: Option<String>,
     /// What the floor did while the cashier had this open.
     pub from_the_floor: Vec<crate::orders::FloorChange>,
-    /// Who put the first line on this bill.
-    pub opened_by: Option<mb_core::StaffId>,
 }
 
 impl Default for CartState {
     fn default() -> Self {
-        CartState {
-            cart: Cart::new(),
-            // Dine-in is what a restaurant counter does most of, and the order-type LOCK is
-            // what a parcel counter uses to stop re-selecting it forty times an hour.
-            order_type: OrderType::DineIn,
-            table: None,
-            table_label: None,
-            order_id: None,
-            settlement: Settlement::new(),
-            bill_discount: None,
-            kitchen: mb_core::KitchenLedger::new(),
-            sub_table: None,
-            customer: None,
-            covers: None,
-            note: None,
-            opened_by: None,
-            from_the_floor: Vec::new(),
-        }
+        CartState::new_order(OrderType::DineIn)
     }
 }
 
 impl CartState {
-    /// Recompute from scratch. There is no incremental path and there must not be one: D4 fixes
-    /// the order of operations, and a bill that was patched rather than recomputed is a bill
-    /// nobody can reason about.
-    pub fn bill(&self, config: &crate::settings::ShopConfig) -> UiResult<Bill> {
-        // Built here rather than stored, because a charge belongs to the ORDER TYPE and that
-        // can change while the cart is open — switching a table to a parcel must drop the
-        // service charge and add the packing one.
-        let charges = config.billing.charges_for(self.order_type);
-        // No place of supply: restaurant service is always intra-state (IGST Act s.12(4)),
-        // which is `PlaceOfSupply`'s default.
-        let mut input = BillInput::new(&self.cart, registration_of(config))
-            .with_order_type(self.order_type)
-            .with_rounding(config.billing.rounding)
-            .with_charges(&charges);
-        if let Some(discount) = self.bill_discount.clone() {
-            input = input.with_bill_discount(discount);
+    /// An empty cart of this type — what the counter shows after a bill, keeping the type lock.
+    #[must_use]
+    pub fn new_order(order_type: OrderType) -> Self {
+        CartState {
+            cart: Cart::new(),
+            order_type,
+            table: None,
+            origin: None,
+            settlement: Settlement::new(),
+            bill_discount: None,
+            kitchen: mb_core::KitchenLedger::new(),
+            customer: None,
+            covers: None,
+            note: None,
+            from_the_floor: Vec::new(),
         }
-        compute_bill(input).map_err(|e| {
+    }
+
+    /// A stored order, back in the cart.
+    #[must_use]
+    pub fn load(order: &AnyOrder, table_label: Option<String>) -> Self {
+        let core = order.core();
+        CartState {
+            cart: core.cart.clone(),
+            order_type: core.order_type(),
+            table: core.table().map(|id| TableSeat {
+                id: id.clone(),
+                label: table_label.unwrap_or_else(|| id.as_str().to_owned()),
+                seat: core.seat().cloned(),
+            }),
+            origin: Some(Origin {
+                id: core.id.clone(),
+                created_at: core.created_at,
+                business_day: core.business_day,
+                opened_by: core.created_by.clone(),
+            }),
+            settlement: Settlement::new(),
+            bill_discount: None,
+            kitchen: core.kitchen.clone(),
+            customer: None,
+            covers: core.covers,
+            note: core.note.clone(),
+            from_the_floor: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn order_type(&self) -> OrderType {
+        self.order_type
+    }
+
+    #[must_use]
+    pub const fn table(&self) -> Option<&TableSeat> {
+        self.table.as_ref()
+    }
+
+    #[must_use]
+    pub fn table_id(&self) -> Option<&str> {
+        self.table.as_ref().map(|t| t.id.as_str())
+    }
+
+    #[must_use]
+    pub fn table_label(&self) -> Option<&str> {
+        self.table.as_ref().map(|t| t.label.as_str())
+    }
+
+    #[must_use]
+    pub fn order_id(&self) -> Option<&str> {
+        self.origin.as_ref().map(|o| o.id.as_str())
+    }
+
+    /// Change the type. Anything but dine-in leaves the table.
+    pub fn set_order_type(&mut self, order_type: OrderType) {
+        self.order_type = order_type;
+        if order_type != OrderType::DineIn {
+            self.table = None;
+        }
+    }
+
+    /// Put the cart on a table, which makes it dine-in.
+    pub fn place_on(&mut self, id: TableId, label: String, seat: Option<SubTable>) {
+        self.order_type = OrderType::DineIn;
+        self.table = Some(TableSeat { id, label, seat });
+    }
+
+    /// Where this order is — the one place a dine-in cart with no table is refused.
+    pub fn placement(&self) -> UiResult<Placement> {
+        Placement::new(
+            self.order_type,
+            self.table.as_ref().map(|t| t.id.clone()),
+            self.table.as_ref().and_then(|t| t.seat.clone()),
+        )
+        .map_err(|_| {
             UiError::new(
-                "bill.compute",
-                "This bill could not be worked out. Nothing has been changed.",
+                "bill.no_table",
+                "This is a dine-in order with no table. Type the table number and \
+                 press Enter, or change the order type.",
             )
-            .with_detail(e.to_string())
         })
     }
+
+    /// The order this cart is, as it would be written. An order that already exists keeps its
+    /// id, its time and its day; a new one takes the clock.
+    pub fn to_core(&self, now: Timestamp, by: &StaffId, till: &str) -> UiResult<OrderCore> {
+        let placement = self.placement()?;
+        let (id, created_at, business_day, created_by) = match &self.origin {
+            Some(origin) => (
+                origin.id.clone(),
+                origin.created_at,
+                origin.business_day,
+                origin.opened_by.clone(),
+            ),
+            None => (
+                OrderId::new(format!("{}_{till}", crate::newid::fresh_at("ord", now))),
+                now,
+                crate::flows::today(now),
+                by.clone(),
+            ),
+        };
+        Ok(OrderCore {
+            id,
+            business_day,
+            created_at,
+            placement,
+            covers: self.covers,
+            cart: self.cart.clone(),
+            created_by,
+            note: self.note.clone(),
+            kitchen: self.kitchen.clone(),
+        })
+    }
+
+    /// The cart is now this order on disk.
+    pub fn adopt(&mut self, core: &OrderCore) {
+        self.origin = Some(Origin {
+            id: core.id.clone(),
+            created_at: core.created_at,
+            business_day: core.business_day,
+            opened_by: core.created_by.clone(),
+        });
+    }
+
+    /// Recompute from scratch. There is no incremental path and there must not be one.
+    pub fn bill(&self, config: &crate::settings::ShopConfig) -> UiResult<Bill> {
+        bill_for(
+            &self.cart,
+            self.order_type,
+            self.bill_discount.clone(),
+            config,
+        )
+    }
+}
+
+/// The one way a cart becomes a bill, for the counter, the tile, the phone and the paper.
+pub fn bill_for(
+    cart: &Cart,
+    order_type: OrderType,
+    bill_discount: Option<DiscountEntry>,
+    config: &crate::settings::ShopConfig,
+) -> UiResult<Bill> {
+    // A charge belongs to the ORDER TYPE: switching a table to a parcel drops the service
+    // charge and adds the packing one.
+    let charges = config.billing.charges_for(order_type);
+    let mut input = BillInput::new(cart, registration_of(config))
+        .with_order_type(order_type)
+        .with_rounding(config.billing.rounding)
+        .with_charges(&charges);
+    if let Some(discount) = bill_discount {
+        input = input.with_bill_discount(discount);
+    }
+    compute_bill(input).map_err(|e| {
+        UiError::new(
+            "bill.compute",
+            "This bill could not be worked out. Nothing has been changed.",
+        )
+        .with_detail(e.to_string())
+    })
 }
 
 /// The whole cart region, in one value.
@@ -306,7 +452,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         lines,
         bill: bill_view(&bill)?,
         order_type: order_type_label(state.order_type).to_owned(),
-        table: state.table_label.clone().or_else(|| state.table.clone()),
+        table: state.table_label().map(str::to_owned),
         payments: state
             .settlement
             .payments()
@@ -329,7 +475,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
             .is_ok_and(|pending| pending.is_empty()),
         kitchen_told: !state.kitchen.told().is_empty(),
         covers: state.covers,
-        order_id: state.order_id.clone(),
+        order_id: state.order_id().map(str::to_owned),
         from_the_floor: state.from_the_floor.clone(),
         length_says: state.cart.length_says().unwrap_or_default(),
     })
@@ -473,8 +619,7 @@ pub fn floor_view(
         });
         let order = open.iter().find(|o| {
             o.core()
-                .table
-                .as_ref()
+                .table()
                 .is_some_and(|t| t.as_str() == table.id.as_str())
         });
 
@@ -515,10 +660,10 @@ pub fn floor_view(
     }
 
     // The "No table" group — parcel and self-service orders, at the end.
-    for order in open.iter().filter(|o| o.core().table.is_none()) {
+    for order in open.iter().filter(|o| o.core().table().is_none()) {
         // No token accessor on AnyOrder (a draft has none), so a tile with no table is labelled
         // by its order type.
-        let label = order_type_label(order.core().order_type).to_owned();
+        let label = order_type_label(order.core().order_type()).to_owned();
         // A parcel or self-service order has no table, so the order is the only thing there is
         // to match on.
         let selected = loaded_order == Some(order.core().id.as_str());
@@ -592,7 +737,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         kitchen_minutes: None,
         order_id: Some(id.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
-        id: core.table.as_ref().map_or(id, |t| t.as_str().to_owned()),
+        id: core.table().map_or(id, |t| t.as_str().to_owned()),
         label,
         section,
         seats: crate::ipc::count(seats),
@@ -605,15 +750,9 @@ pub(crate) fn running_total(
     config: &crate::settings::ShopConfig,
 ) -> Option<MoneyView> {
     let core = order.core();
-    let charges = config.billing.charges_for(core.order_type);
-    compute_bill(
-        BillInput::new(&core.cart, registration_of(config))
-            .with_order_type(core.order_type)
-            .with_rounding(config.billing.rounding)
-            .with_charges(&charges),
-    )
-    .ok()
-    .map(|bill| bill.grand_total.into())
+    bill_for(&core.cart, core.order_type(), None, config)
+        .ok()
+        .map(|bill| bill.grand_total.into())
 }
 
 /// A menu item, from a row.
@@ -650,84 +789,7 @@ pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
     snapshot
 }
 
-/// The cart, held for the life of the process.
-pub type Cart_ = Mutex<CartState>;
-
-// Turning a cart into an order.
-
-/// The shop's FIRST till, and only that.
-pub const TERMINAL: &str = "terminal_default";
-
-impl CartState {
-    /// Build the draft this cart represents.
-    pub fn to_core_for_printing(&self) -> mb_core::OrderCore {
-        mb_core::OrderCore {
-            id: mb_core::OrderId::new(
-                self.order_id
-                    .clone()
-                    .unwrap_or_else(|| "unsaved".to_owned()),
-            ),
-            business_day: mb_core::BusinessDay::from_days_since_epoch(0),
-            created_at: Timestamp::from_millis(0),
-            order_type: self.order_type,
-            table: self.table.clone().map(mb_core::TableId::new),
-            sub_table: self.sub_table.clone(),
-            covers: self.covers,
-            cart: self.cart.clone(),
-            created_by: self
-                .opened_by
-                .clone()
-                .unwrap_or_else(|| mb_core::StaffId::new("unknown")),
-            note: self.note.clone(),
-            kitchen: self.kitchen.clone(),
-        }
-    }
-
-    /// `by` is who opened it, not who is signed in now — the caller passes `opened_by` and
-    /// falls back to the current person only for a cart that somehow has neither.
-    pub fn to_draft(
-        &self,
-        at: Timestamp,
-        by: mb_core::StaffId,
-        till: &str,
-    ) -> UiResult<mb_core::DraftOrder> {
-        let day =
-            mb_core::BusinessDay::of(at, mb_core::DayRule::default(), mb_core::UtcOffset::INDIA);
-        let id = mb_core::OrderId::new(
-            self.order_id
-                .clone()
-                .unwrap_or_else(|| format!("{}_{till}", crate::newid::fresh_at("ord", at))),
-        );
-
-        let mut draft = mb_core::DraftOrder::new(id, day, at, self.order_type, by);
-        if let Some(table) = self.table.as_ref() {
-            draft = draft.on_table(mb_core::TableId::new(table.clone()));
-        }
-        draft.core.cart = self.cart.clone();
-        draft.core.kitchen = self.kitchen.clone();
-        draft.core.note = self.note.clone();
-        Ok(draft)
-    }
-}
-
-/// What the kitchen has not been told about yet.
-pub fn pending_for_kitchen(
-    state: &CartState,
-) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
-    state.cart_pending()
-}
-
-impl CartState {
-    pub fn cart_pending(&self) -> UiResult<Vec<(mb_core::LineIdentity, mb_core::Qty)>> {
-        self.kitchen.pending(&self.cart).map_err(|e| {
-            UiError::new(
-                "kitchen.delta",
-                "What the kitchen still needs could not be worked out. Nothing has been sent.",
-            )
-            .with_detail(e.to_string())
-        })
-    }
-}
+impl CartState {}
 
 #[cfg(test)]
 mod tests {

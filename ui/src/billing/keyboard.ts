@@ -64,6 +64,7 @@ export type Command =
   | { do: 'search'; text: string }
   | { do: 'add-item'; itemId: string; qty: string }
   | { do: 'open-table'; tableId: string }
+  | { do: 'open-order'; orderId: string }
   | { do: 'print-kitchen' }
   | { do: 'complete-bill' }
   | { do: 'new-order' }
@@ -336,7 +337,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     }
     const firstOpen = state.tables.find((t) => t.orderId !== null);
     if (firstOpen) {
-      return [state, [{ do: 'open-table', tableId: firstOpen.id }]];
+      return [state, [openCommand(firstOpen)]];
     }
     return [state, []];
   }
@@ -355,8 +356,16 @@ function openTile(state: State, table: TableView): [State, Command[]] {
   }
   return [
     { ...state, mode: { kind: 'searching' }, text: '', suggestions: [] },
-    [{ do: 'open-table', tableId: table.id }],
+    [openCommand(table)],
   ];
+}
+
+/** A tile with a table opens the table; a parcel or self-service tile IS its order. */
+function openCommand(table: TableView): Command {
+  if (table.orderId !== null && table.id === table.orderId) {
+    return { do: 'open-order', orderId: table.orderId };
+  }
+  return { do: 'open-table', tableId: table.id };
 }
 
 /** Two-dimensional movement over a grid that wraps. */

@@ -827,11 +827,10 @@ fn a_liquor_line_keeps_its_vat_and_its_basis_through_a_round_trip() {
         mb_core::OrderId::new("ord_bar"),
         day,
         at,
-        OrderType::DineIn,
+        mb_core::Placement::on_table(mb_core::TableId::new("tbl_1")),
         mb_core::StaffId::new("staff_1"),
     );
     draft.core.cart = cart;
-    draft.core.table = Some(mb_core::TableId::new("tbl_1"));
 
     let till = mb_db::Till::new(common::OUTLET, common::TERMINAL);
     let open = mb_db::open_draft(&db, till, draft).expect("opened");

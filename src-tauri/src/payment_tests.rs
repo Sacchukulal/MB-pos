@@ -87,7 +87,7 @@ fn as_owner(app: &App, id: &str, name: &str) {
 /// A cart with one dosa on it, ready to be paid for.
 fn one_dosa(app: &App) -> Money {
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -125,7 +125,7 @@ fn a_upi_payment_is_visibly_unconfirmed_until_somebody_says_otherwise() {
         Some("UPI/4477112233".to_owned()),
     )
     .expect("the payment was taken");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     // It is on the list, with its reference and the provider that answered.
     let view = payments_on(&app).expect("the payments screen");
@@ -173,7 +173,7 @@ fn cash_never_reaches_the_unconfirmed_list() {
 
     let total = one_dosa(&app);
     cart_add_payment_on(&app, "Cash".to_owned(), total.paise(), None).expect("taken");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     let view = payments_on(&app).expect("the payments screen");
     assert!(view.unconfirmed.is_empty());
@@ -217,7 +217,7 @@ fn a_declined_card_leaves_the_bill_unsettled_and_says_why() {
         .expect("the cart");
     assert_eq!(paid, Money::ZERO);
     assert!(
-        crate::flows::complete_bill_on(&app).is_err(),
+        crate::flows::complete_bill_on(&app, None).is_err(),
         "an unpaid bill does not settle"
     );
 
@@ -229,7 +229,7 @@ fn a_declined_card_leaves_the_bill_unsettled_and_says_why() {
 
     // The customer taps again and it goes through — same command, same code.
     cart_add_payment_on(&app, "Card".to_owned(), total.paise(), None).expect("approved");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     let view = payments_on(&app).expect("the payments screen");
     assert!(
@@ -266,7 +266,7 @@ fn a_tip_is_in_no_sales_figure_no_tax_figure_and_no_cost_percentage() {
         None,
     )
     .expect("paid, tip included");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     // Not in sales. The day's takings are the bill, not the bill plus the tip.
     let sales = report_on(&app, "sales_day".to_owned(), period()).expect("the sales report");

@@ -89,10 +89,9 @@ pub fn sample_order(registration: Registration) -> Result<(Bill, AnyOrder), Prin
         OrderId::new("ord_sample"),
         day,
         AT,
-        OrderType::DineIn,
+        mb_core::Placement::on_table(TableId::new("6")),
         StaffId::new("staff_sample"),
     )
-    .on_table(TableId::new("6"))
     .core;
     let open = OpenOrder {
         core,
@@ -163,6 +162,7 @@ pub struct Around {
 
 impl Around {
     /// Plain 80 mm in the built-in face, for a test that only wants a document.
+    #[cfg(test)]
     #[must_use]
     pub fn plain(paper: Paper) -> Around {
         let metrics = mb_print::font::Font::builtin().map_or_else(

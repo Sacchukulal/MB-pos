@@ -79,7 +79,7 @@ fn the_drawer_says_what_should_be_in_it() {
 
     // A cash sale, through the real billing path.
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Parcel;
+        state.set_order_type(mb_core::OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -97,7 +97,7 @@ fn the_drawer_says_what_should_be_in_it() {
         })
     })
     .expect("paid");
-    crate::flows::complete_bill_on(&app).expect("settled");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
 
     spend(&app, "exp_veg", "Vegetables", "400", "cash");
     spend(&app, "exp_rent", "Rent", "9000", "bank");

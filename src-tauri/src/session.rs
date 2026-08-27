@@ -7,6 +7,7 @@ use mb_auth::{Actor, PermissionSet};
 use mb_core::{StaffId, Timestamp};
 
 /// How long the counter may sit untouched before it locks itself, when the shop has not said.
+#[cfg(test)]
 pub const IDLE_LOCK: Duration = Duration::from_secs(5 * 60);
 
 /// The shop's answer, as a duration.
@@ -25,7 +26,6 @@ pub const IDLE_TICK: Duration = Duration::from_secs(15);
 #[derive(Debug, Clone)]
 pub struct Session {
     pub actor: Actor,
-    pub since: Timestamp,
     pub last_seen: Timestamp,
     /// True for the stand-in counter user on a shop with no PINs — the banner reads off this,
     /// and so does "should we lock at all?".
@@ -56,7 +56,6 @@ impl Sessions {
     pub fn begin(&self, actor: Actor, now: Timestamp, is_stand_in: bool) {
         *lock(&self.current) = Some(Session {
             actor,
-            since: now,
             last_seen: now,
             is_stand_in,
         });
@@ -158,7 +157,6 @@ mod tests {
 
         let current = sessions.current().expect("somebody is here");
         assert_eq!(current.actor.name, "Ravi");
-        assert_eq!(current.since, now(60));
     }
 
     #[test]

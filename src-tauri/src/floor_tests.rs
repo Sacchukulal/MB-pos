@@ -8,8 +8,8 @@
 
 use mb_auth::RolePreset;
 use mb_core::{
-    AnyOrder, BusinessDay, Cart, DraftOrder, ItemSnapshot, Money, OrderId, OrderType, Qty, StaffId,
-    TableId, TaxRate,
+    AnyOrder, BusinessDay, Cart, DraftOrder, ItemSnapshot, Money, OrderId, Qty, StaffId, TableId,
+    TaxRate,
 };
 use mb_db::repo::floor::{DiningTable, Section};
 use mb_db::{Db, DbConfig, Repos};
@@ -124,10 +124,9 @@ fn seat(
         OrderId::new(id),
         day(),
         at(1),
-        OrderType::DineIn,
+        mb_core::Placement::on_table(TableId::new(table)),
         StaffId::new(crate::state::DEFAULT_STAFF),
-    )
-    .on_table(TableId::new(table));
+    );
     draft.core.cart = cart;
 
     if let Some(told) = told {
@@ -146,20 +145,20 @@ fn seat(
                 let token = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Token,
                     day(),
                 )?;
                 let bill_number = mb_db::numbering::claim(
                     tx,
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Bill,
                     day(),
                 )?;
                 repos.orders().save(
                     OUTLET,
-                    crate::billing::TERMINAL,
+                    crate::terminals::TERMINAL,
                     &AnyOrder::Open(mb_core::OpenOrder {
                         core: draft.core.clone(),
                         token,
@@ -207,7 +206,7 @@ fn moving_an_order_changes_the_table_and_nothing_else() {
 
     let after = read(&app, &order);
     assert_eq!(
-        after.core().table.as_ref().map(TableId::as_str),
+        after.core().table().map(TableId::as_str),
         Some("tbl_3"),
         "the order is at the new table",
     );
@@ -375,10 +374,7 @@ fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
         .find(|o| o.core().id != order)
         .expect("a second order");
 
-    assert_eq!(
-        fresh.core().table.as_ref().map(TableId::as_str),
-        Some("tbl_4")
-    );
+    assert_eq!(fresh.core().table().map(TableId::as_str), Some("tbl_4"));
     assert_eq!(
         fresh.core().cart.lines()[0].qty,
         Qty::from_whole(2).expect("two")
@@ -458,12 +454,12 @@ fn two_parties_can_share_one_table() {
     assert_eq!(open.len(), 2, "two parties");
     assert!(
         open.iter()
-            .all(|o| o.core().table.as_ref().map(TableId::as_str) == Some("tbl_1")),
+            .all(|o| o.core().table().map(TableId::as_str) == Some("tbl_1")),
         "both at the same table",
     );
     let seats: Vec<String> = open
         .iter()
-        .filter_map(|o| o.core().sub_table.as_ref().map(|s| s.as_str().to_owned()))
+        .filter_map(|o| o.core().seat().map(|s| s.as_str().to_owned()))
         .collect();
     assert_eq!(seats, ["B"], "the new party is seat B, upper-cased");
 }
@@ -601,7 +597,8 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
         "printing the bill burned a bill number"
     );
     assert_eq!(
-        before.core.table, after.core.table,
+        before.core.table(),
+        after.core.table(),
         "the party was moved off its table"
     );
     assert_eq!(
@@ -650,7 +647,7 @@ fn an_empty_table_is_marked_the_moment_it_is_opened() {
     // Tap table 2 and type nothing at all — the exact case in the screenshot.
     crate::ipc::open_table_on(&app, "tbl_2".to_owned()).expect("opened");
     assert!(
-        app.with_cart(|state| Ok(state.order_id.clone()))
+        app.with_cart(|state| Ok(state.order_id().map(str::to_owned)))
             .expect("cart")
             .is_none(),
         "an empty table must not have an order yet, or this test is not the bug",

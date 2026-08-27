@@ -5,16 +5,6 @@ use mb_core::Timestamp;
 /// How many random characters go on the end.
 const TAIL: usize = 10;
 
-/// A fresh id for a new row.
-#[must_use]
-pub fn fresh(prefix: &str) -> String {
-    format!(
-        "{prefix}_{}_{}",
-        base36(crate::flows::now().millis()),
-        tail()
-    )
-}
-
 /// The same, when the caller already has the timestamp it is writing with.
 #[must_use]
 pub fn fresh_at(prefix: &str, at: Timestamp) -> String {
@@ -70,14 +60,16 @@ mod tests {
 
     #[test]
     fn an_id_wears_its_prefix() {
-        let id = fresh("adj");
+        let id = fresh_at("adj", crate::flows::now());
         assert!(id.starts_with("adj_"), "{id}");
     }
 
     /// The bug, as a test.
     #[test]
     fn ten_thousand_ids_made_at_once_are_ten_thousand_different_ids() {
-        let made: HashSet<String> = (0..10_000).map(|_| fresh("exp")).collect();
+        let made: HashSet<String> = (0..10_000)
+            .map(|_| fresh_at("exp", crate::flows::now()))
+            .collect();
         assert_eq!(made.len(), 10_000, "two ids collided");
     }
 
@@ -101,7 +93,7 @@ mod tests {
     #[test]
     fn an_id_is_lower_case_letters_and_digits_and_underscores() {
         for _ in 0..200 {
-            let id = fresh("stk");
+            let id = fresh_at("stk", crate::flows::now());
             assert!(
                 id.chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
@@ -113,7 +105,7 @@ mod tests {
     #[test]
     fn the_random_tail_is_always_the_full_length() {
         for _ in 0..200 {
-            let id = fresh("x");
+            let id = fresh_at("x", crate::flows::now());
             let tail = id.rsplit('_').next().unwrap_or_default();
             assert_eq!(tail.len(), TAIL, "{id}");
         }

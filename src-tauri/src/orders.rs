@@ -78,8 +78,9 @@ pub fn apply(
     }
 
     let cashier_has = app
-        .with_cart(|state| Ok(state.order_id.clone()))
+        .with_cart(|state| Ok(state.order_id().map(str::to_owned)))
         .unwrap_or_default();
+    let config = app.shop_config();
 
     let applied = app.with_shop(|shop| {
         shop.db
@@ -106,6 +107,7 @@ pub fn apply(
                     day,
                     cashier_has.as_deref(),
                     app.terminal_id(),
+                    &config,
                 )?;
 
                 let recorded = serde_json::to_string(&applied.outcome).unwrap_or_default();
@@ -209,6 +211,7 @@ fn do_it(
     cashier_has: Option<&str>,
     // Which till this order belongs to.
     till: &str,
+    config: &crate::settings::ShopConfig,
 ) -> Result<Applied, mb_db::DbError> {
     // Opening an order is the one intent with no order to load.
     if let What::OpenOrder {
@@ -226,6 +229,7 @@ fn do_it(
             at,
             day,
             till,
+            config,
         );
     }
 
@@ -280,12 +284,9 @@ fn do_it(
             note: line_note,
             ..
         } => {
-            // Read through THIS transaction, not through `App`.
             let Some(item) = repos
                 .menu()
-                .list_items(OUTLET, true)?
-                .into_iter()
-                .find(|i| i.id.as_str() == item_id)
+                .find_item(&mb_core::ItemId::new(item_id.clone()))?
             else {
                 return Ok(refused(
                     "That item is not on this shop's menu any more. Ask the counter.",
@@ -409,8 +410,9 @@ fn do_it(
         }
 
         What::MoveTable { table_id } => {
-            // Conflict (d): the cashier moved it first.
-            open.core.table = Some(mb_core::TableId::new(table_id.clone()));
+            // A table makes it dine-in, whatever it was.
+            open.core.placement =
+                mb_core::Placement::on_table(mb_core::TableId::new(table_id.clone()));
         }
 
         What::CancelOrder { reason } => {
@@ -446,7 +448,7 @@ fn do_it(
         .save(OUTLET, till, &AnyOrder::Open(open.clone()))?;
 
     Ok(Applied {
-        outcome: view_of(&open, note),
+        outcome: view_of(&open, note, config),
         tell_the_cashier,
     })
 }
@@ -465,9 +467,25 @@ fn open_order(
     at: Timestamp,
     day: mb_core::BusinessDay,
     till: &str,
+    config: &crate::settings::ShopConfig,
 ) -> Result<Applied, mb_db::DbError> {
     let Ok(order_type) = mb_db::encode::order_type_from_sql(order_type) else {
         return Ok(refused("That is not an order type this counter knows."));
+    };
+    let placement = match mb_core::Placement::new(
+        order_type,
+        table_id.map(|t| mb_core::TableId::new(t.to_owned())),
+        None,
+    ) {
+        Ok(placement) => placement,
+        Err(mb_core::OrderError::TableRequired) => {
+            return Ok(refused(
+                "A dine-in order needs a table. Pick one and try again.",
+            ));
+        }
+        Err(_) => {
+            return Ok(refused("Only a dine-in order sits at a table."));
+        }
     };
 
     // A table this shop does not have.
@@ -490,7 +508,7 @@ fn open_order(
             .orders()
             .list_open(OUTLET)?
             .into_iter()
-            .find(|o| o.core().table.as_ref().is_some_and(|t| t.as_str() == table));
+            .find(|o| o.core().table().is_some_and(|t| t.as_str() == table));
         if let Some(AnyOrder::Open(open)) = existing {
             let till = on_which_till(repos, &open.core.id);
             let says = match till {
@@ -503,7 +521,7 @@ fn open_order(
                     .to_owned(),
             };
             return Ok(Applied {
-                outcome: view_of(&open, Some(says)),
+                outcome: view_of(&open, Some(says), config),
                 tell_the_cashier: None,
             });
         }
@@ -513,12 +531,9 @@ fn open_order(
         mb_core::OrderId::new(crate::newid::fresh_at("ord", at)),
         day,
         at,
-        order_type,
+        placement,
         staff.clone(),
     );
-    if let Some(table) = table_id {
-        draft = draft.on_table(mb_core::TableId::new(table.to_owned()));
-    }
     if let Some(covers) = covers {
         draft = draft.with_covers(covers);
     }
@@ -548,21 +563,19 @@ fn open_order(
         .save(OUTLET, till, &AnyOrder::Open(open.clone()))?;
 
     Ok(Applied {
-        outcome: view_of(&open, None),
+        outcome: view_of(&open, None, config),
         tell_the_cashier: None,
     })
 }
 
-/// The counter's own view of the order, which is the only view there is.
-fn view_of(open: &mb_core::OpenOrder, note: Option<String>) -> Outcome {
-    let total = open
-        .core
-        .cart
-        .lines()
-        .iter()
-        .filter_map(|line| line.qty.extend(line.snapshot.unit_price).ok())
-        .try_fold(Money::ZERO, |sum, amount| sum.add(amount))
-        .unwrap_or(Money::ZERO);
+/// The counter's own view of the order — the same bill the counter would print.
+fn view_of(
+    open: &mb_core::OpenOrder,
+    note: Option<String>,
+    config: &crate::settings::ShopConfig,
+) -> Outcome {
+    let total = crate::billing::bill_for(&open.core.cart, open.core.order_type(), None, config)
+        .map_or(Money::ZERO, |bill| bill.grand_total);
 
     Outcome::Ok {
         order_id: open.core.id.as_str().to_owned(),

@@ -125,11 +125,7 @@ pub fn print_test_page(app: tauri::State<'_, App>, printer_id: String) -> UiResu
     guard::require(&app, Permission::SettingsPrinter)?;
     let printer = find_printer(&app, &printer_id)?;
     let document = mb_print::testprint::test_document(&printer, None);
-    let day = BusinessDay::of(
-        Timestamp::from_millis(now_millis()),
-        mb_core::DayRule::default(),
-        mb_core::UtcOffset::INDIA,
-    );
+    let day = crate::flows::today(crate::flows::now());
 
     let job = Job::new(JobKind::Test, &printer.id, document, day).because("test print");
 
@@ -186,11 +182,9 @@ pub fn nudge_offset_on(
         let row = row.clone();
         shop.db
             .transaction(|tx| {
-                mb_db::Repos::new(tx).settings().save_printer(
-                    OUTLET,
-                    &row,
-                    Timestamp::from_millis(now_millis()),
-                )
+                mb_db::Repos::new(tx)
+                    .settings()
+                    .save_printer(OUTLET, &row, crate::flows::now())
             })
             .map_err(|e| words::from_db(&e))?;
 
@@ -302,12 +296,6 @@ fn find_printer(app: &tauri::State<'_, App>, id: &str) -> UiResult<PrinterConfig
     }
 }
 
-fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0))
-}
-
 /// Every command, in one place, so `main.rs` reads as a list rather than a macro nobody can
 /// grep.
 #[macro_export]
@@ -331,13 +319,13 @@ macro_rules! commands {
             $crate::ipc::cart_remove,
             $crate::ipc::cart_clear,
             $crate::ipc::cart_set_order_type,
-            $crate::ipc::cart_add_payment,
             $crate::ipc::cart_clear_payments,
             $crate::ipc::cart_cash_given,
             $crate::ipc::open_orders,
             $crate::ipc::menu_items,
             $crate::ipc::search_items,
             $crate::ipc::open_table,
+            $crate::ipc::open_order,
             $crate::ipc::cart_set_discount,
             $crate::ipc::cart_clear_discount,
             $crate::flows::print_kitchen_ticket,
@@ -563,7 +551,6 @@ macro_rules! commands {
             $crate::diagnostics::write_diagnostics,
             // The update, and the way back.
             $crate::updates::look_for_an_update,
-            $crate::updates::dismiss_update,
             $crate::updates::go_back_a_version,
             // Deliberately Public: on a first run the stand-in is who is standing there, and a
             // set-up list that refuses to draw until somebody has a PIN is a list nobody can
@@ -629,6 +616,7 @@ use crate::billing::{
     CartState, CartView, MenuItemView, TableView, cart_view, floor_view, menu_view,
     order_type_from_label, snapshot_for,
 };
+use mb_core::{OrderId, TableId};
 
 /// What is in the cart right now.
 #[tauri::command]
@@ -762,11 +750,11 @@ pub fn cart_remove(
 pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
     app.with_cart_mut(|state| {
-        let kept = state.order_type;
-        *state = CartState::default();
-        if keep_type {
-            state.order_type = kept;
-        }
+        *state = CartState::new_order(if keep_type {
+            state.order_type()
+        } else {
+            mb_core::OrderType::DineIn
+        });
         cart_view(state, &app.shop_config())
     })
 }
@@ -785,33 +773,13 @@ pub fn cart_set_order_type(
         )
     })?;
     let view = app.with_cart_mut(|state| {
-        state.order_type = kind;
-        // A parcel has no table, and leaving a stale one would settle the bill against a table
-        // nobody is sitting at.
-        if !matches!(kind, mb_core::OrderType::DineIn) {
-            state.table = None;
-            state.table_label = None;
-        }
+        state.set_order_type(kind);
         cart_view(state, &app.shop_config())
     });
     shown(&handle, view)
 }
 
-/// Take a payment. Split payment is simply calling this more than once (1.15).
-#[tauri::command]
-pub fn cart_add_payment(
-    app: tauri::State<'_, App>,
-    handle: tauri::AppHandle,
-    mode: String,
-    amount_paise: i64,
-    reference: Option<String>,
-) -> UiResult<CartView> {
-    shown(
-        &handle,
-        cart_add_payment_on(&app, mode, amount_paise, reference),
-    )
-}
-
+/// Take a payment. A split is this more than once: the cash box, then the lit mode.
 pub fn cart_add_payment_on(
     app: &App,
     mode: String,
@@ -840,7 +808,7 @@ pub fn cart_add_payment_on(
     let reference = reference
         .map(|r| r.trim().to_owned())
         .filter(|r| !r.is_empty());
-    let order_id = app.with_cart(|state| Ok(state.order_id.clone()))?;
+    let order_id = app.with_cart(|state| Ok(state.order_id().map(str::to_owned)))?;
 
     let answer = crate::payments::ask_about(
         app,
@@ -1050,8 +1018,12 @@ pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
 pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     guard::require(app, Permission::BillCreate)?;
     // Both halves of "where is the cashier" — see `TableView::selected`.
-    let (loaded, on_table) =
-        app.with_cart(|state| Ok((state.order_id.clone(), state.table.clone())))?;
+    let (loaded, on_table) = app.with_cart(|state| {
+        Ok((
+            state.order_id().map(str::to_owned),
+            state.table_id().map(str::to_owned),
+        ))
+    })?;
     // The same two thresholds the floor screen uses, from the same place — a billing grid and a
     // floor plan disagreeing about which table is late would be worse than neither of them
     // saying so.
@@ -1079,7 +1051,7 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
                     order: loaded.as_deref(),
                     table: on_table.as_deref(),
                 }),
-                now: Timestamp::from_millis(now_millis()),
+                now: crate::flows::now(),
                 warn_after: warn,
                 late_after: late,
                 config: &app.shop_config(),
@@ -1111,7 +1083,7 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
     use mb_db::repo::floor::{DiningTable, Section};
     use mb_db::repo::menu::MenuItem;
 
-    let at = Timestamp::from_millis(now_millis());
+    let at = crate::flows::now();
 
     if !app.has_shop() {
         let dir = crate::config::AppConfig::directory();
@@ -1291,59 +1263,62 @@ pub fn search_items_on(
     })
 }
 
-/// Load a table's running order into the cart.
+/// Press a table: its running order comes into the cart, or a new order starts on it.
 pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
-    // The label, not the id.
-    let label = app.with_shop(|shop| {
+    let table = TableId::new(table_id);
+    let (label, found) = app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).floor().list_tables(OUTLET))
-            .map_err(|e| words::from_db(&e))
-            .map(|tables| {
-                tables
-                    .into_iter()
-                    .find(|t| t.id.as_str() == table_id)
-                    .map(|t| t.label)
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let label = repos.floor().find_table(&table)?.map(|t| t.label);
+                let found = match repos.floor().open_order_at(&table)? {
+                    Some((order_id, _)) => repos.orders().find(&OrderId::new(order_id))?,
+                    None => None,
+                };
+                Ok((label, found))
             })
+            .map_err(|e| words::from_db(&e))
     })?;
-
-    // An order with no table is identified by its own id.
-    let found = app.with_shop(|shop| {
-        let open = shop
-            .db
-            .transaction(|tx| mb_db::Repos::new(tx).orders().list_open(OUTLET))
-            .map_err(|e| words::from_db(&e))?;
-        Ok(open.into_iter().find(|order| {
-            let core = order.core();
-            core.table.as_ref().is_some_and(|t| t.as_str() == table_id)
-                || (core.table.is_none() && core.id.as_str() == table_id)
-        }))
-    })?;
+    let Some(label) = label else {
+        return Err(UiError::new(
+            "table.unknown",
+            "That table is not on the floor any more.",
+        ));
+    };
 
     app.with_cart_mut(|state| {
-        match found {
-            Some(order) => {
-                let core = order.core();
-                // The whole order comes across: its cart, its type, its id.
-                state.cart = core.cart.clone();
-                state.order_type = core.order_type;
-                state.order_id = Some(core.id.as_str().to_owned());
-                // A parcel keeps its own (absent) table.
-                state.table = core.table.as_ref().map(|t| t.as_str().to_owned());
-                state.table_label = core.table.as_ref().and(label.clone());
-                state.settlement = mb_core::Settlement::new();
-            }
+        *state = match found {
+            Some(order) => CartState::load(&order, Some(label)),
+            // A free table: "press the table and start typing" is the flow.
             None => {
-                // A free table: start a new order on it rather than refusing, because "press
-                // the table and start typing" is the flow.
-                *state = crate::billing::CartState {
-                    order_type: state.order_type,
-                    table: Some(table_id.clone()),
-                    table_label: label.clone(),
-                    ..crate::billing::CartState::default()
-                };
+                let mut fresh = CartState::new_order(mb_core::OrderType::DineIn);
+                fresh.place_on(table.clone(), label, None);
+                fresh
             }
-        }
+        };
+        cart_view(state, &app.shop_config())
+    })
+}
+
+/// Open an order that has no table — a parcel or a self-service order on the floor.
+pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
+    guard::require(app, Permission::BillCreate)?;
+    let order = crate::flows::find_order(app, &OrderId::new(&order_id))?;
+    let Some(order) =
+        order.filter(|o| matches!(o, mb_core::AnyOrder::Open(_) | mb_core::AnyOrder::Draft(_)))
+    else {
+        return Err(UiError::new(
+            "order.not_open",
+            "That order is not on the floor any more.",
+        ));
+    };
+    let label = order
+        .core()
+        .table()
+        .and_then(|t| crate::flows::table_name(app, t));
+    app.with_cart_mut(|state| {
+        *state = CartState::load(&order, label);
         cart_view(state, &app.shop_config())
     })
 }
@@ -2388,6 +2363,15 @@ pub fn open_table(
     table_id: String,
 ) -> UiResult<CartView> {
     shown(&handle, open_table_on(&app, table_id))
+}
+
+#[tauri::command]
+pub fn open_order(
+    app: tauri::State<'_, App>,
+    handle: tauri::AppHandle,
+    order_id: String,
+) -> UiResult<CartView> {
+    shown(&handle, open_order_on(&app, order_id))
 }
 
 fn shown(handle: &tauri::AppHandle, view: UiResult<CartView>) -> UiResult<CartView> {

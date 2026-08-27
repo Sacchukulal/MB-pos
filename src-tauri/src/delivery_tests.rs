@@ -88,9 +88,7 @@ fn as_owner(app: &App, id: &str, name: &str) {
 /// gets wrong.
 fn a_delivery_paid_in_cash(app: &App) -> (String, Money, mb_core::Bill) {
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Delivery;
-        state.table = None;
-        state.table_label = None;
+        state.set_order_type(mb_core::OrderType::Delivery);
         Ok(())
     })
     .expect("delivery");
@@ -108,7 +106,7 @@ fn a_delivery_paid_in_cash(app: &App) -> (String, Money, mb_core::Bill) {
         })
     })
     .expect("paid");
-    crate::flows::complete_bill_on(app).expect("settled");
+    crate::flows::complete_bill_on(app, None).expect("settled");
 
     let board = board_on(app, None).expect("the board");
     let row = board
@@ -286,7 +284,7 @@ fn a_failed_delivery_is_a_state_with_a_reason_and_the_money_is_still_accounted_f
 
     // Billed but NOT settled — the customer pays at the door, and this one never gets there.
     app.with_cart_mut(|state| {
-        state.order_type = mb_core::OrderType::Delivery;
+        state.set_order_type(mb_core::OrderType::Delivery);
         Ok(())
     })
     .expect("delivery");

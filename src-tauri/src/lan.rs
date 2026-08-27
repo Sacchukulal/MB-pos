@@ -669,9 +669,9 @@ pub struct Network {
     pub fingerprint: String,
     pub server_id: String,
     pub is_new_certificate: bool,
-    /// Dropping these stops the server and withdraws the advertisement.
-    pub running: mb_lan::Running,
-    pub advertisement: Option<mb_lan::discovery::Advertisement>,
+    /// Held only to be dropped: that stops the server and withdraws the advertisement.
+    _running: mb_lan::Running,
+    _advertisement: Option<mb_lan::discovery::Advertisement>,
 }
 
 impl std::fmt::Debug for Network {
@@ -778,8 +778,8 @@ pub fn start(handle: &tauri::AppHandle) {
         fingerprint: identity.fingerprint.clone(),
         server_id: identity.server_id.clone(),
         is_new_certificate: identity.is_new,
-        running,
-        advertisement,
+        _running: running,
+        _advertisement: advertisement,
     })));
 
     // The "last seen" flush.

@@ -2,7 +2,7 @@
 //! on a table (1.21, 1.22, 1.23).
 
 use mb_auth::Permission;
-use mb_core::{BusinessDay, Money, Qty, TableId, Timestamp};
+use mb_core::{Money, Qty, TableId, Timestamp};
 use mb_db::repo::floor::{DiningTable, Range, Section};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -145,10 +145,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                     .events()
                     .last_for_each(mb_db::repo::events::KITCHEN_TICKET)?;
 
-                let day = open
-                    .first()
-                    .map_or_else(|| today(at), |order| order.core().business_day);
-                let numbers = repos.floor().occupancy(OUTLET, day)?;
+                let numbers = repos.floor().occupancy(OUTLET, today(at))?;
 
                 let mut tiles = floor_view(
                     &tables,
@@ -175,7 +172,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
 
                 let busy_ids: Vec<String> = open
                     .iter()
-                    .filter_map(|o| o.core().table.as_ref().map(|t| t.as_str().to_owned()))
+                    .filter_map(|o| o.core().table().map(|t| t.as_str().to_owned()))
                     .collect();
 
                 let name_of = |id: &Option<String>| {
@@ -517,7 +514,7 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
     let target = TableId::new(to_table.clone());
 
     let order = open_order(app, &order_id)?;
-    let from = order.core().table.clone();
+    let from = order.core().table().cloned();
     if from.as_ref() == Some(&target) {
         return Err(UiError::new(
             "floor.same_table",
@@ -544,7 +541,7 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                let moved = with_table(order.clone(), Some(target.clone()));
+                let moved = with_table(order.clone(), target.clone());
                 repos.orders().save(OUTLET, app.terminal_id(), &moved)?;
                 repos.events().record(
                     &order_id,
@@ -576,9 +573,11 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
 
     // A cart holding the moved order has to hear about it, or the screen would keep billing the
     // table the party has left.
+    let label =
+        crate::flows::table_name(app, &target).unwrap_or_else(|| target.as_str().to_owned());
     app.with_cart_mut(|state| {
-        if state.order_id.as_deref() == Some(order_id.as_str()) {
-            state.table = Some(target.as_str().to_owned());
+        if state.order_id() == Some(order_id.as_str()) {
+            state.place_on(target.clone(), label, None);
         }
         Ok(())
     })?;
@@ -587,21 +586,14 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
     floor_on(app)
 }
 
-/// Put an order on a different table without rebuilding it by hand.
-fn with_table(order: mb_core::AnyOrder, table: Option<TableId>) -> mb_core::AnyOrder {
-    let mut order = order;
-    match &mut order {
-        mb_core::AnyOrder::Draft(o) => o.core.table = table,
-        mb_core::AnyOrder::Open(o) => o.core.table = table,
-        mb_core::AnyOrder::Settled(o) => o.core.table = table,
-        mb_core::AnyOrder::Cancelled(o) => o.core.table = table,
-        mb_core::AnyOrder::Voided(o) => o.core.table = table,
-    }
+/// Put an order on a different table, which makes it dine-in.
+fn with_table(mut order: mb_core::AnyOrder, table: TableId) -> mb_core::AnyOrder {
+    order.core_mut().placement = mb_core::Placement::on_table(table);
     order
 }
 
 pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiResult<FloorView> {
-    let who = guard::require(app, Permission::BillVoid)?;
+    let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
 
     if from_order == into_order {
@@ -630,8 +622,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
     let day = survivor.core().business_day;
     let absorbed_label = absorbed
         .core()
-        .table
-        .as_ref()
+        .table()
         .map_or_else(|| "an order".to_owned(), |t| t.as_str().to_owned());
 
     app.with_shop(|shop| {
@@ -707,8 +698,8 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
 
     // If either order is in the cart, the cart is now stale in a way the cashier cannot see.
     app.with_cart_mut(|state| {
-        if state.order_id.as_deref() == Some(from_order.as_str())
-            || state.order_id.as_deref() == Some(into_order.as_str())
+        if state.order_id() == Some(from_order.as_str())
+            || state.order_id() == Some(into_order.as_str())
         {
             *state = crate::billing::CartState::default();
         }
@@ -767,7 +758,11 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
     let day = order.core().business_day;
     let table = match &request.to_table {
         Some(id) => Some(TableId::new(id.clone())),
-        None => order.core().table.clone(),
+        None => order.core().table().cloned(),
+    };
+    let placement = match table {
+        Some(table) => mb_core::Placement::DineIn { table, seat },
+        None => order.core().placement.clone(),
     };
 
     app.with_shop(|shop| {
@@ -797,13 +792,11 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                     mb_core::OrderId::new(crate::newid::fresh_at("ord", at)),
                     day,
                     at,
-                    order.core().order_type,
+                    placement.clone(),
                     who.staff_id.clone(),
                 );
                 fresh.core.cart = moved_cart;
                 fresh.core.kitchen = moved_kitchen;
-                fresh.core.table = table.clone();
-                fresh.core.sub_table = seat.clone();
 
                 // Its own token and bill number, claimed in THIS transaction so a failure
                 // cannot consume one — the same rule `open_draft` follows, and claimed against
@@ -862,7 +855,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
     })?;
 
     app.with_cart_mut(|state| {
-        if state.order_id.as_deref() == Some(request.order_id.as_str()) {
+        if state.order_id() == Some(request.order_id.as_str()) {
             *state = crate::billing::CartState::default();
         }
         Ok(())
@@ -1038,14 +1031,4 @@ pub fn even_split(app: tauri::State<'_, App>, ways: u32) -> UiResult<EvenSplitVi
 #[tauri::command]
 pub fn set_covers(app: tauri::State<'_, App>, covers: Option<u32>) -> UiResult<()> {
     set_covers_on(&app, covers)
-}
-
-/// Unused today; here so the day the floor needs a business day it does not invent a second way
-/// of asking for one.
-#[allow(
-    dead_code,
-    reason = "the floor's own day helper, used by occupancy tests"
-)]
-fn business_day_now() -> BusinessDay {
-    today(now())
 }

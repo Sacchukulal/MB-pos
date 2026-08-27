@@ -86,25 +86,6 @@ export function Updates() {
           Check for an update
         </Button>
 
-        {/* A dismissal lasts until tomorrow and no longer. */}
-        {view.available && view.dismissedOn === null ? (
-          <Button
-            variant="quiet"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              call('dismiss_update')
-                .then((fresh) => {
-                  setView(fresh);
-                  toast.show('ok', 'Not today. We will mention it again tomorrow.');
-                })
-                .catch(complain)
-                .finally(() => setBusy(false));
-            }}
-          >
-            Not today
-          </Button>
-        ) : null}
 
         <Button variant="danger" disabled={busy} onClick={() => setConfirming(true)}>
           Go back a version

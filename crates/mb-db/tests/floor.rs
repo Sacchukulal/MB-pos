@@ -179,7 +179,7 @@ fn a_table_with_an_open_order_cannot_be_hidden_or_deleted() {
             let open = repos.orders().list_open(OUTLET)?;
             Ok(open
                 .iter()
-                .find_map(|o| o.core().table.clone())
+                .find_map(|o| o.core().table().cloned())
                 .expect("an order on a table"))
         })
         .expect("a busy table");
@@ -227,7 +227,7 @@ fn a_used_table_can_be_hidden_and_never_deleted() {
             let all = repos.orders().list_all()?;
             Ok(all
                 .iter()
-                .find_map(|o| o.core().table.clone())
+                .find_map(|o| o.core().table().cloned())
                 .expect("a table with history"))
         })
         .expect("a used table");
@@ -338,7 +338,7 @@ fn occupancy_reconciles_with_the_open_orders() {
             let numbers = repos.floor().occupancy(OUTLET, day)?;
             let busy: std::collections::BTreeSet<String> = open
                 .iter()
-                .filter_map(|o| o.core().table.as_ref().map(|t| t.as_str().to_owned()))
+                .filter_map(|o| o.core().table().map(|t| t.as_str().to_owned()))
                 .collect();
             let active = repos
                 .floor()

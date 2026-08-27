@@ -26,6 +26,7 @@ pub enum Kind {
 }
 
 impl Kind {
+    #[cfg(test)]
     pub const ALL: &'static [Kind] = &[
         Kind::LicenceKey,
         Kind::PasswordHash,
@@ -36,6 +37,7 @@ impl Kind {
     ];
 
     #[must_use]
+    #[cfg(test)]
     pub const fn what(self) -> &'static str {
         match self {
             Kind::LicenceKey => "a licence key",
@@ -49,6 +51,7 @@ impl Kind {
 }
 
 /// One line of every pattern.
+#[cfg(test)]
 pub const THE_FIXTURE: &str = "\
 12:04:11.001 INFO  [magic_bill::licensing] activated MB-4KQ7-9WTX-2100 for Anna's Kitchen
 12:04:11.002 DEBUG [mb_auth::pin] stored $argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abc
@@ -59,6 +62,7 @@ pub const THE_FIXTURE: &str = "\
 ";
 
 /// A line that must NOT trip anything — the other half of the fixture.
+#[cfg(test)]
 pub const THE_INNOCENT_FIXTURE: &str = "\
 12:04:11.007 INFO  [magic_bill::flows] settled bill INV-000241 order ord_9f8e at 1786340060438
 12:04:11.008 INFO  [mb_auth::audit] seq 41 hash ffc56e8e51e8 prev 9a1b2c3d4e5f
@@ -132,6 +136,7 @@ pub fn scan(text: &str) -> Vec<Finding> {
 
 /// The findings as one sentence, for a test failure and for the bundle screen.
 #[must_use]
+#[cfg(test)]
 pub fn describe(findings: &[Finding]) -> String {
     findings
         .iter()
@@ -141,19 +146,6 @@ pub fn describe(findings: &[Finding]) -> String {
 }
 
 // Making things safe to write down.
-
-/// `+91 9845012345` → `+91 98••••••45`.
-#[must_use]
-pub fn phone(number: &str) -> String {
-    middle(number)
-}
-
-/// `MB-4KQ7-9WTX-2100` → `MB-4••••••••••00`. Enough for a support call to confirm they are
-/// looking at the same licence, and useless to anybody else.
-#[must_use]
-pub fn key(value: &str) -> String {
-    middle(value)
-}
 
 /// Keep the ends, hide the middle.
 fn middle(value: &str) -> String {
@@ -229,22 +221,5 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert!(!found[0].sample.contains("9WTX"), "{:?}", found[0].sample);
         assert!(found[0].sample.contains('•'));
-    }
-
-    #[test]
-    fn redaction_keeps_the_ends_and_hides_the_middle() {
-        assert_eq!(phone("+91 9845012345"), "+91 ••••••••45");
-        assert_eq!(key("MB-4KQ7-9WTX-2100"), "MB-4•••••••••••00");
-        // Short values are hidden completely rather than 60% shown.
-        assert_eq!(phone("1234"), "••••");
-        assert_eq!(phone(""), "•");
-    }
-
-    /// Redacted output must not itself trip the scanner, or the bundle screen would report a
-    /// leak about the thing that prevented one.
-    #[test]
-    fn redacted_values_are_clean() {
-        let line = format!("activated {} for a shop", key("MB-4KQ7-9WTX-2100"));
-        assert!(scan(&line).is_empty(), "{line}");
     }
 }

@@ -46,6 +46,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0004_tax_rework",
         sql: include_str!("migrations/0004_tax_rework.sql"),
     },
+    // A table belongs to a dine-in order only.
+    Migration {
+        version: 5,
+        name: "0005_placement",
+        sql: include_str!("migrations/0005_placement.sql"),
+    },
 ];
 
 /// The highest version this build understands.

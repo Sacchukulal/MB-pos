@@ -10,9 +10,9 @@ use super::catalog::{self, Entry, Group};
 use super::value::{Kind, Value};
 use super::{Changed, ShopConfig};
 use crate::guard;
+use crate::log_info;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
-use crate::{log_info, log_warn};
 
 // What the screen is handed.
 
@@ -399,6 +399,7 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
         let value = off_the_wire(entry, &edit.value)?;
         (entry.write)(&mut wanted, &value).map_err(|e| UiError::from(e.about(entry.key)))?;
     }
+    catalog::check_gstin_against_state(&wanted).map_err(UiError::from)?;
 
     let at = crate::flows::now();
     let day = crate::flows::today(at);
@@ -659,16 +660,4 @@ pub fn settings_defaults_for(
 #[tauri::command]
 pub fn reload_settings(app: tauri::State<'_, App>) -> UiResult<SettingsView> {
     reload_on(&app)
-}
-
-/// A shop that will not answer is worth one line in the log rather than a silent empty screen.
-pub fn warn_if_unreadable(app: &App) {
-    if let Err(e) = app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| super::load(&mb_db::Repos::new(tx), OUTLET))
-            .map_err(|e| words::from_db(&e))
-    }) && e.code != "shop.none"
-    {
-        log_warn!("this shop's settings will not read: {e}");
-    }
 }

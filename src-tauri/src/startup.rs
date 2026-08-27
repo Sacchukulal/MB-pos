@@ -32,11 +32,7 @@ pub enum Startup {
     /// No database and no candidate.
     FirstRun,
     /// `locate` found databases the configuration did not mention.
-    FoundCandidates {
-        candidates: Vec<FoundDatabase>,
-        /// The path the configuration pointed at, when there was one.
-        expected: Option<PathBuf>,
-    },
+    FoundCandidates { candidates: Vec<FoundDatabase> },
     /// It is there and it will not open.
     Failed { error: UiError },
 }
@@ -93,10 +89,7 @@ pub fn run(config_dir: &Path) -> Startup {
         "start-up: found {} possible data file(s) — asking rather than adopting",
         candidates.len()
     );
-    Startup::FoundCandidates {
-        candidates,
-        expected: recorded,
-    }
+    Startup::FoundCandidates { candidates }
 }
 
 /// Open and migrate. Step 6.

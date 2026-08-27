@@ -71,7 +71,7 @@ fn a_till(scratch: &Scratch, file: &str, id: &str, name: &str, prefix: &str) -> 
 /// One cash sale through the real path, returning the bill number it printed.
 fn a_cash_sale(app: &App) -> String {
     app.with_cart_mut(|state| {
-        state.order_type = OrderType::Parcel;
+        state.set_order_type(OrderType::Parcel);
         Ok(())
     })
     .expect("parcel");
@@ -87,7 +87,7 @@ fn a_cash_sale(app: &App) -> String {
         })
     })
     .expect("paid");
-    crate::flows::complete_bill_on(app).expect("settled")
+    crate::flows::complete_bill_on(app, None).expect("settled")
 }
 
 /// Every bill number in a till's book, in the order they were written.

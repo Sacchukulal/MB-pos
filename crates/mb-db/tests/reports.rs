@@ -87,7 +87,7 @@ fn settle_on(
         OrderId::new(id),
         on,
         at,
-        OrderType::Parcel,
+        mb_core::Placement::Parcel,
         StaffId::new("staff_1"),
     );
     draft.core.cart = cart;

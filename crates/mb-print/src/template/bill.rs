@@ -257,7 +257,7 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
         (true, Some(time)) => format!("{} {time}", core.business_day),
         _ => core.business_day.to_string(),
     };
-    let kind = match core.order_type {
+    let kind = match core.order_type() {
         OrderType::DineIn => "Dine In",
         OrderType::Parcel => "Parcel",
         OrderType::SelfService => "Self Service",
