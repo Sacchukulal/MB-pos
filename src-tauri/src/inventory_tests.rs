@@ -479,20 +479,17 @@ fn demo_stock() {
     let mut licensing = mb_license::Licensing::new(
         home.clone(),
         machine.clone(),
-        std::sync::Arc::new(mb_license::cloud::Stub::active(
-            &machine,
-            crate::flows::today(crate::flows::now()),
-            crate::flows::now(),
-        )) as std::sync::Arc<dyn mb_license::Cloud>,
+        std::sync::Arc::new(mb_license::cloud::Stub::trial(&machine, 14, crate::flows::now()))
+            as std::sync::Arc<dyn mb_license::Cloud>,
         env!("CARGO_PKG_VERSION"),
     );
     licensing
-        .start_trial(
-            "+91 90000 00000",
+        .activate(
+            "MB-STUB-0001",
             crate::flows::now(),
             std::time::Duration::from_secs(5),
         )
-        .expect("the stub starts a trial");
+        .expect("the stub activates a trial");
     app.use_licensing(licensing);
 
     // A menu, so the food-cost tab has dishes on it.

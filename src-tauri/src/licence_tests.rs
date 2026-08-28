@@ -22,7 +22,7 @@ pub(crate) fn machine() -> MachineId {
 }
 
 /// A shop that can trade: one item, an owner at the counter.
-fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
+pub(crate) fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
     let path = scratch.dir().join(format!("{name}.db"));
     let db = Db::open(&DbConfig::new(path.clone())).expect("open");
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
@@ -77,7 +77,6 @@ pub(crate) fn licence_in(
     licensing
         .activate(
             "MB-STUB-0001",
-            "123456",
             at,
             std::time::Duration::from_secs(2),
         )
@@ -385,7 +384,6 @@ fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
     licensing
         .activate(
             "MB-STUB-0001",
-            "123456",
             at,
             std::time::Duration::from_secs(2),
         )

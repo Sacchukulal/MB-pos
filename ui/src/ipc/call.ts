@@ -100,6 +100,8 @@ import type { ReportListView } from './generated/ReportListView';
 import type { ReportView } from './generated/ReportView';
 import type { SavedFileView } from './generated/SavedFileView';
 import type { CounterEdit } from './generated/CounterEdit';
+import type { NoticesView } from './generated/NoticesView';
+import type { CloudRestoreView } from './generated/CloudRestoreView';
 
 /** Every command, with what it takes and what it gives back. */
 export interface Commands {
@@ -109,6 +111,11 @@ export interface Commands {
   first_run: { args: void; returns: FirstRunView };
   create_shop: { args: { folder: string }; returns: FirstRunView };
   use_existing_shop: { args: { path: string }; returns: FirstRunView };
+  /** Bring my shop from the cloud: the licence key, where the file goes, and whether to move a licence bound elsewhere. */
+  restore_from_cloud: {
+    args: { key: string; folder: string; moveHere: boolean };
+    returns: CloudRestoreView;
+  };
   reveal_logs: { args: void; returns: string };
   print_test_page: { args: { printerId: string }; returns: string };
   list_print_jobs: { args: void; returns: PrintJobView[] };
@@ -623,10 +630,9 @@ export interface Commands {
   // The licence.
   account: { args: void; returns: LicenceView };
   refresh_licence: { args: void; returns: LicenceView };
-  activate: { args: { key: string; proof: string }; returns: LicenceView };
-  start_trial: { args: { contact: string }; returns: LicenceView };
+  activate: { args: { key: string }; returns: LicenceView };
   deactivate: { args: void; returns: LicenceView };
-  transfer_here: { args: { key: string; proof: string }; returns: LicenceView };
+  transfer_here: { args: { key: string }; returns: LicenceView };
   use_emergency_code: { args: { code: string }; returns: LicenceView };
 
   // Is this counter healthy, and what can we send to support.
@@ -645,6 +651,11 @@ export interface Commands {
   kitchen_fire: { args: { orderId: string; course: string }; returns: KitchenView };
   look_for_an_update: { args: void; returns: UpdateState };
   go_back_a_version: { args: void; returns: string };
+  install_update: { args: void; returns: string };
+  // The cloud copy, and what comes back down it.
+  notices: { args: void; returns: NoticesView };
+  notices_seen: { args: void; returns: NoticesView };
+  pull_from_cloud: { args: void; returns: NoticesView };
   diagnostics_plan: { args: void; returns: BundlePlanView };
   write_diagnostics: { args: void; returns: string };
 }

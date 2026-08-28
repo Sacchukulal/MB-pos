@@ -125,6 +125,112 @@ pub fn create_shop_on(app: &App, folder: String) -> UiResult<FirstRunView> {
     }
 }
 
+/// What a restore from the cloud answers with: the first-run view, and the sentence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct CloudRestoreView {
+    pub first_run: FirstRunView,
+    /// "312 bills, 4 staff members, 96 other rows and 210 days of totals came down from the cloud."
+    pub says: String,
+}
+
+/// Bring my shop from the cloud: activate the licence here, read everything the cloud holds
+/// under the counter's login into a fresh shop file, and only then open it. `move_here` moves
+/// a licence that is bound to another computer — the one that died.
+pub fn restore_from_cloud_on(
+    app: &App,
+    key: String,
+    folder: String,
+    move_here: bool,
+) -> UiResult<CloudRestoreView> {
+    only_before_set_up(app)?;
+    if app.has_shop() {
+        return Err(UiError::new(
+            "shop.exists",
+            "This computer already has a shop. A shop from the cloud can only be brought onto a \
+             computer with none.",
+        ));
+    }
+    let key = key.trim().to_owned();
+    if key.is_empty() {
+        return Err(UiError::new("licence.key", "Type the licence key first."));
+    }
+
+    // The licence first: it is what says which shop, and it hands the counter its login.
+    let at = crate::flows::now();
+    let outcome = app.with_licensing(|licensing| {
+        if move_here {
+            licensing.transfer(&key, at, crate::flows::today(at), mb_license::deadline::DEADLINE)
+        } else {
+            licensing.activate(&key, at, mb_license::deadline::DEADLINE)
+        }
+    });
+    if let Err(e) = outcome {
+        return Err(crate::words::from_licence(&e));
+    }
+    let Some(login) = app.device_login() else {
+        return Err(UiError::new(
+            "cloud.no_login",
+            "The licence was activated but our server gave this counter no login. Try again in a \
+             minute.",
+        ));
+    };
+
+    let config_dir = crate::config::AppConfig::directory();
+    let path = if folder.trim().is_empty() {
+        default_shop_path()
+    } else {
+        let folder = std::path::PathBuf::from(folder.trim());
+        if folder.extension().is_some_and(|e| e == "db") {
+            folder
+        } else {
+            folder.join("magicbill.db")
+        }
+    };
+    if path.exists() {
+        return Err(UiError::new(
+            "shop.exists",
+            format!(
+                "There is already a shop file at {}. Open that one, or choose another folder.",
+                path.display()
+            ),
+        ));
+    }
+
+    // Written BEFORE it is opened, the same road a pen-drive restore takes.
+    let db = mb_db::Db::open(&mb_db::DbConfig::new(path.clone())).map_err(|e| crate::words::from_db(&e))?;
+    let report = match crate::sync::restore_into(app, &db, &login) {
+        Ok(report) => report,
+        Err(e) => {
+            // Nothing half-restored is left behind to be mistaken for a shop.
+            drop(db);
+            let _ = std::fs::remove_file(&path);
+            return Err(e);
+        }
+    };
+    drop(db);
+
+    match crate::startup::adopt(&config_dir, &path)? {
+        crate::startup::Startup::Ready { db, path, .. } => {
+            crate::log_info!("first run: the shop came down from the cloud to {}", path.display());
+            app.open_shop(*db, path);
+        }
+        crate::startup::Startup::Failed { error } => return Err(error),
+        _ => {
+            return Err(UiError::new(
+                "shop.create",
+                "The shop could not be opened after it came down. Look in Health for what went wrong.",
+            ));
+        }
+    }
+    crate::licensing::after_licence_change(app);
+    Ok(CloudRestoreView {
+        first_run: look_on(app)?,
+        says: report.sentence(),
+    })
+}
+
 /// A set-up shop cannot be swapped from the first-run screen.
 pub(crate) fn only_before_set_up(app: &App) -> UiResult<()> {
     if look_on(app)?.needed {
@@ -148,4 +254,14 @@ pub fn create_shop(app: tauri::State<'_, App>, folder: String) -> UiResult<First
 #[tauri::command]
 pub fn use_existing_shop(app: tauri::State<'_, App>, path: String) -> UiResult<FirstRunView> {
     create_shop_on(&app, path)
+}
+
+#[tauri::command]
+pub fn restore_from_cloud(
+    app: tauri::State<'_, App>,
+    key: String,
+    folder: String,
+    move_here: bool,
+) -> UiResult<CloudRestoreView> {
+    restore_from_cloud_on(&app, key, folder, move_here)
 }

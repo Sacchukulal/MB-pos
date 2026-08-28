@@ -21,14 +21,12 @@ const TONES: Record<string, BadgeTone> = {
 /** magicbill.in, where a plan is actually bought. */
 const RENEW_AT = 'https://magicbill.in/renew';
 
-type Asking = 'activate' | 'transfer' | 'trial' | 'emergency' | null;
+type Asking = 'activate' | 'transfer' | 'emergency' | null;
 
 export function Account() {
   const [view, setView] = useState<LicenceView | null>(null);
   const [asking, setAsking] = useState<Asking>(null);
   const [key, setKey] = useState('');
-  const [proof, setProof] = useState('');
-  const [contact, setContact] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -55,9 +53,7 @@ export function Account() {
         setView(fresh);
         setAsking(null);
         setKey('');
-        setProof('');
         setCode('');
-        setContact('');
         if (done) toast.show("ok", done);
       })
       .catch(report)
@@ -67,6 +63,7 @@ export function Account() {
   if (!view) return null;
 
   const tone = TONES[view.tone] ?? 'neutral';
+  const cloudTone = TONES[view.cloudTone] ?? 'neutral';
 
   return (
     <Page className="mb-account">
@@ -100,6 +97,9 @@ export function Account() {
             {view.clockNote}
           </p>
         )}
+
+        {/* The trial is the website's: one sentence, no dialog, no contact box. */}
+        {!view.isActivated && <p className="mb-account__note">{view.trialSentence}</p>}
 
         <div className="mb-account__actions mb-row mb-row--end">
           {/* "Check again" now actually checks again. */}
@@ -147,13 +147,6 @@ export function Account() {
                 Emergency code
               </Button>
               <Button
-                variant="quiet"
-                disabled={!view.mayManage}
-                onClick={() => setAsking('trial')}
-              >
-                Start a free trial
-              </Button>
-              <Button
                 variant="primary"
                 disabled={!view.mayManage}
                 onClick={() => setAsking('activate')}
@@ -193,10 +186,30 @@ export function Account() {
             <dt>Last checked</dt>
             <dd>{view.checked}</dd>
           </div>
+          {view.restaurantCode !== '' && (
+            <div>
+              {/* What staff type on a phone, beside the shop it names. */}
+              <dt>Shop code for phones</dt>
+              <dd className="mb-account__machine">{view.restaurantCode}</dd>
+            </div>
+          )}
         </dl>
         {view.included.length > 0 && (
           <p className="mb-account__included">{view.included.join(' · ')}</p>
         )}
+      </Card>
+
+      {/* The cloud copy, in Rust's words. */}
+      <Card>
+        <div className="mb-account__top mb-row">
+          <SectionHeader title="Cloud copy" />
+          <Badge tone={cloudTone}>
+            {view.cloudTone === 'ok' ? 'Up to date' : view.cloudTone === 'danger' ? 'Stopped' : 'Behind'}
+          </Badge>
+        </div>
+        <p className="mb-account__note" role="status">
+          {view.cloudCopy}
+        </p>
       </Card>
 
       {/*
@@ -238,13 +251,12 @@ export function Account() {
       >
         <p className="mb-account__note">
           {asking === 'transfer'
-            ? 'This will stop the licence working on the computer it is on now. We will send a code to the mobile number registered with the licence.'
-            : 'We will send a code to the mobile number registered with your licence, so that nobody else can use your key.'}
+            ? 'This will stop the licence working on the computer it is on now. The key is the one on your receipt, or at magicbill.in.'
+            : 'The key is the one on your receipt, or at magicbill.in. Nobody else has it, so nobody else can use it.'}
         </p>
         {/*
-          `autoComplete="off"` on both, found by driving it: WebView2 offered to remember the
-          verification code and then drew its "Saved info" dropdown straight over the Activate
-          button.
+          `autoComplete="off"`, found by driving it: WebView2 offered to remember the box and
+          then drew its "Saved info" dropdown straight over the Activate button.
         */}
         <Input
           label="Licence key"
@@ -253,53 +265,24 @@ export function Account() {
           autoComplete="off"
           autoFocus
         />
-        <Input
-          label="Code we sent you"
-          value={proof}
-          onChange={(e) => setProof(e.target.value)}
-          autoComplete="off"
-        />
         <div className="mb-row mb-row--end">
           <Button variant="quiet" onClick={() => setAsking(null)}>
             Cancel
           </Button>
           <Button
             variant="primary"
-            disabled={busy || key.trim() === '' || proof.trim() === ''}
+            disabled={busy || key.trim() === ''}
             onClick={() =>
               run(
                 () =>
                   asking === 'transfer'
-                    ? call('transfer_here', { key, proof })
-                    : call('activate', { key, proof }),
+                    ? call('transfer_here', { key })
+                    : call('activate', { key }),
                 asking === 'transfer' ? 'The licence is now on this computer.' : 'Activated.',
               )
             }
           >
             {asking === 'transfer' ? 'Move it here' : 'Activate'}
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal
-        open={asking === 'trial'}
-        title="Start a free trial"
-        note="Tell us where to reach you and everything switches on. You can choose a plan later without setting anything up again."
-        onClose={() => setAsking(null)}
-      >
-        {/* field-lint-ok: it is a mobile OR an email — the licence server takes
-            either, and a ten-digit box cannot hold an address. */}
-        <Input label="Mobile or email" value={contact} onChange={(e) => setContact(e.target.value)} autoFocus />
-        <div className="mb-row mb-row--end">
-          <Button variant="quiet" onClick={() => setAsking(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || contact.trim() === ''}
-            onClick={() => run(() => call('start_trial', { contact }), 'Your trial has started.')}
-          >
-            Start
           </Button>
         </div>
       </Modal>

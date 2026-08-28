@@ -21,6 +21,12 @@ pub mod action {
     pub const STAFF_SAVED: AuditAction = "staff.saved";
     pub const STAFF_STATUS: AuditAction = "staff.status";
     pub const ROLE_SAVED: AuditAction = "role.saved";
+    /// The one staff list: an edit made on the owner's phone reached the counter.
+    pub const STAFF_FROM_PHONE: AuditAction = "staff.changed_from_phone";
+    pub const STAFF_PIN_FROM_PHONE: AuditAction = "staff.pin_changed_from_phone";
+    pub const ROLE_FROM_PHONE: AuditAction = "role.changed_from_phone";
+    /// A shop's data was brought down from the cloud onto this computer.
+    pub const CLOUD_RESTORED: AuditAction = "cloud.restored";
     pub const BILL_SETTLED: AuditAction = "bill.settled";
     pub const BILL_VOIDED: AuditAction = "bill.voided";
     pub const BILL_REPRINTED: AuditAction = "bill.reprinted";

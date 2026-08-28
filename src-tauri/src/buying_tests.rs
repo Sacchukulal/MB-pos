@@ -621,7 +621,6 @@ fn demo_buying() {
     licensing
         .activate(
             "MB-STUB-0001",
-            "123456",
             crate::flows::now(),
             std::time::Duration::from_secs(2),
         )

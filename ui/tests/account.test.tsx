@@ -36,6 +36,10 @@ const activated: LicenceView = {
   clockNote: '',
   mayManage: true,
   isActivated: true,
+  restaurantCode: 'ANNA01',
+  cloudCopy: 'Last copied to the cloud: 9 Aug, 6:10 pm. No rows waiting.',
+  cloudTone: 'ok',
+  trialSentence: 'Start your free trial at magicbill.in, then enter the key here.',
 };
 
 function show(view: LicenceView) {
@@ -92,7 +96,13 @@ it('says the licence is still held when a deactivate could not reach the server'
   expect(await screen.findByText(/The licence is still held/)).toBeTruthy();
 });
 
-it('offers a key, a trial and an emergency code when nothing is activated', async () => {
+it('shows the shop code staff type on a phone, and the cloud copy in a sentence', async () => {
+  show(activated);
+  expect(await screen.findByText('ANNA01')).toBeTruthy();
+  expect(screen.getByText(/Last copied to the cloud/)).toBeTruthy();
+});
+
+it('offers a key and an emergency code when nothing is activated, and the trial is one sentence', async () => {
   show({
     ...activated,
     standing: 'never-activated',
@@ -106,7 +116,9 @@ it('offers a key, a trial and an emergency code when nothing is activated', asyn
     headline: 'This computer has no licence yet. You can bill and print.',
   });
   expect(await screen.findByRole('button', { name: 'Enter licence key' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Start a free trial' })).toBeTruthy();
+  // No trial dialog, no contact box: the trial is the website's.
+  expect(screen.queryByRole('button', { name: 'Start a free trial' })).toBeNull();
+  expect(screen.getByText(/Start your free trial at magicbill.in/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Emergency code' })).toBeTruthy();
   // Nothing to deactivate.
   expect(screen.queryByRole('button', { name: 'Deactivate' })).toBeNull();
@@ -127,7 +139,8 @@ it('does not let somebody without licence.manage press anything that changes it'
 });
 
 /** Activation sends the key and the proof. */
-it('will not activate on a key alone', async () => {
+/** The key is the proof: it is shown only to whoever bought it, so there is no code box. */
+it('activates on the key alone', async () => {
   show({
     ...activated,
     isActivated: false,
@@ -137,34 +150,32 @@ it('will not activate on a key alone', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Enter licence key' }));
 
   const key = await screen.findByLabelText('Licence key');
-  const proof = screen.getByLabelText('Code we sent you');
+  expect(screen.queryByLabelText('Code we sent you')).toBeNull();
   const activate = screen.getByRole('button', { name: 'Activate' });
-
-  fireEvent.change(key, { target: { value: 'MB-1234-5678' } });
   expect(activate.hasAttribute('disabled')).toBe(true);
 
-  fireEvent.change(proof, { target: { value: '123456' } });
+  fireEvent.change(key, { target: { value: 'MB-1234-5678' } });
   expect(activate.hasAttribute('disabled')).toBe(false);
 
   fireEvent.click(activate);
   await waitFor(() => {
-    expect(call).toHaveBeenCalledWith('activate', { key: 'MB-1234-5678', proof: '123456' });
+    expect(call).toHaveBeenCalledWith('activate', { key: 'MB-1234-5678' });
   });
 });
 
 /** Every command returns the whole view, so the screen never merges state. */
 it('takes the whole view back from a command', async () => {
-  show({ ...activated, isActivated: false, standing: 'never-activated' });
-  fireEvent.click(await screen.findByRole('button', { name: 'Start a free trial' }));
-  fireEvent.change(await screen.findByLabelText('Mobile or email'), {
-    target: { value: '9812345610' },
+  show({ ...activated, isActivated: false, standing: 'never-activated', planName: 'No plan' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Enter licence key' }));
+  fireEvent.change(await screen.findByLabelText('Licence key'), {
+    target: { value: 'MB-1234-5678' },
   });
 
   call.mockResolvedValueOnce({
     ...activated,
-    planName: 'Free trial',
+    planName: 'Restaurant Plus',
     chip: 'Active',
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-  expect(await screen.findByText('Free trial')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
+  expect(await screen.findByText('Restaurant Plus')).toBeTruthy();
 });

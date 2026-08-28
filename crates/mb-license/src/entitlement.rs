@@ -178,6 +178,8 @@ mod tests {
             bound_to: Some(MachineId::for_tests("machine-a")),
             trial_ends_on: None,
             registered_contact: "+91 98••••••10".to_owned(),
+            restaurant_id: None,
+            short_code: None,
         }
     }
 
@@ -219,7 +221,7 @@ mod tests {
             assert!(entitlement.may(*feature).is_err(), "{feature:?}");
         }
         // ...and billing is not one of the things it can be asked.
-        assert_eq!(Feature::ALL.len(), 5);
+        assert_eq!(Feature::ALL.len(), 4);
     }
 
     #[test]

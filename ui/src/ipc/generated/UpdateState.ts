@@ -9,6 +9,14 @@ export type UpdateState = {
  */
 available: string | null, notes: string, 
 /**
+ * True once the installer for `available` is on this disk and its fingerprint checked.
+ */
+downloaded: boolean, 
+/**
+ * The version that can be gone back to, if any.
+ */
+previous: string | null, 
+/**
  * How many days this counter has been on its current version.
  */
 daysOnThisVersion: number, running: string, isDevBuild: boolean, };

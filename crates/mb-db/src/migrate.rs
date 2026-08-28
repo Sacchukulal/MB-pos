@@ -58,6 +58,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0006_kitchen_closed",
         sql: include_str!("migrations/0006_kitchen_closed.sql"),
     },
+    Migration {
+        version: 7,
+        name: "0007_cloud_notices",
+        sql: include_str!("migrations/0007_cloud_notices.sql"),
+    },
 ];
 
 /// The highest version this build understands.

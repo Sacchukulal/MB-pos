@@ -1,4 +1,5 @@
 import { Button, Icon, SectionHeader, type IconName } from '../kit';
+import type { NoticeView } from '../ipc/generated/NoticeView';
 
 /** One thing the shop should know about. */
 export interface Alert {
@@ -25,10 +26,13 @@ export function loudest(alerts: readonly Alert[]): Alert['tone'] | null {
 
 export function AlertsPanel({
   alerts,
+  notices = [],
   onGo,
   onClose,
 }: {
   alerts: readonly Alert[];
+  /** From Magic Bill, newest first. Shown under the counter's own alerts. */
+  notices?: readonly NoticeView[];
   onGo: (screen: string) => void;
   onClose: () => void;
 }) {
@@ -56,12 +60,12 @@ export function AlertsPanel({
           }
         />
 
-        {alerts.length === 0 ? (
+        {alerts.length === 0 && notices.length === 0 ? (
           <p className="mb-alerts__quiet">
             Nothing needs you. Anything the counter wants to tell you turns up
             here.
           </p>
-        ) : (
+        ) : alerts.length === 0 ? null : (
           <ul className="mb-alerts__list">
             {alerts.map((alert) => (
               <li key={alert.id} className={`mb-alerts__one mb-alerts__one--${alert.tone}`}>
@@ -86,6 +90,28 @@ export function AlertsPanel({
             ))}
           </ul>
         )}
+
+        {/* Notices from Magic Bill. Read once the panel opens; the number on the bell counts the unread. */}
+        {notices.length > 0 ? (
+          <>
+            <SectionHeader title="From Magic Bill" />
+            <ul className="mb-alerts__list" aria-label="Notices from Magic Bill">
+              {notices.map((notice) => (
+                <li
+                  key={notice.id}
+                  className={`mb-alerts__one mb-alerts__one--${notice.isSeen ? 'info' : 'accent'}`}
+                >
+                  <Icon name="info" size="sm" className="mb-alerts__icon" />
+                  <div className="mb-alerts__body">
+                    <span className="mb-alerts__what">{notice.title}</span>
+                    {notice.body ? <span className="mb-alerts__says">{notice.body}</span> : null}
+                    <span className="mb-muted">{notice.when}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
       </section>
     </>
   );

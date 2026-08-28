@@ -22,6 +22,8 @@ pub const COUNTED: &[&str] = &[
     "cash_movements",
     "categories",
     "category_printers",
+    "cloud_day_totals",
+    "cloud_notices",
     "combo_components",
     "combos",
     "counters",

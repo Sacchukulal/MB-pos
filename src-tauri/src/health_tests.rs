@@ -40,7 +40,6 @@ fn licence(scratch: &Scratch, label: &str, status: Status, renews_in_days: i32) 
     licensing
         .activate(
             "MB-STUB-0001",
-            "123456",
             at,
             std::time::Duration::from_secs(2),
         )

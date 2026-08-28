@@ -329,6 +329,9 @@ fn t8_every_named_index_exists() {
         "idx_payment_attempts_day",
         // "What happened on that bill?", asked at the counter mid-argument.
         "idx_payment_attempts_order",
+        // The bell: "any notice from Magic Bill I have not seen?" — partial, so a shop with a
+        // year of read notices still answers from a handful of rows.
+        "idx_cloud_notices_unseen",
     ];
 
     let db = Scratch::new("t8").open();

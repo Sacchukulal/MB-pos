@@ -62,7 +62,7 @@ pub struct Db {
     readers: ReaderPool,
     /// The tables the write in hand has touched, noted by SQLite itself.
     touched: Arc<Mutex<BTreeSet<String>>>,
-    watcher: Mutex<Option<Watcher>>,
+    watchers: Mutex<Vec<Watcher>>,
 }
 
 impl std::fmt::Debug for Db {
@@ -124,13 +124,13 @@ impl Db {
             writer: Mutex::new(writer),
             readers: ReaderPool::new(readers),
             touched,
-            watcher: Mutex::new(None),
+            watchers: Mutex::new(Vec::new()),
         })
     }
 
-    /// Be told, after each commit, which tables it changed.
+    /// Be told, after each commit, which tables it changed. Every watcher is told.
     pub fn watch(&self, watcher: Watcher) {
-        *lock(&self.watcher) = Some(watcher);
+        lock(&self.watchers).push(watcher);
     }
 
     #[must_use]
@@ -182,11 +182,11 @@ impl Db {
         let touched = std::mem::take(&mut *lock(&self.touched));
         // The lock goes first: a watcher must never wait on the counter.
         drop(writer);
-        if outcome.is_ok()
-            && !touched.is_empty()
-            && let Some(watcher) = lock(&self.watcher).clone()
-        {
-            watcher(&touched);
+        if outcome.is_ok() && !touched.is_empty() {
+            let watchers = lock(&self.watchers).clone();
+            for watcher in watchers {
+                watcher(&touched);
+            }
         }
         outcome
     }

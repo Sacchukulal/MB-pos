@@ -77,6 +77,8 @@ pub fn look(app: &App) -> HealthView {
         // somebody can act on today.
         crate::setup::health_row(&crate::setup::look(app)),
         licence_row(app),
+        licence_check_row(app),
+        cloud_row(app),
         update_row(app),
         printers_row(app),
         network_row(app),
@@ -135,6 +137,62 @@ fn licence_row(app: &App) -> HealthRow {
             "Licence",
             format!("{} — active.", entitlement.plan_name),
         ),
+    }
+}
+
+/// How old the last successful check is.
+#[allow(
+    clippy::integer_division,
+    reason = "an age in whole days for a sentence, not money"
+)]
+fn licence_check_row(app: &App) -> HealthRow {
+    let entitlement = app.entitlement();
+    if !app.with_licence(|l| l.key().is_some()) {
+        return HealthRow::ok(
+            "licence_check",
+            "Licence check",
+            "No licence yet, so there is nothing to check.",
+        );
+    }
+    let at = crate::flows::now();
+    let age_ms = at.millis().saturating_sub(entitlement.last_checked.millis());
+    let days = age_ms / 86_400_000;
+    if entitlement.last_checked == mb_core::Timestamp::EPOCH {
+        return HealthRow::warn(
+            "licence_check",
+            "Licence check",
+            "The licence has never been checked with our server. Check the internet \
+             connection and press Check again on the Account screen.",
+        )
+        .go("account");
+    }
+    if days >= 3 {
+        return HealthRow::warn(
+            "licence_check",
+            "Licence check",
+            format!(
+                "The licence was last checked {} ago, on {}. Check the internet connection \
+                 and press Check again on the Account screen — billing is not affected.",
+                crate::words::count(days, "day", "days"),
+                crate::words::when(entitlement.last_checked)
+            ),
+        )
+        .go("account");
+    }
+    HealthRow::ok(
+        "licence_check",
+        "Licence check",
+        format!("Last checked {}.", crate::words::when(entitlement.last_checked)),
+    )
+}
+
+/// The cloud copy, in the same words as the Account screen.
+fn cloud_row(app: &App) -> HealthRow {
+    let (says, tone) = crate::licensing::cloud_copy_says(app, crate::flows::now());
+    match tone {
+        "ok" => HealthRow::ok("cloud", "Cloud copy", says),
+        "danger" => HealthRow::bad("cloud", "Cloud copy", says).go("account"),
+        _ => HealthRow::warn("cloud", "Cloud copy", says).go("account"),
     }
 }
 

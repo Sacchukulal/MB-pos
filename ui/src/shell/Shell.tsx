@@ -7,6 +7,7 @@ import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
 import type { SetupView } from '../ipc/generated/SetupView';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
+import type { NoticesView } from '../ipc/generated/NoticesView';
 import { useTheme } from '../theme/ThemeProvider';
 import { Account } from '../account/Account';
 import { FirstRun } from '../setup/FirstRun';
@@ -229,6 +230,8 @@ export function Shell() {
   /** What the set-up list still wants. */
   const [setup, setSetup] = useState<SetupView | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  /** Notices from Magic Bill, and how many are unread — the bell's other half. */
+  const [notices, setNotices] = useState<NoticesView>({ unseen: 0, notices: [] });
   const { theme, toggle } = useTheme();
   const toast = useToast();
 
@@ -274,6 +277,23 @@ export function Shell() {
 
   useEffect(reloadLock, [reloadLock]);
 
+  /** What Magic Bill has to say, once signed in and again whenever Rust says it changed. */
+  const reloadNotices = useCallback(() => {
+    if (!inApp()) return;
+    call('notices')
+      // Checked, not trusted — the same rule the print queue follows.
+      .then((fresh) => {
+        if (fresh && Array.isArray(fresh.notices)) setNotices(fresh);
+      })
+      // Locked, or no shop: the bell simply has nothing from the cloud yet.
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (lock === null || lock.signedInAs === null) return;
+    reloadNotices();
+  }, [lock, reloadNotices]);
+
   // Rust pushes; React subscribes.
   useEffect(() => {
     if (!inApp()) return undefined;
@@ -282,13 +302,30 @@ export function Shell() {
       if (message.kind === 'printQueue') setJobs(message.jobs);
       if (message.kind === 'session') reloadLock();
       if (message.kind === 'tills') setTillsSay(message.says);
+      if (message.kind === 'notices') reloadNotices();
+      if (message.kind === 'licence') {
+        setStatus((was) => (was ? { ...was, licence: message.says, licenceTone: message.tone } : was));
+      }
     })
       .then((unlisten) => {
         stop = unlisten;
       })
       .catch(() => undefined);
     return () => stop?.();
-  }, [reloadLock]);
+  }, [reloadLock, reloadNotices]);
+
+  /** Opening the bell: fetch what is new, then mark everything read. */
+  const openAlerts = useCallback(() => {
+    setAlertsOpen(true);
+    if (!inApp()) return;
+    call('pull_from_cloud')
+      .catch(() => undefined)
+      .then(() => call('notices_seen'))
+      .then((fresh) => {
+        if (fresh && Array.isArray(fresh.notices)) setNotices(fresh);
+      })
+      .catch(() => undefined);
+  }, []);
 
   /** The queue as it is right now, once, when the shell mounts. */
   useEffect(() => {
@@ -469,9 +506,9 @@ export function Shell() {
         onLock={() => {
           call('lock_now').then(setLock).catch(() => undefined);
         }}
-        alertCount={alerts.length}
-        alertTone={loudest(alerts)}
-        onOpenAlerts={() => setAlertsOpen(true)}
+        alertCount={alerts.length + notices.unseen}
+        alertTone={loudest(alerts) ?? (notices.unseen > 0 ? 'accent' : null)}
+        onOpenAlerts={openAlerts}
       />
 
       <div className="mb-body">
@@ -484,6 +521,7 @@ export function Shell() {
       {alertsOpen ? (
         <AlertsPanel
           alerts={alerts}
+          notices={notices.notices}
           onGo={setScreen}
           onClose={() => setAlertsOpen(false)}
         />

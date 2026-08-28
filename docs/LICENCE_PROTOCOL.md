@@ -78,8 +78,19 @@ from, so it must be safe to have been called and abandoned — see §6.
 First activation.
 
 ```json
-{ "ask": { ... }, "proof": "123456" }
+{ "ask": { ... }, "machine_name": "COUNTER-PC" }
 ```
+
+**The key is the proof.** It is shown only to the owner who bought it (on the receipt and
+at magicbill.in), and it is what an owner types. There is no one-time code and no contact
+box: the round that wired the counter to the cloud (2026-08-27) removed both, from the
+trait, the commands and the screen. `machine_name` is this computer's name, so the owner's
+phone can tell two tills apart. The answer carries the counter's **login** to the cloud
+(`device`) — see `MB-backend/docs/SYNC_PROTOCOL.md` §1.
+
+> The paragraphs below are kept for the finding they answer; **`proof` is gone.** What
+> fixes BACKEND-C6 now is that the key is never shown to anybody but the buyer, and the
+> rate limit in §7.
 
 > **BACKEND-C6:** *"An unactivated licence accepts any device. Both the
 > enrolment program and the old bill-sync program say 'if no device is bound
@@ -145,14 +156,16 @@ second release must not be an error.
 ### 2.4 `POST /v1/licence/transfer`
 
 ```json
-{ "ask": { ... }, "proof": "123456" }
+{ "ask": { ... }, "machine_name": "NEW-PC" }
 ```
+
+No `proof` — the key is the proof, as in §2.1.
 
 Moves the licence onto the calling machine from wherever it was. POS-A4's
 self-service path — *"there was no self-service way to move a licence to a new
 machine at all"*.
 
-* `proof` is mandatory, same as activation.
+* No proof, same as activation.
 * The **old** machine is released and its credential revoked (the box above).
 * **The counter enforces a 30-day cooldown of its own**, in `licence.json`. The
   cloud must enforce one too, server-side, and it is the one that counts: the
@@ -163,11 +176,13 @@ Answers `SignedSnapshot`.
 
 ### 2.5 `POST /v1/licence/trial`
 
-```json
-{ "ask": { ... }, "contact": "+919812345610" }
-```
+**The trial is the website's.** The cloud answers this call with `403 refused` and the
+sentence *"Start your free trial at magicbill.in, then enter the key here."*, and the
+counter no longer makes it — the Account screen shows that sentence instead of a dialog.
+A trial is a licence with `status: "trial"` and a `trial_ends_on`, made at magicbill.in,
+and it is activated with its key like any other.
 
-Starts a self-service trial. Sets `status: "trial"` and a `trial_ends_on`, and
+The original design, kept for the record: a self-service trial from the counter. Sets `status: "trial"` and a `trial_ends_on`, and
 binds the machine.
 
 **A trial converts to paid by the cloud changing `status` to `active` and
@@ -189,7 +204,7 @@ without one.
   "plan": {
     "code": "restaurant-standard",
     "name": "Restaurant Standard",
-    "features": ["reports", "cloud-backup", "mobile-ordering"],
+    "features": ["reports", "mobile-ordering"],
     "limits": { "devices": 4, "terminals": 1 }
   },
   "status": "active",
@@ -197,7 +212,9 @@ without one.
   "grace_days": null,
   "bound_to": { "value": "...", "how": "machine-guid" },
   "trial_ends_on": null,
-  "registered_contact": "+91 98••••••10"
+  "registered_contact": "+91 98••••••10",
+  "restaurant_id": "6f1c…",
+  "short_code": "ANNA01"
 }
 ```
 
@@ -205,10 +222,14 @@ without one.
 * `features` is a list of **stable codes**. A code the counter does not know is
   **ignored, not rejected** — a newer cloud must be able to talk to an older
   till. The four codes a counter understands today are `reports`,
-  `cloud-backup`, `mobile-ordering`, `multi-terminal`. **There is no code for
+  `mobile-ordering`, `multi-terminal`, `inventory` (`cloud-backup` was removed
+  on 2026-08-27: the copy goes up on every plan, so a gate there gated nothing). **There is no code for
   billing or printing and there never will be** (§0.1).
 * A plan is data. Adding "Restaurant Plus, four phones" is a row in the admin
   panel and **never a counter release**.
+* `renews_on` is never null: for a trial the cloud puts `trial_ends_on` there.
+* `restaurant_id` is what a release rollout names; `short_code` is what staff type on a
+  phone. Both are shown on the Account screen; a counter that does not know them ignores them.
 * `registered_contact` **arrives already masked**. The counter shows it on a
   screen anybody with `reports.view` can open, and the owner's mobile number is
   not something a shop's staff need. Sending the full value is a bug in the

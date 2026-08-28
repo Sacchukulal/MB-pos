@@ -26,6 +26,7 @@ pub mod kitchen;
 pub mod menu;
 pub mod menucsv;
 pub mod money;
+pub mod notices;
 pub mod order;
 pub mod outbox;
 pub mod payments;
@@ -41,6 +42,7 @@ pub mod taxclass;
 /// The tills â every terminal has its own series, and moving the master is a decision a
 /// person makes.
 pub mod terminals;
+pub mod wire;
 
 pub use audit::{AuditFilter, AuditRepo};
 pub use buying::{
@@ -123,6 +125,16 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn settings(&self) -> SettingsRepo<'a> {
         SettingsRepo::new(self.tx)
+    }
+
+    #[must_use]
+    pub fn notices(&self) -> notices::NoticesRepo<'a> {
+        notices::NoticesRepo::new(self.tx)
+    }
+
+    #[must_use]
+    pub fn wire(&self) -> wire::WireRepo<'a> {
+        wire::WireRepo::new(self.tx)
     }
 
     #[must_use]

@@ -43,13 +43,19 @@ pub enum VerifyError {
     MalformedSignature,
 }
 
-/// The development key, and it is labelled because it has to be deleted.
+/// The development key. Trusted by debug and test builds only, so a stub-signed licence can
+/// never entitle a shipped counter.
 pub const DEVELOPMENT_SEED: [u8; 32] = [
     0x4d, 0x61, 0x67, 0x69, 0x63, 0x42, 0x69, 0x6c, 0x6c, 0x2d, 0x64, 0x65, 0x76, 0x2d, 0x6f, 0x6e,
     0x6c, 0x79, 0x2d, 0x73, 0x65, 0x65, 0x64, 0x2d, 0x50, 0x32, 0x31, 0x2d, 0x32, 0x30, 0x32, 0x36,
 ];
 
-pub const PRODUCTION_PUBLIC_KEY: Option<&[u8]> = None;
+/// The cloud's Ed25519 public key. The private half lives in the licence function's secrets
+/// and in the password manager, nowhere else.
+pub const PRODUCTION_PUBLIC_KEY: Option<&[u8]> = Some(&[
+    0x45, 0x4e, 0x42, 0x98, 0xb5, 0x6a, 0x4a, 0x19, 0xeb, 0x72, 0x12, 0x31, 0x98, 0x78, 0x23, 0x88,
+    0x8f, 0xab, 0x02, 0x50, 0x0f, 0x50, 0x8a, 0xd6, 0xa2, 0x10, 0x05, 0x22, 0x0f, 0xf0, 0x6e, 0xfc,
+]);
 
 /// The development keypair, derived from the seed.
 pub fn development_keypair() -> Result<Ed25519KeyPair, VerifyError> {
@@ -59,11 +65,17 @@ pub fn development_keypair() -> Result<Ed25519KeyPair, VerifyError> {
 /// Every key this build will accept a snapshot from.
 #[must_use]
 pub fn trusted_keys() -> Vec<Vec<u8>> {
+    keys_for(!cfg!(debug_assertions))
+}
+
+/// The list, by kind of build. A release build trusts the production key and nothing else.
+#[must_use]
+pub fn keys_for(release_build: bool) -> Vec<Vec<u8>> {
     let mut keys = Vec::new();
     if let Some(production) = PRODUCTION_PUBLIC_KEY {
         keys.push(production.to_vec());
     }
-    if let Ok(pair) = development_keypair() {
+    if !release_build && let Ok(pair) = development_keypair() {
         keys.push(pair.public_key().as_ref().to_vec());
     }
     keys
@@ -158,6 +170,8 @@ mod tests {
                 bound_to: Some(MachineId::for_tests("machine-a")),
                 trial_ends_on: None,
                 registered_contact: "+91 98••••••10".to_owned(),
+                restaurant_id: None,
+                short_code: None,
             },
             global_grace_days: Some(15),
             issued_at: Timestamp::from_millis(100 * DAY),
@@ -266,16 +280,25 @@ mod tests {
         );
     }
 
-    /// The development key is temporary and has to LOOK temporary.
+    /// A shipped counter trusts the production key and nothing else; a debug build also trusts
+    /// the development key the stub signs with.
     #[test]
-    fn the_development_key_is_still_marked_as_one() {
-        if PRODUCTION_PUBLIC_KEY.is_some() {
-            panic!(
-                "the production key exists — delete DEVELOPMENT_SEED, \
-                 development_keypair(), the stub's use of it, and this test"
-            );
-        }
-        assert_eq!(trusted_keys().len(), 1, "only the dev key, for now");
+    fn a_release_build_trusts_only_the_production_key() {
+        let production = PRODUCTION_PUBLIC_KEY.expect("the production key is set");
+        assert_eq!(production.len(), 32, "an Ed25519 public key is 32 bytes");
+        assert_eq!(keys_for(true), vec![production.to_vec()]);
+        let debug = keys_for(false);
+        assert_eq!(debug.len(), 2);
+        assert_eq!(debug[0], production.to_vec(), "the production key comes first");
+
+        // What the stub signs is refused by a release build.
+        let stub_signed = signed();
+        assert!(verify(&stub_signed, &keys_for(false)).is_ok());
+        assert_eq!(
+            verify(&stub_signed, &keys_for(true)),
+            Err(VerifyError::BadSignature),
+            "a shipped counter accepted a development-signed licence"
+        );
     }
 
     /// The payload is signed as the exact bytes, so a future field added to `Snapshot` cannot

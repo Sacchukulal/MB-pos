@@ -191,6 +191,15 @@ impl<'a> OutboxRepo<'a> {
         outbox_id(table, row_id)
     }
 
+    /// Everything is already in the cloud — a shop just brought down from it.
+    pub fn clear_backlog(&self, at: Timestamp) -> Result<usize, DbError> {
+        let n = self.tx.execute(
+            "UPDATE sync_outbox SET synced_at = ?1, attempts = 0, last_error = NULL WHERE synced_at IS NULL",
+            [encode::timestamp_to_sql(at)],
+        )?;
+        Ok(n)
+    }
+
     pub fn requeue_everything(&self) -> Result<usize, DbError> {
         let n = self.tx.execute(
             "UPDATE sync_outbox SET synced_at = NULL, attempts = 0, last_error = NULL",

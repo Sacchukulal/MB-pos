@@ -50,6 +50,14 @@ pub struct App {
     terminal_id: String,
     /// The window, once there is one, so a shop opened later is watched too.
     window: Mutex<Option<tauri::AppHandle>>,
+    /// The cloud, under the counter's own login. The stub that is not there, in a test.
+    link: std::sync::RwLock<Arc<dyn crate::cloud::Link>>,
+    /// Where the sender has got to (`cloud.json`, beside the licence).
+    sync: Mutex<crate::sync::SyncFile>,
+    /// Wake the sender: the outbox gained rows, or the licence changed.
+    sender_wakeup: Arc<crate::cloud::Wakeup>,
+    /// Wake the daily licence check now.
+    refresher_wakeup: Arc<crate::cloud::Wakeup>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -71,12 +79,17 @@ impl App {
             true,
         );
         let now = crate::flows::now();
-        // A test must not read the licence of whoever is running it.
+        // A test must not read the licence of whoever is running it — nor reach the cloud.
         #[cfg(test)]
-        let licensing = crate::licensing::for_tests();
+        let (licensing, link): (mb_license::Licensing, Arc<dyn crate::cloud::Link>) =
+            (crate::licensing::for_tests(), Arc::new(crate::cloud::NoLink));
         #[cfg(not(test))]
-        let licensing = crate::licensing::start();
+        let (licensing, link): (mb_license::Licensing, Arc<dyn crate::cloud::Link>) = {
+            let (licensing, http) = crate::licensing::start();
+            (licensing, http)
+        };
         let entitlement = licensing.entitlement(now, crate::flows::today(now));
+        let sync = crate::sync::SyncFile::load(licensing.dir());
         Ok(App {
             shop: Mutex::new(None),
             config: Mutex::new(config),
@@ -96,7 +109,80 @@ impl App {
             }),
             terminal_id: crate::terminals::me(&AppConfig::directory()).terminal_id,
             window: Mutex::new(None),
+            link: std::sync::RwLock::new(link),
+            sync: Mutex::new(sync),
+            sender_wakeup: crate::cloud::Wakeup::new(),
+            refresher_wakeup: crate::cloud::Wakeup::new(),
         })
+    }
+
+    /// The cloud, under the login.
+    #[must_use]
+    pub fn link(&self) -> Arc<dyn crate::cloud::Link> {
+        match self.link.read() {
+            Ok(guard) => Arc::clone(&guard),
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        }
+    }
+
+    /// Put a stand-in cloud in place.
+    #[cfg(test)]
+    pub fn use_link(&self, link: Arc<dyn crate::cloud::Link>) {
+        match self.link.write() {
+            Ok(mut guard) => *guard = link,
+            Err(poisoned) => *poisoned.into_inner() = link,
+        }
+    }
+
+    /// Where the sender has got to.
+    #[must_use]
+    pub fn sync_status(&self) -> crate::sync::SyncFile {
+        lock(&self.sync).clone()
+    }
+
+    /// Change it, and write it beside the licence.
+    pub fn update_sync(&self, f: impl FnOnce(&mut crate::sync::SyncFile)) {
+        let dir = self.with_licence(|l| l.dir().to_path_buf());
+        let mut held = lock(&self.sync);
+        f(&mut held);
+        held.save(&dir);
+    }
+
+    #[must_use]
+    pub fn sender_wakeup(&self) -> Arc<crate::cloud::Wakeup> {
+        Arc::clone(&self.sender_wakeup)
+    }
+
+    #[must_use]
+    pub fn refresher_wakeup(&self) -> Arc<crate::cloud::Wakeup> {
+        Arc::clone(&self.refresher_wakeup)
+    }
+
+    /// The counter's login to the cloud, if it has one.
+    #[must_use]
+    pub fn device_login(&self) -> Option<mb_license::cloud::DeviceLogin> {
+        self.with_licence(|l| l.device().cloned())
+    }
+
+    /// A fresh pair of tokens — or none, when the old pair is spent.
+    pub fn set_device_login(&self, login: Option<mb_license::cloud::DeviceLogin>) {
+        let saved = {
+            let mut held = lock(&self.licensing);
+            held.set_device(login)
+        };
+        if let Err(e) = saved {
+            log_warn!("the cloud login could not be saved beside the licence: {e}");
+        }
+    }
+
+    /// Tell the window something, if there is one.
+    pub fn push(&self, message: Pushed) {
+        use tauri::Emitter as _;
+        if let Some(handle) = lock(&self.window).clone()
+            && let Err(e) = handle.emit(crate::push::CHANNEL, message)
+        {
+            log_warn!("the window could not be told: {e}");
+        }
     }
 
     /// The window is up: from now on the shop's data tells it what changed.
@@ -155,10 +241,12 @@ impl App {
         *lock(&self.updates) = state;
     }
 
-    /// Where releases come from.
+    /// Where releases come from: what the last licence check carried.
     #[must_use]
-    pub fn releases(&self) -> &dyn crate::updates::Releases {
-        &crate::updates::NoReleaseServerYet
+    pub fn releases(&self) -> Box<dyn crate::updates::Releases> {
+        Box::new(crate::cloud::CloudReleases {
+            release: self.with_licence(|l| l.extras().and_then(|e| e.release.clone())),
+        })
     }
 
     /// What this shop is entitled to, right now.
@@ -337,6 +425,17 @@ impl App {
         if let Some(handle) = lock(&self.window).clone() {
             crate::push::watch_the_shop(&handle);
         }
+        // The cloud copy: woken by every commit that queued a row, and once now for whatever
+        // was already waiting.
+        if let Some(db) = self.shop_db() {
+            let wakeup = self.sender_wakeup();
+            db.watch(Arc::new(move |tables| {
+                if tables.contains("sync_outbox") {
+                    wakeup.wake();
+                }
+            }));
+        }
+        self.sender_wakeup().wake();
         log_info!("the shop at {} is open", path.display());
     }
 
@@ -801,6 +900,10 @@ pub enum Pushed {
     Floor,
     /// A kitchen ticket or an order changed: re-read the kitchen.
     Kitchen,
+    /// Notices from Magic Bill came down: the bell's number.
+    Notices { unseen: u32 },
+    /// The licence was checked, or changed: the banner and its tone.
+    Licence { says: String, tone: String },
     /// This till is holding bills the main till has not taken yet.
     Tills {
         /// How many bills are queued here.

@@ -277,7 +277,7 @@ pub fn licence_banner(
         ),
         mb_license::Standing::NeverActivated => {
             "This computer has no licence yet. You can bill and print — enter \
-             your licence key, or start a free trial."
+             your licence key, or start a free trial at magicbill.in."
                 .to_owned()
         }
         mb_license::Standing::NeedsChecking => {
@@ -352,13 +352,48 @@ pub fn from_licence(error: &mb_license::LicenceError) -> UiError {
             )
         }
         mb_license::LicenceError::Cloud(mb_license::CloudError::NotRecognised) => {
-            "That licence key and code did not match. Check both — and ask for \
-             a new code if it has been more than a few minutes."
+            "That licence key was not recognised. Check it against the one on your \
+             receipt, or sign in at magicbill.in to see it."
                 .to_owned()
         }
         other => sentence(&other.to_string()),
     };
     UiError::new(error.code(), message)
+}
+
+/// A call under the counter's login — the cloud copy, the pull, a download.
+#[must_use]
+pub fn from_link(error: &crate::cloud::LinkError) -> UiError {
+    let (code, message) = match error {
+        crate::cloud::LinkError::Unreachable => (
+            "cloud.unreachable",
+            "We could not reach our server. Check the internet connection — billing is not \
+             affected, and the copy catches up on its own."
+                .to_owned(),
+        ),
+        crate::cloud::LinkError::Unauthorised => (
+            "cloud.login",
+            "The counter's login to the cloud has expired. It is renewed on its own; try again \
+             in a minute."
+                .to_owned(),
+        ),
+        // The server's own sentence, shown as-is.
+        crate::cloud::LinkError::Dead(said) | crate::cloud::LinkError::Refused(said) => {
+            ("cloud.refused", sentence(said))
+        }
+        crate::cloud::LinkError::Server(_) => (
+            "cloud.server",
+            "Our server had a problem. Nothing has changed here — try again in a few minutes."
+                .to_owned(),
+        ),
+        crate::cloud::LinkError::Unreadable => (
+            "cloud.unreadable",
+            "Our server sent something this version could not read. Update Magic Bill if an \
+             update is waiting."
+                .to_owned(),
+        ),
+    };
+    UiError::new(code, message).with_detail(error.to_string())
 }
 
 /// An error's `Display` turned into a sentence: a capital at the front and a full stop at the

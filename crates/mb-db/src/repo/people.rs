@@ -25,7 +25,7 @@ impl StaffStatus {
         }
     }
 
-    fn from_sql(s: &str) -> Result<Self, DbError> {
+    pub fn from_sql(s: &str) -> Result<Self, DbError> {
         match s {
             "active" => Ok(StaffStatus::Active),
             "suspended" => Ok(StaffStatus::Suspended),
@@ -36,6 +36,36 @@ impl StaffStatus {
             }),
         }
     }
+}
+
+/// A staff row as it comes down from the cloud.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudStaff {
+    pub id: String,
+    pub role_id: Option<String>,
+    pub name: String,
+    pub code: Option<String>,
+    pub phone: Option<String>,
+    pub joined_on: Option<mb_core::BusinessDay>,
+    pub status: StaffStatus,
+    pub designation: Option<String>,
+    pub department: Option<String>,
+    pub is_rider: bool,
+    pub employment_type: String,
+    pub left_on: Option<mb_core::BusinessDay>,
+    pub can_login_on_phone: bool,
+    pub updated_at: Timestamp,
+}
+
+/// A role as it comes down from the cloud.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudRole {
+    pub id: String,
+    pub name: String,
+    pub is_builtin: bool,
+    pub max_discount_bp: Option<i64>,
+    pub max_discount_paise: Option<i64>,
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +198,109 @@ impl<'a> PeopleRepo<'a> {
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "staff", staff.id.as_str(), Op::Upsert, at)
+    }
+
+    /// A staff row the owner's phone wrote. Applied when it is newer than what is here; never
+    /// queued back up, because the cloud already has it. Answers whether it was applied.
+    pub fn apply_staff_from_cloud(&self, outlet: &str, row: &CloudStaff) -> Result<bool, DbError> {
+        // A role that has not arrived yet (the cloud does the same): keep the person, the role
+        // lands on the next pull.
+        let role_id = match &row.role_id {
+            Some(role) => {
+                let known: bool = self.tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM roles WHERE id = ?1)",
+                    [role],
+                    |r| r.get(0),
+                )?;
+                known.then(|| role.clone())
+            }
+            None => None,
+        };
+        let n = self.tx.execute(
+            "INSERT INTO staff (id, outlet_id, role_id, name, code, phone, joined_on, status, designation,
+                                department, is_rider, employment_type, left_on, can_login_on_phone,
+                                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+             ON CONFLICT (id) DO UPDATE SET role_id            = excluded.role_id,
+                                            name               = excluded.name,
+                                            code               = excluded.code,
+                                            phone              = excluded.phone,
+                                            joined_on          = excluded.joined_on,
+                                            status             = excluded.status,
+                                            designation        = excluded.designation,
+                                            department         = excluded.department,
+                                            is_rider           = excluded.is_rider,
+                                            employment_type    = excluded.employment_type,
+                                            left_on            = excluded.left_on,
+                                            can_login_on_phone = excluded.can_login_on_phone,
+                                            updated_at         = excluded.updated_at
+             WHERE staff.updated_at < excluded.updated_at",
+            rusqlite::params![
+                row.id,
+                outlet,
+                role_id,
+                row.name,
+                row.code,
+                row.phone,
+                row.joined_on.map(encode::business_day_to_sql),
+                row.status.as_sql(),
+                row.designation,
+                row.department,
+                encode::bool_to_sql(row.is_rider),
+                row.employment_type,
+                row.left_on.map(encode::business_day_to_sql),
+                encode::bool_to_sql(row.can_login_on_phone),
+                encode::timestamp_to_sql(row.updated_at),
+            ],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// A PIN the owner set on the phone. The hash arrives as the phone made it.
+    pub fn apply_pin_from_cloud(&self, staff_id: &str, pin_hash: &str) -> Result<bool, DbError> {
+        if !pin_hash.starts_with("$argon2id$") {
+            return Err(DbError::BadValue {
+                column: "staff.pin_hash",
+                value: "not an argon2id hash".to_owned(),
+            });
+        }
+        let n = self.tx.execute(
+            "UPDATE staff SET pin_hash = ?2 WHERE id = ?1 AND (pin_hash IS NULL OR pin_hash <> ?2)",
+            rusqlite::params![staff_id, pin_hash],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// A role the owner's phone wrote, with the exact permissions it grants. Codes this
+    /// program does not know are dropped, not refused.
+    pub fn apply_role_from_cloud(&self, outlet: &str, role: &CloudRole) -> Result<(), DbError> {
+        self.tx.execute(
+            "INSERT INTO roles (id, outlet_id, name, is_builtin, max_discount_bp, max_discount_paise)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (id) DO UPDATE SET name               = excluded.name,
+                                            max_discount_bp    = excluded.max_discount_bp,
+                                            max_discount_paise = excluded.max_discount_paise",
+            rusqlite::params![
+                role.id,
+                outlet,
+                role.name,
+                encode::bool_to_sql(role.is_builtin),
+                role.max_discount_bp,
+                role.max_discount_paise,
+            ],
+        )?;
+        self.tx
+            .execute("DELETE FROM role_permissions WHERE role_id = ?1", [&role.id])?;
+        for code in &role.permissions {
+            if Permission::from_code(code).is_err() {
+                continue;
+            }
+            self.tx.execute(
+                "INSERT INTO role_permissions (role_id, permission_code) VALUES (?1, ?2)",
+                rusqlite::params![role.id, code],
+            )?;
+        }
+        Ok(())
     }
 
     pub fn list_staff(&self, outlet: &str) -> Result<Vec<StaffMember>, DbError> {

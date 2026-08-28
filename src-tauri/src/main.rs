@@ -10,6 +10,8 @@ mod acceptance_tests;
 mod billing;
 /// Suppliers, the paper, the supplier ledger and purchase orders — and one rupee, one row.
 mod buying;
+/// The cloud, over HTTP — the one file that opens a socket to Magic Bill.
+mod cloud;
 #[cfg(test)]
 mod buying_tests;
 mod config;
@@ -124,6 +126,8 @@ mod share;
 mod signin_tests;
 mod startup;
 mod state;
+/// The cloud copy: the outbox goes up, the people list comes down.
+mod sync;
 #[cfg(test)]
 mod terminal_tests;
 /// The tills â who this machine is, who the master is, and the series it issues under.
@@ -246,6 +250,10 @@ fn main() {
             lan::start(app.handle());
             // The bills a secondary is holding.
             forwarding::start_sender(app.handle());
+            // The cloud: the daily licence check, and the copy that goes up. Both on their own
+            // threads, both after the window is up, neither able to hold a bill.
+            licensing::start_refresher(app.handle());
+            sync::start_sender(app.handle());
             // A till that was switched off while somebody moved the main till finds out here,
             // on its own, because the machine that failed is exactly the one that could not be
             // told at the time.

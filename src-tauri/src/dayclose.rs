@@ -437,6 +437,12 @@ pub fn close_on(
                         .collect::<Vec<_>>(),
                 )?;
 
+                // The day's totals go up to the cloud again, now with the day marked closed.
+                let day_key = day.days_since_epoch().to_string();
+                for table in mb_db::repo::wire::TOTALS_TABLES {
+                    repos.outbox().enqueue(OUTLET, table, &day_key, mb_db::repo::Op::Upsert, at)?;
+                }
+
                 // Tomorrow's float, written today.
                 if let Some(amount) = carried.filter(|m| m.is_positive()) {
                     repos.money().save_cash_movement(

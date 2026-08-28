@@ -337,7 +337,7 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     let applied = migrate::apply_all(&mut conn).expect("0004 runs");
     assert_eq!(
         applied.ran,
-        vec![4, 5, 6],
+        vec![4, 5, 6, 7],
         "the rework and what came after it should have been left to do"
     );
 

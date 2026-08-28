@@ -116,4 +116,7 @@ async function main() {
   }
 }
 
-await main();
+// Only when run as a script — `cloud-smoke.mjs` imports `evaluate` from here.
+if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
+  await main();
+}

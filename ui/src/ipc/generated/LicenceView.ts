@@ -53,4 +53,20 @@ clockNote: string,
 /**
  * Whether this person may press anything on this screen.
  */
-mayManage: boolean, isActivated: boolean, };
+mayManage: boolean, isActivated: boolean, 
+/**
+ * What staff type on a phone to reach this shop. Empty until the cloud says.
+ */
+restaurantCode: string, 
+/**
+ * The cloud copy, in one sentence.
+ */
+cloudCopy: string, 
+/**
+ * `ok`, `warn` or `danger`, for the sentence above.
+ */
+cloudTone: string, 
+/**
+ * Where a trial starts. One sentence, no dialog.
+ */
+trialSentence: string, };

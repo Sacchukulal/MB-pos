@@ -7,7 +7,7 @@ use mb_core::{BusinessDay, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::{ClockSays, Watch};
-use crate::cloud::{Ask, Cloud};
+use crate::cloud::{Answer, Ask, Cloud, CloudError, DeviceLogin, Extras};
 use crate::deadline;
 use crate::emergency;
 use crate::entitlement::{Entitlement, decide};
@@ -43,6 +43,10 @@ pub struct LicenceFile {
     pub last_transfer_on: Option<BusinessDay>,
     pub emergency_tries: u32,
     pub tries_locked_until: Option<Timestamp>,
+    /// The counter's own login to the cloud. Beside the licence, never in the shop database.
+    pub device: Option<DeviceLogin>,
+    /// What the last check carried besides the snapshot.
+    pub extras: Option<Extras>,
 }
 
 impl LicenceFile {
@@ -140,6 +144,12 @@ impl Licensing {
         &self.file
     }
 
+    /// The folder the licence lives in, so what belongs beside it can find it.
+    #[must_use]
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     fn ask(&self, key: &str) -> Ask {
         Ask {
             key: key.to_owned(),
@@ -152,6 +162,30 @@ impl Licensing {
     #[must_use]
     pub fn key(&self) -> Option<String> {
         self.stored().map(|s| s.licence.key)
+    }
+
+    /// The verified snapshot, if there is one.
+    #[must_use]
+    pub fn snapshot(&self) -> Option<snapshot::Snapshot> {
+        self.stored()
+    }
+
+    /// The counter's cloud login, if it has one.
+    #[must_use]
+    pub fn device(&self) -> Option<&DeviceLogin> {
+        self.file.device.as_ref()
+    }
+
+    /// A fresh pair of tokens, after the old access token ran out.
+    pub fn set_device(&mut self, device: Option<DeviceLogin>) -> Result<(), LicenceError> {
+        self.file.device = device;
+        self.file.save(&self.dir)
+    }
+
+    /// What the last check carried besides the snapshot.
+    #[must_use]
+    pub fn extras(&self) -> Option<&Extras> {
+        self.file.extras.as_ref()
     }
 
     fn stored(&self) -> Option<snapshot::Snapshot> {
@@ -240,7 +274,8 @@ impl Licensing {
     // Everything below here talks to the cloud, and every one of them goes through
     // `deadline::within`.
 
-    /// The routine check, plus the retry of any queued release.
+    /// The routine check, plus the retry of any queued release. Asks for a fresh login when
+    /// the counter has none.
     pub fn refresh(
         &mut self,
         now: Timestamp,
@@ -252,36 +287,22 @@ impl Licensing {
             return Ok(());
         };
         let ask = self.ask(&key);
+        let want_login = self.file.device.is_none();
         let cloud = Arc::clone(&self.cloud);
-        let answer = deadline::within(limit, move || cloud.refresh(&ask))??;
+        let answer = deadline::within(limit, move || cloud.refresh(&ask, want_login))??;
         self.accept(answer, now)
     }
 
+    /// First activation. The key is the whole proof.
     pub fn activate(
         &mut self,
         key: &str,
-        proof: &str,
         now: Timestamp,
         limit: std::time::Duration,
     ) -> Result<(), LicenceError> {
         let ask = self.ask(key);
-        let proof = proof.to_owned();
         let cloud = Arc::clone(&self.cloud);
-        let answer = deadline::within(limit, move || cloud.activate(&ask, &proof))??;
-        self.accept(answer, now)
-    }
-
-    /// Requirement 4.
-    pub fn start_trial(
-        &mut self,
-        contact: &str,
-        now: Timestamp,
-        limit: std::time::Duration,
-    ) -> Result<(), LicenceError> {
-        let ask = self.ask("");
-        let contact = contact.to_owned();
-        let cloud = Arc::clone(&self.cloud);
-        let answer = deadline::within(limit, move || cloud.start_trial(&ask, &contact))??;
+        let answer = deadline::within(limit, move || cloud.activate(&ask))??;
         self.accept(answer, now)
     }
 
@@ -300,6 +321,8 @@ impl Licensing {
 
         self.file.snapshot = None;
         self.file.emergency_until = None;
+        self.file.device = None;
+        self.file.extras = None;
         self.file.pending_release = if released {
             None
         } else {
@@ -317,7 +340,6 @@ impl Licensing {
     pub fn transfer(
         &mut self,
         key: &str,
-        proof: &str,
         now: Timestamp,
         today: BusinessDay,
         limit: std::time::Duration,
@@ -332,9 +354,15 @@ impl Licensing {
             }
         }
         let ask = self.ask(key);
-        let proof = proof.to_owned();
         let cloud = Arc::clone(&self.cloud);
-        let answer = deadline::within(limit, move || cloud.transfer(&ask, &proof))??;
+        let answer = match deadline::within(limit, move || cloud.transfer(&ask))? {
+            Ok(answer) => answer,
+            // The server's own cooldown, in the same words as the counter's.
+            Err(CloudError::TooSoon { days_left }) => {
+                return Err(LicenceError::TooSoon { days_left });
+            }
+            Err(other) => return Err(other.into()),
+        };
         self.accept(answer, now)?;
         self.file.last_transfer_on = Some(today);
         self.file.save(&self.dir)
@@ -378,10 +406,21 @@ impl Licensing {
     }
 
     /// Store what the cloud said, and move the mark.
-    fn accept(&mut self, signed: SignedSnapshot, now: Timestamp) -> Result<(), LicenceError> {
+    fn accept(&mut self, answer: Answer, now: Timestamp) -> Result<(), LicenceError> {
+        let Answer {
+            snapshot: signed,
+            device,
+            extras,
+        } = answer;
         // Verified before it is stored.
         snapshot::verify(&signed, &snapshot::trusted_keys())?;
         self.file.snapshot = Some(signed);
+        if device.is_some() {
+            self.file.device = device;
+        }
+        if extras.is_some() {
+            self.file.extras = extras;
+        }
         self.file.watch.reached_the_cloud(now);
         self.file.save(&self.dir)
     }
@@ -469,7 +508,7 @@ mod tests {
     fn last_checked_is_the_last_time_the_cloud_answered() {
         let (dir, stub, mut licensing) = setup("last-checked");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         assert_eq!(
             licensing
@@ -495,7 +534,7 @@ mod tests {
     fn activating_stores_a_verified_snapshot_and_entitles_the_shop() {
         let (dir, _stub, mut licensing) = setup("activate");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         let entitlement = licensing.entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS));
         assert_eq!(entitlement.standing, Standing::Fine);
@@ -521,11 +560,11 @@ mod tests {
     }
 
     #[test]
-    fn a_key_without_the_owners_code_does_not_activate() {
-        let (dir, _stub, mut licensing) = setup("no-proof");
+    fn a_wrong_key_does_not_activate() {
+        let (dir, _stub, mut licensing) = setup("wrong-key");
         assert!(
             licensing
-                .activate("MB-STUB-0001", "000000", now_on(TODAY_DAYS), quick())
+                .activate("MB-WRONG-0000", now_on(TODAY_DAYS), quick())
                 .is_err()
         );
         assert_eq!(
@@ -537,12 +576,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The login rides with the activation and stays through refreshes.
+    #[test]
+    fn activation_stores_the_counters_login_and_a_refresh_keeps_it() {
+        let (dir, stub, mut licensing) = setup("login");
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activates");
+        let first = licensing.device().cloned().expect("a login");
+        assert_eq!(stub.logins(), 1);
+
+        licensing
+            .refresh(now_on(TODAY_DAYS + 1), quick())
+            .expect("refreshes");
+        assert_eq!(licensing.device(), Some(&first), "a refresh does not churn the login");
+        assert_eq!(stub.logins(), 1);
+
+        // Lost the tokens: the next refresh asks for a new pair.
+        licensing.set_device(None).expect("saves");
+        licensing
+            .refresh(now_on(TODAY_DAYS + 2), quick())
+            .expect("refreshes");
+        assert!(licensing.device().is_some());
+        assert_eq!(stub.logins(), 2);
+
+        // And it survives a restart.
+        let again = Licensing::new(
+            dir.clone(),
+            a_machine(),
+            Arc::clone(&stub) as Arc<dyn Cloud>,
+            "0.1.0",
+        );
+        assert!(again.device().is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Deactivate releases the binding.
     #[test]
     fn deactivate_releases_the_binding_server_side() {
         let (dir, stub, mut licensing) = setup("deactivate");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
 
         let released = licensing
@@ -558,7 +632,7 @@ mod tests {
     fn an_offline_deactivate_queues_and_says_the_licence_is_still_held() {
         let (dir, stub, mut licensing) = setup("deactivate-offline");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
 
         stub.behave(Behaviour::Unreachable);
@@ -582,18 +656,11 @@ mod tests {
     fn a_transfer_respects_the_cooldown() {
         let (dir, _stub, mut licensing) = setup("cooldown");
         licensing
-            .transfer(
-                "MB-STUB-0001",
-                "123456",
-                now_on(TODAY_DAYS),
-                day(TODAY_DAYS),
-                quick(),
-            )
+            .transfer("MB-STUB-0001", now_on(TODAY_DAYS), day(TODAY_DAYS), quick())
             .expect("first transfer");
 
         match licensing.transfer(
             "MB-STUB-0001",
-            "123456",
             now_on(TODAY_DAYS + 5),
             day(TODAY_DAYS + 5),
             quick(),
@@ -607,7 +674,6 @@ mod tests {
             licensing
                 .transfer(
                     "MB-STUB-0001",
-                    "123456",
                     now_on(TODAY_DAYS + 31),
                     day(TODAY_DAYS + 31),
                     quick(),
@@ -621,7 +687,7 @@ mod tests {
     fn a_cloud_that_never_answers_does_not_hang_the_counter() {
         let (dir, stub, mut licensing) = setup("never-answers");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         stub.behave(Behaviour::NeverAnswers);
 
@@ -646,7 +712,7 @@ mod tests {
     fn a_tampered_licence_file_falls_back_rather_than_failing() {
         let (dir, _stub, mut licensing) = setup("tampered");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         drop(licensing);
 
@@ -693,7 +759,7 @@ mod tests {
     fn a_licence_from_another_machine_does_not_entitle_this_one() {
         let (dir, _stub, mut licensing) = setup("other-machine");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         drop(licensing);
 
@@ -719,7 +785,7 @@ mod tests {
         let (dir, stub, mut licensing) = setup("offline-expiry");
         stub.set_max_offline_days(3);
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         stub.behave(Behaviour::Unreachable);
 
@@ -839,7 +905,7 @@ mod tests {
     fn suspending_a_licence_in_the_cloud_reaches_the_counter() {
         let (dir, stub, mut licensing) = setup("suspend");
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
         assert!(
             licensing
@@ -867,7 +933,7 @@ mod tests {
         stub.set_licence(licence);
         stub.set_global_grace(Some(30));
         licensing
-            .activate("MB-STUB-0001", "123456", now_on(TODAY_DAYS), quick())
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
             .expect("activates");
 
         assert_eq!(
@@ -890,7 +956,6 @@ mod tests {
                 "cloud.activate(",
                 "cloud.release(",
                 "cloud.transfer(",
-                "cloud.start_trial(",
             ] {
                 if code.contains(call) && !code.contains("deadline::within") {
                     unwrapped.push(format!("line {}: {}", number + 1, code.trim()));

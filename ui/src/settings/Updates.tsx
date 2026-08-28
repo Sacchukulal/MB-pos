@@ -1,4 +1,4 @@
-/** The version this counter runs, and the way back off it. */
+/** The version this counter runs, the one waiting, and the way back off it. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -9,9 +9,9 @@ import type { UpdateState } from '../ipc/generated/UpdateState';
 export function Updates() {
   const [view, setView] = useState<UpdateState | null>(null);
   const [busy, setBusy] = useState(false);
-  /** The sentence `go_back_a_version` answered with, once it has. */
-  const [goingBack, setGoingBack] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  /** The sentence Rust answered with once an installer was handed to Windows. */
+  const [closing, setClosing] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<'install' | 'back' | null>(null);
   const toast = useToast();
 
   const complain = useCallback(
@@ -29,11 +29,34 @@ export function Updates() {
 
   if (!view) return <Spinner label="Looking at this version" />;
 
+  /** Download, check, keep the way back, hand over to the installer. */
+  const install = () => {
+    setBusy(true);
+    call('install_update')
+      .then((says) => {
+        setConfirming(null);
+        setClosing(says);
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  const goBack = () => {
+    setBusy(true);
+    call('go_back_a_version')
+      .then((says) => {
+        setConfirming(null);
+        setClosing(says);
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
   return (
     <Card className="mb-updates">
       <SectionHeader
         title="This version"
-        note="What this counter is running, and how to get off it if a new one goes wrong."
+        note="What this counter is running, what is waiting, and how to get off a new one if it goes wrong."
       />
 
       <dl className="mb-updates__facts">
@@ -48,12 +71,19 @@ export function Updates() {
             ? 'today'
             : `${plural(view.daysOnThisVersion, 'day')} ago`}
         </dd>
+        {view.previous ? (
+          <>
+            <dt>Before this</dt>
+            <dd className="mb-mono">{view.previous}</dd>
+          </>
+        ) : null}
       </dl>
 
       {view.available ? (
         <Notice tone="info">
           <strong>Version {view.available} is available.</strong>
           {view.notes ? <p>{view.notes}</p> : null}
+          {view.downloaded ? <p>It is downloaded and checked, waiting to be installed.</p> : null}
         </Notice>
       ) : (
         <p className="mb-muted">
@@ -86,13 +116,38 @@ export function Updates() {
           Check for an update
         </Button>
 
+        {view.available ? (
+          <Button variant="primary" disabled={busy} onClick={() => setConfirming('install')}>
+            Install {view.available}
+          </Button>
+        ) : null}
 
-        <Button variant="danger" disabled={busy} onClick={() => setConfirming(true)}>
+        <Button variant="danger" disabled={busy} onClick={() => setConfirming('back')}>
           Go back a version
         </Button>
       </div>
 
-      {confirming ? (
+      {confirming === 'install' ? (
+        <Notice tone="info" icon="download">
+          <strong>Install version {view.available} now?</strong>
+          <p>
+            Magic Bill downloads it, checks it, and then closes so the installer can
+            put it in place. Do this after the last bill of the day — your
+            shop&rsquo;s data is not touched, and the version you have now is kept so
+            you can go back.
+          </p>
+          <div className="mb-row mb-row--end">
+            <Button variant="quiet" onClick={() => setConfirming(null)}>
+              Not now
+            </Button>
+            <Button variant="primary" disabled={busy} onClick={install}>
+              Install and close
+            </Button>
+          </div>
+        </Notice>
+      ) : null}
+
+      {confirming === 'back' ? (
         <Notice tone="warn" icon="warning">
           <strong>Go back to the version you had before?</strong>
           <p>
@@ -101,38 +156,20 @@ export function Updates() {
             tonight.
           </p>
           <div className="mb-row mb-row--end">
-            <Button variant="quiet" onClick={() => setConfirming(false)}>
+            <Button variant="quiet" onClick={() => setConfirming(null)}>
               Stay on this one
             </Button>
-            <Button
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                call('go_back_a_version')
-                  .then((says) => {
-                    setConfirming(false);
-                    setGoingBack(says);
-                  })
-                  .catch(complain)
-                  .finally(() => setBusy(false));
-              }}
-            >
+            <Button variant="danger" disabled={busy} onClick={goBack}>
               Go back
             </Button>
           </div>
         </Notice>
       ) : null}
 
-      {/* The sentence Rust wrote, with the installer's path in it. */}
-      {goingBack ? (
+      {/* The sentence Rust wrote. The counter is about to close. */}
+      {closing ? (
         <Notice tone="info">
-          <p>{goingBack}</p>
-          <div className="mb-row mb-row--end">
-            <Button variant="quiet" onClick={() => setGoingBack(null)}>
-              Close
-            </Button>
-          </div>
+          <p>{closing}</p>
         </Notice>
       ) : null}
     </Card>

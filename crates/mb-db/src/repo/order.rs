@@ -121,6 +121,14 @@ impl<'a> OrderRepo<'a> {
 
         // The outbox entry is written HERE, in the same transaction as the row it describes.
         OutboxRepo::new(self.tx).enqueue(outlet, "orders", id, Op::Upsert, core.created_at)?;
+        // A bill changes its day's totals; the sender computes them when it sends. One outbox
+        // row per day per table, however busy the hour.
+        if matches!(order, AnyOrder::Settled(_) | AnyOrder::Voided(_)) {
+            let day = encode::business_day_to_sql(core.business_day).to_string();
+            for table in crate::repo::wire::TOTALS_TABLES {
+                OutboxRepo::new(self.tx).enqueue(outlet, table, &day, Op::Upsert, core.created_at)?;
+            }
+        }
         Ok(())
     }
 
@@ -392,15 +400,22 @@ impl<'a> OrderRepo<'a> {
 
     /// Shred a computed bill into its four tables.
     fn save_bill(&self, order_id: &str, bill: &Bill, core: &OrderCore) -> Result<(), DbError> {
+        // The bill-level discount as given, beside what it came to.
+        let given = bill.bill_discount.as_ref();
+        let (discount_kind, discount_value) = given
+            .map(|d| encode::discount_to_sql(d.discount))
+            .map_or((None, None), |(kind, value)| (Some(kind), Some(value)));
         self.tx.execute(
             "INSERT INTO bills (order_id, subtotal, total_line_discount, total_bill_discount,
                                 total_discount, total_charges, was_bill_discount_capped,
                                 total_taxable, total_cgst, total_sgst, total_igst,
                                 non_gst_value, exempt_value, round_off, grand_total,
                                 place_of_supply, rounding_mode, computed_at,
-                                total_vat, untaxed_value, registration, state_tax)
+                                total_vat, untaxed_value, registration, state_tax,
+                                bill_discount_kind, bill_discount_value, bill_discount_reason,
+                                bill_discount_by)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22)",
+                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             rusqlite::params![
                 order_id,
                 encode::money_to_sql(bill.subtotal),
@@ -424,6 +439,10 @@ impl<'a> OrderRepo<'a> {
                 encode::money_to_sql(bill.untaxed_value),
                 encode::registration_to_sql(bill.registration),
                 encode::state_tax_to_sql(bill.state_tax),
+                discount_kind,
+                discount_value,
+                given.and_then(|d| d.reason.clone()),
+                given.and_then(|d| d.authorised_by.as_ref().map(|s| s.as_str().to_owned())),
             ],
         )?;
 
@@ -803,7 +822,8 @@ impl<'a> OrderRepo<'a> {
                     total_charges, was_bill_discount_capped, total_taxable, total_cgst,
                     total_sgst, total_igst, non_gst_value, exempt_value, round_off, grand_total,
                     place_of_supply, rounding_mode,
-                    total_vat, untaxed_value, registration, state_tax
+                    total_vat, untaxed_value, registration, state_tax,
+                    bill_discount_kind, bill_discount_value, bill_discount_reason, bill_discount_by
                FROM bills WHERE order_id = ?1",
         )?;
         let mut rows = stmt.query([order_id])?;
@@ -819,8 +839,19 @@ impl<'a> OrderRepo<'a> {
             |r| r.get::<_, String>(0),
         )?;
 
+        // The bill-level discount as given, when one was.
+        let bill_discount = match (row.get::<_, Option<String>>(20)?, row.get::<_, Option<i64>>(21)?) {
+            (Some(kind), Some(value)) => Some(mb_core::DiscountEntry {
+                discount: encode::discount_from_sql(&kind, value, "bills.bill_discount_kind")?,
+                reason: row.get(22)?,
+                authorised_by: row.get::<_, Option<String>>(23)?.map(mb_core::StaffId::new),
+            }),
+            _ => None,
+        };
+
         let bill = Bill {
             lines: self.read_bill_lines(order_id)?,
+            bill_discount,
             charges: self.read_bill_charges(order_id)?,
             summary: self.read_summary(
                 order_id,

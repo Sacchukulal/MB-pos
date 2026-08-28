@@ -129,6 +129,11 @@ pub struct BillLine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bill {
     pub lines: Vec<BillLine>,
+    /// The bill-level discount as it was GIVEN — the value, why, and by whom — so a report can
+    /// show what was asked for as well as what was taken, and so the bill can be computed again
+    /// from its inputs on another computer.
+    #[serde(default)]
+    pub bill_discount: Option<DiscountEntry>,
     /// Computed and taxed like lines, and in the same `summary`.
     pub charges: Vec<BillCharge>,
     pub summary: TaxSummary,
@@ -358,6 +363,7 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
 
     Ok(Bill {
         lines: computed,
+        bill_discount: input.bill_discount.clone(),
         charges: bill_charges,
         non_gst_value: summary.non_gst_value,
         exempt_value: summary.exempt_value,

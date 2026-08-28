@@ -1,3 +1,5 @@
+//! What leaves the machine, and the stub that stands in for the cloud in every test.
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -12,12 +14,15 @@ pub enum CloudError {
     /// The server answered, and said no.
     #[error("{0}")]
     Refused(String),
-    /// The key or the proof was wrong.
-    #[error("that licence key and code did not match")]
+    /// The key was wrong.
+    #[error("that licence key was not recognised")]
     NotRecognised,
     /// The licence is already on another machine and the caller did not ask to move it.
     #[error("this licence is already in use on another computer")]
     BoundElsewhere { machine: String },
+    /// The server's own cooldown on moving a licence.
+    #[error("this licence was moved recently")]
+    TooSoon { days_left: u16 },
     /// The server answered with something this build could not read.
     #[error("our server sent something this version could not read")]
     Unreadable,
@@ -33,21 +38,59 @@ pub struct Ask {
     pub counter_version: String,
 }
 
+/// The counter's own login to the cloud, issued when a licence is activated or moved here.
+/// It is what the sync thread speaks with; the licence key never travels again after activation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceLogin {
+    pub device_id: String,
+    pub restaurant_id: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    /// When the access token stops working, milliseconds since the epoch.
+    pub expires_at: mb_core::Timestamp,
+}
+
+/// A release manifest, signed by the same key as the licence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedManifest {
+    /// The exact JSON text that was signed.
+    pub manifest: String,
+    /// Base64, standard alphabet.
+    pub signature: String,
+}
+
+/// What rides back with a refresh besides the snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Extras {
+    /// Notices posted for this shop in the last month.
+    pub unread_notices: u32,
+    /// The newest published release, when there is one.
+    pub release: Option<SignedManifest>,
+}
+
+/// What the cloud answers with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Answer {
+    pub snapshot: SignedSnapshot,
+    /// Present on activate and transfer, and on a refresh that asked for one.
+    pub device: Option<DeviceLogin>,
+    pub extras: Option<Extras>,
+}
+
 /// Everything that has to leave this machine.
 pub trait Cloud: Send + Sync + 'static {
-    fn activate(&self, ask: &Ask, proof: &str) -> Result<SignedSnapshot, CloudError>;
+    /// First activation. The key is the proof: it is shown only to the owner who bought it.
+    fn activate(&self, ask: &Ask) -> Result<Answer, CloudError>;
 
-    /// The routine check. Returns the current truth, signed.
-    fn refresh(&self, ask: &Ask) -> Result<SignedSnapshot, CloudError>;
+    /// The routine check. Returns the current truth, signed — and a fresh login when asked.
+    fn refresh(&self, ask: &Ask, want_login: bool) -> Result<Answer, CloudError>;
 
-    /// Release the binding, server-side.
+    /// Release the binding, server-side. Idempotent.
     fn release(&self, ask: &Ask) -> Result<(), CloudError>;
 
     /// Move a licence to this machine from wherever it was.
-    fn transfer(&self, ask: &Ask, proof: &str) -> Result<SignedSnapshot, CloudError>;
-
-    /// Requirement 4: a real self-service trial with an end date.
-    fn start_trial(&self, ask: &Ask, contact: &str) -> Result<SignedSnapshot, CloudError>;
+    fn transfer(&self, ask: &Ask) -> Result<Answer, CloudError>;
 }
 
 // The stub.
@@ -76,7 +119,9 @@ struct Inner {
     behaviour: Behaviour,
     /// So a test can assert that `release` really was called.
     pub released: Vec<String>,
-    pub expected_proof: String,
+    /// How many logins it has handed out.
+    logins: u32,
+    extras: Extras,
 }
 
 /// How the stub misbehaves.
@@ -104,9 +149,24 @@ impl Stub {
                 bound_to: Some(machine.clone()),
                 trial_ends_on: None,
                 registered_contact: "+91 98••••••10".to_owned(),
+                restaurant_id: Some("00000000-0000-0000-0000-00000000stub".to_owned()),
+                short_code: Some("STUB01".to_owned()),
             },
             now,
         )
+    }
+
+    /// A working cloud with a trial licence that ends in `days`.
+    #[must_use]
+    pub fn trial(machine: &MachineId, ends_in_days: i32, now: Timestamp) -> Stub {
+        let today = BusinessDay::from_days_since_epoch(
+            i32::try_from(now.millis().div_euclid(86_400_000)).unwrap_or(0),
+        );
+        let ends = BusinessDay::from_days_since_epoch(today.days_since_epoch() + ends_in_days);
+        let mut licence = Stub::active(machine, ends, now).licence();
+        licence.status = Status::Trial;
+        licence.trial_ends_on = Some(ends);
+        Stub::with(licence, now)
     }
 
     #[must_use]
@@ -120,7 +180,8 @@ impl Stub {
                 max_offline_days: 14,
                 behaviour: Behaviour::Normal,
                 released: Vec::new(),
-                expected_proof: "123456".to_owned(),
+                logins: 0,
+                extras: Extras::default(),
             }),
         }
     }
@@ -157,10 +218,21 @@ impl Stub {
         self.inner().max_offline_days = days;
     }
 
+    /// What the next refresh carries besides the snapshot.
+    pub fn set_extras(&self, extras: Extras) {
+        self.inner().extras = extras;
+    }
+
     /// Did anybody actually release the binding?
     #[must_use]
     pub fn released(&self) -> Vec<String> {
         self.inner().released.clone()
+    }
+
+    /// How many logins have been handed out.
+    #[must_use]
+    pub fn logins(&self) -> u32 {
+        self.inner().logins
     }
 
     #[must_use]
@@ -198,20 +270,49 @@ impl Stub {
         let key = snapshot::development_keypair().map_err(|_| CloudError::Unreadable)?;
         snapshot::sign(&snapshot, &key).map_err(|_| CloudError::Unreadable)
     }
+
+    fn login(&self) -> DeviceLogin {
+        let mut inner = self.inner();
+        inner.logins = inner.logins.saturating_add(1);
+        let n = inner.logins;
+        DeviceLogin {
+            device_id: format!("stub-device-{n}"),
+            restaurant_id: inner
+                .licence
+                .restaurant_id
+                .clone()
+                .unwrap_or_default(),
+            access_token: format!("stub-access-{n}"),
+            refresh_token: format!("stub-refresh-{n}"),
+            expires_at: Timestamp::from_millis(inner.issued_at.millis().saturating_add(3_600_000)),
+        }
+    }
+
+    fn answer(&self, with_login: bool) -> Result<Answer, CloudError> {
+        let snapshot = self.sign_current()?;
+        Ok(Answer {
+            snapshot,
+            device: with_login.then(|| self.login()),
+            extras: Some(self.inner().extras.clone()),
+        })
+    }
 }
 
 impl Cloud for Stub {
-    fn activate(&self, ask: &Ask, proof: &str) -> Result<SignedSnapshot, CloudError> {
+    fn activate(&self, ask: &Ask) -> Result<Answer, CloudError> {
         if let Some(problem) = self.misbehave() {
             return Err(problem);
         }
         {
             let mut inner = self.inner();
-            if proof != inner.expected_proof {
-                return Err(CloudError::NotRecognised);
-            }
             if inner.licence.key != ask.key {
                 return Err(CloudError::NotRecognised);
+            }
+            if inner.licence.status == Status::Revoked {
+                return Err(CloudError::Refused(
+                    "This licence has been revoked. Ring support with your licence key to hand."
+                        .to_owned(),
+                ));
             }
             match &inner.licence.bound_to {
                 Some(bound) if bound != &ask.machine => {
@@ -223,10 +324,10 @@ impl Cloud for Stub {
             }
             inner.licence.bound_to = Some(ask.machine.clone());
         }
-        self.sign_current()
+        self.answer(true)
     }
 
-    fn refresh(&self, ask: &Ask) -> Result<SignedSnapshot, CloudError> {
+    fn refresh(&self, ask: &Ask, want_login: bool) -> Result<Answer, CloudError> {
         if let Some(problem) = self.misbehave() {
             return Err(problem);
         }
@@ -240,7 +341,7 @@ impl Cloud for Stub {
                 });
             }
         }
-        self.sign_current()
+        self.answer(want_login)
     }
 
     fn release(&self, ask: &Ask) -> Result<(), CloudError> {
@@ -253,13 +354,13 @@ impl Cloud for Stub {
         Ok(())
     }
 
-    fn transfer(&self, ask: &Ask, proof: &str) -> Result<SignedSnapshot, CloudError> {
+    fn transfer(&self, ask: &Ask) -> Result<Answer, CloudError> {
         if let Some(problem) = self.misbehave() {
             return Err(problem);
         }
         {
             let mut inner = self.inner();
-            if proof != inner.expected_proof {
+            if inner.licence.key != ask.key {
                 return Err(CloudError::NotRecognised);
             }
             if let Some(old) = inner.licence.bound_to.clone() {
@@ -267,23 +368,7 @@ impl Cloud for Stub {
             }
             inner.licence.bound_to = Some(ask.machine.clone());
         }
-        self.sign_current()
-    }
-
-    fn start_trial(&self, ask: &Ask, _contact: &str) -> Result<SignedSnapshot, CloudError> {
-        if let Some(problem) = self.misbehave() {
-            return Err(problem);
-        }
-        {
-            let mut inner = self.inner();
-            let ends = BusinessDay::from_days_since_epoch(
-                i32::try_from(inner.issued_at.millis().div_euclid(86_400_000)).unwrap_or(0) + 14,
-            );
-            inner.licence.status = Status::Trial;
-            inner.licence.trial_ends_on = Some(ends);
-            inner.licence.bound_to = Some(ask.machine.clone());
-        }
-        self.sign_current()
+        self.answer(true)
     }
 }
 
@@ -310,26 +395,34 @@ mod tests {
     }
 
     #[test]
-    fn activation_needs_something_the_buyer_has() {
+    fn activation_needs_the_key_and_nothing_else() {
         let (stub, machine) = a_stub();
         stub.inner().licence.bound_to = None;
-        assert_eq!(
-            stub.activate(&an_ask(&machine), "000000"),
-            Err(CloudError::NotRecognised)
-        );
-        assert!(stub.activate(&an_ask(&machine), "123456").is_ok());
+        let mut wrong = an_ask(&machine);
+        wrong.key = "MB-WRONG-0000".to_owned();
+        assert_eq!(stub.activate(&wrong), Err(CloudError::NotRecognised));
+        let answer = stub.activate(&an_ask(&machine)).expect("activates");
+        assert!(answer.device.is_some(), "an activation hands the counter its login");
     }
 
     #[test]
     fn a_machine_that_is_no_longer_bound_is_refused_on_refresh() {
         let (stub, machine) = a_stub();
-        assert!(stub.refresh(&an_ask(&machine)).is_ok());
+        assert!(stub.refresh(&an_ask(&machine), false).is_ok());
 
         let other = MachineId::for_tests("machine-b-0002");
-        match stub.refresh(&an_ask(&other)) {
+        match stub.refresh(&an_ask(&other), false) {
             Err(CloudError::BoundElsewhere { machine: m }) => assert_eq!(m, machine.short()),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_refresh_hands_out_a_login_only_when_asked() {
+        let (stub, machine) = a_stub();
+        assert!(stub.refresh(&an_ask(&machine), false).expect("refreshes").device.is_none());
+        assert!(stub.refresh(&an_ask(&machine), true).expect("refreshes").device.is_some());
+        assert_eq!(stub.logins(), 1);
     }
 
     #[test]
@@ -339,7 +432,7 @@ mod tests {
         assert_eq!(stub.released(), vec![machine.value().to_owned()]);
 
         let new_pc = MachineId::for_tests("machine-b-0002");
-        assert!(stub.activate(&an_ask(&new_pc), "123456").is_ok());
+        assert!(stub.activate(&an_ask(&new_pc)).is_ok());
         assert_eq!(stub.licence().bound_to, Some(new_pc));
     }
 
@@ -348,8 +441,7 @@ mod tests {
     fn a_transfer_releases_the_machine_it_came_from() {
         let (stub, machine) = a_stub();
         let new_pc = MachineId::for_tests("machine-b-0002");
-        stub.transfer(&an_ask(&new_pc), "123456")
-            .expect("transfers");
+        stub.transfer(&an_ask(&new_pc)).expect("transfers");
         assert!(stub.released().contains(&machine.value().to_owned()));
         assert_eq!(stub.licence().bound_to, Some(new_pc));
     }
@@ -359,7 +451,7 @@ mod tests {
         let (stub, machine) = a_stub();
         stub.behave(Behaviour::Unreachable);
         assert_eq!(
-            stub.refresh(&an_ask(&machine)),
+            stub.refresh(&an_ask(&machine), false),
             Err(CloudError::Unreachable)
         );
     }
@@ -367,8 +459,18 @@ mod tests {
     #[test]
     fn what_it_signs_verifies() {
         let (stub, machine) = a_stub();
-        let signed = stub.refresh(&an_ask(&machine)).expect("refreshes");
-        let back = snapshot::verify(&signed, &snapshot::trusted_keys()).expect("verifies");
+        let signed = stub.refresh(&an_ask(&machine), false).expect("refreshes");
+        let back = snapshot::verify(&signed.snapshot, &snapshot::trusted_keys()).expect("verifies");
         assert_eq!(back.licence.status, Status::Active);
+    }
+
+    #[test]
+    fn a_revoked_licence_is_refused_with_a_sentence() {
+        let (stub, machine) = a_stub();
+        stub.set_status(Status::Revoked);
+        match stub.activate(&an_ask(&machine)) {
+            Err(CloudError::Refused(said)) => assert!(said.contains("revoked")),
+            other => panic!("{other:?}"),
+        }
     }
 }

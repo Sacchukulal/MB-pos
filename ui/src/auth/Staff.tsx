@@ -91,6 +91,11 @@ function People() {
 
   useEffect(() => {
     void load();
+    // The one staff list: what the owner changed on the phone comes down when this screen
+    // opens, and the list is read again once it has. Quiet when there is no cloud.
+    call('pull_from_cloud')
+      .then(() => load())
+      .catch(() => undefined);
   }, [load]);
 
   const columns: Column<PersonView>[] = [

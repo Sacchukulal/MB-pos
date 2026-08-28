@@ -9,8 +9,10 @@ use crate::health::HealthRow;
 
 // A version is a number.
 
-/// A version, as three numbers.
+/// A version, as three numbers. On the wire it is the string "1.2.0" — what the release shelf
+/// publishes and what a person reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct Version {
     pub major: u32,
     pub minor: u32,
@@ -52,6 +54,21 @@ impl std::str::FromStr for Version {
             minor,
             patch,
         })
+    }
+}
+
+impl TryFrom<String> for Version {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Version, String> {
+        text.parse()
+            .map_err(|()| format!("\"{text}\" is not a version"))
+    }
+}
+
+impl From<Version> for String {
+    fn from(version: Version) -> String {
+        version.to_string()
     }
 }
 
@@ -256,12 +273,43 @@ impl Previous {
     }
 }
 
-/// A cloud that is not there yet, and a stub that ships.
-pub struct NoReleaseServerYet;
+/// Where the installer of the running version is kept, so going back has something to run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Current {
+    pub version: Version,
+    pub installer: PathBuf,
+}
 
-impl Releases for NoReleaseServerYet {
-    fn latest(&self) -> Result<(String, String), String> {
-        Err("there is no release server yet".to_owned())
+impl Current {
+    #[must_use]
+    pub fn path(dir: &Path) -> PathBuf {
+        dir.join("updates").join("current.json")
+    }
+
+    #[must_use]
+    pub fn load(dir: &Path) -> Option<Current> {
+        let text = std::fs::read_to_string(Current::path(dir)).ok()?;
+        let current: Current = serde_json::from_str(&text).ok()?;
+        current.installer.exists().then_some(current)
+    }
+
+    fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let path = Current::path(dir);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, serde_json::to_string_pretty(self).unwrap_or_default())
+    }
+}
+
+impl Previous {
+    fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let folder = Previous::folder(dir);
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(
+            folder.join("previous.json"),
+            serde_json::to_string_pretty(self).unwrap_or_default(),
+        )
     }
 }
 
@@ -290,6 +338,10 @@ pub struct UpdateState {
     /// The version on offer, if any.
     pub available: Option<String>,
     pub notes: String,
+    /// True once the installer for `available` is on this disk and its fingerprint checked.
+    pub downloaded: bool,
+    /// The version that can be gone back to, if any.
+    pub previous: Option<String>,
     /// How many days this counter has been on its current version.
     pub days_on_this_version: u32,
     pub running: String,
@@ -320,8 +372,9 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
             "update",
             "Version",
             format!(
-                "Version {available} is ready to install — you are on {}. \
-                 Open Settings and install it after closing.",
+                "Version {available} is {} — you are on {}. \
+                 Open Settings and press Install after closing.",
+                if state.downloaded { "downloaded and checked" } else { "ready to install" },
                 state.running
             ),
         );
@@ -349,37 +402,158 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
 
 pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
     crate::guard::require(app, mb_auth::Permission::ReportsView)?;
-    let mut state = app.updates();
+    Ok(check_now(app))
+}
 
-    // Everything below needs a release server.
-    match app.releases().latest() {
-        Ok((json, signature)) => match check(&json, &signature) {
-            Ok(manifest) => {
-                let machine = app.with_licence(|l| l.machine().value().to_owned());
-                let shop = app.entitlement().shop_name.unwrap_or_default();
-                let newer = manifest.version > Version::running();
-                let mine = manifest.rollout.includes(&machine, &shop);
-                if newer && mine {
-                    state.available = Some(manifest.version.to_string());
-                    state.notes = manifest.notes;
-                } else {
-                    state.available = None;
-                }
-            }
-            Err(refused) => {
-                crate::log_warn!("an update manifest was refused: {}", refused.says());
+/// The manifest the last licence check carried, judged against this build and this shop's
+/// place in the rollout. Called after every licence check, so Health is right without anybody
+/// opening Settings.
+pub fn check_now(app: &crate::state::App) -> UpdateState {
+    let mut state = app.updates();
+    let dir = crate::config::AppConfig::directory();
+    state.previous = Previous::load(&dir).map(|p| p.version.to_string());
+
+    match manifest_for(app) {
+        Some(manifest) => {
+            let newer = manifest.version > Version::running();
+            if newer {
+                state.available = Some(manifest.version.to_string());
+                state.notes = manifest.notes.clone();
+                state.downloaded = incoming(&dir, &manifest).exists();
+            } else {
                 state.available = None;
+                state.notes = String::new();
+                state.downloaded = false;
             }
-        },
-        Err(why) => crate::log_info!("no update check: {why}"),
+        }
+        None => {
+            state.available = None;
+            state.downloaded = false;
+        }
     }
 
     app.set_updates(state.clone());
-    Ok(state)
+    state
 }
 
-/// Go back to the version before this one.
-pub fn go_back_on(app: &crate::state::App) -> crate::words::UiResult<String> {
+/// The published manifest, when it verifies and this shop is in its rollout.
+fn manifest_for(app: &crate::state::App) -> Option<Manifest> {
+    let (json, signature) = match app.releases().latest() {
+        Ok(found) => found,
+        Err(why) => {
+            crate::log_info!("no update check: {why}");
+            return None;
+        }
+    };
+    let manifest = match check(&json, &signature) {
+        Ok(manifest) => manifest,
+        Err(refused) => {
+            crate::log_warn!("an update manifest was refused: {}", refused.says());
+            return None;
+        }
+    };
+    let machine = app.with_licence(|l| l.machine().value().to_owned());
+    let shop = app
+        .with_licence(|l| l.snapshot().and_then(|s| s.licence.restaurant_id))
+        .unwrap_or_default();
+    manifest.rollout.includes(&machine, &shop).then_some(manifest)
+}
+
+/// Where a downloaded installer waits.
+fn incoming(dir: &Path, manifest: &Manifest) -> PathBuf {
+    dir.join("updates")
+        .join("incoming")
+        .join(format!("MagicBill-{}.exe", manifest.version))
+}
+
+/// Download, check, keep the way back, hand the installer to Windows. The counter closes so
+/// the installer can replace it; the shop's data is not touched.
+pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<String> {
+    use crate::words::UiError;
+    crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
+    let dir = crate::config::AppConfig::directory();
+    let Some(manifest) = manifest_for(app) else {
+        return Err(UiError::new(
+            "update.none",
+            "There is no update to install. Check again after the next licence check.",
+        )
+        .quietly());
+    };
+    if manifest.version <= Version::running() {
+        return Err(UiError::new(
+            "update.none",
+            format!("You are already on version {} — there is nothing newer.", Version::running()),
+        )
+        .quietly());
+    }
+    let to = incoming(&dir, &manifest);
+    let sha = app
+        .link()
+        .download(&manifest.url, &to)
+        .map_err(|e| crate::words::from_link(&e))?;
+    if !sha.eq_ignore_ascii_case(&manifest.sha256) {
+        let _ = std::fs::remove_file(&to);
+        return Err(UiError::new(
+            "update.fingerprint",
+            "The downloaded update did not match its published fingerprint, so it has not been \
+             installed. Nothing on this computer has changed — try again later.",
+        ));
+    }
+
+    // Keep the way back: the installer that put THIS version here becomes the previous one.
+    if let Some(current) = Current::load(&dir) {
+        let kept = Previous::folder(&dir).join(format!("MagicBill-{}.exe", current.version));
+        if let Some(parent) = kept.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if std::fs::rename(&current.installer, &kept).is_ok() || std::fs::copy(&current.installer, &kept).is_ok() {
+            let _ = Previous {
+                version: current.version,
+                installer: kept,
+            }
+            .save(&dir);
+        }
+    }
+    let _ = Current {
+        version: manifest.version,
+        installer: to.clone(),
+    }
+    .save(&dir);
+
+    crate::log_warn!(
+        "installing version {} from {} — the counter is closing for the installer",
+        manifest.version,
+        to.display()
+    );
+    let mut state = app.updates();
+    state.downloaded = true;
+    app.set_updates(state);
+    run_installer(&to, handle)?;
+    Ok(format!(
+        "Version {} is installing. Magic Bill will close and open again on the new version — your \
+         shop's data is not touched.",
+        manifest.version
+    ))
+}
+
+/// Hand an installer to Windows and step out of its way.
+fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<()> {
+    std::process::Command::new(installer)
+        .spawn()
+        .map_err(|e| crate::words::from_io("Starting the installer", &e))?;
+    if let Some(handle) = handle {
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            // Let the reply reach the screen first.
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            handle.exit(0);
+        });
+    }
+    Ok(())
+}
+
+/// Go back to the version before this one — and run its installer.
+pub fn go_back_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<String> {
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
     let dir = crate::config::AppConfig::directory();
     let Some(previous) = Previous::load(&dir) else {
@@ -393,7 +567,7 @@ pub fn go_back_on(app: &crate::state::App) -> crate::words::UiResult<String> {
         previous.version,
         previous.installer.display()
     );
-    // Running it is deliberately not done here.
+    run_installer(&previous.installer, handle)?;
     Ok(going_back_says(Some(&previous)))
 }
 
@@ -407,8 +581,17 @@ pub fn look_for_an_update(
 #[tauri::command]
 pub fn go_back_a_version(
     app: tauri::State<'_, crate::state::App>,
+    handle: tauri::AppHandle,
 ) -> crate::words::UiResult<String> {
-    go_back_on(&app)
+    go_back_on(&app, Some(&handle))
+}
+
+#[tauri::command]
+pub fn install_update(
+    app: tauri::State<'_, crate::state::App>,
+    handle: tauri::AppHandle,
+) -> crate::words::UiResult<String> {
+    install_on(&app, Some(&handle))
 }
 
 #[cfg(test)]
@@ -450,6 +633,20 @@ mod tests {
     fn nonsense_is_refused_rather_than_becoming_zero() {
         assert!("".parse::<Version>().is_err());
         assert!("latest".parse::<Version>().is_err());
+    }
+
+    /// The release shelf publishes "1.2.0", and that is what crosses.
+    #[test]
+    fn a_version_is_a_string_on_the_wire() {
+        assert_eq!(serde_json::to_string(&Version::new(1, 2, 0)).expect("json"), "\"1.2.0\"");
+        let back: Version = serde_json::from_str("\"1.10.3\"").expect("parses");
+        assert_eq!(back, Version::new(1, 10, 3));
+        assert!(serde_json::from_str::<Version>("\"latest\"").is_err());
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"version":"0.2.0","notes":"n","url":"https://x/y.exe","sha256":"00","rollout":{"percent":100,"shops":[]}}"#,
+        )
+        .expect("the shelf's shape");
+        assert_eq!(manifest.version, Version::new(0, 2, 0));
     }
 
     /// G4's other half. A dev build is never told it is up to date.

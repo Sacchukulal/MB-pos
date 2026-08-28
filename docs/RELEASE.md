@@ -104,6 +104,21 @@ One picture, three places, all made from it:
 
 ---
 
+## 2b. The release shelf — how a counter finds it
+
+A counter never looks at GitHub. The release lives on the shelf in MB-backend (`releases`,
+written from the admin desk with `mb_admin_release`): version, notes, the installer's URL,
+its SHA-256, and the rollout (a percentage of machines plus named restaurant ids). The daily
+`licence/refresh` answers with the newest published release **as a manifest signed with the
+licence key** — `{"version":"1.5.0","notes":…,"url":…,"sha256":…,"rollout":{…}}` — so the
+counter checks it with the same public key it checks the licence with. That is the one trust
+root; the release signing key in §1 is that key.
+
+On the counter (`updates.rs`): Settings › This version shows what is waiting; **Install**
+downloads the installer, checks the SHA-256, keeps the installer of the running version under
+`updates\previous` so **Go back** has something to run, then hands the new installer to
+Windows and closes. Health's Version row says what is waiting until then.
+
 ## 3. Staging a release
 
 `rollout.percent` starts at **5**. The counter decides with a stable hash of its

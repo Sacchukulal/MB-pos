@@ -68,6 +68,9 @@ base64 = "0.22"
 # tree through rustls and `mb-license`; taking it here rather than adding a
 # second hashing crate keeps one implementation of one algorithm.
 ring = "0.17"
+# The cloud client. Already in the binary through mb-lan's LAN client; the two extra features
+# are the Windows certificate store (a shop's proxy may add its own root) and nothing else.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 
 # The diagnostics bundle. Writing a ZIP central directory by hand is about two
 # hundred lines whose only job is to be byte-exact, and a bundle a shopkeeper

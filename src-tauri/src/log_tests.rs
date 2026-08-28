@@ -44,8 +44,8 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
     app.use_licensing(licensing);
 
     // A refused activation, then a good one.
-    let _ = crate::licensing::activate_on(app, "MB-4KQ7-9WTX-2100".to_owned(), "000000".to_owned());
-    let _ = crate::licensing::activate_on(app, "MB-STUB-0001".to_owned(), "123456".to_owned());
+    let _ = crate::licensing::activate_on(app, "MB-4KQ7-9WTX-2100".to_owned());
+    let _ = crate::licensing::activate_on(app, "MB-STUB-0001".to_owned());
 
     // An emergency code, right and wrong.
     let _ = crate::licensing::use_emergency_code_on(app, "K7M2Q-9XR4T-BW8HN-3PZ6D".to_owned());

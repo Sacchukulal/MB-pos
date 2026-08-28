@@ -356,7 +356,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("account", Access::Needs(Permission::ReportsView)),
     ("refresh_licence", Access::Needs(Permission::ReportsView)),
     ("activate", Access::Needs(Permission::LicenceManage)),
-    ("start_trial", Access::Needs(Permission::LicenceManage)),
     ("deactivate", Access::Needs(Permission::LicenceManage)),
     ("transfer_here", Access::Needs(Permission::LicenceManage)),
     (
@@ -373,6 +372,13 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         "go_back_a_version",
         Access::Needs(Permission::SettingsStore),
     ),
+    ("install_update", Access::Needs(Permission::SettingsStore)),
+    // The cloud copy. The bell is for whoever is at the counter; the pull rides on it.
+    ("notices", Access::SignedIn),
+    ("notices_seen", Access::SignedIn),
+    ("pull_from_cloud", Access::SignedIn),
+    // A new computer, before it has a shop.
+    ("restore_from_cloud", Access::FirstRun),
     // Public, and it is a decision.
     ("setup_list", Access::Public),
     // The first run.
@@ -507,6 +513,17 @@ pub const SETTINGS_PERMISSIONS: &[Permission] = &[
 ];
 
 /// Refuse unless this person has at least one of these — see `Access::NeedsAny`.
+/// Somebody, anybody, at the counter — the bell, the clock, a leave request.
+pub fn require_signed_in(app: &App) -> UiResult<Actor> {
+    let Some(session) = app.sessions().current() else {
+        return Err(UiError::new(
+            "auth.locked",
+            "The screen is locked. Sign in to carry on.",
+        ));
+    };
+    Ok(session.actor)
+}
+
 pub fn require_any(app: &App, needs: &[Permission]) -> UiResult<Actor> {
     let Some(session) = app.sessions().current() else {
         return Err(UiError::new(

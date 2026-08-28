@@ -59,6 +59,13 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   /** Where the shop's data will go. */
   const [folder, setFolder] = useState('');
 
+  // Bring my shop from the cloud: the licence key names the shop.
+  const [fromCloud, setFromCloud] = useState(false);
+  const [cloudKey, setCloudKey] = useState('');
+  const [moveHere, setMoveHere] = useState(false);
+  /** What came down, in Rust's words. */
+  const [cameDown, setCameDown] = useState('');
+
   // The room: how many tables, numbered from one.
   const [tableCount, setTableCount] = useState('');
   // The printer: one of the ones Windows knows about.
@@ -117,6 +124,25 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .then((fresh) => {
         setView(fresh);
         setStep('details');
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  /** A new computer: the shop comes down from the cloud before it is opened. */
+  const restoreFromCloud = () => {
+    setBusy(true);
+    setProblem('');
+    call('restore_from_cloud', { key: cloudKey, folder, moveHere })
+      .then((fresh) => {
+        setView(fresh.firstRun);
+        setCameDown(fresh.says);
+        setFromCloud(false);
+        // The shop that came down already has a name and a PIN; what it may still lack is
+        // whatever the old computer never had.
+        if (fresh.firstRun.hasDetails && fresh.firstRun.hasPin) setStep('menu');
+        else if (fresh.firstRun.hasDetails) setStep('pin');
+        else setStep('details');
       })
       .catch(complain)
       .finally(() => setBusy(false));
@@ -358,7 +384,47 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               >
                 Start a new shop
               </Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setFromCloud((was) => !was)}>
+                <Icon name="download" size="sm" />
+                Bring my shop from the cloud
+              </Button>
             </div>
+
+            {fromCloud ? (
+              <div className="mb-firstrun__fields">
+                {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
+                <p className="mb-firstrun__lede">
+                  Your licence key names the shop. The last 30 days of bills, your
+                  menu, staff, customers and settings come down before the counter
+                  opens; older days come as totals. Your pen-drive backup holds
+                  everything.
+                </p>
+                <Input
+                  label="Licence key"
+                  value={cloudKey}
+                  autoComplete="off"
+                  autoFocus
+                  onChange={(e) => setCloudKey(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') restoreFromCloud();
+                  }}
+                />
+                <Checkbox
+                  label="The old computer is gone — move the licence here"
+                  checked={moveHere}
+                  onChange={(e) => setMoveHere(e.target.checked)}
+                />
+                <div className="mb-firstrun__actions">
+                  <Button
+                    variant="primary"
+                    disabled={busy || cloudKey.trim() === ''}
+                    onClick={restoreFromCloud}
+                  >
+                    Bring it down
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             {view.found.length > 0 ? (
               <div className="mb-firstrun__found">
@@ -399,6 +465,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             </div>
           </section>
         ) : null}
+
+        {cameDown !== '' ? <Notice tone="info">{cameDown}</Notice> : null}
 
         {step === 'details' ? (
           <section className="mb-firstrun__body">

@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 pub enum Feature {
     /// The reports screen and its exports.
     Reports,
-    /// Bills copied to the cloud (Phase 8).
-    CloudBackup,
     /// Waiters taking orders on their phones.
     MobileOrdering,
     /// More than one till on the same shop.
@@ -22,7 +20,6 @@ impl Feature {
     /// Every feature, for the tests and for the account screen's limits panel.
     pub const ALL: &'static [Feature] = &[
         Feature::Reports,
-        Feature::CloudBackup,
         Feature::MobileOrdering,
         Feature::MultiTerminal,
         Feature::Inventory,
@@ -38,7 +35,6 @@ impl Feature {
     pub const fn code(self) -> &'static str {
         match self {
             Feature::Reports => "reports",
-            Feature::CloudBackup => "cloud-backup",
             Feature::MobileOrdering => "mobile-ordering",
             Feature::MultiTerminal => "multi-terminal",
             Feature::Inventory => "inventory",
@@ -50,7 +46,6 @@ impl Feature {
     pub const fn in_words(self) -> &'static str {
         match self {
             Feature::Reports => "reports",
-            Feature::CloudBackup => "cloud backup",
             Feature::MobileOrdering => "phone ordering",
             Feature::MultiTerminal => "extra tills",
             Feature::Inventory => "stock and recipes",
@@ -100,13 +95,7 @@ mod tests {
         let codes: Vec<&str> = Feature::ALL.iter().map(|f| f.code()).collect();
         assert_eq!(
             codes,
-            vec![
-                "reports",
-                "cloud-backup",
-                "mobile-ordering",
-                "multi-terminal",
-                "inventory"
-            ],
+            vec!["reports", "mobile-ordering", "multi-terminal", "inventory"],
             "the list of gateable features changed"
         );
         for banned in [

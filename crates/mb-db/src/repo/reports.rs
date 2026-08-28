@@ -278,6 +278,14 @@ impl<'a> ReportsRepo<'a> {
                 qty: wants_qty.then(|| Qty::from_thousandths(qty.max(0))),
             });
         }
+        // A shop brought down from the cloud has only its last 30 days as bills; the older days
+        // come from the totals the cloud kept. A day with bills of its own is never doubled.
+        if by == SalesBy::Day {
+            let have: std::collections::BTreeSet<String> = out.iter().map(|b| b.key.clone()).collect();
+            let older = crate::repo::wire::WireRepo::new(self.tx).cloud_days(outlet, period)?;
+            out.extend(older.into_iter().filter(|b| !have.contains(&b.key)));
+            out.sort_by_key(|b| b.key.parse::<i64>().unwrap_or(0));
+        }
         Ok(out)
     }
 

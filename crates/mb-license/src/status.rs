@@ -61,6 +61,12 @@ pub struct Licence {
     pub trial_ends_on: Option<BusinessDay>,
     /// Already masked by the cloud — `+91 98••••••10`.
     pub registered_contact: String,
+    /// The cloud's id for this shop. What a release rollout names.
+    #[serde(default)]
+    pub restaurant_id: Option<String>,
+    /// What a staff member types to log in on a phone. Shown on the Account screen.
+    #[serde(default)]
+    pub short_code: Option<String>,
 }
 
 /// What the licence means today.

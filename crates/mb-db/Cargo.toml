@@ -37,5 +37,10 @@ rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
 # It was already a dev-dependency here; this promotes it.
 serde_json = "1"
 
+# The cloud round. A bill crosses the wire as the same `CartLine` / `Settlement` serde shapes
+# mb-core already has, and a blob crosses as base64 because JSON has no bytes.
+serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
+
 [dev-dependencies]
 serde_json = "1"

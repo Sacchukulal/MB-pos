@@ -82,6 +82,97 @@ pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
     }
 }
 
+/// A notice from Magic Bill, as the bell shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeView {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    /// "8 Aug, 4:32 pm".
+    pub when: String,
+    pub is_seen: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct NoticesView {
+    pub unseen: u32,
+    pub notices: Vec<NoticeView>,
+}
+
+/// What the bell holds, newest first.
+pub fn notices_on(app: &App) -> UiResult<NoticesView> {
+    crate::guard::require_signed_in(app)?;
+    let at = crate::flows::now();
+    app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let notices = repos
+                    .notices()
+                    .list(crate::state::OUTLET, at)?
+                    .into_iter()
+                    .map(|n| NoticeView {
+                        id: n.id,
+                        title: n.title,
+                        body: n.body,
+                        when: crate::words::when(n.starts_at),
+                        is_seen: n.is_seen,
+                    })
+                    .collect();
+                Ok(NoticesView {
+                    unseen: repos.notices().unseen(crate::state::OUTLET, at)?,
+                    notices,
+                })
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+}
+
+/// The bell was opened: everything current is seen.
+pub fn notices_seen_on(app: &App) -> UiResult<NoticesView> {
+    crate::guard::require_signed_in(app)?;
+    let at = crate::flows::now();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                mb_db::Repos::new(tx)
+                    .notices()
+                    .mark_all_seen(crate::state::OUTLET, at)
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })?;
+    let view = notices_on(app)?;
+    app.push(crate::state::Pushed::Notices { unseen: view.unseen });
+    Ok(view)
+}
+
+#[tauri::command]
+pub fn notices(app: tauri::State<'_, App>) -> UiResult<NoticesView> {
+    notices_on(&app)
+}
+
+#[tauri::command]
+pub fn notices_seen(app: tauri::State<'_, App>) -> UiResult<NoticesView> {
+    notices_seen_on(&app)
+}
+
+/// Ask the cloud for the people list and the notices now — the Staff screen and the bell.
+#[tauri::command]
+pub fn pull_from_cloud(app: tauri::State<'_, App>) -> UiResult<NoticesView> {
+    crate::guard::require_signed_in(&app)?;
+    match crate::sync::pull_once(&app) {
+        Ok(_) => {}
+        // A counter with no cloud yet, or none right now, still shows what it has.
+        Err(e) if e.tone == crate::words::Tone::Notice || e.code == "licence.cloud" => {}
+        Err(e) => return Err(e),
+    }
+    notices_on(&app)
+}
+
 /// "there is nothing to read".
 #[tauri::command]
 pub fn reveal_logs() -> UiResult<String> {
@@ -551,7 +642,6 @@ macro_rules! commands {
             // The licence.
             $crate::licensing::account,
             $crate::licensing::activate,
-            $crate::licensing::start_trial,
             $crate::licensing::deactivate,
             $crate::licensing::transfer_here,
             $crate::licensing::use_emergency_code,
@@ -563,6 +653,12 @@ macro_rules! commands {
             // The update, and the way back.
             $crate::updates::look_for_an_update,
             $crate::updates::go_back_a_version,
+            $crate::updates::install_update,
+            // The cloud copy, and what comes back down it.
+            $crate::firstrun::restore_from_cloud,
+            $crate::ipc::notices,
+            $crate::ipc::notices_seen,
+            $crate::ipc::pull_from_cloud,
             // Deliberately Public: on a first run the stand-in is who is standing there, and a
             // set-up list that refuses to draw until somebody has a PIN is a list nobody can
             // use to create the PIN.
