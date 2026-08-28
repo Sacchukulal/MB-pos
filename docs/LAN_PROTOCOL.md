@@ -114,6 +114,13 @@ GET /v1/pair/{request_id}
 The secret is returned **once**. Store it in the platform keystore; the counter
 keeps only an Argon2 hash of it and cannot tell you again.
 
+**Whose phone it is** is decided by the person pressing Allow, who picks a staff
+member — or "shared, nobody's" for a tablet at the pass. The device then acts as
+that person on every intent, with that person's permissions; a shared device may
+take an order and nothing else. `GET /v1/me` says which. (Until 2026-08-28 a phone
+was bound to whoever happened to be signed in at the till, so every waiter's
+phone acted as the cashier.)
+
 The short code may be typed instead of scanned, and is compared case- and
 dash-insensitively.
 
@@ -147,9 +154,37 @@ saw and is answered with one of:
 { "what": "too_far_behind", "newest": 812 }
 ```
 
+Seqs are seeded from the clock at start-up, so they stay monotonic across
+counter restarts: a phone holding yesterday's place is told `too_far_behind`
+rather than silently filtered to nothing.
+
 `too_far_behind` is **said explicitly** so the phone asks for a snapshot as a
 decision. Fifteen phones each refetching everything after a two-second blip is
-how a counter stutters mid-rush.
+how a counter stutters mid-rush. The snapshot is `GET /v1/floor` (below) and,
+if the catalogue version changed, `GET /v1/catalogue`.
+
+### What a push is
+
+```json
+{ "seq": 813, "kind": "floor", "body": { … } }
+```
+
+| `kind` | when | `body` |
+|---|---|---|
+| `floor` | any table or open order changed, by anybody — the cashier, a phone, the kitchen. Bursts are collapsed into one push. | `{ "tables": [ { "id", "state": "free" \| "taken", "order_id" } ], "orders": [ { "order_id", "table_id", "table_label", "order_type", "total", "token", "note", "lines": [ LineView ] } ] }` — every open order, as an outcome would describe it |
+| `catalogue` | the menu, a price, availability, a table or a section changed | `{ "version": "…" }` — compare with what you hold; fetch `/v1/catalogue` if different |
+
+A phone shows only the orders it has touched. **An order it holds that is missing from a
+`floor` body is one the counter has finished with** — settled, voided, cancelled — and the
+phone says so on that order rather than guessing which. Unknown kinds are ignored: a counter
+one version ahead is an ordinary Tuesday.
+
+The catalogue's `tables[].state` is always `free`: what a table is DOING is the floor's, not
+the catalogue's, so that a table being taken does not push 400 menu items to every phone.
+
+```
+GET /v1/floor                 the same body as a `floor` push, now
+```
 
 ### The counter's IP changes, or it restarts
 
@@ -198,6 +233,10 @@ person — and never becomes a business day.
 
 `qty` is a **decimal string**, never a float: `"0.5"`, `"2"`. A quantity
 multiplies a price and floating point has no place near money.
+
+`send_to_kitchen` makes the counter do everything its own send does: the
+kitchen-ticket event, the kitchen screen, and the SAME KOT paper through the
+print queue — an order from a phone prints exactly like one typed at the counter.
 
 ### Outcomes
 
@@ -261,6 +300,15 @@ POST /v1/batch    { "intents": [ …, …, … ] }
 Applied **in order**. Idempotency covers the whole batch, so re-sending a batch
 that was half-answered is safe and correct.
 
+**A whole order is ONE batch.** An intent with no `order_id` applies to the order
+an `open_order` **earlier in the same batch** opened — the phone cannot know an id
+the batch itself creates. So a waiter's whole order is `[open_order, add_item…,
+send_to_kitchen]`, one round trip; a replay re-runs the open with the same intent
+id, gets the original outcome and so the same order — the adds land once, on it.
+This is also why a phone must NOT open an order when a table is merely tapped:
+nothing reaches the counter until the person sends, so an abandoned screen leaves
+no 0.00 ghost on the floor.
+
 ```json
 { "outcomes": [ ["id1", {"outcome":"ok", …}],
                 ["id2", {"outcome":"held", …}] ],
@@ -296,6 +344,9 @@ GET /v1/catalogue?version=<what you hold>
 The version is a hash of **what a phone can see** — names, prices,
 availability — so a shop editing a cost price does not push 400 items to the
 floor.
+
+`items[].category` is the category's **name** ("Tiffin"), never an id — a waiter reads it on
+the sheet, and an id on a phone screen was a bug this line exists to prevent.
 
 **Sold-out items are sent, marked `is_available: false`**, not omitted. A menu
 with a hole in it is a menu where a waiter cannot tell "ran out" from "never

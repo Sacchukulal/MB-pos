@@ -851,3 +851,167 @@ fn a_table_and_a_parcel_cannot_meet() {
         "a table makes it dine-in"
     );
 }
+
+/// The floor as the phones are told it: a taken table names its order, an open order carries
+/// the same lines and total an outcome would, and a settled one is simply not there.
+#[test]
+fn the_floor_body_says_what_every_phone_needs() {
+    let scratch = Scratch::new("floor_body");
+    let app = a_shop(&scratch, "floor_body");
+
+    let empty = orders::floor_body(&app).expect("a floor");
+    assert_eq!(empty["tables"][0]["id"], "tbl_7");
+    assert_eq!(empty["tables"][0]["state"], "free");
+    assert!(empty["orders"].as_array().expect("orders").is_empty());
+
+    let order = open_one(&app, Some("tbl_7"));
+    go(
+        &app,
+        &intent(
+            "add_1",
+            Some(&order),
+            What::AddItem {
+                item_id: "itm_dosa".to_owned(),
+                qty: "2".to_owned(),
+                note: None,
+                modifiers: vec![],
+            },
+        ),
+    );
+
+    let busy = orders::floor_body(&app).expect("a floor");
+    assert_eq!(busy["tables"][0]["state"], "taken");
+    assert_eq!(busy["tables"][0]["order_id"], order);
+    let open = &busy["orders"][0];
+    assert_eq!(open["order_id"], order);
+    assert_eq!(open["table_id"], "tbl_7");
+    assert_eq!(open["table_label"], "7");
+    assert_eq!(open["order_type"], "dine_in");
+    assert_eq!(open["lines"][0]["name"], "Masala Dosa");
+    assert_eq!(open["lines"][0]["qty"], "2");
+    assert!(
+        open["total"].as_str().is_some_and(|t| t != "0.00"),
+        "the total is the counter's figure, not a placeholder"
+    );
+    assert!(open["token"].is_string(), "an open order has its token");
+}
+
+/// A whole order in ONE batch: open the table, add the dishes, send to the kitchen — the phone
+/// cannot know the order id the batch itself creates, so the counter carries it forward. This
+/// is what makes tapping "Send to kitchen" one round trip, and what stops the 0.00 ghost
+/// orders a tap-to-open design left on the floor.
+#[test]
+fn one_batch_opens_fills_and_fires_a_whole_order() {
+    let scratch = Scratch::new("batch_whole");
+    let app = a_shop(&scratch, "batch_whole");
+    let (staff, may) = waiter();
+
+    let batch = mb_lan::Batch {
+        intents: vec![
+            intent(
+                "b_open",
+                None,
+                What::OpenOrder {
+                    order_type: "dine_in".to_owned(),
+                    table_id: Some("tbl_7".to_owned()),
+                    covers: None,
+                },
+            ),
+            intent(
+                "b_add1",
+                None,
+                What::AddItem {
+                    item_id: "itm_dosa".to_owned(),
+                    qty: "2".to_owned(),
+                    note: None,
+                    modifiers: vec![],
+                },
+            ),
+            intent(
+                "b_add2",
+                None,
+                What::AddItem {
+                    item_id: "itm_coffee".to_owned(),
+                    qty: "1".to_owned(),
+                    note: None,
+                    modifiers: vec![],
+                },
+            ),
+            intent("b_fire", None, What::SendToKitchen),
+        ],
+    };
+    let result = orders::apply_batch(&app, "dev_test", &staff, &may, &batch).expect("applied");
+    for (id, outcome) in &result.outcomes {
+        assert!(matches!(outcome, Outcome::Ok { .. }), "{id} was not ok: {outcome:?}");
+    }
+    let Outcome::Ok { order_id, total, lines, .. } = &result.outcomes[3].1 else {
+        panic!("no final view");
+    };
+    assert_eq!(lines.len(), 2, "both dishes are on the order");
+    assert!(lines.iter().all(|l| l.sent_to_kitchen), "the kitchen has everything");
+    assert_ne!(total, "0.00", "the total is real, not a ghost");
+
+    // The replay of the WHOLE batch (a phone that lost the reply) makes nothing new.
+    let again = orders::apply_batch(&app, "dev_test", &staff, &may, &batch).expect("replayed");
+    let Outcome::Ok { order_id: same, .. } = &again.outcomes[0].1 else {
+        panic!("no replayed open");
+    };
+    assert_eq!(order_id, same, "the replayed batch reuses the same order");
+    let Outcome::Ok { lines: after, .. } = &again.outcomes[3].1 else {
+        panic!("no replayed view");
+    };
+    assert_eq!(after.len(), 2, "the replay added nothing twice");
+}
+
+#[test]
+fn a_phone_sending_to_the_kitchen_queues_the_same_ticket() {
+    let scratch = Scratch::new("phone_kot");
+    let app = a_shop(&scratch, "phone_kot");
+    let (staff, may) = waiter();
+
+
+    let jobs = |app: &App| -> i64 {
+        app.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| Repos::new(tx).print_jobs().count(OUTLET))
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("counted")
+    };
+    assert_eq!(jobs(&app), 0, "nothing queued before the order");
+
+    let batch = mb_lan::Batch {
+        intents: vec![
+            intent(
+                "p_open",
+                None,
+                What::OpenOrder {
+                    order_type: "dine_in".to_owned(),
+                    table_id: Some("tbl_7".to_owned()),
+                    covers: None,
+                },
+            ),
+            intent(
+                "p_add",
+                None,
+                What::AddItem {
+                    item_id: "itm_dosa".to_owned(),
+                    qty: "2".to_owned(),
+                    note: None,
+                    modifiers: vec![],
+                },
+            ),
+            intent("p_fire", None, What::SendToKitchen),
+        ],
+    };
+    let result = orders::apply_batch(&app, "dev_test", &staff, &may, &batch).expect("applied");
+    for (id, outcome) in &result.outcomes {
+        assert!(matches!(outcome, Outcome::Ok { .. }), "{id} was not ok: {outcome:?}");
+    }
+    let after = jobs(&app);
+    assert!(after >= 1, "the kitchen ticket is on the print queue, got {after}");
+
+    // The replay (a phone that lost the reply) prints nothing twice.
+    orders::apply_batch(&app, "dev_test", &staff, &may, &batch).expect("replayed");
+    assert_eq!(jobs(&app), after, "a replayed batch queues no second ticket");
+}

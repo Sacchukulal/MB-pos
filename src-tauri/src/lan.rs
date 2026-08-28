@@ -162,6 +162,7 @@ impl mb_lan::Counter for Bridge {
         _request: &mb_lan::PairRequest,
         name: &str,
         platform: &str,
+        staff_id: Option<&str>,
     ) -> Result<mb_lan::PairedDevice, mb_lan::Refusal> {
         let handle = self
             .app()
@@ -171,7 +172,11 @@ impl mb_lan::Counter for Bridge {
             mb_lan::Refusal::Refused("The credential could not be made.".to_owned())
         })?;
         let id = format!("dev_{}", mb_auth::random_token(12));
-        let who = handle.sessions().current().map(|s| s.actor.staff_id);
+        // Two different people: the one whose phone this IS (chosen by the approver; nobody for
+        // a shared tablet), and the one who pressed Allow. Binding the phone to whoever happened
+        // to be signed in at the till made every waiter's phone act as the cashier.
+        let owner = staff_id.map(StaffId::new);
+        let approver = handle.sessions().current().map(|s| s.actor.staff_id);
 
         handle
             .with_shop(|shop| {
@@ -185,14 +190,14 @@ impl mb_lan::Counter for Bridge {
                                 name: name.to_owned(),
                                 platform: platform.to_owned(),
                                 secret_hash: hash.as_str().to_owned(),
-                                staff_id: who.clone(),
+                                staff_id: owner.clone(),
                                 paired_at: at,
-                                paired_by: who.clone(),
+                                paired_by: approver.clone(),
                                 last_seen_at: None,
                                 last_ip: None,
                                 revoked_at: None,
                             },
-                            who.as_ref(),
+                            approver.as_ref(),
                         )?;
                         // The same transaction as the thing it records.
                         repos.audit().append(
@@ -200,7 +205,7 @@ impl mb_lan::Counter for Bridge {
                             &AuditEntry::new(
                                 at,
                                 today(at),
-                                who.clone(),
+                                approver.clone(),
                                 action::DEVICE_PAIRED,
                                 "device",
                             )
@@ -208,6 +213,7 @@ impl mb_lan::Counter for Bridge {
                             .with_after(serde_json::json!({
                                 "name": name,
                                 "platform": platform,
+                                "staff_id": owner.as_ref().map(|s| s.as_str()),
                             })),
                         )?;
                         Ok(())
@@ -298,6 +304,27 @@ impl mb_lan::Counter for Bridge {
         }
         Some(fresh)
     }
+
+    fn floor(&self) -> serde_json::Value {
+        self.app()
+            .and_then(|app| crate::orders::floor_body(&app).ok())
+            .unwrap_or_else(|| serde_json::json!({ "tables": [], "orders": [] }))
+    }
+}
+
+/// Tell every phone on the stream. Cheap when nobody is listening, and never on the thread
+/// that just committed — see `push::watch_the_shop`.
+pub fn push_to_phones(app: &App, kind: &str, body: serde_json::Value) {
+    if let Some(network) = app.network()
+        && network.shared.has_listeners()
+    {
+        network.shared.push(kind, body);
+    }
+}
+
+/// Whether any phone would hear a push right now.
+pub fn phones_listening(app: &App) -> bool {
+    app.network().is_some_and(|n| n.shared.has_listeners())
 }
 
 fn row_of(device: &LanDevice) -> mb_lan::DeviceRow {
@@ -373,6 +400,16 @@ pub struct NetworkView {
     pub qr: Vec<String>,
     pub code: String,
     pub may_pair: bool,
+    /// Who a phone can be given to when Allow is pressed: the active staff.
+    pub people: Vec<PersonPick>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PersonPick {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -512,6 +549,20 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         qr,
         code,
         may_pair,
+        people: app
+            .with_shop(|shop| {
+                shop.db
+                    .read_transaction(|tx| mb_db::Repos::new(tx).people().list_staff(OUTLET))
+                    .map_err(|e| words::from_db(&e))
+            })
+            .unwrap_or_default()
+            .iter()
+            .filter(|p| matches!(p.status, mb_db::repo::people::StaffStatus::Active))
+            .map(|p| PersonPick {
+                id: p.id.as_str().to_owned(),
+                name: p.name.clone(),
+            })
+            .collect(),
     })
 }
 
@@ -549,14 +600,24 @@ pub fn close_pairing_on(app: &App) -> UiResult<NetworkView> {
     view_on(app)
 }
 
-/// A person pressed Allow.
-pub fn allow_on(app: &App, request_id: String) -> UiResult<NetworkView> {
+/// A person pressed Allow, having said whose phone it is (`staff_id`), or that it is a shared
+/// tablet that belongs to nobody (`None`).
+pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
     // The gate is here as well as on `open_pairing`, deliberately.
     crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
     let network = app
         .network()
         .ok_or_else(|| UiError::new("lan.off", "The counter's network is switched off."))?;
+    let owner = staff_id.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    if let Some(id) = &owner
+        && staff_name(app, id).is_none()
+    {
+        return Err(UiError::new(
+            "lan.nobody",
+            "That person is not on the staff list any more. Pick somebody else.",
+        ));
+    }
     let waiting = network.shared.desk.take(&request_id).ok_or_else(|| {
         UiError::new(
             "lan.gone",
@@ -573,6 +634,7 @@ pub fn allow_on(app: &App, request_id: String) -> UiResult<NetworkView> {
         },
         &waiting.name,
         &waiting.platform,
+        owner.as_deref(),
     )
     .map_err(|r| UiError::new("lan.refused", r.message()))?;
 
@@ -646,8 +708,12 @@ pub fn close_pairing(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
 }
 
 #[tauri::command]
-pub fn allow_device(app: tauri::State<'_, App>, request_id: String) -> UiResult<NetworkView> {
-    allow_on(&app, request_id)
+pub fn allow_device(
+    app: tauri::State<'_, App>,
+    request_id: String,
+    staff_id: Option<String>,
+) -> UiResult<NetworkView> {
+    allow_on(&app, request_id, staff_id)
 }
 
 #[tauri::command]

@@ -124,6 +124,7 @@ impl Counter for FakeCounter {
         _request: &PairRequest,
         name: &str,
         _platform: &str,
+        staff_id: Option<&str>,
     ) -> Result<PairedDevice, Refusal> {
         let mut rows = self.rows.lock().unwrap();
         let id = format!("dev_{}", rows.len() + 1);
@@ -132,7 +133,7 @@ impl Counter for FakeCounter {
             id: id.clone(),
             name: name.to_owned(),
             secret: secret.clone(),
-            staff_id: Some("staff_1".to_owned()),
+            staff_id: Some(staff_id.unwrap_or("staff_1").to_owned()),
             permissions: {
                 let mut set = PermissionSet::new();
                 set.insert(Permission::BillCreate);
@@ -145,6 +146,10 @@ impl Counter for FakeCounter {
             secret,
             server_id: "srv_test".to_owned(),
         })
+    }
+
+    fn floor(&self) -> serde_json::Value {
+        serde_json::json!({ "tables": [{ "id": "t1", "state": "taken", "order_id": "ord_1" }], "orders": [] })
     }
 
     fn apply(&self, device: &Device, intent: &mb_lan::Intent) -> mb_lan::Outcome {
@@ -335,6 +340,7 @@ async fn pair_a_phone(h: &Harness, name: &str) -> PairedDevice {
             },
             &waiting.name,
             &waiting.platform,
+            Some("staff_1"),
         )
         .expect("paired");
     h.shared.desk.approve(&request_id, device);
@@ -793,6 +799,7 @@ async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
                         },
                         &waiting.name,
                         &waiting.platform,
+                        None,
                     )
                     .expect("paired");
                 desk.approve(&waiting.request_id, device);
@@ -1016,6 +1023,23 @@ async fn an_intent_needs_a_credential_and_a_stale_catalogue_is_not_resent() {
         304,
         "the counter re-sent a menu the phone already had"
     );
+
+    // The floor: the snapshot a phone takes after `too_far_behind`, the same shape the push
+    // carries. Needs the credential like everything else.
+    let nobody = h.client.get(h.url("/v1/floor")).send().await.expect("tried");
+    assert_eq!(nobody.status(), 401);
+    let floor = h
+        .client
+        .get(h.url("/v1/floor"))
+        .header("authorization", bearer(&device))
+        .send()
+        .await
+        .expect("tried");
+    assert_eq!(floor.status(), 200);
+    let body: serde_json::Value = floor.json().await.expect("json");
+    assert_eq!(body["tables"][0]["state"], "taken");
+    assert_eq!(body["tables"][0]["order_id"], "ord_1");
+    assert!(body["orders"].is_array());
 }
 
 /// The reconnection model: a phone that dropped gets what it missed, and one that is too far
@@ -1024,13 +1048,14 @@ async fn an_intent_needs_a_credential_and_a_stale_catalogue_is_not_resent() {
 async fn a_reconnecting_phone_gets_what_it_missed_and_never_a_refetch_storm() {
     let h = Harness::start();
 
-    for n in 0..5 {
+    let first = h.shared.push("table", serde_json::json!({ "n": 0 }));
+    for n in 1..5 {
         h.shared.push("table", serde_json::json!({ "n": n }));
     }
-    match h.shared.since(2) {
+    match h.shared.since(first + 1) {
         mb_lan::Missed::Since { pushes } => {
             assert_eq!(pushes.len(), 3, "it did not send exactly what was missed");
-            assert_eq!(pushes[0].seq, 3);
+            assert_eq!(pushes[0].seq, first + 2);
         }
         mb_lan::Missed::TooFarBehind { .. } => panic!("three messages is not too far behind"),
     }
@@ -1039,10 +1064,48 @@ async fn a_reconnecting_phone_gets_what_it_missed_and_never_a_refetch_storm() {
     for n in 0..200 {
         h.shared.push("table", serde_json::json!({ "n": n }));
     }
-    match h.shared.since(1) {
-        mb_lan::Missed::TooFarBehind { newest } => assert!(newest > 200),
+    match h.shared.since(first) {
+        mb_lan::Missed::TooFarBehind { newest } => assert!(newest >= first + 200),
         mb_lan::Missed::Since { .. } => {
             panic!("it quietly sent a partial history, which is a phone with a hole in it")
+        }
+    }
+}
+
+/// A counter restart must never leave a phone silently ahead of the stream: yesterday's
+/// held place is either replayed or declared too far behind — NEVER filtered to nothing.
+#[tokio::test]
+async fn a_counter_restart_never_leaves_a_phone_silently_ahead() {
+    let counter = FakeCounter::new();
+    let identity = Arc::new(
+        mb_lan::Identity::ephemeral(&["127.0.0.1".parse().unwrap()]).expect("an identity"),
+    );
+    let yesterday = mb_lan::Shared::new(
+        Arc::clone(&counter) as Arc<dyn Counter>,
+        Arc::clone(&identity),
+        Arc::new(|| Timestamp::from_millis(1_000_000)),
+    );
+    let mut held = 0;
+    for n in 0..3 {
+        held = yesterday.push("floor", serde_json::json!({ "n": n }));
+    }
+
+    // The counter restarts and a day passes; the phone still holds yesterday's place.
+    let today = mb_lan::Shared::new(
+        counter as Arc<dyn Counter>,
+        identity,
+        Arc::new(|| Timestamp::from_millis(87_400_000)),
+    );
+    today.push("floor", serde_json::json!({ "fresh": true }));
+    match today.since(held) {
+        mb_lan::Missed::TooFarBehind { newest } => {
+            assert!(newest > held, "catching up must move the phone forward");
+        }
+        mb_lan::Missed::Since { pushes } => {
+            assert!(
+                !pushes.is_empty(),
+                "yesterday's place filtered today's stream to nothing — the silent-deaf bug"
+            );
         }
     }
 }

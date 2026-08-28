@@ -279,3 +279,20 @@ fn a_day_the_counter_has_no_bills_for_is_read_from_the_cloud_totals() {
     sorted.sort_unstable();
     assert_eq!(keys, sorted);
 }
+
+/// The cloud keeps the newest row per key, so a wire row stamped zero is a row the cloud
+/// updates once and then never again — the owner's phone showed the day's first bill forever.
+#[test]
+fn no_wire_row_ever_carries_the_epoch_as_its_moment() {
+    let scratch = Scratch::new("wire_moments");
+    let db = scratch.open();
+    shop::build(&db);
+    for row in everything_on_the_wire(&db) {
+        assert!(
+            row.updated_at.millis() > 0,
+            "{} {} went to the cloud stamped with the epoch",
+            row.table,
+            row.id
+        );
+    }
+}

@@ -34,6 +34,9 @@ pub struct Applied {
     pub outcome: Outcome,
     /// Set when the cashier has this order open and must be told rather than overwritten.
     pub tell_the_cashier: Option<FloorChange>,
+    /// The kitchen ticket the caller queues once the outcome is on disk: the order as
+    /// sent, and the delta the kitchen had not seen.
+    pub kitchen_paper: Option<(AnyOrder, Vec<(mb_core::LineIdentity, Qty)>)>,
 }
 
 /// Apply one intent.
@@ -59,6 +62,7 @@ pub fn apply(
                 ),
             },
             tell_the_cashier: None,
+            kitchen_paper: None,
         });
     }
 
@@ -74,6 +78,7 @@ pub fn apply(
                 batch_id: intent.id.clone(),
             },
             tell_the_cashier: None,
+            kitchen_paper: None,
         });
     }
 
@@ -96,6 +101,7 @@ pub fn apply(
                                 .to_owned(),
                         }),
                         tell_the_cashier: None,
+                        kitchen_paper: None,
                     });
                 }
 
@@ -136,6 +142,31 @@ pub fn apply(
             .map_err(|e| words::from_db(&e))
     })?;
 
+    // The paper, after the outcome is durably on disk — the same road as the counter's own
+    // ticket (`flows::queue_kitchen_lines`): grouped by station, one KOT number per roll.
+    // A shop that switched the kitchen ticket off still gets the event and the kitchen
+    // screen; it just prints nothing.
+    if let Some((order, delta)) = &applied.kitchen_paper
+        && !config.billing.kitchen_ticket_off
+    {
+        let core = order.core();
+        if let Err(e) = crate::flows::queue_kitchen_lines(
+            app,
+            mb_print::template::TicketKind::New,
+            core.order_type(),
+            core.table(),
+            Some(order),
+            crate::flows::ticket_lines(&core.cart, delta),
+            false,
+            "an order from a phone".to_owned(),
+        ) {
+            crate::log_warn!(
+                "order={} the kitchen was told but the ticket did not queue: {e}",
+                core.id.as_str()
+            );
+        }
+    }
+
     Ok(applied)
 }
 
@@ -175,6 +206,7 @@ fn refused(message: impl Into<String>) -> Applied {
             message: message.into(),
         },
         tell_the_cashier: None,
+        kitchen_paper: None,
     }
 }
 
@@ -274,6 +306,7 @@ fn do_it(
 
     let mut tell_the_cashier = None;
     let mut note = None;
+    let mut kitchen_delta = None;
 
     match &intent.what {
         What::OpenOrder { .. } => unreachable!("handled above"),
@@ -406,6 +439,7 @@ fn do_it(
                     "{} sent to the kitchen.",
                     words::count(i64::try_from(how_many).unwrap_or(0), "item", "items")
                 ));
+                kitchen_delta = Some(pending);
             }
         }
 
@@ -435,6 +469,7 @@ fn do_it(
                     note: Some("The order was cancelled.".to_owned()),
                 },
                 tell_the_cashier: None,
+                kitchen_paper: None,
             });
         }
 
@@ -447,9 +482,29 @@ fn do_it(
         .orders()
         .save(OUTLET, till, &AnyOrder::Open(open.clone()))?;
 
+    // The kitchen is told in the SAME commit as the outcome — the event and the kitchen
+    // screen, exactly as the counter's own ticket records them. The paper itself needs
+    // `&App`, so `apply` queues it once this transaction is on disk.
+    let kitchen_paper = match kitchen_delta {
+        Some(delta) => {
+            repos.events().record(
+                order_id,
+                at,
+                day,
+                mb_db::repo::events::KITCHEN_TICKET,
+                None,
+                None,
+            )?;
+            crate::kitchen::send_in(repos, config, order_id, None, at)?;
+            Some((AnyOrder::Open(open.clone()), delta))
+        }
+        None => None,
+    };
+
     Ok(Applied {
         outcome: view_of(&open, note, config),
         tell_the_cashier,
+        kitchen_paper,
     })
 }
 
@@ -523,6 +578,7 @@ fn open_order(
             return Ok(Applied {
                 outcome: view_of(&open, Some(says), config),
                 tell_the_cashier: None,
+                kitchen_paper: None,
             });
         }
     }
@@ -565,6 +621,7 @@ fn open_order(
     Ok(Applied {
         outcome: view_of(&open, None, config),
         tell_the_cashier: None,
+        kitchen_paper: None,
     })
 }
 
@@ -604,6 +661,81 @@ fn view_of(
     }
 }
 
+/// The floor for the phones: which tables are taken, and every open order as a phone would be
+/// told it — the same lines and total an intent's outcome carries. Sent as the `floor` push
+/// after any change, and answered at `GET /v1/floor`. A phone shows only the orders it has
+/// touched; an order missing from this list is one the counter has finished with.
+pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
+    let config = app.shop_config();
+    app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let tables = repos.floor().list_tables(OUTLET)?;
+                let open = repos.orders().list_open(OUTLET)?;
+                let label_of = |id: &mb_core::TableId| {
+                    tables
+                        .iter()
+                        .find(|t| &t.id == id)
+                        .map(|t| t.label.clone())
+                };
+                let on_table = |id: &mb_core::TableId| {
+                    open.iter()
+                        .find(|o| o.core().table() == Some(id))
+                        .map(|o| o.core().id.as_str().to_owned())
+                };
+                let table_rows: Vec<serde_json::Value> = tables
+                    .iter()
+                    .map(|t| {
+                        let order_id = on_table(&t.id);
+                        serde_json::json!({
+                            "id": t.id.as_str(),
+                            "state": if order_id.is_some() { "taken" } else { "free" },
+                            "order_id": order_id,
+                        })
+                    })
+                    .collect();
+                let order_rows: Vec<serde_json::Value> = open
+                    .iter()
+                    .filter_map(|o| match o {
+                        mb_core::AnyOrder::Open(open) => Some(open),
+                        _ => None,
+                    })
+                    .map(|open| {
+                        let table_id = open.core.table().map(|t| t.as_str().to_owned());
+                        let table_label = open.core.table().and_then(label_of);
+                        let order_type = serde_json::to_value(open.core.order_type())
+                            .ok()
+                            .and_then(|v| v.as_str().map(ToOwned::to_owned))
+                            .unwrap_or_default();
+                        match view_of(open, None, &config) {
+                            Outcome::Ok {
+                                order_id,
+                                total,
+                                lines,
+                                token,
+                                note,
+                            } => serde_json::json!({
+                                "order_id": order_id,
+                                "table_id": table_id,
+                                "table_label": table_label,
+                                "order_type": order_type,
+                                "total": total,
+                                "token": token,
+                                "note": note.or_else(|| open.core.note.clone()),
+                                "lines": lines,
+                            }),
+                            _ => serde_json::Value::Null,
+                        }
+                    })
+                    .filter(|v| !v.is_null())
+                    .collect();
+                Ok(serde_json::json!({ "tables": table_rows, "orders": order_rows }))
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
 // Offline: a batch of intents a phone queued while it could not reach us.
 
 /// Apply a whole batch, in order.
@@ -617,8 +749,34 @@ pub fn apply_batch(
     let mut outcomes = Vec::with_capacity(batch.intents.len());
     let (mut ok, mut refused_count, mut held) = (0_i64, 0_i64, 0_i64);
 
+    // A whole order in ONE batch: the phone cannot know the id of an order the same batch is
+    // about to open, so an intent with no order id applies to the order this batch opened.
+    // A replayed batch re-runs the open with the same intent id, gets the ORIGINAL outcome and
+    // so the same order id (§6) — the adds land on the same order, never a second one.
+    let mut opened: Option<String> = None;
+
     for intent in &batch.intents {
+        let borrowed;
+        let intent = if intent.order_id.is_none()
+            && !matches!(intent.what, mb_lan::intent::What::OpenOrder { .. })
+            && opened.is_some()
+        {
+            borrowed = mb_lan::Intent {
+                id: intent.id.clone(),
+                order_id: opened.clone(),
+                at: intent.at,
+                what: intent.what.clone(),
+            };
+            &borrowed
+        } else {
+            intent
+        };
         let applied = apply(app, device_id, staff, permissions, intent)?;
+        if matches!(intent.what, mb_lan::intent::What::OpenOrder { .. })
+            && let Outcome::Ok { order_id, .. } = &applied.outcome
+        {
+            opened = Some(order_id.clone());
+        }
         match &applied.outcome {
             Outcome::Ok { .. } => ok += 1,
             Outcome::Refused { .. } => refused_count += 1,
@@ -658,13 +816,14 @@ pub fn apply_batch(
 
 /// What a phone needs to take an order, with a version.
 pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
-    let (items, sections, tables) = app.with_shop(|shop| {
+    let (items, categories, sections, tables) = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 Ok((
                     // Every item, including the ones that ran out — `false` and not `true`.
                     repos.menu().list_items(OUTLET, false)?,
+                    repos.menu().list_categories(OUTLET)?,
                     repos.floor().list_sections(OUTLET)?,
                     repos.floor().list_tables(OUTLET)?,
                 ))
@@ -679,16 +838,22 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
             let one = mb_lan::intent::CatalogueItem {
                 id: item.id.as_str().to_owned(),
                 name: item.name.clone(),
+                // The category's NAME — a waiter reads "Tiffin", never an id. A dish whose
+                // category is gone or inactive simply has none.
                 category: item
                     .category_id
                     .as_ref()
-                    .map(|c| c.as_str().to_owned())
+                    .and_then(|c| categories.iter().find(|cat| cat.id.as_str() == c.as_str()))
+                    .map(|cat| cat.name.clone())
                     .unwrap_or_default(),
                 price: item.unit_price.to_plain_string(),
                 is_available: item.is_available,
             };
             fingerprint.push_str(&one.id);
             fingerprint.push_str(&one.name);
+            // The category is part of what a phone can SEE, so renaming one must change the
+            // version — or every paired phone keeps showing the old grouping for ever.
+            fingerprint.push_str(&one.category);
             fingerprint.push_str(&one.price);
             fingerprint.push(if one.is_available { 'y' } else { 'n' });
             one

@@ -41,9 +41,11 @@ export function Network() {
     return () => stop?.();
   }, []);
 
+  // Whose phone each waiting one is: chosen before Allow. '' = a shared tablet, nobody's.
+  const [owners, setOwners] = useState<Record<string, string>>({});
   const act = (
     command: 'open_pairing' | 'close_pairing' | 'allow_device' | 'refuse_device',
-    args?: { requestId: string },
+    args?: { requestId: string; staffId?: string | null },
   ) => {
     call(command, args as never)
       .then(setView)
@@ -132,6 +134,21 @@ export function Network() {
                   {/* The whole sentence, written in Rust. */}
                   <span>{w.says}</span>
                   <div className="mb-row--end">
+                    {/* Whose phone it is decides what it may do: a waiter's phone acts as the
+                        waiter, a shared tablet at the pass acts as nobody. */}
+                    <select
+                      className="mb-select"
+                      aria-label="Whose phone is this?"
+                      value={owners[w.requestId] ?? ''}
+                      onChange={(e) => setOwners({ ...owners, [w.requestId]: e.target.value })}
+                    >
+                      <option value="">Shared — nobody's</option>
+                      {view.people.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
                     <Button
                       small
                       variant="quiet"
@@ -142,7 +159,12 @@ export function Network() {
                     <Button
                       small
                       variant="primary"
-                      onClick={() => act('allow_device', { requestId: w.requestId })}
+                      onClick={() =>
+                        act('allow_device', {
+                          requestId: w.requestId,
+                          staffId: owners[w.requestId] || null,
+                        })
+                      }
                     >
                       Allow
                     </Button>

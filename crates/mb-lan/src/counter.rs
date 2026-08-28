@@ -112,11 +112,14 @@ pub trait Counter: Send + Sync + 'static {
     fn seen(&self, device_id: &str, ip: &str);
 
     /// Store an approved device.
+    /// Issue a credential. `staff_id` is the person the approver bound the device to — the
+    /// waiter whose phone it is — or `None` for a shared tablet that belongs to nobody.
     fn pair(
         &self,
         request: &PairRequest,
         name: &str,
         platform: &str,
+        staff_id: Option<&str>,
     ) -> Result<PairedDevice, Refusal>;
 
     // What a phone actually came here to do.
@@ -140,6 +143,9 @@ pub trait Counter: Send + Sync + 'static {
 
     /// The menu and the floor, with a version.
     fn catalogue(&self, held: Option<&str>) -> Option<crate::intent::Catalogue>;
+    /// What the floor is doing right now — which tables are taken and the open orders — as the
+    /// same JSON the `floor` push carries. A phone asks for it once after `too_far_behind`.
+    fn floor(&self) -> serde_json::Value;
 }
 
 /// One row of the panel's device list.

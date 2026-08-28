@@ -56,7 +56,9 @@ impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, TlsL
 /// One message pushed to every connected phone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Push {
-    /// Monotonic, and it is the whole reconnection design.
+    /// Monotonic ACROSS COUNTER RESTARTS: each run seeds it from the clock, so a phone
+    /// holding yesterday's place is told `too_far_behind` and catches up, never silently
+    /// filtered to nothing by a run whose numbers restarted below its own.
     pub seq: u64,
     pub kind: String,
     pub body: serde_json::Value,
@@ -104,6 +106,8 @@ impl Shared {
         clock: Arc<dyn Fn() -> mb_core::Timestamp + Send + Sync>,
     ) -> Shared {
         let (pushes, _) = tokio::sync::broadcast::channel(BROADCAST_DEPTH);
+        // The first seq of THIS run: the clock, so seqs stay monotonic across restarts.
+        let first_seq = u64::try_from((clock)().millis()).unwrap_or(1).max(1);
         Shared {
             counter,
             desk: Arc::new(Desk::new()),
@@ -114,11 +118,17 @@ impl Shared {
             hello_limiter: Arc::new(Limiter::new(Rate::HELLO)),
             pushes: Arc::new(pushes),
             history: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-            next_seq: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            next_seq: Arc::new(std::sync::atomic::AtomicU64::new(first_seq)),
         }
     }
 
     /// Send something to every connected phone.
+    /// Whether any phone is on the stream. The counter skips building a push nobody would read.
+    #[must_use]
+    pub fn has_listeners(&self) -> bool {
+        self.pushes.receiver_count() > 0
+    }
+
     pub fn push(&self, kind: &str, body: serde_json::Value) -> u64 {
         let seq = self
             .next_seq
@@ -198,6 +208,7 @@ pub fn router(shared: Shared) -> Router {
         .route("/v1/batch", post(batch))
         .route("/v1/forward", post(forward))
         .route("/v1/catalogue", get(catalogue))
+        .route("/v1/floor", get(floor))
         .with_state(shared)
 }
 
@@ -266,6 +277,19 @@ async fn catalogue(
 }
 
 /// An outcome, with the status its own kind implies.
+/// The floor as it is now. The push of the same shape is what keeps a phone current; this is
+/// the one snapshot a phone takes when it was told it is too far behind.
+async fn floor(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+) -> Response {
+    if let Err(response) = authenticate(&shared, &headers, from) {
+        return response;
+    }
+    Json(shared.counter.floor()).into_response()
+}
+
 fn answered(outcome: &crate::intent::Outcome) -> Response {
     use crate::intent::Outcome;
     let status = match outcome {

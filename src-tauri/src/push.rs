@@ -83,7 +83,74 @@ pub fn watch_the_shop(app: &AppHandle) {
         return;
     };
     let handle = app.clone();
-    db.watch(Arc::new(move |tables| emit_changes(&handle, tables)));
+    let phones = start_phone_pusher(app.clone());
+    db.watch(Arc::new(move |tables| {
+        emit_changes(&handle, tables);
+        tell_the_phones(&phones, tables);
+    }));
+}
+
+/// What the phones are told about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhoneNews {
+    Floor,
+    Catalogue,
+}
+
+/// The phones' pusher: its own thread, fed from the commit callback, so building a floor
+/// snapshot never runs on the thread that holds the shop — that is the nesting deadlock P18
+/// and P20 both hit. It also collapses a burst (one settle touches four tables) into one push.
+fn start_phone_pusher(app: AppHandle) -> std::sync::mpsc::Sender<PhoneNews> {
+    let (tx, rx) = std::sync::mpsc::channel::<PhoneNews>();
+    let spawned = std::thread::Builder::new()
+        .name("mb-phones".to_owned())
+        .spawn(move || {
+            while let Ok(first) = rx.recv() {
+                // A burst is one change.
+                let mut news = BTreeSet::new();
+                news.insert(first as u8);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                while let Ok(more) = rx.try_recv() {
+                    news.insert(more as u8);
+                }
+                let Some(state) = app.try_state::<App>() else {
+                    return;
+                };
+                if !crate::lan::phones_listening(&state) {
+                    continue;
+                }
+                if news.contains(&(PhoneNews::Catalogue as u8))
+                    && let Ok(catalogue) = crate::orders::catalogue(&state)
+                {
+                    crate::lan::push_to_phones(
+                        &state,
+                        "catalogue",
+                        serde_json::json!({ "version": catalogue.version }),
+                    );
+                }
+                if news.contains(&(PhoneNews::Floor as u8))
+                    && let Ok(body) = crate::orders::floor_body(&state)
+                {
+                    crate::lan::push_to_phones(&state, "floor", body);
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        log_warn!("the phones' pusher could not be started: {e}");
+    }
+    tx
+}
+
+fn tell_the_phones(phones: &std::sync::mpsc::Sender<PhoneNews>, tables: &BTreeSet<String>) {
+    const FLOOR: &[&str] = &["orders", "order_lines", "payments", "dining_tables", "sections"];
+    const CATALOGUE: &[&str] = &["items", "categories", "item_variants", "dining_tables", "sections"];
+    let touched = |names: &[&str]| names.iter().any(|name| tables.contains(*name));
+    if touched(CATALOGUE) {
+        let _ = phones.send(PhoneNews::Catalogue);
+    }
+    if touched(FLOOR) {
+        let _ = phones.send(PhoneNews::Floor);
+    }
 }
 
 /// Which tables mean which screen.

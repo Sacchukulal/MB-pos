@@ -267,7 +267,7 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
         ),
         (
             "allow_device",
-            crate::lan::allow_on(&app, "req_anything".to_owned())
+            crate::lan::allow_on(&app, "req_anything".to_owned(), None)
                 .expect_err("a device was allowed"),
         ),
     ];

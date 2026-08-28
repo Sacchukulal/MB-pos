@@ -121,9 +121,9 @@ impl<'a> WireRepo<'a> {
         }
         match row.table_name.as_str() {
             "orders" => Ok(self.order(outlet, &row.row_id)?.into_iter().collect()),
-            "day_totals" => Ok(self.day_totals(outlet, &row.row_id)?.into_iter().collect()),
-            "day_item_totals" => self.day_group_totals(outlet, &row.row_id, SalesBy::Item),
-            "day_category_totals" => self.day_group_totals(outlet, &row.row_id, SalesBy::Category),
+            "day_totals" => Ok(self.day_totals(outlet, &row.row_id, row.created_at)?.into_iter().collect()),
+            "day_item_totals" => self.day_group_totals(outlet, &row.row_id, row.created_at, SalesBy::Item),
+            "day_category_totals" => self.day_group_totals(outlet, &row.row_id, row.created_at, SalesBy::Category),
             "expenses" => self.with_row(self.one(row, "SELECT e.id, e.category_id, c.name AS category_name, e.amount AS amount_paise, e.description, e.note, e.business_day, e.paid_by AS paid_by_staff_id, e.paid_at AS created_at, e.mode, e.paid_to, e.reference, e.gst_rate_bp, e.gst_amount AS gst_paise FROM expenses e LEFT JOIN expense_categories c ON c.id = e.category_id WHERE e.id = ?1", Some(Self::expense_note))?, "expenses", &row.row_id),
             "expense_categories" => self.with_row(self.one(row, "SELECT id, name, sort_order FROM expense_categories WHERE id = ?1", None)?, "expense_categories", &row.row_id),
             "cash_movements" => self.with_row(self.one(row, "SELECT id, kind, amount AS amount_paise, business_day, reason AS note, moved_by AS staff_id, at AS created_at FROM cash_movements WHERE id = ?1", None)?, "cash_movements", &row.row_id),
@@ -440,7 +440,7 @@ impl<'a> WireRepo<'a> {
     }
 
     /// The day's one row: bills, money, the split by payment mode, the expenses.
-    fn day_totals(&self, outlet: &str, key: &str) -> Result<Option<WireRow>, DbError> {
+    fn day_totals(&self, outlet: &str, key: &str, at: Timestamp) -> Result<Option<WireRow>, DbError> {
         let day = Self::day_of(key)?;
         let repos = crate::repo::Repos::new(self.tx);
         let period = Period::one_day(day);
@@ -495,14 +495,18 @@ impl<'a> WireRepo<'a> {
         Ok(Some(WireRow {
             table: "day_totals".to_owned(),
             id: key.to_owned(),
-            updated_at: Timestamp::from_millis(0),
+            // The outbox row's moment, NOT zero: the cloud keeps the newest row per key
+            // (`where updated_at < excluded.updated_at`), so a totals row stamped 0 was
+            // written once and then never updated again — the owner's phone showed the
+            // first bill of the day forever.
+            updated_at: at,
             deleted: false,
             data,
         }))
     }
 
     /// One row per item (or category) sold that day.
-    fn day_group_totals(&self, outlet: &str, key: &str, by: SalesBy) -> Result<Vec<WireRow>, DbError> {
+    fn day_group_totals(&self, outlet: &str, key: &str, at: Timestamp, by: SalesBy) -> Result<Vec<WireRow>, DbError> {
         let day = Self::day_of(key)?;
         let repos = crate::repo::Repos::new(self.tx);
         let buckets = repos.reports().sales_by(outlet, Period::one_day(day), by)?;
@@ -536,7 +540,7 @@ impl<'a> WireRepo<'a> {
             out.push(WireRow {
                 table: table.to_owned(),
                 id: format!("{key}|{}", b.key),
-                updated_at: Timestamp::from_millis(0),
+                updated_at: at,
                 deleted: false,
                 data,
             });
