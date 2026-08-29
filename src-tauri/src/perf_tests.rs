@@ -50,10 +50,12 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
                                 format!("Item {n} with masala")
                             },
                             unit_price: mb_core::Money::from_paise(10_000),
-                            tax: mb_core::TaxSpec::gst(
+                            tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(
                                 mb_core::TaxRate::from_percent(5).expect("5%"),
-                            ),
-                            tax_class_id: None,
+                            )).expect("a seeded slab").0,
+                            price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                                mb_core::TaxRate::from_percent(5).expect("5%"),
+                            )).expect("a seeded slab").1,
                             hsn: None,
                             cost_price: None,
                             short_code: None,

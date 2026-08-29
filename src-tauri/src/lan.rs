@@ -162,10 +162,15 @@ impl mb_lan::Counter for Bridge {
             .and_then(|id| staff_permissions(&handle, id.as_str()))
             .unwrap_or_else(floor_permissions);
 
+        let staff_name = device
+            .staff_id
+            .as_ref()
+            .and_then(|id| staff_name(&handle, id.as_str()));
         Some(mb_lan::Device {
             id: device.id,
             name: device.name,
             staff_id: device.staff_id.map(|s| s.as_str().to_owned()),
+            staff_name,
             permissions,
         })
     }
@@ -181,56 +186,84 @@ impl mb_lan::Counter for Bridge {
         crate::push::emit_phones(&self.handle);
     }
 
-    fn people(&self) -> Vec<mb_lan::Person> {
-        self.app()
-            .map(|app| active_people(&app))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|p| mb_lan::Person {
-                id: p.id,
-                name: p.name,
-            })
-            .collect()
-    }
-
-    /// The person's own counter PIN — the same one that signs them in at the till.
-    fn check_pin(&self, staff_id: &str, pin: &str) -> Result<(), mb_lan::Refusal> {
-        let Some(app) = self.app() else {
-            return Err(mb_lan::Refusal::Refused("The counter is closing.".to_owned()));
-        };
-        let member = app
+    /// The phone left on its own. Revoked like a Remove at the counter, minus the person who
+    /// pressed it: the phone did.
+    fn leave(&self, device: &mb_lan::Device) {
+        let Some(handle) = self.app() else { return };
+        let at = now();
+        let id = device.id.clone();
+        let removed = handle
             .with_shop(|shop| {
                 shop.db
-                    .read_transaction(|tx| mb_db::Repos::new(tx).people().find_staff(OUTLET, staff_id))
+                    .transaction(|tx| {
+                        let repos = mb_db::Repos::new(tx);
+                        let removed = repos.devices().revoke(OUTLET, &id, at, None)?;
+                        if removed {
+                            repos.audit().append(
+                                OUTLET,
+                                &AuditEntry::new(at, today(at), None, action::DEVICE_REVOKED, "device")
+                                    .about(id.clone()),
+                            )?;
+                        }
+                        Ok(removed)
+                    })
                     .map_err(|e| words::from_db(&e))
             })
-            .ok()
-            .flatten()
-            .filter(|m| matches!(m.status, mb_db::repo::people::StaffStatus::Active))
-            .ok_or_else(|| {
-                mb_lan::Refusal::Refused(
-                    "That person is not on the staff list any more. Pick somebody else."
-                        .to_owned(),
-                )
-            })?;
-        let stored = member.pin().ok().flatten().ok_or_else(|| {
-            mb_lan::Refusal::Refused(format!(
-                "{} has no PIN yet. Somebody who manages staff can set one at the counter.",
-                member.name
-            ))
-        })?;
-        let typed = mb_auth::Pin::parse(pin).map_err(|_| mb_lan::Refusal::WrongPin(0))?;
-        if mb_auth::verify_pin(&typed, &stored) {
-            Ok(())
-        } else {
-            // The desk decides how many are left; this says only that it was wrong.
-            Err(mb_lan::Refusal::WrongPin(u32::MAX))
+            .unwrap_or(false);
+        if removed {
+            self.forget_device(&device.id);
+            crate::log_info!("{} left the counter on its own", device.name);
+            crate::push::emit_phones(&self.handle);
         }
+    }
+
+    /// The phone's cloud login, for the person this device belongs to: the one Edge Function
+    /// the counter calls on a phone's behalf. A refusal is the cloud's own sentence.
+    fn cloud_login(
+        &self,
+        device: &mb_lan::Device,
+    ) -> Result<serde_json::Value, mb_lan::Refusal> {
+        let handle = self
+            .app()
+            .ok_or_else(|| mb_lan::Refusal::Refused("The counter is closing.".to_owned()))?;
+        let staff_id = device.staff_id.clone().ok_or_else(|| {
+            mb_lan::Refusal::Refused(
+                "A shared tablet belongs to nobody, so it has no login of its own.".to_owned(),
+            )
+        })?;
+        crate::log_info!("{} asks for its cloud login", device.name);
+        let body = serde_json::json!({
+            "staff_id": staff_id,
+            "machine": { "id": device.id, "name": device.name },
+            "app_version": "",
+        });
+        let answer = crate::sync::edge(&handle, "phone-session", &body);
+        match &answer {
+            Ok(_) => crate::log_info!("cloud login handed to {} for {}", device.name, staff_id),
+            Err(e) => crate::log_warn!("cloud login for {} refused: {e}", device.name),
+        }
+        answer.map_err(|e| {
+            use crate::cloud::LinkError;
+            mb_lan::Refusal::Refused(match e {
+                LinkError::Unreachable => {
+                    "The counter cannot reach the cloud right now. Orders still work; reports                      come once it can."
+                        .to_owned()
+                }
+                LinkError::Unauthorised => {
+                    "The counter's cloud login has expired. It renews on its own; try again in                      a minute."
+                        .to_owned()
+                }
+                LinkError::Dead(why) | LinkError::Refused(why) | LinkError::Server(why) => why,
+                LinkError::Unreadable => {
+                    "The cloud answered something this counter could not read.".to_owned()
+                }
+            })
+        })
     }
 
     fn pair(
         &self,
-        _request: &mb_lan::PairRequest,
+        request: &mb_lan::PairRequest,
         name: &str,
         platform: &str,
         staff_id: Option<&str>,
@@ -242,7 +275,21 @@ impl mb_lan::Counter for Bridge {
         let (secret, hash) = mb_auth::new_device_secret().map_err(|_| {
             mb_lan::Refusal::Refused("The credential could not be made.".to_owned())
         })?;
-        let id = format!("dev_{}", mb_auth::random_token(12));
+        // The same phone back (it names its install): its own row, its own seat, a new secret.
+        let install = request.install.clone().filter(|s| !s.trim().is_empty());
+        let known = install.as_deref().and_then(|i| {
+            handle
+                .with_shop(|shop| {
+                    shop.db
+                        .read_transaction(|tx| mb_db::Repos::new(tx).devices().by_install(OUTLET, i))
+                        .map_err(|e| words::from_db(&e))
+                })
+                .ok()
+                .flatten()
+        });
+        let id = known
+            .map(|d| d.id)
+            .unwrap_or_else(|| format!("dev_{}", mb_auth::random_token(12)));
         // Two different people: the one whose phone this IS (chosen by the approver; nobody for
         // a shared tablet), and the one who pressed Allow. Binding the phone to whoever happened
         // to be signed in at the till made every waiter's phone act as the cashier.
@@ -267,6 +314,7 @@ impl mb_lan::Counter for Bridge {
                                 last_seen_at: None,
                                 last_ip: None,
                                 revoked_at: None,
+                                install_id: install.clone(),
                             },
                             approver.as_ref(),
                         )?;
@@ -293,6 +341,7 @@ impl mb_lan::Counter for Bridge {
             })
             .map_err(|e| mb_lan::Refusal::Refused(e.message))?;
 
+        self.forget_device(&id);
         Ok(mb_lan::PairedDevice {
             device_id: id,
             secret: secret.to_issue().to_owned(),
@@ -471,6 +520,11 @@ pub struct NetworkView {
     pub qr: Vec<String>,
     pub code: String,
     pub may_pair: bool,
+    /// What Windows Firewall says about this program — the usual reason a phone cannot reach it.
+    pub firewall: crate::firewall::FirewallState,
+    pub firewall_says: String,
+    /// Whether the "allow it" button is offered.
+    pub may_fix_firewall: bool,
     /// Who a phone can be given to when Allow is pressed: the active staff.
     pub people: Vec<PersonPick>,
     /// How many phones are on the live stream right now.
@@ -496,7 +550,6 @@ pub struct DeviceRowView {
     pub staff: String,
     pub last_seen: String,
     pub last_ip: String,
-    pub is_live: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -540,6 +593,9 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         _ => (Vec::new(), String::new()),
     };
 
+    let firewall = crate::firewall::cached();
+    let (firewall_says, may_fix_firewall) = crate::firewall::words(firewall);
+    let firewall_says = firewall_says.to_owned();
     let (headline, tone) = match &network {
         None => (
             "Phones cannot reach this counter — the network is switched off. \
@@ -554,11 +610,15 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
             "danger".to_owned(),
         ),
         // "Listening" is not "reachable", and this sentence must not pretend otherwise.
+        Some(n) if !firewall.lets_phones_in() => (
+            format!("This counter is at {} on port {}. {firewall_says}", n.address, n.port),
+            if firewall == crate::firewall::FirewallState::Blocked { "danger" } else { "warn" }
+                .to_owned(),
+        ),
         Some(n) => (
             format!(
-                "This counter is waiting for phones at {} on port {}. If a \
-                 phone cannot find it, Windows Firewall is the usual reason: \
-                 allow Magic Bill on private networks.",
+                "This counter is waiting for phones at {} on port {}. Windows Firewall \
+                 lets them in.",
                 n.address, n.port
             ),
             "ok".to_owned(),
@@ -586,6 +646,7 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         },
         devices: devices
             .iter()
+            .filter(|d| d.is_live())
             .map(|d| DeviceRowView {
                 id: d.id.clone(),
                 name: d.name.clone(),
@@ -599,7 +660,6 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                     .last_seen_at
                     .map_or_else(|| "not yet".to_owned(), words::when),
                 last_ip: d.last_ip.clone().unwrap_or_default(),
-                is_live: d.is_live(),
             })
             .collect(),
         waiting: network
@@ -614,7 +674,7 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                         name: w.name.clone(),
                         platform: w.platform.clone(),
                         ip: w.ip.clone(),
-                        says: format!("{} is asking to join, from {}.", w.name, w.ip),
+                        says: format!("{} wants to join, from {}. Whose phone is it?", w.name, w.ip),
                     })
                     .collect()
             })
@@ -623,6 +683,9 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         code,
         may_pair,
         people: active_people(app),
+        firewall,
+        firewall_says,
+        may_fix_firewall: may_fix_firewall && may_pair,
         connected: network
             .as_ref()
             .map_or(0, |n| u32::try_from(n.shared.connected()).unwrap_or(u32::MAX)),
@@ -703,7 +766,9 @@ pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiRe
             "That person is not on the staff list any more. Pick somebody else.",
         ));
     }
-    let waiting = network.shared.desk.take(&request_id).ok_or_else(|| {
+    // Peek, not take: the phone polls every 1.5 s, and a request that is neither waiting nor
+    // approved while the credential is being made would be told the code is bad.
+    let waiting = network.shared.desk.peek(&request_id).ok_or_else(|| {
         UiError::new(
             "lan.gone",
             "That phone is no longer asking. Show a new code and try again.",
@@ -716,6 +781,7 @@ pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiRe
             name: waiting.name.clone(),
             platform: waiting.platform.clone(),
             token: String::new(),
+            install: waiting.install.clone(),
         },
         &waiting.name,
         &waiting.platform,
@@ -723,8 +789,10 @@ pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiRe
     )
     .map_err(|r| UiError::new("lan.refused", r.message()))?;
 
-    // The code stays up: the next waiter in the queue scans without another press.
+    // Approved first, then off the queue: the phone can never poll between the two and be
+    // told the code is bad. The code stays up: the next waiter scans without another press.
     network.shared.desk.approve(&request_id, device);
+    let _ = network.shared.desk.take(&request_id);
     view_on(app)
 }
 
@@ -779,6 +847,26 @@ pub fn revoke_on(app: &App, device_id: String) -> UiResult<NetworkView> {
 }
 
 // The seats.
+
+/// Allow this program through Windows Firewall — one UAC prompt, then the phones get in.
+pub fn allow_firewall_on(app: &App) -> UiResult<NetworkView> {
+    let who = guard::require(app, Permission::DevicesPair)?;
+    let after = crate::firewall::allow();
+    crate::log_info!("{} asked Windows Firewall to allow this program: now {after:?}", who.name);
+    if !after.lets_phones_in() {
+        return Err(UiError::new(
+            "network.firewall",
+            "Windows did not change the firewall — the prompt was closed, or it was refused. \
+             Try again and press Yes.",
+        ));
+    }
+    view_on(app)
+}
+
+#[tauri::command]
+pub fn allow_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
+    allow_firewall_on(&app)
+}
 
 #[tauri::command]
 pub fn network(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
@@ -890,6 +978,14 @@ pub fn start(handle: &tauri::AppHandle) {
              to be added again"
         );
     }
+
+    // The firewall is read once, off the startup path — PowerShell takes a second or two.
+    std::thread::spawn(|| {
+        let state = crate::firewall::refresh();
+        if !state.lets_phones_in() {
+            crate::log_warn!("Windows Firewall does not let phones in: {state:?}");
+        }
+    });
 
     let bridge = Bridge::new(handle.clone());
     let shared = mb_lan::Shared::new(

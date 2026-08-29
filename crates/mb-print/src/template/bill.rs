@@ -86,7 +86,9 @@ pub fn bill_document(metrics: &Metrics, ctx: &BillContext<'_>) -> Result<Documen
     meta(&mut doc, metrics, ctx)?;
     items(&mut doc, metrics, ctx);
     totals(&mut doc, ctx);
-    if s.show.tax_summary && more_than_one_rate(ctx.bill) {
+    // The setting decides, on a one-rate bill as much as a three-rate one — an owner who turned
+    // it on wants the rate-wise table on every tax invoice, which is what a GST audit reads.
+    if s.show.tax_summary {
         tax_summary(&mut doc, ctx);
     }
     payments(&mut doc, ctx);
@@ -587,14 +589,30 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
         );
     }
     // The other half of the split: tax the customer has already paid inside the prices above.
-    if !b.gst_included.is_zero()
-        && let Ok(included) = b.gst_included.total()
-    {
-        doc.text(
-            format!("  (includes tax {})", included.to_plain_string()),
-            style,
-            Align::Left,
-        );
+    // It is still CGST and SGST, and a tax invoice has to say so by name — "includes tax 4.76"
+    // was the line the owner read as "the split is missing".
+    if !b.gst_included.is_zero() && b.registration.charges_gst() {
+        if !b.gst_included.central.is_zero() {
+            doc.row(
+                format!("Incl. CGST{label}"),
+                b.gst_included.central.to_plain_string(),
+                style,
+            );
+        }
+        if !b.gst_included.state.is_zero() {
+            doc.row(
+                format!("Incl. {}{label}", b.state_tax.label()),
+                b.gst_included.state.to_plain_string(),
+                style,
+            );
+        }
+        if !b.gst_included.integrated.is_zero() {
+            doc.row(
+                "Incl. IGST",
+                b.gst_included.integrated.to_plain_string(),
+                style,
+            );
+        }
     }
     if !b.vat_included.is_zero() {
         doc.text(
@@ -668,10 +686,6 @@ fn rate_label(bill: &Bill) -> String {
         (Some(row), None) => format!(" {}", row.rate.label()),
         _ => String::new(),
     }
-}
-
-fn more_than_one_rate(bill: &Bill) -> bool {
-    bill.summary.rows().count() > 1
 }
 
 fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {

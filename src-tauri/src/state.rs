@@ -611,7 +611,6 @@ fn ensure_someone_can_bill(db: &Arc<Db>) {
             &StaffMember {
                 id: mb_core::StaffId::new(DEFAULT_STAFF),
                 name: "Counter".to_owned(),
-                code: None,
                 role_id: None,
                 role_name: None,
                 pin_hash: None,

@@ -229,8 +229,18 @@ pub fn bill_for(
     config: &crate::settings::ShopConfig,
 ) -> UiResult<Bill> {
     // A charge belongs to the ORDER TYPE: switching a table to a parcel drops the service
-    // charge and adds the packing one.
-    let charges = config.billing.charges_for(order_type);
+    // charge and adds the packing one. Its tax comes from the book, like an item's.
+    let charges = config
+        .billing
+        .charges_for(order_type, &config.tax)
+        .map_err(|e| {
+            UiError::new(
+                "bill.charge_slab",
+                "A charge on this bill points at a tax slab the shop no longer has. \
+                 Fix it under Settings › Tax.",
+            )
+            .with_detail(e.to_string())
+        })?;
     let mut input = BillInput::new(cart, registration_of(config))
         .with_order_type(order_type)
         .with_rounding(config.billing.rounding)
@@ -448,7 +458,9 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
                 .add(billed.bill_discount_share)
                 .unwrap_or(Money::ZERO)
                 .into(),
-            amount: billed.gross_including_tax.into(),
+            // What the line adds before its tax, so the lines add up to the Subtotal on the
+            // same screen — for a tax-in price this IS the price paid.
+            amount: billed.net.into(),
             modifiers: line.modifiers.iter().map(|m| m.name.clone()).collect(),
         })
         .collect();
@@ -824,38 +836,36 @@ pub(crate) fn running_total(
         .map(|bill| bill.grand_total.into())
 }
 
-/// A menu item, from a row.
-pub fn menu_view(item: &mb_db::repo::menu::MenuItem) -> MenuItemView {
+/// A menu item, from a row. The tax words come from the book, the only place tax lives.
+pub fn menu_view(item: &mb_db::repo::menu::MenuItem, book: &mb_core::TaxBook) -> MenuItemView {
     MenuItemView {
         id: item.id.as_str().to_owned(),
         name: item.name.clone(),
         price: item.unit_price.into(),
-        rate_label: rate_label(item.tax),
+        // An item whose slab is gone still shows on the counter, and says so.
+        rate_label: book
+            .spec_for(&item.tax_class_id, item.price_basis)
+            .map_or_else(|_| "No tax slab".to_owned(), rate_label),
         category: item.category_id.as_ref().map(|c| c.as_str().to_owned()),
     }
 }
 
-/// Turn a menu row into the snapshot a cart line is frozen from.
-pub fn snapshot_for(item: &mb_db::repo::menu::MenuItem) -> ItemSnapshot {
-    // The whole tax question moves across in one piece.
-    let mut snapshot = ItemSnapshot::new(
-        item.id.clone(),
-        item.name.clone(),
-        item.unit_price,
-        item.tax.rate,
-    )
-    .with_tax(item.tax);
-    if let Some(hsn) = item.hsn.clone() {
-        snapshot = snapshot.with_hsn(hsn);
-    }
-    if let Some(category) = item.category_id.clone() {
-        snapshot = snapshot.with_category(category);
-    }
-    snapshot.course = item.course.clone();
-    // A negative or absurd number in the column becomes "no target" rather than a panic — the
-    // timer is a help, never a reason a bill cannot be rung up.
-    snapshot.prep_minutes = item.prep_minutes.and_then(|m| u32::try_from(m).ok());
-    snapshot
+/// Turn a menu row into the snapshot a cart line is frozen from. The tax is resolved HERE, once,
+/// and frozen with the line; nothing downstream asks the book again.
+pub fn snapshot_for(
+    item: &mb_db::repo::menu::MenuItem,
+    book: &mb_core::TaxBook,
+) -> UiResult<ItemSnapshot> {
+    item.snapshot(book).map_err(|e| {
+        UiError::new(
+            "menu.slab",
+            format!(
+                "{} points at a tax slab this shop no longer has. Give it one under Settings › Tax.",
+                item.name
+            ),
+        )
+        .with_detail(e.to_string())
+    })
 }
 
 impl CartState {}
@@ -871,6 +881,14 @@ mod tests {
 
     fn one() -> Qty {
         Qty::from_whole(1).expect("qty")
+    }
+
+    /// A registered shop — a blank GST number bills without GST, by design.
+    fn regular() -> crate::settings::ShopConfig {
+        let mut config = crate::settings::ShopConfig::default();
+        config.store.gstin = "29ABCDE1234F1Z5".to_owned();
+        config.store.state_code = "29".to_owned();
+        config
     }
 
     /// The cart is in Rust, and the merge rule is mb-core's.
@@ -889,7 +907,7 @@ mod tests {
             .expect("add");
         state.cart.add(dosa, one(), None, vec![]).expect("add");
 
-        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
+        let view = cart_view(&state, &regular()).expect("view");
         assert_eq!(view.lines.len(), 1, "two presses of one item are one line");
         assert_eq!(view.lines[0].qty, "2");
     }
@@ -914,7 +932,7 @@ mod tests {
             .add(dosa, one(), Some("no onion".to_owned()), vec![])
             .expect("add");
         assert_eq!(
-            cart_view(&state, &crate::settings::ShopConfig::default())
+            cart_view(&state, &regular())
                 .expect("view")
                 .lines
                 .len(),
@@ -969,7 +987,7 @@ mod tests {
             )
             .expect("add");
 
-        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
+        let view = cart_view(&state, &regular()).expect("view");
         assert_eq!(
             view.bill.tax_rows.len(),
             2,
@@ -1005,9 +1023,9 @@ mod tests {
             .expect("add");
 
         let bill = state
-            .bill(&crate::settings::ShopConfig::default())
+            .bill(&regular())
             .expect("bill");
-        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
+        let view = cart_view(&state, &regular()).expect("view");
 
         assert_eq!(view.bill.grand_total.paise, bill.grand_total.paise());
         assert_eq!(
@@ -1017,7 +1035,7 @@ mod tests {
         assert_eq!(view.bill.subtotal.paise, bill.subtotal.paise());
         assert_eq!(
             view.lines[0].amount.paise,
-            bill.lines[0].gross_including_tax.paise()
+            bill.lines[0].net.paise()
         );
     }
 
@@ -1042,12 +1060,12 @@ mod tests {
 
         // 100.00 @ 5% exclusive = 105.00.
         let total = state
-            .bill(&crate::settings::ShopConfig::default())
+            .bill(&regular())
             .expect("bill")
             .grand_total;
         assert_eq!(total.paise(), 10_500);
         assert_eq!(
-            cart_view(&state, &crate::settings::ShopConfig::default())
+            cart_view(&state, &regular())
                 .expect("view")
                 .balance
                 .paise,
@@ -1062,7 +1080,7 @@ mod tests {
                     .expect("payment"),
             )
             .expect("add");
-        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
+        let view = cart_view(&state, &regular()).expect("view");
         assert_eq!(view.paid.paise, 5_000);
         assert_eq!(view.balance.paise, 5_500, "half paid is not paid");
 
@@ -1074,7 +1092,7 @@ mod tests {
                     .expect("payment"),
             )
             .expect("add");
-        let view = cart_view(&state, &crate::settings::ShopConfig::default()).expect("view");
+        let view = cart_view(&state, &regular()).expect("view");
         assert_eq!(view.balance.paise, 0, "the bill is paid in full");
         assert_eq!(view.change.paise, 0);
         assert!(state.settlement.is_settled(total).expect("settled"));
@@ -1099,7 +1117,7 @@ mod tests {
             )
             .expect("add");
         assert_eq!(
-            cart_view(&state, &crate::settings::ShopConfig::default())
+            cart_view(&state, &regular())
                 .expect("view")
                 .lines[0]
                 .qty,

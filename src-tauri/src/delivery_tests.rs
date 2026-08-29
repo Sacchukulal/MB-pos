@@ -28,8 +28,8 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
                 category_id: None,
                 name: "Masala Dosa".to_owned(),
                 unit_price: Money::from_paise(12_000),
-                tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
-                tax_class_id: None,
+                tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                 hsn: None,
                 cost_price: None,
                 short_code: None,
@@ -54,7 +54,6 @@ fn hire(app: &App, id: &str, name: &str) {
         StaffEdit {
             id: id.to_owned(),
             name: name.to_owned(),
-            code: None,
             role_id: Some(RolePreset::Cashier.id().to_owned()),
             status: "active".to_owned(),
         },
@@ -164,7 +163,7 @@ fn a_delivery_is_taxed_on_its_own_rate_and_the_cod_cash_reconciles_against_the_h
     // that the two rates are separate figures on one bill.
     let mut config = app.shop_config();
     config.billing.delivery_charge = Money::from_paise(4_000);
-    config.billing.delivery_charge_tax_bp = 500;
+    config.billing.delivery_charge_tax = "tax_food_5".to_owned();
     app.publish_shop_config(config);
 
     let (order_id, total, bill) = a_delivery_paid_in_cash(&app);

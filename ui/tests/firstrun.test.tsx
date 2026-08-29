@@ -13,19 +13,19 @@ vi.mock('../src/ipc/call', () => ({
 const { FirstRun } = await import('../src/setup/FirstRun');
 
 import type { FirstRunView } from '../src/ipc/generated/FirstRunView';
-import type { TaxClassView } from '../src/ipc/generated/TaxClassView';
+import type { TaxSlabView } from '../src/ipc/generated/TaxSlabView';
 
-const shopsClasses: TaxClassView[] = [
+const shopsClasses: TaxSlabView[] = [
   {
     id: 'tax_food_5',
-    name: 'Restaurant food 5%',
+    name: 'GST 5%',
     rate: '5%',
     rateBp: 500,
     kind: 'gst',
-    basis: 'exclusive',
-    treatment: 'Tax added on top',
+    basis: 'shop',
+    priceWords: 'Shop default (added on top)',
     isActive: true,
-    itemsUsing: 0n,
+    itemsUsing: 0,
   },
   {
     id: 'tax_liquor',
@@ -34,9 +34,9 @@ const shopsClasses: TaxClassView[] = [
     rateBp: 2000,
     kind: 'outside_gst',
     basis: 'inclusive',
-    treatment: 'Outside GST',
+    priceWords: 'In the price',
     isActive: true,
-    itemsUsing: 0n,
+    itemsUsing: 0,
   },
 ];
 
@@ -69,7 +69,7 @@ function wire(over: Partial<FirstRunView> = {}) {
         return Promise.resolve({ signedIn: true });
       case 'save_menu_item':
         return Promise.resolve([]);
-      case 'menu_tax_classes':
+      case 'tax_slabs':
         return Promise.resolve(shopsClasses);
       default:
         return Promise.resolve(null);
@@ -196,7 +196,7 @@ it('offers the shop own tax classes, not a hardcoded slab list', async () => {
   wire({ hasShop: true, hasDetails: true, hasPin: true });
   render(<FirstRun onDone={vi.fn()} />);
 
-  const tax = (await screen.findByLabelText('Tax')) as HTMLSelectElement;
+  const tax = (await screen.findByLabelText('Tax slab')) as HTMLSelectElement;
   await waitFor(() => expect(tax.options.length).toBe(2));
   expect([...tax.options].map((o) => o.value)).toEqual(['tax_food_5', 'tax_liquor']);
   expect([...tax.options].some((o) => o.value === 'tax_packaged_12')).toBe(false);

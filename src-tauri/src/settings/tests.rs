@@ -164,7 +164,7 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
         ("round off", "billing.rounding"),
         ("logo", "receipt.logo"),
         ("5 am", "day.starts_at_minutes"),
-        ("igst", "store.state_code"),
+        ("utgst", "store.state_code"),
         ("composition", "store.registration"),
         ("pen drive", "backup.second_folder"),
         ("hsn", "receipt.show.hsn"),
@@ -280,9 +280,13 @@ fn a_value_of_the_wrong_sort_in_a_file_is_refused() {
 #[test]
 fn charges_follow_the_order_type() {
     use mb_core::{ChargeKind, OrderType};
+    let book = mb_core::TaxBook::new(mb_core::starting_classes(), mb_core::PriceBasis::Exclusive);
     let mut billing = Billing::default();
     assert!(
-        billing.charges_for(OrderType::DineIn).is_empty(),
+        billing
+            .charges_for(OrderType::DineIn, &book)
+            .expect("charges")
+            .is_empty(),
         "a shop that has not been asked charges nothing"
     );
 
@@ -290,19 +294,28 @@ fn charges_follow_the_order_type() {
     billing.packing_charge = mb_core::Money::from_paise(1_000);
     billing.delivery_charge = mb_core::Money::from_paise(3_000);
 
-    let dine_in = billing.charges_for(OrderType::DineIn);
+    let dine_in = billing.charges_for(OrderType::DineIn, &book).expect("charges");
     assert_eq!(dine_in.len(), 1);
     assert_eq!(dine_in[0].kind, ChargeKind::Service);
 
-    let parcel = billing.charges_for(OrderType::Parcel);
+    let parcel = billing.charges_for(OrderType::Parcel, &book).expect("charges");
     assert_eq!(parcel.len(), 1);
     assert_eq!(parcel[0].kind, ChargeKind::Packing);
     // A parcel is not a table: no service charge on food nobody served.
     assert!(!parcel.iter().any(|c| c.kind == ChargeKind::Service));
 
-    let delivery = billing.charges_for(OrderType::Delivery);
+    let delivery = billing.charges_for(OrderType::Delivery, &book).expect("charges");
     assert_eq!(delivery.len(), 1);
     assert_eq!(delivery[0].kind, ChargeKind::Delivery);
+
+    // The service charge reads its slab: 18% on a bill of 5% food, and a slab that is gone is
+    // an error rather than a silent zero.
+    assert_eq!(
+        dine_in[0].tax.rate,
+        mb_core::TaxRate::from_percent(18).expect("18%")
+    );
+    billing.service_charge_tax = "tax_nope".to_owned();
+    assert!(billing.charges_for(OrderType::DineIn, &book).is_err());
 }
 
 /// The day rule reaches `mb_core` intact, and a corrupt one does not stop the shop billing.

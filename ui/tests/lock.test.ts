@@ -16,7 +16,6 @@ function person(id: string, name: string, extra: Partial<PersonView> = {}): Pers
   return {
     id,
     name,
-    code: null,
     role: 'Cashier',
     status: 'active',
     hasPin: true,
@@ -28,11 +27,10 @@ function person(id: string, name: string, extra: Partial<PersonView> = {}): Pers
   };
 }
 
-const REKHA = person('staff_1', 'Rekha', { code: 'R1' });
-const RAVI = person('staff_2', 'Ravi', { code: 'R2' });
+const REKHA = person('staff_1', 'Rekha');
+const RAVI = person('staff_2', 'Ravi');
 /** Somebody the recovery code is actually allowed to touch. */
 const MEENA = person('staff_3', 'Meena', {
-  code: 'M1',
   role: 'Owner',
   permissions: ['bill.create', 'staff.manage'],
 });
@@ -62,18 +60,20 @@ describe('choosing who you are', () => {
     if (state.mode.kind === 'pin') expect(state.mode.person.name).toBe('Rekha');
   });
 
-  it('finds a person by their staff code and Enter', () => {
+  it('finds a person by typing enough of their name and Enter', () => {
     // The same trick as the billing screen's table numbers: a keyboard person never has to
-    // reach for the list.
-    const state = drive([{ kind: 'typed', text: 'r2' }, { kind: 'submit' }]);
+    // reach for the list. "ra" is only Ravi; "re" is only Rekha.
+    const state = drive([{ kind: 'typed', text: 'ra' }, { kind: 'submit' }]);
     expect(state.mode.kind).toBe('pin');
     if (state.mode.kind === 'pin') expect(state.mode.person.id).toBe('staff_2');
+    const whole = drive([{ kind: 'typed', text: 'REKHA' }, { kind: 'submit' }]);
+    if (whole.mode.kind === 'pin') expect(whole.mode.person.id).toBe('staff_1');
   });
 
-  it('says so when the code matches nobody, rather than doing nothing', () => {
+  it('says so when the name matches nobody, rather than doing nothing', () => {
     const state = drive([{ kind: 'typed', text: 'zz' }, { kind: 'submit' }]);
     expect(state.mode.kind).toBe('who');
-    expect(state.problem).toContain('staff code');
+    expect(state.problem).toContain('name');
   });
 
   it('will not open the pad for somebody who is locked out', () => {

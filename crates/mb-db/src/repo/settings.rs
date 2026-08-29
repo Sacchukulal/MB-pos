@@ -1,6 +1,6 @@
 //! Typed settings, the store profile, and printers.
 
-use mb_core::{Money, Timestamp};
+use mb_core::{Money, PriceBasis, Timestamp};
 use rusqlite::Transaction;
 
 use crate::encode;
@@ -83,6 +83,8 @@ pub struct StoreProfile {
     pub upi_reference: Option<String>,
     /// `unregistered`, `composition` or `regular`.
     pub registration: String,
+    /// Whether a menu price already contains its tax, unless a slab or an item says otherwise.
+    pub price_basis: PriceBasis,
 }
 
 /// 11 lives on this: `offset_x_mm` / `offset_y_mm`.
@@ -172,8 +174,8 @@ impl<'a> SettingsRepo<'a> {
         self.tx.execute(
             "INSERT INTO store_profile (outlet_id, name, address, phone, gstin, fssai, state_code,
                                         upi_id, upi_merchant_name, upi_reference, registration,
-                                        updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                                        price_basis, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?13, ?12)
              ON CONFLICT (outlet_id) DO UPDATE SET name              = excluded.name,
                                                    address           = excluded.address,
                                                    phone             = excluded.phone,
@@ -184,6 +186,7 @@ impl<'a> SettingsRepo<'a> {
                                                    upi_merchant_name = excluded.upi_merchant_name,
                                                    upi_reference     = excluded.upi_reference,
                                                    registration      = excluded.registration,
+                                                   price_basis       = excluded.price_basis,
                                                    updated_at        = excluded.updated_at",
             rusqlite::params![
                 outlet,
@@ -198,6 +201,7 @@ impl<'a> SettingsRepo<'a> {
                 profile.upi_reference,
                 profile.registration,
                 encode::timestamp_to_sql(at),
+                encode::price_basis_to_sql(profile.price_basis),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "store_profile", outlet, Op::Upsert, at)
@@ -206,7 +210,7 @@ impl<'a> SettingsRepo<'a> {
     pub fn store_profile(&self, outlet: &str) -> Result<Option<StoreProfile>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT name, address, phone, gstin, fssai, state_code, upi_id, upi_merchant_name,
-                    upi_reference, registration
+                    upi_reference, registration, price_basis
                FROM store_profile WHERE outlet_id = ?1",
         )?;
         let mut rows = stmt.query([outlet])?;
@@ -224,6 +228,7 @@ impl<'a> SettingsRepo<'a> {
             upi_merchant_name: row.get(7)?,
             upi_reference: row.get(8)?,
             registration: row.get(9)?,
+            price_basis: encode::price_basis_from_sql(&row.get::<_, String>(10)?)?,
         }))
     }
 

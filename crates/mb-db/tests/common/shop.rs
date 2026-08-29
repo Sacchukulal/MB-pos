@@ -59,7 +59,6 @@ fn seed_masters(db: &Db) {
             &StaffMember {
                 id: StaffId::new("staff_1"),
                 name: "Ravi".to_owned(),
-                code: Some("R1".to_owned()),
                 role_id: Some("role_cashier".to_owned()),
                 role_name: None,
                 // A REAL Argon2 hash, not a placeholder string.
@@ -82,7 +81,6 @@ fn seed_masters(db: &Db) {
             &StaffMember {
                 id: StaffId::new("staff_2"),
                 name: "Priya".to_owned(),
-                code: None,
                 role_id: None,
                 role_name: None,
                 pin_hash: None,
@@ -129,6 +127,7 @@ fn seed_masters(db: &Db) {
                 is_active: true,
                 // The test shop has one kitchen screen, like a real small shop.
                 station: None,
+                default_tax_class_id: None,
             },
             at(0),
         )?;
@@ -140,6 +139,7 @@ fn seed_masters(db: &Db) {
                 sort_order: 1,
                 is_active: true,
                 station: None,
+                default_tax_class_id: None,
             },
             at(0),
         )?;
@@ -162,6 +162,7 @@ fn seed_masters(db: &Db) {
                 upi_merchant_name: Some("Anna Kuteera".to_owned()),
                 upi_reference: Some("MB1".to_owned()),
                 registration: "regular".to_owned(),
+                price_basis: mb_core::PriceBasis::Exclusive,
             },
             at(0),
         )?;
@@ -217,8 +218,8 @@ fn menu() -> Vec<MenuItem> {
             category_id: Some(CategoryId::new("cat_food")),
             name: "Masala Dosa".to_owned(),
             unit_price: Money::from_paise(12_000),
-            tax_class_id: Some(mb_core::TaxClassId::new("tax_food_5")),
-            tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+            tax_class_id: mb_core::TaxClassId::new("tax_food_5"),
+            price_basis: None,
             hsn: Some("2106".to_owned()),
             cost_price: Some(Money::from_paise(4_000)),
             short_code: Some("MD".to_owned()),
@@ -233,12 +234,9 @@ fn menu() -> Vec<MenuItem> {
             category_id: Some(CategoryId::new("cat_food")),
             name: "Water".to_owned(),
             unit_price: Money::from_paise(2_000),
-            // No class, deliberately. This is an inclusive-priced one-off, and the seeded
-            // "Packaged goods 18%" is exclusive — an item pointing at a class must carry that
-            // class's tax spec, so giving it one here would be a fixture describing a shop that
-            // cannot exist.
-            tax_class_id: None,
-            tax: TaxSpec::gst_inclusive(TaxRate::from_percent(18).expect("18%")),
+            // On the 18% slab, but priced tax-in by its own say — the item layer of the book.
+            tax_class_id: mb_core::TaxClassId::new("tax_packaged_18"),
+            price_basis: Some(mb_core::PriceBasis::Inclusive),
             hsn: Some("2201".to_owned()),
             cost_price: None,
             short_code: None,
@@ -253,8 +251,8 @@ fn menu() -> Vec<MenuItem> {
             category_id: Some(CategoryId::new("cat_bar")),
             name: "Beer".to_owned(),
             unit_price: Money::from_paise(22_000),
-            tax_class_id: Some(mb_core::TaxClassId::new("tax_liquor")),
-            tax: TaxSpec::liquor(TaxRate::ZERO),
+            tax_class_id: mb_core::TaxClassId::new("tax_liquor"),
+            price_basis: None,
             hsn: None,
             cost_price: Some(Money::from_paise(14_000)),
             short_code: Some("BR".to_owned()),
@@ -269,8 +267,8 @@ fn menu() -> Vec<MenuItem> {
             category_id: Some(CategoryId::new("cat_food")),
             name: "Mysore Pak (by weight)".to_owned(),
             unit_price: Money::from_paise(60_000),
-            tax_class_id: Some(mb_core::TaxClassId::new("tax_food_5")),
-            tax: TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+            tax_class_id: mb_core::TaxClassId::new("tax_food_5"),
+            price_basis: None,
             hsn: Some("1704".to_owned()),
             cost_price: None,
             short_code: None,
@@ -405,11 +403,17 @@ fn seed_orders(db: &Db) -> Vec<OrderId> {
     ids
 }
 
+/// The seeded slabs, priced tax-added — what the fixture shop's book says.
+pub fn book() -> mb_core::TaxBook {
+    mb_core::TaxBook::new(mb_core::starting_classes(), mb_core::PriceBasis::Exclusive)
+}
+
 fn cart_for(n: i64) -> Cart {
     let items = menu();
+    let book = book();
     let mut cart = Cart::new();
     cart.add(
-        items[0].snapshot(),
+        items[0].snapshot(&book).expect("dosa"),
         Qty::from_whole(1 + n % 3).expect("qty"),
         if n % 3 == 0 {
             Some("extra crispy".to_owned())
@@ -420,7 +424,7 @@ fn cart_for(n: i64) -> Cart {
     )
     .expect("add");
     cart.add(
-        items[1].snapshot(),
+        items[1].snapshot(&book).expect("water"),
         Qty::from_whole(2).expect("qty"),
         None,
         vec![],
@@ -429,7 +433,7 @@ fn cart_for(n: i64) -> Cart {
     if n % 2 == 0 {
         // A non-GST line, so a bar can bill.
         cart.add(
-            items[2].snapshot(),
+            items[2].snapshot(&book).expect("beer"),
             Qty::from_whole(1).expect("qty"),
             None,
             vec![],

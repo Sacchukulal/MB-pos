@@ -23,7 +23,8 @@ fn a_kitchen(scratch: &Scratch, name: &str) -> App {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, path);
     seed(&app);
-    let mut config = crate::settings::ShopConfig::default();
+    // The shop's own configuration, book included — a default one has no slabs.
+    let mut config = app.shop_config();
     config.billing.kitchen_screen = true;
     app.publish_shop_config(config);
     app
@@ -75,6 +76,7 @@ fn seed(app: &App) {
                             sort_order: 0,
                             is_active: true,
                             station: station.map(ToOwned::to_owned),
+                            default_tax_class_id: None,
                         },
                         at,
                     )?;
@@ -110,8 +112,8 @@ fn seed(app: &App) {
                             category_id: Some(CategoryId::new(category)),
                             name: name.to_owned(),
                             unit_price: Money::from_paise(9_000),
-                            tax: mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
-                            tax_class_id: None,
+                            tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                            price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                             hsn: None,
                             cost_price: None,
                             short_code: None,
@@ -149,7 +151,7 @@ fn seat(app: &App, items: &[&str]) -> String {
     for item_id in items {
         let item = app.find_menu_item(item_id).expect("on the menu");
         cart.add(
-            crate::billing::snapshot_for(&item),
+            crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
             mb_core::Qty::from_whole(1).expect("in range"),
             None,
             Vec::new(),
@@ -686,7 +688,7 @@ fn each_category_goes_to_its_own_printer() {
             state
                 .cart
                 .add(
-                    crate::billing::snapshot_for(&item),
+                    crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                     mb_core::Qty::from_whole(1).expect("in range"),
                     None,
                     Vec::new(),
@@ -735,7 +737,7 @@ fn an_unrouted_shop_still_prints_one_ticket() {
             state
                 .cart
                 .add(
-                    crate::billing::snapshot_for(&item),
+                    crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                     mb_core::Qty::from_whole(1).expect("in range"),
                     None,
                     Vec::new(),
@@ -803,7 +805,7 @@ fn a_naan_on_table_5(app: &App) {
         state
             .cart
             .add(
-                crate::billing::snapshot_for(&item),
+                crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                 mb_core::Qty::from_whole(1).expect("in range"),
                 None,
                 Vec::new(),
@@ -950,7 +952,7 @@ fn a_dine_in_order_with_no_table_prints_nothing() {
         state
             .cart
             .add(
-                crate::billing::snapshot_for(&item),
+                crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                 mb_core::Qty::from_whole(1).expect("in range"),
                 None,
                 Vec::new(),

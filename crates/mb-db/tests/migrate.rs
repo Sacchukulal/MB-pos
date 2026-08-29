@@ -179,7 +179,7 @@ fn the_tax_rework_columns_are_there_and_nothing_dangles() {
     // The new shape, table by table.
     for (table, wanted) in [
         ("tax_classes", &["kind", "basis"][..]),
-        ("items", &["tax_kind", "tax_basis"]),
+        ("items", &["tax_class_id", "price_basis"]),
         ("order_lines", &["tax_kind", "tax_basis"]),
         ("bill_lines", &["tax_kind", "tax_basis", "vat"]),
         ("bill_charges", &["tax_kind", "tax_basis"]),
@@ -337,19 +337,20 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     let applied = migrate::apply_all(&mut conn).expect("0004 runs");
     assert_eq!(
         applied.ran,
-        vec![4, 5, 6, 7],
+        vec![4, 5, 6, 7, 8, 9, 10],
         "the rework and what came after it should have been left to do"
     );
 
-    // tax_classes: treatment splits into kind + basis, the rest is untouched.
+    // tax_classes: treatment splits into kind + basis (0004); an exclusive basis then becomes
+    // "no opinion" (0008), because that is what it always meant.
     for (id, kind, basis, rate_bp, name, is_active, sort_order) in [
-        ("tc_excl", "gst", "exclusive", 500, "Old exclusive", 1, 41),
-        ("tc_incl", "gst", "inclusive", 1800, "Old inclusive", 0, 42),
-        ("tc_exempt", "exempt", "exclusive", 250, "Old exempt", 1, 43),
+        ("tc_excl", "gst", Value::Null, 500, "Old exclusive", 1, 41),
+        ("tc_incl", "gst", txt("inclusive"), 1800, "Old inclusive", 0, 42),
+        ("tc_exempt", "exempt", Value::Null, 250, "Old exempt", 1, 43),
         (
             "tc_nongst",
             "outside_gst",
-            "exclusive",
+            Value::Null,
             1400,
             "Old non-GST",
             0,
@@ -362,7 +363,7 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
             id,
             &[
                 ("kind", txt(kind)),
-                ("basis", txt(basis)),
+                ("basis", basis),
                 ("rate_bp", num(rate_bp)),
                 ("name", txt(name)),
                 ("is_active", num(is_active)),
@@ -376,14 +377,13 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
         "items",
         "itm_incl",
         &[
-            ("tax_kind", txt("gst")),
-            ("tax_basis", txt("inclusive")),
+            // Priced tax-in by its own say: the 12% slab has no opinion and the shop says added.
+            ("price_basis", txt("inclusive")),
             ("outlet_id", txt("outlet_default")),
             ("category_id", txt("cat_1")),
             ("name", txt("Filter Coffee")),
             ("unit_price", num(4567)),
             ("tax_class_id", txt("tax_packaged_12")),
-            ("tax_rate_bp", num(1800)),
             ("hsn", txt("2101")),
             ("cost_price", num(1234)),
             ("short_code", txt("FC")),
@@ -401,12 +401,11 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
         "items",
         "itm_nongst",
         &[
-            ("tax_kind", txt("outside_gst")),
-            ("tax_basis", txt("exclusive")),
+            // The liquor slab says tax-in; this row said added, so it keeps its own say.
+            ("price_basis", txt("exclusive")),
             ("name", txt("Old Monk")),
             ("unit_price", num(28999)),
             ("tax_class_id", txt("tax_liquor")),
-            ("tax_rate_bp", num(0)),
             ("hsn", Value::Null),
             ("cost_price", num(17777)),
             ("short_code", txt("OM")),
@@ -571,18 +570,25 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
             ("name", txt("Liquor — state VAT")),
         ],
     );
+    // 0004 added a twin 5% seed; 0008 folded it into the one that was there.
+    let twins: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tax_classes WHERE id = 'tax_goods_5'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(twins, 0, "the twin 5% seed survived 0008");
     check(
         &conn,
         "tax_classes",
-        "tax_goods_5",
+        "tax_food_5",
         &[
-            ("outlet_id", txt("outlet_default")),
-            ("name", txt("Packaged goods 5%")),
+            ("name", txt("GST 5%")),
             ("rate_bp", num(500)),
             ("kind", txt("gst")),
-            ("basis", txt("exclusive")),
+            ("basis", Value::Null),
             ("is_active", num(1)),
-            ("sort_order", num(5)),
         ],
     );
 
@@ -652,4 +658,142 @@ fn ledger(conn: &Connection) -> Vec<(i64, String)> {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("rows")
+}
+
+/// 0008 landed: tax lives in one place. An item's copied rate is gone, an item with no slab
+/// got the slab its copy described, the twin 5% seed merged, and a charge's rate became a slab.
+#[test]
+fn the_tax_book_moves_every_copy_into_the_slabs() {
+    const OLD_ROWS: &str = "
+        INSERT INTO store_profile (outlet_id, name, address, updated_at)
+        VALUES ('outlet_default', 'Anna Tiffin', '12 MG Road', 555);
+
+        INSERT INTO categories (id, outlet_id, name, default_tax_class_id, created_at, updated_at)
+        VALUES ('cat_1', 'outlet_default', 'Snacks', 'tax_goods_5', 1, 2);
+
+        INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id,
+            tax_rate_bp, tax_kind, tax_basis, created_at, updated_at)
+        VALUES ('itm_orphan', 'outlet_default', 'cat_1', 'Water', 2000, NULL,
+                1800, 'gst', 'inclusive', 0, 0),
+               ('itm_biscuit', 'outlet_default', 'cat_1', 'Biscuit', 1000, 'tax_goods_5',
+                500, 'gst', 'exclusive', 0, 0),
+               ('itm_odd', 'outlet_default', 'cat_1', 'Odd thing', 1000, NULL,
+                250, 'gst', 'exclusive', 0, 0);
+
+        INSERT INTO settings (outlet_id, key, value, value_type, updated_at)
+        VALUES ('outlet_default', 'billing.service_charge_tax_bp',  '1800', 'int', 7),
+               ('outlet_default', 'billing.packing_charge_tax_bp',  '500',  'int', 7),
+               ('outlet_default', 'billing.delivery_charge_tax_bp', '0',    'int', 7);
+    ";
+
+    let scratch = Scratch::new("tax_book_data");
+    let mut conn = Connection::open(scratch.db_path()).expect("open");
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+             version    INTEGER NOT NULL PRIMARY KEY,
+             name       TEXT    NOT NULL,
+             checksum   TEXT    NOT NULL,
+             applied_at INTEGER NOT NULL,
+             run_ms     INTEGER NOT NULL
+         ) STRICT;",
+    )
+    .expect("ledger");
+    for m in MIGRATIONS.iter().filter(|m| m.version < 8) {
+        run_single(&mut conn, m).expect("the schema as it stood before the book");
+    }
+    conn.execute_batch(OLD_ROWS).expect("seed old-format rows");
+
+    let applied = migrate::apply_all(&mut conn).expect("0008 runs");
+    assert_eq!(applied.ran, vec![8, 9, 10]);
+
+    // The copied columns are gone from items; the slab pointer is what is left.
+    let columns: Vec<String> = mb_db::schema::columns(&conn, "items")
+        .expect("columns")
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    for gone in ["tax_rate_bp", "tax_kind", "tax_basis"] {
+        assert!(!columns.iter().any(|c| c == gone), "items.{gone} survived 0008");
+    }
+    let old_keys: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key LIKE '%_charge_tax_bp'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(old_keys, 0, "the old charge-rate settings survived 0008");
+
+    // The orphan found the seeded 18% slab and kept its own tax-in say.
+    check(
+        &conn,
+        "items",
+        "itm_orphan",
+        &[
+            ("tax_class_id", txt("tax_packaged_18")),
+            ("price_basis", txt("inclusive")),
+        ],
+    );
+    // The twin 5% seed merged into one, and the name says the rate.
+    check(
+        &conn,
+        "items",
+        "itm_biscuit",
+        &[("tax_class_id", txt("tax_food_5")), ("price_basis", Value::Null)],
+    );
+    check(&conn, "categories", "cat_1", &[("default_tax_class_id", txt("tax_food_5"))]);
+    check(&conn, "tax_classes", "tax_food_5", &[("name", txt("GST 5%"))]);
+    let twins: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tax_classes WHERE id = 'tax_goods_5'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(twins, 0, "the twin 5% seed is still there");
+    // A rate no slab carried got one, so the item's tax did not change.
+    check(
+        &conn,
+        "items",
+        "itm_odd",
+        &[("tax_class_id", txt("tax_gst_250"))],
+    );
+    check(
+        &conn,
+        "tax_classes",
+        "tax_gst_250",
+        &[("name", txt("GST 2.50%")), ("rate_bp", num(250)), ("kind", txt("gst"))],
+    );
+    // The new seeds are in, and the shop prices tax-added until it says otherwise.
+    check(&conn, "tax_classes", "tax_gst_0", &[("rate_bp", num(0)), ("is_active", num(1))]);
+    check(&conn, "tax_classes", "tax_gst_40", &[("rate_bp", num(4000))]);
+    let shop_basis: String = conn
+        .query_row("SELECT price_basis FROM store_profile", [], |r| r.get(0))
+        .expect("the shop has a pricing default");
+    assert_eq!(shop_basis, "exclusive");
+
+    // The charges point at slabs that carry the rate they had.
+    for (key, slab) in [
+        ("billing.service_charge_tax", "tax_packaged_18"),
+        ("billing.packing_charge_tax", "tax_food_5"),
+        ("billing.delivery_charge_tax", "tax_gst_0"),
+    ] {
+        let value: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE outlet_id = 'outlet_default' AND key = ?1",
+                [key],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|e| panic!("{key} is missing: {e}"));
+        assert_eq!(value, slab, "{key}");
+    }
+
+    let dangling: Vec<String> = conn
+        .prepare("PRAGMA foreign_key_check")
+        .expect("prepare")
+        .query_map([], |r| r.get::<_, String>(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    assert!(dangling.is_empty(), "these tables have dangling rows: {dangling:?}");
 }

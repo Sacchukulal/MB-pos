@@ -423,6 +423,7 @@ fn seed_menu(app: &App) {
                             sort_order: i64::try_from(n).expect("seven categories"),
                             is_active: true,
                             station: station.map(str::to_owned),
+                            default_tax_class_id: None,
                         },
                         crate::flows::now(),
                     )?;
@@ -435,8 +436,10 @@ fn seed_menu(app: &App) {
                             category_id: Some(mb_core::CategoryId::new(*category)),
                             name: (*name).to_owned(),
                             unit_price: Money::from_paise(rupees * 100),
-                            tax: mb_core::TaxSpec::gst_inclusive(rate_of(*rate)),
-                            tax_class_id: None,
+                            // The seeded slab for the rate; the demo menu is priced tax-in.
+                            tax_class_id: mb_core::seeded_slab_for(mb_core::TaxKind::Gst, rate_of(*rate))
+                                .expect("a seeded slab for every demo rate"),
+                            price_basis: Some(mb_core::PriceBasis::Inclusive),
                             hsn: None,
                             // A cost on the food, so the food-cost and profit screens are not a
                             // column of dashes.
@@ -1267,7 +1270,6 @@ fn seed_people(app: &App) {
             crate::ipc::StaffEdit {
                 id: (*id).to_owned(),
                 name: (*name).to_owned(),
-                code: Some(name.chars().take(2).collect()),
                 role_id: Some(
                     match *department {
                         "Counter" => "role_manager",
@@ -1335,7 +1337,6 @@ fn seed_people(app: &App) {
         crate::ipc::StaffEdit {
             id: "staff_prakash".to_owned(),
             name: "Prakash".to_owned(),
-            code: Some("Pr".to_owned()),
             role_id: Some("role_waiter".to_owned()),
             status: "active".to_owned(),
         },

@@ -429,7 +429,6 @@ fn the_administrators_are_the_active_people_who_can_manage_staff() {
             &mb_db::repo::people::StaffMember {
                 id: StaffId::new("staff_owner"),
                 name: "Sachin".to_owned(),
-                code: Some("1".to_owned()),
                 role_id: Some(RolePreset::Owner.id().to_owned()),
                 role_name: None,
                 pin_hash: None,
@@ -565,7 +564,6 @@ fn the_last_administrator_cannot_be_removed() {
             &mb_db::repo::people::StaffMember {
                 id: StaffId::new("staff_owner"),
                 name: "Sachin".to_owned(),
-                code: None,
                 role_id: Some(RolePreset::Owner.id().to_owned()),
                 role_name: None,
                 pin_hash: None,

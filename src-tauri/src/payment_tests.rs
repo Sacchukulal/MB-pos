@@ -30,8 +30,8 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
                 category_id: None,
                 name: "Masala Dosa".to_owned(),
                 unit_price: Money::from_paise(12_000),
-                tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
-                tax_class_id: None,
+                tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                 hsn: None,
                 cost_price: None,
                 short_code: None,
@@ -63,7 +63,6 @@ fn as_owner(app: &App, id: &str, name: &str) {
         StaffEdit {
             id: id.to_owned(),
             name: name.to_owned(),
-            code: None,
             role_id: Some(RolePreset::Cashier.id().to_owned()),
             status: "active".to_owned(),
         },

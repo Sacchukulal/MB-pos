@@ -139,8 +139,21 @@ pub struct Applied {
 
 // The login, kept fresh.
 
-/// Call under the login, refreshing it once when the access token has run out.
+/// An RPC under the login, refreshing it once when the access token has run out.
 fn call(app: &App, name: &str, body: &Value) -> Result<Value, LinkError> {
+    under_login(app, |link, token| link.rpc(name, body, token))
+}
+
+/// An Edge Function under the login, the same way.
+pub fn edge(app: &App, name: &str, body: &Value) -> Result<Value, LinkError> {
+    under_login(app, |link, token| link.edge(name, body, token))
+}
+
+/// Run one call under the login, refreshing it once when the access token has run out.
+fn under_login(
+    app: &App,
+    go: impl Fn(&dyn crate::cloud::Link, &str) -> Result<Value, LinkError>,
+) -> Result<Value, LinkError> {
     let Some(login) = app.device_login() else {
         return Err(LinkError::Dead(
             "This counter has no login to the cloud yet. Enter the licence key on the Account screen."
@@ -148,7 +161,7 @@ fn call(app: &App, name: &str, body: &Value) -> Result<Value, LinkError> {
         ));
     };
     let link = app.link();
-    match link.rpc(name, body, &login.access_token) {
+    match go(link.as_ref(), &login.access_token) {
         Err(LinkError::Unauthorised) => {}
         other => return other,
     }
@@ -170,7 +183,7 @@ fn call(app: &App, name: &str, body: &Value) -> Result<Value, LinkError> {
         ..login
     };
     app.set_device_login(Some(fresh));
-    link.rpc(name, body, &refreshed.access_token)
+    go(link.as_ref(), &refreshed.access_token)
 }
 
 // Up.
@@ -984,8 +997,8 @@ mod tests {
             "roles": [{ "id": "role_phone", "updated_at": at, "deleted": false,
                         "data": { "name": "From the phone", "is_builtin": false, "permissions": ["bill.create", "no.such.permission"] } }],
             "staff": [{ "id": "staff_phone", "updated_at": at, "deleted": false,
-                        "data": { "role_id": "role_phone", "name": "Phone Person", "code": "PP1", "status": "active",
-                                  "employment_type": "full_time", "can_login_on_phone": true } }],
+                        "data": { "role_id": "role_phone", "name": "Phone Person", "status": "active",
+                                  "employment_type": "full_time" } }],
             "staff_secrets": [{ "staff_id": "staff_phone", "pin_hash": "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA", "updated_at": at }],
             "notices": [{ "id": "n1", "title": "Hello", "body": "A notice.", "starts_at": at - 1000, "ends_at": null, "updated_at": at, "deleted": false }],
             "licence_changed": true

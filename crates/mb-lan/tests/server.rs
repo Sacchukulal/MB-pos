@@ -70,27 +70,6 @@ impl Counter for FakeCounter {
         "Anna Kuteera".to_owned()
     }
 
-    fn people(&self) -> Vec<mb_lan::Person> {
-        vec![
-            mb_lan::Person {
-                id: "staff_1".to_owned(),
-                name: "Ravi".to_owned(),
-            },
-            mb_lan::Person {
-                id: "staff_2".to_owned(),
-                name: "Anita".to_owned(),
-            },
-        ]
-    }
-
-    fn check_pin(&self, staff_id: &str, pin: &str) -> Result<(), Refusal> {
-        match (staff_id, pin) {
-            ("staff_1", "1234") | ("staff_2", "2468") => Ok(()),
-            ("staff_1" | "staff_2", _) => Err(Refusal::WrongPin(u32::MAX)),
-            _ => Err(Refusal::Refused("That person is not on the staff list.".to_owned())),
-        }
-    }
-
     fn device_limit(&self) -> u32 {
         self.limit.load(Ordering::SeqCst)
     }
@@ -129,6 +108,7 @@ impl Counter for FakeCounter {
             id: row.id.clone(),
             name: row.name.clone(),
             staff_id: row.staff_id.clone(),
+            staff_name: row.staff_id.as_ref().map(|_| "Ravi".to_owned()),
             permissions: row.permissions.clone(),
         })
     }
@@ -337,6 +317,7 @@ async fn pair_a_phone(h: &Harness, name: &str) -> PairedDevice {
             name: name.to_owned(),
             platform: "android".to_owned(),
             token,
+            install: None,
         })
         .send()
         .await
@@ -358,6 +339,7 @@ async fn pair_a_phone(h: &Harness, name: &str) -> PairedDevice {
                 name: waiting.name.clone(),
                 platform: waiting.platform.clone(),
                 token: String::new(),
+            install: None,
             },
             &waiting.name,
             &waiting.platform,
@@ -714,6 +696,7 @@ async fn the_pairing_door_shuts_and_opens_again() {
                     name: "Guessing".to_owned(),
                     platform: "android".to_owned(),
                     token: "wrong".to_owned(),
+            install: None,
                 })
                 .send()
                 .await
@@ -741,6 +724,7 @@ async fn the_pairing_door_shuts_and_opens_again() {
             name: "Guessing".to_owned(),
             platform: "android".to_owned(),
             token: "wrong".to_owned(),
+            install: None,
         })
         .send()
         .await
@@ -817,6 +801,7 @@ async fn a_till_meets_joins_and_forwards_over_the_real_wire() {
                             name: waiting.name.clone(),
                             platform: waiting.platform.clone(),
                             token: String::new(),
+            install: None,
                         },
                         &waiting.name,
                         &waiting.platform,
@@ -877,6 +862,7 @@ async fn a_used_token_cannot_pair_a_second_phone() {
                     name,
                     platform: "android".to_owned(),
                     token,
+            install: None,
                 })
                 .send()
                 .await
@@ -910,6 +896,7 @@ async fn the_device_limit_refuses_in_a_sentence_with_the_number() {
             name: "Phone three".to_owned(),
             platform: "android".to_owned(),
             token,
+            install: None,
         })
         .send()
         .await
@@ -945,6 +932,7 @@ async fn a_full_plan_refuses_a_new_till_and_leaves_the_phones_alone() {
             name: "Second counter".to_owned(),
             platform: "till".to_owned(),
             token,
+            install: None,
         })
         .send()
         .await
@@ -1140,7 +1128,7 @@ async fn a_counter_restart_never_leaves_a_phone_silently_ahead() {
 /// and proves it with that person's PIN — and nobody at the counter presses anything. A wrong
 /// PIN costs a try; three cost the scan. A shared tablet says "nobody" and waits for Allow.
 #[tokio::test]
-async fn a_phone_claims_its_person_with_a_pin_and_needs_nobody_at_the_counter() {
+async fn a_phone_waits_for_allow_and_the_person_is_chosen_at_the_counter() {
     let h = Harness::start();
     let (token, _) = h.shared.desk.open(h.clock.now());
 
@@ -1151,6 +1139,7 @@ async fn a_phone_claims_its_person_with_a_pin_and_needs_nobody_at_the_counter() 
             name: "Ravi's phone".to_owned(),
             platform: "android".to_owned(),
             token,
+            install: None,
         })
         .send()
         .await
@@ -1159,40 +1148,47 @@ async fn a_phone_claims_its_person_with_a_pin_and_needs_nobody_at_the_counter() 
         .await
         .expect("json");
     let request_id = asked["request_id"].as_str().expect("id").to_owned();
-    let names: Vec<&str> = asked["people"]
-        .as_array()
-        .expect("the staff list rides on the 202")
-        .iter()
-        .filter_map(|p| p["name"].as_str())
-        .collect();
-    assert_eq!(names, vec!["Ravi", "Anita"]);
+    // Nothing on the phone to pick from: the staff list stays at the counter.
+    assert!(asked.get("people").is_none(), "{asked}");
 
     // The code moved on the moment it was used: the next waiter scans a fresh one.
     let (next, _) = h.shared.desk.showing(h.clock.now()).expect("still showing");
     assert_ne!(next, asked["request_id"]);
 
-    let claim = |staff: &str, pin: &str| {
-        let client = h.client.clone();
-        let url = h.url(&format!("/v1/pair/{request_id}/claim"));
-        let body = mb_lan::ClaimRequest {
-            staff_id: Some(staff.to_owned()),
-            pin: Some(pin.to_owned()),
-        };
-        async move { client.post(url).json(&body).send().await.expect("claimed") }
-    };
+    // Polling while nobody has pressed Allow: 202, and it stays in the queue.
+    let polled = h
+        .client
+        .get(h.url(&format!("/v1/pair/{request_id}")))
+        .send()
+        .await
+        .expect("polled");
+    assert_eq!(polled.status(), 202);
+    assert_eq!(h.shared.desk.waiting().len(), 1);
 
-    // Two wrong PINs: counted, not fatal, and the sentence says how many are left.
-    let wrong = claim("staff_1", "0000").await;
-    assert_eq!(wrong.status(), 403);
-    let says: serde_json::Value = wrong.json().await.expect("json");
-    assert!(
-        says["message"].as_str().unwrap_or("").contains("2 tries left"),
-        "{says}"
-    );
-    assert_eq!(claim("staff_1", "1111").await.status(), 403);
+    // Somebody at the counter says whose phone it is and presses Allow.
+    let waiting = h.shared.desk.take(&request_id).expect("queued");
+    let device = h
+        .counter
+        .pair(
+            &PairRequest {
+                name: waiting.name.clone(),
+                platform: waiting.platform.clone(),
+                token: String::new(),
+            install: None,
+            },
+            &waiting.name,
+            &waiting.platform,
+            Some("staff_1"),
+        )
+        .expect("paired");
+    h.shared.desk.approve(&request_id, device);
 
-    // The right one: a credential, on the spot, bound to Ravi.
-    let paired = claim("staff_1", "1234").await;
+    let paired = h
+        .client
+        .get(h.url(&format!("/v1/pair/{request_id}")))
+        .send()
+        .await
+        .expect("collected");
     assert_eq!(paired.status(), 200);
     let device: PairedDevice = paired.json().await.expect("json");
     let me: serde_json::Value = h
@@ -1208,76 +1204,23 @@ async fn a_phone_claims_its_person_with_a_pin_and_needs_nobody_at_the_counter() 
         .expect("json");
     assert_eq!(me["staff_id"], "staff_1");
 
-    // The request is spent: a second claim on it is a stranger with a screenshot.
-    assert_eq!(claim("staff_2", "2468").await.status(), 400);
-}
-
-#[tokio::test]
-async fn three_wrong_pins_spend_the_scan() {
-    let h = Harness::start();
-    let (token, _) = h.shared.desk.open(h.clock.now());
-    let asked: serde_json::Value = h
-        .client
-        .post(h.url("/v1/pair"))
-        .json(&PairRequest {
-            name: "Guessing".to_owned(),
-            platform: "android".to_owned(),
-            token,
-        })
-        .send()
-        .await
-        .expect("asked")
-        .json()
-        .await
-        .expect("json");
-    let request_id = asked["request_id"].as_str().expect("id").to_owned();
-    let url = h.url(&format!("/v1/pair/{request_id}/claim"));
-    let body = mb_lan::ClaimRequest {
-        staff_id: Some("staff_1".to_owned()),
-        pin: Some("9999".to_owned()),
-    };
-    for _ in 0..2 {
-        assert_eq!(h.client.post(&url).json(&body).send().await.expect("tried").status(), 403);
-    }
-    let last = h.client.post(&url).json(&body).send().await.expect("tried");
-    assert_eq!(last.status(), 400, "the third wrong PIN did not spend the scan");
-    // And the phone that keeps polling is told, not left waiting.
-    let polled = h
+    // The request is spent: a second collect is a stranger with a screenshot.
+    let again = h
         .client
         .get(h.url(&format!("/v1/pair/{request_id}")))
         .send()
         .await
-        .expect("polled");
-    assert_eq!(polled.status(), 400);
-}
+        .expect("again");
+    assert_eq!(again.status(), 400);
 
-/// A shared tablet names nobody: it waits for Allow exactly as before.
-#[tokio::test]
-async fn a_shared_tablet_still_waits_for_allow() {
-    let h = Harness::start();
-    let (token, _) = h.shared.desk.open(h.clock.now());
-    let asked: serde_json::Value = h
+    // The fake counter cannot reach a cloud: the phone is told so, and stays paired.
+    let login = h
         .client
-        .post(h.url("/v1/pair"))
-        .json(&PairRequest {
-            name: "Pass tablet".to_owned(),
-            platform: "android".to_owned(),
-            token,
-        })
+        .post(h.url("/v1/cloud-login"))
+        .header("Authorization", bearer(&device))
+        .header("x-magicbill-version", "1")
         .send()
         .await
-        .expect("asked")
-        .json()
-        .await
-        .expect("json");
-    let request_id = asked["request_id"].as_str().expect("id").to_owned();
-    let shared = h
-        .client
-        .post(h.url(&format!("/v1/pair/{request_id}/claim")))
-        .json(&mb_lan::ClaimRequest::default())
-        .send()
-        .await
-        .expect("claimed");
-    assert_eq!(shared.status(), 202);
-    assert_eq!(h.shared.desk.waiting().len(), 1, "it left the queue");
+        .expect("cloud-login");
+    assert_eq!(login.status(), 403);
 }

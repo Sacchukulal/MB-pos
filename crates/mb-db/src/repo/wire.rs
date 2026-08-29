@@ -131,8 +131,8 @@ impl<'a> WireRepo<'a> {
             "credit_adjustments" => self.with_row(self.ledger(row, "SELECT id, customer_id, 'adjustment' AS kind, NULL AS bill_id, CASE WHEN increases = 1 THEN amount ELSE -amount END AS amount_paise, business_day, at, reason AS note FROM credit_adjustments WHERE id = ?1")?, "credit_adjustments", &row.row_id),
             "customer_payments" => self.with_row(self.ledger(row, "SELECT id, customer_id, 'payment' AS kind, NULL AS bill_id, -amount AS amount_paise, business_day, received_at AS at, COALESCE(note, '') AS note FROM customer_payments WHERE id = ?1")?, "customer_payments", &row.row_id),
             "categories" => self.with_row(self.one(row, "SELECT id, name, sort_order, is_active FROM categories WHERE id = ?1", None)?, "categories", &row.row_id),
-            "items" => self.with_row(self.one(row, "SELECT id, category_id, name, unit_price AS unit_price_paise, tax_rate_bp, short_code, is_available, sort_order FROM items WHERE id = ?1", None)?, "items", &row.row_id),
-            "staff" => self.with_row(self.one(row, "SELECT id, role_id, name, code, phone, joined_on, status, designation, department, is_rider, employment_type, left_on, can_login_on_phone, pin_hash FROM staff WHERE id = ?1", None)?, "staff", &row.row_id),
+            "items" => self.with_row(self.one(row, "SELECT i.id, i.category_id, i.name, i.unit_price AS unit_price_paise, c.rate_bp AS tax_rate_bp, i.short_code, i.is_available, i.sort_order FROM items i JOIN tax_classes c ON c.id = i.tax_class_id WHERE i.id = ?1", None)?, "items", &row.row_id),
+            "staff" => self.with_row(self.one(row, "SELECT id, role_id, name, phone, joined_on, status, designation, department, is_rider, employment_type, left_on, pin_hash FROM staff WHERE id = ?1", None)?, "staff", &row.row_id),
             "roles" => self.role(row),
             _ => self.boxed(row),
         }
@@ -168,7 +168,7 @@ impl<'a> WireRepo<'a> {
         let Some(mut data) = self.select_one(sql, &row.row_id)? else {
             return Ok(Vec::new());
         };
-        for flag in ["is_active", "is_available", "is_rider", "can_login_on_phone"] {
+        for flag in ["is_active", "is_available", "is_rider"] {
             if let Some(v) = data.get(flag).and_then(Value::as_i64) {
                 data.insert(flag.to_owned(), Value::Bool(v != 0));
             }
@@ -958,7 +958,6 @@ pub fn cloud_staff_from(
         id: id.to_owned(),
         role_id: str_of(data, "role_id"),
         name: str_of(data, "name").unwrap_or_else(|| "Unnamed".to_owned()),
-        code: str_of(data, "code"),
         phone: str_of(data, "phone"),
         joined_on: day_of_field(data, "joined_on", "staff.joined_on")?,
         status,
@@ -967,10 +966,6 @@ pub fn cloud_staff_from(
         is_rider: data.get("is_rider").and_then(Value::as_bool).unwrap_or(false),
         employment_type,
         left_on: day_of_field(data, "left_on", "staff.left_on")?,
-        can_login_on_phone: data
-            .get("can_login_on_phone")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
         updated_at,
     })
 }

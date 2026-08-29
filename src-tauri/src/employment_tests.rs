@@ -65,7 +65,6 @@ fn hire(app: &App, id: &str, name: &str) {
         StaffEdit {
             id: id.to_owned(),
             name: name.to_owned(),
-            code: None,
             role_id: Some(RolePreset::Cashier.id().to_owned()),
             status: "active".to_owned(),
         },

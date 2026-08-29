@@ -1,6 +1,8 @@
 //! The live menu.
 
-use mb_core::{CategoryId, ItemId, ItemSnapshot, Money, TaxClassId, TaxSpec, Timestamp};
+use mb_core::{
+    CategoryId, ItemId, ItemSnapshot, Money, PriceBasis, TaxBook, TaxClassId, TaxSpec, Timestamp,
+};
 use rusqlite::Transaction;
 
 use crate::encode;
@@ -15,19 +17,21 @@ pub struct Category {
     pub is_active: bool,
     /// Which kitchen screen this category's food goes to.
     pub station: Option<String>,
+    /// The slab a new item in this category starts on.
+    pub default_tax_class_id: Option<TaxClassId>,
 }
 
-/// An item as it stands on today's menu.
+/// An item as it stands on today's menu. It says WHICH slab; the slab says what the tax is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuItem {
     pub id: ItemId,
     pub category_id: Option<CategoryId>,
     pub name: String,
     pub unit_price: Money,
-    pub tax_class_id: Option<TaxClassId>,
-    /// The kind, the rate and the pricing basis, together, in `tax_kind`, `tax_rate_bp` and
-    /// `tax_basis`.
-    pub tax: TaxSpec,
+    pub tax_class_id: TaxClassId,
+    /// The item's own say on whether its price contains the tax. `None` = the slab, then the
+    /// shop, decide.
+    pub price_basis: Option<PriceBasis>,
     pub hsn: Option<String>,
     /// `None`, not zero — a shop that has not costed its menu must not be shown a margin of
     /// 100%.
@@ -44,23 +48,29 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
+    /// The whole tax question for this item, answered by the book.
+    pub fn tax(&self, book: &TaxBook) -> Result<TaxSpec, DbError> {
+        book.spec_for(&self.tax_class_id, self.price_basis)
+            .map_err(|e| DbError::invariant(format!("{}: {e}", self.name)))
+    }
+
     /// Freeze this item onto a line.
-    #[must_use]
-    pub fn snapshot(&self) -> ItemSnapshot {
-        let mut snapshot = ItemSnapshot::new(
-            self.id.clone(),
-            self.name.clone(),
-            self.unit_price,
-            self.tax.rate,
-        )
-        .with_tax(self.tax);
+    pub fn snapshot(&self, book: &TaxBook) -> Result<ItemSnapshot, DbError> {
+        let tax = self.tax(book)?;
+        let mut snapshot =
+            ItemSnapshot::new(self.id.clone(), self.name.clone(), self.unit_price, tax.rate)
+                .with_tax(tax);
         if let Some(hsn) = &self.hsn {
             snapshot = snapshot.with_hsn(hsn.clone());
         }
         if let Some(category) = &self.category_id {
             snapshot = snapshot.with_category(category.clone());
         }
-        snapshot
+        snapshot.course = self.course.clone();
+        // A negative or absurd number in the column becomes "no target" rather than a panic —
+        // the timer is a help, never a reason a bill cannot be rung up.
+        snapshot.prep_minutes = self.prep_minutes.and_then(|m| u32::try_from(m).ok());
+        Ok(snapshot)
     }
 }
 
@@ -83,12 +93,13 @@ impl<'a> MenuRepo<'a> {
     ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO categories (id, outlet_id, name, sort_order, is_active, station,
-                                     created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6, ?6)
+                                     default_tax_class_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?8, ?6, ?6)
              ON CONFLICT (id) DO UPDATE SET name = excluded.name,
                                             sort_order = excluded.sort_order,
                                             is_active = excluded.is_active,
                                             station = excluded.station,
+                                            default_tax_class_id = excluded.default_tax_class_id,
                                             updated_at = excluded.updated_at",
             rusqlite::params![
                 category.id.as_str(),
@@ -98,6 +109,7 @@ impl<'a> MenuRepo<'a> {
                 encode::bool_to_sql(category.is_active),
                 encode::timestamp_to_sql(at),
                 category.station,
+                category.default_tax_class_id.as_ref().map(TaxClassId::as_str),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "categories", category.id.as_str(), Op::Upsert, at)
@@ -105,7 +117,7 @@ impl<'a> MenuRepo<'a> {
 
     pub fn list_categories(&self, outlet: &str) -> Result<Vec<Category>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT id, name, sort_order, is_active, station FROM categories
+            "SELECT id, name, sort_order, is_active, station, default_tax_class_id FROM categories
               WHERE outlet_id = ?1 ORDER BY sort_order, name",
         )?;
         let rows = stmt.query_map([outlet], |row| {
@@ -115,17 +127,19 @@ impl<'a> MenuRepo<'a> {
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, name, sort_order, is_active, station) = row?;
+            let (id, name, sort_order, is_active, station, default_tax_class_id) = row?;
             out.push(Category {
                 id: CategoryId::new(id),
                 name,
                 sort_order,
                 is_active: encode::bool_from_sql(is_active, "categories.is_active")?,
                 station,
+                default_tax_class_id: default_tax_class_id.map(TaxClassId::new),
             });
         }
         Ok(out)
@@ -133,17 +147,15 @@ impl<'a> MenuRepo<'a> {
 
     pub fn save_item(&self, outlet: &str, item: &MenuItem, at: Timestamp) -> Result<(), DbError> {
         self.tx.execute(
-            "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id, tax_rate_bp,
-                                tax_kind, tax_basis, hsn, cost_price, short_code, prep_minutes, course,
+            "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id, price_basis,
+                                hsn, cost_price, short_code, prep_minutes, course,
                                 is_open_price, is_available, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?16, ?6, ?7, ?18, ?8, ?9, ?10, ?11, ?17, ?12, ?13, ?14, ?15, ?15)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
              ON CONFLICT (id) DO UPDATE SET category_id   = excluded.category_id,
                                             name          = excluded.name,
                                             unit_price    = excluded.unit_price,
                                             tax_class_id  = excluded.tax_class_id,
-                                            tax_rate_bp   = excluded.tax_rate_bp,
-                                            tax_kind      = excluded.tax_kind,
-                                            tax_basis     = excluded.tax_basis,
+                                            price_basis   = excluded.price_basis,
                                             hsn           = excluded.hsn,
                                             cost_price    = excluded.cost_price,
                                             short_code    = excluded.short_code,
@@ -159,19 +171,17 @@ impl<'a> MenuRepo<'a> {
                 item.category_id.as_ref().map(CategoryId::as_str),
                 item.name,
                 encode::money_to_sql(item.unit_price),
-                encode::tax_rate_to_sql(item.tax.rate),
-                encode::tax_kind_to_sql(item.tax.kind),
+                item.tax_class_id.as_str(),
+                encode::price_basis_opt_to_sql(item.price_basis),
                 item.hsn,
                 item.cost_price.map(encode::money_to_sql),
                 item.short_code,
                 item.prep_minutes,
+                item.course,
                 encode::bool_to_sql(item.is_open_price),
                 encode::bool_to_sql(item.is_available),
                 item.sort_order,
                 encode::timestamp_to_sql(at),
-                item.tax_class_id.as_ref().map(TaxClassId::as_str),
-                item.course,
-                encode::price_basis_to_sql(item.tax.basis),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "items", item.id.as_str(), Op::Upsert, at)
@@ -179,14 +189,14 @@ impl<'a> MenuRepo<'a> {
 
     pub fn list_items(&self, outlet: &str, available_only: bool) -> Result<Vec<MenuItem>, DbError> {
         let sql = if available_only {
-            "SELECT id, category_id, name, unit_price, tax_class_id, tax_rate_bp, tax_kind, hsn,
+            "SELECT id, category_id, name, unit_price, tax_class_id, price_basis, hsn,
                     cost_price, short_code, prep_minutes, course, is_open_price, is_available,
-                    sort_order, tax_basis
+                    sort_order
                FROM items WHERE outlet_id = ?1 AND is_available = 1 ORDER BY sort_order, name"
         } else {
-            "SELECT id, category_id, name, unit_price, tax_class_id, tax_rate_bp, tax_kind, hsn,
+            "SELECT id, category_id, name, unit_price, tax_class_id, price_basis, hsn,
                     cost_price, short_code, prep_minutes, course, is_open_price, is_available,
-                    sort_order, tax_basis
+                    sort_order
                FROM items WHERE outlet_id = ?1 ORDER BY sort_order, name"
         };
         let mut stmt = self.tx.prepare_cached(sql)?;
@@ -197,17 +207,15 @@ impl<'a> MenuRepo<'a> {
                 name: row.get(2)?,
                 unit_price: row.get(3)?,
                 tax_class_id: row.get(4)?,
-                tax_rate_bp: row.get(5)?,
-                tax_kind: row.get(6)?,
-                tax_basis: row.get(15)?,
-                hsn: row.get(7)?,
-                cost_price: row.get(8)?,
-                short_code: row.get(9)?,
-                prep_minutes: row.get(10)?,
-                course: row.get(11)?,
-                is_open_price: row.get(12)?,
-                is_available: row.get(13)?,
-                sort_order: row.get(14)?,
+                price_basis: row.get(5)?,
+                hsn: row.get(6)?,
+                cost_price: row.get(7)?,
+                short_code: row.get(8)?,
+                prep_minutes: row.get(9)?,
+                course: row.get(10)?,
+                is_open_price: row.get(11)?,
+                is_available: row.get(12)?,
+                sort_order: row.get(13)?,
             })
         })?;
 
@@ -219,13 +227,8 @@ impl<'a> MenuRepo<'a> {
                 category_id: row.category_id.map(CategoryId::new),
                 name: row.name,
                 unit_price: encode::money_from_sql(row.unit_price),
-                tax_class_id: row.tax_class_id.map(TaxClassId::new),
-                tax: encode::tax_spec_from_sql_parts(
-                    row.tax_rate_bp,
-                    &row.tax_kind,
-                    &row.tax_basis,
-                    "items.tax_rate_bp",
-                )?,
+                tax_class_id: TaxClassId::new(row.tax_class_id),
+                price_basis: encode::price_basis_opt_from_sql(row.price_basis.as_deref())?,
                 hsn: row.hsn,
                 cost_price: row.cost_price.map(encode::money_from_sql),
                 short_code: row.short_code,
@@ -328,10 +331,8 @@ struct ItemRow {
     category_id: Option<String>,
     name: String,
     unit_price: i64,
-    tax_class_id: Option<String>,
-    tax_rate_bp: i64,
-    tax_kind: String,
-    tax_basis: String,
+    tax_class_id: String,
+    price_basis: Option<String>,
     hsn: Option<String>,
     cost_price: Option<i64>,
     short_code: Option<String>,

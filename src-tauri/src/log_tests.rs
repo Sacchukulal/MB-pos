@@ -58,7 +58,6 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
         crate::ipc::StaffEdit {
             id: "staff_owner".to_owned(),
             name: "Sachin".to_owned(),
-            code: None,
             role_id: Some("role_owner".to_owned()),
             status: "active".to_owned(),
         },

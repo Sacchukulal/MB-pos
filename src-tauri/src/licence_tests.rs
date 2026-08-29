@@ -37,8 +37,8 @@ pub(crate) fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
-                        tax_class_id: None,
+                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                         hsn: None,
                         cost_price: None,
                         short_code: None,
@@ -98,7 +98,7 @@ fn a_bill_is_taken(app: &App) -> String {
         state
             .cart
             .add(
-                crate::billing::snapshot_for(&item),
+                crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                 mb_core::Qty::from_whole(2).expect("in range"),
                 None,
                 vec![],

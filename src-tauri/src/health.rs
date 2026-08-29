@@ -235,6 +235,18 @@ fn network_row(app: &App) -> HealthRow {
              waiters take orders on phones.",
         );
     };
+    let firewall = crate::firewall::cached();
+    if !firewall.lets_phones_in() && firewall != crate::firewall::FirewallState::Unknown {
+        return HealthRow::bad(
+            "network",
+            "Phones",
+            format!(
+                "{} Open Settings › Phones and press \"Allow Magic Bill through Windows Firewall\".",
+                crate::firewall::words(firewall).0
+            ),
+        )
+        .go("settings");
+    }
     let allowed = app.entitlement().limits.devices;
     let paired = u32::try_from(network.shared.counter.devices().len()).unwrap_or(0);
     if paired > allowed {

@@ -460,17 +460,22 @@ macro_rules! commands {
             $crate::corrections::reprint_bill,
             $crate::corrections::refund_bill,
             // The menu.
-            $crate::menu::menu_tax_classes,
             $crate::menu::menu_categories,
             $crate::menu::menu_rows,
             $crate::menu::save_menu_item,
             $crate::menu::set_item_available,
             $crate::menu::save_menu_category,
-            $crate::menu::save_tax_class,
             $crate::menu::change_menu_prices,
             $crate::menu::plan_menu_import,
             $crate::menu::run_menu_import,
             $crate::menu::export_menu,
+            // Settings › Tax — the one screen for tax.
+            $crate::tax::tax_slabs,
+            $crate::tax::tax_page,
+            $crate::tax::save_tax_slab,
+            $crate::tax::remove_tax_slab,
+            $crate::tax::set_items_tax,
+            $crate::tax::set_category_tax,
             $crate::menu::item_composition,
             $crate::menu::save_item_variant,
             $crate::menu::list_modifier_groups,
@@ -633,6 +638,7 @@ macro_rules! commands {
             $crate::lan::network,
             $crate::lan::phones_now,
             $crate::lan::open_pairing,
+            $crate::lan::allow_firewall,
             $crate::lan::close_pairing,
             $crate::lan::allow_device,
             $crate::lan::refuse_device,
@@ -747,10 +753,12 @@ pub fn cart_add_on(
         })?,
     };
 
+    // The tax is resolved here, once, from the book — and frozen with the line.
+    let snapshot = snapshot_for(&item, &app.shop_config().tax)?;
     app.with_cart_mut(|state| {
         state
             .cart
-            .add(snapshot_for(&item), qty, note, vec![])
+            .add(snapshot, qty, note, vec![])
             .map_err(|e| {
                 UiError::new("cart.add", "That item could not be added to the bill.")
                     .with_detail(e.to_string())
@@ -1194,7 +1202,8 @@ pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
             .db
             .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
             .map_err(|e| words::from_db(&e))?;
-        Ok(items.iter().map(menu_view).collect())
+        let book = app.shop_config().tax;
+        Ok(items.iter().map(|item| menu_view(item, &book)).collect())
     })
 }
 
@@ -1272,6 +1281,7 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                         // The demo shop has one kitchen screen, which is what a real small shop
                         // has.
                         station: None,
+                        default_tax_class_id: None,
                     },
                     at,
                 )?;
@@ -1336,14 +1346,12 @@ pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
                             category_id: Some(CategoryId::new("cat_food")),
                             name: (*name).to_owned(),
                             unit_price: Money::from_paise(*paise),
-                            // The demo shop points its items at the seeded classes, so a rate
-                            // change on the class moves them — which is what a real shop does.
-                            tax_class_id: Some(mb_core::TaxClassId::new(match tax.kind {
-                                mb_core::TaxKind::OutsideGst => "tax_liquor",
-                                _ if tax.rate.basis_points() == 1_800 => "tax_packaged_18",
-                                _ => "tax_food_5",
-                            })),
-                            tax: *tax,
+                            // The demo shop points its items at the seeded slabs, so a rate
+                            // change on the slab moves them — which is what a real shop does.
+                            tax_class_id: mb_core::seeded_slab_for(tax.kind, tax.rate)
+                                .unwrap_or_else(|| mb_core::TaxClassId::new("tax_food_5")),
+                            // Only a tax-in item says so; the rest follow the slab and the shop.
+                            price_basis: tax.basis.is_inclusive().then_some(tax.basis),
                             hsn: Some("2106".to_owned()),
                             cost_price: None,
                             short_code: None,
@@ -1380,10 +1388,12 @@ pub fn search_items_on(
             .transaction(|tx| mb_db::Repos::new(tx).menu().list_items(OUTLET, true))
             .map_err(|e| words::from_db(&e))?;
         // The shop's setting, not this function's default.
+        let config = app.shop_config();
         Ok(crate::search::search(
             &items,
             &text,
-            mode.unwrap_or(app.shop_config().billing.search_mode),
+            mode.unwrap_or(config.billing.search_mode),
+            &config.tax,
         ))
     })
 }
@@ -1580,7 +1590,6 @@ pub struct LockState {
 pub struct PersonView {
     pub id: String,
     pub name: String,
-    pub code: Option<String>,
     pub role: Option<String>,
     pub status: String,
     pub has_pin: bool,
@@ -1653,7 +1662,6 @@ fn person_view(
     PersonView {
         id: member.id.as_str().to_owned(),
         name: member.name.clone(),
-        code: member.code.clone(),
         role: member.role_name.clone(),
         status: status_word(member.status).to_owned(),
         has_pin: member.pin_hash.is_some(),
@@ -2088,7 +2096,6 @@ fn role_json(role: &RoleShape) -> serde_json::Value {
 pub struct StaffEdit {
     pub id: String,
     pub name: String,
-    pub code: Option<String>,
     pub role_id: Option<String>,
     /// "active", "suspended" or "left".
     pub status: String,
@@ -2126,7 +2133,6 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
                 let member = mb_db::repo::people::StaffMember {
                     id: mb_core::StaffId::new(staff.id.clone()),
                     name: staff.name.trim().to_owned(),
-                    code: staff.code.clone(),
                     role_id: staff.role_id.clone(),
                     role_name: None,
                     // A PIN is set by its own command.
@@ -2174,7 +2180,6 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
 fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
     serde_json::json!({
         "name": member.name,
-        "code": member.code,
         "role_id": member.role_id,
         "status": status_word(member.status),
         "has_pin": member.pin_hash.is_some(),

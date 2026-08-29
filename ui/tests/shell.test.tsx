@@ -104,6 +104,9 @@ function answer(command: string): Promise<unknown> {
       return Promise.resolve({ devices: [] });
     case 'current_cart':
       return Promise.resolve(null);
+    // The top bar asks how many phones are live before it draws — a real answer, not null.
+    case 'phones_now':
+      return Promise.resolve({ connected: 0, waiting: 0 });
     default:
       return Promise.resolve(null);
   }

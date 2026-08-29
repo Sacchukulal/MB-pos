@@ -23,7 +23,9 @@ import type { ReasonView } from './generated/ReasonView';
 import type { MenuRowView } from './generated/MenuRowView';
 import type { MenuEdit } from './generated/MenuEdit';
 import type { CategoryView } from './generated/CategoryView';
-import type { TaxClassView } from './generated/TaxClassView';
+import type { TaxPageView } from './generated/TaxPageView';
+import type { TaxSlabEdit } from './generated/TaxSlabEdit';
+import type { TaxSlabView } from './generated/TaxSlabView';
 import type { ImportPlanView } from './generated/ImportPlanView';
 import type { ItemComposition } from './generated/ItemComposition';
 import type { ModifierGroupView } from './generated/ModifierGroupView';
@@ -232,7 +234,6 @@ export interface Commands {
   };
 
   // The menu.
-  menu_tax_classes: { args: void; returns: TaxClassView[] };
   menu_categories: { args: void; returns: CategoryView[] };
   menu_rows: { args: void; returns: MenuRowView[] };
   save_menu_item: { args: { edit: MenuEdit }; returns: MenuRowView[] };
@@ -244,17 +245,19 @@ export interface Commands {
     args: { id: string; name: string; isActive: boolean };
     returns: CategoryView[];
   };
-  // The kind and the basis are the machine values Rust sent, never words read back off the
-  // screen.
-  save_tax_class: {
-    args: {
-      id: string;
-      name: string;
-      rate: string;
-      kind: TaxClassView['kind'];
-      basis: TaxClassView['basis'];
-    };
-    returns: string;
+  // Settings › Tax — the one screen for tax. The kind and the basis are the machine values
+  // Rust sent, never words read back off the screen.
+  tax_slabs: { args: void; returns: TaxSlabView[] };
+  tax_page: { args: void; returns: TaxPageView };
+  save_tax_slab: { args: { edit: TaxSlabEdit }; returns: TaxSlabView[] };
+  remove_tax_slab: { args: { id: string }; returns: TaxSlabView[] };
+  set_items_tax: {
+    args: { itemIds: string[]; slabId: string | null; basis: string | null };
+    returns: TaxPageView;
+  };
+  set_category_tax: {
+    args: { categoryId: string; slabId: string | null };
+    returns: TaxPageView;
   };
   change_menu_prices: {
     args: { categoryId: string | null; percent: string };
@@ -616,6 +619,8 @@ export interface Commands {
   network: { args: void; returns: NetworkView };
   phones_now: { args: void; returns: PhonesView };
   open_pairing: { args: void; returns: NetworkView };
+  /** One UAC prompt; Windows Firewall then lets phones reach this program. */
+  allow_firewall: { args: void; returns: NetworkView };
   close_pairing: { args: void; returns: NetworkView };
   allow_device: { args: { requestId: string }; returns: NetworkView };
   refuse_device: { args: { requestId: string }; returns: NetworkView };

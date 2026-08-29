@@ -95,6 +95,9 @@ pub enum Kind {
         shape: Shape,
     },
     Choice(&'static [Choice]),
+    /// The id of one of the shop's tax slabs. The choices are the shop's own, read from the
+    /// tax book when the screen is drawn, so they cannot be listed here.
+    TaxClass,
 }
 
 impl Kind {
@@ -154,6 +157,13 @@ impl Kind {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )))
+            }
+            // Whether the slab EXISTS is checked where the book is at hand (`settings::ipc`).
+            Kind::TaxClass => {
+                if value.as_text()?.trim().is_empty() {
+                    return Err(Invalid::new("Pick a tax slab."));
+                }
+                Ok(())
             }
         }
     }

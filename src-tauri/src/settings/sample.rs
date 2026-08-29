@@ -68,11 +68,15 @@ pub fn sample_order(registration: Registration) -> Result<(Bill, AnyOrder), Prin
     )
     .ok();
 
+    // The seeded slabs, priced tax-added — the sample does not read the shop's own book, so
+    // the preview takes the same path as a fresh shop.
+    let book = mb_core::TaxBook::new(mb_core::starting_classes(), mb_core::PriceBasis::Exclusive);
     let charges = Billing {
         service_charge_bp: 500,
         ..Billing::default()
     }
-    .charges_for(OrderType::DineIn);
+    .charges_for(OrderType::DineIn, &book)
+    .map_err(|e| PrintError::Invalid(format!("the sample bill's charges will not compute: {e}")))?;
 
     // Billed as whatever this shop is.
     let mut input = BillInput::new(&cart, registration)
@@ -427,7 +431,9 @@ mod tests {
 
         let paper = Paper::new(PaperKind::Mm80);
         let around = Around::plain(paper);
-        let (bill, order) = sample_order(Registration::Regular).expect("the sample computes");
+        // The same registration the preview reads — a shop with no GST number is unregistered.
+        let (bill, order) =
+            sample_order(config.store.registration()).expect("the sample computes");
         let store = config.store.to_print_store();
         let document = mb_print::template::bill_document(
             &around.metrics,

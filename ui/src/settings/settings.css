@@ -737,3 +737,65 @@
 .mb-updates__facts dd {
   margin: 0;
 }
+
+/* Settings › Tax — the slabs and the tick list. */
+
+.mb-tax {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section);
+}
+
+.mb-tax__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--gap-group);
+}
+
+.mb-tax__grouphead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--target-min);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.mb-tax__groupname {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mb-tax__groupdefault {
+  margin-left: auto;
+  flex: 0 1 var(--settings-field);
+  min-width: 0;
+}
+
+.mb-tax__apply {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--layer-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 0;
+  border-top: var(--border-width) solid var(--border);
+  background: var(--surface);
+}
+
+.mb-tax__apply > .mb-field {
+  flex: 1 1 var(--settings-field-tight);
+  min-width: 0;
+}
+
+.mb-tax__count {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}

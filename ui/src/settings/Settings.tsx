@@ -37,6 +37,7 @@ import { Network } from './Network';
 import { Numbering } from './Numbering';
 import { Logo } from './Logo';
 import { Printers } from './Printers';
+import { Tax } from './Tax';
 import { Tills } from './Tills';
 import { Updates } from './Updates';
 
@@ -45,6 +46,7 @@ import './settings.css';
 /** Sections that carry a screen as well as (or instead of) a form. */
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
+  tax: () => <Tax />,
   // The logo is a FILE, not a scalar, so it cannot be in the catalogue — but `receipt.logo` and
   // `receipt.logo_width_pct` are, and they were two settings pointing at a picture nothing
   // could supply.
@@ -856,7 +858,8 @@ function Field({
       case 'number':
         return (
           <NumberInput
-            label={setting.label}
+            label={inLine ? undefined : setting.label}
+            aria-label={setting.label}
             hint={
               setting.unit === ''
                 ? hint
@@ -874,8 +877,9 @@ function Field({
       case 'amount':
         return (
           <MoneyInput
-            label={setting.label}
-            hint={hint}
+            label={inLine ? undefined : setting.label}
+            aria-label={setting.label}
+            hint={inLine ? undefined : hint}
             value={value}
             disabled={disabled}
             onChange={onChange}
@@ -895,8 +899,9 @@ function Field({
       default:
         return (
           <Input
-            label={setting.label}
-            hint={hint}
+            label={inLine ? undefined : setting.label}
+            aria-label={setting.label}
+            hint={inLine ? undefined : hint}
             value={value}
             disabled={disabled}
             maxLength={setting.maxLen > 0 ? setting.maxLen : undefined}

@@ -65,6 +65,9 @@ pub struct Store {
     pub upi_reference: String,
     /// `unregistered`, `composition` or `regular` — the gate on the whole tax pipeline.
     pub registration: String,
+    /// `exclusive` or `inclusive` — whether a menu price already holds its tax, unless a
+    /// slab or an item says otherwise. The bottom layer of the tax book.
+    pub price_basis: String,
 }
 
 impl Default for Store {
@@ -80,6 +83,7 @@ impl Default for Store {
             upi_merchant_name: String::new(),
             upi_reference: String::new(),
             registration: "regular".to_owned(),
+            price_basis: "exclusive".to_owned(),
         }
     }
 }
@@ -106,6 +110,7 @@ impl Store {
             upi_merchant_name: some(&self.upi_merchant_name),
             upi_reference: some(&self.upi_reference),
             registration: self.registration.clone(),
+            price_basis: price_basis_from(&self.price_basis),
         }
     }
 
@@ -122,6 +127,7 @@ impl Store {
             upi_merchant_name: profile.upi_merchant_name.clone().unwrap_or_default(),
             upi_reference: profile.upi_reference.clone().unwrap_or_default(),
             registration: profile.registration.clone(),
+            price_basis: price_basis_to(profile.price_basis).to_owned(),
         }
     }
 
@@ -144,9 +150,30 @@ impl Store {
     }
 
     /// What kind of taxpayer this shop is — the gate on the tax pipeline.
+    /// What the shop IS for the tax pipeline. A shop that says it is registered but has typed
+    /// no GST number is billed as unregistered — a bill may not show GST without one (T2).
     #[must_use]
     pub fn registration(&self) -> mb_core::Registration {
-        registration_from(&self.registration)
+        let chosen = registration_from(&self.registration);
+        if chosen.needs_gstin() && self.gstin.trim().is_empty() {
+            return mb_core::Registration::Unregistered;
+        }
+        chosen
+    }
+
+    /// Why the bill is not what the registration box says, if it is not.
+    #[must_use]
+    pub fn registration_note(&self) -> Option<String> {
+        let chosen = registration_from(&self.registration);
+        if chosen.needs_gstin() && self.gstin.trim().is_empty() {
+            return Some(
+                "No GST number typed, so bills print without GST until you add it.".to_owned(),
+            );
+        }
+        if chosen.needs_gstin() && self.state_code.trim().is_empty() {
+            return Some("No state chosen, so the state half of GST prints as SGST.".to_owned());
+        }
+        None
     }
 }
 
@@ -157,6 +184,23 @@ pub fn registration_from(text: &str) -> mb_core::Registration {
         "unregistered" => mb_core::Registration::Unregistered,
         "composition" => mb_core::Registration::Composition,
         _ => mb_core::Registration::Regular,
+    }
+}
+
+/// The shop's pricing default, from the stored word. Anything but `inclusive` is added-on-top.
+#[must_use]
+pub fn price_basis_from(text: &str) -> mb_core::PriceBasis {
+    match text {
+        "inclusive" => mb_core::PriceBasis::Inclusive,
+        _ => mb_core::PriceBasis::Exclusive,
+    }
+}
+
+#[must_use]
+pub const fn price_basis_to(basis: mb_core::PriceBasis) -> &'static str {
+    match basis {
+        mb_core::PriceBasis::Inclusive => "inclusive",
+        mb_core::PriceBasis::Exclusive => "exclusive",
     }
 }
 
@@ -176,13 +220,13 @@ pub struct Billing {
     /// Basis points, so 5% is 500 — and 0 means the shop does not charge it, which is why there
     /// is no separate on/off tick beside it.
     pub service_charge_bp: u32,
-    /// Its OWN rate, because a service charge is taxed at 18% on a bill of 5% food and that
-    /// mixed case is the whole reason `Charge` carries a rate.
-    pub service_charge_tax_bp: u32,
+    /// The tax SLAB each charge is on — one of the shop's own, by id. A charge has no rate of
+    /// its own; it reads the book like an item does.
+    pub service_charge_tax: String,
     pub packing_charge: Money,
-    pub packing_charge_tax_bp: u32,
+    pub packing_charge_tax: String,
     pub delivery_charge: Money,
-    pub delivery_charge_tax_bp: u32,
+    pub delivery_charge_tax: String,
 }
 
 impl Default for Billing {
@@ -197,55 +241,67 @@ impl Default for Billing {
             idle_lock_minutes: 10,
             // Every charge off by default.
             service_charge_bp: 0,
-            service_charge_tax_bp: 1_800,
+            service_charge_tax: "tax_packaged_18".to_owned(),
             packing_charge: Money::ZERO,
-            packing_charge_tax_bp: 500,
+            packing_charge_tax: "tax_food_5".to_owned(),
             delivery_charge: Money::ZERO,
-            delivery_charge_tax_bp: 500,
+            delivery_charge_tax: "tax_food_5".to_owned(),
         }
     }
 }
 
 impl Billing {
     /// The charges this order type attracts, ready for `BillInput`.
-    #[must_use]
-    pub fn charges_for(&self, order_type: mb_core::OrderType) -> Vec<mb_core::Charge> {
-        use mb_core::{Charge, ChargeKind, OrderType, TaxRate};
-        let rate = |bp: u32| TaxRate::from_basis_points(bp).unwrap_or(TaxRate::ZERO);
+    /// The charges this order type carries, each taxed by its slab in the book. A charge whose
+    /// slab is gone is an error, not a zero — the bill must not quietly change.
+    pub fn charges_for(
+        &self,
+        order_type: mb_core::OrderType,
+        book: &mb_core::TaxBook,
+    ) -> Result<Vec<mb_core::Charge>, mb_core::TaxBookError> {
+        use mb_core::{Charge, ChargeKind, OrderType, TaxClassId};
+        let spec = |slab: &str| book.spec_for(&TaxClassId::new(slab), None);
         let mut out = Vec::new();
         match order_type {
             OrderType::DineIn => {
                 if self.service_charge_bp > 0 {
-                    out.push(Charge::percent(
-                        ChargeKind::Service,
-                        "Service Charge",
-                        self.service_charge_bp,
-                        rate(self.service_charge_tax_bp),
-                    ));
+                    let tax = spec(&self.service_charge_tax)?;
+                    out.push(
+                        Charge::percent(
+                            ChargeKind::Service,
+                            "Service Charge",
+                            self.service_charge_bp,
+                            tax.rate,
+                        )
+                        .with_tax(tax),
+                    );
                 }
             }
             OrderType::Parcel | OrderType::SelfService => {
                 if !self.packing_charge.is_zero() {
-                    out.push(Charge::flat(
-                        ChargeKind::Packing,
-                        "Packing",
-                        self.packing_charge,
-                        rate(self.packing_charge_tax_bp),
-                    ));
+                    let tax = spec(&self.packing_charge_tax)?;
+                    out.push(
+                        Charge::flat(ChargeKind::Packing, "Packing", self.packing_charge, tax.rate)
+                            .with_tax(tax),
+                    );
                 }
             }
             OrderType::Delivery => {
                 if !self.delivery_charge.is_zero() {
-                    out.push(Charge::flat(
-                        ChargeKind::Delivery,
-                        "Delivery",
-                        self.delivery_charge,
-                        rate(self.delivery_charge_tax_bp),
-                    ));
+                    let tax = spec(&self.delivery_charge_tax)?;
+                    out.push(
+                        Charge::flat(
+                            ChargeKind::Delivery,
+                            "Delivery",
+                            self.delivery_charge,
+                            tax.rate,
+                        )
+                        .with_tax(tax),
+                    );
                 }
             }
         }
-        out
+        Ok(out)
     }
 }
 
@@ -324,6 +380,10 @@ pub struct ShopConfig {
     /// The scanner, the scale, the customer display and the label printer — every one of them
     /// optional.
     pub devices: Devices,
+    /// The shop's tax slabs and its pricing default — read from the database with the rest,
+    /// never from a settings file. Every tax question on the counter is asked of this.
+    #[serde(skip)]
+    pub tax: mb_core::TaxBook,
 }
 
 /// The things a counter is plugged into.
@@ -463,6 +523,7 @@ pub fn load(repos: &Repos<'_>, outlet: &str) -> Result<ShopConfig, DbError> {
     if let Some(profile) = settings.store_profile(outlet)? {
         config.store = Store::from_profile(&profile);
     }
+    config.tax = repos.tax_classes().book(outlet)?;
 
     for entry in catalog::CATALOG {
         if entry.storage != Storage::Row {

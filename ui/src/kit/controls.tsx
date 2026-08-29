@@ -7,6 +7,7 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
+  type Ref,
 } from 'react';
 
 import { cx } from './cx';
@@ -258,6 +259,8 @@ export function Select({
 
 export interface CheckboxProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
+  /** The box itself — for a group tick that has to be set indeterminate. */
+  ref?: Ref<HTMLInputElement>;
   /** Leave it out where something beside the box already names it. */
   label?: string;
   /** Asked for, like every other hint — a tip beside the box, never under it. */

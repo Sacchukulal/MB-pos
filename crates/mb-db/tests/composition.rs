@@ -350,9 +350,9 @@ fn a_dry_run_changes_nothing_and_says_what_would_happen() {
 
     // One update (the dosa, by name) and two new ones.
     let csv = "name,price_paise,tax_class\r\n\
-               Masala Dosa,15000,Restaurant food 5%\r\n\
-               Filter Coffee,3000,Restaurant food 5%\r\n\
-               Rasam,4000,Restaurant food 5%\r\n";
+               Masala Dosa,15000,GST 5%\r\n\
+               Filter Coffee,3000,GST 5%\r\n\
+               Rasam,4000,GST 5%\r\n";
 
     let plan = db
         .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
@@ -378,8 +378,8 @@ fn the_import_does_what_the_dry_run_said() {
     shop::build(&db);
 
     let csv = "name,price_paise,tax_class\r\n\
-               Masala Dosa,15000,Restaurant food 5%\r\n\
-               Filter Coffee,3000,Restaurant food 5%\r\n";
+               Masala Dosa,15000,GST 5%\r\n\
+               Filter Coffee,3000,GST 5%\r\n";
 
     let (planned_new, planned_updated, written) = db
         .transaction(|tx| {
@@ -403,8 +403,8 @@ fn the_import_does_what_the_dry_run_said() {
         .expect("the new item is not there");
     assert_eq!(coffee.unit_price, Money::from_paise(3_000));
     assert_eq!(
-        coffee.tax.rate,
-        mb_core::TaxRate::from_percent(5).expect("5%")
+        coffee.tax_class_id,
+        mb_core::TaxClassId::new("tax_food_5")
     );
 
     // The dosa was UPDATED, not duplicated.
@@ -431,10 +431,10 @@ fn one_bad_row_refuses_the_whole_file_by_line_number() {
         .len();
 
     let csv = "name,price_paise,tax_class\r\n\
-               Filter Coffee,3000,Restaurant food 5%\r\n\
-               Rasam,not a number,Restaurant food 5%\r\n\
+               Filter Coffee,3000,GST 5%\r\n\
+               Rasam,not a number,GST 5%\r\n\
                Vada,2500,Nonexistent class\r\n\
-               ,5000,Restaurant food 5%\r\n";
+               ,5000,GST 5%\r\n";
 
     let plan = db
         .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
@@ -445,7 +445,7 @@ fn one_bad_row_refuses_the_whole_file_by_line_number() {
     assert!(plan.refused[0].1.contains("12000"), "{}", plan.refused[0].1);
     assert_eq!(plan.refused[1].0, 4);
     assert!(
-        plan.refused[1].1.contains("tax classes"),
+        plan.refused[1].1.contains("tax slabs"),
         "{}",
         plan.refused[1].1
     );

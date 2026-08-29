@@ -95,6 +95,11 @@ pub trait Link: Send + Sync + std::fmt::Debug + 'static {
     fn rpc(&self, name: &str, body: &Value, token: &str) -> Result<Value, LinkError>;
     /// `GET /rest/v1/{path}` under the login, rows `from..=to`.
     fn rest(&self, path: &str, token: &str, from: usize, to: usize) -> Result<Page, LinkError>;
+    /// `POST /functions/v1/{name}` under the login. The one Edge Function the counter calls
+    /// this way is `phone-session` — a phone's cloud login, after Allow.
+    fn edge(&self, _name: &str, _body: &Value, _token: &str) -> Result<Value, LinkError> {
+        Err(LinkError::Unreachable)
+    }
     /// A new access token from the refresh token. The old refresh token is spent either way.
     fn refresh_session(&self, refresh_token: &str) -> Result<Session, LinkError>;
     /// Fetch a file to `to`; answers its SHA-256 as lowercase hex.
@@ -285,6 +290,16 @@ impl Http {
         })
     }
 
+    /// The `message` of a reply body, or a plain "Refused.".
+    fn sentence_of(text: &str) -> String {
+        let body: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+        body.get("message")
+            .and_then(Value::as_str)
+            .filter(|m| !m.is_empty())
+            .unwrap_or("Refused.")
+            .to_owned()
+    }
+
     /// PostgREST's error shape, into the four things a caller can do about it.
     fn link_error(status: u16, text: &str) -> LinkError {
         let body: Value = serde_json::from_str(text).unwrap_or(Value::Null);
@@ -363,6 +378,22 @@ impl Link for Http {
         }
         if text.trim().is_empty() {
             return Ok(Value::Null);
+        }
+        serde_json::from_str(&text).map_err(|_| LinkError::Unreadable)
+    }
+
+    fn edge(&self, name: &str, body: &Value, token: &str) -> Result<Value, LinkError> {
+        let url = format!("{}/functions/v1/{name}", self.base);
+        let request = self.client.post(&url).json(body);
+        let (status, text, _) = self.under_login(request, token)?;
+        if !(200..300).contains(&status) {
+            // A function writes its own sentence; 401 is the login and is refreshed like any
+            // other call. Everything else is the function's answer, not the login's.
+            return Err(match status {
+                401 => LinkError::Unauthorised,
+                s if s >= 500 => LinkError::Server(Http::sentence_of(&text)),
+                _ => LinkError::Refused(Http::sentence_of(&text)),
+            });
         }
         serde_json::from_str(&text).map_err(|_| LinkError::Unreadable)
     }

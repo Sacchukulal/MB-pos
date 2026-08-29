@@ -47,10 +47,12 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
                     category_id: None,
                     name: (*item_name).to_owned(),
                     unit_price: Money::from_paise(rupees * 100),
-                    tax: mb_core::TaxSpec::gst(rate.map_or(mb_core::TaxRate::ZERO, |bp| {
+                    tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(rate.map_or(mb_core::TaxRate::ZERO, |bp| {
                         mb_core::TaxRate::from_basis_points(bp).unwrap_or(mb_core::TaxRate::ZERO)
-                    })),
-                    tax_class_id: None,
+                    }))).expect("a seeded slab").0,
+                    price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(rate.map_or(mb_core::TaxRate::ZERO, |bp| {
+                        mb_core::TaxRate::from_basis_points(bp).unwrap_or(mb_core::TaxRate::ZERO)
+                    }))).expect("a seeded slab").1,
                     hsn: Some("2106".to_owned()),
                     cost_price: None,
                     short_code: None,
@@ -81,7 +83,6 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
         StaffEdit {
             id: "staff_boss".to_owned(),
             name: "Meena".to_owned(),
-            code: None,
             role_id: Some(RolePreset::Cashier.id().to_owned()),
             status: "active".to_owned(),
         },

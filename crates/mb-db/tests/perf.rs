@@ -275,9 +275,9 @@ fn seed_a_shop(db: &Db) {
         // on it have something to hold.
         for n in 0..300 {
             tx.execute(
-                "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
-                                    tax_kind, tax_basis, hsn, short_code, created_at, updated_at)
-                 VALUES (?1, 'outlet_default', 'cat_food', ?2, ?3, 500, 'gst', 'exclusive', '2106', ?4, 0, 0)",
+                "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id,
+                                    hsn, short_code, created_at, updated_at)
+                 VALUES (?1, 'outlet_default', 'cat_food', ?2, ?3, 'tax_food_5', '2106', ?4, 0, 0)",
                 rusqlite::params![
                     format!("itm_{n:04}"),
                     format!("Menu Item Number {n}"),

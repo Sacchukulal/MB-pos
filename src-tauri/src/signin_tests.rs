@@ -77,7 +77,6 @@ pub(crate) fn hire(app: &App, id: &str, name: &str, role: RolePreset) {
         StaffEdit {
             id: id.to_owned(),
             name: name.to_owned(),
-            code: Some(name.chars().take(1).collect()),
             role_id: Some(role.id().to_owned()),
             status: "active".to_owned(),
         },
@@ -400,7 +399,6 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
         StaffEdit {
             id: "staff_owner".to_owned(),
             name: "Sachin".to_owned(),
-            code: Some("S".to_owned()),
             role_id: Some(RolePreset::Owner.id().to_owned()),
             status: "suspended".to_owned(),
         },
@@ -448,7 +446,6 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
         StaffEdit {
             id: "staff_owner".to_owned(),
             name: "Sachin".to_owned(),
-            code: Some("S".to_owned()),
             role_id: Some(RolePreset::Owner.id().to_owned()),
             status: "left".to_owned(),
         },
@@ -478,7 +475,6 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
         StaffEdit {
             id: "staff_cashier".to_owned(),
             name: "Rekha".to_owned(),
-            code: Some("R".to_owned()),
             role_id: Some(RolePreset::Cashier.id().to_owned()),
             status: "left".to_owned(),
         },
@@ -593,7 +589,6 @@ fn a_pin_needs_a_role_behind_it() {
         StaffEdit {
             id: "staff_nobody".to_owned(),
             name: "Nobody".to_owned(),
-            code: None,
             role_id: None,
             status: "active".to_owned(),
         },
@@ -649,8 +644,8 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
-                        tax_class_id: None,
+                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                         hsn: None,
                         cost_price: None,
                         short_code: None,
@@ -766,8 +761,8 @@ fn a_trading_shop(scratch: &Scratch) -> App {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
-                        tax_class_id: None,
+                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                         hsn: None,
                         cost_price: None,
                         short_code: None,
@@ -794,7 +789,7 @@ fn order_teas(app: &App, qty: u32) {
         state
             .cart
             .add(
-                crate::billing::snapshot_for(&item),
+                crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                 mb_core::Qty::from_whole(i64::from(qty)).expect("in range"),
                 None,
                 vec![],
@@ -1126,7 +1121,7 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
         state
             .cart
             .add(
-                crate::billing::snapshot_for(&item),
+                crate::billing::snapshot_for(&item, &app.shop_config().tax).expect("a slab"),
                 mb_core::Qty::from_whole(2).expect("in range"),
                 None,
                 vec![],

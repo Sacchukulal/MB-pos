@@ -1380,7 +1380,7 @@ fn app_registration(repos: &mb_db::Repos<'_>) -> Result<mb_core::Registration, m
         .settings()
         .store_profile(OUTLET)?
         .map_or(mb_core::Registration::Regular, |p| {
-            crate::settings::registration_from(&p.registration)
+            crate::settings::Store::from_profile(&p).registration()
         }))
 }
 
@@ -1399,16 +1399,15 @@ const fn label_for(by: SalesBy) -> &'static str {
 }
 
 /// A rate, in the words the bill prints — including the two that are not rates.
-#[allow(
-    clippy::integer_division,
-    reason = "basis points to whole percent; 1800 bp IS 18% and the remainder \
-              is meaningless — GST has no fractional-percent rate"
-)]
 fn rate_words(rate_bp: i64, tax_kind: &str) -> String {
     match tax_kind {
         "outside_gst" => "Outside GST (liquor)".to_owned(),
         "exempt" => "Exempt".to_owned(),
-        _ => format!("{}%", rate_bp / 100),
+        // The same label the bill prints — 2.5% stays 2.5%, never "2%".
+        _ => u32::try_from(rate_bp)
+            .ok()
+            .and_then(mb_core::TaxRate::from_basis_points)
+            .map_or_else(|| format!("{rate_bp} bp"), |r| r.label()),
     }
 }
 
@@ -2021,6 +2020,7 @@ mod tests {
             upi_merchant_name: None,
             upi_reference: None,
             registration: registration.to_owned(),
+            price_basis: mb_core::PriceBasis::Exclusive,
         };
         let buckets = [
             // A half-percent rate, because integer division printed it as "2".

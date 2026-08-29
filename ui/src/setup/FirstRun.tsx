@@ -6,7 +6,7 @@ import { Button, Checkbox, freshId, Icon, Input, Logo, MoneyInput, Notice, Phone
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
-import type { TaxClassView } from '../ipc/generated/TaxClassView';
+import type { TaxSlabView } from '../ipc/generated/TaxSlabView';
 
 import './firstrun.css';
 
@@ -54,7 +54,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [itemClass, setItemClass] = useState('');
   const [added, setAdded] = useState<string[]>([]);
   // The shop's own classes, not a fourth copy of the slab list.
-  const [classes, setClasses] = useState<readonly TaxClassView[]>([]);
+  const [classes, setClasses] = useState<readonly TaxSlabView[]>([]);
 
   /** Where the shop's data will go. */
   const [folder, setFolder] = useState('');
@@ -95,10 +95,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   // The tax classes are read when the items step opens.
   useEffect(() => {
     if (step !== 'menu') return;
-    call('menu_tax_classes')
+    call('tax_slabs')
       .then((list) => {
-        setClasses(list);
-        setItemClass((was) => (was === '' && list[0] ? list[0].id : was));
+        const live = list.filter((c) => c.isActive);
+        setClasses(live);
+        setItemClass((was) => (was === '' && live[0] ? live[0].id : was));
       })
       .catch(() => undefined);
   }, [step]);
@@ -189,6 +190,13 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         { key: 'store.address', value: address.trim() },
         { key: 'store.phone', value: phone.trim() },
         { key: 'store.gstin', value: gstin.trim() },
+        // A GST number starts with the state code, and a shop with no number is billed as
+        // unregistered — the two settings the Tax page would otherwise ask for.
+        {
+          key: 'store.registration',
+          value: gstin.trim() === '' ? 'unregistered' : 'regular',
+        },
+        { key: 'store.state_code', value: gstin.trim().slice(0, 2) },
       ],
     })
       .then(() => setStep('pin'))
@@ -218,7 +226,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       staff: {
         id,
         name: person.trim(),
-        code: null,
         roleId: 'role_owner',
         status: 'active',
       },
@@ -296,6 +303,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         // A tax CLASS, not a rate: one place decides what 5% means, so changing the rate later
         // changes every item on it.
         taxClassId: itemClass === '' ? null : itemClass,
+        priceBasis: null,
         hsn: null,
         shortCode: null,
         cost: null,
@@ -636,13 +644,13 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 }}
               />
               <Select
-                label="Tax"
+                label="Tax slab"
                 value={itemClass}
                 onChange={(e) => setItemClass(e.target.value)}
                 options={
                   classes.length === 0
-                    ? [{ value: '', label: 'No tax class' }]
-                    : classes.map((c) => ({ value: c.id, label: `${c.name} — ${c.rate}` }))
+                    ? [{ value: '', label: 'No tax slab' }]
+                    : classes.map((c) => ({ value: c.id, label: c.name }))
                 }
               />
               <Button disabled={busy} onClick={addItem}>

@@ -185,18 +185,14 @@ function Who({
   const shown =
     wanted === ''
       ? people
-      : people.filter(
-          (p) =>
-            p.name.toLowerCase().includes(wanted) ||
-            (p.code ?? '').toLowerCase() === wanted,
-        );
+      : people.filter((p) => p.name.toLowerCase().includes(wanted));
 
   return (
     <>
       <h1 className="mb-lock__title">Who is at the counter?</h1>
       {people.length > 6 ? (
         <Input
-          label="Name or staff code"
+          label="Name"
           value={typed}
           autoFocus
           onChange={(event) => onType(event.target.value)}

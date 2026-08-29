@@ -17,7 +17,7 @@ import type { ComboView } from '../src/ipc/generated/ComboView';
 import type { ItemComposition } from '../src/ipc/generated/ItemComposition';
 import type { MenuRowView } from '../src/ipc/generated/MenuRowView';
 import type { MoneyView } from '../src/ipc/generated/MoneyView';
-import type { TaxClassView } from '../src/ipc/generated/TaxClassView';
+import type { TaxSlabView } from '../src/ipc/generated/TaxSlabView';
 
 function money(paise: number, text: string): MoneyView {
   return { paise: BigInt(paise), text };
@@ -29,7 +29,8 @@ const dosa: MenuRowView = {
   categoryId: null,
   price: money(12_000, '120.00'),
   taxClassId: 'tax_food_5',
-  rate: '5% · Tax added on top',
+  priceBasis: 'shop',
+  rate: '5% · added on top',
   hsn: null,
   shortCode: null,
   cost: null,
@@ -195,96 +196,106 @@ describe('a combo (scope 6.3)', () => {
   });
 });
 
-/** The tax class editor. */
-describe('the tax class editor', () => {
-  const liquor: TaxClassView = {
-    id: 'tax_liquor',
-    name: 'Liquor — state VAT',
-    rate: '20%',
-    rateBp: 2000,
-    kind: 'outside_gst',
-    basis: 'inclusive',
-    treatment: 'Outside GST',
-    isActive: true,
-    itemsUsing: 4n,
-  };
+/** The item form sends a slab and a price rule, never a rate. */
+describe('the item form and the tax book', () => {
+  const slabs: TaxSlabView[] = [
+    {
+      id: 'tax_food_5',
+      name: 'GST 5%',
+      rate: '5%',
+      rateBp: 500,
+      kind: 'gst',
+      basis: 'shop',
+      priceWords: 'Shop default (added on top)',
+      isActive: true,
+      itemsUsing: 1,
+    },
+    {
+      id: 'tax_packaged_18',
+      name: 'GST 18%',
+      rate: '18%',
+      rateBp: 1800,
+      kind: 'gst',
+      basis: 'shop',
+      priceWords: 'Shop default (added on top)',
+      isActive: true,
+      itemsUsing: 0,
+    },
+  ];
 
-  function wire() {
+  it('sends the chosen slab and price rule back with the item', async () => {
     call.mockImplementation((name: string) => {
       switch (name) {
-        case 'menu_tax_classes':
-          return Promise.resolve([liquor]);
-        case 'save_tax_class':
-          return Promise.resolve('Saved.');
+        case 'tax_slabs':
+          return Promise.resolve(slabs);
+        case 'menu_rows':
+          return Promise.resolve([dosa]);
+        case 'save_menu_item':
+          return Promise.resolve([dosa]);
         default:
           return Promise.resolve([]);
       }
     });
-  }
-
-  const open = async () => {
-    wire();
     render(
       <ToastProvider>
         <Menu />
       </ToastProvider>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-  };
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]!);
+    const panel = screen.getByRole('complementary', { name: dosa.name });
 
-  it('sends the machine values back, never the words on the tile', async () => {
-    await open();
-
-    // Outside GST asks for a VAT rate by name, because it is not GST.
-    expect(screen.getByLabelText('State VAT %')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bar list' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(call).toHaveBeenCalledWith('save_tax_class', {
-      id: 'tax_liquor',
-      name: 'Bar list',
-      rate: '20',
-      kind: 'outside_gst',
-      basis: 'inclusive',
+    fireEvent.change(within(panel).getByLabelText('Tax slab'), {
+      target: { value: 'tax_packaged_18' },
     });
+    fireEvent.change(within(panel).getByLabelText('Tax in the price'), {
+      target: { value: 'inclusive' },
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith(
+        'save_menu_item',
+        expect.objectContaining({
+          edit: expect.objectContaining({ taxClassId: 'tax_packaged_18', priceBasis: 'inclusive' }),
+        }),
+      ),
+    );
   });
 
-  it('shuts the rate box on a kind that cannot carry one', async () => {
-    await open();
-
-    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'exempt' } });
-    const box = screen.getByLabelText('Rate') as HTMLInputElement;
-    expect(box.disabled, 'exempt has no rate to type').toBe(true);
-    expect(box.value).toBe('0');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(call).toHaveBeenCalledWith(
-      'save_tax_class',
-      expect.objectContaining({ kind: 'exempt', rate: '0' }),
+  it('does not define slabs here — that is Settings › Tax', async () => {
+    call.mockImplementation((name: string) =>
+      Promise.resolve(name === 'tax_slabs' ? slabs : []),
     );
+    render(
+      <ToastProvider>
+        <Menu />
+      </ToastProvider>,
+    );
+    await screen.findByRole('button', { name: 'Add an item' });
+    expect(screen.queryByText('Tax classes')).toBeNull();
   });
 });
 
 /** Typing a menu is a run, not a dialog reopened per dish. */
 describe('adding items (2026-08-24)', () => {
-  const classes: TaxClassView[] = [
+  const classes: TaxSlabView[] = [
     {
       id: 'tax_food_5',
-      name: 'Food 5%',
+      name: 'GST 5%',
       rate: '5%',
       rateBp: 500,
       kind: 'gst',
-      basis: 'exclusive',
-      treatment: 'Tax added on top',
+      basis: 'shop',
+      priceWords: 'Shop default (added on top)',
       isActive: true,
-      itemsUsing: 1n,
+      itemsUsing: 1,
     },
   ];
 
   function open() {
     call.mockImplementation((name: string) => {
       switch (name) {
-        case 'menu_tax_classes':
+        case 'tax_slabs':
           return Promise.resolve(classes);
         case 'menu_rows':
           return Promise.resolve([]);
@@ -342,7 +353,7 @@ describe('adding items (2026-08-24)', () => {
   it('closes when an existing item is saved, because there is nothing to type next', async () => {
     call.mockImplementation((name: string) => {
       switch (name) {
-        case 'menu_tax_classes':
+        case 'tax_slabs':
           return Promise.resolve(classes);
         case 'menu_rows':
           return Promise.resolve([dosa]);
@@ -359,7 +370,6 @@ describe('adding items (2026-08-24)', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]!);
     // Editing names the panel after what is in it; adding names it "Add an item".
     const panel = screen.getByRole('complementary', { name: dosa.name });
-    // Scoped: the tax class block below the list has a Save of its own.
     fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>

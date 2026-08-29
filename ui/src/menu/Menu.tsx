@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, plural, Scroller, SearchField, SectionHeader, Select, SideFold, Toolbar, Table, useToast, type Column, Spinner } from '../kit';
+import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, Scroller, SearchField, Select, SideFold, Toolbar, Table, useToast, type Column, Spinner } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
-import type { TaxClassView } from '../ipc/generated/TaxClassView';
+import type { TaxSlabView } from '../ipc/generated/TaxSlabView';
 import type { ImportPlanView } from '../ipc/generated/ImportPlanView';
 import { Combos, Composition, ModifierGroups } from './Composition';
 import { Groups } from './Groups';
@@ -16,7 +16,7 @@ import './menu.css';
 export function Menu() {
   const [categories, setCategories] = useState<readonly CategoryView[]>([]);
   const [rows, setRows] = useState<readonly MenuRowView[]>([]);
-  const [classes, setClasses] = useState<readonly TaxClassView[]>([]);
+  const [classes, setClasses] = useState<readonly TaxSlabView[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [find, setFind] = useState('');
   const [editing, setEditing] = useState<MenuRowView | null>(null);
@@ -38,7 +38,7 @@ export function Menu() {
     try {
       setCategories(await call('menu_categories'));
       setRows(await call('menu_rows'));
-      setClasses(await call('menu_tax_classes'));
+      setClasses(await call('tax_slabs'));
     } catch (cause) {
       report(cause);
     }
@@ -137,7 +137,12 @@ export function Menu() {
       categoryId: chosen,
       // Empty, not "0.00".
       price: { paise: 0n, text: '' },
-      taxClassId: classes[0]?.id ?? null,
+      // The category's starting slab, else the first live one — Settings › Tax decides both.
+      taxClassId:
+        categories.find((c) => c.id === chosen)?.defaultSlabId ??
+        classes.find((c) => c.isActive)?.id ??
+        '',
+      priceBasis: 'shop',
       rate: '',
       hsn: null,
       shortCode: null,
@@ -286,7 +291,6 @@ export function Menu() {
           <Table dense rows={shown} columns={columns} rowKey={(r) => r.id} />
         )}
 
-        <TaxClasses classes={classes} onChanged={load} onFailed={report} />
         <ModifierGroups onFailed={report} />
         <Combos rows={rows} onFailed={report} />
       </Scroller>
@@ -348,137 +352,6 @@ export function Menu() {
   );
 }
 
-/** The classes, and what each one would move. */
-function TaxClasses({
-  classes,
-  onChanged,
-  onFailed,
-}: {
-  classes: readonly TaxClassView[];
-  onChanged: () => void | Promise<void>;
-  onFailed: (cause: unknown) => void;
-}) {
-  const [editing, setEditing] = useState<TaxClassView | null>(null);
-  const [rate, setRate] = useState('');
-  // The name is editable too, and it has to be.
-  const [name, setName] = useState('');
-  // The machine values, straight from Rust and straight back.
-  const [kind, setKind] = useState<TaxClassView['kind']>('gst');
-  const [basis, setBasis] = useState<TaxClassView['basis']>('exclusive');
-  const toast = useToast();
-
-  // Exempt and no-tax have no rate at all, so the box is shut rather than hinted at.
-  const rateless = kind === 'exempt' || kind === 'untaxed';
-
-  return (
-    <div className="mb-menu__classes">
-      <SectionHeader
-        title="Tax classes"
-        note="A class is your name for a rate. Change one and every item on it follows — bills already printed never move."
-      />
-      <div className="mb-menu__classlist">
-        {classes.map((klass) => (
-          <div key={klass.id} className="mb-menu__class">
-            <div className="mb-stack">
-              <strong>{klass.name}</strong>
-              <span className="mb-muted">
-                {klass.rate} · {klass.treatment} · {plural(klass.itemsUsing, 'item')}
-              </span>
-            </div>
-            <Button
-              small
-              onClick={() => {
-                setEditing(klass);
-                setRate(klass.rate.replace('%', ''));
-                setName(klass.name);
-                setKind(klass.kind);
-                setBasis(klass.basis);
-              }}
-            >
-              Edit
-            </Button>
-          </div>
-        ))}
-      </div>
-
-      {editing ? (
-        <Modal open title={editing.name} onClose={() => setEditing(null)}>
-          <p className="mb-muted">
-            {editing.itemsUsing === 0n
-              ? 'Nothing uses this yet.'
-              : `${plural(editing.itemsUsing, 'item')} will change with it.`}
-          </p>
-          <Input
-            label="Name"
-            hint="What you call it. Most shops put the rate in the name, so change both together."
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <Input
-            label={kind === 'outside_gst' ? 'State VAT %' : 'Rate'}
-            hint={
-              kind === 'outside_gst'
-                ? 'Your state VAT on liquor. Not GST, and it never goes in a GST return.'
-                : 'Per cent. 5, 18, 2.5.'
-            }
-            value={rateless ? '0' : rate}
-            disabled={rateless}
-            autoFocus
-            onChange={(event) => setRate(event.target.value.replace(/[^0-9.]/g, ''))}
-          />
-          <Select
-            label="Kind"
-            hint="What it is in the law. Liquor is outside GST and carries state VAT instead."
-            value={kind}
-            onChange={(event) => setKind(event.target.value as TaxClassView['kind'])}
-            options={[
-              { value: 'gst', label: 'GST' },
-              { value: 'exempt', label: 'Exempt' },
-              { value: 'outside_gst', label: 'Outside GST (VAT)' },
-              { value: 'untaxed', label: 'No tax' },
-            ]}
-          />
-          <Select
-            label="Price basis"
-            hint="Whether the price you type already contains the tax. Bar menus usually do."
-            value={basis}
-            onChange={(event) => setBasis(event.target.value as TaxClassView['basis'])}
-            options={[
-              { value: 'exclusive', label: 'Tax added on top' },
-              { value: 'inclusive', label: 'Tax already in the price' },
-            ]}
-          />
-          <div className="mb-row mb-row--end">
-            <Button variant="quiet" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                call('save_tax_class', {
-                  id: editing.id,
-                  name,
-                  rate: rateless ? '0' : rate,
-                  kind,
-                  basis,
-                })
-                  .then(async (said) => {
-                    setEditing(null);
-                    toast.show('ok', said);
-                    await onChanged();
-                  })
-                  .catch(onFailed);
-              }}
-            >
-              Save
-            </Button>
-          </div>
-        </Modal>
-      ) : null}
-    </div>
-  );
-}
-
 /**
  * One item's form, in the side panel — and the thing that makes typing a whole menu bearable.
  */
@@ -493,7 +366,7 @@ function EditItem({
 }: {
   row: MenuRowView;
   categories: readonly CategoryView[];
-  classes: readonly TaxClassView[];
+  classes: readonly TaxSlabView[];
   onClose: () => void;
   /** The fresh list. It does not close the panel — see above. */
   onSaved: (rows: readonly MenuRowView[]) => void;
@@ -512,7 +385,8 @@ function EditItem({
   const [price, setPrice] = useState(row.price.text);
   const [cost, setCost] = useState(row.cost?.text ?? '');
   const [categoryId, setCategoryId] = useState(row.categoryId ?? '');
-  const [taxClassId, setTaxClassId] = useState(row.taxClassId ?? '');
+  const [taxClassId, setTaxClassId] = useState(row.taxClassId);
+  const [priceBasis, setPriceBasis] = useState(row.priceBasis);
   const [hsn, setHsn] = useState(row.hsn ?? '');
   const [shortCode, setShortCode] = useState(row.shortCode ?? '');
   // What the kitchen screen needs to know about this dish.
@@ -529,6 +403,7 @@ function EditItem({
         categoryId: categoryId === '' ? null : categoryId,
         price,
         taxClassId: taxClassId === '' ? null : taxClassId,
+        priceBasis,
         hsn: hsn.trim() === '' ? null : hsn.trim(),
         shortCode: shortCode.trim() === '' ? null : shortCode.trim(),
         cost: cost.trim() === '' ? null : cost.trim(),
@@ -578,7 +453,7 @@ function EditItem({
       />
       <MoneyInput
         label="Price"
-        hint="What the customer pays, before tax is added — unless the class says tax is included."
+        hint="The menu price. Whether tax is inside it is the slab's and the shop's rule, unless this item says otherwise below."
         value={price}
         onChange={setPrice}
       />
@@ -590,14 +465,28 @@ function EditItem({
         onChanged={onCategoriesChanged}
         onFailed={onFailed}
       />
+      {/* A slab, never a rate: Settings › Tax decides what "GST 5%" means. */}
       <Select
-        label="Tax class"
-        hint="What this is taxed at. Liquor sits outside GST entirely."
+        label="Tax slab"
+        hint="Defined under Settings › Tax. Liquor sits outside GST entirely."
         value={taxClassId}
         onChange={(e) => setTaxClassId(e.target.value)}
         options={[
-          { value: '', label: 'Leave as it is' },
-          ...classes.map((c) => ({ value: c.id, label: `${c.name} — ${c.rate}` })),
+          ...(adding ? [] : [{ value: '', label: 'Leave as it is' }]),
+          ...classes
+            .filter((c) => c.isActive || c.id === row.taxClassId)
+            .map((c) => ({ value: c.id, label: c.isActive ? c.name : `${c.name} (removed)` })),
+        ]}
+      />
+      <Select
+        label="Tax in the price"
+        hint="Shop default follows Settings › Tax. Say otherwise only for this item — an MRP bottle on a shop that adds tax on top."
+        value={priceBasis}
+        onChange={(e) => setPriceBasis(e.target.value)}
+        options={[
+          { value: 'shop', label: 'Shop default' },
+          { value: 'inclusive', label: 'In the price' },
+          { value: 'exclusive', label: 'Added on top' },
         ]}
       />
       <Input

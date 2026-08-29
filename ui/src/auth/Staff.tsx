@@ -99,8 +99,7 @@ function People() {
   }, [load]);
 
   const columns: Column<PersonView>[] = [
-    { key: 'name', header: 'Name', render: (p) => p.name },
-    { key: 'code', header: 'Code', render: (p) => p.code ?? '—' },
+    { key: 'name', header: 'Name', render: (p) => p.name },
     { key: 'role', header: 'Role', render: (p) => p.role ?? 'No role yet' },
     {
       key: 'pin',
@@ -155,7 +154,6 @@ function People() {
             setEditing({
               id: freshId('staff'),
               name: '',
-              code: null,
               role: null,
               status: 'active',
               hasPin: false,
@@ -218,7 +216,6 @@ function EditPerson({
   onSaved: (people: readonly PersonView[]) => void;
 }) {
   const [name, setName] = useState(person.name);
-  const [code, setCode] = useState(person.code ?? '');
   const [roleId, setRoleId] = useState(
     roles.find((r) => r.name === person.role)?.id ?? '',
   );
@@ -231,7 +228,6 @@ function EditPerson({
         staff: {
           id: person.id,
           name,
-          code: code.trim() === '' ? null : code.trim(),
           roleId: roleId === '' ? null : roleId,
           status,
         },
@@ -245,12 +241,6 @@ function EditPerson({
   return (
     <Modal open title={person.name === '' ? 'Add somebody' : person.name} onClose={onClose}>
       <Input label="Name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
-      <Input
-        label="Staff code"
-        hint="Typed at the lock screen instead of tapping a name."
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-      />
       <Select
         label="Role"
         value={roleId}

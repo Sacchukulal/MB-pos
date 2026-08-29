@@ -148,7 +148,8 @@ fn control_for(kind: Kind) -> &'static str {
             ..
         } => "phone",
         Kind::Text { .. } => "words",
-        Kind::Choice(_) => "choice",
+        // A slab is a choice too; its options come from the book, not the catalogue.
+        Kind::Choice(_) | Kind::TaxClass => "choice",
     }
 }
 
@@ -199,7 +200,7 @@ fn off_the_wire(entry: &Entry, raw: &str) -> UiResult<Value> {
                 })?
                 .map_or_else(String::new, |p| p.as_str().to_owned()),
         ),
-        Kind::Text { .. } | Kind::Choice(_) => Value::Text(raw.to_owned()),
+        Kind::Text { .. } | Kind::Choice(_) | Kind::TaxClass => Value::Text(raw.to_owned()),
     };
     super::check(entry, &value).map_err(UiError::from)?;
     Ok(value)
@@ -233,6 +234,7 @@ fn view_of(app: &App, config: &ShopConfig, allowed: &[Permission]) -> SettingsVi
                                 label: o.label.to_owned(),
                             })
                             .collect(),
+                        Kind::TaxClass => slab_choices(config, &(entry.read)(config)),
                         _ => Vec::new(),
                     },
                     // `i32`, not `i64`.
@@ -400,6 +402,18 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
         (entry.write)(&mut wanted, &value).map_err(|e| UiError::from(e.about(entry.key)))?;
     }
     catalog::check_gstin_against_state(&wanted).map_err(UiError::from)?;
+    // The registration rule bites when the registration is what is being saved — changing a
+    // typeface must not be refused for a tax problem. Until it is fixed, the bill is a plain one
+    // (`Store::registration`) and Settings › Tax says so.
+    if edits.iter().any(|e| {
+        matches!(
+            e.key.as_str(),
+            "store.registration" | "store.gstin" | "store.state_code"
+        )
+    }) {
+        catalog::check_registration(&wanted).map_err(UiError::from)?;
+    }
+    check_slabs(&wanted)?;
 
     let at = crate::flows::now();
     let day = crate::flows::today(at);
@@ -437,7 +451,9 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
     })?;
 
     // Only after the commit.
-    app.publish_shop_config(wanted);
+    // Read back rather than published as typed: the book's shop default lives in the store
+    // profile, and the book is part of the configuration.
+    app.reload_shop_config();
 
     if changed.is_empty() {
         log_info!("{} pressed Save and nothing had changed", who.name);
@@ -457,6 +473,49 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
 }
 
 /// The before or the after side of a change list, as one object keyed by setting.
+/// The shop's live slabs as a pick list, plus the one currently chosen even if it has been
+/// retired — so the box never shows a blank where a value is.
+fn slab_choices(config: &ShopConfig, current: &Value) -> Vec<ChoiceView> {
+    let current = current.as_text().unwrap_or("");
+    config
+        .tax
+        .classes
+        .iter()
+        .filter(|c| c.is_active || c.id.as_str() == current)
+        .map(|c| ChoiceView {
+            value: c.id.as_str().to_owned(),
+            label: if c.is_active {
+                c.name.clone()
+            } else {
+                format!("{} (removed)", c.name)
+            },
+        })
+        .collect()
+}
+
+/// Every slab a charge names must be one the shop has today.
+fn check_slabs(config: &ShopConfig) -> UiResult<()> {
+    for entry in catalog::CATALOG {
+        if !matches!(entry.kind, Kind::TaxClass) {
+            continue;
+        }
+        let value = (entry.read)(config);
+        let id = value.as_text().unwrap_or("");
+        let live = config
+            .tax
+            .find(&mb_core::TaxClassId::new(id))
+            .is_some_and(|c| c.is_active);
+        if !live {
+            return Err(UiError::new(
+                "settings.invalid",
+                format!("\"{}\" names a tax slab this shop no longer has. Pick another.", entry.label),
+            )
+            .with_detail(format!("setting {} = {id}", entry.key)));
+        }
+    }
+    Ok(())
+}
+
 fn json_of(changed: &[Changed], side: fn(&Changed) -> &String) -> serde_json::Value {
     serde_json::Value::Object(
         changed

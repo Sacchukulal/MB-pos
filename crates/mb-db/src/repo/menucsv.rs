@@ -1,6 +1,6 @@
 //! The menu, in and out of a spreadsheet.
 
-use mb_core::{CategoryId, ItemId, Money, TaxClassId, TaxSpec, Timestamp};
+use mb_core::{CategoryId, ItemId, Money, PriceBasis, Timestamp};
 use rusqlite::Transaction;
 
 use crate::error::DbError;
@@ -14,6 +14,7 @@ const COLUMNS: &[&str] = &[
     "category",
     "price_paise",
     "tax_class",
+    "price_basis",
     "hsn",
     "short_code",
     "cost_paise",
@@ -93,7 +94,8 @@ impl<'a> MenuCsvRepo<'a> {
                     Some(item.name.as_str()),
                     category.as_deref(),
                     Some(price.as_str()),
-                    item.tax_class_id.as_ref().map(TaxClassId::as_str),
+                    Some(item.tax_class_id.as_str()),
+                    Some(basis_word(item.price_basis)),
                     item.hsn.as_deref(),
                     item.short_code.as_deref(),
                     cost.as_deref(),
@@ -197,35 +199,6 @@ impl<'a> MenuCsvRepo<'a> {
                 None => found.and_then(|i| i.cost_price),
             };
 
-            // A tax class by id or by name.
-            let wanted_class = cell(index_of("tax_class"));
-            let class = match &wanted_class {
-                Some(text) => {
-                    let found_class = classes
-                        .iter()
-                        .find(|c| c.id.as_str() == text || c.name.eq_ignore_ascii_case(text));
-                    match found_class {
-                        Some(class) => Some(class),
-                        None => {
-                            plan.refused.push((
-                                line,
-                                format!("\"{text}\" is not one of this shop's tax classes"),
-                            ));
-                            continue;
-                        }
-                    }
-                }
-                None => None,
-            };
-
-            // The class named in the CSV wins; failing that the item keeps the tax it already
-            // had; failing that it is plain GST at nil, which is what `TaxSpec::default()` is
-            // and the same answer the old `(TaxRate::ZERO, Exclusive)` pair gave.
-            let tax = match class {
-                Some(class) => class.tax,
-                None => found.map_or_else(TaxSpec::default, |i| i.tax),
-            };
-
             // A category by name, and an unknown one is refused rather than silently dropped —
             // an item that lands in "no category" is an item nobody finds again.
             let category = match cell(index_of("category")) {
@@ -234,7 +207,7 @@ impl<'a> MenuCsvRepo<'a> {
                         .iter()
                         .find(|c| c.name.eq_ignore_ascii_case(&text))
                     {
-                        Some(category) => Some(category.id.clone()),
+                        Some(category) => Some(category),
                         None => {
                             plan.refused
                                 .push((line, format!("there is no category called \"{text}\"")));
@@ -242,8 +215,64 @@ impl<'a> MenuCsvRepo<'a> {
                         }
                     }
                 }
-                None => found.and_then(|i| i.category_id.clone()),
+                None => found
+                    .and_then(|i| i.category_id.as_ref())
+                    .and_then(|id| categories.iter().find(|c| &c.id == id)),
             };
+
+            // A tax slab by id or by name. The file wins; failing that the item keeps the slab
+            // it has; a NEW item with no slab takes its category's; failing that it is refused —
+            // an item with no slab cannot be billed.
+            let wanted_class = cell(index_of("tax_class"));
+            let class = match &wanted_class {
+                Some(text) => {
+                    let found_class = classes.iter().find(|c| {
+                        c.is_active
+                            && (c.id.as_str() == text || c.name.eq_ignore_ascii_case(text))
+                    });
+                    match found_class {
+                        Some(class) => class.id.clone(),
+                        None => {
+                            plan.refused.push((
+                                line,
+                                format!("\"{text}\" is not one of this shop's tax slabs"),
+                            ));
+                            continue;
+                        }
+                    }
+                }
+                None => match found
+                    .map(|i| i.tax_class_id.clone())
+                    .or_else(|| category.and_then(|c| c.default_tax_class_id.clone()))
+                {
+                    Some(id) => id,
+                    None => {
+                        plan.refused.push((
+                            line,
+                            format!("{name} needs a tax slab — add a tax_class column"),
+                        ));
+                        continue;
+                    }
+                },
+            };
+
+            // The item's own say on its price, if the file has one.
+            let price_basis = match cell(index_of("price_basis")) {
+                Some(text) => match basis_from_word(&text) {
+                    Some(basis) => basis,
+                    None => {
+                        plan.refused.push((
+                            line,
+                            format!(
+                                "\"{text}\" is not a price basis — shop, inclusive or exclusive"
+                            ),
+                        ));
+                        continue;
+                    }
+                },
+                None => found.and_then(|i| i.price_basis),
+            };
+            let category = category.map(|c| c.id.clone());
 
             let available = match cell(index_of("available")) {
                 Some(text) => matches!(
@@ -261,8 +290,8 @@ impl<'a> MenuCsvRepo<'a> {
                 category_id: category.map(|c| CategoryId::new(c.as_str().to_owned())),
                 name,
                 unit_price: price,
-                tax_class_id: class.map(|c| c.id.clone()),
-                tax,
+                tax_class_id: class,
+                price_basis,
                 hsn: cell(index_of("hsn")).or_else(|| found.and_then(|i| i.hsn.clone())),
                 cost_price: cost,
                 short_code: cell(index_of("short_code"))
@@ -298,6 +327,25 @@ impl<'a> MenuCsvRepo<'a> {
             repo.save_item(outlet, item, at)?;
         }
         Ok(plan.new_items.len() + plan.updated_items.len())
+    }
+}
+
+/// The price-basis column, in the words the file uses.
+const fn basis_word(basis: Option<PriceBasis>) -> &'static str {
+    match basis {
+        None => "shop",
+        Some(PriceBasis::Inclusive) => "inclusive",
+        Some(PriceBasis::Exclusive) => "exclusive",
+    }
+}
+
+/// The same words, read back. `Some(None)` is "shop"; `None` is a word we do not know.
+fn basis_from_word(text: &str) -> Option<Option<PriceBasis>> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "shop" | "default" | "" => Some(None),
+        "inclusive" | "included" | "yes" => Some(Some(PriceBasis::Inclusive)),
+        "exclusive" | "added" | "no" => Some(Some(PriceBasis::Exclusive)),
+        _ => None,
     }
 }
 

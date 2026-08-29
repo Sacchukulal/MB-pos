@@ -70,7 +70,10 @@ pub use tax::{
     GstAmounts, PlaceOfSupply, PriceBasis, RateSummaryRow, Registration, StateTax, TaxKind,
     TaxOutcome, TaxRate, TaxSpec, TaxSummary, Vat, VatSummaryRow,
 };
-pub use taxclass::{TaxClass, TaxClassId, starting_classes};
+pub use taxclass::{
+    TaxBook, TaxBookError, TaxClass, TaxClassId, seeded_placement, seeded_slab_for,
+    starting_classes,
+};
 pub use time::{TimeError, Timestamp, UtcOffset};
 pub use transfer::{Pick, Portion, TransferError, merge_into, take_lines};
 pub use units::{Dimension, Pack, UnitCost, UnitError, Units};

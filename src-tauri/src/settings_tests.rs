@@ -109,11 +109,13 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
     )
     .expect("adds");
 
+    let book = mb_core::TaxBook::new(mb_core::starting_classes(), mb_core::PriceBasis::Exclusive);
     let charges = crate::settings::Billing {
         service_charge_bp: 500,
         ..crate::settings::Billing::default()
     }
-    .charges_for(OrderType::DineIn);
+    .charges_for(OrderType::DineIn, &book)
+    .expect("charges");
 
     let bill = mb_core::compute_bill(
         mb_core::BillInput::new(&cart, mb_core::Registration::Regular)
@@ -456,11 +458,13 @@ fn a_configuration_survives_the_database_being_emptied() {
     })
     .expect("wipes");
     app.reload_shop_config();
-    assert_eq!(
-        app.shop_config(),
-        ShopConfig::default(),
-        "the wipe did not take"
-    );
+    // The slabs are seeded rows, not settings, so they survive the wipe by design.
+    let loaded = app.shop_config();
+    let expected = ShopConfig {
+        tax: loaded.tax.clone(),
+        ..ShopConfig::default()
+    };
+    assert_eq!(loaded, expected, "the wipe did not take");
 
     let (wanted, plan) = crate::settings::plan_import(&app.shop_config(), &exported);
     assert!(plan.is_usable(), "{:?}", plan.problems);
@@ -1091,7 +1095,7 @@ fn the_schedule_backs_up_when_the_newest_one_is_old() {
     let scratch = Scratch::new("backup_schedule");
     let app = a_shop(&scratch, "schedule");
     let copies = scratch.dir().join("copies");
-    let mut config = ShopConfig::default();
+    let mut config = app.shop_config();
     config.backup.every_hours = 1;
     config.backup.folder = copies.display().to_string();
     app.publish_shop_config(config);

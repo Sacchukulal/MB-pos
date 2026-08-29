@@ -11,20 +11,16 @@ use crate::counter::Refusal;
 /// photograph of the screen is worthless by the end of service.
 pub const TOKEN_LIFETIME_SECONDS: i64 = 300;
 
-/// How many wrong PINs one presented token may absorb before the phone has to scan again.
-pub const PIN_TRIES: u32 = 3;
-
-/// A phone that presented a good token and has not been let in yet: it is either claiming
-/// its person with a PIN, or waiting for somebody at the counter to press Allow.
+/// A phone that presented a good token and has not been let in yet: it is waiting for somebody
+/// at the counter to say whose it is and press Allow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
     pub request_id: String,
     pub name: String,
     pub platform: String,
+    pub install: Option<String>,
     pub ip: String,
     pub asked_at: Timestamp,
-    /// Wrong PINs so far.
-    pub wrong_pins: u32,
 }
 
 /// The pairing desk: the code being shown, and the phones queueing at it.
@@ -113,6 +109,7 @@ impl Desk {
         offered: &str,
         name: &str,
         platform: &str,
+        install: Option<&str>,
         ip: &str,
         now: Timestamp,
     ) -> Result<String, Refusal> {
@@ -143,9 +140,9 @@ impl Desk {
             request_id: request_id.clone(),
             name: name.trim().to_owned(),
             platform: platform.to_owned(),
+            install: install.map(str::to_owned),
             ip: ip.to_owned(),
             asked_at: now,
-            wrong_pins: 0,
         });
         Ok(request_id)
     }
@@ -175,27 +172,6 @@ impl Desk {
             .iter()
             .position(|w| w.request_id == request_id)?;
         Some(inner.waiting.remove(at))
-    }
-
-    /// The phone typed a wrong PIN for its person. Three of those and the token is gone: the
-    /// phone scans again, which is a fresh code and a fresh five minutes — and the rate limit
-    /// on `/v1/pair` is what stands between a guesser and the next one.
-    pub fn wrong_pin(&self, request_id: &str) -> Result<u32, Refusal> {
-        let mut inner = lock(&self.inner);
-        let Some(at) = inner
-            .waiting
-            .iter()
-            .position(|w| w.request_id == request_id)
-        else {
-            return Err(Refusal::BadToken);
-        };
-        inner.waiting[at].wrong_pins += 1;
-        let left = PIN_TRIES.saturating_sub(inner.waiting[at].wrong_pins);
-        if left == 0 {
-            inner.waiting.remove(at);
-            inner.refused.push(request_id.to_owned());
-        }
-        Ok(left)
     }
 
     /// A person pressed Allow and the counter issued a credential.
@@ -257,10 +233,10 @@ mod tests {
         let (token, _) = desk.open(at(0));
 
         // Used once.
-        desk.present(&token, "Ravi's phone", "android", "192.168.1.31", at(10))
+        desk.present(&token, "Ravi's phone", "android", None, "192.168.1.31", at(10))
             .expect("the first phone is queued");
         assert_eq!(
-            desk.present(&token, "A stranger", "android", "192.168.1.99", at(11)),
+            desk.present(&token, "A stranger", "android", None, "192.168.1.99", at(11)),
             Err(Refusal::BadToken),
             "a token that pairs twice is a screenshot that pairs a stranger"
         );
@@ -273,6 +249,7 @@ mod tests {
                 &stale,
                 "Late phone",
                 "android",
+                None,
                 "1.2.3.4",
                 at(TOKEN_LIFETIME_SECONDS + 1)
             ),
@@ -286,12 +263,12 @@ mod tests {
     fn a_used_code_is_replaced_and_the_panel_stays_open() {
         let desk = Desk::new();
         let (first, first_code) = desk.open(at(0));
-        desk.present(&first, "Ravi's phone", "android", "1.2.3.4", at(5))
+        desk.present(&first, "Ravi's phone", "android", None, "1.2.3.4", at(5))
             .expect("queued");
         let (second, second_code) = desk.showing(at(6)).expect("still showing");
         assert_ne!(first, second, "the spent token is still on the screen");
         assert_ne!(first_code, second_code);
-        desk.present(&second, "Anita's phone", "android", "1.2.3.5", at(7))
+        desk.present(&second, "Anita's phone", "android", None, "1.2.3.5", at(7))
             .expect("the next phone pairs on the fresh code");
         assert_eq!(desk.waiting().len(), 2);
     }
@@ -302,7 +279,7 @@ mod tests {
         let (_, code) = desk.open(at(0));
         let sloppy = code.to_lowercase().replace('-', " ");
         assert!(
-            desk.present(&sloppy, "Phone", "android", "1.2.3.4", at(1))
+            desk.present(&sloppy, "Phone", "android", None, "1.2.3.4", at(1))
                 .is_ok(),
             "{code} typed as {sloppy} was refused"
         );
@@ -314,7 +291,7 @@ mod tests {
         let desk = Desk::new();
         let (token, _) = desk.open(at(0));
         let request = desk
-            .present(&token, "Kitchen tablet", "android", "1.2.3.4", at(1))
+            .present(&token, "Kitchen tablet", "android", None, "1.2.3.4", at(1))
             .expect("queued");
 
         assert_eq!(desk.collect(&request), Ok(None), "it let itself in");
@@ -340,26 +317,10 @@ mod tests {
         let desk = Desk::new();
         let (token, _) = desk.open(at(0));
         let request = desk
-            .present(&token, "Unknown phone", "android", "1.2.3.4", at(1))
+            .present(&token, "Unknown phone", "android", None, "1.2.3.4", at(1))
             .expect("queued");
         desk.refuse(&request);
         assert_eq!(desk.collect(&request), Err(Refusal::BadToken));
         assert!(desk.waiting().is_empty());
-    }
-
-    /// Three wrong PINs and the presentation is spent: scan again.
-    #[test]
-    fn three_wrong_pins_spend_the_token() {
-        let desk = Desk::new();
-        let (token, _) = desk.open(at(0));
-        let request = desk
-            .present(&token, "Ravi's phone", "android", "1.2.3.4", at(1))
-            .expect("queued");
-        assert_eq!(desk.wrong_pin(&request), Ok(2));
-        assert_eq!(desk.wrong_pin(&request), Ok(1));
-        assert_eq!(desk.wrong_pin(&request), Ok(0));
-        assert!(desk.peek(&request).is_none(), "still in the queue");
-        assert_eq!(desk.collect(&request), Err(Refusal::BadToken));
-        assert_eq!(desk.wrong_pin(&request), Err(Refusal::BadToken));
     }
 }

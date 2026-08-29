@@ -22,6 +22,8 @@ pub struct LanDevice {
     pub last_seen_at: Option<Timestamp>,
     pub last_ip: Option<String>,
     pub revoked_at: Option<Timestamp>,
+    /// The phone's own install id (migration 0010). None for a row from before, or a till.
+    pub install_id: Option<String>,
 }
 
 impl LanDevice {
@@ -46,7 +48,7 @@ impl<'a> DevicesRepo<'a> {
     pub fn all(&self, outlet: &str) -> Result<Vec<LanDevice>, DbError> {
         let mut stmt = self.tx.prepare(
             "SELECT id, name, platform, secret_hash, staff_id, paired_at, paired_by,
-                    last_seen_at, last_ip, revoked_at
+                    last_seen_at, last_ip, revoked_at, install_id
                FROM lan_devices WHERE outlet_id = ?1
            ORDER BY revoked_at IS NOT NULL, paired_at DESC",
         )?;
@@ -66,6 +68,7 @@ impl<'a> DevicesRepo<'a> {
                 revoked_at: row
                     .get::<_, Option<i64>>(9)?
                     .map(encode::timestamp_from_sql),
+                install_id: row.get(10)?,
             })
         })?;
         let mut out = Vec::new();
@@ -83,7 +86,16 @@ impl<'a> DevicesRepo<'a> {
             .find(|d| d.id == id && d.is_live()))
     }
 
-    /// Let a phone in.
+    /// The row a phone already has here, by its install id — live or removed.
+    pub fn by_install(&self, outlet: &str, install: &str) -> Result<Option<LanDevice>, DbError> {
+        Ok(self
+            .all(outlet)?
+            .into_iter()
+            .find(|d| d.install_id.as_deref() == Some(install)))
+    }
+
+    /// Let a phone in. The same id again is the same phone back: its row is rewritten, with a
+    /// new credential, and it is live again.
     pub fn pair(
         &self,
         outlet: &str,
@@ -97,8 +109,19 @@ impl<'a> DevicesRepo<'a> {
         }
         self.tx.execute(
             "INSERT INTO lan_devices (id, outlet_id, name, platform, secret_hash, staff_id,
-                                      paired_at, paired_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                      paired_at, paired_by, install_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT (id) DO UPDATE SET name         = excluded.name,
+                                            platform     = excluded.platform,
+                                            secret_hash  = excluded.secret_hash,
+                                            staff_id     = excluded.staff_id,
+                                            paired_at    = excluded.paired_at,
+                                            paired_by    = excluded.paired_by,
+                                            install_id   = excluded.install_id,
+                                            last_seen_at = NULL,
+                                            last_ip      = NULL,
+                                            revoked_at   = NULL,
+                                            revoked_by   = NULL",
             rusqlite::params![
                 device.id,
                 outlet,
@@ -108,6 +131,7 @@ impl<'a> DevicesRepo<'a> {
                 device.staff_id.as_ref().map(StaffId::as_str),
                 encode::timestamp_to_sql(device.paired_at),
                 paired_by.map(StaffId::as_str),
+                device.install_id,
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(

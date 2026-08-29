@@ -48,6 +48,7 @@ mod expense_tests;
 mod expenses;
 /// The first five minutes — and the command that was missing: nothing in this product could
 /// create a shop.
+mod firewall;
 mod firstrun;
 mod floor;
 #[cfg(test)]
@@ -128,6 +129,7 @@ mod startup;
 mod state;
 /// The cloud copy: the outbox goes up, the people list comes down.
 mod sync;
+mod tax;
 #[cfg(test)]
 mod terminal_tests;
 /// The tills â who this machine is, who the master is, and the series it issues under.

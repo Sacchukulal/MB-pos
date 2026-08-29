@@ -12,16 +12,10 @@ pub struct PairRequest {
     pub platform: String,
     /// The short-lived token from the QR or the counter's screen.
     pub token: String,
-}
-
-/// A phone that presented a good token says whose it is: a person on the staff list, proven
-/// by that person's own PIN — or nobody's, a shared tablet, which then waits for Allow.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct ClaimRequest {
+    /// A stable id for this install of the app, so a phone that pairs again takes its OWN seat
+    /// back instead of a second one. Absent from an old app: then every pairing is a new phone.
     #[serde(default)]
-    pub staff_id: Option<String>,
-    #[serde(default)]
-    pub pin: Option<String>,
+    pub install: Option<String>,
 }
 
 /// Somebody a phone can be given to. Names only — the shop's WiFi already carries them on
@@ -50,6 +44,8 @@ pub struct Device {
     pub name: String,
     /// Nullable, and that is the point.
     pub staff_id: Option<String>,
+    /// The person's name, for the phone's own screen. None for a shared tablet.
+    pub staff_name: Option<String>,
     pub permissions: mb_auth::PermissionSet,
 }
 
@@ -68,8 +64,6 @@ pub enum Refusal {
     BadToken,
     /// A person has not approved it yet.
     WaitingForApproval,
-    /// The PIN did not match the person the phone named. Carries how many tries are left.
-    WrongPin(u32),
     /// Anything the counter itself refused, already written as a sentence.
     Refused(String),
 }
@@ -95,11 +89,6 @@ impl Refusal {
             Refusal::WaitingForApproval => {
                 "Waiting for somebody at the counter to allow this phone.".to_owned()
             }
-            Refusal::WrongPin(0) => {
-                "That PIN is not right, and that was the last try. Scan the code again.".to_owned()
-            }
-            Refusal::WrongPin(1) => "That PIN is not right. One more try.".to_owned(),
-            Refusal::WrongPin(left) => format!("That PIN is not right. {left} tries left."),
         }
     }
 
@@ -112,11 +101,8 @@ impl Refusal {
             // 401 means.
             Refusal::NotPaired | Refusal::Revoked => 401,
             Refusal::WaitingForApproval => 202,
-            Refusal::BadToken | Refusal::WrongPin(0) => 400,
-            Refusal::NotAllowed(_)
-            | Refusal::TooManyDevices(_)
-            | Refusal::Refused(_)
-            | Refusal::WrongPin(_) => 403,
+            Refusal::BadToken => 400,
+            Refusal::NotAllowed(_) | Refusal::TooManyDevices(_) | Refusal::Refused(_) => 403,
         }
     }
 }
@@ -143,19 +129,18 @@ pub trait Counter: Send + Sync + 'static {
     /// screen can show it without asking.
     fn presence(&self, _connected: usize) {}
 
-    /// The people a phone may claim to belong to.
-    fn people(&self) -> Vec<Person> {
-        Vec::new()
-    }
-
-    /// Whether `pin` is that person's PIN. The counter decides what a wrong one costs.
-    fn check_pin(&self, _staff_id: &str, _pin: &str) -> Result<(), Refusal> {
+    /// The phone's login to the cloud, minted by the counter for the person this device belongs
+    /// to (LAN_PROTOCOL.md §3). The whole reply the cloud gave, passed through as-is; a shared
+    /// tablet has no person and so no login. Blocking: the server calls it off its own threads.
+    fn cloud_login(&self, _device: &Device) -> Result<serde_json::Value, Refusal> {
         Err(Refusal::Refused(
-            "This counter cannot check a PIN. Ask somebody at the till to press Allow.".to_owned(),
+            "This counter cannot sign a phone in to the cloud.".to_owned(),
         ))
     }
 
-    /// Store an approved device.
+    /// The phone chose to leave: the counter forgets it, so its seat on the plan is free again.
+    fn leave(&self, _device: &Device) {}
+
     /// Issue a credential. `staff_id` is the person the approver bound the device to — the
     /// waiter whose phone it is — or `None` for a shared tablet that belongs to nobody.
     fn pair(

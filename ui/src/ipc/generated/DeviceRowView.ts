@@ -4,4 +4,4 @@ export type DeviceRowView = { id: string, name: string, platform: string,
 /**
  * "Ravi", or "shared" when no one person owns it.
  */
-staff: string, lastSeen: string, lastIp: string, isLive: boolean, };
+staff: string, lastSeen: string, lastIp: string, };

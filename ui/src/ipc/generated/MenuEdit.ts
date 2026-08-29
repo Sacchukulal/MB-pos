@@ -7,7 +7,15 @@ export type MenuEdit = { id: string, name: string, categoryId: string | null,
 /**
  * Typed by a person: "120", "120.50".
  */
-price: string, taxClassId: string | null, hsn: string | null, shortCode: string | null, cost: string | null, isOpenPrice: boolean, isAvailable: boolean, 
+price: string, 
+/**
+ * None = keep the item's slab; for a new item, the category's starting slab.
+ */
+taxClassId: string | null, 
+/**
+ * `shop`, `inclusive` or `exclusive`; None = keep what the item has.
+ */
+priceBasis: string | null, hsn: string | null, shortCode: string | null, cost: string | null, isOpenPrice: boolean, isAvailable: boolean, 
 /**
  * The course.
  */

@@ -355,7 +355,7 @@ fn do_it(
                 .core
                 .cart
                 .add(
-                    crate::billing::snapshot_for(&item),
+                    item.snapshot(&config.tax)?,
                     qty,
                     line_note.clone(),
                     vec![],
@@ -981,18 +981,23 @@ pub fn take_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView>
     // Every menu lookup FIRST, outside the cart lock — `find_menu_item` takes the shop lock,
     // and taking two locks in two orders in one product is how a till freezes at eight o'clock
     // on a Saturday.
+    let config = app.shop_config();
     let mut resolved = Vec::new();
     for change in &changes {
         let item = app.find_menu_item(&change.item_id)?;
         let qty = Qty::parse(&change.qty).unwrap_or(Qty::ZERO);
-        resolved.push((item, qty, change.note.clone()));
+        resolved.push((
+            crate::billing::snapshot_for(&item, &config.tax)?,
+            qty,
+            change.note.clone(),
+        ));
     }
 
     app.with_cart_mut(|state| {
-        for (item, qty, note) in resolved {
+        for (snapshot, qty, note) in resolved {
             state
                 .cart
-                .add(crate::billing::snapshot_for(&item), qty, note, vec![])
+                .add(snapshot, qty, note, vec![])
                 .map_err(|e| {
                     crate::words::UiError::new(
                         "cart.add",

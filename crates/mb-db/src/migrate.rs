@@ -63,6 +63,24 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0007_cloud_notices",
         sql: include_str!("migrations/0007_cloud_notices.sql"),
     },
+    // The tax book: slabs are the one place tax lives; items stop carrying a copy.
+    Migration {
+        version: 8,
+        name: "0008_tax_book",
+        sql: include_str!("migrations/0008_tax_book.sql"),
+    },
+    // One scan: the staff code and the phone-login switch leave; Allow at the counter is the gate.
+    Migration {
+        version: 9,
+        name: "0009_one_scan",
+        sql: include_str!("migrations/0009_one_scan.sql"),
+    },
+    // One phone, one seat: the install id on a device row.
+    Migration {
+        version: 10,
+        name: "0010_one_seat",
+        sql: include_str!("migrations/0010_one_seat.sql"),
+    },
 ];
 
 /// The highest version this build understands.

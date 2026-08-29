@@ -370,26 +370,15 @@ const REGISTRATIONS: &[Choice] = &[
     },
 ];
 
-const GST_RATES: &[Choice] = &[
+/// Whether a menu price already holds its tax.
+const PRICE_BASES: &[Choice] = &[
     Choice {
-        value: "0",
-        label: "No GST",
+        value: "exclusive",
+        label: "Tax is added on top",
     },
     Choice {
-        value: "500",
-        label: "5%",
-    },
-    Choice {
-        value: "1200",
-        label: "12%",
-    },
-    Choice {
-        value: "1800",
-        label: "18%",
-    },
-    Choice {
-        value: "2800",
-        label: "28%",
+        value: "inclusive",
+        label: "Tax is inside the price",
     },
 ];
 
@@ -837,25 +826,23 @@ fn order_type_from(text: &str) -> Option<mb_core::OrderType> {
 
 /// A GST rate, stored as basis points in a choice so the five legal rates are the only five
 /// that can be chosen.
-fn rate_to(bp: u32) -> &'static str {
-    match bp {
-        500 => "500",
-        1_200 => "1200",
-        1_800 => "1800",
-        2_800 => "2800",
-        _ => "0",
-    }
-}
-
-fn rate_from(text: &str) -> Option<u32> {
-    match text {
-        "0" => Some(0),
-        "500" => Some(500),
-        "1200" => Some(1_200),
-        "1800" => Some(1_800),
-        "2800" => Some(2_800),
-        _ => None,
-    }
+/// One of the shop's tax slabs, by id. The choices come from the tax book when the screen is
+/// drawn; whether the id names a live slab is checked at save time, where the book is.
+macro_rules! slab {
+    ($key:literal, $group:ident, $label:literal, $help:literal,
+     [$($syn:literal),* $(,)?], $($field:ident).+) => {
+        Entry {
+            key: $key,
+            group: Group::$group,
+            storage: Storage::Row,
+            label: $label,
+            help: $help,
+            synonyms: &[$($syn),*],
+            kind: Kind::TaxClass,
+            read: |c| Value::Text(c.$($field).+.clone()),
+            write: |c, v| { c.$($field).+ = v.as_text()?.trim().to_owned(); Ok(()) },
+        }
+    };
 }
 
 // THE TABLE.
@@ -896,9 +883,27 @@ pub const CATALOG: &[Entry] = &[
         store.phone
     ),
     // Neither of these is checked any more.
+    pick_text!(
+        "store.registration",
+        Tax,
+        Store,
+        "Your GST registration",
+        "It decides whether a bill may show GST at all, and what the bill is called.",
+        [
+            "gst",
+            "composition",
+            "registration",
+            "unregistered",
+            "regular",
+            "scheme",
+            "small dealer"
+        ],
+        REGISTRATIONS,
+        store.registration
+    ),
     words!(
         "store.gstin",
-        Store,
+        Tax,
         Store,
         "GST number",
         "Printed on the bill if you turn that on. Type it exactly as it is on \
@@ -922,12 +927,12 @@ pub const CATALOG: &[Entry] = &[
     ),
     pick_text!(
         "store.state_code",
-        Store,
+        Tax,
         Store,
         "State",
-        "Which state you are in. This decides whether a bill charges CGST and \
-         SGST or IGST.",
-        ["state", "karnataka", "igst", "cgst"],
+        "The state your GST number is from. It decides whether the state half of \
+         GST prints as SGST or UTGST.",
+        ["state", "karnataka", "sgst", "utgst", "cgst"],
         STATES,
         store.state_code
     ),
@@ -967,22 +972,64 @@ pub const CATALOG: &[Entry] = &[
         store.upi_reference
     ),
     pick_text!(
-        "store.registration",
+        "store.price_basis",
         Tax,
         Store,
-        "Your GST registration",
-        "It decides whether a bill may show GST at all, and what the bill is called.",
-        [
-            "gst",
-            "composition",
-            "registration",
-            "unregistered",
-            "regular",
-            "scheme",
-            "small dealer"
-        ],
-        REGISTRATIONS,
-        store.registration
+        "Menu prices",
+        "Whether the price you type for an item already has the tax inside it. A slab or \
+         a single item can say otherwise.",
+        ["inclusive", "exclusive", "mrp", "price", "tax included", "added on top"],
+        PRICE_BASES,
+        store.price_basis
+    ),
+    number!("billing.service_charge_bp", Tax, Row, "Service charge",
+        "In hundredths of a percent, so 500 is 5%. 0 means you do not charge it. \
+         Added to dine-in bills only.",
+        ["service", "charge", "percent", "tip"], 0..=2500 "hundredths of a percent",
+        u32, billing.service_charge_bp),
+    slab!(
+        "billing.service_charge_tax",
+        Tax,
+        "Tax on the service charge",
+        "",
+        ["service", "gst", "tax"],
+        billing.service_charge_tax
+    ),
+    cash!(
+        "billing.packing_charge",
+        Tax,
+        Row,
+        "Packing charge",
+        "Added to parcel and self-service bills. Zero means you do not charge it.",
+        ["packing", "parcel", "box", "charge"],
+        0..=100_000,
+        billing.packing_charge
+    ),
+    slab!(
+        "billing.packing_charge_tax",
+        Tax,
+        "Tax on the packing charge",
+        "",
+        ["packing", "gst", "tax"],
+        billing.packing_charge_tax
+    ),
+    cash!(
+        "billing.delivery_charge",
+        Tax,
+        Row,
+        "Delivery charge",
+        "Added to delivery bills. Zero means you do not charge it.",
+        ["delivery", "charge", "rider"],
+        0..=100_000,
+        billing.delivery_charge
+    ),
+    slab!(
+        "billing.delivery_charge_tax",
+        Tax,
+        "Tax on the delivery charge",
+        "",
+        ["delivery", "gst", "tax"],
+        billing.delivery_charge_tax
     ),
     // The bill.
     pick!(
@@ -1700,67 +1747,6 @@ pub const CATALOG: &[Entry] = &[
         ["kds", "screen", "display", "kitchen"],
         billing.kitchen_screen
     ),
-    number!("billing.service_charge_bp", Billing, Row, "Service charge",
-        "In hundredths of a percent, so 500 is 5%. 0 means you do not charge it. \
-         Added to dine-in bills only.",
-        ["service", "charge", "percent", "tip"], 0..=2500 "hundredths of a percent",
-        u32, billing.service_charge_bp),
-    pick!(
-        "billing.service_charge_tax_bp",
-        Billing,
-        Row,
-        "GST on the service charge",
-        "A service charge is usually taxed at 18% even on a bill of 5% food.",
-        ["service", "gst", "tax"],
-        GST_RATES,
-        rate_to,
-        rate_from,
-        billing.service_charge_tax_bp
-    ),
-    cash!(
-        "billing.packing_charge",
-        Billing,
-        Row,
-        "Packing charge",
-        "Added to parcel and self-service bills. Zero means you do not charge it.",
-        ["packing", "parcel", "box", "charge"],
-        0..=100_000,
-        billing.packing_charge
-    ),
-    pick!(
-        "billing.packing_charge_tax_bp",
-        Billing,
-        Row,
-        "GST on the packing charge",
-        "",
-        ["packing", "gst", "tax"],
-        GST_RATES,
-        rate_to,
-        rate_from,
-        billing.packing_charge_tax_bp
-    ),
-    cash!(
-        "billing.delivery_charge",
-        Billing,
-        Row,
-        "Delivery charge",
-        "Added to delivery bills. Zero means you do not charge it.",
-        ["delivery", "charge", "rider"],
-        0..=100_000,
-        billing.delivery_charge
-    ),
-    pick!(
-        "billing.delivery_charge_tax_bp",
-        Billing,
-        Row,
-        "GST on the delivery charge",
-        "",
-        ["delivery", "gst", "tax"],
-        GST_RATES,
-        rate_to,
-        rate_from,
-        billing.delivery_charge_tax_bp
-    ),
     // The day.
     number!("day.starts_at_minutes", Day, Row, "Your day starts at",
         "Minutes past midnight. 300 is 5 in the morning, which means a bill \
@@ -2035,6 +2021,10 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.service_charge", "Charges you add"),
     ("billing.packing_charge", "Charges you add"),
     ("billing.delivery_charge", "Charges you add"),
+    ("store.registration", "Registration"),
+    ("store.gstin", "Registration"),
+    ("store.state_code", "Registration"),
+    ("store.price_basis", "Prices"),
 ];
 
 /// The heading a setting sits under.
@@ -2064,6 +2054,9 @@ const ROWS: &[(&str, &str)] = &[
     ("kitchen.title.", "Title"),
     ("kitchen.details.", "Ticket details"),
     ("kitchen.items.", "Item list"),
+    ("billing.service_charge", "Service charge"),
+    ("billing.packing_charge", "Packing charge"),
+    ("billing.delivery_charge", "Delivery charge"),
 ];
 
 /// The line a setting shares, or `""` when it stands on its own.
@@ -2083,8 +2076,30 @@ pub fn short_for(entry: &Entry) -> &'static str {
     match entry.key.rsplit('.').next() {
         Some("scale") => "Size",
         Some("bold") => "Bold",
+        Some("service_charge_bp") => "Percent",
+        Some("packing_charge" | "delivery_charge") => "Amount",
+        Some(key) if key.ends_with("_charge_tax") => "Tax slab",
         _ => "",
     }
+}
+
+/// A shop that says it is registered has to be able to prove it on the bill.
+pub fn check_registration(config: &ShopConfig) -> Result<(), Invalid> {
+    let registration = config.store.registration();
+    if registration.needs_gstin() && config.store.gstin.trim().is_empty() {
+        return Err(Invalid::new(
+            "Type your GST number, or choose \"Not registered\" — a bill may not show GST \
+             without one.",
+        )
+        .about("store.gstin"));
+    }
+    if registration.needs_gstin() && config.store.state_code.trim().is_empty() {
+        return Err(Invalid::new(
+            "Choose your state — it decides whether the bill says SGST or UTGST.",
+        )
+        .about("store.state_code"));
+    }
+    Ok(())
 }
 
 /// The GSTIN's state code must be the shop's own state.

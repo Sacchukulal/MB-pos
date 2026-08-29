@@ -32,8 +32,8 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
                     category_id: None,
                     name: name.to_owned(),
                     unit_price: mb_core::Money::from_paise(paise),
-                    tax: mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%")),
-                    tax_class_id: None,
+                    tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+                    price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
                     hsn: None,
                     cost_price: None,
                     short_code: None,
@@ -76,7 +76,16 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, path);
+    with_gstin(&app);
     app
+}
+
+/// A registered shop — a blank GST number bills without GST, by design.
+fn with_gstin(app: &App) {
+    let mut config = app.shop_config();
+    config.store.gstin = "29ABCDE1234F1Z5".to_owned();
+    config.store.state_code = "29".to_owned();
+    app.publish_shop_config(config);
 }
 
 fn waiter() -> (StaffId, PermissionSet) {
@@ -767,9 +776,9 @@ fn a_wrong_phone_clock_is_not_staleness() {
 fn the_phone_and_the_counter_agree_on_the_total() {
     let scratch = Scratch::new("p20_total");
     let app = a_shop(&scratch, "total");
-    let mut config = crate::settings::ShopConfig::default();
+    let mut config = app.shop_config();
     config.billing.packing_charge = mb_core::Money::from_paise(1_000);
-    config.billing.packing_charge_tax_bp = 500;
+    config.billing.packing_charge_tax = "tax_food_5".to_owned();
     app.publish_shop_config(config.clone());
 
     let order = open_one(&app, None);

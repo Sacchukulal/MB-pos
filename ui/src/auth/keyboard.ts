@@ -270,16 +270,16 @@ export function reduce(state: State, event: Event): State {
     case 'submit': {
       if (state.busy) return state;
       if (state.mode.kind === 'who') {
-        // Type a staff code and press Enter — the same trick as the billing screen's table
-        // numbers, and for the same reason: a keyboard person should never have to reach for
-        // the list.
+        // Type a name and press Enter — the same trick as the billing screen's table numbers,
+        // and for the same reason: a keyboard person should never have to reach for the list.
+        // The whole name, or enough of it that only one person is left.
         const wanted = state.mode.typed.trim().toLowerCase();
         if (wanted === '') return state;
-        const person = state.people.find(
-          (p) => (p.code ?? '').toLowerCase() === wanted,
-        );
+        const exact = state.people.find((p) => p.name.toLowerCase() === wanted);
+        const starting = state.people.filter((p) => p.name.toLowerCase().startsWith(wanted));
+        const person = exact ?? (starting.length === 1 ? starting[0] : undefined);
         if (!person) {
-          return { ...state, problem: 'No staff code like that. Pick a name instead.' };
+          return { ...state, problem: 'No name like that. Pick a name instead.' };
         }
         return reduce(state, { kind: 'choose', person });
       }

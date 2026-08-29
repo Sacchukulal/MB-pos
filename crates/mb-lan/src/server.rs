@@ -11,7 +11,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::counter::{ClaimRequest, Counter, Device, PairRequest, Refusal};
+use crate::counter::{Counter, Device, PairRequest, Refusal};
 use crate::error::LanError;
 use crate::limit::{Limiter, Rate};
 use crate::pairing::Desk;
@@ -207,8 +207,8 @@ pub fn router(shared: Shared) -> Router {
         .route("/v1/hello", get(hello))
         .route("/v1/pair", post(pair))
         .route("/v1/pair/{request_id}", get(pair_status))
-        .route("/v1/pair/{request_id}/claim", post(claim))
-        .route("/v1/me", get(me))
+        .route("/v1/me", get(me).delete(leave))
+        .route("/v1/cloud-login", post(cloud_login))
         .route("/v1/stream", get(stream))
         // What a phone came here to do.
         .route("/v1/intent", post(intent))
@@ -366,6 +366,7 @@ async fn pair(
         &request.token,
         &request.name,
         &request.platform,
+        request.install.as_deref(),
         &ip,
         (shared.clock)(),
     ) {
@@ -374,71 +375,9 @@ async fn pair(
             Json(serde_json::json!({
                 "request_id": request_id,
                 "message": Refusal::WaitingForApproval.message(),
-                // Whose phone this could be. The phone shows the names; the person proves it
-                // with their PIN, and nobody at the counter has to press anything.
-                "people": shared.counter.people(),
             })),
         )
             .into_response(),
-        Err(r) => refused(&r),
-    }
-}
-
-/// The phone says whose it is. A person on the staff list, with that person's PIN, is let in
-/// on the spot; "nobody's" — a shared tablet — keeps waiting for somebody to press Allow.
-async fn claim(
-    State(shared): State<Shared>,
-    axum::extract::Path(request_id): axum::extract::Path<String>,
-    ConnectInfo(from): ConnectInfo<Peer>,
-    Json(request): Json<ClaimRequest>,
-) -> Response {
-    let ip = from.ip();
-    // The same door as `/v1/pair`: a PIN is guessed here or nowhere.
-    if let Err(wait) = shared.pair_limiter.check(&ip, (shared.clock)()) {
-        return too_many(wait);
-    }
-    let Some(waiting) = shared.desk.peek(&request_id) else {
-        return refused(&Refusal::BadToken);
-    };
-    let Some(staff_id) = request.staff_id.filter(|s| !s.trim().is_empty()) else {
-        // A shared tablet: a person at the counter decides.
-        return (
-            StatusCode::ACCEPTED,
-            Json(Trouble {
-                message: Refusal::WaitingForApproval.message(),
-            }),
-        )
-            .into_response();
-    };
-    let pin = request.pin.unwrap_or_default();
-    if let Err(r) = shared.counter.check_pin(&staff_id, &pin) {
-        // A wrong PIN is counted against the presentation, not against the person's counter
-        // login — three of them and the phone has to be seen scanning again.
-        return match r {
-            Refusal::WrongPin(_) => match shared.desk.wrong_pin(&request_id) {
-                Ok(left) => refused(&Refusal::WrongPin(left)),
-                Err(r) => refused(&r),
-            },
-            other => refused(&other),
-        };
-    }
-    let Some(taken) = shared.desk.take(&request_id) else {
-        return refused(&Refusal::BadToken);
-    };
-    match shared.counter.pair(
-        &PairRequest {
-            name: taken.name.clone(),
-            platform: taken.platform.clone(),
-            token: String::new(),
-        },
-        &waiting.name,
-        &waiting.platform,
-        Some(&staff_id),
-    ) {
-        Ok(device) => {
-            shared.device_limiter.forget(&device.device_id);
-            Json(device).into_response()
-        }
         Err(r) => refused(&r),
     }
 }
@@ -483,6 +422,7 @@ async fn me(
         "device_id": device.id,
         "name": device.name,
         "staff_id": device.staff_id,
+        "staff_name": device.staff_name,
         "may": device
             .permissions
             .iter()
@@ -490,6 +430,51 @@ async fn me(
             .collect::<Vec<_>>(),
     }))
     .into_response()
+}
+
+/// `DELETE /v1/me`: the phone is leaving. The counter forgets it on the spot, so the plan's
+/// phone count is right and the next pairing is not refused for a phone that is gone.
+async fn leave(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+) -> Response {
+    let device = match authenticate(&shared, &headers, from) {
+        Ok(d) => d,
+        Err(response) => return response,
+    };
+    shared.counter.leave(&device);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// The phone's login to the cloud, for the person this device belongs to. The counter asks
+/// the cloud under its own login and passes the reply through. A phone that gets a refusal
+/// here is still paired — it can take orders — and may ask again later.
+async fn cloud_login(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    ConnectInfo(from): ConnectInfo<Peer>,
+) -> Response {
+    let device = match authenticate(&shared, &headers, from) {
+        Ok(d) => d,
+        Err(response) => return response,
+    };
+    if device.staff_id.is_none() {
+        return refused(&Refusal::Refused(
+            "A shared tablet belongs to nobody, so it has no login of its own.".to_owned(),
+        ));
+    }
+    // The counter talks to the cloud with a blocking client: off the async threads.
+    let counter = shared.counter.clone();
+    let answer = tokio::task::spawn_blocking(move || counter.cloud_login(&device)).await;
+    match answer {
+        Ok(Ok(login)) => Json(login).into_response(),
+        Ok(Err(r)) => refused(&r),
+        Err(_) => trouble(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The counter could not ask the cloud just now. Try again.".to_owned(),
+        ),
+    }
 }
 
 #[derive(Debug, Deserialize)]

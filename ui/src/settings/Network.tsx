@@ -10,6 +10,7 @@ import type { NetworkView } from '../ipc/generated/NetworkView';
 export function Network() {
   const [view, setView] = useState<NetworkView | null>(null);
   const [removing, setRemoving] = useState<DeviceRowView | null>(null);
+  const [fixing, setFixing] = useState(false);
   const toast = useToast();
 
   const complain = useCallback(
@@ -55,7 +56,7 @@ export function Network() {
 
   if (!view) return <Spinner label="Looking at the network" />;
 
-  const live = view.devices.filter((d) => d.isLive);
+  const live = view.devices;
 
   return (
     <Scroller className="mb-network">
@@ -77,6 +78,26 @@ export function Network() {
       {/* The sentence at the top, written in Rust. */}
       <Card className={`mb-network__headline mb-network__headline--${view.tone}`}>
         <strong>{view.headline}</strong>
+        {view.mayFixFirewall ? (
+          <div className="mb-row">
+            <Button
+              variant="primary"
+              disabled={fixing}
+              onClick={() => {
+                setFixing(true);
+                call('allow_firewall')
+                  .then((fresh) => {
+                    setView(fresh);
+                    toast.show('ok', 'Windows Firewall now lets phones reach this counter.');
+                  })
+                  .catch(complain)
+                  .finally(() => setFixing(false));
+              }}
+            >
+              Allow Magic Bill through Windows Firewall
+            </Button>
+          </div>
+        ) : null}
         {view.certificateNote ? (
           <p className="mb-network__note">{view.certificateNote}</p>
         ) : null}
@@ -126,7 +147,7 @@ export function Network() {
                 ))}
               </div>
               <div className="mb-network__code">
-                <p>On the phone: scan this, pick your name, type your PIN.</p>
+                <p>On the phone: scan this. The phone then shows up below — pick whose it is and press Allow.</p>
                 <strong className="mb-mono">{view.code}</strong>
                 <p className="mb-network__note">
                   Or type the code. It changes after every phone, so the next one scans a fresh
@@ -140,8 +161,7 @@ export function Network() {
             <div className="mb-network__waiting">
               {view.waiting.map((w) => (
                 <div className="mb-network__ask" key={w.requestId}>
-                  {/* The whole sentence, written in Rust. A phone that is typing its PIN is
-                      also here; a shared tablet waits here for Allow. */}
+                  {/* The whole sentence, written in Rust. Every phone waits here for Allow. */}
                   <span>{w.says}</span>
                   <div className="mb-row--end">
                     {/* Whose phone it is decides what it may do: a waiter's phone acts as the
@@ -152,7 +172,7 @@ export function Network() {
                       value={owners[w.requestId] ?? ''}
                       onChange={(e) => setOwners({ ...owners, [w.requestId]: e.target.value })}
                     >
-                      <option value="">Shared — nobody's</option>
+                      <option value="">Whose phone? (or: shared, nobody's)</option>
                       {view.people.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -189,16 +209,18 @@ export function Network() {
       <Card>
         <SectionHeader
           title="Phones on this counter"
-          action={live.length > 0 ? <Badge tone="neutral">{live.length}</Badge> : undefined}
+          action={
+            live.length > 0 ? <Badge tone="neutral">{live.length}</Badge> : null
+          }
         />
-        {view.devices.length === 0 ? (
+        {live.length === 0 ? (
           <EmptyState
             small
             title="No phones yet"
             body='Press "Add phones" and scan the code with the Magic Bill app.'
           />
         ) : (
-          view.devices.map((device) => (
+          live.map((device) => (
             <div className="mb-network__device" key={device.id}>
               <div>
                 <strong>{device.name}</strong>
@@ -207,15 +229,11 @@ export function Network() {
                   {device.lastIp ? ` · ${device.lastIp}` : ''}
                 </p>
               </div>
-              {device.isLive ? (
-                view.mayPair ? (
-                  <Button small variant="danger" onClick={() => setRemoving(device)}>
-                    Remove
-                  </Button>
-                ) : null
-              ) : (
-                <Badge tone="neutral">Removed</Badge>
-              )}
+              {view.mayPair ? (
+                <Button small variant="danger" onClick={() => setRemoving(device)}>
+                  Remove
+                </Button>
+              ) : null}
             </div>
           ))
         )}

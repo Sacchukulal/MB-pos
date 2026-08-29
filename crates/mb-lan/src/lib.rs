@@ -14,9 +14,7 @@ pub mod qr;
 pub mod server;
 
 pub use client::{ClientError, Credential, Master};
-pub use counter::{
-    ClaimRequest, Counter, Device, DeviceRow, PairRequest, PairedDevice, Person, Refusal,
-};
+pub use counter::{Counter, Device, DeviceRow, PairRequest, PairedDevice, Person, Refusal};
 pub use error::LanError;
 pub use identity::Identity;
 pub use intent::{Batch, BatchResult, Catalogue, Intent, LineView, Outcome, What};

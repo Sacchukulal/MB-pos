@@ -438,18 +438,20 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
     let db = scratch.open();
     shop::build(&db);
 
-    // The fixture's dosa is on "Restaurant food 5%", and there is a settled bill with a dosa on
-    // it.
-    let before_rate = db
-        .transaction(|tx| {
-            Ok(Repos::new(tx)
+    // The fixture's dosa is on "GST 5%", and there is a settled bill with a dosa on it.
+    let rate_of = |db: &Db, id: &str| {
+        db.transaction(|tx| {
+            let repos = Repos::new(tx);
+            let book = repos.tax_classes().book(OUTLET)?;
+            repos
                 .menu()
-                .find_item(&mb_core::ItemId::new("itm_dosa"))?
-                .expect("the dosa")
-                .tax
-                .rate)
+                .find_item(&mb_core::ItemId::new(id))?
+                .expect("the item")
+                .tax(&book)
         })
-        .expect("read");
+        .expect("read")
+    };
+    let before_rate = rate_of(&db, "itm_dosa").rate;
     assert_eq!(before_rate, TaxRate::from_percent(5).expect("5%"));
 
     // What the settled bill says today.
@@ -464,32 +466,20 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
     assert!(billed_rates.contains(&500), "{billed_rates:?}");
 
     // The government moves restaurant food to 18%.
-    let repriced = db
-        .transaction(|tx| {
-            let repos = Repos::new(tx);
-            let mut class = repos
-                .tax_classes()
-                .find(OUTLET, &TaxClassId::new("tax_food_5"))?
-                .expect("the class");
-            class.tax.rate = TaxRate::from_percent(18).expect("18%");
-            class.name = "Restaurant food 18%".to_owned();
-            repos.tax_classes().save(OUTLET, &class, at(9))
-        })
-        .expect("saved");
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let mut class = repos
+            .tax_classes()
+            .find(OUTLET, &TaxClassId::new("tax_food_5"))?
+            .expect("the class");
+        class.rate = TaxRate::from_percent(18).expect("18%");
+        class.name = "GST 18% (food)".to_owned();
+        repos.tax_classes().save(OUTLET, &class, at(9))
+    })
+    .expect("saved");
 
-    assert!(repriced >= 1, "no item followed the class: {repriced}");
-
-    // The MENU moved.
-    let after_rate = db
-        .transaction(|tx| {
-            Ok(Repos::new(tx)
-                .menu()
-                .find_item(&mb_core::ItemId::new("itm_dosa"))?
-                .expect("the dosa")
-                .tax
-                .rate)
-        })
-        .expect("read");
+    // The MENU moved — nothing was rewritten, the item simply reads its slab.
+    let after_rate = rate_of(&db, "itm_dosa").rate;
     assert_eq!(
         after_rate,
         TaxRate::from_percent(18).expect("18%"),
@@ -510,21 +500,13 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
         "changing a tax class rewrote a bill that had already been printed"
     );
 
-    // An item that points at no class is untouched by anybody's class change.
-    let orphan = db
-        .transaction(|tx| {
-            Ok(Repos::new(tx)
-                .menu()
-                .find_item(&mb_core::ItemId::new("itm_beer"))?
-                .expect("the beer")
-                .tax
-                .kind)
-        })
-        .expect("read");
+    // An item on another slab is untouched by this one's change.
+    let beer = rate_of(&db, "itm_beer");
+    assert_eq!(beer.kind, mb_core::TaxKind::OutsideGst, "the beer moved with the food");
     assert_eq!(
-        orphan,
-        mb_core::TaxKind::OutsideGst,
-        "the beer moved with the food"
+        beer.basis,
+        mb_core::PriceBasis::Inclusive,
+        "the liquor slab's own pricing say was lost"
     );
 }
 
@@ -544,7 +526,9 @@ fn the_seeded_classes_match_the_ones_mb_core_ships() {
             .iter()
             .find(|c| c.id == expected.id)
             .unwrap_or_else(|| panic!("{} is not seeded", expected.name));
-        assert_eq!(found.tax, expected.tax, "{}", expected.name);
+        assert_eq!(found.kind, expected.kind, "{}", expected.name);
+        assert_eq!(found.rate, expected.rate, "{}", expected.name);
+        assert_eq!(found.basis, expected.basis, "{}", expected.name);
         assert_eq!(found.name, expected.name);
         assert!(found.is_active, "{} is seeded switched off", expected.name);
     }
@@ -567,7 +551,7 @@ fn the_seeded_classes_match_the_ones_mb_core_ships() {
         .find(|c| c.is_alcohol())
         .expect("a shop must be able to sell liquor");
     assert_eq!(liquor.name, "Liquor — state VAT");
-    assert_eq!(liquor.tax.basis, mb_core::PriceBasis::Inclusive);
+    assert_eq!(liquor.basis, Some(mb_core::PriceBasis::Inclusive));
 }
 
 // The per-order-type rate override test is GONE, with the feature.

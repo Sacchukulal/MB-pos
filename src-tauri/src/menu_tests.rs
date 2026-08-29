@@ -6,15 +6,15 @@
     reason = "tests: expect is the assertion"
 )]
 
-use mb_core::{ItemId, Money, PriceBasis, TaxClassId, TaxKind, TaxRate};
+use mb_core::{ItemId, Money, TaxClassId, TaxKind};
 use mb_db::{Db, DbConfig, Repos};
 
 use crate::menu::{
     ComboEdit, GroupEdit, MenuEdit, ModifierEdit, attach_group_on, change_prices_on,
     export_menu_on, item_composition_on, list_combos_on, list_groups_on, menu_rows_on,
-    plan_import_on, run_import_on, save_combo_on, save_group_on, save_item_on, save_tax_class_on,
-    save_variant_on, tax_classes_on,
+    plan_import_on, run_import_on, save_combo_on, save_group_on, save_item_on, save_variant_on,
 };
+use crate::tax::{save_slab_on, slabs_on};
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
 
@@ -27,16 +27,10 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
     db.transaction(|tx| {
         let repos = Repos::new(tx);
         for (id, name, paise, class) in [
-            ("itm_tea", "Tea", 2000_i64, Some("tax_food_5")),
-            ("itm_dosa", "Masala dosa", 12000, Some("tax_food_5")),
-            ("itm_water", "Water bottle", 2000, Some("tax_packaged_18")),
+            ("itm_tea", "Tea", 2000_i64, "tax_food_5"),
+            ("itm_dosa", "Masala dosa", 12000, "tax_food_5"),
+            ("itm_water", "Water bottle", 2000, "tax_packaged_18"),
         ] {
-            let tax = match class {
-                Some("tax_packaged_18") => {
-                    mb_core::TaxSpec::gst(TaxRate::from_basis_points(1800).expect("18%"))
-                }
-                _ => mb_core::TaxSpec::gst(TaxRate::from_basis_points(500).expect("5%")),
-            };
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
@@ -44,8 +38,8 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
                     category_id: None,
                     name: name.to_owned(),
                     unit_price: Money::from_paise(paise),
-                    tax_class_id: class.map(TaxClassId::new),
-                    tax,
+                    tax_class_id: TaxClassId::new(class),
+                    price_basis: None,
                     hsn: None,
                     cost_price: None,
                     short_code: None,
@@ -92,7 +86,7 @@ fn rate_of(app: &App, id: &str) -> String {
         .to_owned()
 }
 
-/// The whole rate line — "5% · Tax added on top".
+/// The whole rate line — "5% · added on top".
 fn row_rate(app: &App, id: &str) -> String {
     menu_rows_on(app)
         .expect("the menu")
@@ -102,53 +96,53 @@ fn row_rate(app: &App, id: &str) -> String {
         .rate
 }
 
-fn class_of(app: &App, id: &str) -> crate::menu::TaxClassView {
-    tax_classes_on(app)
-        .expect("the classes")
+fn slab_of(app: &App, id: &str) -> crate::tax::TaxSlabView {
+    slabs_on(app)
+        .expect("the slabs")
         .into_iter()
         .find(|c| c.id == id)
-        .expect("that class")
+        .expect("that slab")
 }
 
-/// A rate changes, and everything on that class changes with it.
+/// A rate changes, and everything on that slab changes with it — nothing is rewritten, the
+/// items simply read their slab.
 #[test]
-fn changing_a_class_moves_every_item_on_it_and_nothing_else() {
+fn changing_a_slab_moves_every_item_on_it_and_nothing_else() {
     let scratch = Scratch::new("tax_class");
     let app = a_shop_with_a_menu(&scratch);
 
     assert_eq!(rate_of(&app, "itm_tea"), "5%");
     assert_eq!(rate_of(&app, "itm_water"), "18%");
 
-    let classes = tax_classes_on(&app).expect("the classes");
-    let food = classes
-        .iter()
-        .find(|c| c.id == "tax_food_5")
-        .expect("the seeded food class");
+    let food = slab_of(&app, "tax_food_5");
     assert_eq!(food.items_using, 2, "tea and dosa, not the water");
 
-    let said = save_tax_class_on(
+    save_slab_on(
         &app,
         "tax_food_5".to_owned(),
-        "Restaurant food 12%".to_owned(),
+        "GST 12%".to_owned(),
         "12".to_owned(),
         TaxKind::Gst,
-        PriceBasis::Exclusive,
+        "shop".to_owned(),
     )
     .expect("the rate changed");
-    assert!(said.contains('2'), "it says how many moved: {said}");
 
     assert_eq!(rate_of(&app, "itm_tea"), "12%");
     assert_eq!(rate_of(&app, "itm_dosa"), "12%");
-    assert_eq!(rate_of(&app, "itm_water"), "18%", "a different class");
+    assert_eq!(rate_of(&app, "itm_water"), "18%", "a different slab");
 
-    // The NAME moves too.
-    let renamed = tax_classes_on(&app).expect("the classes");
-    let food = renamed
-        .iter()
-        .find(|c| c.id == "tax_food_5")
-        .expect("still there");
-    assert_eq!(food.name, "Restaurant food 12%");
+    // The NAME moves too, and the counter's own book followed without a restart.
+    let food = slab_of(&app, "tax_food_5");
+    assert_eq!(food.name, "GST 12%");
     assert_eq!(food.rate, "12%");
+    assert_eq!(
+        app.shop_config()
+            .tax
+            .spec_for(&TaxClassId::new("tax_food_5"), None)
+            .expect("in the book")
+            .rate,
+        mb_core::TaxRate::from_percent(12).expect("12%")
+    );
 }
 
 /// A rate outside 0–100% is refused in words, not by a panic.
@@ -157,64 +151,64 @@ fn an_impossible_rate_is_refused() {
     let scratch = Scratch::new("bad_rate");
     let app = a_shop_with_a_menu(&scratch);
 
-    let err = save_tax_class_on(
+    let err = save_slab_on(
         &app,
         "tax_food_5".to_owned(),
         "Nonsense".to_owned(),
         "400".to_owned(),
         TaxKind::Gst,
-        PriceBasis::Exclusive,
+        "shop".to_owned(),
     )
     .expect_err("400% is not a tax rate");
-    assert_eq!(err.code, "menu.rate");
+    assert_eq!(err.code, "tax.rate");
     assert_eq!(rate_of(&app, "itm_tea"), "5%", "and nothing moved");
 }
 
 #[test]
-fn changing_a_class_label_does_not_change_what_it_taxes() {
+fn changing_a_slab_label_does_not_change_what_it_taxes() {
     let scratch = Scratch::new("class_label");
     let app = a_shop_with_a_menu(&scratch);
 
-    // The water's class becomes liquor: outside GST, priced tax-in, 20% VAT.
-    save_tax_class_on(
+    // The water's slab becomes liquor: outside GST, priced tax-in, 20% VAT.
+    save_slab_on(
         &app,
         "tax_packaged_18".to_owned(),
         "Liquor — state VAT".to_owned(),
         "20".to_owned(),
         TaxKind::OutsideGst,
-        PriceBasis::Inclusive,
+        "inclusive".to_owned(),
     )
-    .expect("a bar's class");
+    .expect("a bar's slab");
     assert!(
-        row_rate(&app, "itm_water").contains("Outside GST"),
+        row_rate(&app, "itm_water").contains("VAT 20% · in the price"),
         "the bottle is outside GST: {}",
         row_rate(&app, "itm_water")
     );
 
     // What the screen holds: machine values beside the words.
-    let before = class_of(&app, "tax_packaged_18");
+    let before = slab_of(&app, "tax_packaged_18");
     assert_eq!(before.kind, TaxKind::OutsideGst);
-    assert_eq!(before.basis, PriceBasis::Inclusive);
+    assert_eq!(before.basis, "inclusive");
     assert_eq!(before.rate_bp, 2000);
 
     // Rename it to words that say none of that, sending back exactly what the view carried.
-    save_tax_class_on(
+    save_slab_on(
         &app,
         before.id.clone(),
         "Bar list".to_owned(),
         before.rate.trim_end_matches('%').to_owned(),
         before.kind,
-        before.basis,
+        before.basis.clone(),
     )
     .expect("renamed");
 
-    let after = class_of(&app, "tax_packaged_18");
+    let after = slab_of(&app, "tax_packaged_18");
     assert_eq!(after.name, "Bar list");
     assert_eq!(after.kind, TaxKind::OutsideGst, "still not GST");
-    assert_eq!(after.basis, PriceBasis::Inclusive);
+    assert_eq!(after.basis, "inclusive");
     assert_eq!(after.rate, "20%");
     assert!(
-        row_rate(&app, "itm_water").contains("Outside GST"),
+        row_rate(&app, "itm_water").contains("VAT 20%"),
         "and the bottle is still outside GST: {}",
         row_rate(&app, "itm_water")
     );
@@ -223,20 +217,20 @@ fn changing_a_class_label_does_not_change_what_it_taxes() {
 /// A rate on a kind that cannot carry one is refused, not silently zeroed — which is why the
 /// editor disables the box rather than hinting at it.
 #[test]
-fn an_exempt_class_cannot_be_given_a_rate() {
+fn an_exempt_slab_cannot_be_given_a_rate() {
     let scratch = Scratch::new("exempt_rate");
     let app = a_shop_with_a_menu(&scratch);
 
-    let err = save_tax_class_on(
+    let err = save_slab_on(
         &app,
         "tax_exempt".to_owned(),
         "Exempt".to_owned(),
         "5".to_owned(),
         TaxKind::Exempt,
-        PriceBasis::Exclusive,
+        "shop".to_owned(),
     )
     .expect_err("exempt at 5% is not a thing");
-    assert_eq!(err.code, "menu.rate");
+    assert_eq!(err.code, "tax.rate");
 }
 
 /// An HSN code is 2, 4, 6 or 8 digits.
@@ -250,7 +244,8 @@ fn an_hsn_of_three_digits_is_refused() {
         name: "Tea".to_owned(),
         category_id: None,
         price: "20".to_owned(),
-        tax_class_id: Some("tax_food_5".to_owned()),
+        tax_class_id: None,
+        price_basis: None,
         hsn: Some(hsn.to_owned()),
         short_code: None,
         cost: None,
@@ -564,7 +559,8 @@ fn a_combo_shares_its_price_across_two_different_tax_rates() {
             name: "Water bottle".to_owned(),
             category_id: None,
             price: "40".to_owned(),
-            tax_class_id: Some("tax_packaged_18".to_owned()),
+            tax_class_id: None,
+            price_basis: None,
             hsn: None,
             short_code: None,
             cost: None,

@@ -1,11 +1,15 @@
-//! A shop's tax vocabulary — the thing that lets a bar bill legally.
+//! A shop's tax slabs, and the ONE place an item's tax is worked out.
+//!
+//! A slab is a rate and a kind. Whether the price already contains the tax is decided in
+//! three layers — the item, then the slab, then the shop — and `TaxBook::spec_for` is the only
+//! function that reads those layers. Nothing else in the product stores a resolved tax
+//! against an item; a line freezes its `TaxSpec` when it is sold, and that is the only copy.
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::ItemId;
-use crate::tax::{TaxKind, TaxRate, TaxSpec};
+use crate::tax::{PriceBasis, TaxKind, TaxRate, TaxSpec};
 
-/// Identifies a tax class.
+/// Identifies a tax slab.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TaxClassId(String);
@@ -21,185 +25,307 @@ impl TaxClassId {
     }
 }
 
-/// A named tax, as an owner edits it.
+/// A slab, as an owner edits it on the Tax page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaxClass {
     pub id: TaxClassId,
-    /// What an owner picks from a list: "Restaurant food 5%".
+    /// What an owner picks from a list: "GST 5%".
     pub name: String,
-    /// The kind, the rate and the pricing basis, together.
-    pub tax: TaxSpec,
-    /// Retired rather than deleted — old bills point at this id, and a class an item still uses
-    /// cannot go.
+    pub kind: TaxKind,
+    pub rate: TaxRate,
+    /// `None` = the shop's own setting decides. `Some` = this slab always prices this way
+    /// (liquor is quoted tax-in whatever the shop does with food).
+    pub basis: Option<PriceBasis>,
+    /// Retired rather than deleted while anything points at it.
     pub is_active: bool,
 }
 
 impl TaxClass {
     #[must_use]
-    pub fn new(id: TaxClassId, name: impl Into<String>, tax: TaxSpec) -> Self {
+    pub fn new(id: TaxClassId, name: impl Into<String>, kind: TaxKind, rate: TaxRate) -> Self {
         TaxClass {
             id,
             name: name.into(),
-            tax,
+            kind,
+            rate,
+            basis: None,
             is_active: true,
         }
     }
 
-    /// A class that says two contradictory things is refused, not rounded off.
+    #[must_use]
+    pub fn with_basis(mut self, basis: PriceBasis) -> Self {
+        self.basis = Some(basis);
+        self
+    }
+
+    /// A slab that says two contradictory things is refused, not rounded off.
     #[must_use]
     pub fn is_coherent(&self) -> bool {
-        self.tax.is_coherent()
+        match self.kind {
+            TaxKind::Gst | TaxKind::OutsideGst => true,
+            TaxKind::Exempt | TaxKind::Untaxed => self.rate.is_zero(),
+        }
     }
 
     /// Is this the vocabulary for alcohol?
     #[must_use]
     pub fn is_alcohol(&self) -> bool {
-        self.tax.kind == TaxKind::OutsideGst
+        self.kind == TaxKind::OutsideGst
+    }
+
+    /// The tax for something on this slab, given the shop's default and the item's own say.
+    #[must_use]
+    pub fn spec(&self, shop: PriceBasis, item: Option<PriceBasis>) -> TaxSpec {
+        TaxSpec {
+            kind: self.kind,
+            rate: self.rate,
+            basis: item.or(self.basis).unwrap_or(shop),
+        }
     }
 }
 
-/// The five a new shop starts with.
+/// The slabs a new shop starts with. Every one can be renamed, re-rated or removed.
 #[must_use]
 pub fn starting_classes() -> Vec<TaxClass> {
     let pc = |percent: u32| TaxRate::from_percent(percent).unwrap_or(TaxRate::ZERO);
     vec![
-        TaxClass::new(
-            TaxClassId::new("tax_food_5"),
-            "Restaurant food 5%",
-            TaxSpec::gst(pc(5)),
-        ),
-        TaxClass::new(
-            TaxClassId::new("tax_goods_5"),
-            "Packaged goods 5%",
-            TaxSpec::gst(pc(5)),
-        ),
-        TaxClass::new(
-            TaxClassId::new("tax_packaged_18"),
-            "Packaged goods 18%",
-            TaxSpec::gst(pc(18)),
-        ),
+        TaxClass::new(TaxClassId::new("tax_gst_0"), "GST 0%", TaxKind::Gst, pc(0)),
+        TaxClass::new(TaxClassId::new("tax_food_5"), "GST 5%", TaxKind::Gst, pc(5)),
+        TaxClass::new(TaxClassId::new("tax_packaged_18"), "GST 18%", TaxKind::Gst, pc(18)),
+        TaxClass::new(TaxClassId::new("tax_gst_40"), "GST 40%", TaxKind::Gst, pc(40)),
+        TaxClass::new(TaxClassId::new("tax_exempt"), "Exempt", TaxKind::Exempt, pc(0)),
         TaxClass::new(
             TaxClassId::new("tax_liquor"),
             "Liquor — state VAT",
-            TaxSpec::liquor(TaxRate::ZERO),
-        ),
-        TaxClass::new(TaxClassId::new("tax_exempt"), "Exempt", TaxSpec::exempt()),
+            TaxKind::OutsideGst,
+            pc(0),
+        )
+        .with_basis(PriceBasis::Inclusive),
     ]
 }
 
-/// What a menu item is, as the menu screen edits it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MenuEntry {
-    pub id: ItemId,
-    pub name: String,
-    pub tax_class: TaxClassId,
-    pub is_available: bool,
+/// The seeded slab that carries this kind and rate, if one does — for seeders and fixtures that
+/// think in rates. The retired 12% seed is named too, so an old menu can still be described.
+#[must_use]
+pub fn seeded_slab_for(kind: TaxKind, rate: TaxRate) -> Option<TaxClassId> {
+    let id = match (kind, rate.basis_points()) {
+        (TaxKind::Gst, 0) => "tax_gst_0",
+        (TaxKind::Gst, 500) => "tax_food_5",
+        (TaxKind::Gst, 1_200) => "tax_packaged_12",
+        (TaxKind::Gst, 1_800) => "tax_packaged_18",
+        (TaxKind::Gst, 4_000) => "tax_gst_40",
+        (TaxKind::Exempt, _) => "tax_exempt",
+        (TaxKind::OutsideGst, _) => "tax_liquor",
+        _ => return None,
+    };
+    Some(TaxClassId::new(id))
+}
+
+/// For a seeder or a fixture written in terms of a `TaxSpec`: the seeded slab that carries it,
+/// and the item's own say when the spec prices tax-in. `None` when no seeded slab has that rate.
+#[must_use]
+pub fn seeded_placement(spec: TaxSpec) -> Option<(TaxClassId, Option<PriceBasis>)> {
+    let slab = seeded_slab_for(spec.kind, spec.rate)?;
+    let own = spec.basis.is_inclusive().then_some(PriceBasis::Inclusive);
+    Some((slab, own))
+}
+
+/// Why a tax could not be worked out.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TaxBookError {
+    #[error("there is no tax slab {0}")]
+    NoSuchSlab(String),
+    #[error("the tax slab {0} has been removed")]
+    Retired(String),
+}
+
+/// Every slab the shop has, and the shop's own pricing default — read once, asked many times.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TaxBook {
+    pub classes: Vec<TaxClass>,
+    /// What "price" means on this shop's menu unless a slab or an item says otherwise.
+    pub shop_basis: PriceBasis,
+}
+
+impl TaxBook {
+    #[must_use]
+    pub fn new(classes: Vec<TaxClass>, shop_basis: PriceBasis) -> Self {
+        TaxBook {
+            classes,
+            shop_basis,
+        }
+    }
+
+    #[must_use]
+    pub fn find(&self, id: &TaxClassId) -> Option<&TaxClass> {
+        self.classes.iter().find(|c| &c.id == id)
+    }
+
+    /// The slabs offered to somebody choosing one today.
+    pub fn active(&self) -> impl Iterator<Item = &TaxClass> {
+        self.classes.iter().filter(|c| c.is_active)
+    }
+
+    /// The whole tax question for one thing, answered from its slab and the layers above it.
+    pub fn spec_for(
+        &self,
+        id: &TaxClassId,
+        item_basis: Option<PriceBasis>,
+    ) -> Result<TaxSpec, TaxBookError> {
+        let class = self
+            .find(id)
+            .ok_or_else(|| TaxBookError::NoSuchSlab(id.as_str().to_owned()))?;
+        Ok(class.spec(self.shop_basis, item_basis))
+    }
+
+    /// The same, for something that may only use a live slab — a new item, a charge.
+    pub fn spec_for_live(
+        &self,
+        id: &TaxClassId,
+        item_basis: Option<PriceBasis>,
+    ) -> Result<TaxSpec, TaxBookError> {
+        let class = self
+            .find(id)
+            .ok_or_else(|| TaxBookError::NoSuchSlab(id.as_str().to_owned()))?;
+        if !class.is_active {
+            return Err(TaxBookError::Retired(id.as_str().to_owned()));
+        }
+        Ok(class.spec(self.shop_basis, item_basis))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tax::PriceBasis;
 
     fn pc(percent: u32) -> TaxRate {
         TaxRate::from_percent(percent).expect("a real rate")
     }
 
-    #[test]
-    fn a_class_carries_one_answer_about_tax() {
-        let food = TaxClass::new(
-            TaxClassId::new("tax_food_5"),
-            "Restaurant food 5%",
-            TaxSpec::gst(pc(5)),
-        );
-        assert_eq!(food.tax.kind, TaxKind::Gst);
-        assert_eq!(food.tax.rate, pc(5));
-        assert_eq!(food.tax.basis, PriceBasis::Exclusive);
-        assert!(food.is_coherent());
-        assert!(!food.is_alcohol());
+    fn book(shop: PriceBasis) -> TaxBook {
+        TaxBook::new(starting_classes(), shop)
     }
 
-    /// The commercial test. A shop starts able to describe food, packaged goods, something
-    /// outside GST entirely, and a nil-rated supply.
+    #[test]
+    fn a_slab_is_a_rate_and_a_kind_and_nothing_else_until_asked() {
+        let food = TaxClass::new(TaxClassId::new("tax_food_5"), "GST 5%", TaxKind::Gst, pc(5));
+        assert_eq!(food.basis, None, "a plain slab follows the shop");
+        assert!(food.is_coherent());
+        assert!(!food.is_alcohol());
+        assert_eq!(
+            food.spec(PriceBasis::Exclusive, None),
+            TaxSpec::gst(pc(5))
+        );
+        assert_eq!(
+            food.spec(PriceBasis::Inclusive, None),
+            TaxSpec::gst_inclusive(pc(5))
+        );
+    }
+
+    #[test]
+    fn the_item_beats_the_slab_and_the_slab_beats_the_shop() {
+        let b = book(PriceBasis::Exclusive);
+        let food = TaxClassId::new("tax_food_5");
+        let liquor = TaxClassId::new("tax_liquor");
+        // Shop says added; the food slab has no opinion; the item says nothing.
+        assert_eq!(
+            b.spec_for(&food, None).expect("food").basis,
+            PriceBasis::Exclusive
+        );
+        // The item overrides the shop.
+        assert_eq!(
+            b.spec_for(&food, Some(PriceBasis::Inclusive))
+                .expect("food")
+                .basis,
+            PriceBasis::Inclusive
+        );
+        // Liquor is quoted tax-in whatever the shop does with food.
+        assert_eq!(
+            b.spec_for(&liquor, None).expect("liquor").basis,
+            PriceBasis::Inclusive
+        );
+        // …unless the item itself says otherwise.
+        assert_eq!(
+            b.spec_for(&liquor, Some(PriceBasis::Exclusive))
+                .expect("liquor")
+                .basis,
+            PriceBasis::Exclusive
+        );
+    }
+
+    #[test]
+    fn an_inclusive_shop_makes_every_plain_slab_inclusive() {
+        let b = book(PriceBasis::Inclusive);
+        for class in b.active() {
+            if class.basis.is_none() {
+                assert_eq!(
+                    b.spec_for(&class.id, None).expect("spec").basis,
+                    PriceBasis::Inclusive,
+                    "{}",
+                    class.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_missing_or_retired_slab_is_an_error_not_a_zero() {
+        let mut b = book(PriceBasis::Exclusive);
+        assert_eq!(
+            b.spec_for(&TaxClassId::new("tax_nope"), None),
+            Err(TaxBookError::NoSuchSlab("tax_nope".to_owned()))
+        );
+        b.classes[1].is_active = false;
+        let id = b.classes[1].id.clone();
+        assert!(b.spec_for(&id, None).is_ok(), "an old item may still read it");
+        assert_eq!(
+            b.spec_for_live(&id, None),
+            Err(TaxBookError::Retired(id.as_str().to_owned())),
+            "but nothing new may take it"
+        );
+    }
+
     #[test]
     fn a_shop_starts_with_enough_to_bill_a_bar() {
         let classes = starting_classes();
-        assert_eq!(classes.len(), 5);
-
+        assert_eq!(classes.len(), 6);
         let liquor = classes
             .iter()
             .find(|c| c.id == TaxClassId::new("tax_liquor"))
             .expect("a shop must be able to sell liquor");
         assert!(liquor.is_alcohol());
-        assert_eq!(liquor.tax.kind, TaxKind::OutsideGst);
-        assert_eq!(
-            liquor.tax.basis,
-            PriceBasis::Inclusive,
-            "a bar quotes the price paid"
-        );
-        assert_eq!(liquor.tax.kind, TaxKind::OutsideGst);
-
-        let exempt = classes
-            .iter()
-            .find(|c| c.tax.kind == TaxKind::Exempt)
-            .expect("exempt exists");
-        // Exempt and outside-GST are DIFFERENT things and a return treats them differently:
-        // exempt is a nil-rated supply, liquor is not a supply under GST at all.
-        assert_ne!(exempt.tax.kind, liquor.tax.kind);
+        assert_eq!(liquor.basis, Some(PriceBasis::Inclusive), "a bar quotes the price paid");
+        assert!(liquor.rate.is_zero(), "the shop sets its own state's VAT");
+        assert!(classes.iter().any(|c| c.kind == TaxKind::Exempt));
     }
 
-    /// No abolished slab is seeded.
     #[test]
-    fn no_seeded_class_uses_an_abolished_slab() {
+    fn no_seeded_slab_uses_an_abolished_rate() {
         for class in starting_classes() {
-            let bp = class.tax.rate.basis_points();
+            let bp = class.rate.basis_points();
             assert!(bp != 1_200 && bp != 2_800, "{} seeds {bp}bp", class.name);
         }
     }
 
-    /// Every seed must make sense on its own terms — no rate on a kind that cannot carry one.
     #[test]
-    fn every_seeded_class_is_coherent() {
+    fn every_seeded_slab_is_coherent_and_live() {
         for class in starting_classes() {
             assert!(class.is_coherent(), "{} contradicts itself", class.name);
+            assert!(class.is_active, "{} starts switched off", class.name);
         }
     }
 
-    /// Liquor is seeded with no rate: VAT is set by the state, so the shop must say.
     #[test]
-    fn the_liquor_seed_asks_the_shop_for_its_vat_rate() {
-        let liquor = starting_classes()
-            .into_iter()
-            .find(|c| c.is_alcohol())
-            .expect("liquor exists");
-        assert!(liquor.tax.rate.is_zero());
-        assert!(liquor.name.contains("VAT"), "{}", liquor.name);
-    }
-
-    #[test]
-    fn a_class_that_contradicts_itself_is_not_coherent() {
+    fn a_slab_that_contradicts_itself_is_not_coherent() {
         let wrong = TaxClass::new(
             TaxClassId::new("tax_bad"),
             "Exempt but five per cent",
-            TaxSpec {
-                kind: TaxKind::Exempt,
-                rate: pc(5),
-                basis: PriceBasis::Exclusive,
-            },
+            TaxKind::Exempt,
+            pc(5),
         );
         assert!(!wrong.is_coherent());
-    }
-
-    #[test]
-    fn a_class_round_trips_through_serde() {
-        // Nothing reachable from an order may serialise with a non-string map key.
-        let class = TaxClass::new(
-            TaxClassId::new("tax_liquor"),
-            "Liquor — state VAT",
-            TaxSpec::liquor(pc(20)),
-        );
-        let json = serde_json::to_string(&class).expect("serialises");
-        let back: TaxClass = serde_json::from_str(&json).expect("round trips");
-        assert_eq!(back, class);
+        let fine = TaxClass::new(TaxClassId::new("tax_ok"), "Exempt", TaxKind::Exempt, pc(0));
+        assert!(fine.is_coherent());
     }
 }

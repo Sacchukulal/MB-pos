@@ -52,7 +52,16 @@ fn a_shop(scratch: &Scratch) -> App {
         mb_license::Status::Active,
         90,
     ));
+    with_gstin(&app);
     app
+}
+
+/// A registered shop — a blank GST number bills without GST, by design.
+fn with_gstin(app: &App) {
+    let mut config = app.shop_config();
+    config.store.gstin = "29ABCDE1234F1Z5".to_owned();
+    config.store.state_code = "29".to_owned();
+    app.publish_shop_config(config);
 }
 
 fn a_supplier(app: &App, id: &str, name: &str, terms: &str) {

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::billing::{MenuItemView, menu_view};
+use mb_core::TaxBook;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -37,6 +38,7 @@ pub fn search(
     items: &[mb_db::repo::menu::MenuItem],
     text: &str,
     mode: MatchMode,
+    book: &TaxBook,
 ) -> Vec<MenuItemView> {
     let needle = text.trim().to_lowercase();
     if needle.is_empty() {
@@ -57,7 +59,7 @@ pub fn search(
             .then(a.2.name.cmp(&b.2.name))
     });
     hits.truncate(MAX_SUGGESTIONS);
-    hits.iter().map(|(_, _, item)| menu_view(item)).collect()
+    hits.iter().map(|(_, _, item)| menu_view(item, book)).collect()
 }
 
 fn rank(item: &mb_db::repo::menu::MenuItem, needle: &str, mode: MatchMode) -> Option<Rank> {
@@ -97,13 +99,13 @@ mod tests {
 
     fn item(name: &str) -> MenuItem {
         MenuItem {
-            tax_class_id: None,
             course: None,
             id: ItemId::new(name.to_lowercase().replace(' ', "_")),
             category_id: None,
             name: name.to_owned(),
             unit_price: Money::from_paise(12_000),
-            tax: mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%")),
+            tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
+            price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
             hsn: None,
             cost_price: None,
             short_code: None,
@@ -112,6 +114,10 @@ mod tests {
             is_available: true,
             sort_order: 0,
         }
+    }
+
+    fn book() -> TaxBook {
+        TaxBook::new(mb_core::starting_classes(), mb_core::PriceBasis::Exclusive)
     }
 
     fn names(found: &[MenuItemView]) -> Vec<&str> {
@@ -126,7 +132,7 @@ mod tests {
             item("Butter Naan"),          // name-start
             item("Rebuttal Special"),     // inside
         ];
-        let found = search(&menu, "but", MatchMode::Contains);
+        let found = search(&menu, "but", MatchMode::Contains, &book());
         assert_eq!(
             names(&found),
             ["Butter Naan", "Paneer Butter Masala", "Rebuttal Special"]
@@ -142,12 +148,12 @@ mod tests {
         longer.short_code = Some("D12".to_owned());
         let menu = [item("D1 Sauce"), longer, coded];
         assert_eq!(
-            names(&search(&menu, "d1", MatchMode::Contains)),
+            names(&search(&menu, "d1", MatchMode::Contains, &book())),
             ["Dosa", "D1 Sauce", "Dosa Special"],
             "the exact code, then the name, then the code that starts with it"
         );
         assert_eq!(
-            names(&search(&menu, "d12", MatchMode::StartsWith))[0],
+            names(&search(&menu, "d12", MatchMode::StartsWith, &book()))[0],
             "Dosa Special",
             "a code is found in either mode"
         );
@@ -157,14 +163,14 @@ mod tests {
     fn a_tie_breaks_on_the_shorter_name() {
         // A cashier scanning a list picks the first thing that looks right.
         let menu = [item("Dosa Special Family Pack"), item("Dosa")];
-        assert_eq!(names(&search(&menu, "dos", MatchMode::Contains))[0], "Dosa");
+        assert_eq!(names(&search(&menu, "dos", MatchMode::Contains, &book()))[0], "Dosa");
     }
 
     #[test]
     fn starts_with_mode_refuses_a_word_start() {
         let menu = [item("Paneer Butter Masala"), item("Butter Naan")];
         assert_eq!(
-            names(&search(&menu, "but", MatchMode::StartsWith)),
+            names(&search(&menu, "but", MatchMode::StartsWith, &book())),
             ["Butter Naan"]
         );
     }
@@ -172,15 +178,15 @@ mod tests {
     #[test]
     fn it_is_case_insensitive_because_nobody_uses_shift_at_a_counter() {
         let menu = [item("Masala Dosa")];
-        assert_eq!(search(&menu, "MASALA", MatchMode::Contains).len(), 1);
-        assert_eq!(search(&menu, "masala", MatchMode::Contains).len(), 1);
+        assert_eq!(search(&menu, "MASALA", MatchMode::Contains, &book()).len(), 1);
+        assert_eq!(search(&menu, "masala", MatchMode::Contains, &book()).len(), 1);
     }
 
     #[test]
     fn never_more_than_ten() {
         let menu: Vec<MenuItem> = (0..50).map(|n| item(&format!("Dosa {n}"))).collect();
         assert_eq!(
-            search(&menu, "dosa", MatchMode::Contains).len(),
+            search(&menu, "dosa", MatchMode::Contains, &book()).len(),
             MAX_SUGGESTIONS
         );
     }
@@ -190,7 +196,7 @@ mod tests {
         // An empty search box means the cashier is about to open a table or print a ticket, and
         // the whole menu would be in the way of both.
         let menu = [item("Masala Dosa")];
-        assert!(search(&menu, "", MatchMode::Contains).is_empty());
-        assert!(search(&menu, "   ", MatchMode::Contains).is_empty());
+        assert!(search(&menu, "", MatchMode::Contains, &book()).is_empty());
+        assert!(search(&menu, "   ", MatchMode::Contains, &book()).is_empty());
     }
 }

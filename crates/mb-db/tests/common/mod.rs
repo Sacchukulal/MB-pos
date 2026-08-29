@@ -73,12 +73,12 @@ pub const MENU_SQL: &str = "
     INSERT INTO categories (id, outlet_id, name, created_at, updated_at)
     VALUES ('cat_food', 'outlet_default', 'Food', 0, 0),
            ('cat_bar',  'outlet_default', 'Bar',  0, 0);
-    INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
-                       tax_kind, tax_basis, hsn, created_at, updated_at)
-    VALUES ('itm_dosa',  'outlet_default', 'cat_food', 'Masala Dosa', 12000, 500,
-            'gst', 'exclusive', '2106', 0, 0),
-           ('itm_water', 'outlet_default', 'cat_food', 'Water',        2000, 1800,
-            'gst', 'inclusive', '2201', 0, 0),
-           ('itm_beer',  'outlet_default', 'cat_bar',  'Beer',        22000, 0,
-            'outside_gst', 'inclusive', NULL, 0, 0);
+    INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id,
+                       price_basis, hsn, created_at, updated_at)
+    VALUES ('itm_dosa',  'outlet_default', 'cat_food', 'Masala Dosa', 12000, 'tax_food_5',
+            NULL, '2106', 0, 0),
+           ('itm_water', 'outlet_default', 'cat_food', 'Water',        2000, 'tax_packaged_18',
+            'inclusive', '2201', 0, 0),
+           ('itm_beer',  'outlet_default', 'cat_bar',  'Beer',        22000, 'tax_liquor',
+            NULL, NULL, 0, 0);
 ";

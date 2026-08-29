@@ -44,7 +44,6 @@ pub struct CloudStaff {
     pub id: String,
     pub role_id: Option<String>,
     pub name: String,
-    pub code: Option<String>,
     pub phone: Option<String>,
     pub joined_on: Option<mb_core::BusinessDay>,
     pub status: StaffStatus,
@@ -53,7 +52,6 @@ pub struct CloudStaff {
     pub is_rider: bool,
     pub employment_type: String,
     pub left_on: Option<mb_core::BusinessDay>,
-    pub can_login_on_phone: bool,
     pub updated_at: Timestamp,
 }
 
@@ -72,7 +70,6 @@ pub struct CloudRole {
 pub struct StaffMember {
     pub id: StaffId,
     pub name: String,
-    pub code: Option<String>,
     pub role_id: Option<String>,
     pub role_name: Option<String>,
     /// Argon2id, chosen and owned by `mb-auth`.
@@ -177,12 +174,11 @@ impl<'a> PeopleRepo<'a> {
         at: Timestamp,
     ) -> Result<(), DbError> {
         self.tx.execute(
-            "INSERT INTO staff (id, outlet_id, role_id, name, code, pin_hash, status,
+            "INSERT INTO staff (id, outlet_id, role_id, name, pin_hash, status,
                                 created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
              ON CONFLICT (id) DO UPDATE SET role_id    = excluded.role_id,
                                             name       = excluded.name,
-                                            code       = excluded.code,
                                             pin_hash   = excluded.pin_hash,
                                             status     = excluded.status,
                                             updated_at = excluded.updated_at",
@@ -191,7 +187,6 @@ impl<'a> PeopleRepo<'a> {
                 outlet,
                 staff.role_id,
                 staff.name,
-                staff.code,
                 staff.pin_hash,
                 staff.status.as_sql(),
                 encode::timestamp_to_sql(at),
@@ -217,13 +212,12 @@ impl<'a> PeopleRepo<'a> {
             None => None,
         };
         let n = self.tx.execute(
-            "INSERT INTO staff (id, outlet_id, role_id, name, code, phone, joined_on, status, designation,
-                                department, is_rider, employment_type, left_on, can_login_on_phone,
+            "INSERT INTO staff (id, outlet_id, role_id, name, phone, joined_on, status, designation,
+                                department, is_rider, employment_type, left_on,
                                 created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
              ON CONFLICT (id) DO UPDATE SET role_id            = excluded.role_id,
                                             name               = excluded.name,
-                                            code               = excluded.code,
                                             phone              = excluded.phone,
                                             joined_on          = excluded.joined_on,
                                             status             = excluded.status,
@@ -232,7 +226,6 @@ impl<'a> PeopleRepo<'a> {
                                             is_rider           = excluded.is_rider,
                                             employment_type    = excluded.employment_type,
                                             left_on            = excluded.left_on,
-                                            can_login_on_phone = excluded.can_login_on_phone,
                                             updated_at         = excluded.updated_at
              WHERE staff.updated_at < excluded.updated_at",
             rusqlite::params![
@@ -240,7 +233,6 @@ impl<'a> PeopleRepo<'a> {
                 outlet,
                 role_id,
                 row.name,
-                row.code,
                 row.phone,
                 row.joined_on.map(encode::business_day_to_sql),
                 row.status.as_sql(),
@@ -249,7 +241,6 @@ impl<'a> PeopleRepo<'a> {
                 encode::bool_to_sql(row.is_rider),
                 row.employment_type,
                 row.left_on.map(encode::business_day_to_sql),
-                encode::bool_to_sql(row.can_login_on_phone),
                 encode::timestamp_to_sql(row.updated_at),
             ],
         )?;
@@ -305,7 +296,7 @@ impl<'a> PeopleRepo<'a> {
 
     pub fn list_staff(&self, outlet: &str) -> Result<Vec<StaffMember>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT s.id, s.name, s.code, s.role_id, r.name, s.pin_hash, s.status,
+            "SELECT s.id, s.name, s.role_id, r.name, s.pin_hash, s.status,
                     r.max_discount_bp, r.max_discount_paise
                FROM staff s LEFT JOIN roles r ON r.id = s.role_id
               WHERE s.outlet_id = ?1 ORDER BY s.name",
@@ -317,16 +308,15 @@ impl<'a> PeopleRepo<'a> {
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, String>(6)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<i64>>(6)?,
                 row.get::<_, Option<i64>>(7)?,
-                row.get::<_, Option<i64>>(8)?,
             ))
         })?;
 
         let mut staff = Vec::new();
         for row in rows {
-            let (id, name, code, role_id, role_name, pin_hash, status, max_bp, max_paise) = row?;
+            let (id, name, role_id, role_name, pin_hash, status, max_bp, max_paise) = row?;
             let permissions = match &role_id {
                 Some(role) => self.permissions_for_role(role)?,
                 None => PermissionSet::new(),
@@ -334,7 +324,6 @@ impl<'a> PeopleRepo<'a> {
             staff.push(StaffMember {
                 id: StaffId::new(id),
                 name,
-                code,
                 role_id,
                 role_name,
                 pin_hash,

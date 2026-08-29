@@ -758,10 +758,10 @@ fn t8_variants_and_modifiers_deduct_their_own_amounts() {
         tx.execute_batch(
             "INSERT INTO item_variants (id, item_id, name, unit_price, sort_order, is_active)
              VALUES ('itm_dosa_half', 'itm_dosa', 'Half', 7000, 0, 1);
-             INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_rate_bp,
-                                tax_kind, tax_basis, created_at, updated_at)
+             INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id,
+                                created_at, updated_at)
              VALUES ('itm_dosa_half', 'outlet_default', 'cat_food', 'Masala Dosa (Half)',
-                     7000, 500, 'gst', 'exclusive', 0, 0);
+                     7000, 'tax_food_5', 0, 0);
              INSERT INTO modifier_groups (id, outlet_id, name, min_select, sort_order)
              VALUES ('grp_extras', 'outlet_default', 'Extras', 0, 0);
              INSERT INTO modifiers (id, group_id, name, price_delta, sort_order, is_active)

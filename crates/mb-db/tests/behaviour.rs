@@ -586,8 +586,8 @@ fn t22_the_item_snapshot_is_frozen() {
     // on history, not on housekeeping.
     db.transaction(|tx| {
         tx.execute(
-            "INSERT INTO items (id, outlet_id, name, unit_price, created_at, updated_at)
-             VALUES ('itm_typo', 'outlet_default', 'Masalaa Dosa', 12000, 0, 0)",
+            "INSERT INTO items (id, outlet_id, name, unit_price, tax_class_id, created_at, updated_at)
+             VALUES ('itm_typo', 'outlet_default', 'Masalaa Dosa', 12000, 'tax_food_5', 0, 0)",
             [],
         )?;
         tx.execute("DELETE FROM items WHERE id = 'itm_typo'", [])?;

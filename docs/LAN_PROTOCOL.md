@@ -90,39 +90,22 @@ tablet, somebody at the counter pressing Allow).
 
 ## 3. Pairing
 
-Two things must both be true. Either alone is not enough.
+One scan. Two things must both be true, and the phone types neither of them:
 
 1. the phone presents a token the counter is **showing right now** — proof that
    somebody is standing in front of the counter's screen; and
-2. the phone says **whose it is**, and proves it — with that person's own
-   counter PIN. Nobody at the counter presses anything. (A shared tablet that
-   belongs to nobody is the exception: it waits for a person to press Allow.)
+2. a person at the counter who may pair phones says **whose phone it is** — a
+   name off the staff list, or "shared, nobody's" for a tablet at the pass — and
+   presses Allow.
 
 ```
 POST /v1/pair
-{ "name": "Ravi's phone", "platform": "android", "token": "8GF-CVC" }
+{ "name": "Vivo V2443", "platform": "android", "token": "8GF-CVC", "install": "<a stable id for this install of the app>" }
 
-202 { "request_id": "...",
-      "message": "Waiting for somebody at the counter…",
-      "people": [ { "id": "stf_…", "name": "Ravi" }, … ] }
+202 { "request_id": "...", "message": "Waiting for somebody at the counter to allow this phone." }
 ```
 
-`people` is the active staff list. Show the names; the person taps their own and
-types their PIN:
-
-```
-POST /v1/pair/{request_id}/claim
-{ "staff_id": "stf_…", "pin": "1234" }
-
-200 { "device_id": "dev_…", "secret": "…", "server_id": "srv_…" }
-403 { "message": "That PIN is not right. 2 tries left." }
-400 { "message": "That PIN is not right, and that was the last try. Scan the code again." }
-```
-
-Three wrong PINs spend the presentation; the phone scans again (the code on the
-counter has moved on anyway — see below). A `staff_id` of null means "shared,
-nobody's": the request stays in the queue and the phone polls until a person at
-the counter presses Allow:
+The phone polls while the counter decides:
 
 ```
 GET /v1/pair/{request_id}
@@ -131,6 +114,10 @@ GET /v1/pair/{request_id}
 200 { "device_id": "dev_…", "secret": "…", "server_id": "srv_…" }
 400 { "message": "That is not the code on the counter's screen now — it may have expired or been used…" }
 ```
+
+`install` is how one phone stays ONE phone: a phone that signs out and pairs again takes
+its own seat back (same device id, new secret) instead of filling the plan with copies of
+itself. An old app that sends none is a new phone every time.
 
 The secret is returned **once**. Store it in the platform keystore; the counter
 keeps only an Argon2 hash of it and cannot tell you again.
@@ -146,13 +133,39 @@ a shared device may take an order and nothing else. `GET /v1/me` says which.
 The short code may be typed instead of scanned, and is compared case- and
 dash-insensitively.
 
+### The phone's cloud login
+
+A paired phone also gets its person's login to the cloud — reports, bills, the
+staff desk — from the counter, so nobody types a shop code, a staff code or a
+PIN anywhere:
+
+```
+POST /v1/cloud-login
+Authorization: Bearer <device_id>.<secret>
+
+200 { "session": { access_token, refresh_token, expires_in, expires_at },
+      "device_id": "…", "restaurant": { id, name, short_code }, "staff": { id, name } }
+403 { "message": "A shared tablet belongs to nobody, so it has no login of its own." }
+403 { "message": "The counter cannot reach the cloud right now. Orders still work; reports come once it can." }
+```
+
+The counter calls the cloud's `phone-session` function under its own login and
+passes the reply through untouched. A refusal here does not touch the pairing:
+the phone can take orders, and asks again the next time it opens.
+
+### Leaving
+
+`DELETE /v1/me` under the credential: the phone is leaving. The counter revokes the
+device on the spot (the plan's phone count drops by one) and answers 204. The phone
+forgets the counter either way.
+
 ### Refusals
 
 | status | when |
 |---|---|
-| 400 | the token is wrong, used, or expired; the last wrong PIN |
-| 403 | a wrong PIN with tries left; the shop is at its device limit (the sentence has the number in it) |
-| 429 | too many attempts — see §7 (`/v1/pair` and `…/claim` share the bucket) |
+| 400 | the token is wrong, used, or expired; a person at the counter pressed Refuse |
+| 403 | the shop is at its device limit (the sentence has the number in it); a cloud login the counter could not get |
+| 429 | too many attempts — see §7 |
 
 ---
 

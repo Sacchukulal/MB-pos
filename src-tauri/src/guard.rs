@@ -111,19 +111,24 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("void_line", Access::Needs(Permission::OrderItemVoid)),
     ("reprint_bill", Access::Needs(Permission::BillReprint)),
     // The menu.
-    ("menu_tax_classes", Access::Needs(Permission::MenuManage)),
     ("menu_categories", Access::Needs(Permission::MenuManage)),
     ("menu_rows", Access::Needs(Permission::MenuManage)),
     ("save_menu_item", Access::Needs(Permission::MenuManage)),
     ("set_item_available", Access::Needs(Permission::MenuManage)),
     ("save_menu_category", Access::Needs(Permission::MenuManage)),
-    // A tax rate is not a menu edit: it is what the shop owes the government, and getting it
-    // wrong is a notice rather than a bad price.
-    ("save_tax_class", Access::Needs(Permission::SettingsTax)),
     ("change_menu_prices", Access::Needs(Permission::MenuManage)),
     ("plan_menu_import", Access::Needs(Permission::MenuManage)),
     ("run_menu_import", Access::Needs(Permission::MenuManage)),
     ("export_menu", Access::Needs(Permission::MenuManage)),
+    // Settings › Tax. Reading the slabs is a menu job (the item form picks one); defining a
+    // slab or moving items between slabs is what the shop owes the government, and getting it
+    // wrong is a notice rather than a bad price.
+    ("tax_slabs", Access::Needs(Permission::MenuManage)),
+    ("tax_page", Access::Needs(Permission::MenuManage)),
+    ("save_tax_slab", Access::Needs(Permission::SettingsTax)),
+    ("remove_tax_slab", Access::Needs(Permission::SettingsTax)),
+    ("set_items_tax", Access::Needs(Permission::SettingsTax)),
+    ("set_category_tax", Access::Needs(Permission::SettingsTax)),
     // What an item is made of.
     ("item_composition", Access::Needs(Permission::MenuManage)),
     ("save_item_variant", Access::Needs(Permission::MenuManage)),
@@ -341,6 +346,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // The top bar's number: how many phones are live. No permission — it is a count.
     ("phones_now", Access::SignedIn),
     ("open_pairing", Access::Needs(Permission::DevicesPair)),
+    ("allow_firewall", Access::Needs(Permission::DevicesPair)),
     ("close_pairing", Access::Needs(Permission::DevicesPair)),
     ("allow_device", Access::Needs(Permission::DevicesPair)),
     ("refuse_device", Access::Needs(Permission::DevicesPair)),
@@ -717,7 +723,7 @@ mod tests {
 
     /// Every `#[tauri::command]` in the two files that define them.
     fn declared_commands() -> BTreeSet<String> {
-        const SOURCES: [&str; 32] = [
+        const SOURCES: [&str; 33] = [
             include_str!("terminals.rs"),
             include_str!("orders.rs"),
             include_str!("buying.rs"),
@@ -737,6 +743,7 @@ mod tests {
             include_str!("flows.rs"),
             include_str!("corrections.rs"),
             include_str!("menu.rs"),
+            include_str!("tax.rs"),
             include_str!("floor.rs"),
             include_str!("credit.rs"),
             include_str!("expenses.rs"),

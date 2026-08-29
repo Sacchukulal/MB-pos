@@ -146,6 +146,16 @@ pub fn price_basis_from_sql(text: &str) -> Result<PriceBasis, DbError> {
 }
 
 /// The whole spec, from the three columns that hold it.
+/// An optional basis: NULL means "no opinion — the layer above decides".
+#[must_use]
+pub fn price_basis_opt_to_sql(basis: Option<PriceBasis>) -> Option<&'static str> {
+    basis.map(price_basis_to_sql)
+}
+
+pub fn price_basis_opt_from_sql(text: Option<&str>) -> Result<Option<PriceBasis>, DbError> {
+    text.map(price_basis_from_sql).transpose()
+}
+
 pub fn tax_spec_from_sql_parts(
     rate_bp: i64,
     kind_text: &str,
