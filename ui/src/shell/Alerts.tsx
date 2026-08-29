@@ -76,7 +76,7 @@ export function AlertsPanel({
                 </div>
                 {alert.goTo ? (
                   <Button
-                    small
+                    size="sm"
                     variant="secondary"
                     onClick={() => {
                       onGo(alert.goTo as string);

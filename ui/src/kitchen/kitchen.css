@@ -7,7 +7,7 @@
   gap: var(--space-3);
   height: 100%;
   min-height: 0;
-  background: var(--surface-1);
+  background: var(--surface);
 }
 
 /* The bar. */
@@ -22,10 +22,8 @@
 }
 
 .mb-kds__station {
-  font-size: var(--text-2xl);
+  font-size: var(--text-xl);
   font-weight: var(--weight-bold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
 }
 
 .mb-kds__headline {
@@ -51,9 +49,9 @@
 }
 
 .mb-kds__tab--on {
-  background: var(--accent);
-  color: var(--on-accent);
-  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
 
 /* Firing a course. */
@@ -72,7 +70,7 @@
 }
 
 .mb-kds__fire-label {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   color: var(--text-muted);
 }
 
@@ -80,7 +78,7 @@
 
 .mb-kds__empty {
   margin: auto;
-  font-size: var(--text-2xl);
+  font-size: var(--text-xl);
   color: var(--text-muted);
 }
 
@@ -107,7 +105,7 @@
    * The state is a thick left edge as well as a colour — §2. A card is recognisable across a
    * room by its shape before its colour is read.
    */
-  border-left-width: var(--space-2);
+  border-left-width: var(--tile-stripe);
   border-radius: var(--radius-md);
   background: var(--surface-2);
 }
@@ -171,17 +169,15 @@
 
 .mb-kds__waiting {
   font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
 }
 
 .mb-kds__says,
 .mb-kds__target,
 .mb-kds__course {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
 }
 
 .mb-kds__who {
@@ -250,10 +246,9 @@
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--ok);
-  color: var(--on-accent);
+  color: var(--accent-ink);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-wide);
 }
 
 /* "no onion", "extra spicy" — the line a cook must read. */
@@ -283,7 +278,7 @@
   border-radius: var(--radius-sm);
   background: none;
   padding: var(--space-2) var(--space-3);
-  min-height: var(--target-min);
+  min-height: var(--control-md);
   font: inherit;
   font-size: var(--text-sm);
   color: var(--text-muted);

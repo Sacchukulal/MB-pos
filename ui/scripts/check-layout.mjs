@@ -115,6 +115,30 @@ const CHECKS = [
     fix: 'Focus and selection use --focus-ring-inset, or change border-color. See :focus-visible in tokens.css.',
   },
   {
+    what: 'an empty state with a paragraph',
+    re: /<EmptyState\b[^>]*\bbody=/,
+    only: 'tsx',
+    fix: 'One line. Pass the explanation as `hint` (a tip) or a live sentence as `says`.',
+  },
+  {
+    what: 'the old small-button prop',
+    re: /<Button\b[^>]*\bsmall\b/,
+    only: 'tsx',
+    fix: 'Use size="sm".',
+  },
+  {
+    what: 'small capitals outside a form caption',
+    re: /text-transform\s*:\s*uppercase/,
+    only: 'css',
+    fix: 'Sentence case. The one caption that may be capitals is the kit Caption (mb-layout-allow: if it IS a form caption).',
+  },
+  {
+    what: 'a scrollbar gutter reserved outside the kit',
+    re: /scrollbar-gutter\s*:/,
+    only: 'css',
+    fix: 'Only the page body keeps a gutter (kit/layout.css).',
+  },
+  {
     what: 'a glyph used as an icon',
     re: new RegExp(`[${GLYPH_ICONS.join('')}]`, 'u'),
     only: 'both',

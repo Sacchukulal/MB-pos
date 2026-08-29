@@ -99,7 +99,7 @@ function People() {
   }, [load]);
 
   const columns: Column<PersonView>[] = [
-    { key: 'name', header: 'Name', render: (p) => p.name },
+    { key: 'name', header: 'Name', render: (p) => p.name },
     { key: 'role', header: 'Role', render: (p) => p.role ?? 'No role yet' },
     {
       key: 'pin',
@@ -127,17 +127,17 @@ function People() {
       header: '',
       render: (p) => (
         <div className="mb-row">
-          <Button small onClick={() => setEditing(p)}>
+          <Button size="sm" onClick={() => setEditing(p)}>
             Edit
           </Button>
-          <Button small variant="quiet" onClick={() => setPinFor(p)}>
+          <Button size="sm" variant="quiet" onClick={() => setPinFor(p)}>
             PIN
           </Button>
           {/*
             What they do, who to call, and the day they left — `save_employee`, which had no
             button at all.
           */}
-          <Button small variant="quiet" onClick={() => setAtWork(p)}>
+          <Button size="sm" variant="quiet" onClick={() => setAtWork(p)}>
             At work
           </Button>
         </div>
@@ -417,7 +417,7 @@ function Roles() {
                   : ` · up to ${role.maxDiscountPercent} off`}
               </span>
             </div>
-            <Button small onClick={() => setEditing(role)}>
+            <Button size="sm" onClick={() => setEditing(role)}>
               Edit
             </Button>
           </div>

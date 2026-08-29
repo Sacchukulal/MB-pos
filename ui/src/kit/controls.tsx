@@ -16,23 +16,29 @@ import { InfoTip } from './InfoTip';
 
 type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
 
+/** lg — a hand on a touch screen; md — a page's own buttons; sm — inside a row. */
+type Size = 'sm' | 'md' | 'lg';
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
-  small?: boolean;
+  size?: Size;
   wide?: boolean;
   icon?: ReactNode;
+  /** An icon and nothing else: square, and `title` is compulsory. */
+  iconOnly?: boolean;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   function Button(
-    { variant = 'secondary', small, wide, icon, children, className, ...rest },
+    { variant = 'secondary', size = 'md', wide, icon, iconOnly, children, className, ...rest },
     ref,
   ) {
     const classes = cx(
       'mb-button',
       `mb-button--${variant}`,
-      small && 'mb-button--small',
+      size !== 'md' && `mb-button--${size}`,
       wide && 'mb-button--wide',
+      iconOnly && 'mb-button--icon',
       className,
     );
     return (

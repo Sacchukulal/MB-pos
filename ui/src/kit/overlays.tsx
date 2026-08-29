@@ -229,7 +229,7 @@ function ToastList({
           </div>
           <Button
             variant="quiet"
-            small
+            size="sm"
             onClick={() => onDismiss(toast.id)}
             aria-label="Dismiss"
           >
@@ -264,5 +264,60 @@ export function useReport(): (cause: unknown) => void {
       toast.show('danger', String(cause));
     },
     [toast],
+  );
+}
+
+/** The ⋯ that holds the rest of a row's actions. The commands do not change; the buttons do. */
+export function RowMenu({
+  label = 'More',
+  children,
+  size = 'sm',
+}: {
+  /** What the row is, for the screen reader — "More for Masala Dosa". */
+  label?: string;
+  /** `Button`s. Each one closes the menu when pressed. */
+  children: ReactNode;
+  size?: 'sm' | 'md';
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+  return (
+    <span className="mb-rowmenu">
+      <Button
+        variant="quiet"
+        size={size}
+        iconOnly
+        title={label}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((was) => !was)}
+        icon={<Icon name="more" size="sm" />}
+      />
+      {open ? (
+        <>
+          <button
+            type="button"
+            className="mb-rowmenu__scrim"
+            aria-label="Close"
+            onClick={() => setOpen(false)}
+          />
+          {/* A press inside lands on the button and then closes the sheet. */}
+          <div className="mb-rowmenu__sheet" role="menu" onClick={() => setOpen(false)}>
+            {children}
+          </div>
+        </>
+      ) : null}
+    </span>
   );
 }

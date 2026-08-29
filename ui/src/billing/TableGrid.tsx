@@ -62,7 +62,7 @@ export function TableGrid({
     return (
       <EmptyState
         title="No table matches that"
-        body="Clear the filter to see the whole floor."
+        hint="Clear the filter to see the whole floor."
       />
     );
   }

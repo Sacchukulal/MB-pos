@@ -264,7 +264,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
       <div className="mb-settings mb-settings--empty">
         <EmptyState
           title="There is no shop to change the settings of"
-          body={
+          says={
             view.trouble ??
             'Create a shop or restore a backup, and these settings will be here.'
           }
@@ -309,7 +309,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
             no caller.
           */}
           <Button
-            small
+            size="sm"
             variant="quiet"
             wide
             disabled={dirty}
@@ -327,7 +327,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
             Reload
           </Button>
           <Button
-            small
+            size="sm"
             variant="quiet"
             wide
             onClick={() =>
@@ -401,7 +401,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
             ) : (
               <EmptyState
                 title="Nothing here for you"
-                body="You do not have permission to change any of this shop's settings."
+                hint="You do not have permission to change any of this shop's settings."
               />
             )}
           </Scroller>
@@ -531,7 +531,7 @@ function Section({
         sticky
         action={
           section.canEdit ? (
-            <Button small variant="quiet" onClick={onReset}>
+            <Button size="sm" variant="quiet" onClick={onReset}>
               Reset this section
             </Button>
           ) : null
@@ -775,7 +775,7 @@ function Found({
     return (
       <EmptyState
         title="Nothing matches that"
-        body="Try a plainer word: QR, thank you, round off, backup."
+        hint="Try a plainer word: QR, thank you, round off, backup."
         action={<Button onClick={onClear}>Show the sections again</Button>}
       />
     );
@@ -787,7 +787,7 @@ function Found({
         title={`${plural(found.length, 'setting')} found`}
         sticky
         action={
-          <Button small variant="quiet" onClick={onClear}>
+          <Button size="sm" variant="quiet" onClick={onClear}>
             Clear
           </Button>
         }

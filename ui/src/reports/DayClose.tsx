@@ -201,7 +201,7 @@ export function DayClose() {
               </span>
               <span className="mb-numeric">{row.amount.text}</span>
               <Button
-                small
+                size="sm"
                 onClick={() => {
                   call('confirm_payment', {
                     orderId: row.orderId,

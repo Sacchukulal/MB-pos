@@ -224,7 +224,7 @@ describe('Table', () => {
         rows={[]}
         rowKey={() => 'x'}
         empty={
-          <EmptyState title="No bills yet" body="Settle one and it lands here." />
+          <EmptyState title="No bills yet" hint="Settle one and it lands here." />
         }
       />,
     );

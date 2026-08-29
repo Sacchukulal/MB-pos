@@ -8,6 +8,7 @@ import {
   EmptyState,
   Page,
   PageHeader,
+  RowMenu,
   Panel,
   StatCard,
   Table,
@@ -103,11 +104,12 @@ export function Bills() {
       render: (b) =>
         b.state === 'cancelled' ? null : (
           <div className="mb-row">
-            <Button small onClick={() => setPending({ kind: 'reprint', bill: b })}>
+            <Button size="sm" variant="quiet" onClick={() => setPending({ kind: 'reprint', bill: b })}>
               Reprint
             </Button>
+            <RowMenu label={`More for bill ${b.number}`}>
             <Button
-              small
+              size="sm"
               variant="quiet"
               onClick={() => {
                 call('bill_pdf', { orderId: b.orderId })
@@ -123,17 +125,18 @@ export function Bills() {
             </Button>
             {b.state === 'settled' ? (
               <Button
-                small
+                size="sm"
                 variant="danger"
                 onClick={() => setPending({ kind: 'void', bill: b })}
               >
                 Void
               </Button>
             ) : (
-              <Button small onClick={() => setPending({ kind: 'refund', bill: b })}>
+              <Button size="sm" onClick={() => setPending({ kind: 'refund', bill: b })}>
                 Give money back
               </Button>
             )}
+            </RowMenu>
           </div>
         ),
     },
@@ -161,7 +164,7 @@ export function Bills() {
       {bills.length === 0 ? (
         <EmptyState
           title="No bills yet today"
-          body="Every bill you settle appears here, and this is where you void or reprint one."
+          hint="Every bill you settle appears here, and this is where you void or reprint one."
         />
       ) : (
         <Panel flush>

@@ -112,7 +112,7 @@ function Counter({
       />
 
       <div className="mb-row mb-row--end">
-        <Button variant="primary" small disabled={!dirty} onClick={() => onSave(draft)}>
+        <Button variant="primary" size="sm" disabled={!dirty} onClick={() => onSave(draft)}>
           Save this counter
         </Button>
       </div>

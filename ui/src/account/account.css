@@ -26,7 +26,7 @@
 
 .mb-account__shop {
   font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-bold);
   color: var(--text);
 }
 
@@ -41,7 +41,7 @@
  */
 .mb-account__headline {
   margin: var(--space-3) 0 0;
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   color: var(--text);
   max-width: 62ch;
 }
@@ -56,7 +56,7 @@
   margin: var(--space-3) 0 0;
   padding: var(--space-3);
   border: var(--border-width) solid var(--border);
-  border-left: var(--space-1) solid var(--warn);
+  border-left: var(--tile-stripe) solid var(--warn);
   border-radius: var(--radius-md);
   background: var(--surface-2);
   font-size: var(--text-sm);
@@ -97,21 +97,18 @@
 
 .mb-account__facts dt {
   font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
   color: var(--text-muted);
 }
 
 .mb-account__facts dd {
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   color: var(--text);
 }
 
 /* Read out over the phone to support, so it is monospaced and spaced out. */
 .mb-account__machine {
   font-family: var(--font-mono);
-  letter-spacing: var(--tracking-wide);
 }
 
 .mb-account__included {

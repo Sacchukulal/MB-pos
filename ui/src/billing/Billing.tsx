@@ -624,7 +624,7 @@ export function Billing() {
     return (
       <EmptyState
         title="The billing screen needs the app"
-        body="A browser has no engine behind it. Run Magic Bill itself."
+        hint="A browser has no engine behind it. Run Magic Bill itself."
       />
     );
   }
@@ -701,7 +701,7 @@ export function Billing() {
           {tables.length === 0 && menu.length === 0 ? (
             <EmptyState
               title="This shop has no menu or tables yet"
-              body="Add your items and tables in Settings — or put a demo shop in to see how the counter works."
+              hint="Add your items and tables in Settings — or put a demo shop in to see how the counter works."
               action={
                 <Button variant="primary" onClick={() => void seedDemo()} disabled={busy}>
                   {busy ? <Spinner /> : 'Add a demo shop'}
@@ -712,7 +712,7 @@ export function Billing() {
             /* A shop with a menu and no tables. */
             <EmptyState
               title="No tables yet"
-              body="Add your tables on the Floor screen and they will show here. A counter with no tables does not need any — search for an item above and start the bill."
+              hint="Add your tables on the Floor screen and they will show here. A counter with no tables does not need any — search for an item above and start the bill."
             />
           ) : (
             <TableGrid
@@ -783,7 +783,7 @@ export function Billing() {
             ))}
             <div className="mb-row--end">
               <Button
-                small
+                size="sm"
                 variant="quiet"
                 onClick={() => {
                   call('dismiss_the_floors_items').then(setCart).catch(report);
@@ -792,7 +792,7 @@ export function Billing() {
                 Not now
               </Button>
               <Button
-                small
+                size="sm"
                 variant="primary"
                 onClick={() => {
                   call('take_the_floors_items').then(setCart).catch(report);
@@ -914,7 +914,7 @@ export function Billing() {
             <EmptyState
               small
               title="Nothing on this bill yet"
-              body="Press an item to add it."
+              hint="Type an item or a table number in the box above."
             />
           )}
         </Scroller>
@@ -960,6 +960,7 @@ export function Billing() {
         <div className="mb-actions">
           {cart?.kitchenTicketOff ? null : (
           <Button
+            size="lg"
             disabled={!cart || cart.isEmpty || acting}
             onClick={() => act(printKitchen)}
           >
@@ -968,6 +969,7 @@ export function Billing() {
           )}
           <Button
             variant="primary"
+            size="lg"
             disabled={!cart || cart.isEmpty || acting}
             onClick={() => act(completeBill)}
           >
@@ -992,19 +994,19 @@ export function Billing() {
 
         {/* The rest, in two lines: the paper first, then what changes the bill. */}
         <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
-          <Button small disabled={!cart || cart.isEmpty} onClick={() => setPreview(true)}>
+          <Button size="sm" disabled={!cart || cart.isEmpty} onClick={() => setPreview(true)}>
             Preview bill
           </Button>
           {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
           {cart?.orderId && !cart.kitchenTicketOff ? (
-            <Button small onClick={() => act(reprintKitchen)}>
+            <Button size="sm" onClick={() => act(reprintKitchen)}>
               Reprint ticket
             </Button>
           ) : null}
           {/* Only when this shop has a label printer. */}
           {hasLabels ? (
             <Button
-              small
+              size="sm"
               disabled={!cart || cart.isEmpty}
               onClick={() => {
                 const first = cart?.lines[0];
@@ -1020,11 +1022,11 @@ export function Billing() {
               Label
             </Button>
           ) : null}
-          <Button small disabled={!cart || cart.isEmpty} onClick={() => setDiscounting(true)}>
+          <Button size="sm" disabled={!cart || cart.isEmpty} onClick={() => setDiscounting(true)}>
             {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
           </Button>
           <Button
-            small
+            size="sm"
             disabled={!cart || cart.isEmpty || !cart.orderId}
             onClick={() => setSplitting(true)}
           >
@@ -1032,7 +1034,7 @@ export function Billing() {
           </Button>
           {/* A parked order is cancelled with a reason; a typed one simply goes. */}
           <Button
-            small
+            size="sm"
             disabled={!cart || cart.isEmpty}
             onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
           >
@@ -1157,7 +1159,7 @@ export function PaymentModes({
     <>
       <div className="mb-payment__modes">
         {/* Exactly one of these, so it is the kit's segmented control. */}
-        <div className="mb-segment mb-segment--fill" role="group" aria-label="Paid by">
+        <div className="mb-segment mb-segment--fill mb-segment--lg" role="group" aria-label="Paid by">
           {['Cash', 'Card', 'UPI'].map((label) => (
             <button
               key={label}
@@ -1191,7 +1193,7 @@ export function PaymentModes({
         here rather than on another screen.
       */}
       <div id={creditId} className="mb-payment__credit" hidden={!showCredit}>
-        <Button small wide onClick={onCredit}>
+        <Button size="sm" wide onClick={onCredit}>
           Credit
         </Button>
       </div>

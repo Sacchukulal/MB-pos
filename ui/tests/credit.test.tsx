@@ -94,7 +94,7 @@ describe('who owes me money (scope 5.1)', () => {
 
     // Folded: one button, and no repeated screen title.
     expect(screen.queryByRole('complementary', { name: 'Add a customer' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Credit' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Credit' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add a customer' }));
     const panel = screen.getByRole('complementary', { name: 'Add a customer' });

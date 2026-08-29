@@ -57,7 +57,7 @@ export type {
 } from './controls';
 
 export { useAction, type Action } from './action';
-export { ConfirmDialog, Modal, ToastProvider, useReport, useToast } from './overlays';
+export { ConfirmDialog, Modal, RowMenu, ToastProvider, useReport, useToast } from './overlays';
 export type { ToastTone } from './overlays';
 
 export {
@@ -72,6 +72,8 @@ export {
   SectionHeader,
   Spinner,
   StatCard,
+  Stats,
+  Caption,
   Table,
   Tabs,
 } from './display';

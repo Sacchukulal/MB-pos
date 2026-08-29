@@ -1,4 +1,4 @@
-/* The shell: title bar, rail, and the print-queue indicator. */
+/* The shell: title bar, navigation, and the print-queue indicator. */
 
 .mb-shell {
   display: flex;
@@ -11,26 +11,17 @@
   flex: 0 0 auto;
 }
 
-/* The standing banners (no PIN, held bills, the licence line). */
+/* The standing banners (no PIN, held bills, the licence line): a strip under the bar. */
 .mb-shell__banner {
   flex: 0 0 auto;
-  padding: var(--gap-field) var(--page-pad-x) 0;
 }
 
-/*
- * The licence line rides INSIDE the screen rather than above it, so it scrolls away with the
- * page instead of permanently eating a strip of a 768px window.
- */
 .mb-shell__banner--inmain {
-  padding: 0 0 var(--gap-field);
+  margin: calc(-1 * var(--page-pad-y)) calc(-1 * var(--page-pad-x)) var(--gap-field);
 }
 
 .mb-shell > .mb-body {
   flex: 1 1 auto;
-  /*
-   * Without this a tall child stretches the body instead of scrolling inside it — the same
-   * reason `--cart-lines-min` exists.
-   */
   min-height: 0;
 }
 
@@ -41,7 +32,7 @@
   align-items: center;
   gap: var(--gap-group);
   height: var(--topbar-height);
-  padding: 0 var(--space-2) 0 var(--gap-field);
+  padding: 0 0 0 var(--space-3);
   background: var(--surface);
   border-bottom: var(--border-width) solid var(--border);
   /* Tauri drags the window by anything carrying this attribute. */
@@ -53,10 +44,6 @@
   align-items: center;
   gap: var(--gap-inline);
   flex-shrink: 0;
-  /*
-   * The wordmark is the first thing to give up room when the window is narrow — it is
-   * decoration, and the navigation is not.
-   */
   min-width: 0;
 }
 
@@ -64,16 +51,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-6);
-  height: var(--space-6);
+  width: var(--logo-sm);
+  height: var(--logo-sm);
   flex-shrink: 0;
 }
 
 .mb-topbar__name {
-  /* The first thing to give up room, and then to go entirely. */
   flex-shrink: 1;
   min-width: 0;
-  font-size: var(--type-label);
+  font-size: var(--text-md);
   font-weight: var(--weight-bold);
   color: var(--text);
   white-space: nowrap;
@@ -97,21 +83,18 @@
   align-items: center;
   gap: var(--gap-inline);
   height: var(--topbar-control-height);
-  /*
-   * Shorter than --target-min on purpose: it sits in the top strip, and the touch target is the
-   * width plus the full height of the bar.
-   */
-  padding: 0 var(--gap-inline);
+  padding: 0 var(--space-3);
   background: transparent;
   color: var(--text-muted);
   border: none;
   border-radius: var(--radius-md);
   font: inherit;
-  font-size: var(--type-label);
-  font-weight: var(--type-label-weight);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   line-height: var(--line-tight);
   white-space: nowrap;
   cursor: pointer;
+  flex-shrink: 0;
   transition:
     background-color var(--motion-fast) var(--ease),
     color var(--motion-fast) var(--ease);
@@ -122,16 +105,11 @@
   color: var(--text);
 }
 
-/*
- * Where you are. Carried by the fill, the weight AND the underline — three signals, because
- * this is the single most important piece of state on the screen and it has to survive a bad
- * monitor and a colour-blind cashier.
- */
+/* Where you are: a fill and the accent. */
 .mb-nav__item[aria-current='page'] {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: var(--weight-bold);
-  box-shadow: inset 0 calc(var(--nav-underline) * -1) 0 0 var(--accent);
 }
 
 .mb-nav__label {
@@ -147,11 +125,6 @@
   align-items: center;
 }
 
-.mb-nav__item--more {
-  color: var(--text-muted);
-}
-
-/* Anywhere else closes it. */
 .mb-nav__scrim {
   position: fixed;
   inset: 0;
@@ -169,16 +142,12 @@
   z-index: var(--layer-chrome);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0;
   min-width: var(--rail-sheet-width);
-  padding: var(--space-2);
+  padding: var(--space-1);
   background: var(--surface);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-lg);
-  /*
-   * POP, per the elevation contract: it is over the page and the page cannot be used until you
-   * deal with it.
-   */
+  border-radius: var(--radius-md);
   box-shadow: var(--level-pop);
 }
 
@@ -186,12 +155,12 @@
   display: flex;
   align-items: center;
   gap: var(--gap-field);
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--gap-field);
+  height: var(--control-md);
+  padding: 0 var(--space-3);
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font: inherit;
   font-size: var(--type-body);
   text-align: left;
@@ -207,10 +176,17 @@
   color: var(--text-muted);
 }
 
-/*
- * On the set-up screen there is no navigation to fill the middle, so something has to — and it
- * has to stay draggable, or the window can only be moved by a 200-pixel strip on the left.
- */
+.mb-nav__sheetitem[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--weight-bold);
+}
+
+.mb-nav__sheetitem[aria-current='page'] .mb-icon {
+  color: var(--accent);
+}
+
+/* On the set-up screen there is no navigation to fill the middle, so something has to. */
 .mb-topbar__spacer {
   flex: 1;
 }
@@ -222,6 +198,7 @@
   align-items: center;
   gap: var(--space-1);
   flex-shrink: 0;
+  height: 100%;
   -webkit-app-region: no-drag;
 }
 
@@ -229,7 +206,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-7);
+  width: var(--topbar-control-height);
   height: var(--topbar-control-height);
   background: transparent;
   color: var(--text-muted);
@@ -244,24 +221,23 @@
   color: var(--text);
 }
 
-/*
- * The window buttons are square, tight to each other and hard against the corner — that is
- * where Windows puts them and where a hand goes for them.
- */
+/* The window buttons: Windows' own size, square, hard against the corner. */
 .mb-topbar__windows {
   display: flex;
   align-items: center;
+  align-self: stretch;
   margin-left: var(--space-2);
 }
 
 .mb-topbar__windows .mb-topbar__button {
+  width: var(--window-button-width);
+  height: 100%;
   border-radius: 0;
-  height: var(--topbar-height);
 }
 
 .mb-topbar__button--close:hover {
   background: var(--danger);
-  color: var(--accent-ink);
+  color: #ffffff; /* mb-tokens-allow: white on red is the one Windows close button */
 }
 
 /* Whose till this is. */
@@ -270,20 +246,19 @@
   align-items: center;
   gap: var(--gap-inline);
   height: var(--topbar-control-height);
-  padding: 0 var(--gap-field);
+  padding: 0 var(--space-3);
   background: transparent;
   color: var(--text-muted);
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-pill);
+  border: none;
+  border-radius: var(--radius-md);
   font: inherit;
-  font-size: var(--type-caption);
+  font-size: var(--text-sm);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .mb-who:hover {
   background: var(--surface-2);
-  border-color: var(--border);
   color: var(--text);
 }
 
@@ -316,32 +291,27 @@
   overflow: hidden;
 }
 
-/*
- * Every screen's own root fills what it is given and scrolls inside it, rather than each one
- * deciding for itself whether it is `height: 100%` (billing) or a document that grows
- * (reports).
- */
 .mb-main > * {
   flex: 1;
   min-height: 0;
 }
 
-/* The licence line is not a screen. */
 .mb-main > .mb-shell__banner {
   flex: 0 0 auto;
 }
 
+/* The print queue pill. */
 .mb-queue {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--space-6);
-  padding: var(--space-1) var(--space-3);
+  height: var(--topbar-control-height);
+  padding: 0 var(--space-3);
   background: transparent;
   color: var(--text-muted);
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-pill);
+  border: none;
+  border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--text-sm);
   cursor: pointer;
@@ -351,18 +321,16 @@
   background: var(--surface-2);
 }
 
-/* The one that matters: a job nobody can print. */
 .mb-queue--attention {
   background: var(--danger-soft);
   color: var(--danger);
-  border-color: var(--danger);
   font-weight: var(--weight-bold);
 }
 
 .mb-queue__panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: var(--panel-width);
 }
 
@@ -371,10 +339,10 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   background: var(--surface-2);
   border-radius: var(--radius-md);
-  border-left: var(--space-1) solid var(--border-strong);
+  border-left: var(--tile-stripe) solid var(--border-strong);
 }
 
 .mb-queue__job--attention {
@@ -390,39 +358,32 @@
   color: var(--text-muted);
 }
 
-/* First run. */
-
-/* The licence banner. */
-
-/* A quiet line above the screen, never a modal. */
+/* The licence line: a strip above the screen, never a modal. */
 .mb-licence-note {
   display: flex;
   position: sticky;
   top: 0;
   z-index: var(--layer-sticky);
-  margin: calc(var(--space-5) * -1) calc(var(--space-5) * -1) var(--space-4);
+  margin: calc(var(--page-pad-y) * -1) calc(var(--page-pad-x) * -1) var(--space-4);
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   flex-shrink: 0;
-  padding: var(--space-2) var(--space-4);
+  min-height: var(--control-md);
+  padding: var(--space-1) var(--page-pad-x);
   border-bottom: var(--border-width) solid var(--border);
   background: var(--surface-2);
   font-size: var(--text-sm);
   color: var(--text);
 }
 
-/*
- * Colour is never the only carrier (§2): the sentence already says it, and this is a stripe
- * rather than a fill so it cannot swallow the words.
- */
 .mb-licence-note--warn {
-  border-left: var(--space-1) solid var(--warn);
+  border-left: var(--tile-stripe) solid var(--warn);
 }
 
 .mb-licence-note--danger {
-  border-left: var(--space-1) solid var(--danger);
+  border-left: var(--tile-stripe) solid var(--danger);
 }
 
 .mb-licence-note__go {
@@ -431,71 +392,44 @@
   background: none;
   padding: 0;
   font: inherit;
+  font-weight: var(--weight-medium);
   color: var(--accent);
-  text-decoration: underline;
   cursor: pointer;
 }
 
-/* The item you are on, inside the More sheet. */
-.mb-nav__sheetitem[aria-current='page'] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: var(--weight-bold);
-}
-
-.mb-nav__sheetitem[aria-current='page'] .mb-icon {
-  color: var(--accent);
-}
-
-/* The nav never pushes the tools off the bar. */
-.mb-nav__item {
-  /* A navigation label never truncates. */
-  flex-shrink: 0;
-}
-
 /* Below the reference machine, the wordmark goes so the navigation keeps its words. */
-/*
- * A media query cannot read a custom property: the condition is evaluated before the cascade,
- * so `max-width: var(--x)` is invalid CSS in every browser.
- */
 @media (max-width: 1200px) { /* mb-tokens-allow: media queries cannot use var() */
   .mb-topbar__name {
     display: none;
   }
 
-  /* The role beside the name goes too. */
   .mb-who__role {
     display: none;
   }
 }
 
-/* And at the window's own minimum, the print queue keeps only its icon. */
 @media (max-width: 1120px) { /* mb-tokens-allow: media queries cannot use var() */
   .mb-queue__word {
     display: none;
   }
 
-  /* And the cashier's own name. */
   .mb-who__name {
     display: none;
   }
 }
 
-/*
- * The phones: how many are live, right where the cashier's eye already goes for the bell. A
- * phone asking to join turns the number into a pulse, and the click lands on Settings › Phones.
- */
+/* The phones: how many are live, beside the bell. */
 .mb-phones {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  min-height: var(--space-6);
-  padding: var(--space-1) var(--space-2);
+  height: var(--topbar-control-height);
+  padding: 0 var(--space-2);
   background: transparent;
   color: var(--text-muted);
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-pill);
+  border: none;
+  border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
@@ -505,7 +439,6 @@
 
 .mb-phones:hover {
   background: var(--surface-2);
-  border-color: var(--border);
   color: var(--text);
 }
 
@@ -516,7 +449,6 @@
 .mb-phones--asking {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: var(--accent);
   font-weight: var(--weight-bold);
 }
 
@@ -529,30 +461,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-7);
+  width: var(--topbar-control-height);
   height: var(--topbar-control-height);
   background: transparent;
   color: var(--text-muted);
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-sm);
+  border: none;
+  border-radius: var(--radius-md);
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
 
 .mb-bell:hover {
   background: var(--surface-2);
-  border-color: var(--border);
   color: var(--text);
 }
 
-/*
- * The count. A dot with a number in it, in the tone of the WORST thing waiting — a licence that
- * has ended and a table list nobody has filled in do not deserve the same colour.
- */
 .mb-bell__count {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: var(--space-1);
+  right: var(--space-1);
   min-width: var(--space-4);
   height: var(--space-4);
   padding: 0 var(--space-1);
@@ -578,10 +505,7 @@
   color: var(--accent-ink);
 }
 
-/*
- * The panel hangs off the title bar rather than covering the screen: it is something to glance
- * at between customers, not a page.
- */
+/* The alerts panel hangs off the title bar. */
 .mb-alerts__away {
   position: fixed;
   inset: 0;
@@ -593,19 +517,18 @@
 
 .mb-alerts {
   position: fixed;
-  top: var(--topbar-height);
-  right: var(--gap-field);
+  top: calc(var(--topbar-height) + var(--space-1));
+  right: var(--space-2);
   z-index: var(--layer-lock);
   display: flex;
   flex-direction: column;
-  gap: var(--gap-field);
   width: var(--alerts-width);
   max-height: var(--alerts-tall);
   overflow-y: auto;
-  padding: var(--gap-group);
+  padding: var(--space-1) 0;
   background: var(--surface);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
 }
 
@@ -613,16 +536,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border);
 }
 
 .mb-alerts__title {
   margin: 0;
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   font-weight: var(--weight-bold);
 }
 
 .mb-alerts__quiet {
   margin: 0;
+  padding: var(--space-4);
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--line-normal);
@@ -631,21 +557,23 @@
 .mb-alerts__list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* A row, not a card. */
 .mb-alerts__one {
   display: flex;
   align-items: flex-start;
   gap: var(--gap-field);
-  padding: var(--gap-field);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  /* The stripe is the form half of the signal, so this reads in grey-scale. */
-  border-left: var(--space-1) solid var(--border);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border);
+  border-left: var(--tile-stripe) solid transparent;
+}
+
+.mb-alerts__one:last-child {
+  border-bottom: none;
 }
 
 .mb-alerts__one--info {
@@ -683,11 +611,17 @@
 }
 
 .mb-alerts__what {
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
 
 .mb-alerts__says {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: var(--line-normal);
+}
+
+/* The More button keeps the word More: the current screen's name is the page title. */
+.mb-nav__item--more {
+  color: var(--text-muted);
 }

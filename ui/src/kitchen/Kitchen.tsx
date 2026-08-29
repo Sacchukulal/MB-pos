@@ -124,7 +124,7 @@ export function Kitchen() {
           {view.waitingCourses.map((waiting) => (
             <Button
               key={`${waiting.orderId}-${waiting.course}`}
-              small
+              size="sm"
               onClick={() =>
                 act(
                   call('kitchen_fire', {

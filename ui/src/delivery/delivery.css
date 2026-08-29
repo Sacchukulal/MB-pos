@@ -49,7 +49,7 @@
 
 /* Cash in somebody's pocket. */
 .mb-delivery__carrying {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-weight: var(--weight-medium);
   color: var(--warn);

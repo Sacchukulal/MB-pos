@@ -100,7 +100,7 @@ function Line({ line }: { line: PreviewLine }) {
                   ? { ['--on' as string]: line.dash[0], ['--off' as string]: line.dash[1] }
                   : {}),
               }}
-              data-dashed={line.dash ? 'yes' : undefined}
+              data-dashed={line.dash ? 'yes' : undefined} // mb-tokens-allow: the rule style Rust laid out
             />
           ))}
         </div>

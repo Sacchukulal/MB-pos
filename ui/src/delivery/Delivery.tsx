@@ -168,17 +168,17 @@ export function Delivery() {
         return (
           <Stack gap="inline">
             {next ? (
-              <Button small variant="primary" onClick={() => move(r, next.state)}>
+              <Button size="sm" variant="primary" onClick={() => move(r, next.state)}>
                 {next.label}
               </Button>
             ) : null}
             {r.state === 'out' ? (
-              <Button small variant="quiet" onClick={() => setFailing(r)}>
+              <Button size="sm" variant="quiet" onClick={() => setFailing(r)}>
                 Did not arrive
               </Button>
             ) : null}
             <Button
-              small
+              size="sm"
               variant="quiet"
               onClick={() => {
                 call('print_delivery_slip', { orderId: r.orderId })
@@ -228,7 +228,7 @@ export function Delivery() {
       render: (r) =>
         may && r.carrying.paise > 0 ? (
           <Button
-            small
+            size="sm"
             onClick={() => {
               setHandback(r);
               // Prefilled with what they are carrying, because that is what a rider hands over
@@ -263,7 +263,7 @@ export function Delivery() {
           {view.deliveries.length === 0 ? (
             <EmptyState
               title="No deliveries today"
-              body="An order becomes a delivery when you set its type to Delivery on the billing screen."
+              hint="An order becomes a delivery when you set its type to Delivery on the billing screen."
             />
           ) : (
             <Table
@@ -288,7 +288,7 @@ export function Delivery() {
             <EmptyState
               title="Nobody is out"
               /* The old words sent people to a screen that could not do it. */
-              body="Say who rides — the button above — and then give them an order."
+              hint="Say who rides — the button above — and then give them an order."
             />
           ) : (
             <Table rows={[...view.riders]} columns={riderColumns} rowKey={(r) => r.id} />

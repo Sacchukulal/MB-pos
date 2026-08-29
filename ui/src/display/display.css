@@ -54,7 +54,7 @@
 
 .mb-display__qty,
 .mb-display__amount {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
 }
 
@@ -79,7 +79,7 @@
 }
 
 .mb-display__grand {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);

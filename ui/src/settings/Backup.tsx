@@ -121,7 +121,7 @@ export function Backup() {
       {view.backups.length === 0 ? (
         <EmptyState
           title="There are no backups yet"
-          body="Press Back up now. It takes a snapshot while the counter keeps billing."
+          hint="Press Back up now. It takes a snapshot while the counter keeps billing."
         />
       ) : (
         <Card>
@@ -154,7 +154,7 @@ export function Backup() {
                 render: (row) => (
                   <div className="mb-row mb-row--end">
                     <Button
-                      small
+                      size="sm"
                       disabled={working}
                       onClick={() =>
                         void run(call('verify_backup', { path: row.path }), (report) => {
@@ -169,7 +169,7 @@ export function Backup() {
                     >
                       Check it
                     </Button>
-                    <Button small variant="quiet" onClick={() => setRestoring(row)}>
+                    <Button size="sm" variant="quiet" onClick={() => setRestoring(row)}>
                       Restore
                     </Button>
                   </div>

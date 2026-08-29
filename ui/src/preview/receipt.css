@@ -94,7 +94,7 @@
   background: currentColor;
 }
 
-.mb-receipt__rule[data-dashed='yes'] {
+.mb-receipt__rule[data-dashed='yes'] { /* mb-tokens-allow: the paper rule Rust asked for, dashed or solid */
   background: repeating-linear-gradient(
     to right,
     currentColor 0,

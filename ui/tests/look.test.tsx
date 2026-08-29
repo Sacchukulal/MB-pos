@@ -29,7 +29,7 @@ describe('the icon set', () => {
     expect(svgs).toHaveLength(5);
     for (const svg of svgs) {
       expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');
-      expect(svg.getAttribute('stroke-width')).toBe('1.75');
+      expect(svg.getAttribute('stroke-width')).toBe('1.5');
       expect(svg.getAttribute('stroke-linecap')).toBe('round');
       expect(svg.getAttribute('stroke-linejoin')).toBe('round');
       expect(svg.getAttribute('fill')).toBe('none');
@@ -397,9 +397,9 @@ describe('the cart controls', () => {
 
   it('makes a small button SMALLER than a full one, by its own token', () => {
     // It was `--space-7` — three rem, taller than the 44px it was meant to sit under.
-    const small = block(kit, '.mb-button--small {');
-    expect(small).toContain('min-height: var(--target-small)');
-    expect(small).not.toContain('min-height: var(--space-');
+    const small = block(kit, '.mb-button--sm {');
+    expect(small).toContain('height: var(--control-sm)');
+    expect(small).not.toContain('height: var(--space-');
   });
 
   it('pays through the segmented control, not three styled buttons', () => {

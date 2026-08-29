@@ -56,7 +56,7 @@ export function Count() {
   if (refused !== null) {
     return (
       <div className="mb-count">
-        <EmptyState title="Counting is not open on this counter" body={refused} />
+        <EmptyState title="Counting is not open on this counter" says={refused} />
       </div>
     );
   }
@@ -109,7 +109,7 @@ export function Count() {
       header: 'Why',
       render: (l) =>
         l.needsReason && open ? (
-          <Button small variant="quiet" onClick={() => setExplaining(l)}>
+          <Button size="sm" variant="quiet" onClick={() => setExplaining(l)}>
             Say why
           </Button>
         ) : (
@@ -125,7 +125,7 @@ export function Count() {
       header: '',
       render: (l) => (
         <Button
-          small
+          size="sm"
           variant="quiet"
           onClick={() =>
             view.id
@@ -171,7 +171,7 @@ export function Count() {
       {view.id === null ? (
         <EmptyState
           title="Nothing is being counted"
-          body="Print the sheet, count the store, type it in here."
+          hint="Print the sheet, count the store, type it in here."
         />
       ) : (
         <>
@@ -218,7 +218,7 @@ export function Count() {
           {view.lines.length === 0 ? (
             <EmptyState
               title="Nothing written down yet"
-              body="Pick a material, type what is on the shelf, press Enter. Only what you count is adjusted."
+              hint="Pick a material, type what is on the shelf, press Enter. Only what you count is adjusted."
             />
           ) : (
             <>

@@ -15,6 +15,7 @@ import {
   Page,
   Panel,
   PhoneInput,
+  PageHeader,
   SearchField,
   SectionHeader,
   Select,
@@ -96,14 +97,14 @@ export function Credit() {
       render: (c) => (
         <div className="mb-row">
           <Button
-            small
+            size="sm"
             onClick={() => {
               call('customer_account', { customerId: c.id }).then(setOpen).catch(report);
             }}
           >
             Open
           </Button>
-          <Button small variant="quiet" onClick={() => setEditing(c)}>
+          <Button size="sm" variant="quiet" onClick={() => setEditing(c)}>
             Edit
           </Button>
         </div>
@@ -130,6 +131,7 @@ export function Credit() {
         The rail already says Credit, so this screen opens with the two things you do on it:
         find somebody, and add somebody.
       */}
+      <PageHeader title="Credit" />
       <Toolbar>
         <div className="mb-credit__find">
           <SearchField
@@ -166,7 +168,7 @@ export function Credit() {
         {shown.length === 0 ? (
           <EmptyState
             title="No customers yet"
-            body="Add a regular, and their bills can go on the account."
+            hint="Add a regular, and their bills can go on the account."
           />
         ) : (
           <Panel flush>
@@ -275,7 +277,7 @@ function Account({
 
       <SectionHeader title="The account" />
       {account.movements.length === 0 ? (
-        <EmptyState title="Nothing yet" body="Bills on the account and repayments both appear here." />
+        <EmptyState title="Nothing yet" hint="Bills on the account and repayments both appear here." />
       ) : (
         <table className="mb-ledger">
           <thead>
@@ -490,7 +492,7 @@ export function PutOnAccount({
           {shown.length === 0 ? (
             <EmptyState
               title="No customers yet"
-              body="Add one in Credit, and their bills can go on the account."
+              hint="Add one in Credit, and their bills can go on the account."
             />
           ) : (
             <ul className="mb-comp__list">

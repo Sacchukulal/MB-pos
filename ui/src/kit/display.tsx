@@ -238,26 +238,45 @@ export function Tabs({
   );
 }
 
-/** Nothing here yet — and it says what to do about it. */
+/**
+ * Nothing here yet — one line, and what to do about it. An explanation goes in `hint`, which
+ * is a tip you can ask for; `says` is for a LIVE sentence from the machine (a refusal), never
+ * for a description of the screen.
+ */
 export function EmptyState({
   title,
-  body,
+  hint,
+  says,
   action,
   small = false,
 }: {
   title: string;
-  body?: string;
+  hint?: string;
+  says?: string;
   action?: ReactNode;
   /** True inside a panel rather than a page — the cart, a drawer, a column. */
   small?: boolean;
 }) {
   return (
     <div className={cx('mb-empty', small && 'mb-empty--small')}>
-      <span className="mb-empty__title">{title}</span>
-      {body ? <span>{body}</span> : null}
+      <span className="mb-empty__title">
+        {title}
+        {hint ? <InfoTip label={`About ${title}`}>{hint}</InfoTip> : null}
+      </span>
+      {says ? <span className="mb-empty__says">{says}</span> : null}
       {action}
     </div>
   );
+}
+
+/** A row of stats, equal widths. */
+export function Stats({ children }: { children: ReactNode }) {
+  return <div className="mb-stats">{children}</div>;
+}
+
+/** A caption over a group inside a form — the one place small capitals survive. */
+export function Caption({ children }: { children: ReactNode }) {
+  return <h4 className="mb-caption">{children}</h4>;
 }
 
 /** A screen the licence does not open, said on the screen itself. */
@@ -271,7 +290,7 @@ export function Locked({
   return (
     <EmptyState
       title="This part needs a licence"
-      body={says}
+      says={says}
       action={
         onOpenAccount ? (
           <Button variant="primary" onClick={onOpenAccount}>
@@ -330,7 +349,7 @@ function ButtonImport({
 }) {
   return (
     <>
-      <button type="button" className="mb-button mb-button--quiet" onClick={onDiscard}>
+      <button type="button" className="mb-button mb-button--secondary" onClick={onDiscard}>
         Discard
       </button>
       <button

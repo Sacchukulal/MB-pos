@@ -123,7 +123,7 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
         ) : null}
 
         {canRecover && mode.kind !== 'recover' && mode.kind !== 'recovered' ? (
-          <Button variant="quiet" small onClick={() => dispatch({ kind: 'start-recovery' })}>
+          <Button variant="quiet" size="sm" onClick={() => dispatch({ kind: 'start-recovery' })}>
             Forgotten your PIN?
           </Button>
         ) : null}

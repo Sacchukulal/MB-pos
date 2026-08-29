@@ -145,7 +145,7 @@
 
 /* The count sheet, as text a person can read before printing it. */
 .mb-count__sheet {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-size: var(--text-sm);
   white-space: pre;
   /* Sideways only. The MODAL BODY scrolls vertically. */
@@ -162,4 +162,22 @@
 
 .mb-count__over {
   color: var(--warn);
+}
+
+/* The three figures: equal widths, one row. */
+.mb-buying__figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));
+  gap: var(--gap-field);
+  flex: 1;
+}
+
+.mb-buying__label {
+  font-size: var(--type-caption);
+  font-weight: var(--weight-medium);
+}
+
+.mb-buying__value {
+  font-size: var(--text-2xl);
+  line-height: var(--line-tight);
 }

@@ -65,7 +65,7 @@ export function Buying() {
   if (refused !== null) {
     return (
       <div className="mb-buying">
-        <EmptyState title="Buying is not open on this counter" body={refused} />
+        <EmptyState title="Buying is not open on this counter" says={refused} />
       </div>
     );
   }
@@ -97,14 +97,14 @@ export function Buying() {
       render: (s) => (
         <div className="mb-row mb-row--end">
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() => call('supplier_account', { id: s.id }).then(setAccount).catch(report)}
           >
             Account
           </Button>
           {view.mayManageSuppliers ? (
-            <Button small variant="quiet" onClick={() => setEditingSupplier(s)}>
+            <Button size="sm" variant="quiet" onClick={() => setEditingSupplier(s)}>
               Edit
             </Button>
           ) : null}
@@ -144,7 +144,7 @@ export function Buying() {
       header: '',
       render: (p) => (
         <Button
-          small
+          size="sm"
           variant="quiet"
           onClick={() => call('purchase', { id: p.id }).then(setLooking).catch(report)}
         >
@@ -213,7 +213,7 @@ export function Buying() {
         view.purchases.length === 0 ? (
           <EmptyState
             title="No deliveries yet"
-            body="Enter what arrives: it becomes your food cost, your supplier balance and the money that left the drawer."
+            hint="Enter what arrives: it becomes your food cost, your supplier balance and the money that left the drawer."
           />
         ) : (
           <Table rows={view.purchases} columns={purchaseColumns} rowKey={(p) => p.id} />
@@ -225,7 +225,7 @@ export function Buying() {
           {view.mayManageSuppliers ? (
             <div className="mb-row mb-row--end">
               <Button
-                small
+                size="sm"
                 onClick={() =>
                   setEditingSupplier({
                     id: freshId('sup'),
@@ -250,7 +250,7 @@ export function Buying() {
           {view.suppliers.length === 0 ? (
             <EmptyState
               title="No suppliers yet"
-              body="Add who you buy from — even 'Vegetable market' — and the counter can say what you owe."
+              hint="Add who you buy from — even 'Vegetable market' — and the counter can say what you owe."
             />
           ) : (
             <Table rows={view.suppliers} columns={supplierColumns} rowKey={(s) => s.id} />
@@ -262,7 +262,7 @@ export function Buying() {
         view.orders.length === 0 ? (
           <EmptyState
             title="No orders"
-            body="Optional. Enter what arrives and nothing here will ask about it."
+            hint="Optional. Enter what arrives and nothing here will ask about it."
           />
         ) : (
           <Table
@@ -284,7 +284,7 @@ export function Buying() {
                 render: (o) => (
                   <div className="mb-row mb-row--end">
                     <Button
-                      small
+                      size="sm"
                       variant="quiet"
                       onClick={() =>
                         call('set_order_state', { id: o.id, state: 'sent' })
@@ -295,7 +295,7 @@ export function Buying() {
                       Mark sent
                     </Button>
                     <Button
-                      small
+                      size="sm"
                       variant="quiet"
                       onClick={() =>
                         call('set_order_state', { id: o.id, state: 'closed' })
@@ -860,7 +860,7 @@ function PurchasePaper({
         <div>
           <Button
             variant="quiet"
-            small
+            size="sm"
             onClick={() =>
               call('purchase_photo', { id: purchase.id })
                 .then((found) => setPhoto(found.dataUrl))
@@ -1004,7 +1004,7 @@ function RaiseOrder({
 
       <div className="mb-row">
         <Button
-          small
+          size="sm"
           variant="quiet"
           onClick={() => setLines([...lines, { ...BLANK_LINE }])}
         >

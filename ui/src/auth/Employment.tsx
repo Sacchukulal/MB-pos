@@ -128,7 +128,7 @@ export function Attendance({ staffId }: { staffId?: string }) {
       render: (s) =>
         view?.mayCorrect ? (
           <div className="mb-row">
-            <Button small variant="secondary" onClick={() => setFixing(s)}>
+            <Button size="sm" variant="secondary" onClick={() => setFixing(s)}>
               Fix the hours
             </Button>
           </div>
@@ -180,7 +180,7 @@ export function Attendance({ staffId }: { staffId?: string }) {
       {view && view.shifts.length === 0 ? (
         <EmptyState
           title="Nobody worked on these days"
-          body="Clocking in is the same PIN as signing in — there is no second thing to learn."
+          hint="Clocking in is the same PIN as signing in — there is no second thing to learn."
         />
       ) : (
         <Panel flush>
@@ -452,7 +452,7 @@ function Decide({
         />
         <Button
           variant="danger"
-          small
+          size="sm"
           onClick={() =>
             void call('decide_leave', { id, approve: false, note })
               .then(onDone)
@@ -461,7 +461,7 @@ function Decide({
         >
           Refuse it
         </Button>
-        <Button variant="quiet" small onClick={() => setRefusing(false)}>
+        <Button variant="quiet" size="sm" onClick={() => setRefusing(false)}>
           Back
         </Button>
       </Row>
@@ -472,7 +472,7 @@ function Decide({
     <Row gap="inline">
       <Button
         variant="primary"
-        small
+        size="sm"
         onClick={() =>
           void call('decide_leave', { id, approve: true, note: '' })
             .then(onDone)
@@ -486,7 +486,7 @@ function Decide({
         reason is one nobody can appeal, and Rust refuses it anyway, so asking here is kinder
         than a toast.
       */}
-      <Button variant="secondary" small onClick={() => setRefusing(true)}>
+      <Button variant="secondary" size="sm" onClick={() => setRefusing(true)}>
         Refuse
       </Button>
     </Row>
@@ -646,7 +646,7 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
         {view && view.advances.length === 0 ? (
           <EmptyState
             title="No advances"
-            body="An advance comes out of the drawer the day it is given, and off the next payroll run."
+            hint="An advance comes out of the drawer the day it is given, and off the next payroll run."
           />
         ) : (
           <Table
@@ -912,7 +912,7 @@ export function Payroll() {
         {list && list.runs.length === 0 ? (
           <EmptyState
             title="No payroll yet"
-            body="Pick a period and work it out. Nothing moves until you approve it."
+            hint="Pick a period and work it out. Nothing moves until you approve it."
           />
         ) : (
           <Table
@@ -950,7 +950,7 @@ export function Payroll() {
                 render: (r) => (
                   <div className="mb-row">
                     <Button
-                      small
+                      size="sm"
                       onClick={() =>
                         void call('payroll', { runId: r.id }).then(setRun).catch(report)
                       }
@@ -1057,7 +1057,7 @@ function RunSheet({
                     {/* Correct one line, while the run is still a draft. */}
                     {run.state === 'draft' ? (
                       <Button
-                        small
+                        size="sm"
                         variant="quiet"
                         onClick={() =>
                           setFixing({
@@ -1072,7 +1072,7 @@ function RunSheet({
                       </Button>
                     ) : null}
                     <Button
-                      small
+                      size="sm"
                       variant="quiet"
                       onClick={() => {
                         // This sheet has no toast of its own; a failure goes the same way every

@@ -9,6 +9,7 @@ import {
   EmptyState,
   freshId,
   Icon,
+  InfoTip,
   Input,
   Modal,
   MoneyInput,
@@ -108,11 +109,11 @@ export function Expenses() {
       header: '',
       render: (r) => (
         <div className="mb-row">
-          <Button small variant="quiet" onClick={() => setEditing(r)}>
+          <Button size="sm" variant="quiet" onClick={() => setEditing(r)}>
             Edit
           </Button>
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() => {
               call('delete_expense', { id: r.id }).then(setView).catch(report);
@@ -142,6 +143,7 @@ export function Expenses() {
       <div className="mb-row mb-expenses__quick">
         <Input
           label="What"
+          className="mb-input--lg"
           value={what}
           autoFocus
           onChange={(e) => setWhat(e.target.value)}
@@ -151,6 +153,7 @@ export function Expenses() {
         />
         <MoneyInput
           label="Amount"
+          className="mb-input--sm"
           value={amount}
           onChange={setAmount}
           onKeyDown={(e) => {
@@ -159,6 +162,7 @@ export function Expenses() {
         />
         <Select
           label="Category"
+          className="mb-input--md"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           options={[
@@ -168,6 +172,7 @@ export function Expenses() {
         />
         <Select
           label="How"
+          className="mb-input--sm"
           value={mode}
           onChange={(e) => setMode(e.target.value)}
           options={MODES}
@@ -194,7 +199,8 @@ export function Expenses() {
           In the drawer{' '}
           <strong className="mb-mono">{view.cash.expected.text}</strong>
         </span>
-        <span className="mb-expenses__sum">{view.cash.says}</span>
+        {/* The arithmetic is asked for, not printed. */}
+        <InfoTip label="How the drawer figure is made">{view.cash.says}</InfoTip>
       </div>
 
       {view.due.length > 0 ? (
@@ -204,7 +210,7 @@ export function Expenses() {
             <span key={due.id} className="mb-expenses__reminder">
               {due.description} {due.amount.text} ({due.when})
               <Button
-                small
+                size="sm"
                 onClick={() => {
                   call('confirm_recurring_expense', { id: due.id })
                     .then((fresh) => {
@@ -224,7 +230,7 @@ export function Expenses() {
       {view.rows.length === 0 ? (
         <EmptyState
           title="Nothing spent today"
-          body="Record what goes out as it goes out — that is what makes the profit figure true."
+          hint="Record what goes out as it goes out — that is what makes the profit figure true."
         />
       ) : (
         <>
@@ -245,7 +251,7 @@ export function Expenses() {
               </span>
             ))}
             <Button
-              small
+              size="sm"
               variant="quiet"
               onClick={() => {
                 call('export_expenses')
@@ -494,11 +500,12 @@ function SpendCategories({
   };
 
   return (
-    <Modal open title="What you spend on" onClose={onClose}>
-      <p className="mb-muted">
-        These are the headings your spending is sorted under, and what the
-        totals at the bottom of the screen are grouped by.
-      </p>
+    <Modal
+      open
+      title="What you spend on"
+      note="The headings your spending is sorted under, and what the totals at the bottom of the screen are grouped by."
+      onClose={onClose}
+    >
 
       <div className="mb-row">
         <Input
@@ -555,14 +562,14 @@ function SpendCategories({
                 </>
               )}
               <Button
-                small
+                size="sm"
                 disabled={busy}
                 onClick={() => setRenaming({ id: c.id ?? '', name: c.name })}
               >
                 Rename
               </Button>
               <Button
-                small
+                size="sm"
                 variant="quiet"
                 disabled={busy}
                 onClick={() => void save(c.id ?? '', c.name, false)}

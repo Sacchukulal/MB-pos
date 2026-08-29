@@ -53,9 +53,7 @@
   margin: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 /* Inside a group the tiles do not scroll — the column above them does. */
@@ -144,7 +142,7 @@
 
 /* How many tables are in it — the number that says why a room will not delete. */
 .mb-arrange__count {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
@@ -215,7 +213,7 @@
 
 .mb-plan__cell {
   min-height: var(--plan-cell-size);
-  border: var(--border-width) dashed var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-sm);
 }
 

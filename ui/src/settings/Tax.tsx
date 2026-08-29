@@ -167,11 +167,11 @@ export function Tax() {
       header: '',
       render: (s) => (
         <div className="mb-row">
-          <Button small onClick={() => setEditing(s)}>
+          <Button size="sm" onClick={() => setEditing(s)}>
             Edit
           </Button>
           <Button
-            small
+            size="sm"
             variant="quiet"
             disabled={s.itemsUsing > 0}
             onClick={() => setRemoving(s)}
@@ -236,7 +236,7 @@ export function Tax() {
           sticky
           action={
             <Button
-              small
+              size="sm"
               variant="primary"
               onClick={() =>
                 setEditing({
@@ -272,7 +272,7 @@ export function Tax() {
           }
         />
         {total === 0 ? (
-          <EmptyState small title="No items yet" body="Add items on the Menu screen first." />
+          <EmptyState small title="No items yet" hint="Add items on the Menu screen first." />
         ) : (
           page.categories.map((group) => {
             const inGroup = group.items.filter((i) => ticked.has(i.id)).length;

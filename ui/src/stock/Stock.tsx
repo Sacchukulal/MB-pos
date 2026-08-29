@@ -148,13 +148,13 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       header: '',
       render: (m) => (
         <div className="mb-row">
-          <Button small variant="quiet" onClick={() => setMoving(m)}>
+          <Button size="sm" variant="quiet" onClick={() => setMoving(m)}>
             Move
           </Button>
-          <Button small variant="quiet" onClick={() => setRecipeFor(m)}>
+          <Button size="sm" variant="quiet" onClick={() => setRecipeFor(m)}>
             Recipe
           </Button>
-          <Button small variant="quiet" onClick={() => setEditing({ material: m, isNew: false })}>
+          <Button size="sm" variant="quiet" onClick={() => setEditing({ material: m, isNew: false })}>
             Edit
           </Button>
         </div>
@@ -202,7 +202,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           <span>{view.cacheWarning}</span>
           {view.mayAdjust ? (
             <Button
-              small
+              size="sm"
               onClick={() =>
                 call('rebuild_stock_balances')
                   .then((fresh) => {
@@ -238,7 +238,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         shown.length === 0 ? (
           <EmptyState
             title="No materials yet"
-            body="Add what the kitchen uses — rice, oil, paneer — then say what each dish is made of."
+            hint="Add what the kitchen uses — rice, oil, paneer — then say what each dish is made of."
           />
         ) : (
           <>
@@ -325,7 +325,7 @@ function Dishes({
   onOpen: (dish: DishCostView) => void;
 }) {
   if (view.dishes.length === 0) {
-    return <EmptyState title="No dishes yet" body="Add items to the menu first." />;
+    return <EmptyState title="No dishes yet" hint="Add items to the menu first." />;
   }
   const columns: Column<DishCostView>[] = [
     { key: 'name', header: 'Dish', render: (d) => d.name },
@@ -359,7 +359,7 @@ function Dishes({
         <div className="mb-row">
           {d.isIncomplete ? <Badge tone="warn">Not fully priced</Badge> : null}
           {view.mayManage ? (
-            <Button small variant="quiet" onClick={() => onOpen(d)}>
+            <Button size="sm" variant="quiet" onClick={() => onOpen(d)}>
               {d.hasRecipe ? 'Recipe' : 'Add a recipe'}
             </Button>
           ) : null}
@@ -377,7 +377,7 @@ function BuyList({ view, onReport }: { view: InventoryView; onReport: (cause: un
     return (
       <EmptyState
         title="Nothing to buy"
-        body="Set a reorder level on a material and it appears here when it runs low."
+        hint="Set a reorder level on a material and it appears here when it runs low."
       />
     );
   }
@@ -385,7 +385,7 @@ function BuyList({ view, onReport }: { view: InventoryView; onReport: (cause: un
     <div className="mb-stack">
       <div className="mb-row mb-row--end">
         <Button
-          small
+          size="sm"
           variant="quiet"
           onClick={() =>
             call('buy_list_text')
@@ -419,7 +419,7 @@ function BuyList({ view, onReport }: { view: InventoryView; onReport: (cause: un
 
 function Movements({ rows }: { rows: StockMovementView[] }) {
   if (rows.length === 0) {
-    return <EmptyState title="Nothing has moved yet" body="Buying, selling and wasting all show up here." />;
+    return <EmptyState title="Nothing has moved yet" hint="Buying, selling and wasting all show up here." />;
   }
   const columns: Column<StockMovementView>[] = [
     { key: 'when', header: 'When', render: (m) => m.when },
@@ -468,7 +468,7 @@ function Problems({
     return (
       <EmptyState
         title="Nothing needs a look"
-        body="A bill that could not take something off the shelf is listed here. The bill always goes through."
+        hint="A bill that could not take something off the shelf is listed here. The bill always goes through."
       />
     );
   }
@@ -484,7 +484,7 @@ function Problems({
           </div>
           {view.mayManage ? (
             <Button
-              small
+              size="sm"
               variant="quiet"
               onClick={() =>
                 call('resolve_stock_problem', { id: problem.id }).then(onChange).catch(onReport)
@@ -594,7 +594,7 @@ function MaterialForm({
           <div className="mb-row">
             <strong>How you buy it</strong>
             <Button
-              small
+              size="sm"
               variant="quiet"
               onClick={() => setPacks([...packs, { name: '', size: '', unit: baseOf(dimension) }])}
             >
@@ -624,7 +624,7 @@ function MaterialForm({
                 onChange={(e) => setPacks(packs.map((p, i) => (i === n ? { ...p, unit: e.target.value } : p)))}
                 options={[baseOf(dimension), ...standardOf(dimension)].map((u) => ({ value: u, label: u }))}
               />
-              <Button small variant="quiet" onClick={() => setPacks(packs.filter((_, i) => i !== n))}>
+              <Button size="sm" variant="quiet" onClick={() => setPacks(packs.filter((_, i) => i !== n))}>
                 Remove
               </Button>
             </div>
@@ -938,14 +938,14 @@ export function RecipeEditor({
               }
             />
             <div className="mb-stock__linecost mb-mono">{recipe.lines[n]?.cost.text ?? '—'}</div>
-            <Button small variant="quiet" onClick={() => setLines(lines.filter((_, i) => i !== n))}>
+            <Button size="sm" variant="quiet" onClick={() => setLines(lines.filter((_, i) => i !== n))}>
               Remove
             </Button>
           </div>
         ))}
 
         <div className="mb-row">
-          <Button small variant="quiet" onClick={addLine}>
+          <Button size="sm" variant="quiet" onClick={addLine}>
             Add a material
           </Button>
         </div>
@@ -1034,7 +1034,7 @@ function Variance({ onReport }: { onReport: (cause: unknown) => void }) {
       {rows !== null && rows.length === 0 ? (
         <EmptyState
           title="Nothing to compare yet"
-          body="Needs recipes and a stock count. Do a count and come back."
+          hint="Needs recipes and a stock count. Do a count and come back."
         />
       ) : (
         <Table

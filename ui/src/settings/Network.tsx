@@ -180,14 +180,14 @@ export function Network() {
                       ))}
                     </select>
                     <Button
-                      small
+                      size="sm"
                       variant="quiet"
                       onClick={() => act('refuse_device', { requestId: w.requestId })}
                     >
                       Refuse
                     </Button>
                     <Button
-                      small
+                      size="sm"
                       variant="primary"
                       onClick={() =>
                         act('allow_device', {
@@ -217,7 +217,7 @@ export function Network() {
           <EmptyState
             small
             title="No phones yet"
-            body='Press "Add phones" and scan the code with the Magic Bill app.'
+            hint='Press "Add phones" and scan the code with the Magic Bill app.'
           />
         ) : (
           live.map((device) => (
@@ -230,7 +230,7 @@ export function Network() {
                 </p>
               </div>
               {view.mayPair ? (
-                <Button small variant="danger" onClick={() => setRemoving(device)}>
+                <Button size="sm" variant="danger" onClick={() => setRemoving(device)}>
                   Remove
                 </Button>
               ) : null}

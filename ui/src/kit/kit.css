@@ -1,12 +1,14 @@
 /* THE UI KIT'S STYLING — and the only styling in the product. */
 
+/* Buttons: four kinds, three sizes. */
+
 .mb-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-4);
+  gap: var(--gap-inline);
+  height: var(--control-md);
+  padding: 0 var(--space-3);
   border: var(--border-width) solid transparent;
   border-radius: var(--radius-md);
   font: inherit;
@@ -17,12 +19,13 @@
   white-space: nowrap;
   transition:
     background-color var(--motion-fast) var(--ease),
-    border-color var(--motion-fast) var(--ease);
+    border-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
 }
 
 .mb-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .mb-button--primary {
@@ -30,22 +33,21 @@
   color: var(--accent-ink);
 }
 .mb-button--primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: var(--accent-hover);
 }
 
 .mb-button--secondary {
   background: var(--surface);
   color: var(--text);
-  border-color: var(--border-strong);
+  border-color: var(--border);
+  box-shadow: var(--level-raised);
 }
 .mb-button--secondary:hover:not(:disabled) {
   background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
-/*
- * Quiet is for a LIST of choices — a category rail, a report rail — where a border round every
- * line would be a cage.
- */
+/* Ghost: no fill, no edge. A second action, a rail item, a row action. */
 .mb-button--quiet {
   background: transparent;
   color: var(--text-muted);
@@ -55,66 +57,109 @@
   color: var(--text);
 }
 
-/* An action standing beside other actions gets an edge, wherever it is. */
-.mb-table td .mb-button--quiet,
-.mb-toolbar .mb-button--quiet,
-.mb-pagehead__actions .mb-button--quiet,
-.mb-panel__actions .mb-button--quiet,
-.mb-section .mb-button--quiet,
-.mb-modal__actions .mb-button--quiet,
-.mb-sidefold__foot .mb-button--quiet {
-  /* A softer edge than `secondary`'s, so a row still reads Edit first. */
-  border-color: var(--border);
-  color: var(--text);
-}
-
 /*
  * Destructive is a SEMANTIC colour, never the accent: changing a shop's accent must never make
- * "delete" look like "save".
+ * "delete" look like "save". On a page it is an outline; it fills only in the dialog that
+ * asks "are you sure?".
  */
 .mb-button--danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.mb-button--danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+.mb-modal__actions .mb-button--danger {
   background: var(--danger);
   color: var(--accent-ink);
 }
-.mb-button--danger:hover:not(:disabled) {
+.mb-modal__actions .mb-button--danger:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 
-/* Inside a row. Shorter than a full button, never taller. */
-.mb-button--small {
-  min-height: var(--target-small);
-  padding: var(--space-1) var(--space-3);
+/* Inside a row. */
+.mb-button--sm {
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
   font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+}
+
+/* A hand on a touch screen. */
+.mb-button--lg {
+  height: var(--control-lg);
+  padding: 0 var(--space-4);
+  font-size: var(--text-lg);
 }
 
 .mb-button--wide {
   width: 100%;
 }
 
-/* Segmented control. */
+/* An icon and nothing else: square, and it always carries a title. */
+.mb-button--icon {
+  width: var(--control-md);
+  padding: 0;
+}
+.mb-button--icon.mb-button--sm {
+  width: var(--control-sm);
+}
+.mb-button--icon.mb-button--lg {
+  width: var(--control-lg);
+}
 
-/*
- * The order-type switch. A segmented control: the whole thing sits in a sunk track and the
- * chosen one RISES out of it.
- */
+/* Row menu: the ⋯ that holds the rest of a row's actions. */
+
+.mb-rowmenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.mb-rowmenu__scrim {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+  z-index: var(--layer-panel);
+}
+
+.mb-rowmenu__sheet {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: var(--layer-panel);
+  display: flex;
+  flex-direction: column;
+  min-width: 11rem; /* mb-tokens-allow: the sheet hugs its longest word, and 11rem is that */
+  padding: var(--space-1);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--level-pop);
+}
+
+.mb-rowmenu__sheet .mb-button {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+/* Segmented control: exactly one of these. */
+
 .mb-segment {
   display: inline-flex;
   box-sizing: border-box;
-  /* The same height as an input, so a segment and a search box in one row are the same size. */
-  height: var(--target-min);
+  height: var(--control-md);
   gap: var(--space-1);
   padding: var(--space-1);
   background: var(--surface-sunk);
-  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
 }
 
 .mb-segment__option {
-  /*
-   * No height of its own: the segment sets one and flex stretches these to it, so the control
-   * lines up with an input beside it.
-   */
-  padding: var(--space-2) var(--gap-field);
+  padding: 0 var(--space-3);
   background: transparent;
   color: var(--text-muted);
   border: none;
@@ -135,7 +180,7 @@
 
 .mb-segment__option[aria-pressed='true'] {
   background: var(--surface);
-  color: var(--accent);
+  color: var(--text);
   font-weight: var(--weight-bold);
   box-shadow: var(--level-raised);
 }
@@ -152,6 +197,11 @@
   padding-inline: var(--space-2);
 }
 
+/* A touch-sized one: the order type on the counter. */
+.mb-segment--lg {
+  height: var(--control-lg);
+}
+
 /* A key, said as a key — beside a button's word, or on a kitchen card. */
 .mb-kbd {
   display: inline-block;
@@ -161,7 +211,7 @@
   font: inherit;
   font-size: var(--text-xs);
   line-height: var(--line-normal);
-  opacity: 0.8;
+  opacity: 0.7;
 }
 
 /* Stepper: − n +, one shape. */
@@ -169,10 +219,10 @@
 .mb-stepper {
   display: inline-flex;
   align-items: stretch;
-  height: var(--target-small);
+  height: var(--control-sm);
   background: var(--surface);
-  border: var(--border-width) solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -201,10 +251,6 @@
   cursor: not-allowed;
 }
 
-/*
- * The figure between the buttons. A span, a button (tap to type) or the box it is typed into
- * all wear this, so the row does not jump when one turns into the next.
- */
 .mb-stepper__value {
   display: flex;
   align-items: center;
@@ -216,8 +262,9 @@
   border: none;
   border-inline: var(--border-width) solid var(--border);
   font: inherit;
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -235,15 +282,18 @@ input.mb-stepper__value {
   background: var(--accent-soft);
 }
 
+/* Fields. */
+
 .mb-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 .mb-field__label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  font-size: var(--type-label);
+  font-weight: var(--type-label-weight);
   color: var(--text-muted);
 }
 
@@ -271,14 +321,23 @@ input.mb-stepper__value {
 }
 
 .mb-input {
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-3);
+  height: var(--control-md);
+  padding: 0 var(--space-3);
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border-strong);
   border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--text-md);
+}
+
+textarea.mb-input {
+  height: auto;
+  padding: var(--space-2) var(--space-3);
+}
+
+.mb-input:hover:not(:disabled) {
+  border-color: var(--text-faint);
 }
 
 .mb-input:disabled {
@@ -292,15 +351,50 @@ input.mb-stepper__value {
   background: var(--danger-soft);
 }
 
+/* A field's width, from the scale. */
+.mb-input--xs,
+.mb-field--xs {
+  width: var(--field-xs);
+}
+.mb-input--sm,
+.mb-field--sm {
+  width: var(--field-sm);
+}
+.mb-input--md,
+.mb-field--md {
+  width: var(--field-md);
+}
+.mb-input--lg,
+.mb-field--lg {
+  width: var(--field-lg);
+}
+.mb-field--fill {
+  flex: 1;
+  min-width: 0;
+}
+.mb-field--xs .mb-input,
+.mb-field--sm .mb-input,
+.mb-field--md .mb-input,
+.mb-field--lg .mb-input,
+.mb-field--fill .mb-input {
+  width: 100%;
+}
+
 /*
  * Digits align, everywhere they are compared (§3): "a column of rupees that doesn't line up
- * looks broken to a shopkeeper.".
+ * looks broken to a shopkeeper." In the UI face, with tabular figures — not monospace.
  */
 .mb-input--number,
 .mb-numeric {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* A code somebody copies letter by letter: a licence key, a GSTIN, a recovery code. */
+.mb-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .mb-checkbox,
@@ -308,7 +402,7 @@ input.mb-stepper__value {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--target-min);
+  min-height: var(--control-md);
   cursor: pointer;
 }
 
@@ -316,13 +410,13 @@ input.mb-stepper__value {
 .mb-radio input {
   width: var(--space-4);
   height: var(--space-4);
+  margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
 }
 
 /* A field with a mark in it: ₹, +91. */
 
-/* The mark is beside the value, never inside it. */
 .mb-adorned {
   position: relative;
   display: flex;
@@ -332,31 +426,25 @@ input.mb-stepper__value {
 .mb-adorned .mb-input {
   width: 100%;
   min-width: 0;
-  padding-left: var(--space-7);
+  padding-left: var(--space-6);
 }
 
-/*
- * `+91` is three characters where `₹` is one, so the box gives it more room rather than the
- * mark shrinking to fit.
- */
 .mb-adorned:has(.mb-input--phone) .mb-input {
-  padding-left: var(--space-8);
+  padding-left: var(--space-7);
 }
 
 .mb-adorned__mark {
   position: absolute;
   left: var(--space-3);
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
-  /* The box behind it is what gets clicked. */
   pointer-events: none;
 }
 
-/* Money and phones are both columns of digits somebody compares (§3). */
 .mb-input--money,
 .mb-input--phone {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
 }
 
@@ -364,16 +452,20 @@ input.mb-stepper__value {
   position: relative;
   display: flex;
   align-items: center;
+  /* Never wider than the column it is in — a rail is narrower than a toolbar. */
+  width: min(var(--find-width), 100%);
+  min-width: 0;
 }
 
 .mb-search .mb-input {
   width: 100%;
-  padding-left: var(--space-7);
+  padding-left: var(--space-6);
 }
 
 .mb-search__icon {
   position: absolute;
   left: var(--space-3);
+  display: flex;
   color: var(--text-faint);
   pointer-events: none;
 }
@@ -387,15 +479,17 @@ input.mb-stepper__value {
 }
 
 .mb-keypad__key {
-  min-height: var(--target-min);
-  font-family: var(--font-mono);
+  height: var(--control-lg);
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-lg);
 }
 
-/* The hole where the decimal point is on a money pad and is not on a PIN pad. */
 .mb-keypad__gap {
-  min-height: var(--target-min);
+  height: var(--control-lg);
 }
+
+/* Dialogs. */
 
 .mb-overlay {
   position: fixed;
@@ -411,18 +505,12 @@ input.mb-stepper__value {
 .mb-modal {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
   width: 100%;
-  /*
-   * Modal-width, NOT --space-8. The first version of this used the spacing token, which is
-   * 4rem, and every dialog came out sixty-four pixels wide with one word per line.
-   */
   max-width: var(--modal-width);
   max-height: 85%;
-  padding: var(--space-5);
   background: var(--surface);
   color: var(--text);
-  border: var(--border-width) solid var(--border);
+  border: var(--border-width) solid var(--panel-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
   /* The PANEL does not scroll — the body does. */
@@ -434,39 +522,41 @@ input.mb-stepper__value {
   width: var(--modal-width-wide);
 }
 
-/* The title and, when the dialog has one, the tip that says what it is for. */
 .mb-modal__head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  padding: var(--space-4) var(--space-5) 0;
 }
 
 .mb-modal__title {
   margin: 0;
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   flex-shrink: 0;
 }
 
 .mb-modal__body {
-  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text);
   white-space: pre-line;
-  /*
-   * A flex child will not shrink below its content unless it is told to, so without
-   * `min-height` the scrollbar never appears and the panel grows past the window instead.
-   */
   min-height: 0;
   overflow-y: auto;
 }
 
+/* The way out, always in view. */
 .mb-modal__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
-  /* Never scrolled away with the body. */
   flex-shrink: 0;
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border-width) solid var(--border);
 }
 
 /* Toasts: ONE system, stacked. */
@@ -487,16 +577,12 @@ input.mb-stepper__value {
   gap: var(--space-2);
   min-width: var(--toast-width-min);
   max-width: var(--toast-width-max);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   font-size: var(--text-sm);
   background: var(--surface);
   color: var(--text);
-  border: var(--border-width) solid var(--border);
-  /*
-   * The stripe is the form half of the signal, so a colour-blind cashier and a bad monitor both
-   * still tell an error from a confirmation.
-   */
-  border-left: var(--space-1) solid var(--border-strong);
+  border: var(--border-width) solid var(--panel-border);
+  border-left: var(--tile-stripe) solid var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
 }
@@ -514,80 +600,84 @@ input.mb-stepper__value {
   border-left-color: var(--info);
 }
 
+/* Card: a fill and a shadow. Not a border. */
 .mb-card {
   display: flex;
   flex-direction: column;
   gap: var(--gap-field);
-  padding: var(--gap-group);
+  padding: var(--space-4);
   background: var(--surface);
-  border: var(--border-width) solid var(--border);
+  border: var(--border-width) solid var(--panel-border);
   border-radius: var(--radius-lg);
-  /* RAISED, per the elevation contract in tokens.css. */
   box-shadow: var(--level-raised);
 }
 
-/* Group by proximity, separate by space, not by boxes — avoid cards inside cards (§5). */
-.mb-card .mb-card {
+/* Group by proximity, separate by space, not by boxes — a card inside a card is a group. */
+.mb-card .mb-card,
+.mb-panel .mb-card {
   border: none;
   padding: var(--space-0);
   background: transparent;
   box-shadow: var(--level-flat);
 }
 
+/* A stat. */
 .mb-stat {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 .mb-stat__label {
-  font-size: var(--type-label);
+  font-size: var(--type-caption);
   font-weight: var(--type-label-weight);
   color: var(--text-muted);
 }
 
 .mb-stat__value {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
-  /*
-   * Tightened, because at this size the mono face's default tracking makes a five-figure
-   * takings number look like a licence key.
-   */
   letter-spacing: var(--tracking-title);
 }
 
-/* In the UI font, deliberately. */
 .mb-stat__note {
   font-size: var(--type-caption);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
+/* A row of stats: equal widths, one line. */
+.mb-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));
+  gap: var(--gap-field);
+}
+
+/* Section: a heading and a hairline. Not a box. */
 .mb-section {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-height: var(--control-md);
   padding-bottom: var(--space-2);
   border-bottom: var(--border-width) solid var(--border);
 }
 
-/* The heading takes what it needs and the action sits at the far end. */
 .mb-section > :last-child:not(.mb-section__title):not(.mb-tip) {
   margin-left: auto;
 }
 
-/* The note gives way, never the heading. */
 .mb-section__title {
   margin: 0;
   flex-shrink: 0;
   overflow-wrap: anywhere;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
+  font-size: var(--type-section);
+  font-weight: var(--type-section-weight);
 }
 
-/* Actions go right, the same side as a page header's. */
 .mb-section__action {
   display: flex;
   align-items: center;
@@ -596,10 +686,6 @@ input.mb-stepper__value {
   flex-shrink: 0;
 }
 
-/*
- * The section's name stays put while its content scrolls: ninety settings later you could not
- * tell which section you were in.
- */
 .mb-section--sticky {
   position: sticky;
   top: 0;
@@ -607,14 +693,21 @@ input.mb-stepper__value {
   background: var(--surface);
 }
 
+/* A caption over a group inside a form: the one place small capitals survive. */
+.mb-caption {
+  margin: 0;
+  font-size: var(--type-caption);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 /* InfoTip: the explanation you ask for. */
 
 .mb-tip {
   display: inline-flex;
   align-items: center;
-  /*
-   * The anchor's name is scoped to this tip, so every tip on the screen can use the same one.
-   */
   anchor-scope: --mb-tip;
 }
 
@@ -630,34 +723,28 @@ input.mb-stepper__value {
   background: none;
   border: none;
   color: var(--text-faint);
+  opacity: 0.7;
   cursor: help;
 }
 
 .mb-tip__ask:hover,
 .mb-tip:focus-within .mb-tip__ask {
   color: var(--accent);
+  opacity: 1;
 }
 
-/* No JavaScript decides this. */
-/* `fixed`, not `absolute`, and that is the whole reason this works. */
 .mb-tip__bubble {
   position: fixed;
   position-anchor: --mb-tip;
-  /* Below, growing rightwards. */
   position-area: bottom span-right;
-  /* Near an edge it flips rather than hanging off the screen. */
   position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
-  /*
-   * And if the ⓘ itself scrolls out of view, the bubble goes with it instead of floating over
-   * the middle of the screen.
-   */
   position-visibility: anchors-visible;
   margin: var(--space-1) 0;
   z-index: var(--layer-tip);
   width: max-content;
   max-width: var(--tip-width);
   padding: var(--space-2) var(--space-3);
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
@@ -666,10 +753,8 @@ input.mb-stepper__value {
   font-weight: var(--weight-normal);
   line-height: var(--line-normal);
   text-align: left;
-  /*
-   * `visibility` rather than `display`, so the bubble keeps its box for a screen reader to
-   * describe and can fade rather than blink.
-   */
+  text-transform: none;
+  letter-spacing: 0;
   visibility: hidden;
   opacity: 0;
   transition: opacity var(--motion-fast) ease;
@@ -687,14 +772,14 @@ input.mb-stepper__value {
   }
 }
 
-/* Badge: shape as well as colour. */
+/* Badge: a state in a soft fill and a word. */
 
 .mb-badge {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid transparent;
+  height: 1.375rem; /* mb-tokens-allow: a chip is between the two small text sizes */
+  padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
@@ -704,37 +789,30 @@ input.mb-stepper__value {
 .mb-badge--neutral {
   background: var(--surface-sunk);
   color: var(--text-muted);
-  border-color: var(--border);
 }
 .mb-badge--ok {
   background: var(--ok-soft);
   color: var(--ok);
-  border-color: var(--ok);
 }
 .mb-badge--warn {
   background: var(--warn-soft);
   color: var(--warn);
-  border-color: var(--warn);
 }
 .mb-badge--danger {
   background: var(--danger-soft);
   color: var(--danger);
-  border-color: var(--danger);
 }
 .mb-badge--info {
   background: var(--info-soft);
   color: var(--info);
-  border-color: var(--info);
 }
 .mb-badge--accent {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: var(--accent-line);
 }
 
-/*
- * A squeezed table scrolls sideways here rather than wrapping its cells to one word per line.
- */
+/* Tables. */
+
 .mb-table__wrap {
   flex: 0 0 auto;
   overflow-x: auto;
@@ -745,70 +823,61 @@ input.mb-stepper__value {
   width: 100%;
   min-width: var(--table-min);
   border-collapse: collapse;
-  font-size: var(--text-sm);
+  font-size: var(--type-cell);
 }
 
 .mb-table th {
-  padding: var(--space-2) var(--space-3);
+  height: var(--row-height);
+  padding: 0 var(--space-3);
   text-align: left;
+  font-size: var(--type-caption);
   font-weight: var(--weight-medium);
   color: var(--text-muted);
-  border-bottom: var(--border-width) solid var(--border-strong);
-  white-space: nowrap;
-}
-
-/* A cell stays on one line. */
-.mb-table td {
-  padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--border);
   white-space: nowrap;
 }
 
-/*
- * The name is the one thing worth wrapping — it is the only cell that can be arbitrarily long.
- */
+.mb-table td {
+  height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--border-width) solid var(--border);
+  white-space: nowrap;
+}
+
+.mb-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .mb-table td:first-child {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-/* A time, or a count: one line, even in the first column. */
 .mb-table td.mb-nowrap,
 .mb-table th.mb-nowrap {
   white-space: nowrap;
 }
 
-/* A column header is a LABEL, not a figure. */
 .mb-table td.mb-numeric,
 .mb-table th.mb-numeric {
   text-align: right;
 }
 
-.mb-table th.mb-numeric {
-  font-family: var(--font-ui);
-}
-
-/* An actions cell takes only the room it needs. */
 .mb-table td:last-child:has(> .mb-row),
 .mb-table th:last-child:empty {
   width: 1%;
   white-space: nowrap;
 }
 
-/* A menu of three hundred items is read at a glance, not a screen at a time. */
 .mb-table--dense td {
-  padding-top: var(--space-1);
-  padding-bottom: var(--space-1);
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .mb-table tbody tr:hover {
   background: var(--surface-2);
 }
 
-/*
- * The totals row. Heavier rule above it and bold figures, so it reads as the sum of the column
- * rather than as one more row of it.
- */
 .mb-table tfoot td {
   border-top: var(--border-width) solid var(--border-strong);
   border-bottom: none;
@@ -816,6 +885,7 @@ input.mb-stepper__value {
   color: var(--text);
 }
 
+/* Tabs: a lens over one thing. Text and an underline; never a box. */
 .mb-tabs {
   display: flex;
   gap: var(--space-1);
@@ -823,20 +893,25 @@ input.mb-stepper__value {
 }
 
 .mb-tab {
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-4);
+  height: var(--control-lg);
+  padding: 0 var(--space-3);
+  margin-bottom: calc(var(--border-width) * -1);
   background: transparent;
   color: var(--text-muted);
   border: none;
-  /* The underline is the form signal; the colour is the second one. */
-  border-bottom: var(--space-1) solid transparent;
+  border-bottom: var(--border-width-thick) solid transparent;
   font: inherit;
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
-.mb-tab[aria-selected='true'] {
+.mb-tab:hover {
   color: var(--text);
+}
+
+.mb-tab[aria-selected='true'] {
+  color: var(--accent);
   border-bottom-color: var(--accent);
 }
 
@@ -846,33 +921,37 @@ input.mb-stepper__value {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-7) var(--space-5);
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-5);
   text-align: center;
   color: var(--text-muted);
 }
 
-/* Inside a panel, not on a page — see `EmptyState`'s `small`. */
 .mb-empty--small {
-  padding: var(--space-4) var(--space-3);
-  gap: var(--space-1);
-}
-
-.mb-empty--small .mb-empty__title {
-  font-size: var(--text-md);
+  padding: var(--space-5) var(--space-3);
+  gap: var(--space-2);
 }
 
 .mb-empty__title {
-  font-size: var(--text-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
-  color: var(--text);
+  color: var(--text-muted);
+}
+
+.mb-empty__says {
+  max-width: var(--prose-max);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .mb-spinner {
   display: inline-block;
   width: var(--space-4);
   height: var(--space-4);
-  border: var(--space-1) solid var(--border);
+  border: var(--border-width-thick) solid var(--border);
   border-top-color: var(--accent);
   border-radius: var(--radius-pill);
   animation: mb-spin 900ms linear infinite;
@@ -884,7 +963,6 @@ input.mb-stepper__value {
   }
 }
 
-/* Motion respects the setting; a spinner that cannot spin still says "busy" by being there. */
 @media (prefers-reduced-motion: reduce) {
   .mb-spinner {
     animation: none;
@@ -898,9 +976,9 @@ input.mb-stepper__value {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   background: var(--surface-2);
-  border-top: var(--border-width) solid var(--border-strong);
+  border-top: var(--border-width) solid var(--border);
 }
 
 .mb-savebar__note {
@@ -919,6 +997,10 @@ input.mb-stepper__value {
   gap: var(--space-3);
 }
 
+.mb-daterange .mb-input {
+  width: var(--field-sm);
+}
+
 /* Shared helpers. */
 
 .mb-muted {
@@ -934,4 +1016,28 @@ input.mb-stepper__value {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* The gallery's theme switch: a row of buttons in a card, so the test can lift it out. */
+.mb-pagehead__actions > .mb-card {
+  flex-direction: row;
+  align-items: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* A marked field's width is the width of the box round it. */
+.mb-adorned:has(> .mb-input--xs) {
+  width: var(--field-xs);
+}
+.mb-adorned:has(> .mb-input--sm) {
+  width: var(--field-sm);
+}
+.mb-adorned:has(> .mb-input--md) {
+  width: var(--field-md);
+}
+.mb-adorned:has(> .mb-input--lg) {
+  width: var(--field-lg);
 }

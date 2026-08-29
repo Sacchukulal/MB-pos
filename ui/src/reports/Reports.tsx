@@ -179,7 +179,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           <div className="mb-reports__presets">
             {list.periods.map((choice: PeriodChoiceView) => (
               <Button
-                small
+                size="sm"
                 key={choice.label}
                 variant={choice.from === from && choice.to === to ? 'primary' : 'quiet'}
                 onClick={() => {
@@ -211,19 +211,19 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
                   {/*
                     Sending it first, saving it second: an owner looking at this at 11 p.m.
                   */}
-                  <Button small variant="quiet" onClick={() => share('copy')}>
+                  <Button size="sm" variant="quiet" onClick={() => share('copy')}>
                     Copy
                   </Button>
-                  <Button small variant="quiet" onClick={() => share('whats_app')}>
+                  <Button size="sm" variant="quiet" onClick={() => share('whats_app')}>
                     WhatsApp
                   </Button>
-                  <Button small variant="quiet" onClick={() => share('email')}>
+                  <Button size="sm" variant="quiet" onClick={() => share('email')}>
                     Email
                   </Button>
-                  <Button small variant="quiet" onClick={() => save('report_csv')}>
+                  <Button size="sm" variant="quiet" onClick={() => save('report_csv')}>
                     Save as CSV
                   </Button>
-                  <Button small variant="quiet" onClick={() => save('report_pdf')}>
+                  <Button size="sm" variant="quiet" onClick={() => save('report_pdf')}>
                     Save as PDF
                   </Button>
                 </div>
@@ -272,7 +272,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
                 empty={
                   <EmptyState
                     title="Nothing in this period"
-                    body="Pick a different date range, or a different report."
+                    hint="Pick a different date range, or a different report."
                   />
                 }
               />
@@ -287,7 +287,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         ) : busy ? (
           <Spinner label="Adding it up" />
         ) : (
-          <EmptyState title="Pick a report" body="Choose one from the list on the left." />
+          <EmptyState title="Pick a report" hint="Choose one from the list on the left." />
         )}
           </>
         )}

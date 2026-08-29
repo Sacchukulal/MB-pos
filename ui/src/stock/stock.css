@@ -35,7 +35,7 @@
  * to be readable at a glance.
  */
 .mb-stock__negative {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   color: var(--danger);
 }
 
@@ -68,7 +68,6 @@
   gap: var(--space-3);
   padding: var(--space-3);
   background: var(--surface-2);
-  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
 }
 

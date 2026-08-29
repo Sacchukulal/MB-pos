@@ -1,5 +1,18 @@
 /* MAGIC BILL — THE ONE FILE THAT DECIDES WHAT THE PRODUCT LOOKS LIKE. */
 
+/*
+ * The UI face. Bundled, local, one file: a font that is fetched is a font that can fail to
+ * arrive, and a counter has no business waiting on one. Inter's tabular figures are why the
+ * money columns line up without a monospace face.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('../kit/fonts/InterVariable.woff2') format('woff2');
+}
+
 :root {
   /*
    * THE SCALES. These do NOT change between themes — a theme is a palette, not a different
@@ -27,18 +40,18 @@
   --gap-group: var(--space-5);
   /* Between two sections of a page. */
   --gap-section: var(--space-6);
-  /* The page's own margin — the same on all four sides. */
-  --page-pad: var(--space-3);
+  /* The page's own margin — the same on all four sides. Wider on a wide screen (below). */
+  --page-pad: var(--space-5);
   --page-pad-x: var(--page-pad);
-  --page-pad-y: var(--page-pad);
+  --page-pad-y: var(--space-4);
   /* How wide the scrollbar is. */
-  --scrollbar: var(--space-3);
+  --scrollbar: 0.5rem;
 
   /* THE TYPE CONTRACT — the same argument as spacing. */
 
   --type-page: var(--text-xl);
   --type-page-weight: var(--weight-bold);
-  --type-section: var(--text-md);
+  --type-section: var(--text-lg);
   --type-section-weight: var(--weight-bold);
   --type-label: var(--text-sm);
   --type-label-weight: var(--weight-medium);
@@ -56,32 +69,31 @@
    * icon with the word beside it — an icon that stayed put while its label grew is the thing
    * that looks broken.
    */
-  --icon-sm: 1rem;
-  --icon-md: 1.25rem;
-  --icon-lg: 1.75rem;
+  --icon-sm: 0.875rem;
+  --icon-md: 1rem;
+  --icon-lg: 1.25rem;
   /* The Magic Bill mark: in the title bar, beside a heading, on a screen of its own. */
-  --logo-sm: 2rem;
+  --logo-sm: 1.75rem;
   --logo-md: 3rem;
-  --logo-lg: 5rem;
-  --icon-stroke: 1.75;
+  --logo-lg: 4.5rem;
+  --icon-stroke: 1.5;
 
   /* How narrow a kitchen ticket may get before it wraps. */
   --kds-card-min: 18rem;
 
-  /* Radius. "Middle": modest, not soft, not sharp. */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Radius. Modest: a card is softer than a control, a chip is a pill. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
   --radius-pill: 999px;
 
-  /*
-   * Type. The UI face is THE OPERATING SYSTEM'S OWN (§3): this is a native Windows app,
-   * matching the OS is correct, and it removes a font-loading failure mode.
-   */
-  --font-ui: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+  /* Type. Inter, bundled; the OS face behind it if the file is ever missing. */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI',
     Roboto, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New",
-    monospace;
+  /* Figures on screen use the UI face with tabular numerals — see `.mb-numeric`. */
+  --font-num: var(--font-ui);
+  /* Monospace is for paper and for codes, not for money. */
+  --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
 
   /*
    * The text-size setting multiplies THIS and nothing else, so it reaches every screen, every
@@ -89,21 +101,21 @@
    */
   --type-scale: 1;
 
-  /* The bottom of the scale came up. */
-  --text-xs: calc(0.8125rem * var(--type-scale));
-  --text-sm: calc(0.9375rem * var(--type-scale));
-  --text-md: calc(1rem * var(--type-scale));
-  --text-lg: calc(1.1875rem * var(--type-scale));
-  --text-xl: calc(1.4375rem * var(--type-scale));
-  --text-2xl: calc(1.875rem * var(--type-scale));
+  /* Six steps. Body is 14px: this is software, not a document. */
+  --text-xs: calc(0.75rem * var(--type-scale));
+  --text-sm: calc(0.8125rem * var(--type-scale));
+  --text-md: calc(0.875rem * var(--type-scale));
+  --text-lg: calc(1rem * var(--type-scale));
+  --text-xl: calc(1.25rem * var(--type-scale));
+  --text-2xl: calc(1.75rem * var(--type-scale));
 
   --weight-normal: 400;
   --weight-medium: 500;
-  --weight-bold: 650;
+  --weight-bold: 600;
 
-  --tracking-caps: 0.06em;
-  /* A page title at --text-xl and weight 650 looks loose on the OS UI font without this. */
-  --tracking-title: -0.01em;
+  --tracking-caps: 0.05em;
+  /* Inter needs no tightening at a title size. */
+  --tracking-title: 0;
   /*
    * The other direction, for a string somebody is copying character by character onto paper —
    * the recovery code at first run.
@@ -127,14 +139,28 @@
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
 
   /*
-   * Touch targets. 44px minimum (§7) — this is a counter, and half the shops that buy this run
-   * a touch monitor.
+   * THE CONTROL CONTRACT. Three heights, by job.
+   * lg — a hand on a touch screen: the pay row, a tile, a PIN key, a dialog's primary.
+   * md — a page's own buttons, inputs, selects, segments.
+   * sm — a control inside a row: a row action, a stepper, a chip.
    */
-  --target-min: 44px;
-  /* A control that sits inside a row — a stepper, a chip, a row's own button. */
-  --target-small: 2.25rem;
+  --control-lg: 2.75rem;
+  --control-md: 2.25rem;
+  --control-sm: 1.75rem;
+  /* The touch floor (§7). Only the lg controls stand on it. */
+  --target-min: var(--control-lg);
+  --target-small: var(--control-sm);
   /* How wide the − and + of a stepper are. */
-  --stepper-step: 2rem;
+  --stepper-step: 1.75rem;
+
+  /*
+   * THE FIELD-SIZE SCALE. A form row picks from these, so four fields never show four
+   * unrelated widths.
+   */
+  --field-xs: 6rem;
+  --field-sm: 10rem;
+  --field-md: 16rem;
+  --field-lg: 24rem;
 
   /*
    * Component widths. Here rather than in a component, because "the rail is too narrow" and
@@ -144,35 +170,35 @@
   /* The navigation runs ACROSS THE TOP. */
   --topbar-height: 48px;
   /* A control that sits INSIDE the top strip. */
-  --topbar-control-height: 2.25rem;
+  --topbar-control-height: 2rem;
   --topbar-item-gap: var(--space-1);
   --titlebar-height: var(--topbar-height);
-  /*
-   * The "More" sheet. Wide enough for the longest label plus its icon with room to spare —
-   * "Settings" and "History" both sit comfortably, and a sheet that hugs its text reads as
-   * cramped rather than as tidy.
-   */
+  /* The window buttons: Windows' own size for them. */
+  --window-button-width: 2.875rem;
+  /* The "More" sheet. */
   --rail-sheet-width: 13rem;
   /* A "find something on this screen" box. */
-  --find-width: 20rem;
-  --modal-width: 26rem;
+  --find-width: var(--field-lg);
+  --modal-width: 28rem;
   --modal-width-wide: 42rem;
   --panel-width: 22rem;
   --toast-width-min: 14rem;
   --toast-width-max: 20rem;
 
   /* The billing screen. */
-  --cart-width: 24rem;
+  --cart-width: 23rem;
   /* The totals breakdown scrolls past this, so the item list keeps its room. */
   --totals-breakdown-max: 7.5rem;
   /* The processing-orders panel, between the floor and the cart. */
-  --queue-width: 17rem;
+  --queue-width: 16rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
-  --tile-height: 6.5rem;
-  --tile-height-dense: 3.75rem;
+  --tile-height: 5.5rem;
+  --tile-height-dense: 3.5rem;
   /* Print, edit, delete — the small buttons that sit on a tile. */
   --tile-button: 1.5rem;
+  /* The state stripe down a tile's left edge. */
+  --tile-stripe: 3px;
   --suggestions-height: 22rem;
   /* The floor plan. */
   --plan-cells: 16;
@@ -181,9 +207,9 @@
   --group-route-width: 12rem;
   --group-name-min: 9rem;
   /* 5, the first run — the one screen in the product that is deliberately NARROW. */
-  --firstrun-width: 34rem;
-  --firstrun-lede: 44ch;
-  --firstrun-dot: 1.75rem;
+  --firstrun-width: 35rem;
+  --firstrun-lede: 48ch;
+  --firstrun-dot: 1.5rem;
   /* How wide the item name wants to be on the last set-up step, before the row wraps. */
   --firstrun-item: 12rem;
   /* How much of a device's raw output the device screen shows before it scrolls. */
@@ -192,36 +218,33 @@
   --cart-lines-min: 6rem;
 
   /* The alerts panel. */
-  --alerts-width: 26rem;
-  /* The Floor screen's arranging panel. */
-  --arrange-width: var(--find-width);
+  --alerts-width: 24rem;
+  /* The Floor screen's arranging panel, and every side panel. */
+  --arrange-width: 22rem;
   /* An info tip holds a sentence or two. */
   --tip-width: 20rem;
   --alerts-tall: 70vh;
-  /* (--totals-min was here and is GONE. */
+  /* A block of prose never runs the width of a wide screen. */
+  --prose-max: 64ch;
 
   /* The settings screen. */
   --settings-rail: 15rem;
-  --settings-field: 20rem;
+  --settings-field: var(--field-md);
   /* A tick box is a line of words, so it packs tighter than a field you type in. */
   --settings-tick: 15rem;
-  /*
-   * What is left beside the bill sample is about 34rem, which is one 20rem column and a lot of
-   * nothing.
-   */
-  --settings-field-tight: 16rem;
+  --settings-field-tight: var(--field-md);
   /*
    * Wide enough that a 48-column receipt FITS: 48 characters of --text-sm mono is about 25rem,
    * plus the paper's own padding and border.
    */
-  --settings-paper: 28rem;
+  --settings-paper: 27rem;
 
   /* The day close. */
   --dayclose-column: 22rem;
   --dayclose-face: 3rem;
   --dayclose-box: 5rem;
-  /* Four stat cards across at 1366, two on a laptop, one on a tablet. */
-  --dash-stat: 13rem;
+  /* Four stat cards across at 1366. */
+  --dash-stat: 12rem;
 
   --qr-dot: 6px;
   /* The two values in this file that a theme must NOT change. */
@@ -231,16 +254,18 @@
   --logo-preview-width: 18rem;
 
   /* The lock screen and the people screens. */
-  --lock-width: 24rem;
+  --lock-width: 22rem;
   --lock-people-height: 18rem;
-  --dot-size: 0.875rem;
+  --dot-size: 0.625rem;
   --permission-min: 15rem;
   /* The menu screen. */
-  --menu-categories-width: 14rem;
+  --menu-categories-width: 13rem;
   --class-min: 18rem;
   --import-box-height: 12rem;
   /* How narrow a table may get before it scrolls sideways instead of wrapping. */
   --table-min: 34rem;
+  /* A table row. */
+  --row-height: 2.5rem;
 
   /*
    * THE LAYER CONTRACT. Same argument as spacing and type: a screen names a JOB, never a
@@ -271,45 +296,54 @@
   --border-width: 1px;
 }
 
-/* LIGHT — the default. */
+/* A wide screen gets a wider margin; nothing else changes. */
+@media (min-width: 1600px) { /* mb-tokens-allow: media queries cannot use var() */
+  :root {
+    --page-pad: var(--space-6);
+    --page-pad-y: var(--space-5);
+  }
+}
+
+/* LIGHT — the default. A white sheet on a grey desk. */
 [data-theme="light"] {
   color-scheme: light;
 
-  /* Ground — a neutral grey ramp with the faintest cool cast. */
-  --bg: #f6f7f9;
+  --bg: #f3f4f7;
   --surface: #ffffff;
-  --surface-2: #f9fafb;
-  --surface-sunk: #eef0f3;
+  --surface-2: #eceef3;
+  --surface-sunk: #e4e7ec;
 
   /* Line — two weights and they do different jobs. */
-  --border: #c2c7d0;
+  --border: #c0c5ce;
   --border-strong: #868d9b;
+  /* A card's edge. Invisible here: the fill and the shadow carry it. */
+  --panel-border: #ffffff;
 
   /* Text — three steps, and the gap between them is deliberate. */
-  --text: #101828;
-  --text-muted: #545d6d;
-  --text-faint: #6f7889;
+  --text: #111827;
+  --text-muted: #4b5563;
+  --text-faint: #667085;
 
-  /* Accent — PROVISIONAL DEFAULT, indigo. */
-  --accent: #4a45c4;
+  /* Accent — indigo. */
+  --accent: #4338ca;
   --accent-ink: #ffffff;
-  --accent-hover: #3d38a8;
-  --accent-soft: #ecebfa;
-  --accent-line: #c3c0ee;
+  --accent-hover: #3730a3;
+  --accent-soft: #eef0fb;
+  --accent-line: #c7ccf3;
 
   /* Semantic — never rendered with --accent, never the only signal. */
-  --ok: #177a48;
-  --ok-soft: #e3f5ea;
-  --warn: #96601a;
-  --warn-soft: #fcf1dc;
-  --danger: #bc2222;
-  --danger-soft: #fce8e8;
-  --info: #1c6a86;
-  --info-soft: #e3f1f6;
+  --ok: #15803d;
+  --ok-soft: #dcfce7;
+  --warn: #a16207;
+  --warn-soft: #fef3c7;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --info: #0e6b8c;
+  --info-soft: #e0f2fe;
 
   /* Elevation — the contract above, given colour. */
-  --level-raised: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
-  --level-pop: 0 4px 8px rgb(16 24 40 / 6%), 0 16px 32px rgb(16 24 40 / 14%);
+  --level-raised: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 1px rgb(16 24 40 / 4%);
+  --level-pop: 0 4px 12px rgb(16 24 40 / 8%), 0 16px 32px rgb(16 24 40 / 14%);
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
   --overlay: rgb(16 24 40 / 45%);
@@ -319,41 +353,38 @@
   color-scheme: dark;
 
   /* Dark is NOT the light theme inverted. */
-  --bg: #0e1015;
-  --surface: #171a21;
-  --surface-2: #1e222b;
-  --surface-sunk: #0a0c10;
+  --bg: #0f1117;
+  --surface: #171a22;
+  --surface-2: #1f232d;
+  --surface-sunk: #0b0d12;
 
-  --border: #454b57;
-  --border-strong: #5f6979;
+  --border: #3a4150;
+  --border-strong: #6b7383;
+  /* On a dark ground a shadow is nearly invisible, so a card's edge is a line. */
+  --panel-border: #262b36;
 
-  --text: #e9ecf2;
-  /* Lifted with the lines, and for the same reading. */
-  --text-muted: #a9b3c4;
-  --text-faint: #838da0;
+  --text: #e5e7eb;
+  --text-muted: #a3aab8;
+  --text-faint: #7f8797;
 
   /* The same indigo, lifted so it holds its contrast on a dark ground. */
-  --accent: #8b8cf5;
-  --accent-ink: #0e1015;
-  --accent-hover: #a3a4f8;
-  --accent-soft: #232445;
-  --accent-line: #3f4079;
+  --accent: #818cf8;
+  --accent-ink: #0f1117;
+  --accent-hover: #a5b4fc;
+  --accent-soft: #23264a;
+  --accent-line: #3f4586;
 
-  --ok: #45c489;
+  --ok: #4ade80;
   --ok-soft: #10281c;
-  --warn: #dda54a;
+  --warn: #fbbf24;
   --warn-soft: #2c210b;
-  --danger: #f0736f;
+  --danger: #f87171;
   --danger-soft: #331414;
-  --info: #5cb5d4;
+  --info: #67c3e3;
   --info-soft: #0e2530;
 
-  /*
-   * On a dark ground a shadow is nearly invisible, so elevation is carried by the SURFACE
-   * getting lighter — the shadow only stops a panel's edge from dissolving.
-   */
-  --level-raised: 0 1px 2px rgb(0 0 0 / 45%), 0 1px 3px rgb(0 0 0 / 35%);
-  --level-pop: 0 4px 8px rgb(0 0 0 / 35%), 0 16px 32px rgb(0 0 0 / 55%);
+  --level-raised: 0 1px 2px rgb(0 0 0 / 40%);
+  --level-pop: 0 4px 12px rgb(0 0 0 / 40%), 0 16px 32px rgb(0 0 0 / 55%);
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
   --overlay: rgb(0 0 0 / 65%);
@@ -365,11 +396,12 @@
 
   --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #ffffff;
-  --surface-sunk: #f0f0f0;
+  --surface-2: #f0f0f0;
+  --surface-sunk: #e6e6e6;
 
   --border: #000000;
   --border-strong: #000000;
+  --panel-border: #000000;
 
   --text: #000000;
   --text-muted: #1a1a1a;
@@ -390,8 +422,10 @@
   --info: #004b63;
   --info-soft: #d9eef5;
 
-  --shadow: 0 0 0 1px #000000;
-  --shadow-pop: 0 0 0 2px #000000;
+  --level-raised: 0 0 0 1px #000000;
+  --level-pop: 0 0 0 2px #000000;
+  --shadow: var(--level-raised);
+  --shadow-pop: var(--level-pop);
   --overlay: rgb(0 0 0 / 65%);
 }
 
@@ -413,6 +447,7 @@ body {
   font-family: var(--font-ui);
   font-size: var(--text-md);
   line-height: var(--line-normal);
+  -webkit-font-smoothing: antialiased;
   /* A desktop app is not a document: nothing here should rubber-band or select like prose. */
   -webkit-user-select: none;
   user-select: none;
@@ -441,18 +476,18 @@ textarea {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: var(--border);
   border-radius: var(--radius-pill);
   /*
    * The border is transparent and the background is clipped to the padding box, which is how a
    * thumb gets inset from its track without a second element to do it with.
    */
-  border: var(--space-1) solid transparent;
+  border: 2px solid transparent; /* mb-tokens-allow: the thumb's inset, half the bar */
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
+  background: var(--border-strong);
   background-clip: padding-box;
 }
 

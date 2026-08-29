@@ -147,7 +147,7 @@ export function Devices() {
               header: '',
               render: (d) =>
                 d.testable ? (
-                  <Button small onClick={() => test(d.kind)}>
+                  <Button size="sm" onClick={() => test(d.kind)}>
                     Test it
                   </Button>
                 ) : null,

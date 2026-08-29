@@ -72,7 +72,7 @@ export function Processing({
       <EmptyState
         small
         title="Nothing cooking"
-        body="Orders sent to the kitchen show here until they are billed."
+        hint="Orders sent to the kitchen show here until they are billed."
       />
     );
   }

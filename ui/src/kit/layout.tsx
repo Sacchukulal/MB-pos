@@ -136,19 +136,24 @@ export function SideFold({
             {panel}
           </Scroller>
         </aside>
-      ) : (
-        <button
-          type="button"
-          className="mb-sidefold__strip"
-          title={label}
-          aria-label={label}
-          aria-expanded={false}
-          onClick={onOpen}
-        >
-          <Icon name="plus" size="sm" />
-        </button>
-      )}
-      <div className="mb-sidefold__main">{children}</div>
+      ) : null}
+      <div className="mb-sidefold__main">
+        {/* The way in when folded: a labelled button at the top of the page. */}
+        {allowed && !showing ? (
+          <div className="mb-sidefold__open">
+            <button
+              type="button"
+              className="mb-button mb-button--primary"
+              aria-expanded={false}
+              onClick={onOpen}
+            >
+              <Icon name="plus" size="sm" />
+              {label}
+            </button>
+          </div>
+        ) : null}
+        {children}
+      </div>
     </div>
   );
 }

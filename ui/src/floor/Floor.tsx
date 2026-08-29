@@ -580,7 +580,7 @@ function Picked({
       </span>
 
       {one ? (
-        <Button small onClick={() => onEdit(one)}>
+        <Button size="sm" onClick={() => onEdit(one)}>
           <Icon name="pencil" size="sm" />
           Edit
         </Button>
@@ -589,33 +589,33 @@ function Picked({
       {/* The order operations. */}
       {tile && tile.orderId ? (
         <>
-          <Button small onClick={() => onPrint(tile)}>
+          <Button size="sm" onClick={() => onPrint(tile)}>
             <Icon name="printer" size="sm" />
             Print the bill
           </Button>
-          <Button small onClick={() => onOrder(tile)}>
+          <Button size="sm" onClick={() => onOrder(tile)}>
             Move or merge
           </Button>
         </>
       ) : null}
 
       {hidden < rows.length ? (
-        <Button small onClick={onHide}>
+        <Button size="sm" onClick={onHide}>
           Take off the floor
         </Button>
       ) : null}
       {hidden > 0 ? (
-        <Button small onClick={onShow}>
+        <Button size="sm" onClick={onShow}>
           Put back
         </Button>
       ) : null}
 
-      <Button small variant="danger" onClick={onDelete}>
+      <Button size="sm" variant="danger" onClick={onDelete}>
         <Icon name="trash" size="sm" />
         Delete
       </Button>
 
-      <Button small variant="quiet" onClick={onClear}>
+      <Button size="sm" variant="quiet" onClick={onClear}>
         Clear
       </Button>
     </div>
@@ -653,14 +653,14 @@ function Grid({
     return none ? (
       <EmptyState
         title="No tables yet"
-        body={
+        says={
           canArrange
             ? 'Add a room and a run of tables on the left, and they appear here.'
             : 'Somebody who manages tables can add them.'
         }
       />
     ) : (
-      <EmptyState title="Nothing here" body="Try another room, or show everything." />
+      <EmptyState title="Nothing here" hint="Try another room, or show everything." />
     );
   }
   return (
@@ -843,13 +843,13 @@ function TableActions({
         note="Both parties pay together. This table's food joins the other bill; its own order is kept and marked as merged, never deleted."
       />
       {busy.length === 0 ? (
-        <EmptyState title="Nothing to merge with" body="No other table has an order on it." />
+        <EmptyState title="Nothing to merge with" hint="No other table has an order on it." />
       ) : (
         <div className="mb-floor__mergelist">
           {busy.map((other) => (
             <Button
               key={other.id}
-              small
+              size="sm"
               variant="quiet"
               onClick={() => {
                 call('merge_orders', {

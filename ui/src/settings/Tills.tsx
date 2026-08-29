@@ -139,7 +139,7 @@ export function Tills() {
       {view.waitingSays ? (
         <Card className="mb-tills__waiting">
           <span>{view.waitingSays}</span>
-          <Button small variant="quiet" disabled={busy} onClick={sendNow}>
+          <Button size="sm" variant="quiet" disabled={busy} onClick={sendNow}>
             Send now
           </Button>
         </Card>
@@ -160,12 +160,12 @@ export function Tills() {
             </div>
             <div className="mb-row--end">
               {view.mayManage && !till.isMaster ? (
-                <Button small variant="quiet" disabled={busy} onClick={() => makeMain(till)}>
+                <Button size="sm" variant="quiet" disabled={busy} onClick={() => makeMain(till)}>
                   Make it the main till
                 </Button>
               ) : null}
               {view.mayManage ? (
-                <Button small variant="quiet" onClick={() => open(till)}>
+                <Button size="sm" variant="quiet" onClick={() => open(till)}>
                   Change
                 </Button>
               ) : null}

@@ -43,7 +43,6 @@
   margin: 0;
   padding: var(--space-3);
   background: var(--surface-2);
-  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   max-height: var(--raw-output-height);
   overflow-y: auto; /* mb-layout-allow: a <pre> capped at a height, showing raw printer output */

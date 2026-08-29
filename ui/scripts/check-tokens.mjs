@@ -35,6 +35,25 @@ const CHECKS = [
     re: /style=\{\{/g,
   },
   {
+    // 600, 700 — a weight is a token so the whole product changes together.
+    what: 'a raw font weight',
+    re: /font-weight\s*:\s*\d/g,
+  },
+  {
+    // Zero is allowed: it is "no tracking", not a value.
+    what: 'a raw letter-spacing',
+    re: /letter-spacing\s*:\s*-?(?!0\s*;)\d/g,
+  },
+  {
+    // Dashed is a drop target, not a table.
+    what: 'a dashed border',
+    re: /\bdashed\b/g,
+  },
+  {
+    what: 'a font face named outside the theme',
+    re: /font-family\s*:(?!\s*(?:var\(|inherit))/g,
+  },
+  {
     what: 'a named CSS colour',
     re: /:\s*(?:red|green|blue|black|white|grey|gray|orange|yellow|purple|pink|brown|cyan|magenta)\s*[;,)]/gi,
   },

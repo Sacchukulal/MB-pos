@@ -125,7 +125,7 @@ export function Audit() {
       {view && view.entries.length === 0 ? (
         <EmptyState
           title="Nothing here yet"
-          body="Signing in, voiding a bill, changing a price and closing the day all land here."
+          hint="Signing in, voiding a bill, changing a price and closing the day all land here."
         />
       ) : (
         <Table

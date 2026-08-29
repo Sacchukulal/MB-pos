@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, Scroller, SearchField, Select, SideFold, Toolbar, Table, useToast, type Column, Spinner } from '../kit';
+import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, RowMenu, Scroller, SearchField, Select, SideFold, Toolbar, Table, useToast, type Column, Spinner } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
@@ -107,14 +107,15 @@ export function Menu() {
       header: '',
       render: (r) => (
         <div className="mb-row">
-          <Button small onClick={() => setEditing(r)}>
+          <Button size="sm" onClick={() => setEditing(r)}>
             Edit
           </Button>
-          <Button small variant="quiet" onClick={() => setMadeOf(r)}>
+          <RowMenu label={`More for `}>
+          <Button size="sm" variant="quiet" onClick={() => setMadeOf(r)}>
             Sizes &amp; choices{r.variants > 0n ? ` (${r.variants})` : ''}
           </Button>
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() => {
               call('set_item_available', { itemId: r.id, available: !r.isAvailable })
@@ -125,6 +126,7 @@ export function Menu() {
             {/* "Sold out", not "86 it". */}
             {r.isAvailable ? 'Sold out' : 'Put back'}
           </Button>
+          </RowMenu>
         </div>
       ),
     },
@@ -169,6 +171,7 @@ export function Menu() {
               Categories
             </Button>
             <Button variant="secondary" onClick={() => setBulkOpen(true)}>
+              <Icon name="tag" size="sm" />
               Change prices
             </Button>
             {/* A label wearing the kit's button, over a hidden file input — one way in. */}
@@ -250,8 +253,9 @@ export function Menu() {
       {categories.length > 0 ? (
         <Scroller inset className="mb-menu__categories">
           <Button
-            variant={chosen === null ? 'primary' : 'quiet'}
+            variant="quiet"
             wide
+            aria-current={chosen === null}
             onClick={() => setChosen(null)}
           >
             Everything ({rows.length})
@@ -259,8 +263,9 @@ export function Menu() {
           {categories.map((category) => (
             <Button
               key={category.id}
-              variant={chosen === category.id ? 'primary' : 'quiet'}
+              variant="quiet"
               wide
+              aria-current={chosen === category.id}
               onClick={() => setChosen(category.id)}
             >
               {category.name} ({category.itemCount})
@@ -281,7 +286,7 @@ export function Menu() {
         {shown.length === 0 ? (
           <EmptyState
             title={rows.length === 0 ? 'No items yet' : 'Nothing matches'}
-            body={
+            says={
               rows.length === 0
                 ? 'Add what you sell, and give each thing its tax class — that is what lets this bill a bar as well as a restaurant.'
                 : 'Try a different word, or pick another category.'

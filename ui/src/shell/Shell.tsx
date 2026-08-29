@@ -508,7 +508,8 @@ export function Shell() {
     <div className="mb-shell">
       <TopBar
         shopPath={status?.shopPath ?? null}
-        screens={allowed}
+        // Behind the lock there is no navigation: the bar shows the brand and the tools only.
+        screens={locked ? [] : allowed}
         current={screen}
         onGo={setScreen}
         themeIcon={theme.icon}
@@ -725,8 +726,9 @@ function TopBar({
               aria-current={elsewhere ? 'page' : undefined}
               onClick={() => setMoreOpen((was) => !was)}
             >
-              <Icon name={elsewhere?.icon ?? 'more'} size="md" />
-              <span className="mb-nav__label">{elsewhere?.label ?? 'More'}</span>
+              {/* Always "More": the current screen is named by its own page header, so the bar never reflows. */}
+              <Icon name="more" size="md" />
+              <span className="mb-nav__label">More</span>
               <Icon name={moreOpen ? 'chevron-up' : 'chevron-down'} size="sm" />
             </button>
 
@@ -966,11 +968,11 @@ export function PrintQueuePanel({
               {/* Any job can be given up on; only a parked one can be tried again. */}
               <div className="mb-row">
                 {job.needsAttention ? (
-                  <Button small onClick={() => onRetry(job.id)}>
+                  <Button size="sm" onClick={() => onRetry(job.id)}>
                     Try again
                   </Button>
                 ) : null}
-                <Button small variant="quiet" onClick={() => onDismiss(job.id)}>
+                <Button size="sm" variant="quiet" onClick={() => onDismiss(job.id)}>
                   Give up
                 </Button>
               </div>

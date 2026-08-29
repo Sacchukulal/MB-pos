@@ -55,11 +55,13 @@ export function Groups({
   };
 
   return (
-    <Modal open title="Categories" onClose={onClose} wide>
-      <p className="mb-muted">
-        Categories are how your menu is arranged — Tiffin, Drinks, Tandoor.
-        Each category can also send its kitchen tickets to its own printer.
-      </p>
+    <Modal
+      open
+      title="Categories"
+      note="How your menu is arranged — Tiffin, Drinks, Tandoor. Each category can also send its kitchen tickets to its own printer."
+      onClose={onClose}
+      wide
+    >
 
       <div className="mb-groups__add">
         <Input
@@ -150,14 +152,14 @@ export function Groups({
 
                 <div className="mb-row">
                   <Button
-                    small
+                    size="sm"
                     disabled={busy}
                     onClick={() => setRenaming({ id: category.id, name: category.name })}
                   >
                     Rename
                   </Button>
                   <Button
-                    small
+                    size="sm"
                     variant="quiet"
                     disabled={busy}
                     onClick={() => void save(category.id, category.name, !category.isActive)}

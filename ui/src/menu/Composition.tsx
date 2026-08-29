@@ -56,7 +56,7 @@ export function Composition({
       {made === null || made.variants.length === 0 ? (
         <EmptyState
           title="One size"
-          body="Most things are sold one way. Add a size only if you charge differently for it."
+          hint="Most things are sold one way. Add a size only if you charge differently for it."
         />
       ) : (
         <ul className="mb-comp__list">
@@ -65,7 +65,7 @@ export function Composition({
               <span>{variant.name}</span>
               <span className="mb-mono">{variant.price.text}</span>
               {variant.isActive ? null : <Badge tone="warn">Off</Badge>}
-              <Button small variant="quiet" onClick={() => setSize(variant)}>
+              <Button size="sm" variant="quiet" onClick={() => setSize(variant)}>
                 Edit
               </Button>
             </li>
@@ -75,7 +75,7 @@ export function Composition({
 
       <div className="mb-row mb-row--end">
         <Button
-          small
+          size="sm"
           onClick={() =>
             setSize({
               id: freshId('var'),
@@ -97,7 +97,7 @@ export function Composition({
       {made === null || made.groups.length === 0 ? (
         <EmptyState
           title="No groups yet"
-          body="Make a group of choices below the menu — Spice level, Add-ons — and it becomes tickable here."
+          hint="Make a group of choices below the menu — Spice level, Add-ons — and it becomes tickable here."
         />
       ) : (
         <ul className="mb-comp__list">
@@ -221,7 +221,7 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
         note="Made once, offered on as many items as you like — open an item's sizes and choices to tick it on."
         action={
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() =>
               setEditing({
@@ -243,7 +243,7 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
       {groups.length === 0 ? (
         <EmptyState
           title="No groups yet"
-          body="Spice level, Add-ons, How would you like it cooked — anything the counter has to ask."
+          hint="Spice level, Add-ons, How would you like it cooked — anything the counter has to ask."
         />
       ) : (
         <div className="mb-menu__classlist">
@@ -256,7 +256,7 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
                   {group.modifiers.length === 1 ? '' : 's'}
                 </div>
               </div>
-              <Button small variant="quiet" onClick={() => setEditing(group)}>
+              <Button size="sm" variant="quiet" onClick={() => setEditing(group)}>
                 Edit
               </Button>
             </div>
@@ -368,7 +368,7 @@ function EditGroup({
             onChange={(next) => change(index, { priceDelta: next })}
           />
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() => setChoices((was) => was.filter((_, i) => i !== index))}
           >
@@ -378,7 +378,7 @@ function EditGroup({
       ))}
       <div className="mb-row mb-row--end">
         <Button
-          small
+          size="sm"
           onClick={() =>
             setChoices((was) => [...was, { id: freshId('mod'), name: '', priceDelta: '' }])
           }
@@ -453,7 +453,7 @@ export function Combos({
       key: 'do',
       header: '',
       render: (c) => (
-        <Button small variant="quiet" onClick={() => setEditing(c)}>
+        <Button size="sm" variant="quiet" onClick={() => setEditing(c)}>
           Edit
         </Button>
       ),
@@ -467,7 +467,7 @@ export function Combos({
         note="The combo price is shared across what is in it, in proportion to what each part sells for on its own — so a meal that mixes a 5% dish with an 18% bottle still adds up correctly on the rate summary."
         action={
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() =>
               setEditing({
@@ -488,7 +488,7 @@ export function Combos({
       {combos.length === 0 ? (
         <EmptyState
           title="No combos yet"
-          body="A thali, a meal deal, a happy-hour pair — anything you sell at one price that is really two things."
+          hint="A thali, a meal deal, a happy-hour pair — anything you sell at one price that is really two things."
         />
       ) : (
         <Table rows={[...combos]} columns={columns} rowKey={(c) => c.id} />
@@ -568,7 +568,7 @@ function EditCombo({
             onChange={(event) => change(index, [itemId, event.target.value])}
           />
           <Button
-            small
+            size="sm"
             variant="quiet"
             onClick={() => setParts((was) => was.filter((_, i) => i !== index))}
           >
@@ -577,7 +577,7 @@ function EditCombo({
         </div>
       ))}
       <div className="mb-row mb-row--end">
-        <Button small onClick={() => setParts((was) => [...was, ['', '1']])}>
+        <Button size="sm" onClick={() => setParts((was) => [...was, ['', '1']])}>
           Add something
         </Button>
       </div>

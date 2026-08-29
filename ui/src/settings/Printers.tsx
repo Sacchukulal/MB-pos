@@ -108,7 +108,7 @@ export function Printers() {
         title="Printers"
         sticky
         action={
-          <Button variant="primary" small onClick={() => setEditing(blank())}>
+          <Button variant="primary" size="sm" onClick={() => setEditing(blank())}>
             Add a printer
           </Button>
         }
@@ -117,7 +117,7 @@ export function Printers() {
       {view.printers.length === 0 ? (
         <EmptyState
           title="No printer is set up"
-          body="Add one, and the counter will still bill in the meantime — a shop with no printer spools its paper and prints it when one appears."
+          hint="Add one, and the counter will still bill in the meantime — a shop with no printer spools its paper and prints it when one appears."
         />
       ) : null}
 
@@ -252,12 +252,12 @@ export function Printers() {
                   </span>
                 </div>
                 <div className="mb-row mb-row--end">
-                  <Button small onClick={() => setEditing(editorFor(printer))}>
+                  <Button size="sm" onClick={() => setEditing(editorFor(printer))}>
                     Change
                   </Button>
                   {printer.isStandIn ? null : (
                     <Button
-                      small
+                      size="sm"
                       variant="quiet"
                       onClick={() =>
                         void run(call('delete_printer', { id: printer.id }), (next) => {
@@ -333,16 +333,16 @@ function PrinterSettings({
           {printer.offsetYMm >= 0 ? `+${printer.offsetYMm}` : printer.offsetYMm} mm down.
         </span>
         <div className="mb-row">
-          <Button small onClick={() => onNudge(-1, 0)} aria-label="Move the print 1 mm left">
+          <Button size="sm" onClick={() => onNudge(-1, 0)} aria-label="Move the print 1 mm left">
             ← 1 mm
           </Button>
-          <Button small onClick={() => onNudge(1, 0)} aria-label="Move the print 1 mm right">
+          <Button size="sm" onClick={() => onNudge(1, 0)} aria-label="Move the print 1 mm right">
             1 mm →
           </Button>
-          <Button small onClick={() => onNudge(0, -1)} aria-label="Move the print 1 mm up">
+          <Button size="sm" onClick={() => onNudge(0, -1)} aria-label="Move the print 1 mm up">
             ↑ 1 mm
           </Button>
-          <Button small onClick={() => onNudge(0, 1)} aria-label="Move the print 1 mm down">
+          <Button size="sm" onClick={() => onNudge(0, 1)} aria-label="Move the print 1 mm down">
             ↓ 1 mm
           </Button>
         </div>
