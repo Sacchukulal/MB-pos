@@ -9,6 +9,12 @@
 #
 # **It builds from a TAG and never from a branch.** What shipped has to be
 # something anybody can rebuild, and "main at the time" is not that.
+#
+# What comes out: a GitHub Release for the tag carrying the installer,
+# `manifest.json` and `manifest.json.sig`. A counter looks at
+# `releases/latest/download/manifest.json`, checks the signature with the same
+# key it checks a licence with, downloads the installer, checks its SHA-256,
+# installs it silently and comes back on the new version.
 
 name: release
 
@@ -50,7 +56,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: The four front-end guards
+      - name: The front-end guards
         working-directory: ui
         run: npm run lint
 
@@ -63,10 +69,11 @@ jobs:
       # disagree is a counter that offers itself an update forever.
       # ---------------------------------------------------------------------
       - name: The three versions agree with the tag
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}" -replace '^v',''
-          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           $tauri = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $ui    = (Get-Content ui/package.json -Raw | ConvertFrom-Json).version
           "tag=$tag cargo=$cargo tauri=$tauri ui=$ui"
@@ -75,55 +82,80 @@ jobs:
           }
 
       # ---------------------------------------------------------------------
-      # `--features custom-protocol` IS NOT OPTIONAL. Without it the release
-      # binary looks for a dev server that is not there and opens on
-      # "localhost refused to connect" — found at P08 by building it, running
-      # it, and looking at the window.
+      # `cargo tauri build` runs `npm run build`, builds the release binary with
+      # the custom protocol (without it the binary looks for a dev server that
+      # is not there) and bundles the NSIS installer.
       # ---------------------------------------------------------------------
-      - name: Build the installer
-        working-directory: ui
-        run: npm run build
-      - name: Bundle
-        run: cargo build --release -p magic-bill --features custom-protocol
+      - name: Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
 
-      - name: Installer size against budget S4
+      - name: Build the installer
+        run: cargo tauri build
+
+      - name: Name the installer, measure it, fingerprint it
+        id: installer
         shell: pwsh
         run: |
           $exe = Get-ChildItem -Recurse -Filter '*-setup.exe' target/release/bundle | Select-Object -First 1
           if (-not $exe) { throw "no installer was produced" }
-          $mb = [math]::Round($exe.Length / 1MB, 1)
-          "installer: $mb MB (S4 budget 20 MB, ceiling 30 MB)"
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $named = Join-Path $exe.DirectoryName "Magic-Bill-$version-setup.exe"
+          Move-Item $exe.FullName $named -Force
+          $mb = [math]::Round((Get-Item $named).Length / 1MB, 1)
+          "installer: $named ($mb MB; S4 budget 20 MB, ceiling 30 MB)"
           if ($mb -gt 30) { throw "the installer is past its S4 ceiling at $mb MB" }
           if ($mb -gt 20) { Write-Warning "the installer is past its S4 budget at $mb MB" }
+          $sha = (Get-FileHash $named -Algorithm SHA256).Hash.ToLower()
+          "path=$named" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "sha256=$sha" >> $env:GITHUB_OUTPUT
 
       # ---------------------------------------------------------------------
-      # ANDROID-G2: the counter checks the signature AND the hash, because they
-      # answer different questions — "we published it" and "all of it arrived".
+      # The manifest: what the counter reads. Signed with the release key (the
+      # licence key — one trust root). ANDROID-G2: the counter checks the
+      # signature AND the hash, because they answer different questions — "we
+      # published it" and "all of it arrived".
       # ---------------------------------------------------------------------
-      - name: Sign the installer
-        if: env.MB_WINDOWS_CERT != ''
-        env:
-          MB_WINDOWS_CERT: ${{ secrets.MB_WINDOWS_CERT }}
-          MB_WINDOWS_CERT_PASSWORD: ${{ secrets.MB_WINDOWS_CERT_PASSWORD }}
-        shell: pwsh
-        run: |
-          # See docs/RELEASE.md §1. Skipped, loudly, when the secret is absent,
-          # so a fork can build without holding our certificate.
-          Write-Host "signing with the release certificate"
-
       - name: Write and sign the manifest
         env:
           MB_RELEASE_KEY: ${{ secrets.MB_RELEASE_KEY }}
         shell: pwsh
         run: |
           if (-not $env:MB_RELEASE_KEY) {
-            Write-Warning "MB_RELEASE_KEY is not set — see docs/RELEASE.md section 5. This is POS-C9."
-            exit 0
+            throw "MB_RELEASE_KEY is not set — see docs/RELEASE.md section 5. This is POS-C9."
           }
-          Write-Host "manifest signed"
+          $version = "${{ steps.installer.outputs.version }}"
+          # The notes are the tag's message: two plain sentences for a shopkeeper.
+          $notes = (git tag -l --format='%(contents:subject)' "v$version").Trim()
+          if (-not $notes) { $notes = "Version $version." }
+          $manifest = [ordered]@{
+            version = $version
+            notes   = $notes
+            url     = "https://github.com/${{ github.repository }}/releases/download/v$version/Magic-Bill-$version-setup.exe"
+            sha256  = "${{ steps.installer.outputs.sha256 }}"
+            rollout = [ordered]@{ percent = 100; shops = @() }
+          }
+          $json = $manifest | ConvertTo-Json -Compress -Depth 4
+          [IO.File]::WriteAllText("manifest.json", $json)
+          cargo run -p mb-license --example sign -- manifest.json
+          Get-Content manifest.json
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.installer.outputs.path }}
+            manifest.json
+            manifest.json.sig
+          fail_on_unmatched_files: true
+          generate_release_notes: false
 
       - uses: actions/upload-artifact@v4
         with:
           name: magic-bill-windows
-          path: target/release/bundle/**/*-setup.exe
+          path: |
+            ${{ steps.installer.outputs.path }}
+            manifest.json
+            manifest.json.sig
           if-no-files-found: error

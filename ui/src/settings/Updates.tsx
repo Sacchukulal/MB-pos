@@ -102,18 +102,22 @@ export function Updates() {
             call('look_for_an_update')
               .then((fresh) => {
                 setView(fresh);
-                toast.show(
-                  'ok',
-                  fresh.available
-                    ? `Version ${fresh.available} is available.`
-                    : 'You are on the newest version.',
-                );
+                if (!fresh.available) {
+                  toast.show('ok', 'You are on the newest version.');
+                  return;
+                }
+                // Found one: take it. Download, check, install, and come back on it.
+                toast.show('info', `Version ${fresh.available} found — installing it now.`);
+                return call('install_update').then((says) => {
+                  setConfirming(null);
+                  setClosing(says);
+                });
               })
               .catch(complain)
               .finally(() => setBusy(false));
           }}
         >
-          Check for an update
+          Check for updates
         </Button>
 
         {view.available ? (

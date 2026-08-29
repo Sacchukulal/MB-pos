@@ -536,9 +536,17 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
     ))
 }
 
-/// Hand an installer to Windows and step out of its way.
+/// Hand the installer to Windows and come back on the new version.
+///
+/// The installer runs silently (`/S`) once this process has gone, and when it is done the
+/// program is started again from where it was installed — so from the counter's side, pressing
+/// the button ends with Magic Bill open on the new version. All of that is one `cmd` line,
+/// detached from this process, because this process is about to exit.
 fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<()> {
-    std::process::Command::new(installer)
+    let exe = std::env::current_exe().map_err(|e| crate::words::from_io("Finding the program", &e))?;
+    let line = relaunch_line(installer, &exe);
+    std::process::Command::new("cmd.exe")
+        .args(["/C", &line])
         .spawn()
         .map_err(|e| crate::words::from_io("Starting the installer", &e))?;
     if let Some(handle) = handle {
@@ -550,6 +558,59 @@ fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::
         });
     }
     Ok(())
+}
+
+/// The `cmd` line: wait for this process to let go, install silently, start the program again.
+#[must_use]
+pub fn relaunch_line(installer: &Path, exe: &Path) -> String {
+    format!(
+        "ping -n 3 127.0.0.1 >nul & start \"\" /wait \"{}\" /S & start \"\" \"{}\"",
+        installer.display(),
+        exe.display()
+    )
+}
+
+// GitHub releases: where a shipped counter looks first.
+
+/// The repository whose Releases page is the shelf.
+pub const GITHUB_REPO: &str = "Sacchukulal/MB-pos";
+
+/// The newest release on GitHub. `manifest.json` and `manifest.json.sig` are assets on every
+/// release, and GitHub's `latest/download/<asset>` URL always points at the newest one — so
+/// the counter never needs the API or a token. What it fetches is checked with the same key
+/// as a licence, so GitHub is only a shelf: it cannot put words in our mouth.
+pub struct GitHubReleases {
+    pub link: std::sync::Arc<dyn crate::cloud::Link>,
+    pub dir: PathBuf,
+    /// What the last licence check carried, for a counter that cannot reach GitHub.
+    pub fallback: Box<dyn Releases>,
+}
+
+impl GitHubReleases {
+    #[must_use]
+    pub fn asset_url(asset: &str) -> String {
+        format!("https://github.com/{GITHUB_REPO}/releases/latest/download/{asset}")
+    }
+
+    fn fetch(&self, asset: &str) -> Result<String, String> {
+        let to = self.dir.join("updates").join(asset);
+        self.link
+            .download(&GitHubReleases::asset_url(asset), &to)
+            .map_err(|e| format!("GitHub did not answer for {asset}: {e:?}"))?;
+        std::fs::read_to_string(&to).map_err(|e| format!("{asset} could not be read: {e}"))
+    }
+}
+
+impl Releases for GitHubReleases {
+    fn latest(&self) -> Result<(String, String), String> {
+        match (self.fetch("manifest.json"), self.fetch("manifest.json.sig")) {
+            (Ok(json), Ok(signature)) => Ok((json, signature.trim().to_owned())),
+            (Err(why), _) | (_, Err(why)) => {
+                crate::log_info!("{why} — asking the licence shelf instead");
+                self.fallback.latest()
+            }
+        }
+    }
 }
 
 /// Go back to the version before this one — and run its installer.
@@ -814,5 +875,48 @@ mod tests {
         assert!(with.contains("1.4.4"));
         // The reassurance that matters most.
         assert!(with.contains("shop's data is not touched"));
+    }
+}
+
+#[cfg(test)]
+mod github_tests {
+    use super::*;
+
+    #[test]
+    fn the_relaunch_line_installs_silently_and_starts_the_program_again() {
+        let line = relaunch_line(
+            Path::new(r"C:\data\updates\incoming\MagicBill-0.4.0.exe"),
+            Path::new(r"C:\Program Files\Magic Bill\magic-bill.exe"),
+        );
+        assert!(line.contains(r#"/wait "C:\data\updates\incoming\MagicBill-0.4.0.exe" /S"#), "{line}");
+        assert!(line.ends_with(r#"start "" "C:\Program Files\Magic Bill\magic-bill.exe""#), "{line}");
+        // The wait comes first: the installer must not start while this process still holds the exe.
+        assert!(line.starts_with("ping"), "{line}");
+    }
+
+    #[test]
+    fn the_shelf_is_the_latest_release_and_never_the_api() {
+        let url = GitHubReleases::asset_url("manifest.json");
+        assert_eq!(url, "https://github.com/Sacchukulal/MB-pos/releases/latest/download/manifest.json");
+        assert!(!url.contains("api.github.com"));
+    }
+
+    struct Shelf;
+    impl Releases for Shelf {
+        fn latest(&self) -> Result<(String, String), String> {
+            Ok(("shelf".to_owned(), "sig".to_owned()))
+        }
+    }
+
+    /// No GitHub — the licence shelf answers, as before 0.4.0.
+    #[test]
+    fn with_no_github_the_licence_shelf_still_answers() {
+        let dir = std::env::temp_dir().join(format!("mb-updates-{}", std::process::id()));
+        let releases = GitHubReleases {
+            link: std::sync::Arc::new(crate::cloud::NoLink),
+            dir,
+            fallback: Box::new(Shelf),
+        };
+        assert_eq!(releases.latest(), Ok(("shelf".to_owned(), "sig".to_owned())));
     }
 }

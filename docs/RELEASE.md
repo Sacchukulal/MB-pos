@@ -106,18 +106,20 @@ One picture, three places, all made from it:
 
 ## 2b. The release shelf — how a counter finds it
 
-A counter never looks at GitHub. The release lives on the shelf in MB-backend (`releases`,
-written from the admin desk with `mb_admin_release`): version, notes, the installer's URL,
-its SHA-256, and the rollout (a percentage of machines plus named restaurant ids). The daily
-`licence/refresh` answers with the newest published release **as a manifest signed with the
-licence key** — `{"version":"1.5.0","notes":…,"url":…,"sha256":…,"rollout":{…}}` — so the
-counter checks it with the same public key it checks the licence with. That is the one trust
-root; the release signing key in §1 is that key.
+**GitHub Releases is the shelf** (from 0.4.0). Every tag `v*` makes CI publish a GitHub
+Release carrying `Magic-Bill-<version>-setup.exe`, `manifest.json` and `manifest.json.sig`.
+The counter reads `https://github.com/Sacchukulal/MB-pos/releases/latest/download/manifest.json`
+(and `.sig`) — no API, no token — and checks the signature **with the same key it checks a
+licence with** (`MB_RELEASE_KEY` in CI is the licence signing seed; one trust root). A
+counter that cannot reach GitHub falls back to what the last `licence/refresh` carried
+(`releases` in MB-backend, written from the admin desk), which is the older shelf and still works.
 
-On the counter (`updates.rs`): Settings › This version shows what is waiting; **Install**
-downloads the installer, checks the SHA-256, keeps the installer of the running version under
-`updates\previous` so **Go back** has something to run, then hands the new installer to
-Windows and closes. Health's Version row says what is waiting until then.
+On the counter (`updates.rs`): Settings › This version › **Check for updates** looks, and if
+a newer version is there it downloads the installer, checks its SHA-256, keeps the installer
+of the running version under `updates\previous` so **Go back** has something to run, then
+hands the new installer to Windows **silently (`/S`) and starts Magic Bill again when it is
+done** — the counter comes back on the new version by itself. Health's Version row says what
+is waiting until then.
 
 ## 3. Staging a release
 

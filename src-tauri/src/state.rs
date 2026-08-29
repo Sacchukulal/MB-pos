@@ -241,11 +241,16 @@ impl App {
         *lock(&self.updates) = state;
     }
 
-    /// Where releases come from: what the last licence check carried.
+    /// Where releases come from: GitHub's Releases page first, and what the last licence
+    /// check carried when GitHub cannot be reached.
     #[must_use]
     pub fn releases(&self) -> Box<dyn crate::updates::Releases> {
-        Box::new(crate::cloud::CloudReleases {
-            release: self.with_licence(|l| l.extras().and_then(|e| e.release.clone())),
+        Box::new(crate::updates::GitHubReleases {
+            link: self.link(),
+            dir: crate::config::AppConfig::directory(),
+            fallback: Box::new(crate::cloud::CloudReleases {
+                release: self.with_licence(|l| l.extras().and_then(|e| e.release.clone())),
+            }),
         })
     }
 
