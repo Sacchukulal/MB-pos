@@ -95,6 +95,7 @@ import type { SetupView } from './generated/SetupView';
 import type { KitchenView } from './generated/KitchenView';
 import type { UpdateState } from './generated/UpdateState';
 import type { NetworkView } from './generated/NetworkView';
+import type { PhonesView } from './generated/PhonesView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
 import type { ReportView } from './generated/ReportView';
@@ -613,6 +614,7 @@ export interface Commands {
 
   // The phones this counter serves.
   network: { args: void; returns: NetworkView };
+  phones_now: { args: void; returns: PhonesView };
   open_pairing: { args: void; returns: NetworkView };
   close_pairing: { args: void; returns: NetworkView };
   allow_device: { args: { requestId: string }; returns: NetworkView };

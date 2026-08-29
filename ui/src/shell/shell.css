@@ -481,6 +481,49 @@
   }
 }
 
+/*
+ * The phones: how many are live, right where the cashier's eye already goes for the bell. A
+ * phone asking to join turns the number into a pulse, and the click lands on Settings › Phones.
+ */
+.mb-phones {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--space-6);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--text-muted);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mb-phones:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.mb-phones--live {
+  color: var(--ok);
+}
+
+.mb-phones--asking {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: var(--weight-bold);
+}
+
+.mb-phones__count {
+  min-width: 1ch;
+}
+
 .mb-bell {
   position: relative;
   display: flex;

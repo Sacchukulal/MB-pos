@@ -3,7 +3,7 @@
 use mb_core::credit::{Ageing, Movement, MovementKind};
 use mb_core::expense::Every;
 use mb_core::{BusinessDay, CustomerId, Money, StaffId, Timestamp};
-use rusqlite::Transaction;
+use rusqlite::{OptionalExtension, Transaction};
 
 use crate::encode;
 use crate::error::DbError;
@@ -520,7 +520,35 @@ impl<'a> MoneyRepo<'a> {
             &expense.id,
             Op::Upsert,
             expense.paid_at,
-        )
+        )?;
+        self.totals_changed(outlet, expense.business_day, expense.paid_at)
+    }
+
+    /// A day's totals moved — an expense, a cash movement — so the cloud's copy of that day
+    /// is queued again, exactly as a settled bill queues it. The owner's phone reads the
+    /// day's totals, not the rows; a totals row that never re-sent showed ₹0 of expenses
+    /// beside ₹200 in the expense list.
+    fn totals_changed(&self, outlet: &str, day: BusinessDay, at: Timestamp) -> Result<(), DbError> {
+        let key = encode::business_day_to_sql(day).to_string();
+        for table in crate::repo::wire::TOTALS_TABLES {
+            OutboxRepo::new(self.tx).enqueue(outlet, table, &key, Op::Upsert, at)?;
+        }
+        Ok(())
+    }
+
+    /// The business day a money row sits on, before it is deleted and cannot say.
+    fn day_of(&self, table: &str, outlet: &str, id: &str) -> Result<Option<BusinessDay>, DbError> {
+        let found: Option<i64> = self
+            .tx
+            .query_row(
+                &format!("SELECT business_day FROM {table} WHERE outlet_id = ?1 AND id = ?2"),
+                rusqlite::params![outlet, id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        found
+            .map(|n| encode::business_day_from_sql(n, "business_day"))
+            .transpose()
     }
 
     pub fn list_expenses(&self, outlet: &str, day: BusinessDay) -> Result<Vec<Expense>, DbError> {
@@ -614,6 +642,7 @@ impl<'a> MoneyRepo<'a> {
 
     /// An expense really is deleted — and it is the only money row in this product that is.
     pub fn delete_expense(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        let day = self.day_of("expenses", outlet, id)?;
         let gone = self.tx.execute(
             "DELETE FROM expenses WHERE outlet_id = ?1 AND id = ?2",
             rusqlite::params![outlet, id],
@@ -621,7 +650,11 @@ impl<'a> MoneyRepo<'a> {
         if gone == 0 {
             return Err(DbError::invariant("that expense is not here any more"));
         }
-        OutboxRepo::new(self.tx).enqueue(outlet, "expenses", id, Op::Delete, at)
+        OutboxRepo::new(self.tx).enqueue(outlet, "expenses", id, Op::Delete, at)?;
+        match day {
+            Some(day) => self.totals_changed(outlet, day, at),
+            None => Ok(()),
+        }
     }
 
     // Categories, which are DATA.
@@ -739,7 +772,8 @@ impl<'a> MoneyRepo<'a> {
             &movement.id,
             Op::Upsert,
             movement.at,
-        )
+        )?;
+        self.totals_changed(outlet, movement.business_day, movement.at)
     }
 
     pub fn list_cash_movements(
@@ -787,11 +821,16 @@ impl<'a> MoneyRepo<'a> {
         id: &str,
         at: Timestamp,
     ) -> Result<(), DbError> {
+        let day = self.day_of("cash_movements", outlet, id)?;
         self.tx.execute(
             "DELETE FROM cash_movements WHERE outlet_id = ?1 AND id = ?2",
             rusqlite::params![outlet, id],
         )?;
-        OutboxRepo::new(self.tx).enqueue(outlet, "cash_movements", id, Op::Delete, at)
+        OutboxRepo::new(self.tx).enqueue(outlet, "cash_movements", id, Op::Delete, at)?;
+        match day {
+            Some(day) => self.totals_changed(outlet, day, at),
+            None => Ok(()),
+        }
     }
 
     // Recurring templates.

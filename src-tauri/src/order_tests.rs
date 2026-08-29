@@ -92,6 +92,7 @@ fn intent(id: &str, order: Option<&str>, what: What) -> Intent {
         id: id.to_owned(),
         order_id: order.map(ToOwned::to_owned),
         at: crate::flows::now().millis(),
+        sent_at: None,
         what,
     }
 }
@@ -526,7 +527,9 @@ fn a_batch_applies_in_order_and_reports_each_one() {
             .all(|(_, o)| matches!(o, Outcome::Ok { .. })),
         "some of the batch silently failed"
     );
-    assert!(result.says.contains("100"), "{}", result.says);
+    // A hundred additions and nothing for the kitchen: the counter has nothing to say but
+    // "done" — never a count of "order changes".
+    assert_eq!(result.says, "Done.");
 
     // Sending the WHOLE batch again changes nothing — idempotency across the batch, which is
     // what a phone retrying a half-answered batch does.
@@ -568,6 +571,9 @@ fn an_intent_from_last_night_waits_for_a_person() {
             modifiers: vec![],
         },
     );
+    // Typed fourteen hours before it was sent — by the phone's own clock, which is the only
+    // clock the rule reads.
+    old.sent_at = Some(crate::flows::now().millis());
     old.at = crate::flows::now().millis() - (orders::HOLD_AFTER_HOURS + 2) * 60 * 60 * 1_000;
 
     let out = go(&app, &old);
@@ -738,12 +744,22 @@ fn the_catalogue_version_tracks_what_a_phone_can_see() {
     );
 }
 
-/// The clock's edge, kept honest: `Timestamp` is milliseconds and a phone's clock can be ahead
-/// of the counter's.
+/// The clock's edge, kept honest: the age of an intent is measured on the PHONE's clock alone
+/// — typed-at against sent-at — so a phone that is hours wrong is still exactly right about
+/// how long it held the order. A tablet with auto-time off once held every order it sent.
 #[test]
-fn a_phone_clock_running_fast_is_not_stale() {
-    let now = Timestamp::from_millis(10_000_000_000);
-    assert!(!orders::is_stale(now.millis() + 60_000, now));
+fn a_wrong_phone_clock_is_not_staleness() {
+    let counter_now = Timestamp::from_millis(10_000_000_000);
+    // Sixteen hours BEHIND the counter, typed and sent five seconds apart: fresh.
+    let behind = counter_now.millis() - 16 * 60 * 60 * 1_000;
+    assert!(!orders::is_stale(behind, Some(behind + 5_000)));
+    // Ahead of the counter: fresh.
+    assert!(!orders::is_stale(counter_now.millis() + 60_000, Some(counter_now.millis() + 61_000)));
+    // Really held overnight — fourteen hours between typing and sending, on the same clock.
+    assert!(orders::is_stale(behind, Some(behind + 14 * 60 * 60 * 1_000)));
+    // A phone that did not say when it sent is taken as sending now: never held by a clock
+    // that is not its own.
+    assert!(!orders::is_stale(behind, None));
 }
 
 /// The waiter's phone and the counter show one total: charges, tax and rounding included.

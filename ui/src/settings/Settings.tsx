@@ -80,9 +80,13 @@ function withEdit(edits: Edits, key: string, value: string, saved: string | unde
   return next;
 }
 
-export function Settings() {
+/** `initial` opens a section straight away — the top bar's phones button lands on Phones. */
+export function Settings({ initial }: { initial?: string | null } = {}) {
   const [view, setView] = useState<SettingsView | null>(null);
-  const [group, setGroup] = useState<string>('store');
+  const [group, setGroup] = useState<string>(initial ?? 'store');
+  useEffect(() => {
+    if (initial) setGroup(initial);
+  }, [initial]);
   const [edits, setEdits] = useState<Edits>({});
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');

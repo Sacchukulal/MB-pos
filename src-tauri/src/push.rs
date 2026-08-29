@@ -63,16 +63,20 @@ pub fn emit_session(app: &AppHandle) {
     }
 }
 
-/// A phone is asking to join.
-pub fn emit_pairing(app: &AppHandle) {
+/// The phones: how many are live, how many are asking to join — the top bar's number and the
+/// Phones panel's cue to re-read itself.
+pub fn emit_phones(app: &AppHandle) {
     let Some(state) = app.try_state::<App>() else {
         return;
     };
-    let waiting = state.network().map_or(0, |n| {
-        u32::try_from(n.shared.desk.waiting().len()).unwrap_or(u32::MAX)
+    let (connected, waiting) = state.network().map_or((0, 0), |n| {
+        (
+            u32::try_from(n.shared.connected()).unwrap_or(u32::MAX),
+            u32::try_from(n.shared.desk.waiting().len()).unwrap_or(u32::MAX),
+        )
     });
-    if let Err(e) = app.emit(CHANNEL, Pushed::Pairing { waiting }) {
-        log_warn!("the pairing panel could not be told: {e}");
+    if let Err(e) = app.emit(CHANNEL, Pushed::Phones { connected, waiting }) {
+        log_warn!("the phones panel could not be told: {e}");
     }
 }
 
@@ -195,7 +199,9 @@ pub fn watch_for_pairing(app: &AppHandle) {
     std::thread::Builder::new()
         .name("mb-pairing".to_owned())
         .spawn(move || {
-            let mut last = 0_u32;
+            // What the panel last heard: how many are asking, and which code is on screen —
+            // the code changes the moment a phone uses it, and the screen must follow.
+            let mut last: Option<(usize, String)> = None;
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(700));
                 let Some(state) = handle.try_state::<App>() else {
@@ -204,18 +210,23 @@ pub fn watch_for_pairing(app: &AppHandle) {
                 let Some(network) = state.network() else {
                     continue;
                 };
-                let waiting =
-                    u32::try_from(network.shared.desk.waiting().len()).unwrap_or(u32::MAX);
+                let showing = network.shared.desk.showing(crate::flows::now());
+                let waiting = network.shared.desk.waiting().len();
 
                 // Asleep unless somebody is deliberately watching for a phone — OR a phone is
                 // already standing there.
-                if waiting == 0 && network.shared.desk.showing(crate::flows::now()).is_none() {
-                    last = 0;
+                if waiting == 0 && showing.is_none() {
+                    if last.is_some() {
+                        // The code expired or was closed: the panel learns that too.
+                        last = None;
+                        emit_phones(&handle);
+                    }
                     continue;
                 }
-                if waiting != last {
-                    last = waiting;
-                    emit_pairing(&handle);
+                let now = Some((waiting, showing.map(|(_, code)| code).unwrap_or_default()));
+                if now != last {
+                    last = now;
+                    emit_phones(&handle);
                 }
             }
         })

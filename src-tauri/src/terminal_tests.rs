@@ -461,6 +461,7 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
         id: id.to_owned(),
         order_id: None,
         at: crate::flows::now().millis(),
+        sent_at: None,
         what: What::OpenOrder {
             order_type: "dine_in".to_owned(),
             table_id: Some("tbl_5".to_owned()),
@@ -500,6 +501,7 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
         id: id.to_owned(),
         order_id: Some(order_id.clone()),
         at: crate::flows::now().millis(),
+        sent_at: None,
         what: What::AddItem {
             item_id: "itm_dosa".to_owned(),
             qty: "1".to_owned(),
@@ -579,6 +581,7 @@ fn a_table_opened_on_one_till_is_on_the_other_tills_floor() {
             id: "i9".to_owned(),
             order_id: None,
             at: crate::flows::now().millis(),
+            sent_at: None,
             what: What::OpenOrder {
                 order_type: "dine_in".to_owned(),
                 table_id: Some("tbl_9".to_owned()),

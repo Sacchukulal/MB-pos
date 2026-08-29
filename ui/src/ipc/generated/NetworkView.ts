@@ -26,4 +26,8 @@ qr: Array<string>, code: string, mayPair: boolean,
 /**
  * Who a phone can be given to when Allow is pressed: the active staff.
  */
-people: Array<PersonPick>, };
+people: Array<PersonPick>, 
+/**
+ * How many phones are on the live stream right now.
+ */
+connected: number, };

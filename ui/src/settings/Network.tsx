@@ -23,12 +23,13 @@ export function Network() {
     call('network').then(setView).catch(complain);
   }, [complain]);
 
-  // Rust pushes; React subscribes.
+  // Rust pushes; React subscribes. A phone coming on or off, asking to join, or using the code
+  // (which moves the code on) all arrive as one kind.
   useEffect(() => {
     if (!inApp()) return undefined;
     let stop: (() => void) | undefined;
     subscribe((message) => {
-      if (message.kind === 'pairing') {
+      if (message.kind === 'phones') {
         call('network')
           .then(setView)
           .catch(() => undefined);
@@ -54,15 +55,22 @@ export function Network() {
 
   if (!view) return <Spinner label="Looking at the network" />;
 
+  const live = view.devices.filter((d) => d.isLive);
+
   return (
     <Scroller className="mb-network">
       <SectionHeader
         title="Phones"
         note="Waiters take orders on a phone, over this shop's own WiFi."
         action={
-          <Badge tone={view.tone === 'ok' ? 'ok' : view.tone === 'warn' ? 'warn' : 'danger'}>
-            {view.tone === 'ok' ? 'On' : 'Off'}
-          </Badge>
+          <span className="mb-network__badges">
+            <Badge tone={view.connected > 0 ? 'ok' : 'neutral'}>
+              {view.connected === 1 ? '1 live' : `${view.connected} live`}
+            </Badge>
+            <Badge tone={view.tone === 'ok' ? 'ok' : view.tone === 'warn' ? 'warn' : 'danger'}>
+              {view.tone === 'ok' ? 'On' : 'Off'}
+            </Badge>
+          </span>
         }
       />
 
@@ -89,7 +97,7 @@ export function Network() {
               </Button>
             ) : (
               <Button variant="primary" onClick={() => act('open_pairing')}>
-                Add a phone
+                Add phones
               </Button>
             )}
           </div>
@@ -118,10 +126,11 @@ export function Network() {
                 ))}
               </div>
               <div className="mb-network__code">
-                <p>Scan this on the phone, or type the code:</p>
+                <p>On the phone: scan this, pick your name, type your PIN.</p>
                 <strong className="mb-mono">{view.code}</strong>
                 <p className="mb-network__note">
-                  It stops working in a few minutes, and only lets one phone in.
+                  Or type the code. It changes after every phone, so the next one scans a fresh
+                  one — add as many as you like, then stop showing it.
                 </p>
               </div>
             </div>
@@ -131,7 +140,8 @@ export function Network() {
             <div className="mb-network__waiting">
               {view.waiting.map((w) => (
                 <div className="mb-network__ask" key={w.requestId}>
-                  {/* The whole sentence, written in Rust. */}
+                  {/* The whole sentence, written in Rust. A phone that is typing its PIN is
+                      also here; a shared tablet waits here for Allow. */}
                   <span>{w.says}</span>
                   <div className="mb-row--end">
                     {/* Whose phone it is decides what it may do: a waiter's phone acts as the
@@ -177,12 +187,15 @@ export function Network() {
       ) : null}
 
       <Card>
-        <SectionHeader title="Phones on this counter" />
+        <SectionHeader
+          title="Phones on this counter"
+          action={live.length > 0 ? <Badge tone="neutral">{live.length}</Badge> : undefined}
+        />
         {view.devices.length === 0 ? (
           <EmptyState
             small
             title="No phones yet"
-            body='Press "Add a phone" and scan the code with the Magic Bill app.'
+            body='Press "Add phones" and scan the code with the Magic Bill app.'
           />
         ) : (
           view.devices.map((device) => (

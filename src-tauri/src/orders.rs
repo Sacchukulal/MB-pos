@@ -67,7 +67,7 @@ pub fn apply(
     }
 
     // Too old to apply without asking a person.
-    if is_stale(intent.at, at) {
+    if is_stale(intent.at, intent.sent_at) {
         return Ok(Applied {
             outcome: Outcome::Held {
                 message: format!(
@@ -167,15 +167,31 @@ pub fn apply(
         }
     }
 
+    // The bill, carried to the table: the same paper the counter's own "Print bill" makes,
+    // queued once the outcome is on disk. A phone asked for it; the waiter is on the way.
+    if matches!(intent.what, What::RequestBill)
+        && let Outcome::Ok { order_id, .. } = &applied.outcome
+        && let Err(e) = crate::flows::print_bill_from_floor(app, order_id, staff)
+    {
+        crate::log_warn!(
+            "order={order_id} the bill was asked for from a phone but did not queue: {e}"
+        );
+    }
+
     Ok(applied)
 }
 
-/// True when an intent has been sitting in a phone's pocket too long.
+/// True when an intent has been sitting in a phone's pocket too long — measured on the
+/// phone's own clock, typed-at against sent-at, so a phone that is hours wrong is still right
+/// about how long it held the order. The counter's clock never judges a phone's: a tablet with
+/// auto-time off once had every order it sent held as "last night's".
 #[must_use]
-pub fn is_stale(typed_at_ms: i64, now: Timestamp) -> bool {
-    // A phone's clock can be ahead of the counter's; that is not staleness and must not be
-    // treated as it.
-    let age_ms = now.millis().saturating_sub(typed_at_ms);
+pub fn is_stale(typed_at_ms: i64, sent_at_ms: Option<i64>) -> bool {
+    // A phone that did not say when it sent is taken as sending now.
+    let Some(sent_at_ms) = sent_at_ms else {
+        return false;
+    };
+    let age_ms = sent_at_ms.saturating_sub(typed_at_ms);
     age_ms > HOLD_AFTER_HOURS.saturating_mul(60 * 60 * 1_000)
 }
 
@@ -474,7 +490,31 @@ fn do_it(
         }
 
         What::RequestBill => {
-            note = Some("The counter has the bill. Send the customer over.".to_owned());
+            if open.core.cart.is_empty() {
+                return Ok(refused("There is nothing on this order to bill yet."));
+            }
+            // Written down, so the floor tile says "bill asked" until the table is settled.
+            repos.events().record(
+                order_id,
+                at,
+                day,
+                mb_db::repo::events::BILL_ASKED,
+                Some(staff),
+                None,
+            )?;
+            let label = open.core.table().and_then(|t| {
+                repos
+                    .floor()
+                    .list_tables(OUTLET)
+                    .ok()?
+                    .into_iter()
+                    .find(|row| &row.id == t)
+                    .map(|row| row.label)
+            });
+            note = Some(match label {
+                Some(label) => format!("The bill for table {label} is printing at the counter."),
+                None => "The bill is printing at the counter.".to_owned(),
+            });
         }
     }
 
@@ -673,6 +713,18 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                 let repos = mb_db::Repos::new(tx);
                 let tables = repos.floor().list_tables(OUTLET)?;
                 let open = repos.orders().list_open(OUTLET)?;
+                // Which orders asked for their bill, and who opened each — the phones show
+                // both, and the words are the counter's.
+                let asked = repos
+                    .events()
+                    .last_for_each(mb_db::repo::events::BILL_ASKED)?;
+                let people = repos.people().list_staff(OUTLET)?;
+                let name_of = |id: &StaffId| {
+                    people
+                        .iter()
+                        .find(|p| &p.id == id)
+                        .map(|p| p.name.clone())
+                };
                 let label_of = |id: &mb_core::TableId| {
                     tables
                         .iter()
@@ -684,13 +736,19 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                         .find(|o| o.core().table() == Some(id))
                         .map(|o| o.core().id.as_str().to_owned())
                 };
+                let bill_asked = |order_id: &str| asked.iter().any(|(id, _)| id == order_id);
                 let table_rows: Vec<serde_json::Value> = tables
                     .iter()
                     .map(|t| {
                         let order_id = on_table(&t.id);
+                        let state = match &order_id {
+                            Some(id) if bill_asked(id) => "bill_asked",
+                            Some(_) => "taken",
+                            None => "free",
+                        };
                         serde_json::json!({
                             "id": t.id.as_str(),
-                            "state": if order_id.is_some() { "taken" } else { "free" },
+                            "state": state,
                             "order_id": order_id,
                         })
                     })
@@ -724,6 +782,9 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                                 "token": token,
                                 "note": note.or_else(|| open.core.note.clone()),
                                 "lines": lines,
+                                "bill_asked": bill_asked(open.core.id.as_str()),
+                                "by": name_of(&open.core.created_by),
+                                "by_id": open.core.created_by.as_str(),
                             }),
                             _ => serde_json::Value::Null,
                         }
@@ -765,6 +826,7 @@ pub fn apply_batch(
                 id: intent.id.clone(),
                 order_id: opened.clone(),
                 at: intent.at,
+                sent_at: intent.sent_at,
                 what: intent.what.clone(),
             };
             &borrowed
@@ -789,22 +851,40 @@ pub fn apply_batch(
     }
 
     // The whole thing in one sentence, written here (§6) because the phone shows it and must
-    // not assemble it.
-    let total = ok + refused_count + held;
-    let mut says = format!(
-        "{} of {} went through.",
-        words::count(ok, "order change", "order changes"),
-        total
-    );
+    // not assemble it. A waiter's batch is one order: what they hear is what the kitchen was
+    // told — "6 items sent to the kitchen." — never a count of "order changes".
+    let _ = ok;
+    let mut says = outcomes
+        .iter()
+        .rev()
+        .find_map(|(_, outcome)| match outcome {
+            Outcome::Ok { note: Some(note), .. } if !note.trim().is_empty() => {
+                Some(note.clone())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            if refused_count + held == 0 {
+                "Done.".to_owned()
+            } else {
+                String::new()
+            }
+        });
     if held > 0 {
+        if !says.is_empty() {
+            says.push(' ');
+        }
         says.push_str(&format!(
-            " {} waiting for somebody at the counter to say whether they still apply.",
-            words::count(held, "is", "are")
+            "{} waiting for somebody at the counter to say whether they still apply.",
+            words::count(held, "change is", "changes are")
         ));
     }
     if refused_count > 0 {
+        if !says.is_empty() {
+            says.push(' ');
+        }
         says.push_str(&format!(
-            " {} could not be done — open each one to see why.",
+            "{} could not be done — open the queue to see why.",
             words::count(refused_count, "change", "changes")
         ));
     }
@@ -951,15 +1031,16 @@ mod tests {
 
     #[test]
     fn an_intent_from_yesterday_is_held_and_one_from_now_is_not() {
-        let now = Timestamp::from_millis(50 * 60 * 60 * 1_000);
+        let sent = 50 * 60 * 60 * 1_000;
         let hour = 60 * 60 * 1_000;
 
-        assert!(!is_stale(now.millis(), now), "an intent typed now is stale");
-        assert!(!is_stale(now.millis() - 11 * hour, now));
-        assert!(is_stale(now.millis() - 13 * hour, now));
+        assert!(!is_stale(sent, Some(sent)), "an intent typed now is stale");
+        assert!(!is_stale(sent - 11 * hour, Some(sent)));
+        assert!(is_stale(sent - 13 * hour, Some(sent)));
 
-        // A phone whose clock is AHEAD is not stale.
-        assert!(!is_stale(now.millis() + 5 * hour, now));
+        // The phone's clock is all that is read: only the gap between typing and sending.
+        assert!(!is_stale(sent + 5 * hour, Some(sent)));
+        assert!(!is_stale(sent - 13 * hour, None));
     }
 
     /// Every operation has had its permission decided — the same rule `guard::COMMAND_ACCESS`

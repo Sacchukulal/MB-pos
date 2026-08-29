@@ -385,6 +385,9 @@ pub struct TableView {
     /// Minutes since the last kitchen ticket went out — scope 14.2's second timer, and the one
     /// that catches a forgotten table: "food ordered 18 minutes ago and nothing since".
     pub kitchen_minutes: Option<u32>,
+    /// A waiter asked for this table's bill from a phone, and it printed. The tile says so
+    /// until the table is settled.
+    pub bill_asked: bool,
     pub order_id: Option<String>,
     /// The bill number this order has already claimed, formatted as it will be printed.
     pub bill_number: Option<String>,
@@ -712,6 +715,7 @@ pub fn floor_view(
                 minutes: None,
                 kitchen_told: false,
                 kitchen_minutes: None,
+                bill_asked: false,
                 order_id: None,
                 bill_number: None,
             },
@@ -794,6 +798,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
             .is_ok_and(|pending| pending.is_empty()),
         // Filled in by `floor::floor_on`, which is the only caller with the events table open.
         kitchen_minutes: None,
+        bill_asked: false,
         order_id: Some(id.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
         // A table's tile is the table; a second party's tile, and a tile with no table, is the

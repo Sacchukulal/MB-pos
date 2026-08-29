@@ -58,9 +58,11 @@ fn kind_of(text: &str) -> UiResult<CounterKind> {
     match text {
         "token" => Ok(CounterKind::Token),
         "bill" => Ok(CounterKind::Bill),
+        "kot" => Ok(CounterKind::Kot),
         other => Err(UiError::new(
             "counter.unknown",
-            "There are two counters here: the bill number and the token number.",
+            "There are three counters here: the bill number, the token number and the \
+             kitchen ticket number.",
         )
         .with_detail(other.to_owned())),
     }
@@ -71,19 +73,30 @@ fn view_of(counter: &mb_db::numbering::Counter) -> CounterView {
         .last_issued
         .map_or(counter.start, |issued| issued.saturating_add(1));
     let width = usize::try_from(counter.pad_width.max(0)).unwrap_or(0);
-    let bill = counter.kind == CounterKind::Bill;
+    // Three series, three names. The kitchen ticket's was shown as a second "Token number",
+    // and two sections with one name and different figures read as a broken counter.
+    let (kind, label, help) = match counter.kind {
+        CounterKind::Bill => (
+            "bill",
+            "Bill number",
+            "The number on the bill, and the number your GST return lists. It must never go \
+             backwards.",
+        ),
+        CounterKind::Token => (
+            "token",
+            "Token number",
+            "The number the customer waits for. Most shops start it again every day.",
+        ),
+        CounterKind::Kot => (
+            "kot",
+            "Kitchen ticket number",
+            "The number on each kitchen ticket, so the kitchen can say which one it means.",
+        ),
+    };
     CounterView {
-        kind: if bill { "bill" } else { "token" }.to_owned(),
-        label: if bill { "Bill number" } else { "Token number" }.to_owned(),
-        help: if bill {
-            "The number on the bill, and the number your GST return lists. It \
-             must never go backwards."
-                .to_owned()
-        } else {
-            "The number the customer waits for. Most shops start it again \
-             every day."
-                .to_owned()
-        },
+        kind: kind.to_owned(),
+        label: label.to_owned(),
+        help: help.to_owned(),
         prefix: counter.prefix.clone(),
         pad_width: u32::try_from(counter.pad_width).unwrap_or(0),
         reset_daily: counter.reset_daily,

@@ -10,10 +10,16 @@ pub struct Intent {
     /// Which order this is about.
     #[serde(default)]
     pub order_id: Option<String>,
-    /// The phone's clock, in milliseconds since the epoch, and it is used for exactly one
-    /// thing: deciding whether a queued intent is too old to apply without asking a person (see
-    /// `Outcome::Held`).
+    /// The phone's clock when the person pressed the button, in milliseconds since the epoch.
+    /// Used for exactly one thing: deciding whether a queued intent is too old to apply without
+    /// asking a person (see `Outcome::Held`).
     pub at: i64,
+    /// The SAME phone's clock at the moment it sent this. The counter takes the age as
+    /// `sent_at - at` — both from one clock, so a phone that is hours wrong is still exactly
+    /// right about how long it has been holding the order. A counter never measures a phone's
+    /// intent against its own clock: that is how a tablet with auto-time off held every order.
+    #[serde(default)]
+    pub sent_at: Option<i64>,
     pub what: What,
 }
 
@@ -70,7 +76,8 @@ pub enum What {
     CancelOrder {
         reason: String,
     },
-    /// Ask the counter to work the bill out.
+    /// Ask the counter to work the bill out AND print it, so the waiter can carry it to the
+    /// table. The wire name is the old one; a phone one version behind still gets its bill.
     RequestBill,
 }
 
@@ -89,7 +96,7 @@ impl What {
             What::SendToKitchen => "send to the kitchen",
             What::MoveTable { .. } => "move the order to another table",
             What::CancelOrder { .. } => "cancel the order",
-            What::RequestBill => "ask for the bill",
+            What::RequestBill => "print the bill",
         }
     }
 }
@@ -157,7 +164,9 @@ pub struct Batch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchResult {
     pub outcomes: Vec<(String, Outcome)>,
-    /// The whole thing in one sentence, for the phone's own screen: "38 of 40 went through.
+    /// The whole thing in one sentence, for the phone's own screen, in the words a waiter
+    /// uses: "Table 5: 6 items sent to the kitchen." — and only then, if some did not go, how
+    /// many and why to look.
     pub says: String,
 }
 
@@ -201,6 +210,7 @@ mod tests {
             id: "i1".to_owned(),
             order_id: Some("ord_1".to_owned()),
             at: 0,
+            sent_at: None,
             what: What::AddItem {
                 item_id: "itm_dosa".to_owned(),
                 qty: "2".to_owned(),

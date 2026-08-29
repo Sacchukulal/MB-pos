@@ -76,10 +76,19 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
                 let staff = repos.people().list_staff(OUTLET)?;
                 let name_of =
                     |id: &StaffId| staff.iter().find(|s| s.id == *id).map(|s| s.name.clone());
+                // The table's LABEL — "Table 5" — never its id. A receipt resolves it the
+                // same way (`flows::table_name`); the list showed `tbl_15` until it did too.
+                let tables = repos.floor().list_tables(OUTLET)?;
+                let label_of = |id: &mb_core::TableId| {
+                    tables
+                        .iter()
+                        .find(|t| &t.id == id)
+                        .map(|t| t.label.clone())
+                };
 
                 let mut out = Vec::new();
                 for order in repos.orders().list_for_day(OUTLET, day)? {
-                    let Some(row) = bill_row(&order, &name_of) else {
+                    let Some(row) = bill_row(&order, &name_of, &label_of) else {
                         // A draft or an open order: it is on the floor grid, not in the day's
                         // bills.
                         continue;
@@ -105,6 +114,7 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
 fn bill_row(
     order: &AnyOrder,
     name_of: &impl Fn(&StaffId) -> Option<String>,
+    label_of: &impl Fn(&mb_core::TableId) -> Option<String>,
 ) -> Option<BillRowView> {
     let core = order.core();
     let (state, total, cashier, void_reason) = match order {
@@ -131,7 +141,13 @@ fn bill_row(
             .map(|n| n.formatted.clone())
             .unwrap_or_default(),
         at: words::when(core.created_at),
-        table: core.table().map(|t| t.as_str().to_owned()),
+        table: core.table().map(|t| {
+            let label = label_of(t).unwrap_or_else(|| t.as_str().to_owned());
+            match core.seat() {
+                Some(seat) => format!("Table {label}{}", seat.as_str()),
+                None => format!("Table {label}"),
+            }
+        }),
         order_type: crate::billing::order_type_label(core.order_type()).to_owned(),
         total: MoneyView::from(total),
         cashier,

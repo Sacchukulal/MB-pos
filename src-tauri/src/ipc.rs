@@ -631,6 +631,7 @@ macro_rules! commands {
             $crate::dayclose::reopen_day,
             // The phones this counter serves.
             $crate::lan::network,
+            $crate::lan::phones_now,
             $crate::lan::open_pairing,
             $crate::lan::close_pairing,
             $crate::lan::allow_device,

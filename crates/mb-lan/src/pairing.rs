@@ -11,7 +11,11 @@ use crate::counter::Refusal;
 /// photograph of the screen is worthless by the end of service.
 pub const TOKEN_LIFETIME_SECONDS: i64 = 300;
 
-/// A phone waiting for somebody to press Allow.
+/// How many wrong PINs one presented token may absorb before the phone has to scan again.
+pub const PIN_TRIES: u32 = 3;
+
+/// A phone that presented a good token and has not been let in yet: it is either claiming
+/// its person with a PIN, or waiting for somebody at the counter to press Allow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
     pub request_id: String,
@@ -19,9 +23,15 @@ pub struct Waiting {
     pub platform: String,
     pub ip: String,
     pub asked_at: Timestamp,
+    /// Wrong PINs so far.
+    pub wrong_pins: u32,
 }
 
-/// The pairing desk: the token being shown, and the phones queueing at it.
+/// The pairing desk: the code being shown, and the phones queueing at it.
+///
+/// The code stays up for as long as the panel shows it, and it ROTATES the moment a phone uses
+/// it: a screenshot of the screen is worth one presentation, never two — and the next waiter in
+/// the queue scans a fresh code without anybody pressing "Add a phone" again.
 #[derive(Debug)]
 pub struct Desk {
     inner: Mutex<Inner>,
@@ -31,7 +41,7 @@ pub struct Desk {
 struct Inner {
     /// The token on screen, if the panel is showing one.
     open: Option<OpenToken>,
-    /// Phones that presented a good token and are waiting for a person.
+    /// Phones that presented a good token and are not yet in.
     waiting: Vec<Waiting>,
     /// Request_id -> the credential a person approved, waiting to be collected by the phone
     /// that is polling.
@@ -45,6 +55,17 @@ struct OpenToken {
     token: String,
     code: String,
     opened_at: Timestamp,
+}
+
+impl OpenToken {
+    fn fresh(now: Timestamp) -> OpenToken {
+        // 16 bytes is 128 bits for a token that lives five minutes and is used once.
+        OpenToken {
+            token: mb_auth::random_token(16),
+            code: mb_auth::short_code(),
+            opened_at: now,
+        }
+    }
 }
 
 impl Default for Desk {
@@ -63,19 +84,13 @@ impl Desk {
 
     /// The counter operator pressed "Add a phone".
     pub fn open(&self, now: Timestamp) -> (String, String) {
-        // 16 bytes is 128 bits for a token that lives five minutes and is used once.
-        let token = mb_auth::random_token(16);
-        let code = mb_auth::short_code();
-        let mut inner = lock(&self.inner);
-        inner.open = Some(OpenToken {
-            token: token.clone(),
-            code: code.clone(),
-            opened_at: now,
-        });
-        (token, code)
+        let fresh = OpenToken::fresh(now);
+        let pair = (fresh.token.clone(), fresh.code.clone());
+        lock(&self.inner).open = Some(fresh);
+        pair
     }
 
-    /// Stop showing it. Called when the panel closes, and after a successful pair.
+    /// Stop showing it. Called when the panel closes.
     pub fn close(&self) {
         lock(&self.inner).open = None;
     }
@@ -91,7 +106,8 @@ impl Desk {
         Some((open.token.clone(), open.code.clone()))
     }
 
-    /// A phone presented a token or a code.
+    /// A phone presented a token or a code. A good one is spent on the spot and the panel
+    /// gets a fresh one, so the queue behind this phone keeps moving.
     pub fn present(
         &self,
         offered: &str,
@@ -119,7 +135,8 @@ impl Desk {
         if !matches {
             return Err(Refusal::BadToken);
         }
-        inner.open = None;
+        // Spent. The panel keeps showing — a new code — until somebody closes it.
+        inner.open = Some(OpenToken::fresh(now));
 
         let request_id = mb_auth::random_token(12);
         inner.waiting.push(Waiting {
@@ -128,6 +145,7 @@ impl Desk {
             platform: platform.to_owned(),
             ip: ip.to_owned(),
             asked_at: now,
+            wrong_pins: 0,
         });
         Ok(request_id)
     }
@@ -136,6 +154,16 @@ impl Desk {
     #[must_use]
     pub fn waiting(&self) -> Vec<Waiting> {
         lock(&self.inner).waiting.clone()
+    }
+
+    /// One of them, still in the queue.
+    #[must_use]
+    pub fn peek(&self, request_id: &str) -> Option<Waiting> {
+        lock(&self.inner)
+            .waiting
+            .iter()
+            .find(|w| w.request_id == request_id)
+            .cloned()
     }
 
     /// Take one off the queue, so the caller can pair it.
@@ -147,6 +175,27 @@ impl Desk {
             .iter()
             .position(|w| w.request_id == request_id)?;
         Some(inner.waiting.remove(at))
+    }
+
+    /// The phone typed a wrong PIN for its person. Three of those and the token is gone: the
+    /// phone scans again, which is a fresh code and a fresh five minutes — and the rate limit
+    /// on `/v1/pair` is what stands between a guesser and the next one.
+    pub fn wrong_pin(&self, request_id: &str) -> Result<u32, Refusal> {
+        let mut inner = lock(&self.inner);
+        let Some(at) = inner
+            .waiting
+            .iter()
+            .position(|w| w.request_id == request_id)
+        else {
+            return Err(Refusal::BadToken);
+        };
+        inner.waiting[at].wrong_pins += 1;
+        let left = PIN_TRIES.saturating_sub(inner.waiting[at].wrong_pins);
+        if left == 0 {
+            inner.waiting.remove(at);
+            inner.refused.push(request_id.to_owned());
+        }
+        Ok(left)
     }
 
     /// A person pressed Allow and the counter issued a credential.
@@ -198,7 +247,7 @@ mod tests {
     use super::*;
 
     fn at(seconds: i64) -> Timestamp {
-        Timestamp::from_millis(seconds.saturating_mul(1_000))
+        Timestamp::from_millis(seconds * 1_000)
     }
 
     /// A token expires, and a used one cannot be used twice.
@@ -209,8 +258,7 @@ mod tests {
 
         // Used once.
         desk.present(&token, "Ravi's phone", "android", "192.168.1.31", at(10))
-            .expect("the first phone is let through to the queue");
-        // And not twice — even inside the lifetime.
+            .expect("the first phone is queued");
         assert_eq!(
             desk.present(&token, "A stranger", "android", "192.168.1.99", at(11)),
             Err(Refusal::BadToken),
@@ -232,6 +280,22 @@ mod tests {
         );
     }
 
+    /// The panel keeps showing after a phone uses the code — a NEW code, so the next waiter
+    /// in the queue scans without anybody pressing "Add a phone" again.
+    #[test]
+    fn a_used_code_is_replaced_and_the_panel_stays_open() {
+        let desk = Desk::new();
+        let (first, first_code) = desk.open(at(0));
+        desk.present(&first, "Ravi's phone", "android", "1.2.3.4", at(5))
+            .expect("queued");
+        let (second, second_code) = desk.showing(at(6)).expect("still showing");
+        assert_ne!(first, second, "the spent token is still on the screen");
+        assert_ne!(first_code, second_code);
+        desk.present(&second, "Anita's phone", "android", "1.2.3.5", at(7))
+            .expect("the next phone pairs on the fresh code");
+        assert_eq!(desk.waiting().len(), 2);
+    }
+
     #[test]
     fn the_short_code_is_forgiving_about_how_it_is_typed() {
         let desk = Desk::new();
@@ -244,7 +308,7 @@ mod tests {
         );
     }
 
-    /// Nothing is issued until a person presses Allow.
+    /// Nothing is issued until a person presses Allow, or the phone proves its person.
     #[test]
     fn a_good_token_is_not_a_credential() {
         let desk = Desk::new();
@@ -281,5 +345,21 @@ mod tests {
         desk.refuse(&request);
         assert_eq!(desk.collect(&request), Err(Refusal::BadToken));
         assert!(desk.waiting().is_empty());
+    }
+
+    /// Three wrong PINs and the presentation is spent: scan again.
+    #[test]
+    fn three_wrong_pins_spend_the_token() {
+        let desk = Desk::new();
+        let (token, _) = desk.open(at(0));
+        let request = desk
+            .present(&token, "Ravi's phone", "android", "1.2.3.4", at(1))
+            .expect("queued");
+        assert_eq!(desk.wrong_pin(&request), Ok(2));
+        assert_eq!(desk.wrong_pin(&request), Ok(1));
+        assert_eq!(desk.wrong_pin(&request), Ok(0));
+        assert!(desk.peek(&request).is_none(), "still in the queue");
+        assert_eq!(desk.collect(&request), Err(Refusal::BadToken));
+        assert_eq!(desk.wrong_pin(&request), Err(Refusal::BadToken));
     }
 }

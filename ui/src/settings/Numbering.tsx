@@ -96,7 +96,9 @@ function Counter({
           hint={
             counter.kind === 'bill'
               ? 'IT MUST NEVER GO BACKWARDS. Two bills with the same number is a GST return the department will reject.'
-              : 'What the next customer will be called.'
+              : counter.kind === 'kot'
+                ? 'What the next kitchen ticket will be numbered.'
+                : 'What the next customer will be called.'
           }
           value={String(draft.nextValue)}
           onChange={(event) => set({ nextValue: Number(event.currentTarget.value) || 1 })}

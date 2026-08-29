@@ -143,6 +143,9 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                 let told = repos
                     .events()
                     .last_for_each(mb_db::repo::events::KITCHEN_TICKET)?;
+                let asked = repos
+                    .events()
+                    .last_for_each(mb_db::repo::events::BILL_ASKED)?;
 
                 let numbers = repos.floor().occupancy(OUTLET, today(at))?;
 
@@ -166,6 +169,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                             .iter()
                             .find(|(id, _)| id == order_id)
                             .map(|(_, when)| crate::ipc::count(minutes_between(*when, at)));
+                        tile.bill_asked = asked.iter().any(|(id, _)| id == order_id);
                     }
                 }
 

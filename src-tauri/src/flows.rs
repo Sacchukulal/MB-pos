@@ -659,6 +659,31 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
     })
 }
 
+/// A phone asked for the bill: the same paper "Print bill" makes at the counter, on the bill
+/// printer, with the waiter's name where the cashier's would be. No session guard — the
+/// permission was checked on the intent, which is the door a phone comes through.
+pub(crate) fn print_bill_from_floor(app: &App, order_id: &str, waiter: &StaffId) -> UiResult<()> {
+    let id = OrderId::new(order_id.to_owned());
+    let Some(order @ AnyOrder::Open(_)) = find_order(app, &id)? else {
+        return Err(UiError::new(
+            "bill.not_open",
+            "There is no open order on that table any more.",
+        ));
+    };
+    let bill = bill_of(app, &order)?;
+    let name = staff_name(app, waiter).unwrap_or_else(|| "the floor".to_owned());
+    queue_bill(app, &order, &bill, &name, Copy::NotPaid)?;
+    log_info!(
+        "the bill for {} was asked for from the floor by {name}",
+        order
+            .core()
+            .table()
+            .and_then(|t| table_name(app, t))
+            .unwrap_or_else(|| "an order with no table".to_owned())
+    );
+    Ok(())
+}
+
 /// The bill for an order, as it would print right now.
 pub fn preview_order_on(
     app: &App,

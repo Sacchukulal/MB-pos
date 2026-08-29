@@ -21,6 +21,12 @@ pub struct Bridge {
     handle: tauri::AppHandle,
     /// "Last seen", waiting to be written.
     pending: Mutex<Vec<(String, String, Timestamp)>>,
+    /// Device id → SHA-256 of the secret this counter has ALREADY verified with Argon2 once.
+    /// Argon2id at 19 MiB is the right cost for a door and the wrong cost for a corridor: a
+    /// waiter's every tap was paying it, and on a slow counter that was the lag. The register
+    /// is still read on every request (a revoked phone dies on its next tap); only the hash
+    /// is remembered.
+    verified: Mutex<std::collections::HashMap<String, [u8; 32]>>,
 }
 
 impl Bridge {
@@ -29,7 +35,13 @@ impl Bridge {
         Arc::new(Bridge {
             handle,
             pending: Mutex::new(Vec::new()),
+            verified: Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// A phone was taken off the counter: whatever it proved before no longer counts.
+    pub fn forget_device(&self, device_id: &str) {
+        lock(&self.verified).remove(device_id);
     }
 
     fn app(&self) -> Option<tauri::State<'_, App>> {
@@ -130,9 +142,17 @@ impl mb_lan::Counter for Bridge {
             .ok()
             .flatten()?;
 
-        let hash = mb_auth::PinHash::from_stored(&device.secret_hash).ok()?;
-        if !mb_auth::verify_device_secret(secret, &hash) {
-            return None;
+        // Argon2 once per phone; a cheap, constant-time compare from then on.
+        let digest = mb_auth::sha256(secret.as_bytes());
+        let already = lock(&self.verified)
+            .get(&device.id)
+            .is_some_and(|known| constant_time_eq(known, &digest));
+        if !already {
+            let hash = mb_auth::PinHash::from_stored(&device.secret_hash).ok()?;
+            if !mb_auth::verify_device_secret(secret, &hash) {
+                return None;
+            }
+            lock(&self.verified).insert(device.id.clone(), digest);
         }
 
         // What this device's PERSON may do.
@@ -155,6 +175,57 @@ impl mb_lan::Counter for Bridge {
         let mut pending = lock(&self.pending);
         pending.retain(|(id, _, _)| id != device_id);
         pending.push((device_id.to_owned(), ip.to_owned(), now()));
+    }
+
+    fn presence(&self, _connected: usize) {
+        crate::push::emit_phones(&self.handle);
+    }
+
+    fn people(&self) -> Vec<mb_lan::Person> {
+        self.app()
+            .map(|app| active_people(&app))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| mb_lan::Person {
+                id: p.id,
+                name: p.name,
+            })
+            .collect()
+    }
+
+    /// The person's own counter PIN — the same one that signs them in at the till.
+    fn check_pin(&self, staff_id: &str, pin: &str) -> Result<(), mb_lan::Refusal> {
+        let Some(app) = self.app() else {
+            return Err(mb_lan::Refusal::Refused("The counter is closing.".to_owned()));
+        };
+        let member = app
+            .with_shop(|shop| {
+                shop.db
+                    .read_transaction(|tx| mb_db::Repos::new(tx).people().find_staff(OUTLET, staff_id))
+                    .map_err(|e| words::from_db(&e))
+            })
+            .ok()
+            .flatten()
+            .filter(|m| matches!(m.status, mb_db::repo::people::StaffStatus::Active))
+            .ok_or_else(|| {
+                mb_lan::Refusal::Refused(
+                    "That person is not on the staff list any more. Pick somebody else."
+                        .to_owned(),
+                )
+            })?;
+        let stored = member.pin().ok().flatten().ok_or_else(|| {
+            mb_lan::Refusal::Refused(format!(
+                "{} has no PIN yet. Somebody who manages staff can set one at the counter.",
+                member.name
+            ))
+        })?;
+        let typed = mb_auth::Pin::parse(pin).map_err(|_| mb_lan::Refusal::WrongPin(0))?;
+        if mb_auth::verify_pin(&typed, &stored) {
+            Ok(())
+        } else {
+            // The desk decides how many are left; this says only that it was wrong.
+            Err(mb_lan::Refusal::WrongPin(u32::MAX))
+        }
     }
 
     fn pair(
@@ -402,6 +473,8 @@ pub struct NetworkView {
     pub may_pair: bool,
     /// Who a phone can be given to when Allow is pressed: the active staff.
     pub people: Vec<PersonPick>,
+    /// How many phones are on the live stream right now.
+    pub connected: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -549,21 +622,33 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         qr,
         code,
         may_pair,
-        people: app
-            .with_shop(|shop| {
-                shop.db
-                    .read_transaction(|tx| mb_db::Repos::new(tx).people().list_staff(OUTLET))
-                    .map_err(|e| words::from_db(&e))
-            })
-            .unwrap_or_default()
-            .iter()
-            .filter(|p| matches!(p.status, mb_db::repo::people::StaffStatus::Active))
-            .map(|p| PersonPick {
-                id: p.id.as_str().to_owned(),
-                name: p.name.clone(),
-            })
-            .collect(),
+        people: active_people(app),
+        connected: network
+            .as_ref()
+            .map_or(0, |n| u32::try_from(n.shared.connected()).unwrap_or(u32::MAX)),
     })
+}
+
+/// Everybody a phone can belong to: the active staff.
+fn active_people(app: &App) -> Vec<PersonPick> {
+    app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| mb_db::Repos::new(tx).people().list_staff(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })
+    .unwrap_or_default()
+    .iter()
+    .filter(|p| matches!(p.status, mb_db::repo::people::StaffStatus::Active))
+    .map(|p| PersonPick {
+        id: p.id.as_str().to_owned(),
+        name: p.name.clone(),
+    })
+    .collect()
+}
+
+/// Equal without an early exit, so the time it takes says nothing about where they differ.
+fn constant_time_eq(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    a.iter().zip(b).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 fn staff_name(app: &App, staff_id: &str) -> Option<String> {
@@ -638,8 +723,8 @@ pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiRe
     )
     .map_err(|r| UiError::new("lan.refused", r.message()))?;
 
+    // The code stays up: the next waiter in the queue scans without another press.
     network.shared.desk.approve(&request_id, device);
-    network.shared.desk.close();
     view_on(app)
 }
 
@@ -687,6 +772,9 @@ pub fn revoke_on(app: &App, device_id: String) -> UiResult<NetworkView> {
             "That phone had already been removed.",
         ));
     }
+    if let Some(network) = app.network() {
+        network.bridge.forget_device(&device_id);
+    }
     view_on(app)
 }
 
@@ -695,6 +783,29 @@ pub fn revoke_on(app: &App, device_id: String) -> UiResult<NetworkView> {
 #[tauri::command]
 pub fn network(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
     view_on(&app)
+}
+
+/// The top bar's number, and the badge on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PhonesView {
+    /// On the live stream right now.
+    pub connected: u32,
+    /// Asking to join, waiting for somebody here.
+    pub waiting: u32,
+}
+
+#[tauri::command]
+pub fn phones_now(app: tauri::State<'_, App>) -> UiResult<PhonesView> {
+    guard::require_signed_in(&app)?;
+    let (connected, waiting) = app.network().map_or((0, 0), |n| {
+        (
+            u32::try_from(n.shared.connected()).unwrap_or(u32::MAX),
+            u32::try_from(n.shared.desk.waiting().len()).unwrap_or(u32::MAX),
+        )
+    });
+    Ok(PhonesView { connected, waiting })
 }
 
 #[tauri::command]

@@ -38,6 +38,7 @@ function table(label: string, busy = false): TableView {
     kitchenTold: true,
     billNumber: null,
     kitchenMinutes: null,
+    billAsked: false,
     orderId: busy ? `ord_${label}` : null,
     selected: false,
   };

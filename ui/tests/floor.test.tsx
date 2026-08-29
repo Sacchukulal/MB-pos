@@ -40,6 +40,7 @@ function tile(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Table
     minutes: null,
     kitchenTold: true,
     kitchenMinutes: null,
+    billAsked: false,
     orderId: null,
     billNumber: null,
     selected: false,

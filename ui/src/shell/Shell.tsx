@@ -8,6 +8,7 @@ import type { LockState } from '../ipc/generated/LockState';
 import type { SetupView } from '../ipc/generated/SetupView';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import type { NoticesView } from '../ipc/generated/NoticesView';
+import type { PhonesView } from '../ipc/generated/PhonesView';
 import { useTheme } from '../theme/ThemeProvider';
 import { Account } from '../account/Account';
 import { FirstRun } from '../setup/FirstRun';
@@ -43,8 +44,11 @@ export interface Screen {
   icon: IconName;
   /** True for a screen the counter uses every day. */
   daily?: boolean;
-  /** `go` opens another screen. */
-  render: (go: (screen: string) => void) => ReactNode;
+  /**
+   * `go` opens another screen — `go('settings/network')` opens Settings on the Phones section;
+   * `sub` is that part, for the screen that was asked for it.
+   */
+  render: (go: (screen: string) => void, sub?: string | null) => ReactNode;
   /** The permission this screen's commands check in Rust. */
   needs?: string;
   /** Any one of these opens it. */
@@ -160,7 +164,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     id: 'settings',
     label: 'Settings',
     icon: 'settings',
-    render: () => <Settings />,
+    render: (_go, sub) => <Settings initial={sub} />,
     needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
   },
   {
@@ -215,7 +219,16 @@ const SCREENS: readonly Screen[] = import.meta.env.DEV
   : SHIPPED_SCREENS;
 
 export function Shell() {
-  const [screen, setScreen] = useState<string>('billing');
+  const [screen, setScreenOnly] = useState<string>('billing');
+  /** The part of a screen that was asked for: `settings/network` → `network`. */
+  const [sub, setSub] = useState<string | null>(null);
+  const setScreen = useCallback((id: string) => {
+    const slash = id.indexOf('/');
+    setSub(slash < 0 ? null : id.slice(slash + 1));
+    setScreenOnly(slash < 0 ? id : id.slice(0, slash));
+  }, []);
+  /** The phones: live now, and asking to join. */
+  const [phones, setPhones] = useState<PhonesView>({ connected: 0, waiting: 0 });
   const [status, setStatus] = useState<AppStatus | null>(null);
   /** Is this counter set up? */
   const [setUp, setSetUp] = useState<boolean | null>(null);
@@ -292,6 +305,8 @@ export function Shell() {
   useEffect(() => {
     if (lock === null || lock.signedInAs === null) return;
     reloadNotices();
+    // The phones' number, once; Rust pushes every change after that.
+    if (inApp()) call('phones_now').then(setPhones).catch(() => undefined);
   }, [lock, reloadNotices]);
 
   // Rust pushes; React subscribes.
@@ -303,6 +318,7 @@ export function Shell() {
       if (message.kind === 'session') reloadLock();
       if (message.kind === 'tills') setTillsSay(message.says);
       if (message.kind === 'notices') reloadNotices();
+      if (message.kind === 'phones') setPhones({ connected: message.connected, waiting: message.waiting });
       if (message.kind === 'licence') {
         setStatus((was) => (was ? { ...was, licence: message.says, licenceTone: message.tone } : was));
       }
@@ -509,12 +525,14 @@ export function Shell() {
         alertCount={alerts.length + notices.unseen}
         alertTone={loudest(alerts) ?? (notices.unseen > 0 ? 'accent' : null)}
         onOpenAlerts={openAlerts}
+        phones={phones}
+        onOpenPhones={() => setScreen('settings/network')}
       />
 
       <div className="mb-body">
         <main className="mb-main">
           {/* Nothing is rendered behind the lock. */}
-          {locked ? null : active?.render(setScreen)}
+          {locked ? null : active?.render(setScreen, active.id === screen ? sub : null)}
         </main>
       </div>
 
@@ -625,11 +643,16 @@ function TopBar({
   alertCount,
   alertTone,
   onOpenAlerts,
+  phones,
+  onOpenPhones,
 }: {
   shopPath: string | null;
   screens: readonly Screen[];
   current: string;
   onGo: (screen: string) => void;
+  /** How many phones are live, and how many are asking to join. */
+  phones: PhonesView;
+  onOpenPhones: () => void;
   themeIcon: string;
   themeName: string;
   onToggleTheme: () => void;
@@ -787,6 +810,31 @@ function TopBar({
           </span>
         </button>
         )}
+
+        {/* The phones: live now, or asking to join. One click lands on Settings › Phones. */}
+        {phones.connected > 0 || phones.waiting > 0 ? (
+          <button
+            type="button"
+            className={[
+              'mb-phones',
+              phones.waiting > 0 ? 'mb-phones--asking' : phones.connected > 0 ? 'mb-phones--live' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onClick={onOpenPhones}
+            aria-label={
+              phones.waiting > 0
+                ? `${phones.waiting} phone${phones.waiting === 1 ? '' : 's'} asking to join — open Phones`
+                : `${phones.connected} phone${phones.connected === 1 ? '' : 's'} live — open Phones`
+            }
+            title={phones.waiting > 0 ? 'A phone is asking to join' : 'Phones live now'}
+          >
+            <Icon name="phone" size="sm" />
+            <span className="mb-phones__count">
+              {phones.waiting > 0 ? `${phones.waiting} asking` : phones.connected}
+            </span>
+          </button>
+        ) : null}
 
         <button
           type="button"

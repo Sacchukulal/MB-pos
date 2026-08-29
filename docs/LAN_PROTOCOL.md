@@ -83,7 +83,8 @@ sent on every request except `/v1/hello` and `/v1/pair`.
 **What this does not cover, stated plainly:** a stranger on the shop's WiFi can
 impersonate the counter to a phone that has *never* paired, because that phone
 has nothing to compare against. That is why the fingerprint travels in a code a
-person holds up, and why pairing needs somebody to press Allow.
+person holds up, and why pairing needs the person's own PIN (or, for a shared
+tablet, somebody at the counter pressing Allow).
 
 ---
 
@@ -91,35 +92,56 @@ person holds up, and why pairing needs somebody to press Allow.
 
 Two things must both be true. Either alone is not enough.
 
-1. the phone presents a token the counter is **showing right now**; and
-2. **a person at the counter presses Allow**, having seen the device's name.
+1. the phone presents a token the counter is **showing right now** — proof that
+   somebody is standing in front of the counter's screen; and
+2. the phone says **whose it is**, and proves it — with that person's own
+   counter PIN. Nobody at the counter presses anything. (A shared tablet that
+   belongs to nobody is the exception: it waits for a person to press Allow.)
 
 ```
 POST /v1/pair
 { "name": "Ravi's phone", "platform": "android", "token": "8GF-CVC" }
 
-202 { "request_id": "...", "message": "Waiting for somebody at the counter…" }
+202 { "request_id": "...",
+      "message": "Waiting for somebody at the counter…",
+      "people": [ { "id": "stf_…", "name": "Ravi" }, … ] }
 ```
 
-Then poll:
+`people` is the active staff list. Show the names; the person taps their own and
+types their PIN:
+
+```
+POST /v1/pair/{request_id}/claim
+{ "staff_id": "stf_…", "pin": "1234" }
+
+200 { "device_id": "dev_…", "secret": "…", "server_id": "srv_…" }
+403 { "message": "That PIN is not right. 2 tries left." }
+400 { "message": "That PIN is not right, and that was the last try. Scan the code again." }
+```
+
+Three wrong PINs spend the presentation; the phone scans again (the code on the
+counter has moved on anyway — see below). A `staff_id` of null means "shared,
+nobody's": the request stays in the queue and the phone polls until a person at
+the counter presses Allow:
 
 ```
 GET /v1/pair/{request_id}
 
 202 { "message": "Waiting for somebody at the counter to allow this phone." }
 200 { "device_id": "dev_…", "secret": "…", "server_id": "srv_…" }
-400 { "message": "That code has expired or has already been used…" }
+400 { "message": "That is not the code on the counter's screen now — it may have expired or been used…" }
 ```
 
 The secret is returned **once**. Store it in the platform keystore; the counter
 keeps only an Argon2 hash of it and cannot tell you again.
 
-**Whose phone it is** is decided by the person pressing Allow, who picks a staff
-member — or "shared, nobody's" for a tablet at the pass. The device then acts as
-that person on every intent, with that person's permissions; a shared device may
-take an order and nothing else. `GET /v1/me` says which. (Until 2026-08-28 a phone
-was bound to whoever happened to be signed in at the till, so every waiter's
-phone acted as the cashier.)
+**The code on the counter stays up until somebody closes it, and it changes the
+moment a phone uses it.** So one press of "Add phones" pairs the whole floor,
+each phone scanning a fresh code — and a screenshot of the screen is worth one
+presentation, never two.
+
+The device acts as its person on every intent, with that person's permissions;
+a shared device may take an order and nothing else. `GET /v1/me` says which.
 
 The short code may be typed instead of scanned, and is compared case- and
 dash-insensitively.
@@ -128,9 +150,9 @@ dash-insensitively.
 
 | status | when |
 |---|---|
-| 400 | the token is wrong, used, or expired |
-| 403 | the shop is at its device limit (the sentence has the number in it) |
-| 429 | too many attempts — see §7 |
+| 400 | the token is wrong, used, or expired; the last wrong PIN |
+| 403 | a wrong PIN with tries left; the shop is at its device limit (the sentence has the number in it) |
+| 429 | too many attempts — see §7 (`/v1/pair` and `…/claim` share the bucket) |
 
 ---
 
@@ -171,13 +193,18 @@ if the catalogue version changed, `GET /v1/catalogue`.
 
 | `kind` | when | `body` |
 |---|---|---|
-| `floor` | any table or open order changed, by anybody — the cashier, a phone, the kitchen. Bursts are collapsed into one push. | `{ "tables": [ { "id", "state": "free" \| "taken", "order_id" } ], "orders": [ { "order_id", "table_id", "table_label", "order_type", "total", "token", "note", "lines": [ LineView ] } ] }` — every open order, as an outcome would describe it |
+| `floor` | any table or open order changed, by anybody — the cashier, a phone, the kitchen. Bursts are collapsed into one push. | `{ "tables": [ { "id", "state": "free" \| "taken" \| "bill_asked", "order_id" } ], "orders": [ { "order_id", "table_id", "table_label", "order_type", "total", "token", "note", "lines": [ LineView ], "bill_asked": bool, "by": "Ravi" \| null, "by_id": "stf_…" \| null } ] }` — every open order, as an outcome would describe it; `by`/`by_id` name whoever opened it, so a phone can mark its own |
 | `catalogue` | the menu, a price, availability, a table or a section changed | `{ "version": "…" }` — compare with what you hold; fetch `/v1/catalogue` if different |
 
-A phone shows only the orders it has touched. **An order it holds that is missing from a
-`floor` body is one the counter has finished with** — settled, voided, cancelled — and the
-phone says so on that order rather than guessing which. Unknown kinds are ignored: a counter
-one version ahead is an ordinary Tuesday.
+**The floor is the whole floor.** A phone shows every open order — any waiter may look at,
+add to or bill any table — and marks the ones its own person opened by `by`. **An order it
+holds that is missing from a `floor` body is one the counter has finished with** — settled,
+voided, cancelled — and the phone says so on that order rather than guessing which. Unknown
+kinds are ignored: a counter one version ahead is an ordinary Tuesday.
+
+While a phone is on `/v1/stream` the counter counts it as live; the counter's own screen shows
+that number. A phone that wants to be counted keeps the socket open for as long as it is on
+any floor screen.
 
 The catalogue's `tables[].state` is always `free`: what a table is DOING is the floor's, not
 the catalogue's, so that a table being taken does not push 400 menu items to every phone.
@@ -205,14 +232,21 @@ sentence that already says which side needs updating. Show it as-is.
   "id": "<client-generated, unique for ever>",
   "order_id": "<or null, only for open_order>",
   "at": 1786000000000,
+  "sent_at": 1786000000900,
   "what": { "do": "add_item", "item_id": "itm_dosa", "qty": "2",
             "note": null, "modifiers": [] }
 }
 ```
 
-`at` is the **phone's** clock in milliseconds. It is used for exactly one
-thing — deciding whether a queued intent is too old to apply without asking a
-person — and never becomes a business day.
+`at` is the **phone's** clock in milliseconds when the person pressed the button;
+`sent_at` is the **same clock** at the moment the request left the phone. They
+are used for exactly one thing — deciding whether a queued intent is too old to
+apply without asking a person — and the counter reads the age as `sent_at − at`,
+both from one clock, so a phone that is hours wrong is still exactly right about
+how long it held the order. **The counter's clock never judges a phone's**: a
+tablet with auto-time off once had every order it sent held as "last night's".
+Neither value ever becomes a business day. A phone that omits `sent_at` is
+taken as sending now.
 
 ### The operations
 
@@ -230,6 +264,11 @@ person — and never becomes a business day.
 | `move_table` | `table_id` | `bill.create` |
 | `cancel_order` | `reason` (**compulsory**) | `order.cancel` |
 | `request_bill` | — | `bill.create` |
+
+`request_bill` makes the counter **print the bill** on its bill printer — the same "bill
+to the table" paper the counter's own Print bill makes, with the waiter's name on it —
+and marks the order `bill_asked` on the floor until it is settled. The waiter carries the
+paper over; the money is still taken at the counter.
 
 `qty` is a **decimal string**, never a float: `"0.5"`, `"2"`. A quantity
 multiplies a price and floating point has no place near money.
@@ -312,15 +351,19 @@ no 0.00 ghost on the floor.
 ```json
 { "outcomes": [ ["id1", {"outcome":"ok", …}],
                 ["id2", {"outcome":"held", …}] ],
-  "says": "38 order changes of 40 went through. 2 are waiting …" }
+  "says": "6 items sent to the kitchen. 1 change is waiting for somebody at the counter …" }
 ```
 
 **Per intent, never one status for the batch.** A batch that reports a single
-result is a batch whose failures are invisible.
+result is a batch whose failures are invisible. `says` is what a waiter hears:
+the last thing the counter did in their words ("6 items sent to the kitchen.",
+"The bill for table 5 is printing at the counter."), then — only if some did
+not go — how many are held or refused. Never a count of "order changes".
 
 ### Held intents
 
-An intent older than **12 hours** is not applied. It waits for somebody at the
+An intent that was **typed more than 12 hours before it was sent** (`sent_at −
+at`, the phone's own clock) is not applied. It waits for somebody at the
 counter to say whether it still applies.
 
 v1's failure this prevents: a phone that was offline all evening reconnects

@@ -889,9 +889,12 @@ pub enum Pushed {
         /// True while nobody has a PIN — the shell's undismissable banner.
         stand_in: bool,
     },
-    /// A phone is asking to join.
-    Pairing {
-        /// How many phones are waiting for somebody to press Allow.
+    /// The phones changed: one came on or off the live stream, or one is asking to join, or
+    /// the code on the Phones panel moved on.
+    Phones {
+        /// How many phones are on the live stream right now.
+        connected: u32,
+        /// How many are waiting for somebody at the counter.
         waiting: u32,
     },
     /// The floor changed the order the cashier has open.

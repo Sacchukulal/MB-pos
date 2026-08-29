@@ -14,9 +14,13 @@ who: string | null, role: string | null,
 /**
  * True while nobody has a PIN — the shell's undismissable banner.
  */
-stand_in: boolean, } | { "kind": "pairing", 
+stand_in: boolean, } | { "kind": "phones", 
 /**
- * How many phones are waiting for somebody to press Allow.
+ * How many phones are on the live stream right now.
+ */
+connected: number, 
+/**
+ * How many are waiting for somebody at the counter.
  */
 waiting: number, } | { "kind": "floorChanged", waiting: number, } | { "kind": "floor" } | { "kind": "kitchen" } | { "kind": "notices", unseen: number, } | { "kind": "licence", says: string, tone: string, } | { "kind": "tills", 
 /**

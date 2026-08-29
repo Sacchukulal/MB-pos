@@ -8,6 +8,8 @@ use crate::error::DbError;
 
 /// A kitchen ticket went to the printer.
 pub const KITCHEN_TICKET: &str = "kitchen_ticket";
+/// A phone asked for the bill and the counter printed it for the table.
+pub const BILL_ASKED: &str = "bill_asked";
 /// The order moved to another table.
 pub const MOVED: &str = "moved";
 /// This order's food was folded into another bill.

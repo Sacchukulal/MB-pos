@@ -25,6 +25,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     minutes: null,
     kitchenTold: true,
     kitchenMinutes: null,
+    billAsked: false,
     orderId: null,
     billNumber: null,
     selected: false,

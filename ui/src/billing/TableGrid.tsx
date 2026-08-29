@@ -180,6 +180,13 @@ export function Tile({
                 aria-label="The kitchen has not been told"
               />
             ) : null}
+            {/* A waiter asked for this table's bill from a phone; it printed. */}
+            {table.billAsked ? (
+              <span className="mb-tile__bill" title="The bill was asked for from a phone">
+                <Icon name="file" size="sm" />
+                Bill
+              </span>
+            ) : null}
           </span>
         )}
 

@@ -27,7 +27,12 @@ kitchenTold: boolean,
  * Minutes since the last kitchen ticket went out — scope 14.2's second timer, and the one
  * that catches a forgotten table: "food ordered 18 minutes ago and nothing since".
  */
-kitchenMinutes: number | null, orderId: string | null, 
+kitchenMinutes: number | null, 
+/**
+ * A waiter asked for this table's bill from a phone, and it printed. The tile says so
+ * until the table is settled.
+ */
+billAsked: boolean, orderId: string | null, 
 /**
  * The bill number this order has already claimed, formatted as it will be printed.
  */

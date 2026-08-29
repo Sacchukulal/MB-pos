@@ -11,7 +11,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::counter::{Counter, Device, PairRequest, Refusal};
+use crate::counter::{ClaimRequest, Counter, Device, PairRequest, Refusal};
 use crate::error::LanError;
 use crate::limit::{Limiter, Rate};
 use crate::pairing::Desk;
@@ -129,6 +129,12 @@ impl Shared {
         self.pushes.receiver_count() > 0
     }
 
+    /// How many phones are on the stream right now.
+    #[must_use]
+    pub fn connected(&self) -> usize {
+        self.pushes.receiver_count()
+    }
+
     pub fn push(&self, kind: &str, body: serde_json::Value) -> u64 {
         let seq = self
             .next_seq
@@ -201,6 +207,7 @@ pub fn router(shared: Shared) -> Router {
         .route("/v1/hello", get(hello))
         .route("/v1/pair", post(pair))
         .route("/v1/pair/{request_id}", get(pair_status))
+        .route("/v1/pair/{request_id}/claim", post(claim))
         .route("/v1/me", get(me))
         .route("/v1/stream", get(stream))
         // What a phone came here to do.
@@ -367,9 +374,71 @@ async fn pair(
             Json(serde_json::json!({
                 "request_id": request_id,
                 "message": Refusal::WaitingForApproval.message(),
+                // Whose phone this could be. The phone shows the names; the person proves it
+                // with their PIN, and nobody at the counter has to press anything.
+                "people": shared.counter.people(),
             })),
         )
             .into_response(),
+        Err(r) => refused(&r),
+    }
+}
+
+/// The phone says whose it is. A person on the staff list, with that person's PIN, is let in
+/// on the spot; "nobody's" — a shared tablet — keeps waiting for somebody to press Allow.
+async fn claim(
+    State(shared): State<Shared>,
+    axum::extract::Path(request_id): axum::extract::Path<String>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    Json(request): Json<ClaimRequest>,
+) -> Response {
+    let ip = from.ip();
+    // The same door as `/v1/pair`: a PIN is guessed here or nowhere.
+    if let Err(wait) = shared.pair_limiter.check(&ip, (shared.clock)()) {
+        return too_many(wait);
+    }
+    let Some(waiting) = shared.desk.peek(&request_id) else {
+        return refused(&Refusal::BadToken);
+    };
+    let Some(staff_id) = request.staff_id.filter(|s| !s.trim().is_empty()) else {
+        // A shared tablet: a person at the counter decides.
+        return (
+            StatusCode::ACCEPTED,
+            Json(Trouble {
+                message: Refusal::WaitingForApproval.message(),
+            }),
+        )
+            .into_response();
+    };
+    let pin = request.pin.unwrap_or_default();
+    if let Err(r) = shared.counter.check_pin(&staff_id, &pin) {
+        // A wrong PIN is counted against the presentation, not against the person's counter
+        // login — three of them and the phone has to be seen scanning again.
+        return match r {
+            Refusal::WrongPin(_) => match shared.desk.wrong_pin(&request_id) {
+                Ok(left) => refused(&Refusal::WrongPin(left)),
+                Err(r) => refused(&r),
+            },
+            other => refused(&other),
+        };
+    }
+    let Some(taken) = shared.desk.take(&request_id) else {
+        return refused(&Refusal::BadToken);
+    };
+    match shared.counter.pair(
+        &PairRequest {
+            name: taken.name.clone(),
+            platform: taken.platform.clone(),
+            token: String::new(),
+        },
+        &waiting.name,
+        &waiting.platform,
+        Some(&staff_id),
+    ) {
+        Ok(device) => {
+            shared.device_limiter.forget(&device.device_id);
+            Json(device).into_response()
+        }
         Err(r) => refused(&r),
     }
 }
@@ -443,40 +512,49 @@ async fn stream(
     let missed = shared.since(query.since.unwrap_or(0));
     let mut receiver = shared.pushes.subscribe();
     let device_id = device.id;
+    // Told on the way in and, below, on the way out — the counter's screen shows how many
+    // phones are live without ever asking.
+    shared.counter.presence(shared.connected());
 
     upgrade.on_upgrade(move |mut socket| async move {
         use axum::extract::ws::Message;
 
-        // What it missed, first and in order, before anything live.
-        if let Ok(text) = serde_json::to_string(&missed)
-            && socket.send(Message::Text(text.into())).await.is_err()
-        {
-            return;
-        }
-
-        loop {
-            tokio::select! {
-                // A phone that cannot keep up is DISCONNECTED, not allowed to grow a queue in
-                // the counter's memory.
-                received = receiver.recv() => match received {
-                    Ok(push) => {
-                        let Ok(text) = serde_json::to_string(&push) else { continue };
-                        if socket.send(Message::Text(text.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                },
-                // Anything the phone says, plus its own liveness.
-                from_phone = tokio::time::timeout(IDLE, socket.recv()) => match from_phone {
-                    Ok(Some(Ok(Message::Close(_))) | None) | Err(_) => break,
-                    Ok(Some(Err(_))) => break,
-                    Ok(Some(Ok(_))) => {}
-                },
+        let served = async {
+            // What it missed, first and in order, before anything live.
+            if let Ok(text) = serde_json::to_string(&missed)
+                && socket.send(Message::Text(text.into())).await.is_err()
+            {
+                return;
             }
-        }
-        let _ = device_id;
+
+            loop {
+                tokio::select! {
+                    // A phone that cannot keep up is DISCONNECTED, not allowed to grow a queue in
+                    // the counter's memory.
+                    received = receiver.recv() => match received {
+                        Ok(push) => {
+                            let Ok(text) = serde_json::to_string(&push) else { continue };
+                            if socket.send(Message::Text(text.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    },
+                    // Anything the phone says, plus its own liveness.
+                    from_phone = tokio::time::timeout(IDLE, socket.recv()) => match from_phone {
+                        Ok(Some(Ok(Message::Close(_))) | None) | Err(_) => break,
+                        Ok(Some(Err(_))) => break,
+                        Ok(Some(Ok(_))) => {}
+                    },
+                }
+            }
+            let _ = device_id;
+        };
+        served.await;
+        // Whatever way it left, the receiver goes first and then the count is told.
+        drop(receiver);
+        shared.counter.presence(shared.connected());
     })
 }
 
