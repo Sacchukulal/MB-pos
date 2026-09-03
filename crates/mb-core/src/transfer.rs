@@ -49,7 +49,7 @@ pub fn take_lines(from: &mut Portion, picks: &[Pick]) -> Result<Portion> {
 
     // Highest index first, so removing a line cannot shift the ones still to be taken.
     let mut ordered: Vec<Pick> = picks.to_vec();
-    ordered.sort_unstable_by(|a, b| b.index.cmp(&a.index));
+    ordered.sort_unstable_by_key(|pick| std::cmp::Reverse(pick.index));
     if ordered
         .windows(2)
         .any(|pair| pair[0].index == pair[1].index)

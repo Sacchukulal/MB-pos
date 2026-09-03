@@ -94,7 +94,7 @@ pub fn search_usual_places(extra: &[PathBuf]) -> Vec<FoundDatabase> {
             found.push(db);
         }
     }
-    found.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    found.sort_by_key(|db| std::cmp::Reverse(db.modified_ms));
     found
 }
 

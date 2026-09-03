@@ -785,9 +785,9 @@ fn fit_columns(columns: &[Column], width: usize) -> Vec<usize> {
         })
         .collect();
 
-    if fills > 0 {
-        let spare = width.saturating_sub(fixed);
-        let each = spare / fills;
+    let spare = width.saturating_sub(fixed);
+    // `checked_div` is the "are there any fill columns" test: none means nothing to share.
+    if let Some(each) = spare.checked_div(fills) {
         let mut left_over = spare % fills;
         for (w, c) in widths.iter_mut().zip(columns) {
             if matches!(c.width, Width::Fill) {

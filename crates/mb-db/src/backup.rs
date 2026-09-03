@@ -617,7 +617,7 @@ fn verify_structure(path: &Path) -> Result<bool, DbError> {
 pub fn prune(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, DbError> {
     let mut backups = list(dir)?;
     // Newest first.
-    backups.sort_by(|a, b| b.manifest.taken_at_ms.cmp(&a.manifest.taken_at_ms));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.manifest.taken_at_ms));
     let mut pruned = Vec::new();
     for backup in backups.into_iter().skip(keep.max(1)) {
         let _ = std::fs::remove_file(backup.manifest_path());
@@ -651,7 +651,7 @@ pub fn list(dir: &Path) -> Result<Vec<Backup>, DbError> {
             out.push(Backup { path, manifest });
         }
     }
-    out.sort_by(|a, b| a.manifest.taken_at_ms.cmp(&b.manifest.taken_at_ms));
+    out.sort_by_key(|b| b.manifest.taken_at_ms);
     Ok(out)
 }
 
