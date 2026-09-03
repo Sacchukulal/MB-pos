@@ -23,6 +23,17 @@ const STEPS = [
 /** `code` is a screen without a dot, and that is deliberate. */
 type StepId = (typeof STEPS)[number]['id'] | 'code';
 
+/**
+ * The step after the PIN: a shop that already has items is not asked for items, and one that
+ * already has tables is not asked for tables — a seeded or restored shop goes straight to the
+ * printer.
+ */
+function stepAfterPin(view: FirstRunView | null): StepId {
+  if (view && view.hasItems && view.hasTables) return 'printer';
+  if (view && view.hasItems) return 'tables';
+  return 'menu';
+}
+
 export function FirstRun({ onDone }: { onDone: () => void }) {
   const [view, setView] = useState<FirstRunView | null>(null);
   const [step, setStep] = useState<StepId>('shop');
@@ -85,7 +96,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         setView(fresh);
         // Somebody who already has a shop and a name lands where they left off rather than
         // being asked again.
-        if (fresh.hasShop && fresh.hasDetails && fresh.hasPin) setStep('menu');
+        if (fresh.hasShop && fresh.hasDetails && fresh.hasPin) setStep(stepAfterPin(fresh));
         else if (fresh.hasShop && fresh.hasDetails) setStep('pin');
         else if (fresh.hasShop) setStep('details');
       })
@@ -236,7 +247,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         // Sign them in with the PIN they just chose.
         return call('login', { staffId: id, pin })
           .catch(() => undefined)
-          .then(() => setStep(code ? 'code' : 'menu'));
+          .then(() => setStep(code ? 'code' : stepAfterPin(view)));
       })
       .catch(complain)
       .finally(() => setBusy(false));
@@ -599,7 +610,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               <Button
                 variant="primary"
                 disabled={!wroteItDown}
-                onClick={() => setStep('menu')}
+                onClick={() => setStep(stepAfterPin(view))}
               >
                 Next
               </Button>
@@ -670,7 +681,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
             {/* One button, because there is only one outcome. */}
             <div className="mb-firstrun__actions">
-              <Button variant="primary" onClick={() => setStep('tables')}>
+              <Button variant="primary" onClick={() => setStep(view.hasTables ? 'printer' : 'tables')}>
                 {added.length > 0 ? 'Next' : 'Skip this — next'}
               </Button>
             </div>

@@ -1,42 +1,28 @@
-/** The fourth sink. */
+/**
+ * The paper, on the screen.
+ *
+ * For the graphics engine the preview IS the printer's raster — every dot Rust would send the
+ * printer, drawn on one canvas at a whole or half number of dots per screen pixel, black ink on
+ * white paper. There is no second renderer: no font, no cap-height ratio, nothing this file
+ * works out for itself.
+ *
+ * The text engine prints with the printer's own ROM font, which no screen has, so its preview is
+ * the structured list of rows Rust laid out, drawn in a monospace face at the row heights the
+ * printer spends — an honest approximation, and the caption says so.
+ */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { PreviewDoc } from '../ipc/generated/PreviewDoc';
 import type { PreviewLine } from '../ipc/generated/PreviewLine';
-import type { PreviewBandLine } from '../ipc/generated/PreviewBandLine';
+import type { PreviewRaster } from '../ipc/generated/PreviewRaster';
 
 import './receipt.css';
 
-// How tall a capital is, as a fraction of the font size.
-
-export function Receipt({
-  doc,
-  font,
-}: {
-  doc: PreviewDoc;
-  /**
-   * The typeface the printer will use, as a Windows family name — so the preview is in the face
-   * the paper will be.
-   */
-  font?: string;
-}) {
+export function Receipt({ doc }: { doc: PreviewDoc }) {
   return (
-    // No monospace/proportional branch any more.
     <div className="mb-receipt">
-      <div
-        className="mb-receipt__paper"
-        aria-label="Preview of the printed bill"
-        // The two numbers the whole page is drawn from, both out of Rust.
-        style={{ /* mb-tokens-allow: the paper's own dot count and the shop's chosen face, both named by Rust */
-          ['--receipt-dots' as string]: doc.dots,
-          ...(font ? { fontFamily: `${font}, monospace` } : {}),
-        }}
-      >
-        {doc.lines.map((line, index) => (
-          <Line key={index} line={line} />
-        ))}
-      </div>
+      {doc.raster ? <Paper raster={doc.raster} /> : <RomPaper doc={doc} />}
       <p className="mb-receipt__length">
         {doc.millimetres} mm of paper · {doc.columns} characters across ·{' '}
         {doc.engine === 'text' ? "the printer's own font" : 'graphics'}
@@ -48,6 +34,126 @@ export function Receipt({
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+/** Dots per screen pixel when nothing has been measured yet, or nothing can be. */
+const DEFAULT_DOTS_PER_PIXEL = 2;
+
+/** The coarsest the paper is ever drawn; beyond this a bill is a grey smudge. */
+const COARSEST_DOTS_PER_PIXEL = 8;
+
+/**
+ * How many printer dots one screen pixel stands for, so that the paper fits in `available`
+ * pixels — always a whole number or a half, never a fraction, so a one-dot rule is never
+ * smeared across two pixels at partial strength and a two-dot bar is never lost.
+ */
+export function dotsPerPixel(dots: number, available: number): number {
+  if (!(available > 0) || !(dots > 0)) return DEFAULT_DOTS_PER_PIXEL;
+  for (let ratio = 0.5; ratio <= COARSEST_DOTS_PER_PIXEL; ratio += 0.5) {
+    if (dots / ratio <= available) return ratio;
+  }
+  return COARSEST_DOTS_PER_PIXEL;
+}
+
+/** The base64 rows, back into bytes. */
+function unpack(bits: string): Uint8Array {
+  const text = atob(bits);
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) out[i] = text.charCodeAt(i);
+  return out;
+}
+
+/** A `#rrggbb` token value as three channels; `fallback` when the token cannot be read. */
+function channels(value: string, fallback: [number, number, number]): [number, number, number] {
+  const hex = value.trim().replace('#', '');
+  if (hex.length !== 6) return fallback;
+  const n = Number.parseInt(hex, 16);
+  if (Number.isNaN(n)) return fallback;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** The printer's raster, dot for dot. */
+function Paper({ raster }: { raster: PreviewRaster }) {
+  const frame = useRef<HTMLDivElement | null>(null);
+  const canvas = useRef<HTMLCanvasElement | null>(null);
+  const [ratio, setRatio] = useState(DEFAULT_DOTS_PER_PIXEL);
+
+  // How much room the paper has, and again whenever that changes.
+  useLayoutEffect(() => {
+    const target = frame.current;
+    if (!target) return undefined;
+    const measure = () => setRatio(dotsPerPixel(raster.width, target.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [raster.width]);
+
+  // The dots.
+  useEffect(() => {
+    const target = canvas.current;
+    if (!target || raster.width === 0 || raster.height === 0) return;
+    const context = target.getContext('2d');
+    if (!context) return;
+    // The paper's two colours are the two print tokens — never the theme's.
+    const style = getComputedStyle(target);
+    const ink = channels(style.getPropertyValue('--print-ink'), [0, 0, 0]);
+    const paper = channels(style.getPropertyValue('--print-paper'), [255, 255, 255]);
+    const bytes = unpack(raster.bits);
+    const stride = Math.ceil(raster.width / 8);
+    const image = context.createImageData(raster.width, raster.height);
+    for (let y = 0; y < raster.height; y += 1) {
+      for (let x = 0; x < raster.width; x += 1) {
+        const byte = bytes[y * stride + (x >> 3)] ?? 0;
+        const on = (byte >> (7 - (x & 7))) & 1;
+        const colour = on ? ink : paper;
+        const at = (y * raster.width + x) * 4;
+        image.data[at] = colour[0];
+        image.data[at + 1] = colour[1];
+        image.data[at + 2] = colour[2];
+        image.data[at + 3] = 255;
+      }
+    }
+    context.putImageData(image, 0, 0);
+  }, [raster]);
+
+  return (
+    <div ref={frame} className="mb-receipt__frame">
+      <canvas
+        ref={canvas}
+        className="mb-receipt__paper mb-receipt__paper--raster"
+        aria-label="Preview of the printed bill, exactly as the printer will draw it"
+        role="img"
+        width={raster.width}
+        height={raster.height}
+        data-dots-per-pixel={ratio}
+        // The paper's size on screen: its dots, at a whole or half number of dots a pixel.
+        style={{ /* mb-tokens-allow: printer dots into screen pixels, at the ratio chosen above */
+          width: `${raster.width / ratio}px`,
+          height: `${raster.height / ratio}px`,
+        }}
+      />
+    </div>
+  );
+}
+
+/** The text engine's paper: rows of the printer's own characters. */
+function RomPaper({ doc }: { doc: PreviewDoc }) {
+  return (
+    <div
+      className="mb-receipt__paper mb-receipt__paper--rom"
+      aria-label="Preview of the printed bill"
+      // The one number the page is drawn from, out of Rust.
+      style={{ /* mb-tokens-allow: the paper's own dot count, named by Rust */
+        ['--receipt-dots' as string]: doc.dots,
+      }}
+    >
+      {doc.lines.map((line, index) => (
+        <Line key={index} line={line} />
+      ))}
     </div>
   );
 }
@@ -70,9 +176,9 @@ function Line({ line }: { line: PreviewLine }) {
                 .join(' ')}
               // Every one of these is a dot count Rust computed.
               style={{ /* mb-tokens-allow: positions and sizes computed by Rust, not design values */
-                ['--at' as string]: line.indent + segmentStart(line, segment.width, index),
+                ['--at' as string]: line.indent + segmentStart(line, index),
                 ['--wide' as string]: segment.width * line.advance,
-                ['--cap' as string]: line.cap,
+                ['--tall' as string]: line.row,
               }}
             >
               {segment.text}
@@ -82,50 +188,24 @@ function Line({ line }: { line: PreviewLine }) {
       );
 
     case 'rule':
-      /* A drawn line, like the paper draws. */
+      /* The printer's own character, repeated — which is what the text engine prints. */
       return (
         <div className="mb-receipt__row" style={rows(line.row)}>
-          {Array.from({ length: line.strokes }, (_, stroke) => (
-            <span
-              key={stroke}
-              className="mb-receipt__rule"
-              style={{ /* mb-tokens-allow: rule geometry computed by Rust */
-                ['--at' as string]: line.indent,
-                ['--wide' as string]: line.width,
-                ['--thick' as string]: line.thickness,
-                ['--stroke' as string]: stroke * (line.thickness + line.gap),
-                ['--strokes' as string]:
-                  line.strokes * line.thickness + (line.strokes - 1) * line.gap,
-                ...(line.dash
-                  ? { ['--on' as string]: line.dash[0], ['--off' as string]: line.dash[1] }
-                  : {}),
-              }}
-              data-dashed={line.dash ? 'yes' : undefined} // mb-tokens-allow: the rule style Rust laid out
-            />
-          ))}
-        </div>
-      );
-
-    case 'logo':
-      return (
-        <div className="mb-receipt__row" style={rows(line.row)}>
-          <Dots line={line} />
-        </div>
-      );
-
-    case 'band':
-      /* The letterhead — a logo and the shop's name side by side. */
-      return (
-        <div className="mb-receipt__row" style={rows(line.row)}>
-          {line.image.kind === 'logo' ? <Dots line={line.image} /> : null}
-          {line.lines.map((text, index) => (
-            <BandText key={index} line={text} />
-          ))}
+          <span
+            className="mb-receipt__box mb-receipt__box--left"
+            style={{ /* mb-tokens-allow: the rule's place and width in printer dots */
+              ['--at' as string]: line.indent,
+              ['--wide' as string]: line.glyphs.length * line.advance,
+              ['--tall' as string]: line.row,
+            }}
+          >
+            {line.glyphs}
+          </span>
         </div>
       );
 
     case 'qr':
-      /* The square at the size the printer will make it. */
+      /* The printer draws the square; this is its size. */
       return (
         <div className="mb-receipt__row" style={rows(line.row)}>
           <span
@@ -166,93 +246,8 @@ function Line({ line }: { line: PreviewLine }) {
   }
 }
 
-/** The real dots, at the size they will print. */
-function Dots({
-  line,
-}: {
-  line: Extract<PreviewLine, { kind: 'logo' }>;
-}) {
-  const canvas = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const target = canvas.current;
-    if (!target || !line.ink || line.width === 0 || line.height === 0) return;
-    target.width = line.width;
-    target.height = line.height;
-    const context = target.getContext('2d');
-    if (!context) return;
-    const image = context.createImageData(line.width, line.height);
-    for (let i = 0; i < line.ink.length; i += 1) {
-      const on = line.ink[i] === 1;
-      const at = i * 4;
-      // Ink is black on white — the paper's colours, not the theme's, because this is a picture
-      // of paper.
-      image.data[at] = on ? 0 : 255;
-      image.data[at + 1] = on ? 0 : 255;
-      image.data[at + 2] = on ? 0 : 255;
-      image.data[at + 3] = on ? 255 : 0;
-    }
-    context.putImageData(image, 0, 0);
-  }, [line.ink, line.width, line.height]);
-
-  if (!line.ink) {
-    /*
-     * A logo that will not read does not print, and the preview says the same thing rather than
-     * drawing a picture that is not there.
-     */
-    return (
-      <span
-        className="mb-receipt__nologo"
-        style={{ ['--at' as string]: line.left }} /* mb-tokens-allow: a position in printer dots */
-      >
-        (your logo could not be read)
-      </span>
-    );
-  }
-
-  return (
-    <canvas
-      ref={canvas}
-      className="mb-receipt__logo"
-      style={{ /* mb-tokens-allow: the picture's real place on the paper, in dots */
-        ['--at' as string]: line.left,
-        ['--wide' as string]: line.width,
-        ['--tall' as string]: line.height,
-        ['--down' as string]: line.indent,
-      }}
-    />
-  );
-}
-
-function BandText({ line }: { line: PreviewBandLine }) {
-  return (
-    <span
-      className={[
-        'mb-receipt__box',
-        `mb-receipt__box--${line.align}`,
-        line.bold ? 'mb-receipt__box--bold' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      style={{ /* mb-tokens-allow: a letterhead line, placed by Rust */
-        ['--at' as string]: line.left,
-        ['--wide' as string]: line.width,
-        ['--cap' as string]: line.cap,
-        ['--down' as string]: line.top,
-        ['--tall' as string]: line.row,
-      }}
-    >
-      {line.text}
-    </span>
-  );
-}
-
 /** Where a box starts, in dots. */
-function segmentStart(
-  line: Extract<PreviewLine, { kind: 'text' }>,
-  _width: number,
-  index: number,
-): number {
+function segmentStart(line: Extract<PreviewLine, { kind: 'text' }>, index: number): number {
   let at = 0;
   for (let i = 0; i < index; i += 1) {
     at += (line.segments[i]?.width ?? 0) * line.advance;

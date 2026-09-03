@@ -387,6 +387,45 @@ fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
     }
 }
 
+/// Five faces, named as a Windows user knows them.
+#[test]
+fn the_typefaces_are_five_plain_family_names() {
+    use super::catalog::FONTS;
+
+    let offered: Vec<&str> = FONTS.iter().map(|c| c.value).collect();
+    assert_eq!(offered, ["builtin", "consolas", "courier", "arial", "verdana"]);
+    for choice in FONTS {
+        assert!(
+            !choice.label.contains(" — "),
+            "{:?} carries an explainer",
+            choice.label
+        );
+    }
+}
+
+/// A file written by an older build names a face that left the list; the import maps it the
+/// way the database does, rather than refusing the whole file.
+#[test]
+fn an_import_file_with_an_old_typeface_is_mapped_not_refused() {
+    let current = ShopConfig::default();
+    let mut file = std::collections::BTreeMap::new();
+    file.insert(
+        "receipt.font".to_owned(),
+        serde_json::Value::String("calibri".to_owned()),
+    );
+    file.insert(
+        "kitchen.font".to_owned(),
+        serde_json::Value::String("consolas_bold".to_owned()),
+    );
+
+    let (wanted, plan) = super::plan_import(&current, &file);
+    assert!(plan.is_usable(), "{:?}", plan.problems);
+    assert_eq!(wanted.receipt.font, "arial");
+    assert_eq!(wanted.kitchen.font, "consolas");
+    assert_eq!(plan.changes.len(), 2);
+    assert!(plan.changes.iter().any(|c| c.after == "arial"));
+}
+
 /// Ten sizes, numbered 1 to 10, and nothing else on the label.
 #[test]
 fn the_text_sizes_are_plain_numbers() {

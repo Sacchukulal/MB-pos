@@ -25,6 +25,10 @@ pub struct FirstRunView {
     pub has_details: bool,
     /// True once somebody has a PIN.
     pub has_pin: bool,
+    /// True once the menu has an item — the wizard does not ask for what is already there.
+    pub has_items: bool,
+    /// True once the room has a table.
+    pub has_tables: bool,
     /// Where the shop's data file is, once there is one.
     pub shop_path: String,
     /// Other databases already on this computer.
@@ -46,6 +50,8 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
             has_shop: false,
             has_details: false,
             has_pin: false,
+            has_items: false,
+            has_tables: false,
             shop_path: String::new(),
             // Every database already on this computer, described.
             found: mb_db::locate::search_usual_places(&[])
@@ -69,24 +75,32 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
     // A shop is open.
     let config = app.shop_config();
     let has_details = !config.store.name.trim().is_empty();
-    let has_pin = app
+    // One read for the three facts the wizard skips steps on: a PIN, items, tables.
+    let (has_pin, has_items, has_tables) = app
         .with_shop(|shop| {
             shop.db
                 .transaction(|tx| {
-                    mb_db::Repos::new(tx)
-                        .people()
-                        .list_staff(crate::state::OUTLET)
+                    let repos = mb_db::Repos::new(tx);
+                    let people = repos.people().list_staff(crate::state::OUTLET)?;
+                    let items = repos.menu().list_items(crate::state::OUTLET, false)?;
+                    let tables = repos.floor().list_tables(crate::state::OUTLET)?;
+                    Ok((
+                        people.iter().any(|p| p.pin_hash.is_some()),
+                        !items.is_empty(),
+                        !tables.is_empty(),
+                    ))
                 })
                 .map_err(|e| crate::words::from_db(&e))
         })
-        .map(|people| people.iter().any(|p| p.pin_hash.is_some()))
-        .unwrap_or(false);
+        .unwrap_or((false, false, false));
 
     Ok(FirstRunView {
         needed: !(has_details && has_pin),
         has_shop: true,
         has_details,
         has_pin,
+        has_items,
+        has_tables,
         shop_path,
         found: Vec::new(),
         default_folder,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Badge, Button, Card, EmptyState, freshId, Input, Modal, MoneyInput, onlyAmount, PhoneInput, Select, Table, Tabs, useToast, type Column, InfoTip } from '../kit';
-import { call, isUiError } from '../ipc/call';
+import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import type { BuyingView } from '../ipc/generated/BuyingView';
 import type { BuyMaterialView } from '../ipc/generated/BuyMaterialView';
 import type { PurchaseLineEdit } from '../ipc/generated/PurchaseLineEdit';
@@ -55,6 +55,11 @@ export function Buying() {
         setRefused(null);
       })
       .catch((cause) => {
+        // The licence saying no is an answer, and it is already on the page — not a toast.
+        if (isLicenceRefusal(cause)) {
+          setRefused(cause.message);
+          return;
+        }
         if (isUiError(cause)) setRefused(cause.message);
         report(cause);
       });

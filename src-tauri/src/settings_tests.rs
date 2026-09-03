@@ -953,6 +953,57 @@ fn a_size_that_left_the_list_snaps_to_the_nearest_one_on_it() {
     }
 }
 
+/// A typeface that left the list still opens the shop, in the face nearest it — a shop must
+/// never fail to load over a font (audit B17).
+#[test]
+fn a_typeface_that_left_the_list_still_opens_and_reads_as_the_nearest_one() {
+    let scratch = Scratch::new("settings_legacy_font");
+    let app = a_shop(&scratch, "legacy_font");
+
+    // Exactly what is on disk in a shop that chose Lucida Console for the bill and Times for
+    // the ticket before today.
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let settings = Repos::new(tx).settings();
+                settings.set(
+                    OUTLET,
+                    "receipt.font",
+                    &"lucida".to_owned(),
+                    crate::flows::now(),
+                    None,
+                )?;
+                settings.set(
+                    OUTLET,
+                    "kitchen.font",
+                    &"times".to_owned(),
+                    crate::flows::now(),
+                    None,
+                )
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("the old rows");
+
+    let config = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| crate::settings::load(&Repos::new(tx), OUTLET))
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the settings load, rather than refusing the shop over a typeface");
+
+    assert_eq!(config.receipt.font, "consolas");
+    assert_eq!(config.kitchen.font, "verdana");
+    // And what it reads as is something the screen can show back and the printer can load.
+    for key in [&config.receipt.font, &config.kitchen.font] {
+        assert!(
+            mb_print::font::family(key).is_some(),
+            "{key} is not on the list"
+        );
+    }
+}
+
 /// Choosing 2 inch changes the paper the bill is laid out on.
 #[test]
 fn choosing_the_paper_width_relays_out_the_bill() {

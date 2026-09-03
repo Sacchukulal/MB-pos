@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Card, SectionHeader, Table, useToast, type BadgeTone, type Column,
+import { Badge, Button, Panel, Table, useToast, type BadgeTone, type Column,
   Icon,
   Page,
   PageHeader,
@@ -83,33 +83,30 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   return (
     <Page className="mb-health">
+      {/* The verdict is the header's fact line and its chip — not a box of its own. */}
       <PageHeader
         title="Health"
+        subtitle={view.headline}
         actions={
-          <Button variant="secondary" onClick={load}>
-            <Icon name="refresh" size="sm" />
-            Check again
-          </Button>
+          <>
+            <Badge tone={TONES[view.tone] ?? 'neutral'}>{CHIPS[view.tone] ?? view.tone}</Badge>
+            <Button variant="secondary" onClick={load}>
+              <Icon name="refresh" size="sm" />
+              Check again
+            </Button>
+          </>
         }
       />
 
-      <Card>
-        <div className="mb-health__top mb-row">
-          <p className="mb-health__headline">{view.headline}</p>
-          <Badge tone={TONES[view.tone] ?? 'neutral'}>{CHIPS[view.tone] ?? view.tone}</Badge>
-        </div>
-      </Card>
-
-      <Card>
+      <Panel flush>
         <Table columns={columns} rows={[...view.rows]} rowKey={(row) => row.id} />
-      </Card>
+      </Panel>
 
       {/* The manifest before the zip. */}
-      <Card>
-        <SectionHeader
-          title="Send us what is happening"
-          note="If something above will not come right, this is what we need to look at it."
-        />
+      <Panel
+        title="Send us what is happening"
+        note="If something above will not come right, this is what we need to look at it."
+      >
         {plan ? (
           <>
             <ul className="mb-health__bundle">
@@ -169,7 +166,7 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             </Button>
           </div>
         )}
-      </Card>
+      </Panel>
     </Page>
   );
 }

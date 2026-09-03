@@ -14,6 +14,7 @@ import {
   Modal,
   MoneyInput,
   NumberInput,
+  Panel,
   PhoneInput,
   plural,
   SaveBar,
@@ -377,7 +378,13 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
                 onClear={() => onSearch('')}
               />
             ) : active ? (
-              <div className="mb-stack">
+              /*
+               * ONE bordered panel for the whole section. Every card inside it is a group
+               * (heading + hairline), which is what the kit does with a card in a panel — so
+               * the section reads as one form, not as a stack of boxes.
+               */
+              <Panel className="mb-settings__form">
+              <div className="mb-sections">
                 {/* The paper, at the top, before anything else on this screen. */}
                 {SHOWS_PAPER.has(active.code) ? (
                   <PaperWidth
@@ -398,6 +405,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
                 ) : null}
                 {OWN_SCREEN[active.code]?.()}
               </div>
+              </Panel>
             ) : (
               <EmptyState
                 title="Nothing here for you"
@@ -648,14 +656,8 @@ function Paper({
       <Scroller inset className="mb-settings__paperroll">
         {preview ? (
           <>
-            {/*
-              In the face the paper will be, and — for a proportional one — laid out by the
-              layout's own boxes.
-            */}
-            <Receipt
-              doc={preview.doc}
-              font={preview.font}
-            />
+            {/* The printer's own raster, dot for dot. */}
+            <Receipt doc={preview.doc} />
             {/*
               Half-typed is a normal state, and saying which box is not usable yet beats
               blanking the paper or shouting on every keystroke.
@@ -883,6 +885,19 @@ function Field({
             value={value}
             disabled={disabled}
             onChange={onChange}
+          />
+        );
+      /* A clock time — "05:00" — and Rust holds the minutes. */
+      case 'time':
+        return (
+          <Input
+            type="time"
+            label={inLine ? undefined : setting.label}
+            aria-label={setting.label}
+            hint={hint}
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange(event.currentTarget.value)}
           />
         );
       /* The shop's own number, and it is a phone like every other. */

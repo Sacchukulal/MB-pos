@@ -2,7 +2,7 @@
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
-use mb_core::{AnyOrder, BusinessDay, Money, OrderId, StaffId};
+use mb_core::{AnyOrder, Money, OrderId, StaffId};
 use mb_db::repo::corrections::{Reason, Refund};
 use serde::Serialize;
 use ts_rs::TS;
@@ -80,10 +80,7 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
                 // same way (`flows::table_name`); the list showed `tbl_15` until it did too.
                 let tables = repos.floor().list_tables(OUTLET)?;
                 let label_of = |id: &mb_core::TableId| {
-                    tables
-                        .iter()
-                        .find(|t| &t.id == id)
-                        .map(|t| t.label.clone())
+                    tables.iter().find(|t| &t.id == id).map(|t| t.label.clone())
                 };
 
                 let mut out = Vec::new();
@@ -223,10 +220,11 @@ pub fn void_bill_on(
         ));
     };
 
-    if day_is_closed(app, settled.core.business_day)? {
-        return Err(UiError::new(
+    if let Some(since) = crate::dayclose::locked_since(app, settled.core.business_day)? {
+        return Err(crate::dayclose::locked_refusal(
             "void.day_closed",
-            "That day has been closed. Record this as today's correction instead.",
+            since,
+            "void this bill",
         ));
     }
 
@@ -366,18 +364,6 @@ fn approve_if_needed(
         ));
     }
     Ok(())
-}
-
-fn day_is_closed(app: &App, day: BusinessDay) -> UiResult<bool> {
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                mb_db::Repos::new(tx)
-                    .corrections()
-                    .day_is_locked(OUTLET, day)
-            })
-            .map_err(|e| words::from_db(&e))
-    })
 }
 
 // Cancel an open order.
@@ -670,6 +656,14 @@ pub fn refund_on(
         return Err(UiError::new(
             "refund.amount",
             "Type how much is going back to the customer.",
+        ));
+    }
+    // A refund is money out of today's drawer, and a closed day takes none.
+    if let Some(since) = crate::dayclose::locked_since(app, day)? {
+        return Err(crate::dayclose::locked_refusal(
+            "refund.day_closed",
+            since,
+            "refund this",
         ));
     }
 

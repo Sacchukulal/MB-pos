@@ -17,6 +17,8 @@ pub mod composition;
 pub mod corrections;
 /// The physical stock count, which freezes the book and posts a delta.
 pub mod counts;
+/// The business day: its lock, its kind and what it came to.
+pub mod days;
 pub mod delivery;
 pub mod devices;
 pub mod employment;
@@ -52,6 +54,7 @@ pub use buying::{
 pub use composition::{Combo, ComboPart, CompositionRepo, Modifier, ModifierGroup, Variant};
 pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
 pub use counts::{CountLine, CountRepo, CountState, StockCount, Written};
+pub use days::{DayFigures, DayKind, DayRow, DaysRepo};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
 pub use menucsv::{ImportPlan, MenuCsvRepo};
@@ -201,6 +204,12 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn counts(&self) -> CountRepo<'a> {
         CountRepo::new(self.tx)
+    }
+
+    /// The business day: the lock every money path checks, and what the day came to.
+    #[must_use]
+    pub fn days(&self) -> DaysRepo<'a> {
+        DaysRepo::new(self.tx)
     }
 
     /// The tills.

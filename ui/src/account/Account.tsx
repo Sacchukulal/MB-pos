@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, Input, Modal, SectionHeader, useToast, type BadgeTone,
   Page,
   PageHeader,
+  Panel,
+  Sections,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
@@ -71,7 +73,10 @@ export function Account() {
         title="Account"
       />
 
-      {/* The state of things, in one card. */}
+      {/* One bordered panel; each card inside it is a group parted by a hairline. */}
+      <Panel>
+      <Sections>
+      {/* The state of things, in one group. */}
       <Card>
         <div className="mb-account__top mb-row">
           <div className="mb-account__who">
@@ -241,6 +246,8 @@ export function Account() {
           </Button>
         </div>
       </Card>
+      </Sections>
+      </Panel>
 
       {/* The dialogs. */}
 

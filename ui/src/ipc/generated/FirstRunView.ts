@@ -21,6 +21,14 @@ hasDetails: boolean,
  */
 hasPin: boolean, 
 /**
+ * True once the menu has an item — the wizard does not ask for what is already there.
+ */
+hasItems: boolean, 
+/**
+ * True once the room has a table.
+ */
+hasTables: boolean, 
+/**
  * Where the shop's data file is, once there is one.
  */
 shopPath: string, 

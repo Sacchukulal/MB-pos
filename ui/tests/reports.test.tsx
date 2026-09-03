@@ -72,6 +72,19 @@ function answer(command: string) {
     });
   }
   if (command === 'report') return Promise.resolve(invented);
+  if (command === 'days') {
+    return Promise.resolve({
+      today: '2026-08-09',
+      todaySays: 'Today, Sunday 9 August',
+      todayState: 'open',
+      todayClosedSays: '',
+      mayAct: true,
+      carrySays: '',
+      days: [],
+      upcoming: [],
+      mayPlanHoliday: true,
+    });
+  }
   if (command === 'report_csv' || command === 'report_pdf') {
     return Promise.resolve({
       path: 'C:/Users/x/Documents/Magic Bill reports/Wastage.csv',
@@ -194,4 +207,16 @@ it('says why, on the screen, when the licence does not cover reports', async () 
   // And the way out is on the same screen, not somewhere they have to find.
   fireEvent.click(screen.getByRole('button', { name: 'Open Account' }));
   expect(go).toHaveBeenCalledWith('account');
+});
+
+it('puts the days beside the dashboard, and opens them without asking for a report', async () => {
+  open();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Days' })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Days' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
+  // Today's state is the subtitle, and its one press is right there.
+  await waitFor(() => expect(screen.getByText('Today, Sunday 9 August')).toBeTruthy());
+  expect(screen.getByRole('button', { name: 'Close today' })).toBeTruthy();
+  // The old entry is gone with the old model.
+  expect(screen.queryByRole('button', { name: 'Close the day' })).toBeNull();
 });

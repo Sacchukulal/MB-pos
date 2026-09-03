@@ -11,7 +11,6 @@ import {
   Input,
   Modal,
   MoneyInput,
-  Notice,
   Page,
   PageHeader,
   Panel,
@@ -20,7 +19,6 @@ import {
   Select,
   Stack,
   Table,
-  Toolbar,
   useToast,
   type BadgeTone,
   type Column,
@@ -245,18 +243,12 @@ export function Delivery() {
 
   return (
     <Page className="mb-delivery">
+      {/* The day and the money on the road are the header's fact line, not a box each. */}
       <PageHeader
         title="Delivery"
         count={view.deliveries.length}
+        subtitle={`${view.day} · ${view.says}`}
       />
-
-      <Toolbar>
-        <span className="mb-delivery__day">{view.day}</span>
-      </Toolbar>
-
-      <Notice tone={view.carrying.paise > 0 ? 'warn' : 'ok'} icon="bike">
-        {view.says}
-      </Notice>
 
       <Sections>
         <Panel title="Out today" flush>

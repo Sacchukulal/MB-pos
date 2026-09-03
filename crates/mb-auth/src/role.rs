@@ -124,12 +124,15 @@ impl RolePreset {
                 .filter(|p| !matches!(p, Permission::StaffManage | Permission::BackupRun))
                 .collect(),
 
+            // A cashier opens the shop, so a cashier must be able to close the day that was left
+            // open — the gate at sign-in is passable by whoever is standing there.
             RolePreset::Cashier => [
                 Permission::BillCreate,
                 Permission::BillDiscountLine,
                 Permission::BillReprint,
                 Permission::DrawerOpen,
                 Permission::CreditCollect,
+                Permission::DayClose,
             ]
             .into_iter()
             .collect(),
@@ -180,6 +183,24 @@ mod tests {
         assert!(!waiter.permissions.has(Permission::DrawerOpen));
         assert!(!waiter.permissions.has(Permission::ReportsView));
         assert_eq!(waiter.permissions.len(), 1);
+    }
+
+    /// Whoever opens the shop in the morning meets the gate for a day left open, and a cashier
+    /// opens the shop.
+    #[test]
+    fn a_cashier_can_close_the_day_the_gate_asks_about() {
+        assert!(
+            RolePreset::Cashier
+                .shape()
+                .permissions
+                .has(Permission::DayClose)
+        );
+        assert!(
+            !RolePreset::Waiter
+                .shape()
+                .permissions
+                .has(Permission::DayClose)
+        );
     }
 
     #[test]

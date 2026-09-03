@@ -49,9 +49,14 @@ pub mod action {
     pub const SETTING_CHANGED: AuditAction = "setting.changed";
     pub const COUNTER_CHANGED: AuditAction = "counter.changed";
     pub const DRAWER_OPENED: AuditAction = "drawer.opened";
+    /// A business day was closed and locked.
     pub const DAY_CLOSED: AuditAction = "day.closed";
     /// A locked day was opened again.
     pub const DAY_REOPENED: AuditAction = "day.reopened";
+    /// A day the shop was shut, marked so — or unmarked.
+    pub const DAY_HOLIDAY: AuditAction = "day.holiday";
+    /// One till counted its drawer.
+    pub const DRAWER_COUNTED: AuditAction = "drawer.counted";
     /// A phone was let onto the counter, or taken off it.
     pub const DEVICE_PAIRED: AuditAction = "device.paired";
     pub const DEVICE_REVOKED: AuditAction = "device.revoked";
@@ -156,6 +161,8 @@ pub mod action {
         DRAWER_OPENED,
         DAY_CLOSED,
         DAY_REOPENED,
+        DAY_HOLIDAY,
+        DRAWER_COUNTED,
         DEVICE_PAIRED,
         DEVICE_REVOKED,
         INTENT_APPLIED,
@@ -237,6 +244,8 @@ pub mod action {
             DRAWER_OPENED => "Opened the cash drawer",
             DAY_CLOSED => "Closed the day",
             DAY_REOPENED => "Opened a closed day again",
+            DAY_HOLIDAY => "Marked a day a holiday",
+            DRAWER_COUNTED => "Counted the drawer",
             DEVICE_PAIRED => "Added a phone to the counter",
             DEVICE_REVOKED => "Removed a phone from the counter",
             INTENT_APPLIED => "Changed an order from a phone",

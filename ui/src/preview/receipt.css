@@ -15,21 +15,47 @@
   container-type: inline-size;
 }
 
+/* The room the raster has: measured by the screen, and the dots-per-pixel chosen from it. */
+.mb-receipt__frame {
+  width: min(100cqw, var(--panel-width));
+  min-width: 0;
+}
+
+/* Paper: white, and black ink, in both themes. */
 .mb-receipt__paper {
+  margin: 0;
+  background: var(--print-paper);
+  color: var(--print-ink);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+/*
+ * The printer's raster, one canvas. Shown at a whole or half number of dots a pixel. Where a
+ * pixel holds more than one dot the browser averages them — the paper seen from a step back,
+ * which is how a receipt is read; at one dot a pixel or larger every dot is a dot.
+ */
+.mb-receipt__paper--raster {
+  display: block;
+  image-rendering: auto;
+  box-sizing: content-box;
+}
+
+.mb-receipt__paper--raster[data-dots-per-pixel='0.5'],
+.mb-receipt__paper--raster[data-dots-per-pixel='1'] {
+  image-rendering: pixelated;
+}
+
+/* The text engine's paper: rows of the printer's own characters, in a monospace face. */
+.mb-receipt__paper--rom {
   /* The one number the page is drawn from. */
   --receipt-paper: min(100cqw, var(--panel-width));
   --dot: calc(var(--receipt-paper) / var(--receipt-dots, 576));
 
   position: relative;
   width: var(--receipt-paper);
-  margin: 0;
   padding: calc(var(--dot) * 16) 0;
-  /* White paper and black ink, in both themes. */
-  background: var(--print-paper);
-  color: var(--print-ink);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -47,17 +73,19 @@
   height: calc(var(--tall, 0) * var(--dot));
 }
 
-/* One aligned box, at the dots the layout put it at. */
+/*
+ * One aligned box, at the dots the layout put it at. The printer's own font fills its row —
+ * a 24-dot row is a 24-dot character cell — so the size IS the row, and no ratio is guessed.
+ */
 .mb-receipt__box {
   position: absolute;
   left: calc(var(--at, 0) * var(--dot));
-  top: calc(var(--down, 0) * var(--dot));
+  top: 0;
   width: calc(var(--wide, 0) * var(--dot));
   height: calc(var(--tall, 0) * var(--dot));
   display: flex;
   align-items: center;
-  /* The size the printer will draw, converted once. */
-  font-size: calc(var(--cap, 15) * var(--dot) / 0.72);
+  font-size: calc(var(--tall, 24) * var(--dot));
   /* It does not clip. */
   overflow: visible;
 }
@@ -76,50 +104,6 @@
 
 .mb-receipt__box--bold {
   font-weight: var(--weight-bold);
-}
-
-/* A rule is a rule. */
-.mb-receipt__rule {
-  position: absolute;
-  left: calc(var(--at, 0) * var(--dot));
-  width: calc(var(--wide, 0) * var(--dot));
-  height: calc(var(--thick, 1) * var(--dot));
-  /*
-   * Centred in its row, and the strokes stacked from there — the same arithmetic
-   * `RasterSink::draw_rule` does.
-   */
-  top: calc(
-    (var(--tall, 0) - var(--strokes, 1)) * var(--dot) / 2 + var(--stroke, 0) * var(--dot)
-  );
-  background: currentColor;
-}
-
-.mb-receipt__rule[data-dashed='yes'] { /* mb-tokens-allow: the paper rule Rust asked for, dashed or solid */
-  background: repeating-linear-gradient(
-    to right,
-    currentColor 0,
-    currentColor calc(var(--on, 6) * var(--dot)),
-    transparent calc(var(--on, 6) * var(--dot)),
-    transparent calc((var(--on, 6) + var(--off, 4)) * var(--dot))
-  );
-}
-
-/* The shop's own logo, at the size it will print. */
-.mb-receipt__logo {
-  position: absolute;
-  left: calc(var(--at, 0) * var(--dot));
-  top: calc(var(--down, 0) * var(--dot));
-  width: calc(var(--wide, 0) * var(--dot));
-  height: calc(var(--tall, 0) * var(--dot));
-  image-rendering: pixelated;
-}
-
-.mb-receipt__nologo {
-  position: absolute;
-  left: calc(var(--at, 0) * var(--dot));
-  /* On the paper, so it takes the paper's ink. */
-  color: var(--print-ink);
-  font-size: var(--text-sm);
 }
 
 /* The QR square, at the size the printer's own encoder will make it. */

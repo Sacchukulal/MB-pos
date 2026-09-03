@@ -808,17 +808,11 @@ pub fn cancel_purchase_on(app: &App, id: String, reason: String) -> UiResult<Buy
                     )));
                 };
                 // The day lock has a door, not a back door.
-                if repos
-                    .corrections()
-                    .day_is_locked(OUTLET, purchase.business_day)?
-                {
-                    return Ok(Err(UiError::new(
+                if let Some(since) = repos.days().locked_at(OUTLET, purchase.business_day)? {
+                    return Ok(Err(crate::dayclose::locked_refusal(
                         "purchase.day_locked",
-                        format!(
-                            "{} has been closed and locked. Reopen that day first \
-                             (Reports → Day close), then cancel this.",
-                            purchase.business_day
-                        ),
+                        since,
+                        "cancel this",
                     )));
                 }
                 repos.buying().cancel_purchase(

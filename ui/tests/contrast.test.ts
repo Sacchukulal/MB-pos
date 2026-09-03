@@ -80,7 +80,7 @@ describe('every theme is readable (T6, UI_GUIDELINES §2)', () => {
   const all = themes();
 
   it('finds the themes at all, so a broken parse cannot pass', () => {
-    expect([...all.keys()].sort()).toEqual(['contrast', 'dark', 'light']);
+    expect([...all.keys()].sort()).toEqual(['dark', 'light']);
     for (const [name, tokens] of all) {
       expect(tokens.size, `${name} has no tokens`).toBeGreaterThan(15);
     }

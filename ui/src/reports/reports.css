@@ -117,9 +117,9 @@
   line-height: var(--line-normal);
 }
 
-/* Closing the day. */
+/* The days, and the drawer count beside them. */
 
-.mb-dayclose {
+.mb-days {
   /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;

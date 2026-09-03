@@ -1,36 +1,22 @@
 /** How it looks. */
 
-import { Card, Radio, SectionHeader } from '../kit';
+import { Radio, SectionHeader } from '../kit';
 import { useTheme } from '../theme/ThemeProvider';
-import { TEXT_SIZES, THEMES } from '../theme/themes';
+import { TEXT_SIZES } from '../theme/themes';
 
+/*
+ * Text size only. Light and dark are the sun and moon button in the title bar — one place to
+ * change the theme, not two (owner, 2026-09-03).
+ */
 export function Appearance() {
-  const { theme, textSize, setTheme, setTextSize } = useTheme();
+  const { textSize, setTextSize } = useTheme();
 
   return (
     <div className="mb-appearance">
-      <Card>
-        <SectionHeader
-          title="Theme"
-          note="Changes as soon as you choose it. The sun and moon button in the title bar flips between light and dark."
-        />
-        <div className="mb-appearance__choices">
-          {THEMES.map((option) => (
-            <Radio
-              key={option.id}
-              name="mb-theme"
-              label={option.name}
-              checked={theme.id === option.id}
-              onChange={() => setTheme(option.id)}
-            />
-          ))}
-        </div>
-      </Card>
-
-      <Card>
+      <div className="mb-settings__topic">
         <SectionHeader
           title="Text size"
-          note="Scales the whole app, including the receipt preview. Audit F9: many owners are 50+ and the counter screen is across a desk."
+          note="Scales the whole app, including the receipt preview. Changes as soon as you choose it."
         />
         <div className="mb-appearance__choices">
           {TEXT_SIZES.map((option) => (
@@ -43,7 +29,7 @@ export function Appearance() {
             />
           ))}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

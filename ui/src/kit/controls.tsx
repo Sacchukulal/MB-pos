@@ -26,11 +26,16 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
   /** An icon and nothing else: square, and `title` is compulsory. */
   iconOnly?: boolean;
+  /**
+   * A pressable row in a list — a person on the lock screen, a section in a rail. May hold two
+   * lines; its height comes from its words.
+   */
+  list?: boolean;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   function Button(
-    { variant = 'secondary', size = 'md', wide, icon, iconOnly, children, className, ...rest },
+    { variant = 'secondary', size = 'md', wide, icon, iconOnly, list, children, className, ...rest },
     ref,
   ) {
     const classes = cx(
@@ -39,6 +44,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       size !== 'md' && `mb-button--${size}`,
       wide && 'mb-button--wide',
       iconOnly && 'mb-button--icon',
+      list && 'mb-button--list',
       className,
     );
     return (
@@ -87,6 +93,8 @@ function FieldShell({ label, hint, error, children }: FieldShellProps) {
 
 export interface InputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'id'> {
+  /** The box itself, for a caller that has to focus it — the Cash button on the till. */
+  ref?: Ref<HTMLInputElement>;
   label?: string;
   hint?: string;
   error?: string;

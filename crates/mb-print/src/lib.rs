@@ -2,6 +2,7 @@
 
 #![deny(missing_debug_implementations)]
 
+pub mod codes;
 pub mod doc;
 pub mod drawer;
 pub mod error;
@@ -34,8 +35,10 @@ pub use metrics::{Metrics, SizeMetrics};
 pub use paper::{Offset, Paper, PaperKind};
 pub use pdf::to_pdf;
 pub use printer::{Capabilities, Engine, PrinterConfig, Role, Target, nudge};
-pub use queue::{Job, JobKind, JobState, JobStatus, Queue, QueueConfig, QueueEvent};
-pub use raster::{Raster, to_raster};
+pub use queue::{
+    Drawing, Job, JobKind, JobState, JobStatus, Queue, QueueConfig, QueueEvent, drawing_for,
+};
+pub use raster::{Raster, RasterOptions, to_raster};
 pub use render::{Call, Recorder, Sink, render};
 pub use routing::{PrinterMode, RoutingTable, TicketStyle, route};
 pub use settings::{KitchenSettings, ReceiptSettings};

@@ -38,6 +38,13 @@ mb-db = { path = "../mb-db" }
 # against S4's 20 MB installer budget.
 fontdue = { version = "0.9", default-features = false }
 
+# The QR encoder, for the two places the printer's own `GS ( k` cannot reach: the on-screen
+# preview, which is the printer's raster and has no encoder of its own, and a printer without
+# one. Already compiled into the binary behind `mb-lan` (the pairing code), so it adds no new
+# code — the same argument `src-tauri` makes for `base64`. `default-features = false` drops
+# its image and SVG renderers; this crate draws the modules itself.
+qrcode = { version = "0.14", default-features = false }
+
 # P07's two OS transports, and the only crate in this workspace that may say
 # `unsafe` (D34). Windows only; everything else here builds and tests without
 # it, which is why the queue tests all run against the File transport.

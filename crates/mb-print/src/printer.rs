@@ -42,6 +42,17 @@ pub enum Engine {
     Text,
 }
 
+impl Engine {
+    /// The word the screen and the log use — `raster` or `text`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Engine::Raster => "raster",
+            Engine::Text => "text",
+        }
+    }
+}
+
 /// What this printer is allowed to receive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

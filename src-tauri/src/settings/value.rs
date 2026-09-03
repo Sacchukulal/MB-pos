@@ -98,7 +98,12 @@ pub enum Kind {
     /// The id of one of the shop's tax slabs. The choices are the shop's own, read from the
     /// tax book when the screen is drawn, so they cannot be listed here.
     TaxClass,
+    /// A time of day. Held as minutes past midnight; shown and typed as a clock time.
+    Time,
 }
+
+/// Minutes in a day, for a `Kind::Time`.
+pub const MINUTES_IN_A_DAY: i64 = 24 * 60;
 
 impl Kind {
     /// The one gate. Everything that reaches a setting comes through here first, including an
@@ -162,6 +167,13 @@ impl Kind {
             Kind::TaxClass => {
                 if value.as_text()?.trim().is_empty() {
                     return Err(Invalid::new("Pick a tax slab."));
+                }
+                Ok(())
+            }
+            Kind::Time => {
+                let n = value.as_int()?;
+                if !(0..MINUTES_IN_A_DAY).contains(&n) {
+                    return Err(Invalid::new("That is not a time of day."));
                 }
                 Ok(())
             }

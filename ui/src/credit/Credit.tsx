@@ -21,7 +21,6 @@ import {
   Select,
   SideFold,
   Table,
-  Toolbar,
   useToast,
   type Column,
 } from '../kit';
@@ -131,16 +130,19 @@ export function Credit() {
         The rail already says Credit, so this screen opens with the two things you do on it:
         find somebody, and add somebody.
       */}
-      <PageHeader title="Credit" />
-      <Toolbar>
-        <div className="mb-credit__find">
-          <SearchField
-            value={find}
-            placeholder="Find a customer, or a number"
-            onChange={(event) => setFind(event.target.value)}
-          />
-        </div>
-      </Toolbar>
+      <PageHeader
+        title="Credit"
+        count={rows.length}
+        actions={
+          <div className="mb-credit__find">
+            <SearchField
+              value={find}
+              placeholder="Find a customer, or a number"
+              onChange={(event) => setFind(event.target.value)}
+            />
+          </div>
+        }
+      />
 
       <SideFold
         label={editing && editing.name !== '' ? editing.name : 'Add a customer'}

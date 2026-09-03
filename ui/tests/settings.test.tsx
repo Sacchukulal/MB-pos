@@ -160,18 +160,11 @@ beforeEach(() => {
           millimetres: 64,
           engine: 'raster',
           notes: [],
+          // No raster: the fixture is the text engine's shape, so the rows are drawn as rows.
+          raster: null,
           lines: [
             line('Anna Kuteera', { cap: 26, row: 40, advance: 22, scale: 2, bold: true }),
-            {
-              kind: 'rule',
-              indent: 0,
-              width: 576,
-              row: 9,
-              thickness: 1,
-              strokes: 1,
-              gap: 0,
-              dash: null,
-            },
+            { kind: 'rule', glyphs: '-'.repeat(48), indent: 0, row: 24, advance: 12 },
             line('Come back soon'),
           ],
         },
@@ -384,6 +377,7 @@ describe('the settings screen', () => {
             millimetres: 24,
             engine: 'raster',
             notes: [],
+            raster: null,
             lines: [line('Anna Kuteera')],
           },
         });

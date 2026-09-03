@@ -223,7 +223,8 @@ pub(super) const SIZES: &[Choice] = &[
     },
 ];
 
-/// The typefaces.
+/// The typefaces — `mb_print::font::FAMILIES`, key for key and label for label (a test keeps
+/// them so). A key that left this list is mapped by `modernise` when a shop opens.
 pub(super) const FONTS: &[Choice] = &[
     Choice {
         value: "builtin",
@@ -234,40 +235,16 @@ pub(super) const FONTS: &[Choice] = &[
         label: "Consolas",
     },
     Choice {
-        value: "consolas_bold",
-        label: "Consolas Bold — darker on faint paper",
-    },
-    Choice {
         value: "courier",
         label: "Courier New",
-    },
-    Choice {
-        value: "lucida",
-        label: "Lucida Console",
-    },
-    Choice {
-        value: "cascadia",
-        label: "Cascadia Mono",
-    },
-    Choice {
-        value: "times",
-        label: "Times New Roman — a printed-book look",
-    },
-    Choice {
-        value: "georgia",
-        label: "Georgia — heavier serif, clear on faint paper",
     },
     Choice {
         value: "arial",
         label: "Arial",
     },
     Choice {
-        value: "calibri",
-        label: "Calibri — rounder, a little smaller",
-    },
-    Choice {
         value: "verdana",
-        label: "Verdana — widest, easiest to read small",
+        label: "Verdana",
     },
 ];
 
@@ -1748,12 +1725,23 @@ pub const CATALOG: &[Entry] = &[
         billing.kitchen_screen
     ),
     // The day.
-    number!("day.starts_at_minutes", Day, Row, "Your day starts at",
-        "Minutes past midnight. 300 is 5 in the morning, which means a bill \
-         printed at 1 a.m. counts as yesterday's. This changes every report you \
-         will ever run.",
-        ["day", "business day", "5 am", "close", "midnight", "cutoff"],
-        0..=1439 "minutes past midnight", u32, day.starts_at_minutes),
+    // A clock time, not a count of minutes (B6, 2026-09-03).
+    Entry {
+        key: "day.starts_at_minutes",
+        group: Group::Day,
+        storage: Storage::Row,
+        label: "Your day starts at",
+        help: "The time a new business day begins. At 05:00 a bill printed at 1 a.m. counts \
+               as yesterday's. This changes every report you will ever run.",
+        synonyms: &["day", "business day", "5 am", "close", "midnight", "cutoff", "time"],
+        kind: Kind::Time,
+        read: |c| Value::Int(i64::from(c.day.starts_at_minutes)),
+        write: |c, v| {
+            c.day.starts_at_minutes = u32::try_from(v.as_int()?)
+                .map_err(|_| Invalid::new("That is not a time of day."))?;
+            Ok(())
+        },
+    },
     cash!(
         "stock.count_reason_above",
         Stock,

@@ -39,12 +39,25 @@
 .mb-button--secondary {
   background: var(--surface);
   color: var(--text);
-  border-color: var(--border);
-  box-shadow: var(--level-raised);
+  border-color: var(--border-strong);
 }
 .mb-button--secondary:hover:not(:disabled) {
   background: var(--surface-2);
-  border-color: var(--border-strong);
+  border-color: var(--text-faint);
+}
+
+/*
+ * A toggle. Pressed is the accent, the same as a chosen segment, so "this is the one" looks the
+ * same whether it stands alone (Cash, beside its box) or in a row (Dine in · Parcel).
+ */
+.mb-button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.mb-button[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 /* Ghost: no fill, no edge. A second action, a rail item, a row action. */
@@ -84,6 +97,31 @@
   padding: 0 var(--space-2);
   font-size: var(--text-sm);
   border-radius: var(--radius-sm);
+}
+
+/*
+ * A row in a list that happens to be pressable: the person on the lock screen, a section in a
+ * rail. Two lines are allowed, so the height comes from the words — a fixed-height button was
+ * how "Cashier" lost its bottom half.
+ */
+.mb-button--list {
+  height: auto;
+  min-height: var(--control-md);
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  white-space: normal;
+}
+
+.mb-button--list[aria-current='true'],
+.mb-button--list[aria-current='page'] {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: var(--weight-bold);
+  box-shadow: inset var(--tile-stripe) 0 0 var(--accent);
 }
 
 /* A hand on a touch screen. */
@@ -146,7 +184,18 @@
   width: 100%;
 }
 
-/* Segmented control: exactly one of these. */
+/* A menu near the bottom of the screen opens UPWARD, so it is never cut off by the window. */
+.mb-rowmenu__sheet--up {
+  top: auto;
+  bottom: calc(100% + var(--space-1));
+}
+
+/* A menu whose button carries a word ("Card") as well as the arrow. */
+.mb-rowmenu__trigger {
+  gap: var(--space-1);
+}
+
+/* Segmented control: exactly one of these. A bordered track, and each option is a button in it. */
 
 .mb-segment {
   display: inline-flex;
@@ -154,7 +203,8 @@
   height: var(--control-md);
   gap: var(--space-1);
   padding: var(--space-1);
-  background: var(--surface-sunk);
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
 }
 
@@ -162,7 +212,7 @@
   padding: 0 var(--space-3);
   background: transparent;
   color: var(--text-muted);
-  border: none;
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius-sm);
   font: inherit;
   font-size: var(--type-label);
@@ -176,13 +226,14 @@
 
 .mb-segment__option:hover {
   color: var(--text);
+  background: var(--surface-sunk);
 }
 
+/* The chosen one is ink on the accent — unmistakable from across the counter. */
 .mb-segment__option[aria-pressed='true'] {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--accent);
+  color: var(--accent-ink);
   font-weight: var(--weight-bold);
-  box-shadow: var(--level-raised);
 }
 
 /* The same control, filling the width it is given — the cart's payment row. */
@@ -408,8 +459,8 @@ textarea.mb-input {
 
 .mb-checkbox input,
 .mb-radio input {
-  width: var(--space-4);
-  height: var(--space-4);
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
@@ -436,7 +487,7 @@ textarea.mb-input {
 .mb-adorned__mark {
   position: absolute;
   left: var(--space-3);
-  color: var(--text-faint);
+  color: var(--brand);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   pointer-events: none;
@@ -466,7 +517,7 @@ textarea.mb-input {
   position: absolute;
   left: var(--space-3);
   display: flex;
-  color: var(--text-faint);
+  color: var(--brand);
   pointer-events: none;
 }
 
@@ -619,6 +670,13 @@ textarea.mb-input {
   padding: var(--space-0);
   background: transparent;
   box-shadow: var(--level-flat);
+}
+
+/* Two groups in one panel are parted by a hairline, never by a second box. */
+.mb-panel .mb-card + .mb-card {
+  padding-top: var(--gap-section);
+  border-top: var(--border-width) solid var(--border);
+  border-radius: 0;
 }
 
 /* A stat. */
@@ -778,7 +836,7 @@ textarea.mb-input {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  height: 1.375rem; /* mb-tokens-allow: a chip is between the two small text sizes */
+  height: 1.5rem; /* mb-tokens-allow: a chip is between the two small text sizes */
   padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
   font-size: var(--text-xs);
@@ -830,9 +888,10 @@ textarea.mb-input {
   height: var(--row-height);
   padding: 0 var(--space-3);
   text-align: left;
-  font-size: var(--type-caption);
-  font-weight: var(--weight-medium);
+  font-size: var(--type-label);
+  font-weight: var(--weight-bold);
   color: var(--text-muted);
+  background: var(--surface-2);
   border-bottom: var(--border-width) solid var(--border);
   white-space: nowrap;
 }
@@ -893,7 +952,7 @@ textarea.mb-input {
 }
 
 .mb-tab {
-  height: var(--control-lg);
+  height: var(--control-md);
   padding: 0 var(--space-3);
   margin-bottom: calc(var(--border-width) * -1);
   background: transparent;
@@ -911,7 +970,8 @@ textarea.mb-input {
 }
 
 .mb-tab[aria-selected='true'] {
-  color: var(--accent);
+  color: var(--text);
+  font-weight: var(--weight-bold);
   border-bottom-color: var(--accent);
 }
 
@@ -922,13 +982,13 @@ textarea.mb-input {
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-8) var(--space-5);
+  padding: var(--space-6) var(--space-4);
   text-align: center;
   color: var(--text-muted);
 }
 
 .mb-empty--small {
-  padding: var(--space-5) var(--space-3);
+  padding: var(--space-4) var(--space-3);
   gap: var(--space-2);
 }
 

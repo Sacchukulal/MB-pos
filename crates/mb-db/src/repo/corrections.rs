@@ -270,7 +270,6 @@ impl<'a> CorrectionsRepo<'a> {
         Ok(encode::money_from_sql(paise))
     }
 
-    /// 8's seam. Has this day been closed and locked?
     pub fn order_by_bill_number(
         &self,
         outlet: &str,
@@ -286,23 +285,6 @@ impl<'a> CorrectionsRepo<'a> {
             Some(row) => Ok(Some(row.get(0)?)),
             None => Ok(None),
         }
-    }
-
-    pub fn day_is_locked(&self, outlet: &str, day: BusinessDay) -> Result<bool, DbError> {
-        let locked: Option<i64> = self
-            .tx
-            .query_row(
-                // `terminal_id IS NULL` is the SHOP's row, and leaving it out is a real bug
-                // this caught: a till's own drawer close is not locked, so without the filter
-                // this answered from whichever row SQLite reached first and a closed day
-                // accepted a void.
-                "SELECT is_locked FROM day_closes
-                  WHERE outlet_id = ?1 AND business_day = ?2 AND terminal_id IS NULL",
-                rusqlite::params![outlet, encode::business_day_to_sql(day)],
-                |row| row.get(0),
-            )
-            .ok();
-        Ok(locked == Some(1))
     }
 
     // The sum that has to tie.

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, RowMenu, Scroller, SearchField, Select, SideFold, Toolbar, Table, useToast, type Column, Spinner } from '../kit';
+import { Badge, Button, Checkbox, EmptyState, Foot, freshId, Icon, Input, Modal, MoneyInput, Page, PageHeader, RowMenu, Scroller, SearchField, Select, SideFold, Table, Tabs, useToast, type Column, Spinner } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
@@ -25,6 +25,8 @@ export function Menu() {
   /** The spreadsheet somebody chose, waiting to be looked at. */
   const [importing, setImporting] = useState<string | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
+  /** Three kinds of thing live on the menu, and they are three tabs of one shape. */
+  const [tab, setTab] = useState<'items' | 'choices' | 'combos'>('items');
   const toast = useToast();
 
   const report = useCallback(
@@ -159,64 +161,78 @@ export function Menu() {
 
   return (
     <Page className="mb-menu">
-      <Toolbar
-        end={
+      {/*
+        The same header as every screen: the name, the count, the search, and the rarer jobs
+        (categories, prices, files) behind one menu instead of four buttons across the top.
+      */}
+      <PageHeader
+        title="Menu"
+        count={rows.length}
+        actions={
           <>
-            {/*
-              First, because it is what a shop does before it has items: decide what the
-              categories are.
-            */}
-            <Button variant="secondary" onClick={() => setGroupsOpen(true)}>
-              <Icon name="plus" size="sm" />
-              Categories
-            </Button>
-            <Button variant="secondary" onClick={() => setBulkOpen(true)}>
-              <Icon name="tag" size="sm" />
-              Change prices
-            </Button>
-            {/* A label wearing the kit's button, over a hidden file input — one way in. */}
-            <label className="mb-button mb-button--secondary">
-              <Icon name="upload" size="sm" />
-              Import a file
-              <input
-                className="mb-visually-hidden"
-                type="file"
-                accept="text/csv,.csv,.txt"
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = '';
-                  if (file) file.text().then(setImporting).catch(report);
-                }}
+            <div className="mb-menu__find">
+              <SearchField
+                value={find}
+                placeholder="Find an item"
+                onChange={(event) => setFind(event.target.value)}
               />
-            </label>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                call('export_menu')
-                  .then((path) => toast.show('ok', 'The menu was saved as a spreadsheet.', path))
-                  .catch(report);
-              }}
-            >
-              <Icon name="download" size="sm" />
-              Save as a file
-            </Button>
+            </div>
+            <RowMenu label="More for the menu" size="md">
+              <Button variant="quiet" onClick={() => setGroupsOpen(true)}>
+                <Icon name="settings" size="sm" />
+                Categories
+              </Button>
+              <Button variant="quiet" onClick={() => setBulkOpen(true)}>
+                <Icon name="tag" size="sm" />
+                Change prices
+              </Button>
+              {/* A label wearing the kit's button, over a hidden file input — one way in. */}
+              <label className="mb-button mb-button--quiet">
+                <Icon name="upload" size="sm" />
+                Import a file
+                <input
+                  className="mb-visually-hidden"
+                  type="file"
+                  accept="text/csv,.csv,.txt"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = '';
+                    if (file) file.text().then(setImporting).catch(report);
+                  }}
+                />
+              </label>
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  call('export_menu')
+                    .then((path) => toast.show('ok', 'The menu was saved as a spreadsheet.', path))
+                    .catch(report);
+                }}
+              >
+                <Icon name="download" size="sm" />
+                Save as a file
+              </Button>
+            </RowMenu>
           </>
         }
-      >
-        <div className="mb-menu__find">
-          <SearchField
-            value={find}
-            placeholder="Find an item"
-            onChange={(event) => setFind(event.target.value)}
-          />
-        </div>
-      </Toolbar>
+      />
 
-      {/*
+      <Tabs
+        tabs={[
+          { id: 'items', label: 'Items' },
+          { id: 'choices', label: 'Choices' },
+          { id: 'combos', label: 'Combos' },
+        ]}
+        active={tab}
+        onChange={(id) => setTab(id as 'items' | 'choices' | 'combos')}
+      />
+
+      {tab === 'items' ? (
+      /*
         Adding an item is a panel, not a dialog that comes back: it stays open and empties
         itself after each item, keeping the category and the tax class, so a menu is typed in a
         run.
-      */}
+      */
       <SideFold
         label={editing && editing.name !== '' ? editing.name : 'Add an item'}
         open={editing !== null}
@@ -295,12 +311,18 @@ export function Menu() {
         ) : (
           <Table dense rows={shown} columns={columns} rowKey={(r) => r.id} />
         )}
-
-        <ModifierGroups onFailed={report} />
-        <Combos rows={rows} onFailed={report} />
       </Scroller>
       </div>
       </SideFold>
+      ) : tab === 'choices' ? (
+        <Scroller className="mb-menu__items">
+          <ModifierGroups onFailed={report} />
+        </Scroller>
+      ) : (
+        <Scroller className="mb-menu__items">
+          <Combos rows={rows} onFailed={report} />
+        </Scroller>
+      )}
 
       {groupsOpen ? (
         <Groups

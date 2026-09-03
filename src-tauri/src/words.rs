@@ -202,6 +202,32 @@ pub fn bytes(count: u64) -> String {
     }
 }
 
+/// "Tuesday" — from the day count; 1970-01-01 was a Thursday.
+#[must_use]
+pub fn weekday(day: mb_core::BusinessDay) -> &'static str {
+    const NAMES: [&str; 7] = [
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+    ];
+    let index = day.days_since_epoch().rem_euclid(7);
+    NAMES
+        .get(usize::try_from(index).unwrap_or(0))
+        .copied()
+        .unwrap_or("?")
+}
+
+/// "Tuesday 2 September" — the way a person names a day they can still remember.
+#[must_use]
+pub fn day_with_weekday(day: mb_core::BusinessDay, today: mb_core::BusinessDay) -> String {
+    format!("{} {}", weekday(day), self::day(day, today))
+}
+
+/// "9 August", or "9 August 2025" when it was not this year.
 #[must_use]
 pub fn day(business_day: mb_core::BusinessDay, today: mb_core::BusinessDay) -> String {
     const MONTHS: [&str; 12] = [

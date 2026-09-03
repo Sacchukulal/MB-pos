@@ -186,25 +186,29 @@ impl Around {
     }
 }
 
-/// Build `Around` the way a real print builds it.
-pub fn around_for(app: &crate::state::App, paper: Paper, group: &str) -> Around {
+/// Build `Around` the way a real print builds it: on the printer this kind of paper goes to,
+/// with that printer's paper, offset, engine and face.
+pub fn around_for(app: &crate::state::App, group: &str) -> Around {
     // The same question the queue asks, through the same function — the kitchen ticket and the
-    // bill each have their own face and their own engine, and a preview that guessed either
-    // would be a preview that lies.
-    let kind = if group == "kitchen" {
-        mb_print::queue::JobKind::Kitchen
+    // bill each have their own printer, their own face and their own engine, and a preview
+    // that guessed any of them would be a preview that lies. The kitchen ticket goes where a
+    // real ticket with no category routing goes: `flows::printer_for(Role::Kitchen)`.
+    let (kind, role) = if group == "kitchen" {
+        (
+            mb_print::queue::JobKind::Kitchen,
+            mb_print::printer::Role::Kitchen,
+        )
     } else {
-        mb_print::queue::JobKind::Bill
+        (mb_print::queue::JobKind::Bill, mb_print::printer::Role::Bill)
     };
-    let printer = crate::flows::default_printer(app)
-        .unwrap_or_else(|_| {
-            mb_print::printer::PrinterConfig::new(
-                "prn_preview",
-                "Preview",
-                mb_print::printer::Target::None,
-            )
-        })
-        .with_paper(paper.kind);
+    let printer = crate::flows::printer_for(app, role).unwrap_or_else(|_| {
+        mb_print::printer::PrinterConfig::new(
+            "prn_preview",
+            "Preview",
+            mb_print::printer::Target::None,
+        )
+    });
+    let paper = printer.paper;
     let (metrics, engine) = app.metrics_for(kind, &printer);
 
     // The shop's own first table, through the real lookup.

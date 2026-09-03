@@ -573,7 +573,7 @@ fn seed_money(db: &Db) {
         )?;
 
         let opening = Money::from_paise(200_000);
-        let expected = repos.money().expected_cash(OUTLET, day(0), opening)?;
+        let expected = repos.money().cash_position(OUTLET, day(0))?.expected;
         repos.money().save_day_close(
             OUTLET,
             &DayClose {

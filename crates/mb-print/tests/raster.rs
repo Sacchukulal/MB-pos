@@ -1,7 +1,8 @@
 #![allow(
     clippy::expect_used,
     clippy::panic,
-    reason = "tests: expect is the assertion"
+    clippy::integer_division,
+    reason = "tests: expect is the assertion, and dots are not money"
 )]
 
 mod common;
@@ -179,38 +180,220 @@ fn a_real_logo_is_drawn_at_the_width_it_asked_for() {
     assert_eq!(inked, 288, "the logo is not half the width of the paper");
 }
 
-/// The QR goes to the printer's own encoder when it has one, and becomes text when it does not.
+/// The QR goes to the printer's own encoder when it has one, and is drawn as modules when it
+/// does not — the same square, at the same module size, either way.
 #[test]
-fn the_qr_is_the_printers_when_it_has_one_and_text_when_it_does_not() {
+fn the_qr_is_the_printers_when_it_has_one_and_modules_when_it_does_not() {
+    let payload = "upi://pay?pa=anna@upi&am=646.00";
     let mut doc = Document::new(Paper::new(PaperKind::Mm80));
     doc.push(mb_print::doc::Block::QrCode {
-        payload: "upi://pay?pa=anna@upi&am=646.00".to_owned(),
+        payload: payload.to_owned(),
         width_pct: 40,
         align: Align::Centre,
     });
     let laid = layout(&doc).expect("lays out");
 
     let native = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
+    let module = native
+        .bands
+        .iter()
+        .find_map(|b| match b {
+            Band::Qr { module, .. } => Some(*module),
+            _ => None,
+        })
+        .expect("a printer with an encoder should be sent the payload, not a picture");
+    // Two-fifths of 576 dots is 230; a 27-module symbol comes to 8 dots a module.
+    let modules = mb_print::codes::qr(payload).expect("encodes");
+    assert_eq!(module, modules.module_for(230));
+    assert!(module > 6, "the setting's width was ignored: module {module}");
+
+    let drawn = to_raster(&laid, &metrics(laid.paper), RasterOptions::drawn()).expect("rasters");
+    assert!(drawn.notes.is_empty(), "{:?}", drawn.notes);
     assert!(
-        native.bands.iter().any(|b| matches!(b, Band::Qr { .. })),
-        "a printer with an encoder should be sent the payload, not a picture"
+        drawn.bands.iter().all(|b| matches!(b, Band::Ink { .. })),
+        "a screen has no encoder, so every band is ink"
+    );
+    // A real square: the top-left finder pattern is a solid 7×7 ring of modules, so its
+    // corner dot is ink and the dot one module inside the ring is not.
+    let side = modules.size * u32::from(module);
+    let image = first_ink(&drawn);
+    let left = (576 - side) / 2;
+    let top = (image.height - side) / 2;
+    assert!(image.ink(left, top), "the finder pattern's corner is blank");
+    assert!(
+        !image.ink(left + u32::from(module), top + u32::from(module)),
+        "the finder pattern's inner ring is inked"
+    );
+    assert!(drawn.ink.iter().any(|l| l.dots > 1_000), "{:?}", drawn.ink);
+}
+
+/// The setting's width reaches the paper: a wider setting is a bigger module.
+#[test]
+fn the_qr_width_setting_changes_the_module_size_on_both_engines() {
+    let payload = "upi://pay?pa=anna@upi&pn=Anna&am=646.00&cu=INR";
+    let module_at = |pct: u8| {
+        let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+        doc.push(mb_print::doc::Block::QrCode {
+            payload: payload.to_owned(),
+            width_pct: pct,
+            align: Align::Centre,
+        });
+        let laid = layout(&doc).expect("lays out");
+        let raster =
+            to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
+        let native = raster
+            .bands
+            .iter()
+            .find_map(|b| match b {
+                Band::Qr { module, .. } => Some(*module),
+                _ => None,
+            })
+            .expect("a QR band");
+        // The text engine is told the same number.
+        let text = mb_print::escpos::encode_text(
+            &laid,
+            &mb_print::printer::Capabilities::default(),
+            &mb_print::escpos::JobOptions::default(),
+        );
+        let at = text
+            .windows(7)
+            .position(|w| w == [0x1D, 0x28, 0x6B, 3, 0, 49, 67])
+            .expect("GS ( k 67 sets the module size");
+        assert_eq!(text[at + 7], native, "the two engines disagree at {pct} %");
+        // And the drawn square is that many dots a module.
+        let drawn = to_raster(&laid, &metrics(laid.paper), RasterOptions::drawn()).expect("rasters");
+        let modules = mb_print::codes::qr(payload).expect("encodes");
+        assert_eq!(
+            drawn.ink.first().map(|l| l.dots),
+            Some(u32::from(native) * u32::from(native) * dark_count(&modules)),
+            "the drawn square is not {native} dots a module"
+        );
+        native
+    };
+    assert!(module_at(20) < module_at(40));
+    assert!(module_at(40) < module_at(80));
+    assert_eq!(module_at(100), 16, "the printer's own limit");
+}
+
+fn dark_count(modules: &mb_print::codes::Modules) -> u32 {
+    let mut n = 0;
+    for y in 0..modules.size {
+        for x in 0..modules.size {
+            if modules.dark(x, y) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// The barcode reaches the paper on the graphics engine — as the printer's own command when
+/// it has one, and as bars when it does not.
+#[test]
+fn the_barcode_is_printed_by_the_raster_engine() {
+    let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+    doc.line("TOTAL 646.00");
+    doc.push(mb_print::doc::Block::Barcode {
+        payload: "BIR1207".to_owned(),
+        human_readable: true,
+        align: Align::Centre,
+    });
+    doc.line("Thank you");
+    let laid = layout(&doc).expect("lays out");
+
+    let native = to_raster(&laid, &metrics(laid.paper), RasterOptions::default()).expect("rasters");
+    assert!(
+        native.bands.iter().any(|b| matches!(
+            b,
+            Band::Barcode { payload, human_readable: true, .. } if payload == "BIR1207"
+        )),
+        "the barcode band is missing: {:?}",
+        native.bands.len()
+    );
+    // And it is sent: `GS k 73` with the payload, between the two ink bands.
+    let bytes = mb_print::escpos::encode_raster(
+        &native,
+        &mb_print::printer::Capabilities::default(),
+        &mb_print::escpos::JobOptions::default(),
+    );
+    let at = bytes
+        .windows(4)
+        .position(|w| w == [0x1D, 0x6B, 73, 9])
+        .expect("GS k 73 is on the wire");
+    assert_eq!(&bytes[at + 4..at + 6], b"{B");
+    assert_eq!(&bytes[at + 6..at + 13], b"BIR1207");
+    let rasters = bytes
+        .windows(3)
+        .filter(|w| *w == [0x1D, 0x76, 0x30])
+        .count();
+    assert_eq!(rasters, 2, "the text before and after the bars are two pictures");
+
+    // A printer with no `GS k` gets bars drawn: Code 128 starts with a two-dot bar after the
+    // quiet zone, and the number is under it.
+    let drawn = to_raster(&laid, &metrics(laid.paper), RasterOptions::drawn()).expect("rasters");
+    assert!(drawn.notes.is_empty(), "{:?}", drawn.notes);
+    assert_eq!(drawn.bands.len(), 1, "everything is one picture");
+    let bars = drawn.dots_for_line(1).expect("the barcode's ink");
+    // Sixty rows of bars for ten symbols is thousands of dots; the text under them is a few
+    // hundred more.
+    assert!(bars > 3_000, "only {bars} dots of barcode");
+    let image = first_ink(&drawn);
+    let widths = mb_print::codes::code128("BIR1207").expect("encodes");
+    let wide = mb_print::codes::barcode_width(&widths);
+    let left = (576 - wide) / 2 + mb_print::codes::barcode_quiet();
+    let top = laid.lines[0].row_dots;
+    // Start B opens with a two-unit bar, and a unit is two dots.
+    assert!(image.ink(left, top + 30), "the first bar is blank");
+    assert!(image.ink(left + 3, top + 30), "the first bar is narrower than two units");
+    assert!(!image.ink(left + 4, top + 30), "the first space is inked");
+    assert!(!image.ink(left - 1, top + 30), "the quiet zone is inked");
+}
+
+/// A bill number a barcode cannot carry is printed as characters, and the sink says so.
+#[test]
+fn a_barcode_that_cannot_be_drawn_becomes_its_characters() {
+    let mut doc = Document::new(Paper::new(PaperKind::Mm80));
+    doc.push(mb_print::doc::Block::Barcode {
+        payload: "BIR/\u{20B9}".to_owned(),
+        human_readable: true,
+        align: Align::Centre,
+    });
+    let laid = layout(&doc).expect("lays out");
+    let drawn = to_raster(&laid, &metrics(laid.paper), RasterOptions::drawn()).expect("rasters");
+    assert!(drawn.notes.contains(&RasterNote::BarcodeAsText));
+    assert!(drawn.ink.iter().any(|l| l.dots > 0));
+}
+
+/// The queue and the preview resolve a printer through the one function.
+#[test]
+fn a_printer_is_drawn_the_same_way_wherever_it_is_asked() {
+    use mb_print::printer::{Engine, PrinterConfig, Target};
+    let faces = mb_print::font::OneFace::builtin().expect("loads");
+
+    let mut printer = PrinterConfig::new("p1", "Counter", Target::None);
+    let drawing = mb_print::drawing_for(&printer, Some("consolas"), &faces);
+    assert_eq!(drawing.engine, Engine::Raster);
+    assert!(drawing.metrics.font().is_some());
+    assert_eq!(drawing.metrics.paper(), printer.paper);
+    // A file or a null target has no encoders, so the sink draws the codes itself.
+    assert_eq!(drawing.raster, RasterOptions::drawn());
+
+    printer.caps.raster = false;
+    let drawing = mb_print::drawing_for(&printer, None, &faces);
+    assert_eq!(drawing.engine, Engine::Text);
+    assert!(
+        drawing.metrics.font().is_none(),
+        "the text engine lays out with the printer's own font"
     );
 
-    let drawn = to_raster(
-        &laid,
-        &metrics(laid.paper),
-        RasterOptions {
-            native_qr: false,
-            ..RasterOptions::default()
-        },
-    )
-    .expect("rasters");
-    assert!(
-        drawn.notes.contains(&RasterNote::QrAsText),
-        "a printer with no encoder should print the payload as text — a URI a \
-         customer can type beats a blank space"
+    let real = PrinterConfig::new("p2", "Counter", Target::Network {
+        host: "192.168.1.9".to_owned(),
+        port: 9100,
+    });
+    assert_eq!(
+        mb_print::drawing_for(&real, None, &faces).raster,
+        RasterOptions::default()
     );
-    assert!(drawn.ink.iter().any(|l| l.dots > 0));
 }
 
 /// Every thermal paper size rasterises to its own dot width.
@@ -236,7 +419,7 @@ fn first_ink(raster: &mb_print::raster::Raster) -> &Monochrome {
         .iter()
         .find_map(|b| match b {
             Band::Ink { image } => Some(image),
-            Band::Qr { .. } => None,
+            _ => None,
         })
         .expect("something was drawn")
 }
@@ -381,7 +564,7 @@ fn a_proportional_face_still_puts_the_amount_against_the_right_edge() {
         .iter()
         .filter_map(|b| match b {
             Band::Ink { image } => Some(image),
-            Band::Qr { .. } => None,
+            _ => None,
         })
         .flat_map(|image| {
             (0..image.height).filter_map(move |y| (0..image.width).rev().find(|x| image.ink(*x, y)))
@@ -413,7 +596,7 @@ fn a_proportional_face_is_drawn_proportionally() {
             .iter()
             .filter_map(|b| match b {
                 Band::Ink { image } => Some(image),
-                Band::Qr { .. } => None,
+                _ => None,
             })
             .flat_map(|image| {
                 (0..image.height)

@@ -7,10 +7,6 @@ import type { PreviewDoc } from "./PreviewDoc";
  */
 export type PreviewView = { doc: PreviewDoc, paper: string, 
 /**
- * The face the printer will use, named so a browser can use it too.
- */
-font: string, 
-/**
  * Settings that could not be used yet, by name.
  */
 notUsableYet: Array<string>, };

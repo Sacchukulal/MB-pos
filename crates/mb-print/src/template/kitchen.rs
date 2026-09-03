@@ -120,12 +120,7 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
         _ => String::new(),
     };
     let kind = if s.show_order_type {
-        match ctx.order_type {
-            OrderType::DineIn => "Dine In",
-            OrderType::Parcel => "Parcel",
-            OrderType::SelfService => "Self Service",
-            OrderType::Delivery => "Delivery",
-        }
+        super::order_type_label(ctx.order_type)
     } else {
         ""
     };
@@ -201,14 +196,7 @@ fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
     let gap = usize::from(s.row_height.gap());
     let mut rows = Vec::with_capacity(ctx.lines.len());
     for (n, line) in ctx.lines.iter().enumerate() {
-        // A blank row between dishes, not after the last one — trailing air is what
-        // `doc.spacer` at the end is for, and doubling it wastes paper on every ticket of the
-        // day.
-        if n > 0 {
-            for _ in 0..gap {
-                rows.push(vec![String::new(), String::new(), String::new()]);
-            }
-        }
+        super::gap_before(&mut rows, n, gap, columns.len());
         rows.push(vec![line.qty.to_string(), String::new(), line.name.clone()]);
         for modifier in &line.modifiers {
             rows.push(vec![String::new(), String::new(), format!("+ {modifier}")]);
@@ -258,11 +246,7 @@ fn two_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
     let gap = usize::from(s.row_height.gap());
     let mut rows = Vec::with_capacity(cells.len().div_ceil(2));
     for (n, pair) in cells.chunks(2).enumerate() {
-        if n > 0 {
-            for _ in 0..gap {
-                rows.push(vec![String::new(), String::new()]);
-            }
-        }
+        super::gap_before(&mut rows, n, gap, columns.len());
         rows.push(vec![
             pair.first().cloned().unwrap_or_default(),
             pair.get(1).cloned().unwrap_or_default(),

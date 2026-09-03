@@ -1,6 +1,6 @@
 //! The bill — the only place in the product that knows what a receipt looks like.
 
-use mb_core::{AnyOrder, Bill, OrderType, PlaceOfSupply, PriceBasis};
+use mb_core::{AnyOrder, Bill, PlaceOfSupply, PriceBasis};
 use serde::{Deserialize, Serialize};
 
 use crate::doc::{Align, BandLine, Block, Column, Document, Style};
@@ -259,12 +259,7 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
         (true, Some(time)) => format!("{} {time}", core.business_day),
         _ => core.business_day.to_string(),
     };
-    let kind = match core.order_type() {
-        OrderType::DineIn => "Dine In",
-        OrderType::Parcel => "Parcel",
-        OrderType::SelfService => "Self Service",
-        OrderType::Delivery => "Delivery",
-    };
+    let kind = super::order_type_label(core.order_type());
     let table = ctx.table.map(|t| format!("Table {t}"));
     let covers = match (s.show.covers, core.covers) {
         (true, Some(n)) if n > 0 => Some(format!("Covers {n}")),
@@ -455,11 +450,7 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
     for (n, line) in ctx.bill.lines.iter().enumerate() {
         // Row height, and it is the only thing "row height" can mean on a device that cannot
         // vary leading.
-        if n > 0 {
-            for _ in 0..gap {
-                rows.push(vec![String::new(); columns.len()]);
-            }
-        }
+        super::gap_before(&mut rows, n, gap, columns.len());
         let mut row = vec![line.snapshot.name.clone()];
         if with_hsn {
             row.push(line.snapshot.hsn.clone().unwrap_or_default());

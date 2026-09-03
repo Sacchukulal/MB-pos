@@ -337,7 +337,7 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     let applied = migrate::apply_all(&mut conn).expect("0004 runs");
     assert_eq!(
         applied.ran,
-        vec![4, 5, 6, 7, 8, 9, 10],
+        vec![4, 5, 6, 7, 8, 9, 10, 11],
         "the rework and what came after it should have been left to do"
     );
 
@@ -345,7 +345,15 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     // "no opinion" (0008), because that is what it always meant.
     for (id, kind, basis, rate_bp, name, is_active, sort_order) in [
         ("tc_excl", "gst", Value::Null, 500, "Old exclusive", 1, 41),
-        ("tc_incl", "gst", txt("inclusive"), 1800, "Old inclusive", 0, 42),
+        (
+            "tc_incl",
+            "gst",
+            txt("inclusive"),
+            1800,
+            "Old inclusive",
+            0,
+            42,
+        ),
         ("tc_exempt", "exempt", Value::Null, 250, "Old exempt", 1, 43),
         (
             "tc_nongst",
@@ -704,7 +712,7 @@ fn the_tax_book_moves_every_copy_into_the_slabs() {
     conn.execute_batch(OLD_ROWS).expect("seed old-format rows");
 
     let applied = migrate::apply_all(&mut conn).expect("0008 runs");
-    assert_eq!(applied.ran, vec![8, 9, 10]);
+    assert_eq!(applied.ran, vec![8, 9, 10, 11]);
 
     // The copied columns are gone from items; the slab pointer is what is left.
     let columns: Vec<String> = mb_db::schema::columns(&conn, "items")
@@ -713,7 +721,10 @@ fn the_tax_book_moves_every_copy_into_the_slabs() {
         .map(|c| c.name)
         .collect();
     for gone in ["tax_rate_bp", "tax_kind", "tax_basis"] {
-        assert!(!columns.iter().any(|c| c == gone), "items.{gone} survived 0008");
+        assert!(
+            !columns.iter().any(|c| c == gone),
+            "items.{gone} survived 0008"
+        );
     }
     let old_keys: i64 = conn
         .query_row(
@@ -739,10 +750,23 @@ fn the_tax_book_moves_every_copy_into_the_slabs() {
         &conn,
         "items",
         "itm_biscuit",
-        &[("tax_class_id", txt("tax_food_5")), ("price_basis", Value::Null)],
+        &[
+            ("tax_class_id", txt("tax_food_5")),
+            ("price_basis", Value::Null),
+        ],
     );
-    check(&conn, "categories", "cat_1", &[("default_tax_class_id", txt("tax_food_5"))]);
-    check(&conn, "tax_classes", "tax_food_5", &[("name", txt("GST 5%"))]);
+    check(
+        &conn,
+        "categories",
+        "cat_1",
+        &[("default_tax_class_id", txt("tax_food_5"))],
+    );
+    check(
+        &conn,
+        "tax_classes",
+        "tax_food_5",
+        &[("name", txt("GST 5%"))],
+    );
     let twins: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM tax_classes WHERE id = 'tax_goods_5'",
@@ -762,11 +786,25 @@ fn the_tax_book_moves_every_copy_into_the_slabs() {
         &conn,
         "tax_classes",
         "tax_gst_250",
-        &[("name", txt("GST 2.50%")), ("rate_bp", num(250)), ("kind", txt("gst"))],
+        &[
+            ("name", txt("GST 2.50%")),
+            ("rate_bp", num(250)),
+            ("kind", txt("gst")),
+        ],
     );
     // The new seeds are in, and the shop prices tax-added until it says otherwise.
-    check(&conn, "tax_classes", "tax_gst_0", &[("rate_bp", num(0)), ("is_active", num(1))]);
-    check(&conn, "tax_classes", "tax_gst_40", &[("rate_bp", num(4000))]);
+    check(
+        &conn,
+        "tax_classes",
+        "tax_gst_0",
+        &[("rate_bp", num(0)), ("is_active", num(1))],
+    );
+    check(
+        &conn,
+        "tax_classes",
+        "tax_gst_40",
+        &[("rate_bp", num(4000))],
+    );
     let shop_basis: String = conn
         .query_row("SELECT price_basis FROM store_profile", [], |r| r.get(0))
         .expect("the shop has a pricing default");
@@ -795,5 +833,85 @@ fn the_tax_book_moves_every_copy_into_the_slabs() {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("rows");
-    assert!(dangling.is_empty(), "these tables have dangling rows: {dangling:?}");
+    assert!(
+        dangling.is_empty(),
+        "these tables have dangling rows: {dangling:?}"
+    );
+}
+
+/// 0011 landed: a business day is a thing. Every shop roll-up row in `day_closes` became the
+/// day it stood for, with its lock intact; a till's own drawer count did not.
+#[test]
+fn the_business_days_backfill_keeps_the_lock_and_skips_the_drawers() {
+    const OLD_ROWS: &str = "
+        INSERT INTO staff (id, outlet_id, name, status, created_at, updated_at)
+        VALUES ('staff_1', 'outlet_default', 'Ravi', 'active', 0, 0);
+
+        INSERT INTO day_closes (id, outlet_id, business_day, terminal_id, shift_no, opening_float,
+            expected_cash, counted_cash, variance, is_locked, closed_at, closed_by, note)
+        VALUES ('close_20600_terminal_default_1', 'outlet_default', 20600, 'terminal_default', 1,
+                200000, 500000, 500000, 0, 0, 1000, 'staff_1', NULL),
+               ('close_20600', 'outlet_default', 20600, NULL, 0,
+                200000, 500000, 500000, 0, 1, 1001, 'staff_1', 'all square'),
+               ('close_20601', 'outlet_default', 20601, NULL, 0,
+                200000, 300000, 290000, -10000, 0, 2001, 'staff_1', 'reopened later');
+    ";
+
+    let scratch = Scratch::new("business_days_backfill");
+    let mut conn = Connection::open(scratch.db_path()).expect("open");
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+             version    INTEGER NOT NULL PRIMARY KEY,
+             name       TEXT    NOT NULL,
+             checksum   TEXT    NOT NULL,
+             applied_at INTEGER NOT NULL,
+             run_ms     INTEGER NOT NULL
+         ) STRICT;",
+    )
+    .expect("ledger");
+    for m in MIGRATIONS.iter().filter(|m| m.version < 11) {
+        run_single(&mut conn, m).expect("the schema as it stood before the day");
+    }
+    conn.execute_batch(OLD_ROWS).expect("seed old-format rows");
+
+    let applied = migrate::apply_all(&mut conn).expect("0011 runs");
+    assert_eq!(applied.ran, vec![11]);
+
+    let rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM business_days", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(rows, 2, "one row per shop roll-up, none for a drawer");
+
+    // The locked day is still locked, and knows who closed it and why.
+    check_where(
+        &conn,
+        "business_days",
+        "business_day = 20600",
+        &[
+            ("kind", txt("trading")),
+            ("is_locked", num(1)),
+            ("closed_at", num(1001)),
+            ("closed_by", txt("staff_1")),
+            ("note", txt("all square")),
+            ("reopened_at", Value::Null),
+            ("bills", num(0)),
+            ("net", num(0)),
+            ("cash_taken", num(0)),
+        ],
+    );
+    // The reopened one is open.
+    check_where(
+        &conn,
+        "business_days",
+        "business_day = 20601",
+        &[("is_locked", num(0)), ("kind", txt("trading"))],
+    );
+    // And the drawer rows are exactly as they were.
+    check(
+        &conn,
+        "day_closes",
+        "close_20600_terminal_default_1",
+        &[("is_locked", num(0))],
+    );
+    check(&conn, "day_closes", "close_20600", &[("is_locked", num(1))]);
 }

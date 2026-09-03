@@ -150,24 +150,41 @@ fn control_for(kind: Kind) -> &'static str {
         Kind::Text { .. } => "words",
         // A slab is a choice too; its options come from the book, not the catalogue.
         Kind::Choice(_) | Kind::TaxClass => "choice",
+        Kind::Time => "time",
     }
 }
 
-/// A value, as the box shows it.
-fn on_the_wire(value: &Value) -> String {
-    match value {
-        Value::Bool(true) => "1".to_owned(),
-        Value::Bool(false) => "0".to_owned(),
-        Value::Int(n) => n.to_string(),
-        Value::Money(m) => m.to_plain_string(),
-        Value::Text(t) => t.clone(),
+/// A value, as the box shows it. A time of day travels as the clock shows it, "05:00".
+fn on_the_wire(kind: Kind, value: &Value) -> String {
+    match (kind, value) {
+        (Kind::Time, Value::Int(n)) => format!("{:02}:{:02}", n / 60, n % 60),
+        (_, Value::Bool(true)) => "1".to_owned(),
+        (_, Value::Bool(false)) => "0".to_owned(),
+        (_, Value::Int(n)) => n.to_string(),
+        (_, Value::Money(m)) => m.to_plain_string(),
+        (_, Value::Text(t)) => t.clone(),
     }
+}
+
+/// "05:00" back to minutes past midnight.
+fn minutes_of_clock(raw: &str) -> Option<i64> {
+    let (h, m) = raw.trim().split_once(':')?;
+    let h: i64 = h.parse().ok()?;
+    let m: i64 = m.parse().ok()?;
+    (h < 24 && m < 60).then_some(h * 60 + m)
 }
 
 /// The same journey back.
 fn off_the_wire(entry: &Entry, raw: &str) -> UiResult<Value> {
     let value = match entry.kind {
         Kind::Bool => Value::Bool(raw == "1" || raw.eq_ignore_ascii_case("true")),
+        Kind::Time => Value::Int(minutes_of_clock(raw).ok_or_else(|| {
+            UiError::new(
+                "settings.invalid",
+                format!("\"{raw}\" is not a time. Try 05:00."),
+            )
+            .with_detail(format!("setting {}", entry.key))
+        })?),
         Kind::Int { unit, .. } => Value::Int(raw.trim().parse::<i64>().map_err(|_| {
             UiError::new(
                 "settings.invalid",
@@ -225,7 +242,7 @@ fn view_of(app: &App, config: &ShopConfig, allowed: &[Permission]) -> SettingsVi
                     label: entry.label.to_owned(),
                     help: entry.help.to_owned(),
                     control: control_for(entry.kind).to_owned(),
-                    value: on_the_wire(&(entry.read)(config)),
+                    value: on_the_wire(entry.kind, &(entry.read)(config)),
                     choices: match entry.kind {
                         Kind::Choice(options) => options
                             .iter()
@@ -295,33 +312,19 @@ pub fn search_on(app: &App, text: String) -> UiResult<Vec<String>> {
 pub struct PreviewView {
     pub doc: crate::preview::PreviewDoc,
     pub paper: String,
-    /// The face the printer will use, named so a browser can use it too.
-    pub font: String,
     /// Settings that could not be used yet, by name.
     pub not_usable_yet: Vec<String>,
 }
 
-/// Which paper the preview is drawn on — the shop's own default printer's.
-fn preview_paper(app: &App) -> (mb_print::paper::Paper, String) {
-    use mb_print::paper::{Paper, PaperKind};
-    let mm = crate::flows::default_printer(app)
-        .map(|printer| match printer.paper.kind {
-            PaperKind::Mm58 => 58,
-            PaperKind::Mm100 => 100,
-            _ => 80,
-        })
-        .unwrap_or(80);
-    let kind = match mm {
-        58 => PaperKind::Mm58,
-        100 => PaperKind::Mm100,
-        _ => PaperKind::Mm80,
+/// The paper the preview is drawn on, in the words the screen shows.
+fn paper_label(paper: mb_print::paper::Paper) -> String {
+    use mb_print::paper::PaperKind;
+    let (mm, inches) = match paper.kind {
+        PaperKind::Mm58 => (58, "2 inch"),
+        PaperKind::Mm100 => (100, "4 inch"),
+        _ => (80, "3 inch"),
     };
-    let inches = match mm {
-        58 => "2 inch",
-        100 => "4 inch",
-        _ => "3 inch",
-    };
-    (Paper::new(kind), format!("{mm} mm ({inches})"))
+    format!("{mm} mm ({inches})")
 }
 
 pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult<PreviewView> {
@@ -341,9 +344,9 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
         }
     }
 
-    let (paper, paper_label) = preview_paper(app);
-    // The preview takes the printer's own engine, face and paper.
-    let around = super::sample::around_for(app, paper, group.as_str());
+    // The preview takes the routed printer's own paper, engine and face — the bill printer's
+    // for the bill, the kitchen printer's for the ticket.
+    let around = super::sample::around_for(app, group.as_str());
     let doc = match Group::from_code(&group) {
         Some(Group::Kitchen) => super::sample::kitchen_preview(&wanted, &around),
         // Everything else previews the BILL, and on purpose: a shop changing its name or its
@@ -353,29 +356,11 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
     }
     .map_err(|e| words::from_print(&e))?;
 
-    // The face this preview is of.
-    let key = match Group::from_code(&group) {
-        Some(Group::Kitchen) => wanted.kitchen.font.as_str(),
-        _ => wanted.receipt.font.as_str(),
-    };
-    let family = mb_print::font::family(key);
-
     Ok(PreviewView {
         doc,
-        paper: paper_label,
-        // The built-in face is the only one with no Windows name, and the screen has its own
-        // monospace stack for it — so it is named as nothing rather than as a family a browser
-        // would fail to find.
-        font: family
-            .filter(|f| f.file.is_some())
-            .map_or_else(String::new, |f| windows_family(f.label).to_owned()),
+        paper: paper_label(around.paper),
         not_usable_yet,
     })
-}
-
-/// The Windows family name inside a label.
-fn windows_family(label: &str) -> &str {
-    label.split(" — ").next().unwrap_or(label).trim()
 }
 
 /// Save what changed, and only what changed.
@@ -547,7 +532,7 @@ pub fn defaults_for_on(app: &App, group: String) -> UiResult<Vec<SettingEdit>> {
         .filter(|entry| entry.group == group)
         .map(|entry| SettingEdit {
             key: entry.key.to_owned(),
-            value: on_the_wire(&(entry.read)(&defaults)),
+            value: on_the_wire(entry.kind, &(entry.read)(&defaults)),
         })
         .collect())
 }
@@ -666,7 +651,7 @@ pub fn run_config_import_on(app: &App, text: String) -> UiResult<SavedView> {
         .iter()
         .map(|entry| SettingEdit {
             key: entry.key.to_owned(),
-            value: on_the_wire(&(entry.read)(&wanted)),
+            value: on_the_wire(entry.kind, &(entry.read)(&wanted)),
         })
         .collect();
     save_on(app, edits)

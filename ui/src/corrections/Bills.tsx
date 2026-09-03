@@ -10,7 +10,6 @@ import {
   PageHeader,
   RowMenu,
   Panel,
-  StatCard,
   Table,
   useToast,
   type Column,
@@ -144,22 +143,24 @@ export function Bills() {
 
   return (
     <Page className="mb-screen">
+      {/* The day's figures are the header's fact line — three numbers do not need three boxes. */}
       <PageHeader
         title="Bills"
         count={bills.length}
         note="A voided bill keeps its number and stays on this list. A gap in the bill book is evidence; a missing bill is a question nobody can answer."
+        subtitle={
+          totals && bills.length > 0
+            ? [
+                `Taken today ${totals.gross.text}`,
+                `Voided ${totals.voids.text}`,
+                `Net ${totals.net.text}`,
+                totals.refunded.paise > 0 ? `Given back ${totals.refunded.text}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : undefined
+        }
       />
-
-      {totals && bills.length > 0 ? (
-        <div className="mb-bills__stats">
-          <StatCard label="Taken today" value={totals.gross.text} />
-          <StatCard label="Voided" value={totals.voids.text} />
-          <StatCard label="Net" value={totals.net.text} />
-          {totals.refunded.paise > 0 ? (
-            <StatCard label="Given back" value={totals.refunded.text} />
-          ) : null}
-        </div>
-      ) : null}
 
       {bills.length === 0 ? (
         <EmptyState

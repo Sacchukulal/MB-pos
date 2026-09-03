@@ -45,6 +45,8 @@ const fresh: FirstRunView = {
   hasShop: false,
   hasDetails: false,
   hasPin: false,
+  hasItems: false,
+  hasTables: false,
   shopPath: '',
   found: [],
   defaultFolder: 'C:\\Users\\Meena\\AppData\\Roaming\\MagicBill\\magicbill.db',

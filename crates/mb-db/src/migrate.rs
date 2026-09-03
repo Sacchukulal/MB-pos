@@ -81,6 +81,13 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0010_one_seat",
         sql: include_str!("migrations/0010_one_seat.sql"),
     },
+    // A business day is a thing: the lock, the kind (trading or holiday) and the frozen totals
+    // live on the day, not on a drawer count.
+    Migration {
+        version: 11,
+        name: "0011_business_days",
+        sql: include_str!("migrations/0011_business_days.sql"),
+    },
 ];
 
 /// The highest version this build understands.

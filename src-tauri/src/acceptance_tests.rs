@@ -47,12 +47,24 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
                     category_id: None,
                     name: (*item_name).to_owned(),
                     unit_price: Money::from_paise(rupees * 100),
-                    tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(rate.map_or(mb_core::TaxRate::ZERO, |bp| {
-                        mb_core::TaxRate::from_basis_points(bp).unwrap_or(mb_core::TaxRate::ZERO)
-                    }))).expect("a seeded slab").0,
-                    price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(rate.map_or(mb_core::TaxRate::ZERO, |bp| {
-                        mb_core::TaxRate::from_basis_points(bp).unwrap_or(mb_core::TaxRate::ZERO)
-                    }))).expect("a seeded slab").1,
+                    tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(rate.map_or(
+                        mb_core::TaxRate::ZERO,
+                        |bp| {
+                            mb_core::TaxRate::from_basis_points(bp)
+                                .unwrap_or(mb_core::TaxRate::ZERO)
+                        },
+                    )))
+                    .expect("a seeded slab")
+                    .0,
+                    price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(rate.map_or(
+                        mb_core::TaxRate::ZERO,
+                        |bp| {
+                            mb_core::TaxRate::from_basis_points(bp)
+                                .unwrap_or(mb_core::TaxRate::ZERO)
+                        },
+                    )))
+                    .expect("a seeded slab")
+                    .1,
                     hsn: Some("2106".to_owned()),
                     cost_price: None,
                     short_code: None,
@@ -707,21 +719,11 @@ fn a_corrupted_shop_file_is_refused_rather_than_half_opened() {
 fn a_locked_day_refuses_the_corrections_that_would_change_it() {
     let scratch = Scratch::new("acceptance_locked");
     let app = a_shop(&scratch, "locked");
-    let (number, total) = bill(&app, &[("itm_dosa", "1")], "Cash");
+    let (number, _total) = bill(&app, &[("itm_dosa", "1")], "Cash");
 
-    // Counted in ₹500 notes.
-    #[allow(clippy::integer_division, reason = "counting notes, in a test")]
-    let notes = u32::try_from(total.paise() / 50_000).unwrap_or(0);
-    crate::dayclose::close_on(
-        &app,
-        vec![crate::dayclose::CountArg {
-            value: 50_000,
-            count: notes,
-        }],
-        "Counted at close".to_owned(),
-        false,
-    )
-    .expect("closed");
+    // No count needed: the day is a thing of its own.
+    let today = crate::flows::today(crate::flows::now());
+    crate::dayclose::close_day_on(&app, today.to_string()).expect("closed");
 
     let bills = crate::corrections::list_bills_on(&app).expect("the bills");
     let row = bills

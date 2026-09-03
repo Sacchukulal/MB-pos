@@ -44,15 +44,11 @@
 
 /*
  * A name and a role on two lines, so a thirty-person shop is still scannable and a two-person
- * shop still gets a target you cannot miss.
+ * shop still gets a target you cannot miss. The shape is the kit's list button; only the two
+ * lines' type is decided here.
  */
 .mb-lock__person {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
-  min-height: var(--control-md);
-  text-align: left;
+  min-height: var(--control-lg);
 }
 
 .mb-lock__name {

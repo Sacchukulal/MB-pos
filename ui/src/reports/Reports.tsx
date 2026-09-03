@@ -18,7 +18,7 @@ import {
 } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import { Dashboard } from './Dashboard';
-import { DayClose } from './DayClose';
+import { Days } from './Days';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
 import type { ReportEntryView } from '../ipc/generated/ReportEntryView';
 import type { ReportListView } from '../ipc/generated/ReportListView';
@@ -74,8 +74,8 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   // One effect, one call: whenever the report or the period changes, ask again.
   useEffect(() => {
-    // Neither the dashboard nor the day close is a report.
-    if (!from || !to || chosen === DAY_CLOSE || chosen === TODAY) return;
+    // Neither the dashboard nor the days screen is a report.
+    if (!from || !to || chosen === DAYS || chosen === TODAY) return;
     setBusy(true);
     call('report', { id: chosen, period: { from, to } })
       .then(setReport)
@@ -121,7 +121,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       <Scroller inset className="mb-reports__rail">
         {/*
           At the top and on their own: one is the question an owner opens this screen to ask,
-          the other is the thing a shop does every single night.
+          the other is the thing a shop does every single night — close the day.
         */}
         <div className="mb-reports__group">
           {[
@@ -129,7 +129,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             // right, and two buttons saying the same word that do different things is how a
             // screen teaches somebody to distrust it.
             { id: TODAY, label: 'Today at a glance' },
-            { id: DAY_CLOSE, label: 'Close the day' },
+            { id: DAYS, label: 'Days' },
           ].map((entry) => (
             <button
               type="button"
@@ -171,8 +171,8 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       <div className="mb-reports__body">
         {chosen === TODAY ? (
           <Dashboard />
-        ) : chosen === DAY_CLOSE ? (
-          <DayClose />
+        ) : chosen === DAYS ? (
+          <Days />
         ) : (
           <>
         <div className="mb-reports__when">
@@ -297,7 +297,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 }
 
 /** Not a report id — the one entry on this screen that is a thing to DO. */
-const DAY_CLOSE = 'day_close';
+const DAYS = 'days';
 
 /** Nor is the dashboard: it is the answer to a question, not a report. */
 const TODAY = 'today';

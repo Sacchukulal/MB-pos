@@ -23,8 +23,10 @@ const LINE_HEIGHT: f64 = FONT_SIZE * 1.25;
 #[must_use]
 pub fn to_pdf(laid: &Laid) -> Vec<u8> {
     let mut sink = PdfSink {
-        advance: laid.base_advance.max(1),
-        ..PdfSink::default()
+        placed: Vec::new(),
+        laid,
+        cursor: 0.0,
+        page: 0,
     };
     render(laid, &mut sink);
     sink.finish_document()
@@ -41,31 +43,20 @@ struct Placed {
 }
 
 #[derive(Debug)]
-struct PdfSink {
+struct PdfSink<'a> {
     placed: Vec<Placed>,
-    /// One character of the body size, in dots — what the layout counts an indent in, and what
-    /// this sink divides by to get back to columns.
-    advance: u32,
+    /// For `Laid::columns_of` — the layout counts an indent in dots, and this page counts in
+    /// columns of a fixed-pitch face.
+    laid: &'a Laid,
     /// Points down from the top margin of the current page.
     cursor: f64,
     page: usize,
 }
 
-impl Default for PdfSink {
-    fn default() -> Self {
-        PdfSink {
-            placed: Vec::new(),
-            advance: 12,
-            cursor: 0.0,
-            page: 0,
-        }
-    }
-}
-
 /// How much of a page a line may occupy — the foot is kept clear for the page number.
 const BODY_HEIGHT: f64 = PAGE_HEIGHT - MARGIN - MARGIN - LINE_HEIGHT * 2.0;
 
-impl PdfSink {
+impl PdfSink<'_> {
     /// Scale is honoured here, and the first version of this file did not honour it — a 2×
     /// heading came out the same size as the item lines while the text sink gave it twice the
     /// width.
@@ -205,32 +196,18 @@ fn escape(text: &str) -> String {
     out
 }
 
-impl PdfSink {
-    /// An indent given in dots, as the columns this fixed-pitch page counts in.
-    #[expect(
-        clippy::integer_division,
-        reason = "dots back into whole characters, not money"
-    )]
-    const fn columns_of(dots: u32, advance: u32) -> usize {
-        if advance == 0 {
-            return 0;
-        }
-        (dots / advance) as usize
-    }
-}
-
-impl Sink for PdfSink {
+impl Sink for PdfSink<'_> {
     fn line(&mut self, line: &LaidLine, _index: usize) {
         if let LaidContent::Text { text } = &line.content {
-            let indent = PdfSink::columns_of(line.indent_dots, self.advance);
+            let indent = self.laid.columns_of(line.indent_dots);
             self.place(indent, text, line.style.scale());
         }
     }
 
     fn rule(&mut self, line: &LaidLine, pattern: Pattern, width: u32, _index: usize) {
         // A real line, like the raster sink draws.
-        let indent = PdfSink::columns_of(line.indent_dots, self.advance);
-        let across = PdfSink::columns_of(width, self.advance).max(1);
+        let indent = self.laid.columns_of(line.indent_dots);
+        let across = self.laid.columns_of(width).max(1);
         let rule = crate::layout::Rule::of(pattern);
         for _ in 0..rule.strokes {
             self.place(indent, &"_".repeat(across), 1);

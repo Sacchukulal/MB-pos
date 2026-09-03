@@ -261,6 +261,8 @@ fn t8_every_named_index_exists() {
         // The authentication path reads the live device register on EVERY request, because
         // revocation has to bite on the next request and not on the next login.
         "idx_lan_devices_live",
+        // One phone, one seat: the pairing looks the install up before it adds a row (0010).
+        "idx_lan_devices_install",
         // The kitchen screen asks "what is outstanding at my station" several times a minute,
         // and it must not scan a year of tickets to answer.
         "idx_kitchen_live",

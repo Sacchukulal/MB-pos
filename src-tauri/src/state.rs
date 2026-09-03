@@ -3,7 +3,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use mb_db::Db;
-use mb_print::font::Font;
 use mb_print::printer::{Engine, PrinterConfig, Role, Target};
 use mb_print::queue::sqlite::SqliteStore;
 use mb_print::queue::{JobStore, MemoryStore, Queue, QueueConfig};
@@ -539,40 +538,19 @@ impl App {
         lock(&self.shop).is_some()
     }
 
-    /// The built-in face, for a caller that has no shop settings to consult.
-    #[must_use]
-    pub fn font(&self) -> Arc<Font> {
-        self.faces.builtin()
-    }
-
-    /// The metrics a job of this kind will actually be drawn with.
+    /// The metrics a job of this kind will actually be drawn with, and the engine's name —
+    /// through `mb_print::drawing_for`, the same function the queue calls with the same face
+    /// key `App::print` stamps on the job, so a preview cannot be laid out differently from
+    /// the paper.
     #[must_use]
     pub fn metrics_for(
         &self,
         kind: mb_print::queue::JobKind,
         printer: &mb_print::printer::PrinterConfig,
     ) -> (mb_print::metrics::Metrics, &'static str) {
-        match printer.effective_engine() {
-            mb_print::printer::Engine::Text => (
-                mb_print::metrics::Metrics::printer_font(printer.paper),
-                "text",
-            ),
-            mb_print::printer::Engine::Raster => (
-                mb_print::metrics::Metrics::face(
-                    printer.paper,
-                    self.face_for(kind)
-                        .map_or_else(|| self.font(), |key| self.face_named(&key)),
-                ),
-                "raster",
-            ),
-        }
-    }
-
-    /// The face a key names, the same way the queue resolves it.
-    #[must_use]
-    pub fn face_named(&self, key: &str) -> Arc<Font> {
-        use mb_print::font::Typefaces;
-        self.faces.face(Some(key))
+        let face = self.face_for(kind);
+        let drawing = mb_print::drawing_for(printer, face.as_deref(), self.faces.as_ref());
+        (drawing.metrics, drawing.engine.name())
     }
 
     /// Change the stored configuration and write it, atomically.

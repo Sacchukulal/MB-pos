@@ -758,7 +758,7 @@ fn run_job(shared: &Arc<Shared>, printer_id: &str, mut job: StoredJob) {
         }
         match outcome {
             Ok(engine) => {
-                job.engine_used = Some(engine_name(engine).to_owned());
+                job.engine_used = Some(engine.name().to_owned());
                 // Printed means gone — from the store, and from what a screen is shown.
                 let _ = shared.store.remove(&job.id);
                 lock(&shared.statuses).remove(&job.id);
@@ -870,6 +870,35 @@ struct Failure {
     permanent: bool,
 }
 
+/// How one printer draws a document: the engine it can use, the metrics that engine lays out
+/// with, and what the raster sink may leave to the printer's own encoders.
+///
+/// The queue asks here before it prints and the screen asks here before it previews, so the
+/// two cannot drift — a preview laid out with a different face or a different engine from
+/// the paper is the bug this exists to prevent.
+#[derive(Debug, Clone)]
+pub struct Drawing {
+    pub engine: Engine,
+    pub metrics: Metrics,
+    pub raster: RasterOptions,
+}
+
+/// The one resolution. `font` is the key the job carries (`Job::in_face`), which the caller
+/// took from the shop's settings for that kind of document.
+#[must_use]
+pub fn drawing_for(printer: &PrinterConfig, font: Option<&str>, faces: &dyn Typefaces) -> Drawing {
+    let engine = printer.effective_engine();
+    let metrics = match engine {
+        Engine::Text => Metrics::printer_font(printer.paper),
+        Engine::Raster => Metrics::face(printer.paper, faces.face(font)),
+    };
+    Drawing {
+        engine,
+        metrics,
+        raster: RasterOptions::for_printer(&printer.caps),
+    }
+}
+
 fn print_once(
     shared: &Arc<Shared>,
     printer: &PrinterConfig,
@@ -881,11 +910,9 @@ fn print_once(
     document.paper = printer.paper;
 
     // Laid out with the metrics of the engine that will draw it.
-    let mut engine = printer.effective_engine();
-    let metrics = match engine {
-        Engine::Text => Metrics::printer_font(printer.paper),
-        Engine::Raster => Metrics::face(printer.paper, shared.faces.face(payload.font.as_deref())),
-    };
+    let drawing = drawing_for(printer, payload.font.as_deref(), shared.faces.as_ref());
+    let mut engine = drawing.engine;
+    let metrics = drawing.metrics;
     let laid = layout_for(&document, &metrics).map_err(|e| Failure {
         message: e.to_string(),
         // An amount wider than the paper is a template bug, not a printer that is switched off.
@@ -901,14 +928,7 @@ fn print_once(
 
     let bytes = match engine {
         Engine::Raster => {
-            let raster = to_raster(
-                &laid,
-                &metrics,
-                RasterOptions {
-                    native_qr: printer.caps.native_qr,
-                    ..RasterOptions::default()
-                },
-            );
+            let raster = to_raster(&laid, &metrics, drawing.raster);
             match raster {
                 Ok(raster) => escpos::encode_raster(&raster, &printer.caps, &options),
                 Err(_) => {
@@ -956,13 +976,6 @@ fn describe_job(job: &StoredJob, printer: &PrinterConfig) -> String {
     match &job.reason {
         Some(reason) => format!("{OUR_DOCUMENTS} — {} ({reason}) — {}", job.kind, printer.name),
         None => format!("{OUR_DOCUMENTS} — {} — {}", job.kind, printer.name),
-    }
-}
-
-const fn engine_name(engine: Engine) -> &'static str {
-    match engine {
-        Engine::Raster => "raster",
-        Engine::Text => "text",
     }
 }
 

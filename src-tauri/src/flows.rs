@@ -460,10 +460,24 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
 
     let (number, settled) = app.with_shop(|shop| {
         let till = mb_db::Till::new(OUTLET, app.terminal_id());
-        let existing = shop
+        let (existing, locked) = shop
             .db
-            .transaction(|tx| mb_db::Repos::new(tx).orders().find(&core.id))
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                Ok((
+                    repos.orders().find(&core.id)?,
+                    repos.days().locked_at(OUTLET, core.business_day)?,
+                ))
+            })
             .map_err(|e| words::from_db(&e))?;
+        // A closed day takes no more money: the one check, the same one a void makes.
+        if let Some(since) = locked {
+            return Err(crate::dayclose::locked_refusal(
+                "bill.day_closed",
+                since,
+                "keep billing",
+            ));
+        }
 
         let open = match existing {
             // Parked already: its numbers stay, the cart as it is now goes in. The time and the

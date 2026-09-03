@@ -556,15 +556,21 @@ pub fn load(repos: &Repos<'_>, outlet: &str) -> Result<ShopConfig, DbError> {
     Ok(config)
 }
 
-/// A value an older build wrote, in the words this one uses.
+/// A value an older build wrote, in the words this one uses. Runs before `check`, on the way
+/// in from the database and on the way in from an import file, so a value that left the list
+/// is mapped rather than refused — a shop must never fail to open over a typeface.
 fn modernise(entry: &catalog::Entry, stored: Value) -> Value {
     let Value::Text(text) = &stored else {
         return stored;
     };
-    // Sizes and nothing else.
+    // Sizes and typefaces, and nothing else.
     let value::Kind::Choice(choices) = entry.kind else {
         return stored;
     };
+    // A face that left the list, or a name this build has never heard of.
+    if std::ptr::eq(choices, catalog::FONTS) {
+        return Value::Text(mb_print::font::current_key(text).to_owned());
+    }
     if !std::ptr::eq(choices, catalog::SIZES) {
         return stored;
     }
@@ -739,6 +745,9 @@ pub fn plan_import(
             ));
             continue;
         };
+        // A file written by an older build, in the words this one uses — the same map the
+        // database goes through.
+        let value = modernise(entry, value);
         if let Err(e) = entry.kind.check(&value) {
             plan.problems
                 .push(format!("\"{}\": {}", entry.label, e.message));

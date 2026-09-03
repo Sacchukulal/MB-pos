@@ -414,7 +414,7 @@ fn ink(raster: &mb_print::raster::Raster) -> &mb_print::image::Monochrome {
         .iter()
         .find_map(|b| match b {
             Band::Ink { image } => Some(image),
-            Band::Qr { .. } => None,
+            _ => None,
         })
         .expect("something was drawn")
 }

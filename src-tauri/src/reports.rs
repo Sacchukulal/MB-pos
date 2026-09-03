@@ -1509,16 +1509,14 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let day = crate::flows::today(crate::flows::now());
     let period = Period::one_day(day);
-    let yesterday = day.previous();
 
-    let (totals, position, closed_yesterday) = app.with_shop(|shop| {
+    let (totals, position) = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 Ok((
                     repos.corrections().day_totals(OUTLET, day)?,
                     repos.money().cash_position(OUTLET, day)?,
-                    repos.corrections().day_is_locked(OUTLET, yesterday)?,
                 ))
             })
             .map_err(|e| words::from_db(&e))
@@ -1532,20 +1530,9 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         Money::ZERO
     };
 
+    // A day left open is the gate's business, not a card: it is asked at sign-in and cannot be
+    // ignored.
     let mut attention = Vec::new();
-
-    // Yesterday, never closed. The one that compounds: a shop that skips a close never notices
-    // the day it was ₹2,000 short.
-    if !closed_yesterday {
-        attention.push(needs_you(
-            "warn",
-            "Yesterday was never closed",
-            format!(
-                "{yesterday} has no closing count. Closing it records what was \
-                 in the drawer, and locks the day so its bills cannot change."
-            ),
-        ));
-    }
 
     // Paper that did not come out.
     let parked = app.with_shop(|shop| {

@@ -15,7 +15,7 @@ import { isUiError } from '../ipc/call';
 import { cx } from './cx';
 import { Button } from './controls';
 import { InfoTip } from './InfoTip';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 
 export interface ModalProps {
   open: boolean;
@@ -267,17 +267,36 @@ export function useReport(): (cause: unknown) => void {
   );
 }
 
-/** The ⋯ that holds the rest of a row's actions. The commands do not change; the buttons do. */
+/**
+ * The ⋯ that holds the rest of a row's actions. The commands do not change; the buttons do.
+ *
+ * With `text` it is a word and an arrow ("Card ▾") rather than a bare mark, and with `up` the
+ * sheet opens above the button — for a menu near the bottom of the screen.
+ */
 export function RowMenu({
   label = 'More',
   children,
   size = 'sm',
+  icon = 'more',
+  text,
+  pressed,
+  up,
+  className,
 }: {
   /** What the row is, for the screen reader — "More for Masala Dosa". */
   label?: string;
   /** `Button`s. Each one closes the menu when pressed. */
   children: ReactNode;
   size?: 'sm' | 'md';
+  /** The mark on the button. */
+  icon?: IconName;
+  /** A word beside the mark, when the button says what was chosen from it. */
+  text?: ReactNode;
+  /** Lit, like a pressed toggle — the choice in this menu is the one in force. */
+  pressed?: boolean;
+  /** Open the sheet above the button rather than below it. */
+  up?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -292,18 +311,23 @@ export function RowMenu({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
   return (
-    <span className="mb-rowmenu">
+    <span className={cx('mb-rowmenu', className)}>
       <Button
-        variant="quiet"
+        variant={text === undefined ? 'quiet' : 'secondary'}
         size={size}
-        iconOnly
+        iconOnly={text === undefined}
+        className={text === undefined ? undefined : 'mb-rowmenu__trigger'}
         title={label}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-pressed={pressed}
         onClick={() => setOpen((was) => !was)}
-        icon={<Icon name="more" size="sm" />}
-      />
+        icon={text === undefined ? <Icon name={icon} size="sm" /> : undefined}
+      >
+        {text}
+        {text === undefined ? null : <Icon name={icon} size="sm" />}
+      </Button>
       {open ? (
         <>
           <button
@@ -313,7 +337,11 @@ export function RowMenu({
             onClick={() => setOpen(false)}
           />
           {/* A press inside lands on the button and then closes the sheet. */}
-          <div className="mb-rowmenu__sheet" role="menu" onClick={() => setOpen(false)}>
+          <div
+            className={cx('mb-rowmenu__sheet', up && 'mb-rowmenu__sheet--up')}
+            role="menu"
+            onClick={() => setOpen(false)}
+          >
             {children}
           </div>
         </>

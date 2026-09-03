@@ -312,7 +312,7 @@ fn closing_the_day_is_not_behind_the_licence() {
 
     // It answers. What it says about the day is `dayclose`'s own business; the claim here is
     // only that the LICENCE did not stop it.
-    match crate::dayclose::view_on(&app, None) {
+    match crate::dayclose::day_state_on(&app, None) {
         Ok(_) => {}
         Err(e) => assert_ne!(
             e.code, "licence.not_operating",

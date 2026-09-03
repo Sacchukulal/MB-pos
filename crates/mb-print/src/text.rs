@@ -7,34 +7,25 @@ use crate::render::{BandImage, Sink, render};
 /// Render a laid-out document as plain lines.
 #[must_use]
 pub fn to_text(laid: &Laid) -> String {
-    let advance = laid.base_advance.max(1);
     let mut sink = TextSink {
         out: String::new(),
-        columns: 0,
-        advance,
+        columns: laid.columns_of(laid.paper.kind.dots().unwrap_or(laid.base_advance)),
+        laid,
     };
-    sink.columns = sink.columns_of(laid.paper.kind.dots().unwrap_or(advance));
     render(laid, &mut sink);
     sink.out
 }
 
 #[derive(Debug)]
-struct TextSink {
+struct TextSink<'a> {
     out: String,
     columns: usize,
-    advance: u32,
+    /// For `Laid::columns_of` — an indent given in dots, as the spaces a fixed-pitch printer
+    /// pads with.
+    laid: &'a Laid,
 }
 
-impl TextSink {
-    /// An indent given in dots, as the spaces a fixed-pitch printer pads with.
-    #[expect(
-        clippy::integer_division,
-        reason = "dots back into whole characters — the printer font's advance divides exactly"
-    )]
-    const fn columns_of(&self, dots: u32) -> usize {
-        (dots / self.advance) as usize
-    }
-
+impl TextSink<'_> {
     fn push(&mut self, indent: usize, body: &str) {
         for _ in 0..indent {
             self.out.push(' ');
@@ -55,10 +46,10 @@ impl TextSink {
     }
 }
 
-impl Sink for TextSink {
+impl Sink for TextSink<'_> {
     fn line(&mut self, line: &LaidLine, _index: usize) {
         if let LaidContent::Text { text } = &line.content {
-            let indent = self.columns_of(line.indent_dots);
+            let indent = self.laid.columns_of(line.indent_dots);
             self.push(indent, text);
         }
     }
@@ -66,8 +57,8 @@ impl Sink for TextSink {
     fn rule(&mut self, line: &LaidLine, pattern: Pattern, width: u32, _index: usize) {
         // The one sink that still draws a rule out of characters, because it is the one sink
         // that cannot draw a dot.
-        let indent = self.columns_of(line.indent_dots);
-        let across = self.columns_of(width).max(1);
+        let indent = self.laid.columns_of(line.indent_dots);
+        let across = self.laid.columns_of(width).max(1);
         let body: String = std::iter::repeat_n(pattern.glyph(), across).collect();
         self.push(indent, &body);
     }

@@ -211,6 +211,7 @@ function Who({
             <Button
               key={person.id}
               wide
+              list
               variant={person.lockedOut ? 'quiet' : 'secondary'}
               className="mb-lock__person"
               onClick={() => onChoose(person)}

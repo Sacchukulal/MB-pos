@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Scroller, useReport } from '../kit';
+import { Button, EmptyState, Page, PageHeader, Scroller, useReport } from '../kit';
 import { call, inApp, subscribe } from '../ipc/call';
 import type { KitchenTicket } from '../ipc/generated/KitchenTicket';
 import type { KitchenView } from '../ipc/generated/KitchenView';
@@ -13,6 +13,18 @@ import './kitchen.css';
 export function Kitchen() {
   const [view, setView] = useState<KitchenView | null>(null);
   const [station, setStation] = useState<string | null>(null);
+  /**
+   * Whether the shop has turned the kitchen screen on. The page is always listed (owner,
+   * 2026-09-03); when the screen is off it says so and offers the switch, instead of hiding.
+   */
+  const [screenOn, setScreenOn] = useState<boolean | null>(null);
+  const readStatus = useCallback(() => {
+    if (!inApp()) return;
+    call('app_status')
+      .then((status) => setScreenOn(status.kitchenScreen))
+      .catch(() => setScreenOn(true));
+  }, []);
+  useEffect(readStatus, [readStatus]);
 
   // ONE clock for the whole screen — see the note above.
   const tick = useTick();
@@ -79,6 +91,35 @@ export function Kitchen() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  if (screenOn === false) {
+    return (
+      <Page>
+        <PageHeader title="Kitchen" />
+        <EmptyState
+          title="The kitchen screen is off"
+          hint="With it on, every kitchen ticket also appears here, and the kitchen presses Done when the food goes out."
+          action={
+            <Button
+              variant="primary"
+              onClick={() =>
+                call('save_settings', {
+                  edits: [{ key: 'billing.kitchen_screen', value: 'true' }],
+                })
+                  .then(() => {
+                    readStatus();
+                    load();
+                  })
+                  .catch(report)
+              }
+            >
+              Turn on the kitchen screen
+            </Button>
+          }
+        />
+      </Page>
+    );
+  }
 
   if (!view) return null;
 

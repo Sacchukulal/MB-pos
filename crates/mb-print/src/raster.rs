@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::codes;
 use crate::doc::{Align, Pattern, Style};
 use crate::error::PrintError;
 use crate::font::{Cell, Font};
@@ -12,6 +13,7 @@ use crate::image::Monochrome;
 use crate::layout::{BandText, Laid, LaidContent, LaidLine, Rule as LayoutRule};
 use crate::metrics::Metrics;
 use crate::paper::Paper;
+use crate::printer::Capabilities;
 use crate::render::{BandImage, Sink, render};
 
 /// How many dot rows one `GS v 0` carries.
@@ -34,6 +36,12 @@ pub enum Band {
         module: u8,
         align: Align,
     },
+    /// A barcode the printer draws.
+    Barcode {
+        payload: String,
+        human_readable: bool,
+        align: Align,
+    },
 }
 
 /// Something the raster sink had to do that a person might want to know.
@@ -42,9 +50,11 @@ pub enum Band {
 pub enum RasterNote {
     /// A logo that could not be read.
     LogoSkipped { reason: String },
-    /// The printer has no QR encoder, so the payload was printed as text — the same thing the
+    /// The payload was too long for any QR, so it was printed as text — the same thing the
     /// text sink does, and a URI a customer can type is worth more than a blank square.
     QrAsText,
+    /// The payload had a character Code 128 cannot carry, so it was printed as text.
+    BarcodeAsText,
 }
 
 /// How much ink one line of the document produced.
@@ -70,7 +80,7 @@ impl Raster {
             .iter()
             .map(|b| match b {
                 Band::Ink { image } => image.height,
-                Band::Qr { .. } => 0,
+                Band::Qr { .. } | Band::Barcode { .. } => 0,
             })
             .sum()
     }
@@ -82,21 +92,41 @@ impl Raster {
     }
 }
 
+/// What the sink may leave to the printer's own encoders, and what it must draw itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RasterOptions {
     /// Whether this printer has `GS ( k` — the built-in QR encoder.
     pub native_qr: bool,
-    /// Module size for that encoder.
-    pub qr_module: u8,
+    /// Whether this printer has `GS k` — the built-in barcode encoder.
+    pub native_barcode: bool,
 }
 
 impl Default for RasterOptions {
     fn default() -> Self {
+        // What a thermal receipt printer sold in the last decade does.
         RasterOptions {
             native_qr: true,
-            // 6 dots a module puts a 25×25 UPI QR at about 150 dots — a quarter of 80 mm paper,
-            // and every phone camera reads it first time.
-            qr_module: 6,
+            native_barcode: true,
+        }
+    }
+}
+
+impl RasterOptions {
+    /// What this printer says it can do.
+    #[must_use]
+    pub const fn for_printer(caps: &Capabilities) -> RasterOptions {
+        RasterOptions {
+            native_qr: caps.native_qr,
+            native_barcode: caps.native_barcode,
+        }
+    }
+
+    /// Everything as ink — for the screen, which has no encoder to hand anything to.
+    #[must_use]
+    pub const fn drawn() -> RasterOptions {
+        RasterOptions {
+            native_qr: false,
+            native_barcode: false,
         }
     }
 }
@@ -182,6 +212,19 @@ impl Canvas {
         !was
     }
 
+    /// A filled rectangle; how many dots it newly inked.
+    fn fill(&mut self, x0: u32, top: usize, width: u32, height: u32) -> u32 {
+        let mut dots = 0;
+        for y in 0..height {
+            for x in 0..width {
+                if self.set(x0 + x, top + y as usize) {
+                    dots += 1;
+                }
+            }
+        }
+        dots
+    }
+
     fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
@@ -226,6 +269,18 @@ impl RasterSink<'_> {
     fn cell(&self, style: Style) -> Cell {
         self.font
             .cell_for_cap(u32::from(self.metrics.size(style).cap))
+    }
+
+    /// Where something `wide` dots across starts, aligned inside the paper left of the indent.
+    fn aligned(&self, line: &LaidLine, wide: u32, align: Align) -> u32 {
+        let usable = self.width.saturating_sub(line.indent_dots).max(1);
+        let spare = usable.saturating_sub(wide);
+        line.indent_dots
+            + match align {
+                Align::Left => 0,
+                Align::Centre => spare / 2,
+                Align::Right => spare,
+            }
     }
 
     /// One laid-out line, drawn the way its face needs.
@@ -467,13 +522,7 @@ impl RasterSink<'_> {
         let scaled = image.scaled_to(target.min(usable));
 
         let top = self.canvas.add_rows(line.row_dots.max(scaled.height));
-        let spare = usable.saturating_sub(scaled.width);
-        let x0 = line.indent_dots
-            + match align {
-                Align::Left => 0,
-                Align::Centre => spare / 2,
-                Align::Right => spare,
-            };
+        let x0 = self.aligned(line, scaled.width, align);
 
         let mut dots = 0;
         for y in 0..scaled.height {
@@ -484,6 +533,100 @@ impl RasterSink<'_> {
             }
         }
         dots
+    }
+
+    /// The QR as modules, at the module size the printer's own encoder would be told, so the
+    /// square is the same size whichever of the two draws it. `None` when the payload will not
+    /// encode.
+    fn draw_qr(&mut self, line: &LaidLine, payload: &str, width_pct: u8, align: Align) -> Option<u32> {
+        let modules = codes::qr(payload)?;
+        let usable = self.width.saturating_sub(line.indent_dots).max(1);
+        let module = u32::from(modules.module_for(codes::qr_side(usable, width_pct)));
+        let side = modules.size * module;
+
+        // Centred in the row the layout reserved, which is the side it asked for; the modules
+        // round down to fit inside it.
+        let rows = line.row_dots.max(side);
+        let top = self.canvas.add_rows(rows) + ((rows - side) / 2) as usize;
+        let x0 = self.aligned(line, side, align);
+
+        let mut dots = 0;
+        for my in 0..modules.size {
+            for mx in 0..modules.size {
+                if modules.dark(mx, my) {
+                    dots += self.canvas.fill(
+                        x0 + mx * module,
+                        top + (my * module) as usize,
+                        module,
+                        module,
+                    );
+                }
+            }
+        }
+        Some(dots)
+    }
+
+    /// The bars, at the widths and height `GS k` would draw them, with the number underneath.
+    /// `None` when the payload is not something Code 128 can carry.
+    fn draw_barcode(
+        &mut self,
+        line: &LaidLine,
+        payload: &str,
+        human_readable: bool,
+        align: Align,
+    ) -> Option<u32> {
+        let widths = codes::code128(payload)?;
+        let wide = codes::barcode_width(&widths);
+        let top = self.canvas.add_rows(line.row_dots.max(codes::BAR_HEIGHT));
+        let x0 = self.aligned(line, wide, align);
+
+        let mut dots = 0;
+        let mut x = x0 + codes::barcode_quiet();
+        for (n, width) in widths.iter().enumerate() {
+            let width = u32::from(*width) * codes::NARROW;
+            // Bars and spaces alternate, and a Code 128 symbol starts with a bar.
+            if n % 2 == 0 {
+                dots += self.canvas.fill(x, top, width, codes::BAR_HEIGHT);
+            }
+            x += width;
+        }
+
+        if human_readable {
+            let cell = self.cell(Style::NORMAL);
+            let text_width = u32::try_from(payload.chars().count())
+                .unwrap_or(u32::MAX)
+                .saturating_mul(cell.width);
+            let left = x0 + wide.saturating_sub(text_width) / 2;
+            dots += self.draw_grid(payload, left, cell, false, top + codes::BAR_HEIGHT as usize);
+        }
+        Some(dots)
+    }
+
+    /// A payload as characters — what every sink does with a code it cannot draw.
+    fn draw_as_text(&mut self, line: &LaidLine, payload: &str) -> u32 {
+        let cell = self.cell(Style::NORMAL);
+        let across = self
+            .metrics
+            .body()
+            .chars_across(self.width.saturating_sub(line.indent_dots));
+        let mut dots = 0;
+        let chars: Vec<char> = payload.chars().collect();
+        for chunk in chars.chunks(across.max(1)) {
+            let text: String = chunk.iter().collect();
+            let top = self.canvas.add_rows(cell.height);
+            dots += self.draw_grid(&text, line.indent_dots, cell, false, top);
+        }
+        dots
+    }
+
+    /// A command has to sit between two pictures, so the picture so far becomes a band and a
+    /// new one starts after it.
+    fn hand_to_printer(&mut self, band: Band, index: usize) {
+        self.canvas.drain_into(&mut self.bands);
+        self.bands.push(band);
+        // A code the printer draws is not "no ink"; recording zero would make the anti-drift
+        // test think the sink dropped it.
+        self.ink.push(LineInk { index, dots: 1 });
     }
 }
 
@@ -512,40 +655,28 @@ impl Sink for RasterSink<'_> {
 
     fn qr(&mut self, line: &LaidLine, payload: &str, width_pct: u8, align: Align, index: usize) {
         if self.options.native_qr {
-            // A command has to sit between two pictures, so the picture so far becomes a band
-            // and a new one starts after it.
-            self.canvas.drain_into(&mut self.bands);
-            let _ = width_pct;
             // The print offset cannot reach a native QR, and saying so is better than
             // pretending: the printer's own encoder positions the square with `ESC a`, which
             // knows nothing about a millimetre correction.
-            self.bands.push(Band::Qr {
-                payload: payload.to_owned(),
-                module: self.options.qr_module.clamp(1, 16),
-                align,
-            });
-            // A QR is not "no ink"; recording zero would make the anti-drift test think the
-            // sink dropped it.
-            self.ink.push(LineInk {
+            let usable = self.width.saturating_sub(line.indent_dots).max(1);
+            self.hand_to_printer(
+                Band::Qr {
+                    payload: payload.to_owned(),
+                    module: codes::qr_module(payload, codes::qr_side(usable, width_pct)),
+                    align,
+                },
                 index,
-                dots: u32::from(self.options.qr_module),
-            });
+            );
             return;
         }
 
-        self.notes.push(RasterNote::QrAsText);
-        let cell = self.cell(Style::NORMAL);
-        let across = self
-            .metrics
-            .body()
-            .chars_across(self.width.saturating_sub(line.indent_dots));
-        let mut dots = 0;
-        let chars: Vec<char> = payload.chars().collect();
-        for chunk in chars.chunks(across.max(1)) {
-            let text: String = chunk.iter().collect();
-            let top = self.canvas.add_rows(cell.height);
-            dots += self.draw_grid(&text, line.indent_dots, cell, false, top);
-        }
+        let dots = match self.draw_qr(line, payload, width_pct, align) {
+            Some(dots) => dots,
+            None => {
+                self.notes.push(RasterNote::QrAsText);
+                self.draw_as_text(line, payload)
+            }
+        };
         self.ink.push(LineInk { index, dots });
     }
 
@@ -557,10 +688,26 @@ impl Sink for RasterSink<'_> {
         align: Align,
         index: usize,
     ) {
-        // The printer's own `GS k` draws the bars.
-        let _ = (payload, human_readable, align);
-        self.canvas.add_rows(line.row_dots);
-        self.ink.push(LineInk { index, dots: 1 });
+        if self.options.native_barcode {
+            self.hand_to_printer(
+                Band::Barcode {
+                    payload: payload.to_owned(),
+                    human_readable,
+                    align,
+                },
+                index,
+            );
+            return;
+        }
+
+        let dots = match self.draw_barcode(line, payload, human_readable, align) {
+            Some(dots) => dots,
+            None => {
+                self.notes.push(RasterNote::BarcodeAsText);
+                self.draw_as_text(line, payload)
+            }
+        };
+        self.ink.push(LineInk { index, dots });
     }
 
     fn blank(&mut self, line: &LaidLine, index: usize) {

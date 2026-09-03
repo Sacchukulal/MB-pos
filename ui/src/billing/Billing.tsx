@@ -18,6 +18,7 @@ import {
   MoneyInput,
   onlyAmount,
   Page,
+  RowMenu,
   Scroller,
   SearchField,
   Spinner,
@@ -308,16 +309,26 @@ export function Billing() {
     [cart?.kitchenTold, removeLine],
   );
 
+  /**
+   * The money row, back to its start: Cash lit, nothing in the box. Every fresh bill begins
+   * here — a UPI bill must not leave UPI lit for the next customer.
+   */
+  const freshMoney = useCallback(() => {
+    setCashGiven('');
+    setPayMode('Cash');
+  }, []);
+
   const newOrder = useCallback(async () => {
     try {
       // The type stays: a parcel counter should not re-pick it forty times an hour. The shop's
       // lock, when it is on, is applied in Rust.
       setCart(await call('cart_clear', { keepType: true }));
+      freshMoney();
       await refreshFloor();
     } catch (cause) {
       report(cause);
     }
-  }, [refreshFloor, report]);
+  }, [freshMoney, refreshFloor, report]);
 
   /** Enter, with a burst of characters in the box: ask Rust whether that was a machine. */
   const handledAsScan = useCallback(async (): Promise<boolean> => {
@@ -417,29 +428,54 @@ export function Billing() {
       // in one command.
       const number = await call('complete_bill', { mode: payMode });
       setCart(await call('current_cart'));
-      setCashGiven('');
+      freshMoney();
       await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
       report(cause);
     }
-  }, [payMode, refreshFloor, report, toast]);
+  }, [freshMoney, payMode, refreshFloor, report, toast]);
 
-  /** The cash box, committed — and never onto an empty cart, which is what a blur after settling would do. */
+  /**
+   * Which keystroke's answer is the latest. Replies can come back out of order; only the one
+   * for what is in the box now may touch the cart.
+   */
+  const cashSeq = useRef(0);
+
+  /**
+   * The cash box, committed on EVERY keystroke — the answer beside it moves as the cashier
+   * types, not when they leave the box. Never onto an empty cart, which is what a stray key
+   * after settling would do.
+   */
   const commitCash = useCallback(
-    async (typed: string) => {
+    (typed: string) => {
       if (!cart || cart.isEmpty) return;
-      try {
-        setCart(
-          typed.trim() === ''
-            ? await call('cart_clear_payments')
-            : await call('cart_cash_given', { amount: typed.trim() }),
-        );
-      } catch (cause) {
-        report(cause);
-      }
+      const amount = typed.trim();
+      // Half a number ("500.") is not a number yet; the last whole one stands until it is.
+      if (amount !== '' && !/^\d+(\.\d{1,2})?$/.test(amount)) return;
+      const seq = ++cashSeq.current;
+      void (async () => {
+        try {
+          const fresh =
+            amount === ''
+              ? await call('cart_clear_payments')
+              : await call('cart_cash_given', { amount });
+          if (seq === cashSeq.current) setCart(fresh);
+        } catch (cause) {
+          if (seq === cashSeq.current) report(cause);
+        }
+      })();
     },
     [cart, report],
+  );
+
+  /** A key in the cash box: keep what was typed, and ask Rust what it means straight away. */
+  const typeCash = useCallback(
+    (typed: string) => {
+      setCashGiven(typed);
+      commitCash(typed);
+    },
+    [commitCash],
   );
 
   // A tap goes through the SAME reducer a key does, so touch and keyboard cannot drift apart.
@@ -924,34 +960,11 @@ export function Billing() {
             mode={payMode}
             onPick={setPayMode}
             onCredit={() => setOnAccount(true)}
+            cash={cashGiven}
+            onCash={typeCash}
+            onCashDone={() => commitCash(cashGiven)}
+            cart={cart}
           />
-
-          {/*
-            The one box a cashier types money into, and only for the one thing that is counted
-            by hand.
-          */}
-          {payMode === 'Cash' ? (
-            <div className="mb-payment__cash">
-              <MoneyInput
-                label="Cash given"
-                value={cashGiven}
-                onChange={setCashGiven}
-                onBlur={() => void commitCash(cashGiven)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void commitCash(cashGiven);
-                }}
-              />
-              {cart && cart.change.paise > 0n ? (
-                <span className="mb-payment__answer">
-                  Change <strong>{cart.change.text}</strong>
-                </span>
-              ) : cart && cart.payments.length > 0 && cart.balance.paise > 0n ? (
-                <span className="mb-payment__answer">
-                  Still owing <strong>{cart.balance.text}</strong>
-                </span>
-              ) : null}
-            </div>
-          ) : null}
         </div>
 
         {cart && !cart.isEmpty ? <Totals bill={cart.bill} /> : null}
@@ -1131,7 +1144,9 @@ export function Billing() {
             setOnAccount(false);
             toast.show('ok', said);
             // The cart came back from Rust with the credit payment on it; ask for it again
-            // rather than trusting a second copy.
+            // rather than trusting a second copy. The box is done with: the credit took the
+            // bill.
+            setCashGiven('');
             call('current_cart').then(setCart).catch(report);
           }}
           onFailed={report}
@@ -1141,62 +1156,129 @@ export function Billing() {
   );
 }
 
-/** The four ways to pay, and what each of them knows about the bill. */
+/** The ways that are not cash, in the order a counter meets them. */
+const OTHER_MODES = ['Card', 'UPI'] as const;
+
+/**
+ * What the row says beside the cash box, and in which colour. Rust worked the figures out;
+ * this only picks the sentence.
+ */
+export function paymentAnswer(
+  cart: CartView | null,
+  mode: string,
+): { tone: 'back' | 'short' | 'by'; text: string } | null {
+  if (!cart || cart.isEmpty) return null;
+  // Cash over the total comes back, whichever mode is lit.
+  if (cart.change.paise > 0n) return { tone: 'back', text: `Return ${cart.change.text}` };
+  if (cart.balance.paise > 0n) {
+    // Card or UPI: the rest goes that way when the bill is completed — a split, if some cash
+    // was typed first.
+    if (mode !== 'Cash') return { tone: 'by', text: `${cart.balance.text} by ${mode}` };
+    // Cash, and some was typed: how much more the customer has to find.
+    if (cart.payments.length > 0) return { tone: 'short', text: `Need ${cart.balance.text}` };
+    return null;
+  }
+  // Taken in full, nothing to hand back.
+  if (cart.payments.length > 0) return { tone: 'back', text: 'Paid exactly' };
+  return null;
+}
+
+/**
+ * The money row: Cash and its box, Rust's answer, and the arrow that keeps Card, UPI and Credit.
+ * One row, because the cashier's eye is on the customer's hand.
+ */
 export function PaymentModes({
   mode,
   onPick,
   onCredit,
+  cash,
+  onCash,
+  onCashDone,
+  cart,
 }: {
   /** Which mode is lit. */
   mode: string;
   onPick: (mode: string) => void;
   onCredit: () => void;
+  /** The cash handed over, as typed. */
+  cash: string;
+  onCash: (typed: string) => void;
+  /** The typed cash is done with — Enter, or leaving the box. */
+  onCashDone: () => void;
+  cart: CartView | null;
 }) {
-  const [showCredit, setShowCredit] = useState(false);
-  const creditId = useId();
+  const cashBox = useRef<HTMLInputElement>(null);
+  const answer = paymentAnswer(cart, mode);
+  const other = mode !== 'Cash';
 
   return (
-    <>
-      <div className="mb-payment__modes">
-        {/* Exactly one of these, so it is the kit's segmented control. */}
-        <div className="mb-segment mb-segment--fill mb-segment--lg" role="group" aria-label="Paid by">
-          {['Cash', 'Card', 'UPI'].map((label) => (
-            <button
-              key={label}
-              type="button"
-              className="mb-segment__option"
-              aria-pressed={mode === label}
-              onClick={() => onPick(label)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="mb-payment__reveal"
-          aria-expanded={showCredit}
-          aria-controls={creditId}
-          title={showCredit ? 'Hide credit billing' : 'Show credit billing'}
-          onClick={() => setShowCredit((was) => !was)}
-        >
-          <Icon
-            name={showCredit ? 'chevron-up' : 'chevron-down'}
-            size="sm"
-            label={showCredit ? 'Hide credit billing' : 'Show credit billing'}
-          />
-        </button>
-      </div>
+    <div className="mb-payment__row" role="group" aria-label="Paid by">
+      {/* Cash is the default and the most common, so it stands on its own. */}
+      <Button
+        aria-pressed={!other}
+        onClick={() => {
+          onPick('Cash');
+          cashBox.current?.focus();
+        }}
+      >
+        Cash
+      </Button>
 
       {/*
-        A credit sale happens mid-bill with the customer standing there, so the picker opens
-        here rather than on another screen.
+        The one box a cashier types money into. It stays when Card or UPI is lit, because a
+        customer may hand over some cash and pay the rest by card: the cash goes down here and
+        the balance goes the other way when the bill is completed.
       */}
-      <div id={creditId} className="mb-payment__credit" hidden={!showCredit}>
-        <Button size="sm" wide onClick={onCredit}>
+      <MoneyInput
+        ref={cashBox}
+        aria-label="Cash given"
+        placeholder="Cash given"
+        value={cash}
+        onChange={onCash}
+        onBlur={onCashDone}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') onCashDone();
+        }}
+      />
+
+      {answer ? (
+        <span
+          className={`mb-payment__answer mb-payment__answer--${answer.tone}`}
+          role="status"
+        >
+          {answer.text}
+        </span>
+      ) : null}
+
+      {/*
+        Card, UPI and Credit, behind one small arrow. The button says which of them is in force.
+        A credit sale happens mid-bill with the customer standing there, so the picker opens here
+        rather than on another screen.
+      */}
+      <RowMenu
+        className="mb-payment__other"
+        label={other ? `Paid by ${mode}. Other ways to pay` : 'Other ways to pay'}
+        icon="chevron-down"
+        text={other ? mode : undefined}
+        pressed={other}
+        size="md"
+        up
+      >
+        {OTHER_MODES.map((label) => (
+          <Button
+            key={label}
+            variant="quiet"
+            size="sm"
+            aria-pressed={mode === label}
+            onClick={() => onPick(label)}
+          >
+            {label}
+          </Button>
+        ))}
+        <Button variant="quiet" size="sm" onClick={onCredit}>
           Credit
         </Button>
-      </div>
-    </>
+      </RowMenu>
+    </div>
   );
 }

@@ -422,8 +422,9 @@ fn lay_block(
             },
             style: Style::NORMAL,
             indent_dots,
-            // The printer draws the square itself and the sink cannot know how tall it will be.
-            row_dots: usable * u32::from((*width_pct).clamp(1, 100)) / 100,
+            // The square the setting asks for; the sink draws it (or has the printer draw it)
+            // at the module size that comes nearest.
+            row_dots: crate::codes::qr_side(usable, *width_pct),
             segments: Vec::new(),
         }),
 
@@ -439,8 +440,8 @@ fn lay_block(
             },
             style: Style::NORMAL,
             indent_dots,
-            // `GS h` is set to 60 dots by `escpos`, plus the characters under it.
-            row_dots: 60
+            // The bars' own height, plus the characters under them.
+            row_dots: crate::codes::BAR_HEIGHT
                 + if *human_readable {
                     metrics.body().row
                 } else {

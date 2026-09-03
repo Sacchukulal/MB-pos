@@ -109,7 +109,7 @@ describe('the theme is data, not code (D21, and the owner ruling of 2026-08-04)'
     expect(toggleTarget('light')).toBe('dark');
     expect(toggleTarget('dark')).toBe('light');
     // From anything else it returns to the default rather than guessing.
-    expect(toggleTarget('contrast')).toBe('dark');
+    expect(toggleTarget('contrast')).toBe('light');
     expect(toggleTarget('a-theme-that-was-deleted')).toBe('light');
   });
 });

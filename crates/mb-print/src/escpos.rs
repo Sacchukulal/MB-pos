@@ -186,12 +186,19 @@ impl EscPos {
         self
     }
 
-    pub fn barcode(&mut self, payload: &str, human_readable: bool, height: u8) -> &mut Self {
-        // How tall, in dots.
-        self.out
-            .extend_from_slice(&[GS, b'h', height.clamp(1, 255)]);
-        // Narrow bar width, 2 dots.
-        self.out.extend_from_slice(&[GS, b'w', 2]);
+    pub fn barcode(&mut self, payload: &str, human_readable: bool) -> &mut Self {
+        // How tall, in dots — the height the layout reserved and the raster sink draws.
+        self.out.extend_from_slice(&[
+            GS,
+            b'h',
+            u8::try_from(crate::codes::BAR_HEIGHT).unwrap_or(u8::MAX),
+        ]);
+        // Narrow bar width, in dots — the width the raster sink draws.
+        self.out.extend_from_slice(&[
+            GS,
+            b'w',
+            u8::try_from(crate::codes::NARROW).unwrap_or(2),
+        ]);
         // Where the characters go: 0 none, 2 below.
         self.out
             .extend_from_slice(&[GS, b'H', if human_readable { 2 } else { 0 }]);
@@ -245,18 +252,9 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
     out.size(1).emphasis(false);
 
     // The layout counts in dots; this engine prints with the printer's own fixed font, so it
-    // divides back — exactly, because `Metrics::printer_font` only ever answers in whole
-    // multiples of it.
-    let advance = laid.base_advance.max(1);
-    let columns_of = |dots: u32| -> usize {
-        #[expect(
-            clippy::integer_division,
-            reason = "dots back into whole characters, not money"
-        )]
-        {
-            (dots / advance) as usize
-        }
-    };
+    // divides back through `Laid::columns_of` — exactly, because `Metrics::printer_font` only
+    // ever answers in whole multiples of the advance.
+    let paper_dots = laid.paper.kind.dots().unwrap_or(0);
 
     for line in &laid.lines {
         match &line.content {
@@ -269,7 +267,7 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                     bold = line.style.bold;
                     out.emphasis(bold);
                 }
-                let indent = " ".repeat(columns_of(line.indent_dots));
+                let indent = " ".repeat(laid.columns_of(line.indent_dots));
                 out.line(&format!("{indent}{}", text.trim_end()));
             }
             LaidContent::Separator { pattern, width } => {
@@ -281,8 +279,8 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                     bold = false;
                     out.emphasis(false);
                 }
-                let indent = " ".repeat(columns_of(line.indent_dots));
-                let across = columns_of(*width).max(1);
+                let indent = " ".repeat(laid.columns_of(line.indent_dots));
+                let across = laid.columns_of(*width).max(1);
                 let body: String = std::iter::repeat_n(pattern.glyph(), across).collect();
                 out.line(&format!("{indent}{body}"));
             }
@@ -307,9 +305,18 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                         .align(Align::Left);
                 }
             }
-            LaidContent::QrCode { payload, align, .. } => {
+            LaidContent::QrCode {
+                payload,
+                width_pct,
+                align,
+            } => {
                 if caps.native_qr {
-                    out.align(*align).qr(payload, 6).align(Align::Left);
+                    // The module size the setting's width comes to — the same sum the raster
+                    // sink does, so both engines print the same square.
+                    let usable = paper_dots.saturating_sub(line.indent_dots).max(1);
+                    let module =
+                        crate::codes::qr_module(payload, crate::codes::qr_side(usable, *width_pct));
+                    out.align(*align).qr(payload, module).align(Align::Left);
                 } else {
                     // The same choice the text sink makes: a URI a customer can read and type
                     // beats a blank space.
@@ -321,16 +328,7 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                 human_readable,
                 align,
             } => {
-                if caps.native_barcode {
-                    out.align(*align)
-                        .barcode(payload, *human_readable, 60)
-                        .line("")
-                        .align(Align::Left);
-                } else {
-                    // The same choice the QR arm makes above: characters a person can read beat
-                    // a blank space.
-                    out.line(payload);
-                }
+                native_barcode(&mut out, caps, payload, *human_readable, *align);
             }
             LaidContent::Image { .. } => {
                 // A printer's own font path cannot draw a logo.
@@ -373,12 +371,36 @@ pub fn encode_raster(raster: &Raster, caps: &Capabilities, options: &JobOptions)
                     out.line(payload);
                 }
             }
+            Band::Barcode {
+                payload,
+                human_readable,
+                align,
+            } => native_barcode(&mut out, caps, payload, *human_readable, *align),
         }
     }
 
     out.default_line_spacing();
     finish_job(&mut out, caps, options);
     out.finish()
+}
+
+/// The printer's own bars, or — the same choice the QR arm makes — characters a person can
+/// read, which beat a blank space.
+fn native_barcode(
+    out: &mut EscPos,
+    caps: &Capabilities,
+    payload: &str,
+    human_readable: bool,
+    align: Align,
+) {
+    if caps.native_barcode {
+        out.align(align)
+            .barcode(payload, human_readable)
+            .line("")
+            .align(Align::Left);
+    } else {
+        out.line(payload);
+    }
 }
 
 /// The end of every job: the drawer, the feed and the cut, each only if this printer can do it.

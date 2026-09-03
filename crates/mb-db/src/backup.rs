@@ -19,6 +19,7 @@ pub const COUNTED: &[&str] = &[
     "bill_lines",
     "bill_tax_rows",
     "bills",
+    "business_days",
     "cash_movements",
     "categories",
     "category_printers",

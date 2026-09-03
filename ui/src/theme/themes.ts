@@ -7,7 +7,7 @@ export interface Theme {
   /** What the shop sees in the settings list. */
   readonly name: string;
   /** Which face the toggle shows while this theme is active. */
-  readonly icon: 'sun' | 'moon' | 'contrast';
+  readonly icon: 'sun' | 'moon';
   /** Whether this theme counts as the dark one for the sun/moon toggle. */
   readonly appearance: 'light' | 'dark';
 }
@@ -23,15 +23,13 @@ export const LIGHT: Theme = {
   appearance: 'light',
 };
 
+/*
+ * Two, and only two. The light theme is black on white at 15:1 and up, so it IS the
+ * high-contrast theme; a third block was a second way to say the same thing (owner, 2026-09-03).
+ */
 export const THEMES: readonly Theme[] = [
   LIGHT,
   { id: 'dark', name: 'Dark', icon: 'moon', appearance: 'dark' },
-  {
-    id: 'contrast',
-    name: 'High contrast',
-    icon: 'contrast',
-    appearance: 'light',
-  },
 ];
 
 export const DEFAULT_THEME: ThemeId = LIGHT.id;

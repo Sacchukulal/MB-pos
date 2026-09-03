@@ -129,6 +129,7 @@ pub fn is_boolean_name(name: &str) -> bool {
 pub const ROOT_TABLES: &[&str] = &[
     "audit_log",
     "applied_events",
+    "business_days",
     "categories",
     "combos",
     "customer_payments",

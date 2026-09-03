@@ -1031,24 +1031,7 @@ impl<'a> MoneyRepo<'a> {
         })
     }
 
-    // The day close.
-    /// Superseded by `MoneyRepo::cash_position`, and kept as one line of delegation rather than
-    /// a second answer.
-    pub fn expected_cash(
-        &self,
-        outlet: &str,
-        day: BusinessDay,
-        opening_float: Money,
-    ) -> Result<Money, DbError> {
-        let position = self.cash_position(outlet, day)?;
-        if position.opening_float.is_zero() {
-            return position
-                .expected
-                .add(opening_float)
-                .map_err(|e| DbError::invariant(e.to_string()));
-        }
-        Ok(position.expected)
-    }
+    // The drawer count.
 
     /// A close is one drawer, or it is the shop's roll-up.
     pub fn save_day_close(&self, outlet: &str, close: &DayClose) -> Result<(), DbError> {

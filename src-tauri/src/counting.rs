@@ -346,13 +346,11 @@ pub fn approve_stock_count_on(app: &App, id: String) -> UiResult<StockCountView>
                         "That count is not on file. Refresh and try again.",
                     )));
                 };
-                if repos.corrections().day_is_locked(OUTLET, day)? {
-                    return Ok(Err(UiError::new(
+                if let Some(since) = repos.days().locked_at(OUTLET, day)? {
+                    return Ok(Err(crate::dayclose::locked_refusal(
                         "count.day_locked",
-                        format!(
-                            "{day} has been closed and locked, so nothing may move in it. \
-                             Reopen the day (Reports → Day close), then approve this count."
-                        ),
+                        since,
+                        "approve this count",
                     )));
                 }
                 let moved = repos

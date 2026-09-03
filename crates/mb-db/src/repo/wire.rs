@@ -471,7 +471,7 @@ impl<'a> WireRepo<'a> {
             rusqlite::params![outlet, day_sql],
             |r| r.get(0),
         )?;
-        let is_day_closed = repos.money().find_day_close(outlet, day)?.is_some();
+        let is_day_closed = repos.days().is_locked(outlet, day)?;
         let (gross, discount, tax) = by_day
             .first()
             .map_or((Money::ZERO, Money::ZERO, Money::ZERO), |b| {

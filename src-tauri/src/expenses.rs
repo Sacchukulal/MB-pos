@@ -360,6 +360,15 @@ pub fn save_expense_on(app: &App, edit: ExpenseEdit) -> UiResult<ExpensesView> {
             })
             .map_err(|e| words::from_db(&e))
     })?;
+    // An expense written into a closed day would change a figure that was frozen.
+    let dated = before.as_ref().map_or(day, |b| b.business_day);
+    if let Some(since) = crate::dayclose::locked_since(app, dated)? {
+        return Err(crate::dayclose::locked_refusal(
+            "expense.day_closed",
+            since,
+            "record this",
+        ));
+    }
 
     app.with_shop(|shop| {
         shop.db
@@ -429,6 +438,13 @@ pub fn delete_expense_on(app: &App, id: String) -> UiResult<ExpensesView> {
     let who = guard::require(app, Permission::ExpensesManage)?;
     let at = now();
     let day = today(at);
+    if let Some(since) = crate::dayclose::locked_since(app, day)? {
+        return Err(crate::dayclose::locked_refusal(
+            "expense.day_closed",
+            since,
+            "delete this",
+        ));
+    }
 
     app.with_shop(|shop| {
         shop.db
@@ -487,6 +503,13 @@ pub fn save_movement_on(
         return Err(UiError::new(
             "cash.reason",
             "Say why. Money leaving a drawer without a reason is how a shortfall becomes an argument.",
+        ));
+    }
+    if let Some(since) = crate::dayclose::locked_since(app, day)? {
+        return Err(crate::dayclose::locked_refusal(
+            "cash.day_closed",
+            since,
+            "move this",
         ));
     }
 

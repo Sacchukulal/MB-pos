@@ -299,7 +299,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // The faces a shop may choose between.
 
-/// The faces on offer, and where each one comes from.
+/// The faces on offer, and where each one comes from. Five: the shipped face and four that
+/// every stock Windows has — a face that is not on the machine prints as the shipped one,
+/// silently, which is why Cascadia and Calibri left the list.
 pub const FAMILIES: &[Family] = &[
     Family {
         key: "builtin",
@@ -314,40 +316,10 @@ pub const FAMILIES: &[Family] = &[
         monospace: true,
     },
     Family {
-        key: "consolas_bold",
-        label: "Consolas Bold — darker on faint paper",
-        file: Some("consolab.ttf"),
-        monospace: true,
-    },
-    Family {
         key: "courier",
         label: "Courier New",
         file: Some("cour.ttf"),
         monospace: true,
-    },
-    Family {
-        key: "lucida",
-        label: "Lucida Console",
-        file: Some("lucon.ttf"),
-        monospace: true,
-    },
-    Family {
-        key: "cascadia",
-        label: "Cascadia Mono",
-        file: Some("CascadiaMono.ttf"),
-        monospace: true,
-    },
-    Family {
-        key: "times",
-        label: "Times New Roman — a printed-book look",
-        file: Some("times.ttf"),
-        monospace: false,
-    },
-    Family {
-        key: "georgia",
-        label: "Georgia — heavier serif, clear on faint paper",
-        file: Some("georgia.ttf"),
-        monospace: false,
     },
     Family {
         key: "arial",
@@ -356,18 +328,28 @@ pub const FAMILIES: &[Family] = &[
         monospace: false,
     },
     Family {
-        key: "calibri",
-        label: "Calibri — rounder, a little smaller",
-        file: Some("calibri.ttf"),
-        monospace: false,
-    },
-    Family {
         key: "verdana",
-        label: "Verdana — widest, easiest to read small",
+        label: "Verdana",
         file: Some("verdana.ttf"),
         monospace: false,
     },
 ];
+
+/// The key on today's list for a key any build ever stored. A face that left the list goes
+/// to the one nearest it in shape; a name this build has never heard of goes to the shipped
+/// face, because nothing about a typeface may stop a shop from opening.
+#[must_use]
+pub fn current_key(stored: &str) -> &'static str {
+    if let Some(known) = family(stored) {
+        return known.key;
+    }
+    match stored {
+        "consolas_bold" | "lucida" | "cascadia" => "consolas",
+        "calibri" => "arial",
+        "times" | "georgia" => "verdana",
+        _ => "builtin",
+    }
+}
 
 /// One choice on the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,6 +488,34 @@ mod tests {
     fn the_shipped_face_loads() {
         let font = Font::builtin().expect("the built-in face must load");
         assert_eq!(font.name(), "IBM Plex Mono Regular");
+    }
+
+    /// Five faces, plain family names, and every stored key from any build lands on one.
+    #[test]
+    fn five_faces_and_every_old_key_lands_on_one_of_them() {
+        let keys: Vec<&str> = FAMILIES.iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["builtin", "consolas", "courier", "arial", "verdana"]);
+        for family in FAMILIES {
+            assert!(
+                !family.label.contains(" — "),
+                "{} still carries an explainer",
+                family.key
+            );
+            assert_eq!(current_key(family.key), family.key);
+        }
+        for (old, now) in [
+            ("consolas_bold", "consolas"),
+            ("lucida", "consolas"),
+            ("cascadia", "consolas"),
+            ("calibri", "arial"),
+            ("times", "verdana"),
+            ("georgia", "verdana"),
+            ("", "builtin"),
+            ("wingdings", "builtin"),
+        ] {
+            assert_eq!(current_key(old), now, "{old}");
+            assert!(family(current_key(old)).is_some());
+        }
     }
 
     #[test]

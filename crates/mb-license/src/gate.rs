@@ -26,8 +26,17 @@ impl Feature {
     ];
 
     /// Closing the day is not a report, and this constant is where that decision is written.
-    pub const REPORTS_DOES_NOT_MEAN_THE_DAY_CLOSE: &'static [&'static str] =
-        &["day_close", "count_cash", "close_day", "reopen_day"];
+    pub const REPORTS_DOES_NOT_MEAN_THE_DAY_CLOSE: &'static [&'static str] = &[
+        "day_state",
+        "days",
+        "close_pending",
+        "close_day",
+        "mark_holiday",
+        "unmark_holiday",
+        "reopen_day",
+        "count_cash",
+        "count_drawer",
+    ];
 
     /// The stable code. This is what a plan carries, so adding a plan in the admin panel never
     /// needs a counter release.
