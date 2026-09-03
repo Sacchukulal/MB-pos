@@ -18,6 +18,8 @@ pub struct BackupView {
     pub second_folder: String,
     /// Where the shop's live data file is, so a support call can ask for one folder.
     pub database: String,
+    /// The folder that holds the whole shop: its data file, its licence, its backups.
+    pub shop_folder: String,
     pub backups: Vec<BackupRowView>,
     /// The sentence at the top, and it is the whole point of the screen.
     pub headline: String,
@@ -89,6 +91,15 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
     let database = app
         .with_shop(|shop| Ok(shop.path.display().to_string()))
         .unwrap_or_else(|_| "no shop is open".to_owned());
+    let shop_folder = app
+        .with_shop(|shop| {
+            Ok(shop
+                .path
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default())
+        })
+        .unwrap_or_default();
 
     // What a verify found, remembered.
     let verified = verify_marks(app);
@@ -157,6 +168,7 @@ pub fn status_on(app: &App) -> UiResult<BackupView> {
         folder: folder.display().to_string(),
         second_folder: config.backup.second_folder.clone(),
         database,
+        shop_folder,
         backups: rows,
         headline,
         tone,

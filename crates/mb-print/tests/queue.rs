@@ -37,6 +37,8 @@ struct Recorder {
     permanent: Mutex<bool>,
     /// When set, `send` blocks until released.
     gate: Option<Arc<Gate>>,
+    /// How many sends have reached the gate — the write is in flight from then on.
+    at_gate: AtomicU32,
     /// How many times a blocked send was stopped from outside.
     interrupted: AtomicU32,
 }
@@ -112,6 +114,7 @@ struct FakeTransport {
 impl Transport for FakeTransport {
     fn send(&mut self, bytes: &[u8], _document: &str) -> Result<(), TransportError> {
         if let Some(gate) = &self.recorder.gate {
+            self.recorder.at_gate.fetch_add(1, Ordering::SeqCst);
             gate.wait();
         }
         let attempt = self.recorder.attempts.fetch_add(1, Ordering::SeqCst) + 1;
@@ -170,7 +173,7 @@ impl Interrupt for FakeInterrupt {
 
 fn font() -> Arc<dyn mb_print::font::Typefaces> {
     Arc::new(mb_print::font::OneFace(Arc::new(
-        Font::builtin().expect("the shipped face loads"),
+        Font::default_face().expect("the default face loads"),
     )))
 }
 
@@ -186,7 +189,7 @@ impl mb_print::font::Typefaces for Watching {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(key.map(str::to_owned));
-        Arc::new(Font::builtin().expect("the shipped face loads"))
+        Arc::new(Font::default_face().expect("the default face loads"))
     }
 }
 
@@ -950,7 +953,7 @@ fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
     );
 
     queue
-        .enqueue(ticket("kitchen").in_face(Some("consolas".to_owned())))
+        .enqueue(ticket("kitchen").in_face(Some("monospace".to_owned())))
         .expect("queued");
     assert!(
         until(|| printer_fake.sent.lock().unwrap().len() == 1),
@@ -960,11 +963,11 @@ fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
     let asked = watching.asked.lock().unwrap().clone();
     assert_eq!(
         asked,
-        vec![Some("consolas".to_owned())],
+        vec![Some("monospace".to_owned())],
         "the queue drew the ticket with a face the job did not ask for"
     );
 
-    // And a job that chose nothing asks for nothing, which is the built-in one.
+    // And a job that chose nothing asks for nothing, which is the default one.
     queue.enqueue(ticket("kitchen")).expect("queued");
     assert!(
         until(|| printer_fake.sent.lock().unwrap().len() == 2),
@@ -1123,6 +1126,11 @@ fn giving_up_on_a_job_in_flight_stops_it_and_forgets_it() {
         .snapshot()
         .iter()
         .any(|j| j.id == id && j.state == JobState::Printing)));
+    // Printing covers the drawing too; the write is in flight once the send is at the gate.
+    assert!(
+        until(|| held.at_gate.load(Ordering::SeqCst) == 1),
+        "the send never reached the printer"
+    );
 
     queue.dismiss(&id).expect("dismissed");
     assert_eq!(held.interrupted.load(Ordering::SeqCst), 1, "the write in flight was not stopped");
@@ -1172,6 +1180,10 @@ fn giving_up_on_all_covers_every_state() {
         .snapshot()
         .iter()
         .any(|j| j.id == first && j.state == JobState::Printing)));
+    assert!(
+        until(|| held.at_gate.load(Ordering::SeqCst) == 1),
+        "the send never reached the printer"
+    );
     assert_eq!(queue.snapshot().len(), 3);
 
     assert_eq!(queue.dismiss_all().expect("dismissed"), 3);

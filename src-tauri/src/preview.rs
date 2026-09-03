@@ -23,6 +23,11 @@ use ts_rs::TS;
 pub struct PreviewDoc {
     /// Printable dots across. The preview is exactly as wide as the paper, not "about right".
     pub dots: u32,
+    /// The roll's whole width in millimetres, and how much of it the head can reach. The
+    /// screen draws the difference as the paper's own margin, so the preview is the receipt
+    /// in the hand and not a strip of ink with no edge.
+    pub paper_mm: u32,
+    pub printable_mm: u32,
     /// Characters across at the body size — what the settings screen tells a shop it is
     /// choosing when it picks a size.
     pub columns: usize,
@@ -205,6 +210,8 @@ pub fn to_preview(laid: &Laid, metrics: &Metrics, engine: &str) -> PreviewDoc {
 
     PreviewDoc {
         dots: metrics.dots(),
+        paper_mm: laid.paper.kind.width_mm(),
+        printable_mm: laid.paper.kind.printable_mm(),
         columns: metrics.body().chars_across(metrics.dots()),
         lines,
         millimetres: laid.total_mm(),
@@ -337,7 +344,7 @@ mod tests {
     use mb_print::paper::{Paper, PaperKind};
 
     fn metrics(kind: PaperKind) -> Metrics {
-        let font = std::sync::Arc::new(mb_print::font::Font::builtin().expect("loads"));
+        let font = std::sync::Arc::new(mb_print::font::Font::default_face().expect("loads"));
         Metrics::face(Paper::new(kind), font)
     }
 

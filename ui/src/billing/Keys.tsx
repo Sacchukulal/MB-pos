@@ -1,11 +1,13 @@
-/** The keyboard, on screen: the suggestion list, the how-many box and the help sheet. */
+/** The keyboard, on screen: the suggestion list, the how-many box, the table box, the help sheet. */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { Button, Modal, onlyAmount } from '../kit';
+import { Button, Input, Modal, cx, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
+import type { TableView } from '../ipc/generated/TableView';
 import { SHORTCUTS, type Mode } from './keyboard';
 
+/** The menu items that match what was typed, under the search box. */
 export function Suggestions({
   items,
   highlighted,
@@ -17,25 +19,19 @@ export function Suggestions({
 }) {
   if (items.length === 0) return null;
   return (
-    <ul className="mb-suggestions" role="listbox" aria-label="Menu suggestions">
+    <ul className="mb-suggestions mb-sheet" role="listbox" aria-label="Menu suggestions">
       {items.map((item, index) => (
         <li key={item.id}>
           <button
             type="button"
             role="option"
             aria-selected={index === highlighted}
-            className={[
-              'mb-suggestion',
-              index === highlighted ? 'mb-suggestion--on' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            className={cx('mb-sheet__item', 'mb-suggestion')}
             // Touch reaches the same place Enter does.
             onClick={() => onPick(index)}
           >
             <span className="mb-suggestion__name">{item.name}</span>
             <span className="mb-suggestion__rate">{item.rateLabel}</span>
-            {/* Its own class, not the table tile's. */}
             <span className="mb-suggestion__price">{item.price.text}</span>
           </button>
         </li>
@@ -45,18 +41,21 @@ export function Suggestions({
 }
 
 /**
- * How many of the chosen item. A box under the search box, not a dialog: the keyboard engine
+ * How many of the chosen item, in a dialog in the middle of the screen. The keyboard engine
  * owns every key in it (Enter adds, arrows step, Esc leaves), so nothing here decides.
  */
 export function HowMany({
   mode,
   onChange,
   onAdd,
+  onLeave,
 }: {
   mode: Extract<Mode, { kind: 'quantity' }>;
   onChange: (text: string) => void;
   /** The button, for a hand on the screen — the same as Enter. */
   onAdd: () => void;
+  /** The dialog's own close: the same as Esc. */
+  onLeave: () => void;
 }) {
   const box = useRef<HTMLInputElement>(null);
   // The "1" is selected, so typing a number replaces it and Enter alone keeps it.
@@ -65,12 +64,22 @@ export function HowMany({
     box.current?.select();
   }, []);
   return (
-    <div className="mb-ask" role="dialog" aria-label={`How many ${mode.item.name}`}>
-      <div className="mb-ask__what">
-        <span className="mb-ask__name">{mode.item.name}</span>
-        <span className="mb-ask__price">{mode.item.price.text}</span>
-      </div>
-      <div className="mb-ask__row">
+    <Modal
+      open
+      title={`${mode.item.name} · ${mode.item.price.text}`}
+      onClose={onLeave}
+      actions={
+        <>
+          <Button onMouseDown={(event) => event.preventDefault()} onClick={onLeave}>
+            Leave it
+          </Button>
+          <Button variant="primary" onMouseDown={(event) => event.preventDefault()} onClick={onAdd}>
+            Add
+          </Button>
+        </>
+      }
+    >
+      <div className="mb-ask">
         <input
           ref={box}
           className="mb-input mb-input--number mb-ask__box"
@@ -81,15 +90,69 @@ export function HowMany({
           value={mode.text}
           onChange={(event) => onChange(onlyAmount(event.target.value))}
         />
-        <Button variant="primary" onMouseDown={(event) => event.preventDefault()} onClick={onAdd}>
-          Add
-        </Button>
+        <span className="mb-ask__keys">
+          <kbd className="mb-kbd">↑ ↓</kbd> more or fewer <kbd className="mb-kbd">Enter</kbd> add{' '}
+          <kbd className="mb-kbd">Esc</kbd> leave it
+        </span>
       </div>
-      <span className="mb-ask__keys">
-        <kbd className="mb-kbd">↑ ↓</kbd> more or fewer <kbd className="mb-kbd">Enter</kbd> add{' '}
-        <kbd className="mb-kbd">Esc</kbd> leave it
-      </span>
-    </div>
+    </Modal>
+  );
+}
+
+/**
+ * Which table, asked in the middle of the screen when Enter lands on a dine-in cart with no
+ * table: one box for the number, and Enter opens that table.
+ */
+export function TableBox({
+  tables,
+  onOpen,
+  onClose,
+}: {
+  tables: readonly TableView[];
+  onOpen: (table: TableView) => void;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState('');
+  const [problem, setProblem] = useState<string | undefined>();
+  const submit = () => {
+    const wanted = typed.trim().toLowerCase();
+    const table = tables.find((t) => t.label.toLowerCase() === wanted);
+    if (table) onOpen(table);
+    else setProblem(wanted === '' ? 'Type the table number.' : `There is no table ${typed.trim()}.`);
+  };
+
+  return (
+    <Modal
+      open
+      title="Which table?"
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={submit}>
+            Open
+          </Button>
+        </>
+      }
+    >
+      <Input
+        label="Table number"
+        value={typed}
+        autoFocus
+        autoComplete="off"
+        error={problem}
+        onChange={(event) => {
+          setTyped(event.target.value);
+          setProblem(undefined);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            submit();
+          }
+        }}
+      />
+    </Modal>
   );
 }
 

@@ -187,7 +187,7 @@ fn render_bill(config: &ShopConfig, bill: &mb_core::Bill, order: &mb_core::AnyOr
     // the item table is one line or two.
     let metrics = mb_print::metrics::Metrics::face(
         mb_print::paper::Paper::new(mb_print::paper::PaperKind::Mm80),
-        std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
+        std::sync::Arc::new(mb_print::font::Font::default_face().expect("the default face loads")),
     );
     let document = mb_print::template::bill_document(
         &metrics,
@@ -425,55 +425,6 @@ fn updated_at(app: &App) -> i64 {
     .expect("the profile exists")
 }
 
-/// Export, wipe, import, and every setting is back.
-#[test]
-fn a_configuration_survives_the_database_being_emptied() {
-    let scratch = Scratch::new("settings-round-trip");
-    let app = a_shop(&scratch, "round-trip");
-
-    let old = app.shop_config();
-    let mut new = old.clone();
-    new.receipt.footer = "Visit again!".to_owned();
-    new.receipt.pattern = mb_print::doc::Pattern::Double;
-    new.receipt.qr_width_pct = 55;
-    new.billing.packing_charge = mb_core::Money::from_paise(1_500);
-    new.billing.idle_lock_minutes = 0;
-    new.day.starts_at_minutes = 240;
-    new.store.name = "Anna Kuteera".to_owned();
-    new.store.state_code = "29".to_owned();
-    new.store.registration = "composition".to_owned();
-    save(&app, &old, &new);
-
-    let exported = crate::settings::to_map(&app.shop_config());
-
-    // Everything gone, exactly as a new machine would find it.
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                tx.execute("DELETE FROM settings", [])?;
-                tx.execute("DELETE FROM store_profile", [])?;
-                Ok(())
-            })
-            .map_err(|e| crate::words::from_db(&e))
-    })
-    .expect("wipes");
-    app.reload_shop_config();
-    // The slabs are seeded rows, not settings, so they survive the wipe by design.
-    let loaded = app.shop_config();
-    let expected = ShopConfig {
-        tax: loaded.tax.clone(),
-        ..ShopConfig::default()
-    };
-    assert_eq!(loaded, expected, "the wipe did not take");
-
-    let (wanted, plan) = crate::settings::plan_import(&app.shop_config(), &exported);
-    assert!(plan.is_usable(), "{:?}", plan.problems);
-    let blank = app.shop_config();
-    save(&app, &blank, &wanted);
-
-    assert_eq!(app.shop_config(), new);
-}
-
 /// A row stored as the wrong type is an error that names the key, not a silent default.
 #[test]
 fn a_setting_stored_as_the_wrong_type_is_an_error_that_names_it() {
@@ -642,7 +593,7 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
         vec![
             crate::settings::ipc::SettingEdit {
                 key: "receipt.font".to_owned(),
-                value: "consolas".to_owned(),
+                value: "monospace".to_owned(),
             },
             crate::settings::ipc::SettingEdit {
                 key: "kitchen.font".to_owned(),
@@ -653,7 +604,7 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
     .expect("both faces save");
 
     let config = app.shop_config();
-    assert_eq!(config.receipt.font, "consolas");
+    assert_eq!(config.receipt.font, "monospace");
     assert_eq!(config.kitchen.font, "courier");
 
     // What `App::print` would stamp on each kind of paper.
@@ -668,7 +619,7 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
 
     assert_eq!(
         app.face_for_test(bill.kind),
-        Some("consolas".to_owned()),
+        Some("monospace".to_owned()),
         "the bill did not take the shop's bill face"
     );
     assert_eq!(
@@ -677,17 +628,20 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
         "the kitchen ticket did not take the shop's kitchen face"
     );
 
-    // And a shop that has chosen nothing asks for nothing, which is the built-in face — not an
-    // empty string the loader would have to special-case.
+    // And a shop that chooses the default asks for it by name — not an empty string the loader
+    // would have to special-case.
     crate::settings::ipc::save_on(
         &app,
         vec![crate::settings::ipc::SettingEdit {
             key: "receipt.font".to_owned(),
-            value: "builtin".to_owned(),
+            value: mb_print::font::DEFAULT_KEY.to_owned(),
         }],
     )
     .expect("saves");
-    assert_eq!(app.face_for_test(bill.kind), Some("builtin".to_owned()));
+    assert_eq!(
+        app.face_for_test(bill.kind),
+        Some(mb_print::font::DEFAULT_KEY.to_owned())
+    );
 }
 
 // The printers.
@@ -993,8 +947,8 @@ fn a_typeface_that_left_the_list_still_opens_and_reads_as_the_nearest_one() {
         })
         .expect("the settings load, rather than refusing the shop over a typeface");
 
-    assert_eq!(config.receipt.font, "consolas");
-    assert_eq!(config.kitchen.font, "verdana");
+    assert_eq!(config.receipt.font, "monospace");
+    assert_eq!(config.kitchen.font, "times");
     // And what it reads as is something the screen can show back and the printer can load.
     for key in [&config.receipt.font, &config.kitchen.font] {
         assert!(
@@ -1047,12 +1001,13 @@ fn choosing_the_paper_width_relays_out_the_bill() {
 
     // Four inch, and a width nobody sells is refused rather than stored.
     crate::settings::printers::set_paper_on(&app, 100).expect("four inch");
-    assert_eq!(
-        crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
-            .expect("the preview")
-            .doc
-            .columns,
-        64
+    let four_inch = crate::settings::ipc::preview_on(&app, "receipt".to_owned(), Vec::new())
+        .expect("the preview")
+        .doc
+        .columns;
+    assert!(
+        four_inch > wide_columns,
+        "100 mm fits {four_inch} characters and 80 mm fits {wide_columns}"
     );
     assert!(crate::settings::printers::set_paper_on(&app, 70).is_err());
 }

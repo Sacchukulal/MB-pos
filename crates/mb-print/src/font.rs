@@ -12,12 +12,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::PrintError;
 
-/// The face this build ships.
-const BUILTIN: &[u8] = include_bytes!("../assets/IBMPlexMono-Regular.ttf");
+/// The face a shop prints in until it chooses another, and the one drawn when its choice is
+/// missing from the computer.
+pub const DEFAULT_KEY: &str = "times";
 
 /// How much of a pixel has to be covered before a dot is fired.
 const INK_THRESHOLD: u8 = 100;
@@ -109,9 +111,11 @@ impl fmt::Debug for Font {
 }
 
 impl Font {
-    /// The face this build ships.
-    pub fn builtin() -> Result<Font, PrintError> {
-        Font::load(BUILTIN, "IBM Plex Mono Regular")
+    /// The default face, read from the computer's font folder.
+    pub fn default_face() -> Result<Font, PrintError> {
+        family(DEFAULT_KEY)
+            .ok_or_else(|| PrintError::invalid("the default typeface is not on the list"))?
+            .load()
     }
 
     /// Any TrueType or OpenType face, from bytes.
@@ -299,55 +303,59 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // The faces a shop may choose between.
 
-/// The faces on offer, and where each one comes from. Five: the shipped face and four that
-/// every stock Windows has — a face that is not on the machine prints as the shipped one,
-/// silently, which is why Cascadia and Calibri left the list.
+/// The faces on offer. Six names, every one drawn from a face stock Windows carries: the three
+/// generic names resolve the way a browser on Windows resolves them.
 pub const FAMILIES: &[Family] = &[
     Family {
-        key: "builtin",
-        label: "Magic Bill's own (IBM Plex Mono)",
-        file: None,
+        key: "monospace",
+        label: "Monospace",
+        file: "consola.ttf",
         monospace: true,
     },
     Family {
-        key: "consolas",
-        label: "Consolas",
-        file: Some("consola.ttf"),
-        monospace: true,
+        key: "sans_serif",
+        label: "Sans-Serif",
+        file: "arial.ttf",
+        monospace: false,
     },
     Family {
-        key: "courier",
-        label: "Courier New",
-        file: Some("cour.ttf"),
-        monospace: true,
+        key: "serif",
+        label: "Serif",
+        file: "times.ttf",
+        monospace: false,
     },
     Family {
         key: "arial",
         label: "Arial",
-        file: Some("arial.ttf"),
+        file: "arial.ttf",
         monospace: false,
     },
     Family {
-        key: "verdana",
-        label: "Verdana",
-        file: Some("verdana.ttf"),
+        key: "courier",
+        label: "Courier New",
+        file: "cour.ttf",
+        monospace: true,
+    },
+    Family {
+        key: "times",
+        label: "Times New Roman",
+        file: "times.ttf",
         monospace: false,
     },
 ];
 
 /// The key on today's list for a key any build ever stored. A face that left the list goes
-/// to the one nearest it in shape; a name this build has never heard of goes to the shipped
-/// face, because nothing about a typeface may stop a shop from opening.
+/// to the one nearest it in shape; a name this build has never heard of goes to the default,
+/// because nothing about a typeface may stop a shop from opening.
 #[must_use]
 pub fn current_key(stored: &str) -> &'static str {
     if let Some(known) = family(stored) {
         return known.key;
     }
     match stored {
-        "consolas_bold" | "lucida" | "cascadia" => "consolas",
-        "calibri" => "arial",
-        "times" | "georgia" => "verdana",
-        _ => "builtin",
+        "builtin" | "consolas" | "consolas_bold" | "lucida" | "cascadia" => "monospace",
+        "calibri" | "verdana" => "arial",
+        _ => DEFAULT_KEY,
     }
 }
 
@@ -358,10 +366,31 @@ pub struct Family {
     pub key: &'static str,
     /// What the shop reads.
     pub label: &'static str,
-    /// The file in the system font folder, or `None` for the built-in.
-    pub file: Option<&'static str>,
+    /// The file in the system font folder.
+    pub file: &'static str,
     /// Does every character have the same width?
     pub monospace: bool,
+}
+
+impl Family {
+    /// Where this face lives on this computer.
+    #[must_use]
+    pub fn path(&self) -> PathBuf {
+        font_dir().join(self.file)
+    }
+
+    /// The face itself, read from the computer's font folder.
+    pub fn load(&self) -> Result<Font, PrintError> {
+        let path = self.path();
+        let bytes = std::fs::read(&path).map_err(|e| {
+            PrintError::invalid(format!(
+                "{} is not installed on this computer ({}): {e}",
+                self.label,
+                path.display()
+            ))
+        })?;
+        Font::load(&bytes, self.label)
+    }
 }
 
 /// Is this a name this build knows?
@@ -370,9 +399,17 @@ pub fn family(key: &str) -> Option<Family> {
     FAMILIES.iter().copied().find(|f| f.key == key)
 }
 
+/// Where Windows keeps its typefaces.
+#[must_use]
+pub fn font_dir() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from)
+        .join("Fonts")
+}
+
 /// Which face to draw a job with, asked of the caller.
 pub trait Typefaces: Send + Sync + fmt::Debug {
-    /// `None`, an empty string, or `"builtin"` all mean the shipped face.
+    /// `None` or an empty string mean the default face.
     fn face(&self, key: Option<&str>) -> Arc<Font>;
 }
 
@@ -381,8 +418,8 @@ pub trait Typefaces: Send + Sync + fmt::Debug {
 pub struct OneFace(pub Arc<Font>);
 
 impl OneFace {
-    pub fn builtin() -> Result<OneFace, PrintError> {
-        Ok(OneFace(Arc::new(Font::builtin()?)))
+    pub fn default_face() -> Result<OneFace, PrintError> {
+        Ok(OneFace(Arc::new(Font::default_face()?)))
     }
 }
 
@@ -398,8 +435,12 @@ mod measuring {
 
     use super::*;
 
-    fn builtin() -> Font {
-        Font::builtin().expect("the built-in face loads")
+    /// A face in which every character is the same width.
+    fn typewriter() -> Font {
+        family("monospace")
+            .expect("on the list")
+            .load()
+            .expect("the monospace face loads")
     }
 
     /// In a typewriter face every character is the same width, so measuring a string is
@@ -407,7 +448,7 @@ mod measuring {
     /// measure.
     #[test]
     fn a_typewriter_face_measures_the_same_as_counting() {
-        let font = builtin();
+        let font = typewriter();
         let cell = font.cell_for_cap(15);
         let advance = font.advance('M', cell);
 
@@ -423,16 +464,7 @@ mod measuring {
     /// And in a proportional face they are not, which is the whole point.
     #[test]
     fn a_proportional_face_measures_an_i_narrower_than_an_m() {
-        let Ok(bytes) = std::fs::read(
-            std::path::PathBuf::from(
-                std::env::var_os("SystemRoot").unwrap_or("C:\\Windows".into()),
-            )
-            .join("Fonts")
-            .join("times.ttf"),
-        ) else {
-            return;
-        };
-        let font = Font::load(&bytes, "Times New Roman").expect("loads");
+        let font = Font::default_face().expect("the default face loads");
         let cell = font.cell_for_cap(15);
 
         assert!(
@@ -447,7 +479,7 @@ mod measuring {
     /// Digits stay in step.
     #[test]
     fn digits_are_the_same_width_in_every_face_on_offer() {
-        let font = builtin();
+        let font = typewriter();
         let cell = font.cell_for_cap(15);
         let zero = font.advance('0', cell);
         for digit in "123456789".chars() {
@@ -459,7 +491,7 @@ mod measuring {
     /// bigger text.
     #[test]
     fn a_taller_cell_draws_wider_characters() {
-        let font = builtin();
+        let font = typewriter();
         let small = font.cell_for_cap(10);
         let large = font.cell_for_cap(24);
         assert!(small.height < large.height);
@@ -472,7 +504,7 @@ mod measuring {
     /// Nothing measures as nothing.
     #[test]
     fn no_character_measures_as_zero() {
-        let font = builtin();
+        let font = typewriter();
         let cell = font.cell_for_cap(15);
         for ch in ['\u{0}', '\u{7}', ' ', '\u{200b}', 'ಅ'] {
             assert!(font.advance(ch, cell) >= 1, "{ch:?} measured as nothing");
@@ -484,17 +516,29 @@ mod measuring {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_shipped_face_loads() {
-        let font = Font::builtin().expect("the built-in face must load");
-        assert_eq!(font.name(), "IBM Plex Mono Regular");
+    /// A face in which every character is the same width.
+    fn typewriter() -> Font {
+        family("monospace")
+            .expect("on the list")
+            .load()
+            .expect("the monospace face loads")
     }
 
-    /// Five faces, plain family names, and every stored key from any build lands on one.
     #[test]
-    fn five_faces_and_every_old_key_lands_on_one_of_them() {
+    fn the_default_face_loads() {
+        let font = Font::default_face().expect("the default face must load");
+        assert_eq!(font.name(), "Times New Roman");
+        assert_eq!(family(DEFAULT_KEY).map(|f| f.label), Some("Times New Roman"));
+    }
+
+    /// Six faces, plain family names, and every stored key from any build lands on one.
+    #[test]
+    fn six_faces_and_every_old_key_lands_on_one_of_them() {
         let keys: Vec<&str> = FAMILIES.iter().map(|f| f.key).collect();
-        assert_eq!(keys, ["builtin", "consolas", "courier", "arial", "verdana"]);
+        assert_eq!(
+            keys,
+            ["monospace", "sans_serif", "serif", "arial", "courier", "times"]
+        );
         for family in FAMILIES {
             assert!(
                 !family.label.contains(" — "),
@@ -504,23 +548,34 @@ mod tests {
             assert_eq!(current_key(family.key), family.key);
         }
         for (old, now) in [
-            ("consolas_bold", "consolas"),
-            ("lucida", "consolas"),
-            ("cascadia", "consolas"),
+            ("builtin", "monospace"),
+            ("consolas", "monospace"),
+            ("consolas_bold", "monospace"),
+            ("lucida", "monospace"),
+            ("cascadia", "monospace"),
             ("calibri", "arial"),
-            ("times", "verdana"),
-            ("georgia", "verdana"),
-            ("", "builtin"),
-            ("wingdings", "builtin"),
+            ("verdana", "arial"),
+            ("georgia", "times"),
+            ("", "times"),
+            ("wingdings", "times"),
         ] {
             assert_eq!(current_key(old), now, "{old}");
             assert!(family(current_key(old)).is_some());
         }
     }
 
+    /// Every face on the list is a file stock Windows carries.
+    #[test]
+    fn every_face_on_the_list_loads_from_the_font_folder() {
+        for family in FAMILIES {
+            let font = family.load().expect(family.label);
+            assert_eq!(font.name(), family.label);
+        }
+    }
+
     #[test]
     fn a_glyph_fits_its_cell_and_has_ink_in_it() {
-        let font = Font::builtin().expect("loads");
+        let font = typewriter();
         let cell = font.cell_for_cap(15);
         let glyph = font.glyph('M', cell);
 
@@ -543,7 +598,7 @@ mod tests {
 
     #[test]
     fn a_space_is_blank_and_a_full_stop_is_not() {
-        let font = Font::builtin().expect("loads");
+        let font = typewriter();
         let cell = font.cell_for_cap(15);
         assert!(font.glyph(' ', cell).is_blank());
         assert!(!font.glyph('.', cell).is_blank());
@@ -551,7 +606,7 @@ mod tests {
 
     #[test]
     fn the_cache_returns_the_same_glyph() {
-        let font = Font::builtin().expect("loads");
+        let font = typewriter();
         let cell = font.cell_for_cap(15);
         let first = font.glyph('7', cell);
         let second = font.glyph('7', cell);
@@ -564,7 +619,7 @@ mod tests {
     #[test]
     fn every_thermal_cell_size_produces_a_usable_face() {
         // Every cap height the settings screen offers — see `catalog::SIZES`.
-        let font = Font::builtin().expect("loads");
+        let font = typewriter();
         for cap in [9_u32, 11, 13, 15, 17, 19, 22, 25, 29, 35] {
             let cell = font.cell_for_cap(cap);
             let glyph = font.glyph('8', cell);

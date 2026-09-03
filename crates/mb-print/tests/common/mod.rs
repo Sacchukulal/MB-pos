@@ -343,17 +343,21 @@ pub fn until(mut check: impl FnMut() -> bool) -> bool {
 
 /// The built-in face's metrics for a roll — what a test that only wants a document hands
 /// `bill_document`.
-pub fn metrics(kind: mb_print::paper::PaperKind) -> mb_print::metrics::Metrics {
-    mb_print::metrics::Metrics::face(
-        mb_print::paper::Paper::new(kind),
-        std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
+/// The face every test lays out in: Courier New, the typewriter face `layout::layout` uses.
+pub fn test_face() -> std::sync::Arc<mb_print::font::Font> {
+    std::sync::Arc::new(
+        mb_print::font::family("courier")
+            .expect("on the list")
+            .load()
+            .expect("Courier New loads"),
     )
+}
+
+pub fn metrics(kind: mb_print::paper::PaperKind) -> mb_print::metrics::Metrics {
+    mb_print::metrics::Metrics::face(mb_print::paper::Paper::new(kind), test_face())
 }
 
 /// The same, for a roll that carries a print offset.
 pub fn metrics_on(paper: mb_print::paper::Paper) -> mb_print::metrics::Metrics {
-    mb_print::metrics::Metrics::face(
-        paper,
-        std::sync::Arc::new(mb_print::font::Font::builtin().expect("the shipped face loads")),
-    )
+    mb_print::metrics::Metrics::face(paper, test_face())
 }

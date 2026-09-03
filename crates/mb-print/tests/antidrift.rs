@@ -195,7 +195,9 @@ fn t10_a_reprint_is_marked_and_an_original_is_not() {
     assert!(!original.contains("VOIDED"));
 
     assert!(reprint.contains("DUPLICATE"));
-    assert!(reprint.contains("REPRINT #3"), "the count is not printed");
+    // Read across the wrap: a wide face may break the sentence over two lines.
+    let flat = reprint.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("REPRINT #3"), "the count is not printed: {reprint}");
 
     assert!(voided.contains("VOIDED"));
     assert!(voided.contains("wrong table"), "the reason is not printed");

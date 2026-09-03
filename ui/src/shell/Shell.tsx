@@ -52,6 +52,11 @@ export interface Screen {
   /** True for a screen the counter uses every day. */
   daily?: boolean;
   /**
+   * Where the bar's button goes when this entry is a door into part of another screen —
+   * `settings/network` for Phones. Such an entry never renders itself.
+   */
+  at?: string;
+  /**
    * `go` opens another screen — `go('settings/network')` opens Settings on the Phones section;
    * `sub` is that part, for the screen that was asked for it.
    */
@@ -81,8 +86,17 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     render: () => <Floor />,
   },
   {
-    id: 'credit',
+    // The phones are watched all day, so their section of Settings has a button of its own.
+    id: 'phones',
     daily: true,
+    label: 'Phones',
+    icon: 'phone',
+    at: 'settings/network',
+    render: () => null,
+    needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
+  },
+  {
+    id: 'credit',
     label: 'Credit',
     icon: 'wallet',
     render: () => <Credit />,
@@ -92,7 +106,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     // "Spends", not "Expenses": the rail is read at a glance and the shorter word is the one a
     // shopkeeper uses.
     id: 'expenses',
-    daily: true,
     label: 'Spends',
     icon: 'banknote',
     render: () => <Expenses />,
@@ -555,6 +568,7 @@ export function Shell() {
         // Behind the lock there is no navigation: the bar shows the brand and the tools only.
         screens={locked ? [] : allowed}
         current={screen}
+        sub={sub}
         onGo={setScreen}
         themeIcon={theme.icon}
         themeName={theme.name}
@@ -624,6 +638,7 @@ export function Shell() {
           // Two lists, because they are two questions.
           recoverable={lock?.recoverable ?? []}
           canRecover={lock?.canRecover ?? false}
+          lastSignedIn={lock?.lastSignedIn ?? null}
           onSignedIn={reloadLock}
         />
       ) : null}
@@ -635,10 +650,23 @@ export function Shell() {
 export function splitScreens(
   screens: readonly Screen[],
   current: string,
+  sub: string | null = null,
 ): { inBar: Screen[]; inMore: Screen[]; elsewhere: Screen | null } {
   const inBar = screens.filter((s) => s.daily);
   const inMore = screens.filter((s) => !s.daily);
-  return { inBar, inMore, elsewhere: inMore.find((s) => s.id === current) ?? null };
+  // A part of a More screen that has its own door in the bar (Phones) is not "elsewhere".
+  const path = sub ? `${current}/${sub}` : current;
+  const throughADoor = inBar.some((s) => s.at === path);
+  return {
+    inBar,
+    inMore,
+    elsewhere: throughADoor ? null : (inMore.find((s) => s.id === current) ?? null),
+  };
+}
+
+/** Whether a bar button stands for the screen (or the part of one) that is open. */
+export function isCurrent(item: Screen, current: string, sub: string | null): boolean {
+  return (item.at ?? item.id) === (sub ? `${current}/${sub}` : current);
 }
 
 /** The window buttons, and nothing else. */
@@ -704,10 +732,13 @@ function TopBar({
   onOpenAlerts,
   phones,
   onOpenPhones,
+  sub,
 }: {
   shopPath: string | null;
   screens: readonly Screen[];
   current: string;
+  /** The part of the current screen that is open, when one was asked for. */
+  sub: string | null;
   onGo: (screen: string) => void;
   /** How many phones are live, and how many are asking to join. */
   phones: PhonesView;
@@ -732,7 +763,7 @@ function TopBar({
 
   const face: IconName = themeIcon === 'moon' ? 'moon' : 'sun';
 
-  const { inBar, inMore, elsewhere } = splitScreens(screens, current);
+  const { inBar, inMore, elsewhere } = splitScreens(screens, current, sub);
 
   // Close More on Escape and on going somewhere.
   useEffect(() => {
@@ -764,8 +795,8 @@ function TopBar({
             key={item.id}
             type="button"
             className="mb-nav__item"
-            aria-current={item.id === current ? 'page' : undefined}
-            onClick={() => go(item.id)}
+            aria-current={isCurrent(item, current, sub) ? 'page' : undefined}
+            onClick={() => go(item.at ?? item.id)}
           >
             {/* Icon AND label — §5: bare icons are hostile to a new cashier. */}
             <Icon name={item.icon} size="md" />
@@ -798,16 +829,16 @@ function TopBar({
                 */}
                 <button
                   type="button"
-                  className="mb-nav__scrim"
+                  className="mb-sheetscrim mb-nav__scrim"
                   aria-label="Close"
                   onClick={() => setMoreOpen(false)}
                 />
-                <div className="mb-nav__sheet" role="menu">
+                <div className="mb-sheet mb-nav__sheet" role="menu">
                   {inMore.map((item) => (
                     <button
                       key={item.id}
                       type="button"
-                      className="mb-nav__sheetitem"
+                      className="mb-sheet__item mb-nav__sheetitem"
                       role="menuitem"
                       aria-current={item.id === current ? 'page' : undefined}
                       onClick={() => go(item.id)}

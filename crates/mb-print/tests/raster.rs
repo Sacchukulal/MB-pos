@@ -18,8 +18,12 @@ use mb_print::render::{Recorder, render};
 use mb_print::template::{Copy, bill_document};
 use mb_print::text::to_text;
 
+/// The typewriter face these tests draw with: every character one column wide.
 fn font() -> Font {
-    Font::builtin().expect("the shipped face loads")
+    mb_print::font::family("courier")
+        .expect("on the list")
+        .load()
+        .expect("Courier New loads")
 }
 
 fn metrics(paper: Paper) -> mb_print::metrics::Metrics {
@@ -368,10 +372,10 @@ fn a_barcode_that_cannot_be_drawn_becomes_its_characters() {
 #[test]
 fn a_printer_is_drawn_the_same_way_wherever_it_is_asked() {
     use mb_print::printer::{Engine, PrinterConfig, Target};
-    let faces = mb_print::font::OneFace::builtin().expect("loads");
+    let faces = mb_print::font::OneFace::default_face().expect("loads");
 
     let mut printer = PrinterConfig::new("p1", "Counter", Target::None);
-    let drawing = mb_print::drawing_for(&printer, Some("consolas"), &faces);
+    let drawing = mb_print::drawing_for(&printer, Some("monospace"), &faces);
     assert_eq!(drawing.engine, Engine::Raster);
     assert!(drawing.metrics.font().is_some());
     assert_eq!(drawing.metrics.paper(), printer.paper);
@@ -520,28 +524,27 @@ fn the_old_three_sizes_are_unchanged() {
             "{stored} stopped being {scale}x for the text engine"
         );
     }
-    // And the layout still gives them the widths they always had: 48 columns on 80 mm paper at
-    // the body size, and fewer as the letter grows.
-    for (stored, limit) in [(24_u16, 52_usize), (48, 26), (72, 16)] {
-        let longest = at_size(Style::from_stored(stored), &wrappable()).1;
-        assert!(
-            longest <= limit && longest + 4 >= limit,
-            "a stored {stored} filled {longest} of {limit} columns"
-        );
-    }
+    // And the layout still fills the roll: a full line at the body size on 80 mm paper, and
+    // fewer characters as the letter grows — about half at 2x, a third at 3x.
+    let body = at_size(Style::from_stored(24), &wrappable()).1;
+    let double = at_size(Style::from_stored(48), &wrappable()).1;
+    let triple = at_size(Style::from_stored(72), &wrappable()).1;
+    assert!(body >= 32, "the body size filled only {body} columns of 80 mm");
+    assert!(
+        double * 2 <= body + 4 && double * 2 + 4 >= body,
+        "2x filled {double} columns against {body} at the body size"
+    );
+    assert!(
+        triple * 3 <= body + 6 && triple * 3 + 6 >= body,
+        "3x filled {triple} columns against {body} at the body size"
+    );
 }
 
 // Proportional faces.
 
 /// Times New Roman, or `None` on a machine that does not have it.
 fn proportional() -> Option<Font> {
-    let path = std::path::PathBuf::from(
-        std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()),
-    )
-    .join("Fonts")
-    .join("times.ttf");
-    let bytes = std::fs::read(path).ok()?;
-    Font::load(&bytes, "Times New Roman").ok()
+    mb_print::font::family("times")?.load().ok()
 }
 
 /// The amount still ends where the paper ends.
@@ -615,10 +618,10 @@ fn a_proportional_face_is_drawn_proportionally() {
 
 /// A typewriter face is untouched.
 #[test]
-fn the_shipped_face_still_takes_the_grid_path() {
+fn a_typewriter_face_still_takes_the_grid_path() {
     assert!(
         font().is_monospace(),
-        "the built-in face stopped being a typewriter one"
+        "Courier New stopped being taken for a typewriter face"
     );
     if let Some(times) = proportional() {
         assert!(

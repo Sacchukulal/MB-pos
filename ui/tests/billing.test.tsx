@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModes, paymentAnswer } from '../src/billing/Billing';
 import { Processing, ProcessingHead, processingOrders } from '../src/billing/Processing';
-import { DENSE_ABOVE, TableGrid } from '../src/billing/TableGrid';
+import { TableGrid } from '../src/billing/TableGrid';
 import { Totals } from '../src/billing/Totals';
 import type { BillView } from '../src/ipc/generated/BillView';
 import type { CartView } from '../src/ipc/generated/CartView';
@@ -112,28 +112,16 @@ describe('the table grid (scope 1.4)', () => {
     expect(tile.getAttribute('aria-label')).toContain('646.00');
   });
 
-  it('steps down a density past the threshold, and not before', () => {
-    // "a busy shop has 40+ tables.
+  it('draws sixty tables at the same size as four', () => {
     const many = (count: number) =>
       Array.from({ length: count }, (_, n) =>
-        table({ id: `t${n}`, label: `${n + 1}` }),
+        table({ id: `t${n}`, label: `${n + 1}`, total: money(10_000, '100.00'), state: 'occupied' }),
       );
-
-    const small = render(
-      <TableGrid tables={many(4)} filter="" onOpen={vi.fn()}
-        onPrintBill={vi.fn()} />,
-    );
-    expect(small.container.querySelector('[data-dense="true"]')).toBeNull();
-    cleanup();
-
     const big = render(
-      <TableGrid tables={many(DENSE_ABOVE + 36)} filter="" onOpen={vi.fn()}
-        onPrintBill={vi.fn()} />,
+      <TableGrid tables={many(60)} filter="" onOpen={vi.fn()} onPrintBill={vi.fn()} />,
     );
-    expect(
-      big.container.querySelector('[data-dense="true"]'),
-      'sixty tables did not engage the dense step',
-    ).toBeTruthy();
+    // Every tile still carries its amount: no smaller step for a big floor.
+    expect(big.container.querySelectorAll('.mb-tile__amount')).toHaveLength(60);
   });
 
   it('never loses a parcel order — it goes in the "No table" group', () => {
@@ -297,6 +285,7 @@ describe('the payment modes (2026-08-23, one row 2026-09-03)', () => {
       cash=""
       onCash={vi.fn()}
       onCashDone={vi.fn()}
+      onEnter={vi.fn()}
       cart={null}
       {...over}
     />
@@ -349,6 +338,17 @@ describe('the payment modes (2026-08-23, one row 2026-09-03)', () => {
     act(() => arrow().click());
     act(() => mode('Credit').click());
     expect(onCredit).toHaveBeenCalledTimes(1);
+  });
+
+  it('completes the bill on Enter in the cash box, and only then', () => {
+    const onEnter = vi.fn();
+    const onCashDone = vi.fn();
+    render(row({ onEnter, onCashDone }));
+    const box = screen.getByRole('textbox', { name: 'Cash given' });
+    fireEvent.keyDown(box, { key: '5' });
+    expect(onEnter).not.toHaveBeenCalled();
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onEnter).toHaveBeenCalledTimes(1);
   });
 
   it('hands the cash box to whoever presses Cash', () => {

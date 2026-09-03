@@ -257,8 +257,15 @@ mod tests {
             carried: None,
             sign_off: false,
         };
-        let doc = day_close_document(Paper::new(PaperKind::Mm58), &context);
-        let text = to_text(&layout(&doc).expect("lays out"));
+        let paper = Paper::new(PaperKind::Mm58);
+        let doc = day_close_document(paper, &context);
+        // In a typewriter face the narrow roll is 32 characters across.
+        let typewriter = crate::font::family("monospace")
+            .expect("on the list")
+            .load()
+            .expect("loads");
+        let metrics = crate::metrics::Metrics::face(paper, std::sync::Arc::new(typewriter));
+        let text = to_text(&crate::layout::layout_for(&doc, &metrics).expect("lays out"));
         for line in text.lines() {
             assert!(line.chars().count() <= 32, "too wide: {line:?}");
         }

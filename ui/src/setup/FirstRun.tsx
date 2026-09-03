@@ -282,20 +282,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     }
     setBusy(true);
     setProblem('');
-    call('save_printer', {
-      edit: {
-        id: '',
-        name: printerName,
-        kind: 'spooler',
-        address: printerName,
-        paperMm: 80,
-        isDefault: true,
-        role: 'both',
-        engine: 'raster',
-        isBoldDark: false,
-        canKickDrawer: false,
-      },
-    })
+    call('choose_bill_printer', { windowsName: printerName })
       .then(() => onDone())
       .catch(complain)
       .finally(() => setBusy(false));

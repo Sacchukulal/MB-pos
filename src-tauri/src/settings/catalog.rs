@@ -227,24 +227,28 @@ pub(super) const SIZES: &[Choice] = &[
 /// them so). A key that left this list is mapped by `modernise` when a shop opens.
 pub(super) const FONTS: &[Choice] = &[
     Choice {
-        value: "builtin",
-        label: "Magic Bill's own (IBM Plex Mono)",
+        value: "monospace",
+        label: "Monospace",
     },
     Choice {
-        value: "consolas",
-        label: "Consolas",
+        value: "sans_serif",
+        label: "Sans-Serif",
     },
     Choice {
-        value: "courier",
-        label: "Courier New",
+        value: "serif",
+        label: "Serif",
     },
     Choice {
         value: "arial",
         label: "Arial",
     },
     Choice {
-        value: "verdana",
-        label: "Verdana",
+        value: "courier",
+        label: "Courier New",
+    },
+    Choice {
+        value: "times",
+        label: "Times New Roman",
     },
 ];
 
@@ -1261,7 +1265,7 @@ pub const CATALOG: &[Entry] = &[
         Row,
         "Bill typeface",
         "The face your bills print in. All of these come with Windows — if one \
-         is missing from this computer, Magic Bill quietly uses its own.",
+         is missing from this computer, Magic Bill quietly prints in Times New Roman.",
         ["font", "typeface", "face", "typography", "letters", "print"],
         FONTS,
         receipt.font

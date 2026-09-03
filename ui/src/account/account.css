@@ -4,115 +4,177 @@
   /* The page margin is the SHELL's. */
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--gap-group);
   min-height: 0;
   height: 100%;
 }
 
-/* `.mb-card` is a COLUMN. */
-.mb-account__top {
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-direction: row;
+/* A panel's body is a column of groups. */
+.mb-account .mb-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-group);
 }
 
-.mb-account__who {
+/* The three smaller panels stand side by side, and stack when the window is narrow. */
+.mb-account__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--account-col), 1fr));
+  gap: var(--gap-group);
+}
+
+/* The three stand level, and a panel's button sits on its floor. */
+.mb-account__grid > .mb-panel > .mb-panel__body {
+  flex: 1;
+}
+
+.mb-account__grid .mb-row--end {
+  margin-top: auto;
+}
+
+.mb-account__label {
+  font-size: var(--type-caption);
+  font-weight: var(--type-label-weight);
+  color: var(--text-muted);
+}
+
+/* The verdict: a tile with a mark, the standing in a word, and the sentence. */
+.mb-account__verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-group);
+}
+
+.mb-account__face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--account-face);
+  height: var(--account-face);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+  color: var(--text-muted);
+}
+
+.mb-account__face--ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.mb-account__face--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.mb-account__face--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.mb-account__said {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  /* Level with the tile's centre when there is only the one word. */
+  min-height: var(--account-face);
+  justify-content: center;
+}
+
+.mb-account__standing {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+  color: var(--text);
+}
+
+.mb-account__sentence {
+  margin: 0;
+  font-size: var(--type-body);
+  color: var(--text-muted);
+  max-width: var(--prose-max);
+}
+
+/* Label over value, in equal columns. */
+.mb-account__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--account-fact), 1fr));
+  gap: var(--gap-field) var(--gap-group);
+  margin: 0;
+  padding: var(--space-3) 0;
+  border-top: var(--border-width) solid var(--border);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.mb-account__fact {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
 }
 
-.mb-account__shop {
+.mb-account__fact dt {
+  font-size: var(--type-caption);
+  font-weight: var(--type-label-weight);
+  color: var(--text-muted);
+}
+
+.mb-account__fact dd {
+  margin: 0;
   font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-medium);
   color: var(--text);
-}
-
-.mb-account__plan {
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/*
- * The banner sentence. It is the thing an owner opens this screen to read, so it is body text
- * and not a tooltip.
- */
-.mb-account__headline {
-  margin: var(--space-3) 0 0;
-  font-size: var(--text-md);
-  color: var(--text);
-  max-width: 62ch;
-}
-
-.mb-account__renews {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.mb-account__warn {
-  margin: var(--space-3) 0 0;
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border);
-  border-left: var(--tile-stripe) solid var(--warn);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  font-size: var(--text-sm);
-  color: var(--text);
-  max-width: 62ch;
-}
-
-.mb-account__note {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-  max-width: 52ch;
-}
-
-.mb-account__actions {
-  margin-top: var(--space-3);
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-/*
- * Label above value, wrapping — a 1366 x 768 screen is the reference machine and four facts in
- * a row is what fits.
- */
-.mb-account__facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-5);
-  margin: 0;
-}
-
-.mb-account__facts > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.mb-account__facts dt {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-
-.mb-account__facts dd {
-  margin: 0;
-  font-size: var(--text-md);
-  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 /* Read out over the phone to support, so it is monospaced and spaced out. */
-.mb-account__machine {
+.mb-account__code {
   font-family: var(--font-mono);
+  letter-spacing: var(--tracking-code);
+}
+
+/* What staff type on a phone: the biggest thing on its panel. */
+.mb-account__shopcode {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-code);
+  line-height: var(--line-tight);
+  color: var(--text);
 }
 
 .mb-account__included {
-  margin: var(--space-3) 0 0;
-  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-inline);
+}
+
+/* The way out on the left, the way forward on the right. */
+.mb-account__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-group);
+  flex-wrap: wrap;
+}
+
+.mb-account__aside {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  min-width: 0;
+}
+
+.mb-account__only {
+  font-size: var(--type-label);
   color: var(--text-muted);
+}
+
+.mb-account__note {
+  margin: 0;
+  font-size: var(--type-label);
+  color: var(--text-muted);
+  max-width: var(--prose-max);
 }

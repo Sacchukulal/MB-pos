@@ -60,6 +60,18 @@ impl RowHeight {
             RowHeight::Standard | RowHeight::Relaxed => 1,
         }
     }
+
+    /// The air between one section and the next, in half body rows — the letterhead from the
+    /// bill's details, the details from the items, the items from the sums. Compact packs
+    /// them; Relaxed gives a whole row.
+    #[must_use]
+    pub const fn section_air(self) -> u8 {
+        match self {
+            RowHeight::Compact => 0,
+            RowHeight::Standard => 1,
+            RowHeight::Relaxed => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,7 +239,7 @@ impl Default for ReceiptSettings {
             bill_barcode: false,
             // Named rather than empty: "" is not one of the choices, and the settings catalogue
             // is right to refuse a value that is not on its own list.
-            font: "builtin".to_owned(),
+            font: crate::font::DEFAULT_KEY.to_owned(),
             footer: "Thank you, visit again".to_owned(),
             composition_note: "Composition taxable person, not eligible to collect tax on supplies"
                 .to_owned(),
@@ -307,7 +319,7 @@ impl Default for KitchenSettings {
             items: dots(Style::LADDER[8], true),
             // Named rather than empty: "" is not one of the choices, and the settings catalogue
             // is right to refuse a value that is not on its own list.
-            font: "builtin".to_owned(),
+            font: crate::font::DEFAULT_KEY.to_owned(),
         }
     }
 }

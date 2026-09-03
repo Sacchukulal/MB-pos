@@ -357,8 +357,10 @@ fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
     assert!(rendered.contains("KITCHEN"));
     assert!(rendered.contains("Masala Dosa"));
     assert!(rendered.contains("Idli"));
-    assert!(rendered.contains("extra cheese"), "a modifier is missing");
-    assert!(rendered.contains("extra crispy"), "a note is missing");
+    // Read across the wrap: the big kitchen type breaks a modifier over two lines.
+    let flat = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("extra cheese"), "a modifier is missing: {rendered}");
+    assert!(flat.contains("extra crispy"), "a note is missing: {rendered}");
 
     // Cart order, not alphabetical and not grouped.
     let dosa = rendered.find("Masala Dosa").expect("dosa");

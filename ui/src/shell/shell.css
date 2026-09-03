@@ -82,7 +82,7 @@
   display: flex;
   align-items: center;
   gap: var(--gap-inline);
-  height: 100%;
+  height: var(--topbar-control-height);
   padding: 0 var(--space-3);
   background: transparent;
   color: var(--text-muted);
@@ -105,12 +105,20 @@
   color: var(--text);
 }
 
-/* Where you are: bold words and a brand-blue rule under them — no coloured fill. */
+/*
+ * Where you are: the filled button, the same way a chosen order type or Cash is lit — one
+ * language for "this is the one" across the product. An underline was not seen (owner,
+ * 2026-09-03).
+ */
 .mb-nav__item[aria-current='page'] {
-  color: var(--text);
+  background: var(--accent);
+  color: var(--accent-ink);
   font-weight: var(--weight-bold);
-  box-shadow: inset 0 calc(-1 * var(--nav-underline)) 0 var(--brand);
-  border-radius: 0;
+}
+
+.mb-nav__item[aria-current='page']:hover {
+  background: var(--accent-hover);
+  color: var(--accent-ink);
 }
 
 .mb-nav__label {
@@ -126,13 +134,8 @@
   align-items: center;
 }
 
+/* The More sheet is the kit's sheet (`.mb-sheet`); this only says where it lies in the bar. */
 .mb-nav__scrim {
-  position: fixed;
-  inset: 0;
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: default;
   z-index: var(--layer-chrome);
 }
 
@@ -141,47 +144,11 @@
   top: calc(100% + var(--space-1));
   left: 0;
   z-index: var(--layer-chrome);
-  display: flex;
-  flex-direction: column;
-  gap: 0;
   min-width: var(--rail-sheet-width);
-  padding: var(--space-1);
-  background: var(--surface);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--level-pop);
-}
-
-.mb-nav__sheetitem {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-field);
-  height: var(--control-md);
-  padding: 0 var(--space-3);
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: var(--type-body);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.mb-nav__sheetitem:hover {
-  background: var(--surface-2);
 }
 
 .mb-nav__sheetitem .mb-icon {
   color: var(--text-muted);
-}
-
-.mb-nav__sheetitem[aria-current='page'] {
-  background: var(--surface-2);
-  color: var(--text);
-  font-weight: var(--weight-bold);
-  box-shadow: inset var(--tile-stripe) 0 0 var(--accent);
 }
 
 .mb-nav__sheetitem[aria-current='page'] .mb-icon {

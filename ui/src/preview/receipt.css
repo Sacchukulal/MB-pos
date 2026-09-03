@@ -15,10 +15,27 @@
   container-type: inline-size;
 }
 
-/* The room the raster has: measured by the screen, and the dots-per-pixel chosen from it. */
+/* The room the roll has: measured by the screen, and the dots-per-pixel chosen from it. */
 .mb-receipt__frame {
-  width: min(100cqw, var(--panel-width));
+  display: flex;
+  justify-content: center;
+  width: 100cqw;
   min-width: 0;
+}
+
+/*
+ * THE ROLL. White to its edges in both themes, lying on the page with a shadow, the printable
+ * strip in the middle of it — the receipt as it sits in the hand, not a strip of ink cut at the
+ * last dot. The margin is the paper's own (80 mm of roll, 72 of print), set by the screen from
+ * the numbers Rust sends.
+ */
+.mb-receipt__sheet {
+  box-sizing: content-box;
+  width: max-content;
+  max-width: 100%;
+  background: var(--print-paper);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--level-pop);
 }
 
 /* Paper: white, and black ink, in both themes. */
@@ -26,15 +43,12 @@
   margin: 0;
   background: var(--print-paper);
   color: var(--print-ink);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
 }
 
 /*
- * The printer's raster, one canvas. Shown at a whole or half number of dots a pixel. Where a
- * pixel holds more than one dot the browser averages them — the paper seen from a step back,
- * which is how a receipt is read; at one dot a pixel or larger every dot is a dot.
+ * The printer's raster, one canvas. Shown at a whole number of dots a device pixel. Where a
+ * device pixel holds more than one dot the browser averages them — the paper seen from a step
+ * back, which is how a receipt is read; at one dot a device pixel or larger every dot is a dot.
  */
 .mb-receipt__paper--raster {
   display: block;
@@ -42,19 +56,23 @@
   box-sizing: content-box;
 }
 
-.mb-receipt__paper--raster[data-dots-per-pixel='0.5'],
-.mb-receipt__paper--raster[data-dots-per-pixel='1'] {
+.mb-receipt__paper--exact {
   image-rendering: pixelated;
+}
+
+/* The text engine's roll: the strip's dots and the margin's, and one dot is the sheet's width shared out. */
+.mb-receipt__sheet--rom {
+  --receipt-sheet: 100cqw;
+  --dot: calc(var(--receipt-sheet) / (var(--receipt-dots, 576) + 2 * var(--receipt-margin, 0)));
+
+  width: var(--receipt-sheet);
+  padding: calc(var(--dot) * var(--receipt-margin, 0));
 }
 
 /* The text engine's paper: rows of the printer's own characters, in a monospace face. */
 .mb-receipt__paper--rom {
-  /* The one number the page is drawn from. */
-  --receipt-paper: min(100cqw, var(--panel-width));
-  --dot: calc(var(--receipt-paper) / var(--receipt-dots, 576));
-
   position: relative;
-  width: var(--receipt-paper);
+  width: calc(var(--dot) * var(--receipt-dots, 576));
   padding: calc(var(--dot) * 16) 0;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

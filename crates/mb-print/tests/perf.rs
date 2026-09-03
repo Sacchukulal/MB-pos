@@ -183,7 +183,7 @@ fn p3_a_kitchen_ticket_renders_in_almost_no_time() {
 fn p4_a_bill_becomes_dots_inside_its_budget() {
     let fixture = big_fixture();
     let paper = Paper::new(PaperKind::Mm80);
-    let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
+    let font = std::sync::Arc::new(Font::default_face().expect("the default face loads"));
     let doc = bill_document(
         &common::metrics(paper.kind),
         &fixture.context(Copy::Original),
@@ -249,7 +249,7 @@ fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
             mb_print::printer::Target::None,
         )],
         store,
-        std::sync::Arc::new(mb_print::font::OneFace::builtin().expect("the shipped face loads")),
+        std::sync::Arc::new(mb_print::font::OneFace::default_face().expect("the default face loads")),
         QueueConfig::default(),
     );
 

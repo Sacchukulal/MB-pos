@@ -147,14 +147,57 @@
   width: var(--control-lg);
 }
 
-/* Row menu: the ⋯ that holds the rest of a row's actions. */
+/*
+ * The sheet: the floating list that opens under a menu button or a dropdown. ONE recipe —
+ * the top bar's More, a row's ⋯ and every Select open the same sheet; each only says where
+ * its own lies.
+ */
 
-.mb-rowmenu {
-  position: relative;
-  display: inline-flex;
+.mb-sheet {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--level-pop);
 }
 
-.mb-rowmenu__scrim {
+/* One row of a sheet. */
+.mb-sheet__item {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  flex: none;
+  height: var(--control-md);
+  padding: 0 var(--space-3);
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--type-body);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mb-sheet__item:hover,
+.mb-sheet__item--on {
+  background: var(--surface-2);
+}
+
+/* The row that is in force: the current screen, the chosen option. */
+.mb-sheet__item[aria-current='page'],
+.mb-sheet__item[aria-selected='true'] {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: var(--weight-bold);
+  box-shadow: inset var(--tile-stripe) 0 0 var(--accent);
+}
+
+/* The invisible cover that closes a sheet when anything else is pressed. */
+.mb-sheetscrim {
   position: fixed;
   inset: 0;
   background: transparent;
@@ -164,19 +207,31 @@
   z-index: var(--layer-panel);
 }
 
+/* A dropdown's sheet: fixed to the window where its box is, over dialogs too, and it scrolls. */
+.mb-select__scrim {
+  z-index: var(--layer-dropdown);
+}
+
+.mb-select__sheet {
+  position: fixed;
+  z-index: var(--layer-dropdown);
+  margin: var(--space-1) 0;
+  overflow-y: auto;
+}
+
+/* Row menu: the ⋯ that holds the rest of a row's actions. */
+
+.mb-rowmenu {
+  position: relative;
+  display: inline-flex;
+}
+
 .mb-rowmenu__sheet {
   position: absolute;
   top: calc(100% + var(--space-1));
   right: 0;
   z-index: var(--layer-panel);
-  display: flex;
-  flex-direction: column;
   min-width: 11rem; /* mb-tokens-allow: the sheet hugs its longest word, and 11rem is that */
-  padding: var(--space-1);
-  background: var(--surface);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--level-pop);
 }
 
 .mb-rowmenu__sheet .mb-button {

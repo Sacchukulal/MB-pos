@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 
-import { Button, Input, Keypad, Logo, Scroller } from '../kit';
+import { Button, Input, Keypad, Logo, Scroller, cx } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import {
   PIN_DIGITS,
   initial,
   reduce,
+  shown,
   take,
   type Event,
   type State,
@@ -25,17 +26,22 @@ export interface LockProps {
    */
   recoverable: readonly PersonView[];
   canRecover: boolean;
+  /** Who signed in last at this counter, so the mark starts on them. */
+  lastSignedIn: string | null;
   /** Called when somebody got in. */
   onSignedIn: () => void;
 }
 
-export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps) {
+/** Keys the window takes even while a text box has focus. */
+const ALWAYS_OURS = new Set(['Enter', 'ArrowUp', 'ArrowDown']);
+
+export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn }: LockProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initial);
   const runningSeq = useRef(0);
 
   useEffect(() => {
-    dispatch({ kind: 'people', people, recoverable, canRecover });
-  }, [people, recoverable, canRecover]);
+    dispatch({ kind: 'people', people, recoverable, canRecover, lastSignedIn });
+  }, [people, recoverable, canRecover, lastSignedIn]);
 
   // The commands ride in the state.
   useEffect(() => {
@@ -76,7 +82,9 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
       if (event.key === 'Tab') return;
       // Let the text inputs have their own typing; the reducer takes the rest.
       const target = event.target as HTMLElement | null;
-      if (target?.tagName === 'INPUT' && event.key !== 'Enter') return;
+      if (target?.tagName === 'INPUT' && !ALWAYS_OURS.has(event.key)) return;
+      // The arrows move the mark, not the page.
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') event.preventDefault();
       dispatch({ kind: 'key', key: event.key });
     };
     window.addEventListener('keydown', onKey);
@@ -90,43 +98,52 @@ export function Lock({ people, recoverable, canRecover, onSignedIn }: LockProps)
 
   const mode = state.mode;
 
+  const problem = state.problem ? (
+    <p className="mb-lock__problem" role="alert">
+      {state.problem}
+    </p>
+  ) : null;
+
+  const forgot =
+    canRecover && mode.kind !== 'recover' && mode.kind !== 'recovered' ? (
+      <Button variant="quiet" size="sm" onClick={() => dispatch({ kind: 'start-recovery' })}>
+        Forgotten your PIN?
+      </Button>
+    ) : null;
+
+  if (mode.kind === 'pin') {
+    return (
+      <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Sign in">
+        <div className="mb-lock__card mb-lock__card--split">
+          <People
+            people={state.people}
+            typed={mode.typed}
+            marked={mode.person}
+            onType={(text) => dispatch({ kind: 'typed', text })}
+            onChoose={(person) => dispatch({ kind: 'choose', person })}
+          />
+          <div className="mb-lock__pad">
+            <Logo size="lg" />
+            <SignIn person={mode.person} digits={mode.digits} busy={state.busy} onPad={onPad} />
+            {problem}
+            {forgot}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Sign in">
       <div className="mb-lock__card">
         <Logo size="lg" />
         {mode.kind === 'recovered' ? (
           <Recovered code={mode.freshCode} onDone={() => dispatch({ kind: 'done' })} />
-        ) : mode.kind === 'recover' ? (
-          <Recover state={state} dispatch={dispatch} onPad={onPad} />
-        ) : mode.kind === 'pin' ? (
-          <PinPad
-            person={mode.person}
-            digits={mode.digits}
-            busy={state.busy}
-            onPad={onPad}
-            onCancel={() => dispatch({ kind: 'cancel' })}
-            onSubmit={() => dispatch({ kind: 'submit' })}
-          />
         ) : (
-          <Who
-            people={state.people}
-            typed={mode.typed}
-            onType={(text) => dispatch({ kind: 'typed', text })}
-            onChoose={(person) => dispatch({ kind: 'choose', person })}
-          />
+          <Recover state={state} dispatch={dispatch} onPad={onPad} />
         )}
-
-        {state.problem ? (
-          <p className="mb-lock__problem" role="alert">
-            {state.problem}
-          </p>
-        ) : null}
-
-        {canRecover && mode.kind !== 'recover' && mode.kind !== 'recovered' ? (
-          <Button variant="quiet" size="sm" onClick={() => dispatch({ kind: 'start-recovery' })}>
-            Forgotten your PIN?
-          </Button>
-        ) : null}
+        {problem}
+        {forgot}
       </div>
     </div>
   );
@@ -150,114 +167,109 @@ function Pad({
         {Array.from({ length: PIN_DIGITS }, (_, index) => (
           <span
             key={index}
-            className={[
-              'mb-lock__dot',
-              index < digits.length ? 'mb-lock__dot--filled' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            className={cx('mb-lock__dot', index < digits.length && 'mb-lock__dot--filled')}
           />
         ))}
       </div>
 
-      {/*
-        No decimal point. A PIN has no decimal point, and the key sat exactly where a thumb
-        lands.
-      */}
+      {/* No decimal point: a PIN has none, and the key sat exactly where a thumb lands. */}
       <Keypad onPress={onPad} disabled={busy} dot={false} />
       <span className="mb-visually-hidden">{label}</span>
     </>
   );
 }
 
-function Who({
+/** The people down the side, one of them marked. */
+function People({
   people,
   typed,
+  marked,
   onType,
   onChoose,
 }: {
   people: readonly PersonView[];
   typed: string;
+  marked: PersonView | null;
   onType: (text: string) => void;
   onChoose: (person: PersonView) => void;
 }) {
-  const wanted = typed.trim().toLowerCase();
-  const shown =
-    wanted === ''
-      ? people
-      : people.filter((p) => p.name.toLowerCase().includes(wanted));
+  const list = shown(people, typed);
+  const rows = useRef<HTMLDivElement>(null);
+
+  // The mark stays in view as the arrows move it.
+  useEffect(() => {
+    rows.current
+      ?.querySelector<HTMLElement>('[aria-current="true"]')
+      ?.scrollIntoView?.({ block: 'nearest' });
+  }, [marked]);
 
   return (
-    <>
+    <div className="mb-lock__people-column">
       <h1 className="mb-lock__title">Who is at the counter?</h1>
       {people.length > 6 ? (
         <Input
           label="Name"
           value={typed}
-          autoFocus
+          autoComplete="off"
           onChange={(event) => onType(event.target.value)}
         />
       ) : null}
-      <Scroller inset className="mb-lock__people">
-        {shown.length === 0 ? (
-          /* Two different emptinesses, and they were saying the same thing. */
+      <Scroller inset className="mb-lock__people" ref={rows}>
+        {list.length === 0 ? (
           <p className="mb-muted">
             {people.length === 0
               ? 'Nobody here has a PIN yet. Somebody who manages staff can set one.'
               : 'Nobody here goes by that. Clear the box to see everybody.'}
           </p>
         ) : (
-          shown.map((person) => (
+          list.map((person) => (
             <Button
               key={person.id}
               wide
               list
               variant={person.lockedOut ? 'quiet' : 'secondary'}
               className="mb-lock__person"
+              aria-current={person.id === marked?.id ? 'true' : undefined}
               onClick={() => onChoose(person)}
             >
               <span className="mb-lock__name">{person.name}</span>
-              <span className="mb-lock__role">
-                {person.lockedOut ?? person.role ?? ''}
-              </span>
+              <span className="mb-lock__role">{person.lockedOut ?? person.role ?? ''}</span>
             </Button>
           ))
         )}
       </Scroller>
-    </>
+      <p className="mb-lock__hint">Up and down pick a name. The fourth digit signs you in.</p>
+    </div>
   );
 }
 
-function PinPad({
+/** The marked person and their pad. */
+function SignIn({
   person,
   digits,
   busy,
   onPad,
-  onCancel,
-  onSubmit,
 }: {
-  person: PersonView;
+  person: PersonView | null;
   digits: string;
   busy: boolean;
   onPad: (key: string) => void;
-  onCancel: () => void;
-  onSubmit: () => void;
 }) {
+  if (!person) {
+    return <h1 className="mb-lock__title">Nobody can sign in yet</h1>;
+  }
   return (
     <>
       <h1 className="mb-lock__title">{person.name}</h1>
-      <p className="mb-muted">{person.role ?? ''}</p>
-
-      <Pad digits={digits} busy={busy} onPad={onPad} label={`${person.name}'s PIN`} />
-
-      <div className="mb-lock__actions">
-        <Button variant="quiet" onClick={onCancel} disabled={busy}>
-          Somebody else
-        </Button>
-        <Button variant="primary" onClick={onSubmit} disabled={busy}>
-          {busy ? 'Checking…' : 'Sign in'}
-        </Button>
-      </div>
+      <p className={cx('mb-muted', person.lockedOut && 'mb-lock__problem')}>
+        {person.lockedOut ?? person.role ?? ''}
+      </p>
+      <Pad
+        digits={digits}
+        busy={busy || person.lockedOut !== null}
+        onPad={onPad}
+        label={`${person.name}'s PIN`}
+      />
     </>
   );
 }

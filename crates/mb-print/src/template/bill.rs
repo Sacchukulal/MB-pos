@@ -81,17 +81,27 @@ pub fn bill_document(metrics: &Metrics, ctx: &BillContext<'_>) -> Result<Documen
     let s = ctx.settings;
     let mut doc = Document::new(metrics.paper());
 
+    // Air between one section and the next, sized by the row-height setting — so the paper
+    // reads as a letterhead, the bill's details, a table, the sums and a footer rather than one
+    // dense column. Compact gives none; the preview shows exactly what the printer feeds.
+    let air = s.row_height.section_air();
+
     header(&mut doc, ctx);
+    doc.air(air);
     marks(&mut doc, ctx);
     meta(&mut doc, metrics, ctx)?;
+    doc.air(air);
     items(&mut doc, metrics, ctx);
+    doc.air(air);
     totals(&mut doc, ctx);
     // The setting decides, on a one-rate bill as much as a three-rate one — an owner who turned
     // it on wants the rate-wise table on every tax invoice, which is what a GST audit reads.
     if s.show.tax_summary {
+        doc.air(air);
         tax_summary(&mut doc, ctx);
     }
     payments(&mut doc, ctx);
+    doc.air(air);
     footer(&mut doc, ctx);
 
     Ok(doc)
@@ -732,6 +742,7 @@ fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
     }
 }
 
+/// The payment lines, with their own air above them — only when there are any.
 fn payments(doc: &mut Document, ctx: &BillContext<'_>) {
     let s = ctx.settings;
     if !s.show.payment_lines {
@@ -740,6 +751,7 @@ fn payments(doc: &mut Document, ctx: &BillContext<'_>) {
     let Some(settlement) = settlement_of(ctx.order) else {
         return;
     };
+    doc.air(s.row_height.section_air());
 
     for payment in settlement.payments() {
         doc.row(

@@ -731,7 +731,7 @@ mod tests {
     use crate::paper::PaperKind;
 
     fn metrics(kind: PaperKind) -> Metrics {
-        let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
+        let font = std::sync::Arc::new(Font::default_face().expect("the default face loads"));
         Metrics::face(Paper::new(kind), font)
     }
 

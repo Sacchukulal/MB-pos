@@ -1,23 +1,9 @@
-/** The printer setup. */
+/** The printer setup: where bills print, and how kitchen tickets are cut. */
 
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  EmptyState,
-  Input,
-  Modal,
-  SectionHeader,
-  Select,
-  Spinner,
-  useToast,
-} from '../kit';
+import { Button, Card, Checkbox, SectionHeader, Select, Spinner, useToast } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
-import type { PrinterEdit } from '../ipc/generated/PrinterEdit';
-import type { PrinterRowView } from '../ipc/generated/PrinterRowView';
 import type { PrintersView } from '../ipc/generated/PrintersView';
 
 const PAPERS = [
@@ -26,42 +12,14 @@ const PAPERS = [
   { value: '100', label: '100 mm (4 inch)' },
 ];
 
-const KINDS = [
-  { value: 'spooler', label: 'Through Windows' },
-  { value: 'network', label: 'Over the network' },
-  { value: 'serial', label: 'Serial cable' },
-  { value: 'none', label: 'Not connected yet' },
-];
-
-const ROLES = [
-  { value: 'both', label: 'Bills and kitchen tickets' },
-  { value: 'bill', label: 'Bills only' },
-  { value: 'kitchen', label: 'Kitchen tickets only' },
-];
-
-const ENGINES = [
-  { value: 'raster', label: 'Graphics — prints exactly like the preview' },
-  { value: 'text', label: "Text — the printer's own font, faster" },
-];
-
-function blank(): PrinterEdit {
-  return {
-    id: '',
-    name: '',
-    kind: 'spooler',
-    address: '',
-    paperMm: 80,
-    isDefault: false,
-    role: 'both',
-    engine: 'raster',
-    isBoldDark: false,
-    canKickDrawer: false,
-  };
+/** The Windows printers as a pick list, with the one already chosen kept even if Windows lost it. */
+function printerOptions(windows: readonly string[], chosen: string, none: string) {
+  const names = chosen && !windows.includes(chosen) ? [chosen, ...windows] : windows;
+  return [{ value: '', label: none }, ...names.map((name) => ({ value: name, label: name }))];
 }
 
 export function Printers() {
   const [view, setView] = useState<PrintersView | null>(null);
-  const [editing, setEditing] = useState<PrinterEdit | null>(null);
   const toast = useToast();
 
   const load = useCallback(() => {
@@ -76,9 +34,10 @@ export function Printers() {
   useEffect(load, [load]);
 
   const run = useCallback(
-    async <T,>(work: Promise<T>, then?: (value: T) => void) => {
+    async (work: Promise<PrintersView>, said?: string) => {
       try {
-        then?.(await work);
+        setView(await work);
+        if (said) toast.show('ok', said);
       } catch (cause) {
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
       }
@@ -88,393 +47,208 @@ export function Printers() {
 
   if (!view) return <Spinner label="Reading the printer setup" />;
 
-  const chosen = view.printers.find((p) => p.isDefault) ?? view.printers[0] ?? null;
-  const editorFor = (printer: PrinterRowView): PrinterEdit => ({
-    id: printer.id,
-    name: printer.name,
-    kind: printer.kind,
-    address: printer.address,
-    paperMm: printer.paperMm,
-    isDefault: printer.isDefault,
-    role: printer.role,
-    engine: printer.engine,
-    isBoldDark: printer.isBoldDark,
-    canKickDrawer: printer.canKickDrawer,
-  });
+  const bill = view.printers.find((p) => p.isDefault) ?? null;
+  const billName = bill && !bill.isStandIn ? bill.address : '';
+  /** A category's printer, as the Windows name the shop picks from. */
+  const windowsNameOf = (printerId: string) =>
+    view.printers.find((p) => p.id === printerId && p.kind === 'spooler')?.address ?? '';
+  const separate = view.kitchenMode === 'other';
+  const perCategory = view.ticketStyle === 'category';
 
   return (
     <div className="mb-printers">
-      <SectionHeader
-        title="Printers"
-        sticky
-        action={
-          <Button variant="primary" size="sm" onClick={() => setEditing(blank())}>
-            Add a printer
-          </Button>
-        }
-      />
+      <SectionHeader title="Printers" sticky />
 
-      {view.printers.length === 0 ? (
-        <EmptyState
-          title="No printer is set up"
-          hint="Add one, and the counter will still bill in the meantime — a shop with no printer spools its paper and prints it when one appears."
+      {/* ONE: the printer. */}
+      <Card>
+        <SectionHeader title="Bills print on" />
+        <Select
+          label="Printer"
+          value={billName}
+          options={printerOptions(view.windows, billName, 'No printer yet — bills print nothing')}
+          onChange={(event) =>
+            void run(
+              call('choose_bill_printer', { windowsName: event.currentTarget.value }),
+              event.currentTarget.value ? 'Bills print there now.' : 'No printer: bills print nothing.',
+            )
+          }
         />
-      ) : null}
+        {bill && !bill.isStandIn ? (
+          <>
+            <div className="mb-printers__fields">
+              <Select
+                label="Paper width"
+                value={String(bill.paperMm)}
+                options={PAPERS}
+                onChange={(event) =>
+                  void run(
+                    call('set_paper_size', { mm: Number(event.currentTarget.value) }),
+                    `Bills print on ${event.currentTarget.value} mm paper now.`,
+                  )
+                }
+              />
+              <Checkbox
+                label="A cash drawer is plugged into this printer"
+                checked={bill.canKickDrawer}
+                onChange={(event) =>
+                  void run(call('set_drawer', { on: event.currentTarget.checked }))
+                }
+              />
+            </div>
+            <div className="mb-row">
+              <Button
+                onClick={() =>
+                  void call('print_sample_bill', { printerId: bill.id })
+                    .then(() => toast.show('info', 'A sample bill has gone to the printer.'))
+                    .catch((cause) => {
+                      if (isUiError(cause)) toast.show('danger', cause.message);
+                    })
+                }
+              >
+                Print a sample bill
+              </Button>
+              <Button
+                variant="quiet"
+                onClick={() =>
+                  void call('print_test_page', { printerId: bill.id })
+                    .then(() => toast.show('info', 'The alignment slip is printing. Its ruler is what the arrows move.'))
+                    .catch((cause) => {
+                      if (isUiError(cause)) toast.show('danger', cause.message);
+                    })
+                }
+              >
+                Print the alignment slip
+              </Button>
+              <span className="mb-field__hint">
+                Off-centre? Nudge it: now {signed(bill.offsetXMm)} mm across, {signed(bill.offsetYMm)} mm
+                down.
+              </span>
+              {(
+                [
+                  ['← 1 mm', -1, 0, 'Move the print 1 mm left'],
+                  ['1 mm →', 1, 0, 'Move the print 1 mm right'],
+                  ['↑ 1 mm', 0, -1, 'Move the print 1 mm up'],
+                  ['↓ 1 mm', 0, 1, 'Move the print 1 mm down'],
+                ] as const
+              ).map(([word, dx, dy, says]) => (
+                <Button
+                  key={word}
+                  size="sm"
+                  aria-label={says}
+                  onClick={() =>
+                    void run(call('nudge_printer', { printerId: bill.id, dxMm: dx, dyMm: dy }))
+                  }
+                >
+                  {word}
+                </Button>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </Card>
 
-      {/* WHERE BILLS PRINT — one question, at the top, in a dropdown. */}
-      {chosen ? (
-        <Card>
-          <SectionHeader
-            title="Where bills print"
-            note="Kitchen tickets go here too, unless a category below says otherwise."
-          />
-          <Select
-            label="This shop's printer"
-            value={chosen.id}
-            options={view.printers.map((p) => ({
-              value: p.id,
-              label: p.isStandIn ? `${p.name} — prints nothing` : `${p.name} · ${p.connection}`,
-            }))}
-            onChange={(event) =>
-              void run(
-                call('set_default_printer', { printerId: event.currentTarget.value }),
-                (next) => {
-                  setView(next);
-                  toast.show('ok', 'Bills print there now.');
-                },
-              )
-            }
-          />
+      {/* TWO: the kitchen tickets. */}
+      <Card>
+        <SectionHeader title="Kitchen tickets" />
+        <Choice
+          label="Which printer"
+          value={separate ? 'other' : 'same'}
+          options={[
+            { value: 'same', label: 'The bill printer' },
+            { value: 'other', label: 'Other printers, by category' },
+          ]}
+          onPick={(mode) =>
+            void run(
+              call('set_kitchen_mode', { mode }),
+              mode === 'same'
+                ? 'Kitchen tickets print with the bills.'
+                : 'Choose a printer for each category below.',
+            )
+          }
+        />
+        <Choice
+          label="How many tickets"
+          value={perCategory ? 'category' : 'combined'}
+          options={[
+            { value: 'combined', label: 'One ticket for everything' },
+            { value: 'category', label: 'One ticket per category' },
+          ]}
+          onPick={(style) =>
+            void run(
+              call('set_ticket_style', { style }),
+              style === 'combined'
+                ? 'One kitchen ticket per printer.'
+                : 'Each category prints its own ticket.',
+            )
+          }
+        />
 
-          {/* The one warning worth interrupting somebody for. */}
-          {chosen.isStandIn ? (
-            <p className="mb-field__error" role="alert">
-              <span aria-hidden="true">⚠</span>
-              Nothing is printing. This is the stand-in every shop starts with —
-              add your real printer, or choose it above.
-            </p>
-          ) : null}
-
-          <PrinterSettings
-            printer={chosen}
-            onEdit={() => setEditing(editorFor(chosen))}
-            onTest={() =>
-              void run(call('print_sample_bill', { printerId: chosen.id }), () =>
-                toast.show(
-                  'info',
-                  'A sample bill has gone to the printer. Look at the paper, then nudge it if it is off-centre.',
-                ),
-              )
-            }
-            onSlip={() =>
-              void run(call('print_test_page', { printerId: chosen.id }), () =>
-                toast.show(
-                  'info',
-                  'The slip is printing. The ruler on it is what the arrows below move.',
-                ),
-              )
-            }
-            onNudge={(dx, dy) =>
-              void run(call('nudge_printer', { printerId: chosen.id, dxMm: dx, dyMm: dy }), setView)
-            }
-          />
-        </Card>
-      ) : null}
-
-      {/* 1, and it does something now. */}
-      {view.routes.length > 0 ? (
-        <Card>
-          <SectionHeader
-            title="Which printer each kind of food goes to"
-            note="Anything not listed goes to the printer above."
-          />
-          {/* The stand-in is not a station. */}
-          {view.printers.filter((p) => p.role !== 'bill' && !p.isStandIn).length < 2 ? (
-            <p className="mb-field__hint">
-              This shop has one kitchen printer, so everything goes there. Add a
-              second and you can send the tandoor's food to the tandoor.
-            </p>
+        {separate ? (
+          view.routes.length === 0 ? (
+            <p className="mb-field__hint">The menu has no categories yet, so there is nothing to send apart.</p>
           ) : (
             <div className="mb-printers__routes">
               {view.routes.map((route) => (
                 <Select
                   key={route.categoryId}
                   label={route.category}
-                  value={route.printerId}
-                  options={[
-                    { value: '', label: 'The printer above' },
-                    ...view.printers
-                      .filter((p) => p.role !== 'bill' && !p.isStandIn)
-                      .map((p) => ({ value: p.id, label: p.name })),
-                  ]}
+                  value={windowsNameOf(route.printerId)}
+                  options={printerOptions(
+                    view.windows,
+                    windowsNameOf(route.printerId),
+                    'The bill printer',
+                  )}
                   onChange={(event) =>
                     void run(
-                      call('route_category', {
+                      call('route_category_to', {
                         categoryId: route.categoryId,
-                        printerId: event.currentTarget.value,
+                        windowsName: event.currentTarget.value,
                       }),
-                      (next) => {
-                        setView(next);
-                        toast.show('ok', `${route.category} tickets print there now.`);
-                      },
+                      `${route.category} tickets print there now.`,
                     )
                   }
                 />
               ))}
             </div>
-          )}
-        </Card>
-      ) : null}
-
-      {/* Every printer the shop has, for adding, changing and removing. */}
-      {view.printers.length > 0 ? (
-        <Card>
-          <SectionHeader
-            title="Every printer set up here"
-            note={`${view.printers.length} in total`}
-          />
-          <div className="mb-printers__all">
-            {view.printers.map((printer) => (
-              <div className="mb-printers__row" key={printer.id}>
-                <div className="mb-stack">
-                  <span className="mb-printers__name">
-                    {printer.name}
-                    {printer.isDefault ? <Badge tone="accent">Bills print here</Badge> : null}
-                  </span>
-                  <span className="mb-field__hint">
-                    {printer.connection} · {printer.paperMm} mm ·{' '}
-                    {printer.role === 'bill'
-                      ? 'bills'
-                      : printer.role === 'kitchen'
-                        ? 'kitchen tickets'
-                        : 'bills and kitchen tickets'}
-                    {printer.canKickDrawer ? ' · opens the drawer' : ''}
-                  </span>
-                </div>
-                <div className="mb-row mb-row--end">
-                  <Button size="sm" onClick={() => setEditing(editorFor(printer))}>
-                    Change
-                  </Button>
-                  {printer.isStandIn ? null : (
-                    <Button
-                      size="sm"
-                      variant="quiet"
-                      onClick={() =>
-                        void run(call('delete_printer', { id: printer.id }), (next) => {
-                          setView(next);
-                          toast.show('info', 'That printer has gone.');
-                        })
-                      }
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
-
-      <PrinterDialog
-        edit={editing}
-        windows={view.windows}
-        onClose={() => setEditing(null)}
-        onSave={(next) =>
-          void run(call('save_printer', { edit: next }), (updated) => {
-            setView(updated);
-            setEditing(null);
-            toast.show(
-              'ok',
-              'Saved. New jobs use it after the next restart — anything already waiting keeps its own printer.',
-            );
-          })
-        }
-      />
+          )
+        ) : null}
+      </Card>
     </div>
   );
 }
 
-/**
- * What you do with the printer once you have chosen it: prove it works, straighten what it puts
- * on the paper, change how it is set up.
- */
-function PrinterSettings({
-  printer,
-  onEdit,
-  onTest,
-  onSlip,
-  onNudge,
+/** A choice of two, as two buttons: the one in force is filled. */
+function Choice({
+  label,
+  value,
+  options,
+  onPick,
 }: {
-  printer: PrinterRowView;
-  onEdit: () => void;
-  onTest: () => void;
-  onSlip: () => void;
-  onNudge: (dx: number, dy: number) => void;
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onPick: (value: string) => void;
 }) {
   return (
-    <>
-      <div className="mb-row">
-        <Button onClick={onTest}>Print a sample bill</Button>
-        <Button variant="quiet" onClick={onSlip}>
-          Print the alignment slip
-        </Button>
-        <Button onClick={onEdit}>Change how it is set up</Button>
+    <div className="mb-field">
+      <span className="mb-field__label">{label}</span>
+      <div className="mb-row" role="group" aria-label={label}>
+        {options.map((option) => (
+          <Button
+            key={option.value}
+            variant={option.value === value ? 'primary' : 'secondary'}
+            aria-pressed={option.value === value}
+            onClick={() => option.value !== value && onPick(option.value)}
+          >
+            {option.label}
+          </Button>
+        ))}
       </div>
-
-      {/*
-        Thermal printers disagree about where the first dot sits, so the same correct document
-        comes out 2 mm off-centre on one model and centred on another.
-      */}
-      <div className="mb-printers__nudge">
-        <span className="mb-field__hint">
-          Off-centre on the paper? Print a sample, then nudge it. Now at{' '}
-          {printer.offsetXMm >= 0 ? `+${printer.offsetXMm}` : printer.offsetXMm} mm across,{' '}
-          {printer.offsetYMm >= 0 ? `+${printer.offsetYMm}` : printer.offsetYMm} mm down.
-        </span>
-        <div className="mb-row">
-          <Button size="sm" onClick={() => onNudge(-1, 0)} aria-label="Move the print 1 mm left">
-            ← 1 mm
-          </Button>
-          <Button size="sm" onClick={() => onNudge(1, 0)} aria-label="Move the print 1 mm right">
-            1 mm →
-          </Button>
-          <Button size="sm" onClick={() => onNudge(0, -1)} aria-label="Move the print 1 mm up">
-            ↑ 1 mm
-          </Button>
-          <Button size="sm" onClick={() => onNudge(0, 1)} aria-label="Move the print 1 mm down">
-            ↓ 1 mm
-          </Button>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
 
-function PrinterDialog({
-  edit,
-  windows,
-  onClose,
-  onSave,
-}: {
-  edit: PrinterEdit | null;
-  windows: readonly string[];
-  onClose: () => void;
-  onSave: (edit: PrinterEdit) => void;
-}) {
-  const [draft, setDraft] = useState<PrinterEdit>(blank());
-
-  useEffect(() => {
-    if (edit) setDraft(edit);
-  }, [edit]);
-
-  const set = (patch: Partial<PrinterEdit>) => setDraft({ ...draft, ...patch });
-
-  return (
-    <Modal
-      open={edit !== null}
-      title={edit?.id ? 'Change this printer' : 'Add a printer'}
-      onClose={onClose}
-      wide
-      actions={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={() => onSave(draft)}>
-            Save this printer
-          </Button>
-        </>
-      }
-    >
-      <div className="mb-stack">
-        <Input
-          label="What you call it"
-          hint="Counter, Kitchen, Bar — the name you will look for."
-          value={draft.name}
-          onChange={(event) => set({ name: event.currentTarget.value })}
-        />
-        <Select
-          label="How it is connected"
-          value={draft.kind}
-          options={KINDS}
-          onChange={(event) => set({ kind: event.currentTarget.value, address: '' })}
-        />
-
-        {draft.kind === 'spooler' ? (
-          windows.length > 0 ? (
-            <Select
-              label="Which Windows printer"
-              hint="Asked of Windows each time this screen opens, so one installed a minute ago is here."
-              value={draft.address}
-              options={[
-                { value: '', label: 'Choose one' },
-                ...windows.map((name) => ({ value: name, label: name })),
-              ]}
-              onChange={(event) => set({ address: event.currentTarget.value })}
-            />
-          ) : (
-            <Input
-              label="Which Windows printer"
-              hint="Windows lists no printers on this machine. Type the name if you know it."
-              value={draft.address}
-              onChange={(event) => set({ address: event.currentTarget.value })}
-            />
-          )
-        ) : null}
-
-        {draft.kind === 'network' ? (
-          <Input
-            label="Address and port"
-            hint="Like 192.168.1.50:9100. Most thermal printers use 9100."
-            value={draft.address}
-            onChange={(event) => set({ address: event.currentTarget.value })}
-          />
-        ) : null}
-
-        {draft.kind === 'serial' ? (
-          <Input
-            label="Serial port"
-            hint="Like COM3."
-            value={draft.address}
-            onChange={(event) => set({ address: event.currentTarget.value })}
-          />
-        ) : null}
-
-        <Select
-          label="Paper width"
-          value={String(draft.paperMm)}
-          options={PAPERS}
-          onChange={(event) => set({ paperMm: Number(event.currentTarget.value) })}
-        />
-        <Select
-          label="What it prints"
-          value={draft.role}
-          options={ROLES}
-          onChange={(event) => set({ role: event.currentTarget.value })}
-        />
-        <Select
-          label="How it prints"
-          hint="Graphics is exactly what the preview shows. Text uses the printer's own font and is quicker on an old machine."
-          value={draft.engine}
-          options={ENGINES}
-          onChange={(event) => set({ engine: event.currentTarget.value })}
-        />
-        <Checkbox
-          label="Bold and dark"
-          checked={draft.isBoldDark}
-          onChange={(event) => set({ isBoldDark: event.currentTarget.checked })}
-        />
-        <Checkbox
-          label="A cash drawer is plugged into this printer"
-          checked={draft.canKickDrawer}
-          onChange={(event) => set({ canKickDrawer: event.currentTarget.checked })}
-        />
-        {/* It says "default" now, and it is not how you set one. */}
-        <Checkbox
-          label="Make this the printer bills print on"
-          checked={draft.isDefault}
-          onChange={(event) => set({ isDefault: event.currentTarget.checked })}
-        />
-      </div>
-    </Modal>
-  );
+/** "+2" or "-1", for an offset. */
+function signed(n: number): string {
+  return n >= 0 ? `+${n}` : String(n);
 }

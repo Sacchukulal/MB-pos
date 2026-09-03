@@ -30,7 +30,7 @@ const AT: Timestamp = Timestamp::from_millis(1_770_000_000_000);
 fn metrics(kind: PaperKind) -> Metrics {
     Metrics::face(
         Paper::new(kind),
-        Arc::new(Font::builtin().expect("the shipped face loads")),
+        Arc::new(Font::default_face().expect("the default face loads")),
     )
 }
 
@@ -150,17 +150,7 @@ fn a_capital_is_as_tall_as_the_size_says() {
 
 /// A face this machine may not have.
 fn load(family: mb_print::font::Family) -> Option<Font> {
-    match family.file {
-        None => Font::builtin().ok(),
-        Some(file) => {
-            let path = std::path::PathBuf::from(
-                std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()),
-            )
-            .join("Fonts")
-            .join(file);
-            Font::load(&std::fs::read(path).ok()?, family.label).ok()
-        }
-    }
+    family.load().ok()
 }
 
 // T-rule. A rule is a rule.
@@ -220,7 +210,7 @@ fn every_pattern_draws_something_different() {
     };
     let solid = inked(Pattern::Solid);
     assert_eq!(inked(Pattern::Double), solid * 2, "Double is two strokes");
-    assert_eq!(inked(Pattern::Bold), solid * 3, "Bold is three dots thick");
+    assert_eq!(inked(Pattern::Bold), solid * 2, "Bold is twice as thick as Solid");
     assert!(inked(Pattern::Dashed) < solid, "Dashed is not solid");
     assert!(
         inked(Pattern::Dotted) < inked(Pattern::Dashed),
@@ -235,8 +225,8 @@ fn a_one_item_bill_is_not_a_foot_of_paper() {
     let laid = owners_bill(PaperKind::Mm80, &ReceiptSettings::default());
     let mm = laid.total_mm();
     assert!(
-        mm <= 75,
-        "the owner's one-dosa bill is {mm} mm of roll, and it was 117 before P32"
+        mm <= 85,
+        "the owner's one-dosa bill is {mm} mm of roll — 117 before P32, and about 70 before the sections got their air (2026-09-03)"
     );
     // And it is a real bill, not an empty one.
     assert!(mm >= 40, "{mm} mm is too short to be a bill at all");
@@ -245,7 +235,7 @@ fn a_one_item_bill_is_not_a_foot_of_paper() {
 /// The same, on the other two rolls a shop can buy.
 #[test]
 fn every_roll_prints_a_short_bill() {
-    for (kind, budget) in [(PaperKind::Mm58, 95), (PaperKind::Mm100, 70)] {
+    for (kind, budget) in [(PaperKind::Mm58, 105), (PaperKind::Mm100, 80)] {
         let laid = owners_bill(kind, &ReceiptSettings::default());
         let mm = laid.total_mm();
         assert!(

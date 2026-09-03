@@ -96,8 +96,32 @@ export function Backup() {
       </div>
 
       <Card>
-        <SectionHeader title="Where things are" />
+        <SectionHeader
+          title="Where things are"
+          note="One folder holds the whole shop: its data, its settings and its licence. Choose another folder to run the shop kept there."
+        />
         <dl className="mb-backup__where">
+          <dt>This shop&rsquo;s folder</dt>
+          <dd className="mb-backup__folder">
+            <span>{view.shopFolder}</span>
+            <Button
+              size="sm"
+              disabled={working}
+              onClick={() =>
+                void run(
+                  call('pick_a_folder', { start: view.shopFolder }).then((picked) =>
+                    picked ? call('use_shop_folder', { folder: picked }) : null,
+                  ),
+                  (moved) => {
+                    // A different shop is open now: every screen starts again from it.
+                    if (moved !== null) window.location.reload();
+                  },
+                )
+              }
+            >
+              Choose another folder
+            </Button>
+          </dd>
           <dt>This shop&rsquo;s data</dt>
           <dd>{view.database}</dd>
           <dt>Backups go to</dt>

@@ -252,9 +252,11 @@ mod tests {
             .with_offset(Offset::new(3, 0));
         let doc = test_document(&printer, None);
         let text = to_text(&layout(&doc).expect("lays out"));
+        // Read across the wrap: a wide face may break the sentence over two lines.
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
         // 3 mm on 80 mm paper is 2 columns.
-        assert!(text.contains("+3 mm right"), "{text}");
-        assert!(text.contains("2 characters"), "{text}");
+        assert!(flat.contains("+3 mm right"), "{text}");
+        assert!(flat.contains("2 characters"), "{text}");
     }
 
     #[test]

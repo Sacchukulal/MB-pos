@@ -290,6 +290,11 @@ pub enum Block {
     Spacer {
         lines: u8,
     },
+    /// Air between one section and the next, in HALF body rows — a whole blank line between
+    /// every section was a foot of paper, and none at all was one dense column.
+    Air {
+        halves: u8,
+    },
 }
 
 /// A whole printable thing.
@@ -344,6 +349,14 @@ impl Document {
 
     pub fn spacer(&mut self, lines: u8) -> &mut Self {
         self.push(Block::Spacer { lines })
+    }
+
+    /// Air, in half body rows. Nothing at all for zero, so a caller can pass a setting straight.
+    pub fn air(&mut self, halves: u8) -> &mut Self {
+        if halves == 0 {
+            return self;
+        }
+        self.push(Block::Air { halves })
     }
 }
 

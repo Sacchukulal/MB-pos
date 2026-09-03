@@ -18,6 +18,7 @@ import {
   MoneyInput,
   onlyAmount,
   Page,
+  Panel,
   RowMenu,
   Scroller,
   SearchField,
@@ -27,13 +28,13 @@ import {
   useReport,
   useToast,
 } from '../kit';
-import { call, inApp, subscribe } from '../ipc/call';
+import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
-import { HelpSheet, HowMany, Suggestions } from './Keys';
+import { HelpSheet, HowMany, Suggestions, TableBox } from './Keys';
 import {
   initial as initialKeys,
   reduce as reduceKeys,
@@ -60,6 +61,8 @@ const ORDER_TYPES = ['Dine in', 'Parcel', 'Self service', 'Delivery'] as const;
 
 /** Whether the processing panel is open — a look preference, kept on this computer. */
 const PROCESSING_KEY = 'mb.billing.processing';
+/** Whether the ← → keys may change the order type — a look preference, kept on this computer. */
+const ARROWS_KEY = 'mb.billing.arrows';
 
 export function Billing() {
   const toast = useToast();
@@ -102,6 +105,16 @@ export function Billing() {
   useEffect(() => {
     keep(PROCESSING_KEY, processingOpen ? 'open' : 'folded');
   }, [processingOpen]);
+  /**
+   * The small lock at the end of the order-type row: a parcel counter whose cashier keeps
+   * brushing ← → while typing wants the keys to stop moving it. The buttons still work.
+   */
+  const [arrowsLocked, setArrowsLocked] = useState(
+    () => remember(ARROWS_KEY, 'free') === 'locked',
+  );
+  useEffect(() => {
+    keep(ARROWS_KEY, arrowsLocked ? 'locked' : 'free');
+  }, [arrowsLocked]);
 
   // ONE shared clock (§5 rule 10).
   const tick = useTick();
@@ -149,6 +162,8 @@ export function Billing() {
   const report = useReport();
   // One action at a time on this screen, matching the counter in Rust.
   const [act, acting] = useAction();
+  /** The table-number box is open: Enter was pressed on a dine-in cart with no table. */
+  const [pickingTable, setPickingTable] = useState(false);
 
   // Silent on failure, and deliberately.
   const refreshFloor = useCallback(async () => {
@@ -390,7 +405,9 @@ export function Billing() {
       searchBox.current?.focus();
       toast.show('ok', 'Kitchen ticket sent.');
     } catch (cause) {
-      report(cause);
+      // A dine-in cart with no table: ask for the number, in its own box.
+      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable(true);
+      else report(cause);
     }
   }, [refreshFloor, report, toast]);
 
@@ -432,7 +449,8 @@ export function Billing() {
       await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
-      report(cause);
+      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable(true);
+      else report(cause);
     }
   }, [freshMoney, payMode, refreshFloor, report, toast]);
 
@@ -448,23 +466,21 @@ export function Billing() {
    * after settling would do.
    */
   const commitCash = useCallback(
-    (typed: string) => {
+    async (typed: string) => {
       if (!cart || cart.isEmpty) return;
       const amount = typed.trim();
       // Half a number ("500.") is not a number yet; the last whole one stands until it is.
       if (amount !== '' && !/^\d+(\.\d{1,2})?$/.test(amount)) return;
       const seq = ++cashSeq.current;
-      void (async () => {
-        try {
-          const fresh =
-            amount === ''
-              ? await call('cart_clear_payments')
-              : await call('cart_cash_given', { amount });
-          if (seq === cashSeq.current) setCart(fresh);
-        } catch (cause) {
-          if (seq === cashSeq.current) report(cause);
-        }
-      })();
+      try {
+        const fresh =
+          amount === ''
+            ? await call('cart_clear_payments')
+            : await call('cart_cash_given', { amount });
+        if (seq === cashSeq.current) setCart(fresh);
+      } catch (cause) {
+        if (seq === cashSeq.current) report(cause);
+      }
     },
     [cart, report],
   );
@@ -473,10 +489,22 @@ export function Billing() {
   const typeCash = useCallback(
     (typed: string) => {
       setCashGiven(typed);
-      commitCash(typed);
+      void commitCash(typed);
     },
     [commitCash],
   );
+
+  /**
+   * Enter in the cash box: the cash is down, and the bill is done. The commit is awaited so
+   * the settlement Rust completes against is the one with this cash on it.
+   */
+  const cashEntered = useCallback(() => {
+    if (!cart || cart.isEmpty) return;
+    act(async () => {
+      await commitCash(cashGiven);
+      await completeBill();
+    });
+  }, [act, cart, cashGiven, commitCash, completeBill]);
 
   // A tap goes through the SAME reducer a key does, so touch and keyboard cannot drift apart.
   const openTable = useCallback(
@@ -591,9 +619,14 @@ export function Billing() {
 
   useEffect(() => {
     if (cart?.orderType) {
-      dispatch({ kind: 'order-type', value: cart.orderType, locked: cart.orderTypeLocked });
+      dispatch({
+        kind: 'order-type',
+        value: cart.orderType,
+        // Locked by the shop (one order type only) or by the cashier (the small lock).
+        locked: cart.orderTypeLocked || arrowsLocked,
+      });
     }
-  }, [cart?.orderType, cart?.orderTypeLocked]);
+  }, [cart?.orderType, cart?.orderTypeLocked, arrowsLocked]);
 
   // The search box has focus from the moment the screen opens.
   useEffect(() => {
@@ -604,6 +637,28 @@ export function Billing() {
   useEffect(() => {
     if (keys.mode.kind === 'searching') searchBox.current?.focus();
   }, [keys.mode.kind]);
+
+  // A press anywhere that is not a text box, a dialog or the lock screen sends the caret back to
+  // the search box, so the next thing typed is an item or a table.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target || target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) {
+        return;
+      }
+      const active = document.activeElement;
+      const typing =
+        (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) &&
+        active !== searchBox.current;
+      dispatch({
+        kind: 'click-empty',
+        textSelected: (window.getSelection()?.toString() ?? '') !== '',
+        controlFocused: typing,
+      });
+    };
+    window.addEventListener('click', onClick);
+    return () => window.removeEventListener('click', onClick);
+  }, []);
 
   // Every key, in one listener, on the window — so a cashier never has to click into anything
   // first.
@@ -697,6 +752,7 @@ export function Billing() {
                 mode={keys.mode}
                 onChange={(text) => dispatch({ kind: 'typed-qty', text })}
                 onAdd={() => dispatch({ kind: 'key', key: 'Enter' })}
+                onLeave={() => dispatch({ kind: 'key', key: 'Escape' })}
               />
             ) : (
               <Suggestions
@@ -706,6 +762,18 @@ export function Billing() {
               />
             )}
           </div>
+
+          {/* Enter on a dine-in cart with no table asks for the number here. */}
+          {pickingTable ? (
+            <TableBox
+              tables={tables}
+              onClose={() => setPickingTable(false)}
+              onOpen={(table) => {
+                setPickingTable(false);
+                dispatch({ kind: 'tap-tile', index: tables.indexOf(table) });
+              }}
+            />
+          ) : null}
 
           {/* Esc from an empty box does the same — see the keyboard engine. */}
           <Button onClick={() => void newOrder()}>
@@ -784,18 +852,32 @@ export function Billing() {
 
       <div className="mb-billbar__type">
         {cart?.orderTypeLocked ? null : (
-          <div className="mb-segment" role="group" aria-label="Order type">
+          /* Four buttons, the lit one filled — and the small lock for the ← → keys. */
+          <div className="mb-ordertype" role="group" aria-label="Order type">
             {ORDER_TYPES.map((kind) => (
-              <button
+              <Button
                 key={kind}
-                type="button"
-                className="mb-segment__option"
                 aria-pressed={cart?.orderType === kind}
                 onClick={() => void setOrderType(kind)}
               >
                 {kind}
-              </button>
+              </Button>
             ))}
+            <Button
+              variant="quiet"
+              size="sm"
+              iconOnly
+              className="mb-ordertype__lock"
+              aria-pressed={arrowsLocked}
+              title={
+                arrowsLocked
+                  ? 'The ← → keys are locked. Press to let them change the order type again.'
+                  : 'Lock the ← → keys so they cannot change the order type.'
+              }
+              aria-label={arrowsLocked ? 'Unlock the arrow keys' : 'Lock the arrow keys'}
+              onClick={() => setArrowsLocked((was) => !was)}
+              icon={<Icon name="lock" size="sm" />}
+            />
           </div>
         )}
       </div>
@@ -841,6 +923,8 @@ export function Billing() {
         ) : null}
 
         {/* Where this bill is, and its number once it has one. */}
+        {/* The bill itself: where it is, and its lines, on one bordered sheet. */}
+        <Panel flush className="mb-cart__bill">
         {cart && (cart.table || cart.billNumber) ? (
           <div className="mb-cart__head">
             <span className="mb-cart__where">
@@ -954,6 +1038,7 @@ export function Billing() {
             />
           )}
         </Scroller>
+        </Panel>
 
         <div className="mb-payment">
           <PaymentModes
@@ -962,12 +1047,13 @@ export function Billing() {
             onCredit={() => setOnAccount(true)}
             cash={cashGiven}
             onCash={typeCash}
-            onCashDone={() => commitCash(cashGiven)}
+            onCashDone={() => void commitCash(cashGiven)}
+            onEnter={cashEntered}
             cart={cart}
           />
         </div>
 
-        {cart && !cart.isEmpty ? <Totals bill={cart.bill} /> : null}
+        {cart ? <Totals bill={cart.bill} /> : null}
 
         {/* Two buttons, and a fold. */}
         <div className="mb-actions">
@@ -980,10 +1066,11 @@ export function Billing() {
             Kitchen ticket
           </Button>
           )}
+          {/* Always live: an empty bill is refused with a sentence, never with a grey button. */}
           <Button
             variant="primary"
             size="lg"
-            disabled={!cart || cart.isEmpty || acting}
+            disabled={!cart || acting}
             onClick={() => act(completeBill)}
           >
             Complete bill
@@ -1194,6 +1281,7 @@ export function PaymentModes({
   cash,
   onCash,
   onCashDone,
+  onEnter,
   cart,
 }: {
   /** Which mode is lit. */
@@ -1203,8 +1291,10 @@ export function PaymentModes({
   /** The cash handed over, as typed. */
   cash: string;
   onCash: (typed: string) => void;
-  /** The typed cash is done with — Enter, or leaving the box. */
+  /** The typed cash is done with — leaving the box. */
   onCashDone: () => void;
+  /** Enter in the box: the cash is down and the bill is to be completed. */
+  onEnter: () => void;
   cart: CartView | null;
 }) {
   const cashBox = useRef<HTMLInputElement>(null);
@@ -1237,7 +1327,10 @@ export function PaymentModes({
         onChange={onCash}
         onBlur={onCashDone}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') onCashDone();
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onEnter();
+          }
         }}
       />
 

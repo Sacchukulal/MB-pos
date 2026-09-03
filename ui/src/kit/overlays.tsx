@@ -332,13 +332,13 @@ export function RowMenu({
         <>
           <button
             type="button"
-            className="mb-rowmenu__scrim"
+            className="mb-sheetscrim"
             aria-label="Close"
             onClick={() => setOpen(false)}
           />
           {/* A press inside lands on the button and then closes the sheet. */}
           <div
-            className={cx('mb-rowmenu__sheet', up && 'mb-rowmenu__sheet--up')}
+            className={cx('mb-sheet mb-rowmenu__sheet', up && 'mb-rowmenu__sheet--up')}
             role="menu"
             onClick={() => setOpen(false)}
           >

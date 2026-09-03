@@ -557,6 +557,7 @@ macro_rules! commands {
             $crate::firstrun::first_run,
             $crate::firstrun::create_shop,
             $crate::firstrun::use_existing_shop,
+            $crate::firstrun::use_shop_folder,
             // The logo, and the two Browse buttons that did not exist.
             $crate::logo::logo,
             $crate::logo::pick_a_logo,
@@ -603,16 +604,17 @@ macro_rules! commands {
             $crate::share::share_report,
             // The settings.
             $crate::settings::ipc::settings_all,
-            $crate::settings::ipc::reload_settings,
             $crate::settings::ipc::search_settings,
             $crate::settings::ipc::save_settings,
             $crate::settings::ipc::settings_defaults_for,
             $crate::settings::ipc::preview_settings,
             $crate::settings::printers::printer_setup,
-            $crate::settings::printers::save_printer,
-            $crate::settings::printers::delete_printer,
+            $crate::settings::printers::choose_bill_printer,
+            $crate::settings::printers::set_drawer,
+            $crate::settings::printers::set_kitchen_mode,
+            $crate::settings::printers::set_ticket_style,
+            $crate::settings::printers::route_category_to,
             $crate::settings::printers::route_category,
-            $crate::settings::printers::set_default_printer,
             $crate::settings::printers::set_paper_size,
             $crate::settings::printers::print_sample_bill,
             $crate::settings::printers::nudge_printer,
@@ -622,9 +624,6 @@ macro_rules! commands {
             $crate::settings::backup::request_restore,
             $crate::settings::backup::cancel_restore,
             $crate::settings::backup::find_shops,
-            $crate::settings::ipc::export_settings,
-            $crate::settings::ipc::plan_settings_import,
-            $crate::settings::ipc::run_settings_import,
             $crate::settings::numbering::numbering,
             $crate::settings::numbering::save_counter,
             // Thirteen reports behind three commands, for the same reason the settings screen
@@ -1594,6 +1593,8 @@ pub struct LockState {
     /// Who the recovery code may set a PIN for, which is not a subset of `Self::people` — and
     /// the difference is a way to be locked out of your own shop for good.
     pub recoverable: Vec<PersonView>,
+    /// Who signed in last at this counter, so the lock screen starts on them.
+    pub last_signed_in: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -1615,10 +1616,12 @@ pub struct PersonView {
 
 /// The key the shop's recovery code hash is stored under.
 const RECOVERY_KEY: &str = "auth.recovery_hash";
+/// The key the last successful sign-in's staff id is stored under.
+const LAST_SIGNED_IN_KEY: &str = "auth.last_signed_in";
 
 pub fn lock_state_on(app: &App) -> UiResult<LockState> {
     let current = app.sessions().current();
-    let (people, can_recover) = app
+    let (people, can_recover, last_signed_in) = app
         .with_shop(|shop| {
             shop.db
                 .transaction(|tx| {
@@ -1630,11 +1633,12 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
                         people.push(person_view(&member, locked_out));
                     }
                     let recovery: Option<String> = repos.settings().get(OUTLET, RECOVERY_KEY)?;
-                    Ok((people, recovery.is_some()))
+                    let last: Option<String> = repos.settings().get(OUTLET, LAST_SIGNED_IN_KEY)?;
+                    Ok((people, recovery.is_some(), last))
                 })
                 .map_err(|e| words::from_db(&e))
         })
-        .unwrap_or_else(|_| (Vec::new(), false));
+        .unwrap_or_else(|_| (Vec::new(), false, None));
 
     Ok(LockState {
         signed_in_as: current.as_ref().map(|s| s.actor.name.clone()),
@@ -1664,6 +1668,7 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
             .filter(|p| p.has_pin && p.status == "active")
             .collect(),
         can_recover,
+        last_signed_in,
     })
 }
 
@@ -1805,6 +1810,23 @@ pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState>
         &AuditEntry::new(at, day, Some(member.id.clone()), action::LOGIN_OK, "staff")
             .about(member.id.as_str()),
     );
+    // Remembered in the shop's own data, so the next lock screen starts on this person.
+    let remembered = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                mb_db::Repos::new(tx).settings().set(
+                    OUTLET,
+                    LAST_SIGNED_IN_KEY,
+                    &member.id.as_str().to_owned(),
+                    at,
+                    Some(member.id.as_str()),
+                )
+            })
+            .map_err(|e| words::from_db(&e))
+    });
+    if let Err(e) = remembered {
+        log_warn!("who signed in last could not be remembered: {e}");
+    }
     log_info!("{} signed in", member.name);
     lock_state_on(app)
 }

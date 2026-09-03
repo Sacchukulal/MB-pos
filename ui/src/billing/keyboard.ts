@@ -187,7 +187,13 @@ function stepQuantity(text: string, by: number): string {
 
 /** Back to the box, with nothing typed in it — the counter is ready for the next thing. */
 function cleared(state: State): State {
-  return { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 };
+  return {
+    ...state,
+    mode: { kind: 'searching' },
+    text: '',
+    suggestions: [],
+    highlighted: -1,
+  };
 }
 
 function key(state: State, pressed: string): [State, Command[]] {
@@ -264,14 +270,12 @@ function key(state: State, pressed: string): [State, Command[]] {
     return [cleared(state), [{ do: 'new-order' }, { do: 'focus-search' }]];
   }
 
-  const hasSuggestions = state.suggestions.length > 0;
+  const rows = state.suggestions.length;
+  const hasSuggestions = rows > 0;
 
   if (pressed === 'ArrowDown') {
     if (hasSuggestions) {
-      return [
-        { ...state, highlighted: (state.highlighted + 1) % state.suggestions.length },
-        [],
-      ];
+      return [{ ...state, highlighted: (state.highlighted + 1) % rows }, []];
     }
     // Down on an empty box with nothing suggested moves into the processing orders — which is
     // how a cashier reaches a bill to complete without the mouse. It starts on the order that
@@ -285,9 +289,7 @@ function key(state: State, pressed: string): [State, Command[]] {
 
   if (pressed === 'ArrowUp') {
     if (hasSuggestions) {
-      const next =
-        (state.highlighted - 1 + state.suggestions.length) % state.suggestions.length;
-      return [{ ...state, highlighted: next }, []];
+      return [{ ...state, highlighted: (state.highlighted - 1 + rows) % rows }, []];
     }
     return [state, []];
   }
@@ -309,9 +311,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     // because a cashier types "6" far more often than they mean an item with a 6 in its name.
     if (state.text !== '') {
       const table = matchTable(state.tables, state.text);
-      if (table) {
-        return [{ ...state, text: '', suggestions: [], highlighted: -1 }, [openCommand(table)]];
-      }
+      if (table) return openTile(state, table);
     }
 
     // Then a highlighted suggestion.
@@ -343,10 +343,7 @@ function key(state: State, pressed: string): [State, Command[]] {
 
 /** A tile was chosen, by key or by tap. Typed items go with the cashier — Rust sees to that. */
 function openTile(state: State, table: TableView): [State, Command[]] {
-  return [
-    { ...state, mode: { kind: 'searching' }, text: '', suggestions: [], highlighted: -1 },
-    [openCommand(table)],
-  ];
+  return [cleared(state), [openCommand(table)]];
 }
 
 /** A tile with a table opens the table; a parcel, a self-service order or a second party IS its order. */
@@ -381,6 +378,7 @@ export const SHORTCUTS: readonly {
   { group: 'The order', keys: 'Enter', what: 'On an empty box: print the kitchen ticket — the order waits under Processing orders' },
   { group: 'The order', keys: 'Enter', what: 'On an order from Processing orders: complete the bill' },
   { group: 'The order', keys: 'table number, Enter', what: "Open that table's order — typed items go with you" },
+  { group: 'The order', keys: 'Enter, with no table', what: 'A dine-in order asks for its table number in a box; type it and press Enter' },
   { group: 'The order', keys: '← →', what: 'Change the order type (unless the shop locks it)' },
   { group: 'The order', keys: 'Esc', what: 'New order, from anywhere' },
   { group: 'Processing orders', keys: '↓', what: 'From an empty box, into the processing orders' },

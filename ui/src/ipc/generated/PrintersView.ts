@@ -10,4 +10,13 @@ windows: Array<string>,
 /**
  * Which printer each category's kitchen tickets go to.
  */
-routes: Array<RouteView>, };
+routes: Array<RouteView>, 
+/**
+ * `same`: every kitchen ticket goes to the bill printer. `other`: each category may name
+ * its own printer; the rest go to the bill printer.
+ */
+kitchenMode: string, 
+/**
+ * `combined`: one ticket per printer. `category`: one ticket per category on it.
+ */
+ticketStyle: string, };

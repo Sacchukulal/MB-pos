@@ -150,6 +150,22 @@ impl Licensing {
         &self.dir
     }
 
+    /// Move to the shop's folder. A licence already there is read; otherwise the one held here
+    /// is written there and the old file removed, so one folder holds the whole shop.
+    pub fn relocate(&mut self, dir: PathBuf) -> Result<(), LicenceError> {
+        if dir == self.dir {
+            return Ok(());
+        }
+        if LicenceFile::path(&dir).is_file() {
+            self.file = LicenceFile::load(&dir);
+        } else if self.file != LicenceFile::default() {
+            self.file.save(&dir)?;
+            let _ = std::fs::remove_file(LicenceFile::path(&self.dir));
+        }
+        self.dir = dir;
+        Ok(())
+    }
+
     fn ask(&self, key: &str) -> Ask {
         Ask {
             key: key.to_owned(),

@@ -9,10 +9,8 @@ export const PIN_DIGITS = 4;
 export type RecoverStep = 'code' | 'who' | 'pin' | 'again';
 
 export type Mode =
-  /** Choosing who you are — by tapping a name, or by typing a staff code. */
-  | { kind: 'who'; typed: string }
-  /** Typing the PIN. */
-  | { kind: 'pin'; person: PersonView; digits: string }
+  /** Signing in: the people down one side, the pad for whoever is marked. */
+  | { kind: 'pin'; person: PersonView | null; digits: string; typed: string }
   /** The recovery flow, as four steps rather than one screen. */
   | {
       kind: 'recover';
@@ -32,6 +30,8 @@ export interface State {
   recoverable: readonly PersonView[];
   /** Whether this shop has a recovery code to offer at all. */
   canRecover: boolean;
+  /** Who signed in last, so the mark starts on them. */
+  lastSignedIn: string | null;
   /** The last thing Rust said, shown under the pad. */
   problem: string | null;
   /** True while a command is in flight — the pad stops accepting digits. */
@@ -57,13 +57,16 @@ export type Event =
       people: readonly PersonView[];
       recoverable: readonly PersonView[];
       canRecover: boolean;
+      lastSignedIn: string | null;
     }
   | { kind: 'choose'; person: PersonView }
+  /** The arrow keys: the mark moves one row. */
+  | { kind: 'move'; by: 1 | -1 }
   | { kind: 'digit'; digit: string }
   | { kind: 'typed'; text: string }
-  /** Backspace. One digit, or one character of a staff code. */
+  /** Backspace. One digit. */
   | { kind: 'back' }
-  /** Somebody else, Back. Leaves the step whole — never a digit at a time. */
+  /** Back, or a full clear of the pad. Leaves the step whole — never a digit at a time. */
   | { kind: 'cancel' }
   | { kind: 'submit' }
   | { kind: 'start-recovery' }
@@ -73,10 +76,11 @@ export type Event =
 
 export function initial(): State {
   return {
-    mode: { kind: 'who', typed: '' },
+    mode: signIn(null),
     people: [],
     recoverable: [],
     canRecover: false,
+    lastSignedIn: null,
     problem: null,
     busy: false,
     pending: [],
@@ -84,7 +88,22 @@ export function initial(): State {
   };
 }
 
-/* Who the recovery code is allowed to set a PIN for is not decided here. */
+/** The sign-in screen, marked on somebody, with an empty pad. */
+function signIn(person: PersonView | null, typed = ''): Mode {
+  return { kind: 'pin', person, digits: '', typed };
+}
+
+/** The people the list shows: everybody, or those whose name has what was typed. */
+export function shown(people: readonly PersonView[], typed: string): readonly PersonView[] {
+  const wanted = typed.trim().toLowerCase();
+  if (wanted === '') return people;
+  return people.filter((p) => p.name.toLowerCase().includes(wanted));
+}
+
+/** Who the mark starts on: whoever signed in last, else the first name. */
+function startingMark(people: readonly PersonView[], lastSignedIn: string | null): PersonView | null {
+  return people.find((p) => p.id === lastSignedIn) ?? people[0] ?? null;
+}
 
 function queue(state: State, command: Command): State {
   const seq = state.seq + 1;
@@ -109,6 +128,22 @@ function recovery(): Mode {
   };
 }
 
+/** Send the marked person's PIN, once it has the right number of digits. */
+function submitPin(state: State, mode: Extract<Mode, { kind: 'pin' }>): State {
+  if (!mode.person) {
+    return { ...state, problem: 'Choose who you are.' };
+  }
+  if (mode.person.lockedOut) {
+    return { ...state, problem: mode.person.lockedOut };
+  }
+  if (mode.digits.length !== PIN_DIGITS) {
+    // Said here rather than after a round trip, because it is a fact about the shape and not
+    // about the PIN.
+    return { ...state, problem: `A PIN is ${PIN_DIGITS} digits.` };
+  }
+  return queue(state, { do: 'sign-in', staffId: mode.person.id, pin: mode.digits });
+}
+
 export function reduce(state: State, event: Event): State {
   switch (event.kind) {
     case 'people': {
@@ -118,17 +153,24 @@ export function reduce(state: State, event: Event): State {
         people: event.people,
         recoverable: event.recoverable,
         canRecover: event.canRecover,
+        lastSignedIn: event.lastSignedIn,
       };
-      // Which list somebody has to still be on depends on what they are in the middle of:
-      // signing in, or having a PIN set for them.
       const gone = (id: string, from: readonly PersonView[]) =>
         !from.some((p) => p.id === id);
 
-      if (mode.kind === 'pin' && gone(mode.person.id, event.people)) {
-        return { ...carried, mode: { kind: 'who', typed: '' } };
+      if (mode.kind === 'pin') {
+        // The mark stays on whoever it was on, as long as they are still on the list.
+        if (mode.person && !gone(mode.person.id, event.people)) {
+          const fresh = event.people.find((p) => p.id === mode.person?.id) ?? mode.person;
+          return { ...carried, mode: { ...mode, person: fresh } };
+        }
+        return {
+          ...carried,
+          mode: signIn(startingMark(event.people, event.lastSignedIn), mode.typed),
+        };
       }
-      // The same fact inside the recovery flow: somebody suspended halfway through a reset must
-      // not still be the person a new PIN is written to.
+      // Somebody suspended halfway through a reset must not still be the person a new PIN is
+      // written to.
       if (mode.kind === 'recover' && mode.person && gone(mode.person.id, event.recoverable)) {
         return {
           ...carried,
@@ -140,8 +182,7 @@ export function reduce(state: State, event: Event): State {
     }
 
     case 'choose':
-      // In the recovery flow, choosing a person means "this new PIN is theirs" — not "open the
-      // pad for them".
+      // In the recovery flow, choosing a person means "this new PIN is theirs".
       if (state.mode.kind === 'recover') {
         return {
           ...state,
@@ -155,28 +196,43 @@ export function reduce(state: State, event: Event): State {
           },
         };
       }
-      // Locked out: the pad does not open at all.
-      if (event.person.lockedOut) {
-        return { ...state, problem: event.person.lockedOut };
+      if (state.mode.kind === 'pin') {
+        if (state.busy) return state;
+        return { ...state, problem: null, mode: signIn(event.person, state.mode.typed) };
       }
-      return {
-        ...state,
-        mode: { kind: 'pin', person: event.person, digits: '' },
-        problem: null,
-      };
+      return state;
+
+    case 'move': {
+      if (state.mode.kind !== 'pin' || state.busy) return state;
+      const marked = state.mode.person;
+      const list = shown(state.people, state.mode.typed);
+      if (list.length === 0) return state;
+      const at = list.findIndex((p) => p.id === marked?.id);
+      const next =
+        at < 0
+          ? event.by > 0
+            ? 0
+            : list.length - 1
+          : Math.min(list.length - 1, Math.max(0, at + event.by));
+      const person = list[next];
+      if (!person || person.id === marked?.id) return state;
+      return reduce(state, { kind: 'choose', person });
+    }
 
     case 'digit': {
       if (state.busy) return state;
       if (!/^[0-9]$/.test(event.digit)) return state;
 
       if (state.mode.kind === 'pin') {
-        // The fifth keypress does nothing.
-        if (state.mode.digits.length >= PIN_DIGITS) return state;
-        return {
-          ...state,
-          problem: null,
-          mode: { ...state.mode, digits: state.mode.digits + event.digit },
-        };
+        const { person, digits } = state.mode;
+        if (!person) return state;
+        // Locked out: the pad takes nothing, and says why.
+        if (person.lockedOut) return { ...state, problem: person.lockedOut };
+        if (digits.length >= PIN_DIGITS) return state;
+        const mode = { ...state.mode, digits: digits + event.digit };
+        const next = { ...state, problem: null, mode };
+        // The fourth digit signs in by itself.
+        return mode.digits.length === PIN_DIGITS ? submitPin(next, mode) : next;
       }
 
       if (state.mode.kind === 'recover') {
@@ -196,8 +252,19 @@ export function reduce(state: State, event: Event): State {
     }
 
     case 'typed':
-      if (state.mode.kind === 'who') {
-        return { ...state, mode: { kind: 'who', typed: event.text } };
+      if (state.mode.kind === 'pin') {
+        const list = shown(state.people, event.text);
+        const marked = state.mode.person;
+        // Narrowing the list moves the mark onto it when the marked name has dropped out.
+        const person =
+          marked && list.some((p) => p.id === marked.id) ? marked : (list[0] ?? marked);
+        return {
+          ...state,
+          mode:
+            person?.id === marked?.id
+              ? { ...state.mode, typed: event.text }
+              : signIn(person, event.text),
+        };
       }
       if (state.mode.kind === 'recover' && state.mode.step === 'code') {
         return { ...state, mode: { ...state.mode, code: event.text } };
@@ -207,21 +274,10 @@ export function reduce(state: State, event: Event): State {
     case 'back': {
       // Backspace, and only Backspace.
       if (state.mode.kind === 'pin') {
-        if (state.mode.digits === '') {
-          // Backspace on an empty pad goes back to the list, which is how somebody who tapped
-          // the wrong name gets out without the mouse.
-          return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
-        }
+        if (state.mode.digits === '') return state;
         return {
           ...state,
           mode: { ...state.mode, digits: state.mode.digits.slice(0, -1) },
-        };
-      }
-      if (state.mode.kind === 'who') {
-        if (state.mode.typed === '') return state;
-        return {
-          ...state,
-          mode: { kind: 'who', typed: state.mode.typed.slice(0, -1) },
         };
       }
       if (state.mode.kind === 'recover') {
@@ -253,7 +309,11 @@ export function reduce(state: State, event: Event): State {
         };
         const step = previous[mode.step];
         if (step === null) {
-          return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
+          return {
+            ...state,
+            mode: signIn(startingMark(state.people, state.lastSignedIn)),
+            problem: null,
+          };
         }
         // Stepping back clears both pads, always.
         return {
@@ -263,43 +323,17 @@ export function reduce(state: State, event: Event): State {
         };
       }
 
-      if (state.mode.kind === 'who' && state.mode.typed === '') return state;
-      return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
+      if (state.mode.kind === 'pin') {
+        if (state.mode.digits === '' && state.problem === null) return state;
+        return { ...state, mode: { ...state.mode, digits: '' }, problem: null };
+      }
+      return state;
     }
 
     case 'submit': {
       if (state.busy) return state;
-      if (state.mode.kind === 'who') {
-        // Type a name and press Enter — the same trick as the billing screen's table numbers,
-        // and for the same reason: a keyboard person should never have to reach for the list.
-        // The whole name, or enough of it that only one person is left.
-        const wanted = state.mode.typed.trim().toLowerCase();
-        if (wanted === '') return state;
-        const exact = state.people.find((p) => p.name.toLowerCase() === wanted);
-        const starting = state.people.filter((p) => p.name.toLowerCase().startsWith(wanted));
-        const person = exact ?? (starting.length === 1 ? starting[0] : undefined);
-        if (!person) {
-          return { ...state, problem: 'No name like that. Pick a name instead.' };
-        }
-        return reduce(state, { kind: 'choose', person });
-      }
-
-      if (state.mode.kind === 'pin') {
-        if (state.mode.digits.length !== PIN_DIGITS) {
-          // Said here rather than after a round trip, because it is a fact about the shape and
-          // not about the PIN.
-          return { ...state, problem: `A PIN is ${PIN_DIGITS} digits.` };
-        }
-        return queue(state, {
-          do: 'sign-in',
-          staffId: state.mode.person.id,
-          pin: state.mode.digits,
-        });
-      }
-
-      if (state.mode.kind === 'recover') {
-        return submitRecovery(state, state.mode);
-      }
+      if (state.mode.kind === 'pin') return submitPin(state, state.mode);
+      if (state.mode.kind === 'recover') return submitRecovery(state, state.mode);
       return state;
     }
 
@@ -336,6 +370,8 @@ export function reduce(state: State, event: Event): State {
         people: state.people,
         recoverable: state.recoverable,
         canRecover: state.canRecover,
+        lastSignedIn: state.lastSignedIn,
+        mode: signIn(startingMark(state.people, state.lastSignedIn)),
       };
 
     case 'key':
@@ -409,24 +445,24 @@ function key(state: State, pressed: string): State {
       if (state.mode.step === 'pin' || state.mode.step === 'again') {
         return reduce(state, { kind: 'digit', digit: pressed });
       }
-      return state;
-    }
-    // On the "who" screen a digit is part of a staff code.
-    if (state.mode.kind === 'who') {
-      return { ...state, mode: { kind: 'who', typed: state.mode.typed + pressed } };
     }
     return state;
   }
+  if (pressed === 'ArrowDown') return reduce(state, { kind: 'move', by: 1 });
+  if (pressed === 'ArrowUp') return reduce(state, { kind: 'move', by: -1 });
   if (pressed === 'Enter') return reduce(state, { kind: 'submit' });
   if (pressed === 'Backspace') return reduce(state, { kind: 'back' });
   if (pressed === 'Escape') {
     // Escape clears what has been typed.
     if (state.mode.kind === 'pin') {
-      return { ...state, mode: { ...state.mode, digits: '' }, problem: null };
+      return { ...state, mode: signIn(state.mode.person), problem: null };
     }
-    // Out of the recovery flow, not one step back — Escape has always meant "clear what I
-    // typed", and a half-finished reset is not a thing to keep.
-    return { ...state, mode: { kind: 'who', typed: '' }, problem: null };
+    // Out of the recovery flow, not one step back: a half-finished reset is not a thing to keep.
+    return {
+      ...state,
+      mode: signIn(startingMark(state.people, state.lastSignedIn)),
+      problem: null,
+    };
   }
   return state;
 }

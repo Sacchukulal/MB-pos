@@ -334,13 +334,24 @@ pub fn encode_text(laid: &Laid, caps: &Capabilities, options: &JobOptions) -> Ve
                 // A printer's own font path cannot draw a logo.
             }
             LaidContent::Blank => {
-                out.line("");
+                // The dots the layout reserved — a half-row of air is a half-row on the paper
+                // too, not a whole line's feed.
+                feed_exact(&mut out, line.row_dots);
             }
         }
     }
 
     finish_job(&mut out, caps, options);
     out.finish()
+}
+
+/// Feed exactly this many dots, in the 255-dot steps `ESC J` allows.
+fn feed_exact(out: &mut EscPos, mut dots: u32) {
+    while dots > 0 {
+        let step = u8::try_from(dots.min(255)).unwrap_or(255);
+        out.feed_dots(step);
+        dots -= u32::from(step);
+    }
 }
 
 #[must_use]

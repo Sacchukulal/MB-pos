@@ -21,6 +21,7 @@ TEXT "      FSSAI 11223344556677"
 LF
 TEXT "--------------------------------"
 LF
+ESC J 12     feed dots
 ESC E 1      emphasis
 TEXT "          TAX INVOICE"
 LF
@@ -39,6 +40,7 @@ TEXT "Customer          Suresh Traders"
 LF
 TEXT "Cust GSTIN       29ZYXWV9876K1Z2"
 LF
+ESC J 12     feed dots
 TEXT "--------------------------------"
 LF
 TEXT "Paneer Butter Masala (Half) -"
@@ -59,6 +61,7 @@ TEXT "2 x 220.00                440.00"
 LF
 TEXT "--------------------------------"
 LF
+ESC J 12     feed dots
 TEXT "Subtotal                  980.00"
 LF
 TEXT "Discount                 -106.00"
@@ -77,7 +80,7 @@ TEXT "Exempt value                5.00"
 LF
 TEXT "Round off                   0.31"
 LF
-LF
+ESC J 24     feed dots
 GS ! 0x11     character size
 ESC E 1      emphasis
 TEXT "TOTAL     948.00"
@@ -86,6 +89,7 @@ GS ! 0x00     character size
 ESC E 0      emphasis
 TEXT "--------------------------------"
 LF
+ESC J 12     feed dots
 TEXT "Tax summary"
 LF
 TEXT "Rate       Taxable   CGST   SGST"
@@ -94,6 +98,7 @@ TEXT "5%          499.70  12.50  12.49"
 LF
 TEXT "18%           0.00   0.00   0.00"
 LF
+ESC J 12     feed dots
 TEXT "Card                      484.00"
 LF
 TEXT "Sodexo                    242.00"
@@ -102,6 +107,7 @@ TEXT "Credit                    242.00"
 LF
 TEXT "Tip                        20.00"
 LF
+ESC J 12     feed dots
 ESC a 1      align
 GS ( k       QR model (4 bytes)
 GS ( k       QR module size (3 bytes)
@@ -111,6 +117,6 @@ GS ( k       QR print (3 bytes)
 ESC a 0      align
 TEXT "     Thank you, visit again"
 LF
-LF
+ESC J 24     feed dots
 ESC d 3      feed lines
 GS V 1       cut

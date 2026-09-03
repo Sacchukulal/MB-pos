@@ -245,6 +245,90 @@ pub fn restore_from_cloud_on(
     })
 }
 
+/// The data file inside a folder, when the folder holds exactly one shop.
+fn data_file_in(folder: &std::path::Path) -> Option<std::path::PathBuf> {
+    for name in ["magicbill.db", "shop.db"] {
+        let path = folder.join(name);
+        if mb_db::locate::inspect(&path).is_some() {
+            return Some(path);
+        }
+    }
+    let mut shops: Vec<std::path::PathBuf> = std::fs::read_dir(folder)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e == "db"))
+        .filter(|path| mb_db::locate::inspect(path).is_some())
+        .collect();
+    if shops.len() == 1 { shops.pop() } else { None }
+}
+
+/// Switch this counter to the shop in another folder: its data, its settings and its licence.
+/// Whoever is signed in is signed out first, in the shop they were signed in to. Answers with
+/// the folder now in use.
+pub fn use_shop_folder_on(app: &App, folder: String) -> UiResult<String> {
+    only_before_set_up(app)?;
+
+    let folder = std::path::PathBuf::from(folder.trim());
+    if !folder.is_dir() {
+        return Err(UiError::new(
+            "shop.folder",
+            format!("There is no folder at {}.", folder.display()),
+        ));
+    }
+    let Some(path) = data_file_in(&folder) else {
+        return Err(UiError::new(
+            "shop.folder",
+            format!(
+                "There is no Magic Bill data file in {}. Choose the folder that holds \
+                 magicbill.db.",
+                folder.display()
+            ),
+        ));
+    };
+    let already_open = app
+        .with_shop(|shop| Ok(shop.path == path))
+        .unwrap_or(false);
+    if already_open {
+        return Ok(folder.display().to_string());
+    }
+
+    let at = crate::flows::now();
+    if let Some(who) = app.sessions().end() {
+        app.record(&mb_auth::AuditEntry::new(
+            at,
+            crate::flows::today(at),
+            Some(who.staff_id.clone()),
+            mb_auth::audit::action::LOGOUT,
+            "staff",
+        ));
+    }
+
+    let config_dir = crate::config::AppConfig::directory();
+    match crate::startup::adopt(&config_dir, &path)? {
+        crate::startup::Startup::Ready { db, path, .. } => {
+            crate::log_info!("the counter moved to the shop at {}", path.display());
+            app.open_shop(*db, path);
+        }
+        crate::startup::Startup::Failed { error } => return Err(error),
+        _ => {
+            return Err(UiError::new(
+                "shop.folder",
+                "That shop could not be opened. Look in Health for what went wrong.",
+            ));
+        }
+    }
+    crate::licensing::after_licence_change(app);
+    // The window hears who is at the counter now: nobody, or the stand-in on a shop with no PIN.
+    let current = app.sessions().current();
+    app.push(crate::state::Pushed::Session {
+        who: current.as_ref().map(|s| s.actor.name.clone()),
+        role: current.as_ref().and_then(|s| s.actor.role_name.clone()),
+        stand_in: current.as_ref().is_some_and(|s| s.is_stand_in),
+    });
+    Ok(folder.display().to_string())
+}
+
 /// A set-up shop cannot be swapped from the first-run screen.
 pub(crate) fn only_before_set_up(app: &App) -> UiResult<()> {
     if look_on(app)?.needed {
@@ -268,6 +352,11 @@ pub fn create_shop(app: tauri::State<'_, App>, folder: String) -> UiResult<First
 #[tauri::command]
 pub fn use_existing_shop(app: tauri::State<'_, App>, path: String) -> UiResult<FirstRunView> {
     create_shop_on(&app, path)
+}
+
+#[tauri::command]
+pub fn use_shop_folder(app: tauri::State<'_, App>, folder: String) -> UiResult<String> {
+    use_shop_folder_on(&app, folder)
 }
 
 #[tauri::command]

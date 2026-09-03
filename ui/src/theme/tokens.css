@@ -202,11 +202,9 @@
   --totals-breakdown-max: 7.5rem;
   /* The processing-orders panel, between the floor and the cart. */
   --queue-width: 16rem;
-  --tile-min: 7.5rem;
-  --tile-min-dense: 5.5rem;
+  --tile-min: 9rem;
   /* A tile's FLOOR. It grows for its content; it never cuts a timer in half. */
-  --tile-height: 5.75rem;
-  --tile-height-dense: 3.75rem;
+  --tile-height: 6.5rem;
   /* Print, edit, delete — the small buttons that sit on a tile. */
   --tile-button: 1.625rem;
   /* The state stripe down a tile's left edge. */
@@ -228,6 +226,8 @@
   --raw-output-height: 12rem;
   /* How little of the cart may ever be on screen. */
   --cart-lines-min: 6rem;
+  /* The cash box on the money row: one width, with room beside it for the answer. */
+  --cash-box-width: 8rem;
 
   /* The alerts panel. */
   --alerts-width: 24rem;
@@ -246,10 +246,12 @@
   --settings-tick: 15rem;
   --settings-field-tight: var(--field-md);
   /*
-   * Wide enough that a 48-column receipt FITS: 48 characters of --text-sm mono is about 25rem,
-   * plus the paper's own padding and border.
+   * Wide enough that an 80 mm roll — 640 dots, margins included — fits at a dot and a half a
+   * pixel, and a 58 mm roll dot for dot.
    */
-  --settings-paper: 27rem;
+  --settings-paper: 31rem;
+  /* The most the paper column may take, however wide the roll: the settings keep their room. */
+  --settings-paper-max: 44rem;
 
   /* The day close. */
   --dayclose-column: 22rem;
@@ -257,6 +259,11 @@
   --dayclose-box: 5rem;
   /* Four stat cards across at 1366. */
   --dash-stat: 12rem;
+
+  /* The account screen: the verdict tile, a fact's column, and the small panels' floor. */
+  --account-face: 3rem;
+  --account-fact: 8rem;
+  --account-col: 20rem;
 
   --qr-dot: 6px;
   /* The two values in this file that a theme must NOT change. */
@@ -267,6 +274,9 @@
 
   /* The lock screen and the people screens. */
   --lock-width: 22rem;
+  /* The sign-in card: the people down the left, the pad on the right. */
+  --lock-split-width: 40rem;
+  --lock-people-width: 15rem;
   --lock-people-height: 18rem;
   --dot-size: 0.625rem;
   --permission-min: 15rem;
@@ -294,6 +304,8 @@
   --layer-tip: 50;
   /* A dialog and the sheet it dims. */
   --layer-modal: 100;
+  /* A dropdown's list: over whatever it opened from, a dialog included. */
+  --layer-dropdown: 150;
   /* A toast, over the dialog that raised it. */
   --layer-toast: 200;
   /* The lock. Above everything — a toast over a locked screen leaks. */
@@ -391,7 +403,7 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0b1120;
+  --bg: #060a14;
   --surface: #111a2e;
   --surface-2: #182338;
   --surface-sunk: #1f2c45;

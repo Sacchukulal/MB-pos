@@ -9,7 +9,11 @@ folder: string, secondFolder: string,
 /**
  * Where the shop's live data file is, so a support call can ask for one folder.
  */
-database: string, backups: Array<BackupRowView>, 
+database: string, 
+/**
+ * The folder that holds the whole shop: its data file, its licence, its backups.
+ */
+shopFolder: string, backups: Array<BackupRowView>, 
 /**
  * The sentence at the top, and it is the whole point of the screen.
  */

@@ -77,34 +77,60 @@ pub(crate) fn queue_kitchen_lines(
     let waiter = order.and_then(|o| staff_name(app, &o.core().created_by));
     let time = clock_time(at);
 
-    // Grouped by printer and NOT by category: a shop with six categories and two printers
-    // wants two tickets, not six.
+    // One ticket per printer, or one per category on it: the shop's two choices under
+    // Settings › Printers decide, and a category with no printer of its own falls back to the
+    // bill printer.
     let fallback = printer_for(app, Role::Kitchen)?;
-    let routes = routes(
+    let Routes { by_item, routing } = routes(
         app,
         &lines.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
     );
 
-    let mut stations: Vec<(PrinterConfig, Vec<mb_print::template::TicketLine>)> = Vec::new();
+    let mut stations: Vec<Station> = Vec::new();
     for (item, line) in lines {
-        let printer = routes
-            .get(item.as_str())
-            .cloned()
+        let routed = by_item.get(item.as_str());
+        let printer = routed
+            .and_then(|r| r.printer.clone())
+            .filter(|_| routing.separate_printers)
             .unwrap_or_else(|| fallback.clone());
-        match stations.iter_mut().find(|(p, _)| p.id == printer.id) {
-            Some((_, theirs)) => theirs.push(line),
-            None => stations.push((printer, vec![line])),
+        let category = routed
+            .and_then(|r| r.category.clone())
+            .filter(|_| routing.per_category);
+        match stations
+            .iter_mut()
+            .find(|s| s.printer.id == printer.id && s.category == category)
+        {
+            Some(station) => station.lines.push(line),
+            None => stations.push(Station {
+                printer,
+                category,
+                lines: vec![line],
+            }),
         }
     }
 
     let settings = app.shop_config().kitchen;
+    let printers_used = {
+        let mut ids: Vec<&str> = stations.iter().map(|s| s.printer.id.as_str()).collect();
+        ids.dedup();
+        ids.len()
+    };
 
     // The id of the FIRST ticket is what comes back: the caller only tells the cashier
     // something is printing.
     let mut id = String::new();
-    for (printer, station_lines) in &stations {
+    for station in &stations {
+        let printer = &station.printer;
         // One number per roll of paper.
         let kot = claim_kot_number(app, today(at));
+        // The heading: the category when tickets are per category, else the printer when
+        // more than one printer is involved.
+        let printer_heading = if printers_used > 1 {
+            Some(printer.name.as_str())
+        } else {
+            None
+        };
+        let heading = station.category.as_deref().or(printer_heading);
         let ctx = mb_print::template::KitchenContext {
             kind,
             token: token.as_deref(),
@@ -115,12 +141,8 @@ pub(crate) fn queue_kitchen_lines(
             time: Some(time.as_str()),
             waiter: waiter.as_deref(),
             reprint,
-            station: if stations.len() > 1 {
-                Some(printer.name.as_str())
-            } else {
-                None
-            },
-            lines: station_lines,
+            station: heading,
+            lines: &station.lines,
             settings: &settings,
         };
         let document = mb_print::template::kitchen_document(printer.paper, &ctx)
@@ -135,49 +157,69 @@ pub(crate) fn queue_kitchen_lines(
     Ok(id)
 }
 
-/// Which printer each of these items' categories is routed to — one read, not one per line.
-fn routes(
-    app: &App,
-    items: &[mb_core::ItemId],
-) -> std::collections::HashMap<String, PrinterConfig> {
-    let mut out = std::collections::HashMap::new();
+/// One roll of paper: a printer, and the category when tickets are per category.
+struct Station {
+    printer: PrinterConfig,
+    category: Option<String>,
+    lines: Vec<mb_print::template::TicketLine>,
+}
+
+/// What is known about one item's route: its category's printer, if it has one, and the
+/// category's name.
+#[derive(Clone)]
+struct Routed {
+    printer: Option<PrinterConfig>,
+    category: Option<String>,
+}
+
+struct Routes {
+    by_item: std::collections::HashMap<String, Routed>,
+    routing: crate::settings::printers::KitchenRouting,
+}
+
+/// Where each of these items' categories sends its food, and how the shop wants the tickets cut —
+/// one read, not one per line.
+fn routes(app: &App, items: &[mb_core::ItemId]) -> Routes {
     let read = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
+                let routing = crate::settings::printers::kitchen_routing(&repos)?;
                 let category_printers = repos.settings().category_printers(OUTLET)?;
                 let printers = repos.settings().list_printers(OUTLET)?;
-                let mut routed = Vec::new();
+                let categories = repos.menu().list_categories(OUTLET)?;
+                let mut by_item = std::collections::HashMap::new();
                 for item in items {
                     let Some(item) = repos.menu().find_item(item)? else {
                         continue;
                     };
-                    let Some(category) = item.category_id else {
+                    let Some(category_id) = item.category_id else {
                         continue;
                     };
-                    let Some((_, printer_id)) = category_printers
+                    let printer = category_printers
                         .iter()
-                        .find(|(c, _)| *c == category.as_str())
-                    else {
-                        continue;
-                    };
-                    if let Some(row) = printers.iter().find(|p| &p.id == printer_id) {
-                        routed.push((
-                            item.id.as_str().to_owned(),
-                            crate::state::printer_config_for(row),
-                        ));
-                    }
+                        .find(|(c, _)| *c == category_id.as_str())
+                        .and_then(|(_, printer_id)| printers.iter().find(|p| &p.id == printer_id))
+                        .map(crate::state::printer_config_for);
+                    let category = categories
+                        .iter()
+                        .find(|c| c.id == category_id)
+                        .map(|c| c.name.clone());
+                    by_item.insert(item.id.as_str().to_owned(), Routed { printer, category });
                 }
-                Ok(routed)
+                Ok(Routes { by_item, routing })
             })
             .map_err(|e| words::from_db(&e))
     });
     // A menu that will not read is not a reason to lose the ticket: every line goes to the
-    // default kitchen printer.
-    if let Ok(routed) = read {
-        out.extend(routed);
-    }
-    out
+    // default kitchen printer, on one ticket.
+    read.unwrap_or_else(|_| Routes {
+        by_item: std::collections::HashMap::new(),
+        routing: crate::settings::printers::KitchenRouting {
+            separate_printers: false,
+            per_category: false,
+        },
+    })
 }
 
 /// The words a cook reads, for a set of ledger deltas.

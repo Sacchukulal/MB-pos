@@ -34,7 +34,7 @@ mb-db = { path = "../mb-db" }
 # rasteriser is outline parsing, composite glyphs and scan-line filling — a
 # month of somebody's life to be worse at it.
 #
-# Size: roughly 60 KB of the release binary, plus the 133 KB font in assets/,
+# Size: roughly 60 KB of the release binary, reading the faces from the Windows font folder,
 # against S4's 20 MB installer budget.
 fontdue = { version = "0.9", default-features = false }
 

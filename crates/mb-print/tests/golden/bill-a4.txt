@@ -4,6 +4,7 @@
                                      GSTIN 29ABCDE1234F1ZW
                                       FSSAI 11223344556677
 ------------------------------------------------------------------------------------------------
+
                                           TAX INVOICE
                         TOKEN 42
 Bill BIR/1207                           2026-08-03 19:42                                 Dine In
@@ -11,6 +12,7 @@ Table 6                                                                         
 Order Suresh
 Customer                                                                          Suresh Traders
 Cust GSTIN                                                                       29ZYXWV9876K1Z2
+
 Item                                                                 HSN    Qty    Rate   Amount
 ------------------------------------------------------------------------------------------------
 Paneer Butter Masala (Half) - Extra Spicy                            2106     2  240.00   480.00
@@ -18,6 +20,7 @@ Paneer Butter Masala (Half) - Extra Spicy                            2106     2 
 Water 1L                                                             2201     3   20.00    60.00
 Beer 650ml                                                                    2  220.00   440.00
 ------------------------------------------------------------------------------------------------
+
 Subtotal                                                                                  980.00
 Discount                                                                                 -106.00
 Service Charge                                                                             43.70
@@ -30,14 +33,17 @@ Round off                                                                       
 
 TOTAL                                             948.00
 ------------------------------------------------------------------------------------------------
+
 Tax summary
 Rate                                                                   Taxable     CGST     SGST
 5%                                                                      499.70    12.50    12.49
 18%                                                                       0.00     0.00     0.00
+
 Card                                                                                      484.00
 Sodexo                                                                                    242.00
 Credit                                                                                    242.00
 Tip                                                                                        20.00
+
 u
 p
 i

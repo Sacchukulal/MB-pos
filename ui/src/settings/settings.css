@@ -223,15 +223,27 @@
 }
 
 .mb-settings__panes--paper {
-  grid-template-columns: minmax(0, 1fr) var(--settings-paper);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-5);
 }
 
+/*
+ * The paper column is as wide as the roll at one dot a device pixel (`--roll-width`, set by
+ * the screen from the numbers Rust sends), plus its own padding and the roll's scrollbar — so
+ * the preview is drawn dot for dot, never averaged. Capped, so the settings keep their room.
+ */
 .mb-settings__paper {
   display: grid;
   /* The heading stays; only the roll under it scrolls. */
   grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-2);
+  width: min(
+    calc(
+      var(--roll-width, var(--settings-paper)) + 2 * var(--space-3) + 2 * var(--border-width) +
+        var(--scrollbar)
+    ),
+    var(--settings-paper-max)
+  );
   min-width: 0;
   min-height: 0;
   padding: var(--space-3);
@@ -282,63 +294,15 @@
   min-width: 0;
 }
 
-.mb-printers__list {
-  display: flex;
-  flex-direction: column;
+/* The paper and the drawer, side by side under the printer. */
+.mb-printers__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
   gap: var(--space-3);
+  align-items: end;
 }
 
-.mb-printers__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-/* Every printer the shop has — the cupboard below the one it prints on. */
-.mb-printers__all {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.mb-printers__row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-}
-
-.mb-printers__row:nth-child(even) {
-  background: var(--surface-2);
-}
-
-.mb-printers__name {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-weight: var(--weight-medium);
-  color: var(--text);
-}
-
-/*
- * The nudge (7.11). Sunk, because it is a correction you make while looking at a piece of paper
- * rather than a setting you choose.
- */
-.mb-printers__nudge {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-  padding: var(--space-3);
-  background: var(--surface-sunk);
-  border-radius: var(--radius-md);
-}
-
+/* One printer box per category. */
 .mb-printers__routes {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
@@ -388,6 +352,14 @@
   margin: 0;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+/* The folder row: the path, and the button that changes it. */
+.mb-backup__folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
 }
 
 .mb-backup__places {
@@ -443,26 +415,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
-}
-
-/*
- * Export / import, at the foot of the section list — a thing you do to the whole configuration
- * rather than to a section of it.
- */
-.mb-settings__moving {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-3);
-  border-top: var(--border-width) solid var(--border);
-}
-
-/*
- * The label carries `mb-button` for its looks; this only adds what a label does not get for
- * free.
- */
-.mb-settings__load {
-  cursor: pointer;
 }
 
 .mb-settings__changes {

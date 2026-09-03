@@ -1,6 +1,6 @@
 /** The settings screen, and there is only one of it. */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import {
   Button,
@@ -11,7 +11,6 @@ import {
   EmptyState,
   InfoTip,
   Input,
-  Modal,
   MoneyInput,
   NumberInput,
   Panel,
@@ -24,14 +23,14 @@ import {
   Select,
   Spinner,
   useToast,
+  useDevicePixelRatio,
 } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
 import type { GroupView } from '../ipc/generated/GroupView';
-import type { ConfigPlanView } from '../ipc/generated/ConfigPlanView';
 import type { PreviewView } from '../ipc/generated/PreviewView';
 import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
-import { Receipt } from '../preview/Receipt';
+import { Receipt, dotsPerPixel, marginDots } from '../preview/Receipt';
 import { Appearance } from './Appearance';
 import { Backup } from './Backup';
 import { Network } from './Network';
@@ -72,6 +71,9 @@ const EXTRA_SECTIONS = [
 /** Which sections show the paper beside them. */
 const SHOWS_PAPER = new Set(['receipt', 'kitchen']);
 
+/** How much of the settings screen the paper may take; the form keeps the rest. */
+const PAPER_SHARE = 0.5;
+
 /** The edits a person has made and not yet saved, by key. */
 type Edits = Record<string, string>;
 
@@ -97,10 +99,6 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
   /** Where the unsaved-changes guard was heading when it stopped us. */
   const [leavingTo, setLeavingTo] = useState<string | null>(null);
   const [paper, setPaper] = useState<PreviewView | null>(null);
-  /** A configuration file that has been read and planned, waiting for a yes. */
-  const [importing, setImporting] = useState<{ text: string; plan: ConfigPlanView } | null>(
-    null,
-  );
   const body = useRef<HTMLDivElement>(null);
   const toast = useToast();
 
@@ -237,20 +235,6 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
     }
   }, [active, edits, toast]);
 
-  /** Read the file, ask Rust what it WOULD do, and show that. */
-  const onImport = useCallback(
-    async (file: File) => {
-      try {
-        const text = await file.text();
-        setImporting({ text, plan: await call('plan_settings_import', { text }) });
-      } catch (cause) {
-        if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-        else toast.show('danger', 'That file could not be read.');
-      }
-    },
-    [toast],
-  );
-
   if (!view) {
     return (
       <div className="mb-settings">
@@ -303,61 +287,6 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
           ))}
         </Scroller>
 
-        {/* The whole configuration, out and in. */}
-        <div className="mb-settings__moving">
-          {/*
-            Read them again from the shop's data file — `reload_settings`, which existed and had
-            no caller.
-          */}
-          <Button
-            size="sm"
-            variant="quiet"
-            wide
-            disabled={dirty}
-            onClick={() =>
-              void call('reload_settings')
-                .then((fresh) => {
-                  setView(fresh);
-                  toast.show('ok', 'Reloaded.');
-                })
-                .catch((cause) => {
-                  if (isUiError(cause)) toast.show('danger', cause.message);
-                })
-            }
-          >
-            Reload
-          </Button>
-          <Button
-            size="sm"
-            variant="quiet"
-            wide
-            onClick={() =>
-              void call('export_settings')
-                .then((path) =>
-                  toast.show('ok', 'Saved.', path),
-                )
-                .catch((cause) => {
-                  if (isUiError(cause)) toast.show('danger', cause.message);
-                })
-            }
-          >
-            Save to a file
-          </Button>
-          {/* A label wearing the kit's button, over a hidden file input. */}
-          <label className="mb-button mb-button--secondary mb-settings__load">
-            Load settings from a file
-            <input
-              className="mb-visually-hidden"
-              type="file"
-              accept="application/json,.json"
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = '';
-                if (file) void onImport(file);
-              }}
-            />
-          </label>
-        </div>
       </nav>
 
       {/* Two columns, two scrollbars. */}
@@ -458,65 +387,6 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
         }}
       />
 
-      {/* The dry run, and it is the feature. */}
-      <Modal
-        open={importing !== null}
-        title="Load these settings?"
-        onClose={() => setImporting(null)}
-        wide
-        actions={
-          <>
-            <Button onClick={() => setImporting(null)}>Do not load them</Button>
-            <Button
-              variant="primary"
-              disabled={!importing?.plan.usable || importing.plan.changes.length === 0}
-              onClick={() => {
-                const chosen = importing;
-                setImporting(null);
-                if (!chosen) return;
-                void call('run_settings_import', { text: chosen.text })
-                  .then((saved) => {
-                    setView(saved.settings);
-                    setEdits({});
-                    toast.show('ok', `Loaded. ${saved.changed.length} settings changed.`);
-                  })
-                  .catch((cause) => {
-                    if (isUiError(cause)) toast.show('danger', cause.message);
-                  });
-              }}
-            >
-              Change {importing?.plan.changes.length ?? 0} settings
-            </Button>
-          </>
-        }
-      >
-        <div className="mb-stack">
-          {importing?.plan.problems.length ? (
-            <p className="mb-settings__problem">
-              This file cannot be used, so nothing will be changed:{' '}
-              {importing.plan.problems.join(' ')}
-            </p>
-          ) : null}
-          {importing?.plan.changes.length === 0 ? (
-            <p className="mb-field__hint">
-              Every setting in that file already matches this shop. Nothing to do.
-            </p>
-          ) : null}
-          <ul className="mb-settings__changes">
-            {importing?.plan.changes.map((change) => (
-              <li key={change.label}>
-                {change.label}: <s>{change.before}</s> → <strong>{change.after}</strong>
-              </li>
-            ))}
-          </ul>
-          {importing?.plan.unknown.length ? (
-            <p className="mb-field__hint">
-              {plural(importing.plan.unknown.length, 'setting')} in that file are from a newer
-              Magic Bill and will be left out.
-            </p>
-          ) : null}
-        </div>
-      </Modal>
     </div>
   );
 }
@@ -641,8 +511,33 @@ function Paper({
   preview: PreviewView | null;
   kitchen: boolean;
 }) {
+  const aside = useRef<HTMLElement>(null);
+  const pixelRatio = useDevicePixelRatio();
+  const [room, setRoom] = useState(0);
+  // How much of the screen the paper may take: measured, and again whenever the window changes.
+  useLayoutEffect(() => {
+    const panes = aside.current?.parentElement;
+    if (!panes) return undefined;
+    const measure = () => setRoom(panes.clientWidth * PAPER_SHARE);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(panes);
+    return () => observer.disconnect();
+  }, []);
+  // The whole roll, margins included, at the finest whole-dot ratio that fits its share.
+  const rollDots = preview ? preview.doc.dots + 2 * marginDots(preview.doc) : null;
+  const rollWidth =
+    rollDots === null ? null : rollDots / dotsPerPixel(rollDots, room, pixelRatio);
   return (
-    <aside className="mb-settings__paper" aria-label="Preview of what prints">
+    <aside
+      ref={aside}
+      className="mb-settings__paper"
+      aria-label="Preview of what prints"
+      style={ /* mb-tokens-allow: the roll's own width in dots, named by Rust, at this screen's pixel ratio */
+        rollWidth === null ? undefined : { ['--roll-width' as string]: `${rollWidth}px` }
+      }
+    >
       <div className="mb-settings__paperhead">
         <span className="mb-settings__papertitle">
           {kitchen ? 'The kitchen ticket' : 'The bill'}

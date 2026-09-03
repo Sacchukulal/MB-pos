@@ -8,6 +8,12 @@ export type PreviewDoc = {
  */
 dots: number, 
 /**
+ * The roll's whole width in millimetres, and how much of it the head can reach. The
+ * screen draws the difference as the paper's own margin, so the preview is the receipt
+ * in the hand and not a strip of ink with no edge.
+ */
+paperMm: number, printableMm: number, 
+/**
  * Characters across at the body size — what the settings screen tells a shop it is
  * choosing when it picks a size.
  */

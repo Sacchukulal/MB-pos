@@ -141,12 +141,11 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
   show();
   await screen.findByText('Who is at the counter?');
 
-  // Somebody signs in for real: pick the person, tap six digits, press the button.
+  // Somebody signs in for real: pick the person and tap the four digits; the fourth signs in.
   fireEvent.click(await screen.findByRole('button', { name: /Meena/ }));
-  for (const digit of ['4', '8', '2', '9', '1', '3']) {
+  for (const digit of ['4', '8', '2', '9']) {
     fireEvent.click(await screen.findByRole('button', { name: digit }));
   }
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
   // The screen mounts NOW, and this is the whole claim: its first command goes out with a
   // session behind it, so it comes back with the shop's menu in it rather than a refusal nobody

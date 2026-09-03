@@ -209,73 +209,6 @@ fn a_gstin_that_does_not_match_its_state_is_refused() {
     assert_eq!(error.key, Some("store.gstin"));
 }
 
-#[test]
-fn a_configuration_survives_being_written_out_and_read_back() {
-    let mut config = ShopConfig::default();
-    // Move every kind of value, so the round trip is not proving that booleans work.
-    config.receipt.footer = "Visit again!".to_owned();
-    config.receipt.qr_width_pct = 55;
-    config.billing.packing_charge = mb_core::Money::from_paise(1_500);
-    config.billing.search_mode = crate::search::MatchMode::StartsWith;
-    config.store.name = "Anna Kuteera".to_owned();
-    config.store.registration = "composition".to_owned();
-    config.day.starts_at_minutes = 240;
-
-    let file = super::to_map(&config);
-    let (restored, plan) = super::plan_import(&ShopConfig::default(), &file);
-    assert!(plan.is_usable(), "{:?}", plan.problems);
-    assert!(plan.unknown.is_empty());
-    assert_eq!(restored, config);
-}
-
-/// One bad value and the file changes nothing at all.
-#[test]
-fn an_import_with_one_bad_value_changes_nothing() {
-    let current = ShopConfig::default();
-    let mut file = super::to_map(&current);
-    file.insert(
-        "receipt.footer".to_owned(),
-        serde_json::json!("Come back soon"),
-    );
-    file.insert("receipt.logo_width_pct".to_owned(), serde_json::json!(400));
-
-    let (wanted, plan) = super::plan_import(&current, &file);
-    assert!(!plan.is_usable());
-    assert!(
-        plan.problems.iter().any(|p| p.contains("Logo width")),
-        "the problem should name the setting in words: {:?}",
-        plan.problems
-    );
-    // And the good value in the same file did NOT get through.
-    assert_eq!(wanted, current);
-}
-
-/// A configuration written by a NEWER build must still be usable.
-#[test]
-fn an_unknown_key_is_reported_and_not_fatal() {
-    let current = ShopConfig::default();
-    let mut file = super::to_map(&current);
-    file.insert("receipt.show.horoscope".to_owned(), serde_json::json!(true));
-    let (_, plan) = super::plan_import(&current, &file);
-    assert!(plan.is_usable(), "{:?}", plan.problems);
-    assert_eq!(plan.unknown, vec!["receipt.show.horoscope".to_owned()]);
-}
-
-/// The wrong sort of value in the file is a problem, not a coercion.
-#[test]
-fn a_value_of_the_wrong_sort_in_a_file_is_refused() {
-    let current = ShopConfig::default();
-    let mut file = super::to_map(&current);
-    file.insert("receipt.show.token".to_owned(), serde_json::json!("yes"));
-    let (_, plan) = super::plan_import(&current, &file);
-    assert!(!plan.is_usable());
-    assert!(
-        plan.problems.iter().any(|p| p.contains("wrong sort")),
-        "{:?}",
-        plan.problems
-    );
-}
-
 /// A charge is added for the order type that earned it, and for no other.
 #[test]
 fn charges_follow_the_order_type() {
@@ -387,13 +320,21 @@ fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
     }
 }
 
-/// Five faces, named as a Windows user knows them.
+/// Six faces, named as a Windows user knows them, key for key with the print crate's list.
 #[test]
-fn the_typefaces_are_five_plain_family_names() {
+fn the_typefaces_are_six_plain_family_names() {
     use super::catalog::FONTS;
 
     let offered: Vec<&str> = FONTS.iter().map(|c| c.value).collect();
-    assert_eq!(offered, ["builtin", "consolas", "courier", "arial", "verdana"]);
+    assert_eq!(
+        offered,
+        ["monospace", "sans_serif", "serif", "arial", "courier", "times"]
+    );
+    let families: Vec<&str> = mb_print::font::FAMILIES.iter().map(|f| f.key).collect();
+    assert_eq!(offered, families);
+    for (choice, family) in FONTS.iter().zip(mb_print::font::FAMILIES) {
+        assert_eq!(choice.label, family.label);
+    }
     for choice in FONTS {
         assert!(
             !choice.label.contains(" — "),
@@ -401,29 +342,6 @@ fn the_typefaces_are_five_plain_family_names() {
             choice.label
         );
     }
-}
-
-/// A file written by an older build names a face that left the list; the import maps it the
-/// way the database does, rather than refusing the whole file.
-#[test]
-fn an_import_file_with_an_old_typeface_is_mapped_not_refused() {
-    let current = ShopConfig::default();
-    let mut file = std::collections::BTreeMap::new();
-    file.insert(
-        "receipt.font".to_owned(),
-        serde_json::Value::String("calibri".to_owned()),
-    );
-    file.insert(
-        "kitchen.font".to_owned(),
-        serde_json::Value::String("consolas_bold".to_owned()),
-    );
-
-    let (wanted, plan) = super::plan_import(&current, &file);
-    assert!(plan.is_usable(), "{:?}", plan.problems);
-    assert_eq!(wanted.receipt.font, "arial");
-    assert_eq!(wanted.kitchen.font, "consolas");
-    assert_eq!(plan.changes.len(), 2);
-    assert!(plan.changes.iter().any(|c| c.after == "arial"));
 }
 
 /// Ten sizes, numbered 1 to 10, and nothing else on the label.

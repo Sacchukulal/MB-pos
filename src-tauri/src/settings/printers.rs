@@ -22,6 +22,50 @@ pub struct PrintersView {
     pub windows: Vec<String>,
     /// Which printer each category's kitchen tickets go to.
     pub routes: Vec<RouteView>,
+    /// `same`: every kitchen ticket goes to the bill printer. `other`: each category may name
+    /// its own printer; the rest go to the bill printer.
+    pub kitchen_mode: String,
+    /// `combined`: one ticket per printer. `category`: one ticket per category on it.
+    pub ticket_style: String,
+}
+
+/// Where the two kitchen choices live: settings rows of the shop's own, read at print time.
+const KITCHEN_MODE_KEY: &str = "printers.kitchen_mode";
+const TICKET_STYLE_KEY: &str = "printers.ticket_style";
+
+/// How this shop wants its kitchen tickets: which printers, and how many tickets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KitchenRouting {
+    /// True when each category may have its own printer.
+    pub separate_printers: bool,
+    /// True when every category gets a ticket of its own.
+    pub per_category: bool,
+}
+
+impl KitchenRouting {
+    const fn mode_word(self) -> &'static str {
+        if self.separate_printers { "other" } else { "same" }
+    }
+
+    const fn style_word(self) -> &'static str {
+        if self.per_category { "category" } else { "combined" }
+    }
+}
+
+/// Read the two choices. A shop that has never chosen prints one ticket per printer, and uses
+/// other printers exactly when a category has been given one.
+pub(crate) fn kitchen_routing(repos: &mb_db::Repos<'_>) -> Result<KitchenRouting, mb_db::DbError> {
+    let mode: Option<String> = repos.settings().get(OUTLET, KITCHEN_MODE_KEY)?;
+    let style: Option<String> = repos.settings().get(OUTLET, TICKET_STYLE_KEY)?;
+    let separate_printers = match mode.as_deref() {
+        Some("other") => true,
+        Some(_) => false,
+        None => !repos.settings().category_printers(OUTLET)?.is_empty(),
+    };
+    Ok(KitchenRouting {
+        separate_printers,
+        per_category: style.as_deref() == Some("category"),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -122,7 +166,7 @@ pub fn printers_on(app: &App) -> UiResult<PrintersView> {
     );
 
     app.with_shop(|shop| {
-        let (printers, routes) = shop
+        let (printers, routes, routing) = shop
             .db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
@@ -131,6 +175,7 @@ pub fn printers_on(app: &App) -> UiResult<PrintersView> {
                 let mapped = repos.settings().category_printers(OUTLET)?;
                 let routes = categories
                     .into_iter()
+                    .filter(|category| category.is_active)
                     .map(|category| RouteView {
                         printer_id: mapped
                             .iter()
@@ -141,7 +186,8 @@ pub fn printers_on(app: &App) -> UiResult<PrintersView> {
                         category: category.name,
                     })
                     .collect();
-                Ok((printers, routes))
+                let routing = kitchen_routing(&repos)?;
+                Ok((printers, routes, routing))
             })
             .map_err(|e| words::from_db(&e))?;
 
@@ -149,8 +195,183 @@ pub fn printers_on(app: &App) -> UiResult<PrintersView> {
             printers: printers.iter().map(row_view).collect(),
             windows,
             routes,
+            kitchen_mode: routing.mode_word().to_owned(),
+            ticket_style: routing.style_word().to_owned(),
         })
     })
+}
+
+/// The row a Windows printer already has here, if any.
+fn row_for_windows_printer(existing: &[Printer], windows_name: &str) -> Option<Printer> {
+    existing
+        .iter()
+        .find(|p| p.kind == "spooler" && p.address.as_deref() == Some(windows_name))
+        .cloned()
+}
+
+/// A fresh row for a Windows printer: named after it, on the paper the bill printer uses.
+fn windows_printer_edit(existing: &[Printer], windows_name: &str, role: &str, is_default: bool) -> PrinterEdit {
+    let paper = existing
+        .iter()
+        .find(|p| p.is_default)
+        .and_then(|p| u32::try_from(p.paper_mm).ok())
+        .unwrap_or(80);
+    PrinterEdit {
+        id: String::new(),
+        name: windows_name.to_owned(),
+        kind: "spooler".to_owned(),
+        address: windows_name.to_owned(),
+        paper_mm: paper,
+        is_default,
+        role: role.to_owned(),
+        engine: "raster".to_owned(),
+        is_bold_dark: false,
+        can_kick_drawer: false,
+    }
+}
+
+fn all_printers(app: &App) -> UiResult<Vec<Printer>> {
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| mb_db::Repos::new(tx).settings().list_printers(OUTLET))
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// Bills print on this Windows printer. An empty name means none yet: the stand-in takes the
+/// bills again and prints nothing.
+pub fn choose_bill_printer_on(app: &App, windows_name: String) -> UiResult<PrintersView> {
+    guard::require(app, Permission::SettingsPrinter)?;
+    let windows_name = windows_name.trim().to_owned();
+    let existing = all_printers(app)?;
+    if windows_name.is_empty() {
+        return set_default_printer_on(app, crate::state::NO_PRINTER.to_owned());
+    }
+    match row_for_windows_printer(&existing, &windows_name) {
+        Some(row) => {
+            // A printer the kitchen already uses can print the bills too.
+            if row.role == "kitchen" {
+                save_printer_on(
+                    app,
+                    PrinterEdit {
+                        id: row.id.clone(),
+                        name: row.name.clone(),
+                        kind: row.kind.clone(),
+                        address: row.address.clone().unwrap_or_default(),
+                        paper_mm: u32::try_from(row.paper_mm).unwrap_or(80),
+                        is_default: true,
+                        role: "both".to_owned(),
+                        engine: row.engine.clone(),
+                        is_bold_dark: row.is_bold_dark,
+                        can_kick_drawer: row.can_kick_drawer,
+                    },
+                )
+            } else {
+                set_default_printer_on(app, row.id)
+            }
+        }
+        None => save_printer_on(app, windows_printer_edit(&existing, &windows_name, "both", true)),
+    }
+}
+
+/// Whether a cash drawer hangs off the bill printer.
+pub fn set_drawer_on(app: &App, on: bool) -> UiResult<PrintersView> {
+    guard::require(app, Permission::SettingsPrinter)?;
+    let target = crate::flows::default_printer(app)?.id;
+    let Some(row) = all_printers(app)?.into_iter().find(|p| p.id == target) else {
+        return Err(UiError::new("printer.unknown", "That printer is not set up any more."));
+    };
+    save_printer_on(
+        app,
+        PrinterEdit {
+            id: row.id.clone(),
+            name: row.name.clone(),
+            kind: row.kind.clone(),
+            address: row.address.clone().unwrap_or_default(),
+            paper_mm: u32::try_from(row.paper_mm).unwrap_or(80),
+            is_default: row.is_default,
+            role: row.role.clone(),
+            engine: row.engine.clone(),
+            is_bold_dark: row.is_bold_dark,
+            can_kick_drawer: on,
+        },
+    )
+}
+
+/// Write one of the two kitchen choices.
+fn set_kitchen_choice(app: &App, key: &str, value: &str) -> UiResult<PrintersView> {
+    let who = guard::require(app, Permission::SettingsPrinter)?;
+    let at = crate::flows::now();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                mb_db::Repos::new(tx).settings().set(
+                    OUTLET,
+                    key,
+                    &value.to_owned(),
+                    at,
+                    Some(who.staff_id.as_str()),
+                )
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    log_info!("{} set {key} to {value}", who.name);
+    printers_on(app)
+}
+
+/// `same`: kitchen tickets print where bills do. `other`: categories may name their own printer.
+pub fn set_kitchen_mode_on(app: &App, mode: String) -> UiResult<PrintersView> {
+    if !["same", "other"].contains(&mode.as_str()) {
+        return Err(UiError::new(
+            "printer.kitchen_mode",
+            "Kitchen tickets print on the bill printer, or on other printers.",
+        ));
+    }
+    set_kitchen_choice(app, KITCHEN_MODE_KEY, &mode)
+}
+
+/// `combined`: one ticket per printer. `category`: one ticket per category.
+pub fn set_ticket_style_on(app: &App, style: String) -> UiResult<PrintersView> {
+    if !["combined", "category"].contains(&style.as_str()) {
+        return Err(UiError::new(
+            "printer.ticket_style",
+            "A kitchen ticket is one for everything, or one per category.",
+        ));
+    }
+    set_kitchen_choice(app, TICKET_STYLE_KEY, &style)
+}
+
+/// This category's kitchen tickets go to that Windows printer, which gets a row here if it has
+/// none. An empty name sends them back to the bill printer.
+pub fn route_category_to_on(
+    app: &App,
+    category_id: String,
+    windows_name: String,
+) -> UiResult<PrintersView> {
+    guard::require(app, Permission::SettingsPrinter)?;
+    let windows_name = windows_name.trim().to_owned();
+    if windows_name.is_empty() {
+        return route_category_on(app, category_id, String::new());
+    }
+    let existing = all_printers(app)?;
+    let printer_id = match row_for_windows_printer(&existing, &windows_name) {
+        Some(row) => row.id,
+        None => {
+            let saved = save_printer_on(
+                app,
+                windows_printer_edit(&existing, &windows_name, "kitchen", false),
+            )?;
+            saved
+                .printers
+                .iter()
+                .find(|p| p.kind == "spooler" && p.address == windows_name)
+                .map(|p| p.id.clone())
+                .ok_or_else(|| {
+                    UiError::new("printer.unknown", "That printer could not be set up.")
+                })?
+        }
+    };
+    route_category_on(app, category_id, printer_id)
 }
 
 /// The three paper widths this product supports, and the reason a fourth is a decision rather
@@ -401,44 +622,6 @@ pub fn set_paper_on(app: &App, mm: u32) -> UiResult<PrintersView> {
     printers_on(app)
 }
 
-pub fn delete_printer_on(app: &App, id: String) -> UiResult<PrintersView> {
-    let who = guard::require(app, Permission::SettingsPrinter)?;
-
-    if id == crate::state::NO_PRINTER {
-        return Err(UiError::new(
-            "printer.stand_in",
-            "This is the stand-in every shop starts with. Change it into your \
-             real printer instead of removing it.",
-        ));
-    }
-
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                // A printer with paper in the spool cannot go.
-                let waiting = repos.print_jobs().count_for_printer(&id)?;
-                if waiting > 0 {
-                    return Err(mb_db::DbError::invariant(format!(
-                        "there {} still {waiting} print job{} against this \
-                         printer",
-                        if waiting == 1 { "is" } else { "are" },
-                        if waiting == 1 { "" } else { "s" }
-                    )));
-                }
-                repos
-                    .settings()
-                    .delete_printer(OUTLET, &id, crate::flows::now())
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-
-    // Same as saving one: the queue is the printer list made real.
-    app.rebuild_queue();
-    log_info!("{} removed a printer", who.name);
-    printers_on(app)
-}
-
 /// Which printer this category's kitchen tickets go to.
 pub fn route_category_on(
     app: &App,
@@ -544,21 +727,35 @@ pub fn printer_setup(app: tauri::State<'_, App>) -> UiResult<PrintersView> {
 }
 
 #[tauri::command]
-pub fn save_printer(app: tauri::State<'_, App>, edit: PrinterEdit) -> UiResult<PrintersView> {
-    save_printer_on(&app, edit)
-}
-
-#[tauri::command]
-pub fn delete_printer(app: tauri::State<'_, App>, id: String) -> UiResult<PrintersView> {
-    delete_printer_on(&app, id)
-}
-
-#[tauri::command]
-pub fn set_default_printer(
+pub fn choose_bill_printer(
     app: tauri::State<'_, App>,
-    printer_id: String,
+    windows_name: String,
 ) -> UiResult<PrintersView> {
-    set_default_printer_on(&app, printer_id)
+    choose_bill_printer_on(&app, windows_name)
+}
+
+#[tauri::command]
+pub fn set_drawer(app: tauri::State<'_, App>, on: bool) -> UiResult<PrintersView> {
+    set_drawer_on(&app, on)
+}
+
+#[tauri::command]
+pub fn set_kitchen_mode(app: tauri::State<'_, App>, mode: String) -> UiResult<PrintersView> {
+    set_kitchen_mode_on(&app, mode)
+}
+
+#[tauri::command]
+pub fn set_ticket_style(app: tauri::State<'_, App>, style: String) -> UiResult<PrintersView> {
+    set_ticket_style_on(&app, style)
+}
+
+#[tauri::command]
+pub fn route_category_to(
+    app: tauri::State<'_, App>,
+    category_id: String,
+    windows_name: String,
+) -> UiResult<PrintersView> {
+    route_category_to_on(&app, category_id, windows_name)
 }
 
 #[tauri::command]

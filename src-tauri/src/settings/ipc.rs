@@ -346,7 +346,7 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
 
     // The preview takes the routed printer's own paper, engine and face — the bill printer's
     // for the bill, the kitchen printer's for the ticket.
-    let around = super::sample::around_for(app, group.as_str());
+    let around = super::sample::around_for(app, group.as_str(), &wanted);
     let doc = match Group::from_code(&group) {
         Some(Group::Kitchen) => super::sample::kitchen_preview(&wanted, &around),
         // Everything else previews the BILL, and on purpose: a shop changing its name or its
@@ -539,32 +539,6 @@ pub fn defaults_for_on(app: &App, group: String) -> UiResult<Vec<SettingEdit>> {
 
 /// Re-read from disk, for the moments the configuration may have changed under us — after a
 /// restore, and when a screen wants to be sure.
-pub fn reload_on(app: &App) -> UiResult<SettingsView> {
-    app.reload_shop_config();
-    all_on(app)
-}
-
-// The whole configuration, out and in — so a dealer sets up the second shop in a minute instead
-// of an afternoon.
-
-/// What an import WOULD do, before anything is written.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(export, export_to = "../../ui/src/ipc/generated/")]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigPlanView {
-    pub changes: Vec<ChangeView>,
-    /// Keys this build has never heard of.
-    pub unknown: Vec<String>,
-    /// Why it cannot be used.
-    pub problems: Vec<String>,
-    pub usable: bool,
-}
-
-/// Where the file goes.
-fn config_file(app: &App) -> std::path::PathBuf {
-    beside_the_shop(app, "magic-bill-settings.json")
-}
-
 /// A file a shop can find: next to its data file.
 pub(crate) fn beside_the_shop(app: &App, file_name: &str) -> std::path::PathBuf {
     app.with_shop(|shop| {
@@ -580,99 +554,7 @@ pub(crate) fn beside_the_shop(app: &App, file_name: &str) -> std::path::PathBuf 
     .unwrap_or_else(|_| mb_db::locate::default_config_dir().join(file_name))
 }
 
-/// Export. Every setting as `key: value`, sorted, with a version line.
-pub fn export_on(app: &App) -> UiResult<String> {
-    guard::require(app, Permission::SettingsStore)?;
-    let map = super::to_map(&app.shop_config());
-    let text = serde_json::to_string_pretty(&map).map_err(|e| {
-        UiError::new(
-            "settings.export",
-            "This shop's settings could not be written out.",
-        )
-        .with_detail(e.to_string())
-    })?;
-
-    let path = config_file(app);
-    std::fs::write(&path, &text).map_err(|e| {
-        UiError::new(
-            "settings.export",
-            format!("The settings could not be written to {}.", path.display()),
-        )
-        .with_detail(e.to_string())
-    })?;
-    log_info!("the settings were written to {}", path.display());
-    Ok(path.display().to_string())
-}
-
-fn read_config_file(text: &str) -> UiResult<std::collections::BTreeMap<String, serde_json::Value>> {
-    serde_json::from_str(text).map_err(|e| {
-        UiError::new(
-            "settings.import",
-            "That file is not a Magic Bill settings file.",
-        )
-        .with_detail(e.to_string())
-    })
-}
-
-/// The dry run is the feature.
-pub fn plan_config_import_on(app: &App, text: String) -> UiResult<ConfigPlanView> {
-    guard::require_any(app, guard::SETTINGS_PERMISSIONS)?;
-    let file = read_config_file(&text)?;
-    let (_, plan) = super::plan_import(&app.shop_config(), &file);
-    Ok(ConfigPlanView {
-        changes: plan.changes.iter().map(ChangeView::from).collect(),
-        unknown: plan.unknown.clone(),
-        problems: plan.problems.clone(),
-        usable: plan.is_usable(),
-    })
-}
-
-/// An import writes tax rates and printer setup, so it needs ALL FOUR permissions, not the one
-/// that happens to cover the first key in the file.
-pub fn run_config_import_on(app: &App, text: String) -> UiResult<SavedView> {
-    for need in guard::SETTINGS_PERMISSIONS {
-        guard::require(app, *need)?;
-    }
-    let file = read_config_file(&text)?;
-    let before = app.shop_config();
-    let (wanted, plan) = super::plan_import(&before, &file);
-    if !plan.is_usable() {
-        return Err(UiError::new(
-            "settings.import",
-            format!(
-                "This file cannot be used, so nothing has been changed: {}",
-                plan.problems.join(" ")
-            ),
-        ));
-    }
-
-    // Straight through `save_on`, so an import obeys exactly the rules a person typing obeys.
-    let edits = catalog::CATALOG
-        .iter()
-        .map(|entry| SettingEdit {
-            key: entry.key.to_owned(),
-            value: on_the_wire(entry.kind, &(entry.read)(&wanted)),
-        })
-        .collect();
-    save_on(app, edits)
-}
-
 // The seats.
-
-#[tauri::command]
-pub fn export_settings(app: tauri::State<'_, App>) -> UiResult<String> {
-    export_on(&app)
-}
-
-#[tauri::command]
-pub fn plan_settings_import(app: tauri::State<'_, App>, text: String) -> UiResult<ConfigPlanView> {
-    plan_config_import_on(&app, text)
-}
-
-#[tauri::command]
-pub fn run_settings_import(app: tauri::State<'_, App>, text: String) -> UiResult<SavedView> {
-    run_config_import_on(&app, text)
-}
 
 #[tauri::command]
 pub fn settings_all(app: tauri::State<'_, App>) -> UiResult<SettingsView> {
@@ -706,7 +588,3 @@ pub fn settings_defaults_for(
     defaults_for_on(&app, group)
 }
 
-#[tauri::command]
-pub fn reload_settings(app: tauri::State<'_, App>) -> UiResult<SettingsView> {
-    reload_on(&app)
-}

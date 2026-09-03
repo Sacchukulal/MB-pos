@@ -295,7 +295,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("scanned", Access::Needs(Permission::BillCreate)),
     ("print_label", Access::Needs(Permission::BillCreate)),
     ("settings_all", Access::NeedsAny(SETTINGS_PERMISSIONS)),
-    ("reload_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("search_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     ("save_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
     (
@@ -304,29 +303,17 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     // The live preview. Reading only — it renders a SAMPLE bill and never touches a real one.
     ("preview_settings", Access::NeedsAny(SETTINGS_PERMISSIONS)),
-    ("export_settings", Access::Needs(Permission::SettingsStore)),
-    (
-        "plan_settings_import",
-        Access::NeedsAny(SETTINGS_PERMISSIONS),
-    ),
-    // All four, and the command re-checks each one: an import writes tax rates and printer
-    // setup, so it is not a store edit.
-    (
-        "run_settings_import",
-        Access::NeedsAny(SETTINGS_PERMISSIONS),
-    ),
     // The counters. A bill number is what a GST return is a list of.
     ("numbering", Access::Needs(Permission::SettingsTax)),
     ("save_counter", Access::Needs(Permission::SettingsTax)),
     // The printers, the backup and where the shop is.
     ("printer_setup", Access::Needs(Permission::SettingsPrinter)),
-    ("save_printer", Access::Needs(Permission::SettingsPrinter)),
-    ("delete_printer", Access::Needs(Permission::SettingsPrinter)),
+    ("choose_bill_printer", Access::Needs(Permission::SettingsPrinter)),
+    ("set_drawer", Access::Needs(Permission::SettingsPrinter)),
+    ("set_kitchen_mode", Access::Needs(Permission::SettingsPrinter)),
+    ("set_ticket_style", Access::Needs(Permission::SettingsPrinter)),
+    ("route_category_to", Access::Needs(Permission::SettingsPrinter)),
     ("route_category", Access::Needs(Permission::SettingsPrinter)),
-    (
-        "set_default_printer",
-        Access::Needs(Permission::SettingsPrinter),
-    ),
     ("set_paper_size", Access::Needs(Permission::SettingsPrinter)),
     (
         "print_sample_bill",
@@ -416,6 +403,8 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("first_run", Access::FirstRun),
     ("create_shop", Access::FirstRun),
     ("use_existing_shop", Access::FirstRun),
+    // Move to another folder's shop; once set up, it asks for the backup permission itself.
+    ("use_shop_folder", Access::FirstRun),
     // Browse for a folder — the other thing a fresh install needs and could not do.
     ("pick_a_folder", Access::FirstRun),
     // The logo.

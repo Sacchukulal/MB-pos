@@ -13,16 +13,32 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { useDevicePixelRatio } from '../kit';
 import type { PreviewDoc } from '../ipc/generated/PreviewDoc';
 import type { PreviewLine } from '../ipc/generated/PreviewLine';
 import type { PreviewRaster } from '../ipc/generated/PreviewRaster';
 
 import './receipt.css';
 
+/**
+ * The roll's own margin either side of the printable strip, in dots — the paper a receipt has
+ * that the head never reaches. Drawn, so the preview is the receipt in the hand.
+ */
+export function marginDots(doc: Pick<PreviewDoc, 'dots' | 'paperMm' | 'printableMm'>): number {
+  if (!(doc.printableMm > 0) || doc.paperMm <= doc.printableMm) return 0;
+  const dotsPerMm = doc.dots / doc.printableMm;
+  return Math.round(((doc.paperMm - doc.printableMm) * dotsPerMm) / 2);
+}
+
 export function Receipt({ doc }: { doc: PreviewDoc }) {
+  const margin = marginDots(doc);
   return (
     <div className="mb-receipt">
-      {doc.raster ? <Paper raster={doc.raster} /> : <RomPaper doc={doc} />}
+      {doc.raster ? (
+        <Paper raster={doc.raster} margin={margin} />
+      ) : (
+        <RomPaper doc={doc} margin={margin} />
+      )}
       <p className="mb-receipt__length">
         {doc.millimetres} mm of paper · {doc.columns} characters across ·{' '}
         {doc.engine === 'text' ? "the printer's own font" : 'graphics'}
@@ -38,23 +54,31 @@ export function Receipt({ doc }: { doc: PreviewDoc }) {
   );
 }
 
-/** Dots per screen pixel when nothing has been measured yet, or nothing can be. */
+/** Dots per device pixel when nothing has been measured yet, or nothing can be. */
 const DEFAULT_DOTS_PER_PIXEL = 2;
 
 /** The coarsest the paper is ever drawn; beyond this a bill is a grey smudge. */
 const COARSEST_DOTS_PER_PIXEL = 8;
 
 /**
- * How many printer dots one screen pixel stands for, so that the paper fits in `available`
- * pixels — always a whole number or a half, never a fraction, so a one-dot rule is never
- * smeared across two pixels at partial strength and a two-dot bar is never lost.
+ * How many printer dots one CSS pixel stands for, so that the paper fits in `available` CSS
+ * pixels. Every answer is a whole number of dots per DEVICE pixel, or one dot over two of
+ * them: `pixelRatio` device pixels make a CSS pixel, so a dot always lands on whole device
+ * pixels and a one-dot rule is never smeared across two at partial strength.
  */
-export function dotsPerPixel(dots: number, available: number): number {
-  if (!(available > 0) || !(dots > 0)) return DEFAULT_DOTS_PER_PIXEL;
-  for (let ratio = 0.5; ratio <= COARSEST_DOTS_PER_PIXEL; ratio += 0.5) {
+export function dotsPerPixel(dots: number, available: number, pixelRatio = 1): number {
+  const perDevice = pixelRatio > 0 ? pixelRatio : 1;
+  if (!(available > 0) || !(dots > 0)) return DEFAULT_DOTS_PER_PIXEL * perDevice;
+  for (let step = 0.5; step <= COARSEST_DOTS_PER_PIXEL; step += step < 1 ? 0.5 : 1) {
+    const ratio = step * perDevice;
     if (dots / ratio <= available) return ratio;
   }
-  return COARSEST_DOTS_PER_PIXEL;
+  return COARSEST_DOTS_PER_PIXEL * perDevice;
+}
+
+/** Whether every dot gets at least one whole device pixel, so it can be drawn without averaging. */
+export function drawsEveryDot(ratio: number, pixelRatio = 1): boolean {
+  return ratio <= (pixelRatio > 0 ? pixelRatio : 1);
 }
 
 /** The base64 rows, back into bytes. */
@@ -74,23 +98,25 @@ function channels(value: string, fallback: [number, number, number]): [number, n
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** The printer's raster, dot for dot. */
-function Paper({ raster }: { raster: PreviewRaster }) {
+/** The printer's raster, dot for dot, on the roll it prints on. */
+function Paper({ raster, margin }: { raster: PreviewRaster; margin: number }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
-  const [ratio, setRatio] = useState(DEFAULT_DOTS_PER_PIXEL);
+  const pixelRatio = useDevicePixelRatio();
+  const [ratio, setRatio] = useState(DEFAULT_DOTS_PER_PIXEL * pixelRatio);
 
-  // How much room the paper has, and again whenever that changes.
+  // How much room the whole roll has — margins included — and again whenever that changes.
   useLayoutEffect(() => {
     const target = frame.current;
     if (!target) return undefined;
-    const measure = () => setRatio(dotsPerPixel(raster.width, target.clientWidth));
+    const measure = () =>
+      setRatio(dotsPerPixel(raster.width + margin * 2, target.clientWidth, pixelRatio));
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [raster.width]);
+  }, [raster.width, margin, pixelRatio]);
 
   // The dots.
   useEffect(() => {
@@ -122,38 +148,56 @@ function Paper({ raster }: { raster: PreviewRaster }) {
 
   return (
     <div ref={frame} className="mb-receipt__frame">
-      <canvas
-        ref={canvas}
-        className="mb-receipt__paper mb-receipt__paper--raster"
-        aria-label="Preview of the printed bill, exactly as the printer will draw it"
-        role="img"
-        width={raster.width}
-        height={raster.height}
-        data-dots-per-pixel={ratio}
-        // The paper's size on screen: its dots, at a whole or half number of dots a pixel.
-        style={{ /* mb-tokens-allow: printer dots into screen pixels, at the ratio chosen above */
-          width: `${raster.width / ratio}px`,
-          height: `${raster.height / ratio}px`,
+      {/* The roll: white to its edges, the printable strip in the middle of it. */}
+      <div
+        className="mb-receipt__sheet"
+        style={{ /* mb-tokens-allow: the roll's own margin, in printer dots, at the ratio chosen above */
+          padding: `${margin / ratio}px`,
         }}
-      />
+      >
+        <canvas
+          ref={canvas}
+          className={[
+            'mb-receipt__paper',
+            'mb-receipt__paper--raster',
+            drawsEveryDot(ratio, pixelRatio) ? 'mb-receipt__paper--exact' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          aria-label="Preview of the printed bill, exactly as the printer will draw it"
+          role="img"
+          width={raster.width}
+          height={raster.height}
+          data-dots-per-pixel={ratio}
+          // The paper's size on screen: its dots, at a whole or half number of dots a pixel.
+          style={{ /* mb-tokens-allow: printer dots into screen pixels, at the ratio chosen above */
+            width: `${raster.width / ratio}px`,
+            height: `${raster.height / ratio}px`,
+          }}
+        />
+      </div>
     </div>
   );
 }
 
-/** The text engine's paper: rows of the printer's own characters. */
-function RomPaper({ doc }: { doc: PreviewDoc }) {
+/** The text engine's paper: rows of the printer's own characters, on the roll. */
+function RomPaper({ doc, margin }: { doc: PreviewDoc; margin: number }) {
   return (
-    <div
-      className="mb-receipt__paper mb-receipt__paper--rom"
-      aria-label="Preview of the printed bill"
-      // The one number the page is drawn from, out of Rust.
-      style={{ /* mb-tokens-allow: the paper's own dot count, named by Rust */
-        ['--receipt-dots' as string]: doc.dots,
-      }}
-    >
-      {doc.lines.map((line, index) => (
-        <Line key={index} line={line} />
-      ))}
+    <div className="mb-receipt__frame">
+      <div
+        className="mb-receipt__sheet mb-receipt__sheet--rom"
+        // The two numbers the page is drawn from, out of Rust: the strip's dots and the margin's.
+        style={{ /* mb-tokens-allow: the paper's own dot counts, named by Rust */
+          ['--receipt-dots' as string]: doc.dots,
+          ['--receipt-margin' as string]: margin,
+        }}
+      >
+        <div className="mb-receipt__paper mb-receipt__paper--rom" aria-label="Preview of the printed bill">
+          {doc.lines.map((line, index) => (
+            <Line key={index} line={line} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

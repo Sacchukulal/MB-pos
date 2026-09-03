@@ -156,6 +156,8 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     if s.separators.below_details {
         doc.separator(s.pattern);
     }
+    // Air before the food, so the cook's eye lands on the first line and not on the header.
+    doc.air(s.row_height.section_air());
 
     if s.two_column {
         two_column_items(&mut doc, ctx);

@@ -1,4 +1,4 @@
-/** The totals block on the till. */
+/** The totals block on the till. Always drawn, zeros and all, so the cart never changes shape. */
 
 import { Scroller } from '../kit';
 import type { BillView } from '../ipc/generated/BillView';
@@ -37,11 +37,9 @@ export function Totals({ bill }: { bill: BillView }) {
         />
       ))}
 
-      {isPositive(bill.taxTotal) ? <Row label="Tax" value={bill.taxTotal} /> : null}
-
-      {isNonZero(bill.roundOff) ? (
-        <Row muted label="Round off" value={bill.roundOff} />
-      ) : null}
+      {/* Tax and round-off are always rows, so the block keeps one height bill to bill. */}
+      <Row label="Tax" value={bill.taxTotal} />
+      <Row muted label="Round off" value={bill.roundOff} />
 
       </Scroller>
 
@@ -88,8 +86,4 @@ function Row({
 
 function isPositive(value: MoneyView): boolean {
   return value.paise > 0n;
-}
-
-function isNonZero(value: MoneyView): boolean {
-  return value.paise !== 0n;
 }

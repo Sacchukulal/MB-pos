@@ -31,9 +31,10 @@ impl Rule {
     /// The rule this pattern draws.
     #[must_use]
     pub const fn of(pattern: Pattern) -> Rule {
+        // A single dot row prints faint on a thermal head, so a plain rule is two dots thick.
         match pattern {
             Pattern::Solid => Rule {
-                thickness: 1,
+                thickness: 2,
                 dash: None,
                 strokes: 1,
                 stroke_gap: 0,
@@ -41,25 +42,25 @@ impl Rule {
             // Six on, four off — long enough to read as a dashed line at arm's length and short
             // enough that the ends always land on ink.
             Pattern::Dashed => Rule {
-                thickness: 1,
+                thickness: 2,
                 dash: Some((6, 4)),
                 strokes: 1,
                 stroke_gap: 0,
             },
             Pattern::Dotted => Rule {
-                thickness: 1,
+                thickness: 2,
                 dash: Some((2, 4)),
                 strokes: 1,
                 stroke_gap: 0,
             },
             Pattern::Bold => Rule {
-                thickness: 3,
+                thickness: 4,
                 dash: None,
                 strokes: 1,
                 stroke_gap: 0,
             },
             Pattern::Double => Rule {
-                thickness: 1,
+                thickness: 2,
                 dash: None,
                 strokes: 2,
                 stroke_gap: 3,
@@ -285,11 +286,14 @@ pub fn layout_for(doc: &Document, metrics: &Metrics) -> Result<Laid, PrintError>
     })
 }
 
-/// Lay a document out with the built-in face, for a caller that has none — tests, and the
-/// samples the settings screen draws before a printer is chosen.
+/// Lay a document out for a caller with no printer face of its own: a PDF, which prints in
+/// Courier, and tests. Courier New is that face's twin, so every column lands where the PDF
+/// will draw it.
 pub fn layout(doc: &Document) -> Result<Laid, PrintError> {
-    let font = std::sync::Arc::new(crate::font::Font::builtin()?);
-    layout_for(doc, &Metrics::face(doc.paper, font))
+    let font = crate::font::family("courier")
+        .ok_or_else(|| PrintError::invalid("Courier New is not on the list"))?
+        .load()?;
+    layout_for(doc, &Metrics::face(doc.paper, std::sync::Arc::new(font)))
 }
 
 fn clamp_offset(asked_mm: i32, dots: u32, advance: u32, notes: &mut Vec<Note>) -> u32 {
@@ -324,6 +328,21 @@ fn lay_block(
         Block::Spacer { lines: n } => {
             let row = metrics.body().row;
             for _ in 0..*n {
+                lines.push(LaidLine {
+                    content: LaidContent::Blank,
+                    style: Style::NORMAL,
+                    indent_dots,
+                    row_dots: row,
+                    segments: Vec::new(),
+                });
+            }
+        }
+
+        // One blank line of exactly that many dots. The raster and the text engine both feed
+        // dots, so the paper gets the same air the screen shows.
+        Block::Air { halves } => {
+            let row = metrics.body().row * u32::from(*halves) / 2;
+            if row > 0 {
                 lines.push(LaidLine {
                     content: LaidContent::Blank,
                     style: Style::NORMAL,
@@ -908,9 +927,13 @@ mod tests {
     use crate::doc::Block;
     use crate::paper::{Offset, PaperKind};
 
+    /// A typewriter face, so every column is a whole character wide.
     fn metrics(kind: PaperKind) -> Metrics {
-        let font = std::sync::Arc::new(crate::font::Font::builtin().expect("loads"));
-        Metrics::face(Paper::new(kind), font)
+        let font = crate::font::family("monospace")
+            .expect("on the list")
+            .load()
+            .expect("loads");
+        Metrics::face(Paper::new(kind), std::sync::Arc::new(font))
     }
 
     #[test]

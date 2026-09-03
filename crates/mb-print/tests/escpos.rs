@@ -27,7 +27,7 @@ use mb_print::transport::file::FileTransport;
 #[test]
 fn t3_the_wire_is_what_it_was() {
     let fixture = Fixture::new();
-    let font = std::sync::Arc::new(Font::builtin().expect("the shipped face loads"));
+    let font = std::sync::Arc::new(Font::default_face().expect("the default face loads"));
     let caps = Capabilities::default();
     let options = JobOptions::default();
 

@@ -48,6 +48,18 @@ impl PaperKind {
         }
     }
 
+    /// The roll's whole width in millimetres — what the paper IS, as against what the head
+    /// can reach. The difference is the margin the preview draws on either side.
+    #[must_use]
+    pub const fn width_mm(self) -> u32 {
+        match self {
+            PaperKind::Mm58 => 58,
+            PaperKind::Mm80 => 80,
+            PaperKind::Mm100 => 100,
+            PaperKind::A4 => 210,
+        }
+    }
+
     /// Printable width in millimetres.
     #[must_use]
     pub const fn printable_mm(self) -> u32 {

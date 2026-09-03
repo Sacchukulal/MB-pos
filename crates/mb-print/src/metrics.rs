@@ -201,7 +201,7 @@ mod tests {
     use crate::paper::PaperKind;
 
     fn face_metrics(kind: PaperKind) -> Metrics {
-        let font = Arc::new(Font::builtin().expect("the shipped face loads"));
+        let font = Arc::new(Font::default_face().expect("the default face loads"));
         Metrics::face(Paper::new(kind), font)
     }
 

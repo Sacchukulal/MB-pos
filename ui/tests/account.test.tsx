@@ -59,9 +59,10 @@ it('shows the renewal as a sentence and not as a date field', async () => {
   // 2.10: "your plan renews on 12 September" beats a date field, and the difference is that one
   // of them is a sentence.
   expect(await screen.findByText('Your plan renews on 12 September.')).toBeTruthy();
-  expect(screen.getByText("Anna's Kitchen")).toBeTruthy();
-  expect(screen.getByText('Restaurant Standard')).toBeTruthy();
-  expect(screen.getByText('Active')).toBeTruthy();
+  // The shop and its plan share the one line under the title.
+  expect(screen.getByText(/Anna's Kitchen/)).toBeTruthy();
+  expect(screen.getAllByText(/Restaurant Standard/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
 });
 
 it('shows the machine id, because support asks for it', async () => {
@@ -82,7 +83,8 @@ it('shows the sentences Rust wrote, whatever they say', async () => {
     clockNote: 'ZZZ-CLOCK note.',
   });
   expect(await screen.findByText('ZZZ-HEADLINE about the plan.')).toBeTruthy();
-  expect(screen.getByText('ZZZ-CHIP')).toBeTruthy();
+  // The chip stands in the header and again beside the licence.
+  expect(screen.getAllByText('ZZZ-CHIP').length).toBeGreaterThan(0);
   expect(screen.getByText('ZZZ-CLOCK note.')).toBeTruthy();
 });
 
@@ -118,7 +120,8 @@ it('offers a key and an emergency code when nothing is activated, and the trial 
   expect(await screen.findByRole('button', { name: 'Enter licence key' })).toBeTruthy();
   // No trial dialog, no contact box: the trial is the website's.
   expect(screen.queryByRole('button', { name: 'Start a free trial' })).toBeNull();
-  expect(screen.getByText(/Start your free trial at magicbill.in/)).toBeTruthy();
+  // The headline takes the one sentence; the trial sentence shows when there is no headline.
+  expect(screen.queryByText(/Start your free trial at magicbill.in/)).toBeNull();
   expect(screen.getByRole('button', { name: 'Emergency code' })).toBeTruthy();
   // Nothing to deactivate.
   expect(screen.queryByRole('button', { name: 'Deactivate' })).toBeNull();
@@ -129,7 +132,7 @@ it('offers a key and an emergency code when nothing is activated, and the trial 
 
 it('does not let somebody without licence.manage press anything that changes it', async () => {
   show({ ...activated, mayManage: false });
-  await screen.findByText("Anna's Kitchen");
+  await screen.findByText(/Anna's Kitchen/);
   expect(screen.getByRole('button', { name: 'Deactivate' }).hasAttribute('disabled')).toBe(true);
   expect(
     screen.getByRole('button', { name: 'Move a licence here' }).hasAttribute('disabled'),

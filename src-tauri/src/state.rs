@@ -415,6 +415,9 @@ impl App {
         if let Some(old) = previous {
             old.queue.shutdown();
         }
+        if let Some(folder) = path.parent() {
+            self.follow_shop_folder(folder);
+        }
         // After the shop is in place, because reading the settings needs a shop to read them
         // from.
         self.reload_shop_config();
@@ -441,6 +444,31 @@ impl App {
         }
         self.sender_wakeup().wake();
         log_info!("the shop at {} is open", path.display());
+    }
+
+    /// The licence and the cloud copy's bookmark live beside the data file, so they move when
+    /// the shop does.
+    fn follow_shop_folder(&self, folder: &std::path::Path) {
+        let was = self.with_licence(|l| l.dir().to_path_buf());
+        if was == folder {
+            return;
+        }
+        if let Err(e) = self.with_licensing(|l| l.relocate(folder.to_path_buf())) {
+            log_warn!(
+                "the licence could not follow the shop to {} ({e}); it stays in {}",
+                folder.display(),
+                was.display()
+            );
+            return;
+        }
+        let mut sync = lock(&self.sync);
+        if crate::sync::SyncFile::path(folder).is_file() {
+            *sync = crate::sync::SyncFile::load(folder);
+        } else {
+            sync.save(folder);
+            let _ = std::fs::remove_file(crate::sync::SyncFile::path(&was));
+        }
+        log_info!("the licence follows the shop: {}", folder.display());
     }
 
     pub fn rebuild_queue(&self) {
@@ -548,8 +576,17 @@ impl App {
         kind: mb_print::queue::JobKind,
         printer: &mb_print::printer::PrinterConfig,
     ) -> (mb_print::metrics::Metrics, &'static str) {
-        let face = self.face_for(kind);
-        let drawing = mb_print::drawing_for(printer, face.as_deref(), self.faces.as_ref());
+        self.metrics_in_face(self.face_for(kind).as_deref(), printer)
+    }
+
+    /// The metrics this printer draws with in a given face — for a preview of settings that
+    /// are not saved yet.
+    pub fn metrics_in_face(
+        &self,
+        face: Option<&str>,
+        printer: &mb_print::printer::PrinterConfig,
+    ) -> (mb_print::metrics::Metrics, &'static str) {
+        let drawing = mb_print::drawing_for(printer, face, self.faces.as_ref());
         (drawing.metrics, drawing.engine.name())
     }
 

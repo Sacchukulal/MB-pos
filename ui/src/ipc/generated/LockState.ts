@@ -30,4 +30,8 @@ canRecover: boolean,
  * Who the recovery code may set a PIN for, which is not a subset of `Self::people` — and
  * the difference is a way to be locked out of your own shop for good.
  */
-recoverable: Array<PersonView>, };
+recoverable: Array<PersonView>, 
+/**
+ * Who signed in last at this counter, so the lock screen starts on them.
+ */
+lastSignedIn: string | null, };

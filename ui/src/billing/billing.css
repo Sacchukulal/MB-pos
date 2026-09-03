@@ -63,14 +63,13 @@
   transition: none;
 }
 
-/* The order type takes the cart's column, hard against its right edge. */
+/* The order type takes the cart's column, and exactly the cart's width. */
 .mb-billbar__type {
   grid-column: 2;
   grid-row: 1;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-3);
+  min-width: 0;
 }
 
 .mb-billing__floor {
@@ -82,6 +81,10 @@
 
 /* THE CART IS PERMANENT: it never moves, never hides. */
 
+/*
+ * The column itself has no box. The bill (where it is, and its lines) sits on one bordered
+ * panel; the money row, the totals block and the two buttons stand under it on the page.
+ */
 .mb-billing__cart {
   grid-column: 2;
   grid-row: 2;
@@ -91,15 +94,33 @@
   min-height: 0;
   /* THE COLUMN DOES NOT SCROLL, AND THAT IS THE POINT. */
   overflow: hidden;
-  padding: var(--space-3);
-  background: var(--surface);
-  border: var(--border-width) solid var(--panel-border);
-  border-radius: var(--radius-lg);
-  /*
-   * RAISED, per the elevation contract — the cart is a panel sitting on the page, and it is the
-   * one thing on this screen that never moves.
-   */
-  box-shadow: var(--level-raised);
+}
+
+/*
+ * The order type: four buttons sharing the column's width, and the small lock at the end. The
+ * row's edges are the cart panel's edges, so the two read as one column.
+ */
+.mb-ordertype {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-ordertype > .mb-button:not(.mb-ordertype__lock) {
+  flex: 1 1 0;
+  padding: 0 var(--space-2);
+}
+
+/* Lightly there until it is on: a locked row shows a filled lock, a free one a faint one. */
+.mb-ordertype__lock {
+  opacity: 0.45;
+}
+
+.mb-ordertype__lock:hover,
+.mb-ordertype__lock[aria-pressed='true'] {
+  opacity: 1;
 }
 
 /* The table grid — the floor's view of the open orders. */
@@ -137,12 +158,7 @@
 .mb-floor__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
-  gap: var(--space-2);
-}
-
-.mb-floor--dense .mb-floor__grid {
-  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min-dense), 1fr));
-  gap: var(--space-1);
+  gap: var(--space-3);
 }
 
 /* A tile. State in FORM as well as colour. */
@@ -178,10 +194,11 @@
 .mb-tile--person-7 { --tile-person: var(--person-8); }
 
 /*
- * BUSY: the person's colour as ONE stripe down the left edge, inset so the rectangle stays a
- * rectangle — the owner's ruling: no filled cards, one dark-bordered edge.
+ * BUSY: the person's colour as a thick edge down the left and a thin line round the other three
+ * sides. The stripe is inset so the rectangle stays a rectangle; the fill stays the sheet.
  */
 .mb-tile--busy {
+  border-color: var(--tile-person, var(--border-strong));
   box-shadow: var(--level-raised), inset var(--tile-stripe) 0 0 0 var(--tile-person, var(--border-strong));
 }
 
@@ -206,14 +223,6 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-}
-
-.mb-floor--dense .mb-tile {
-  height: var(--tile-height-dense);
-}
-
-.mb-floor--dense .mb-tile__face {
-  padding: var(--space-1) var(--space-2);
 }
 
 /* FREE: a plain sheet, quiet text — and no colour at all. */
@@ -271,13 +280,6 @@
   font-size: var(--text-md);
 }
 
-/*
- * The dense step is past 24 tables, where the number has to give some of that back to fit ten
- * columns — but not all of it.
- */
-.mb-floor--dense .mb-tile__label {
-  font-size: var(--text-md);
-}
 
 /* The print mark. */
 .mb-tile__print {
@@ -433,6 +435,11 @@
   gap: 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+/* On a busy tile the + sits bottom-right, so the seats stop short of it. */
+.mb-tile--busy .mb-tile__meta {
+  padding-right: var(--tile-button);
 }
 
 .mb-tile__meta > * {
@@ -678,17 +685,11 @@
   font-size: var(--type-label);
   font-weight: var(--type-label-weight);
   cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease),
-    border-color var(--motion-fast) var(--ease);
+  transition: background-color var(--motion-fast) var(--ease);
 }
 
 .mb-processing__head:hover {
   background: var(--surface-2);
-}
-
-.mb-processing__head[aria-expanded='true'] {
-  border-color: var(--accent-line);
 }
 
 .mb-processing__title {
@@ -847,13 +848,30 @@
 
 /* The cart region. */
 
+/*
+ * The bill's panel. It gives way FIRST — shrink 50 against the totals block's 1 — and its
+ * basis is the floor it keeps while there is room to keep it; it never disappears.
+ */
+.mb-cart__bill {
+  flex: 1 50 var(--cart-lines-min);
+  min-height: 0;
+}
+
+.mb-cart__bill > .mb-panel__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* Where the bill is, and its number, over the lines. */
 .mb-cart__head {
   display: flex;
+  flex: none;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--gap-inline);
-  padding: 0 var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-1);
 }
 
 .mb-cart__where {
@@ -873,16 +891,14 @@
   white-space: nowrap;
 }
 
-/*
- * The list gives way FIRST — shrink 50 against the totals block's 1. Its basis is the floor it
- * keeps while there is room to keep it.
- */
+/* The lines take what the panel has left under the head. */
 .mb-cart__lines {
   display: flex;
   flex-direction: column;
   gap: 0;
-  flex: 1 50 var(--cart-lines-min);
-  /* It gives way FIRST, but it does not disappear. */
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--space-1) var(--space-1);
 }
 
 @media (min-height: 700px) { /* mb-tokens-allow: media queries cannot use var() */
@@ -1087,22 +1103,22 @@
   min-width: 0;
 }
 
-/* The box gives way to the words beside it, but never to nothing. */
+/* The box is one fixed width, so the row looks the same with or without an answer beside it. */
 .mb-payment__row .mb-field {
-  flex: 1 1 var(--field-xs);
-  min-width: var(--field-xs);
+  flex: none;
+  width: var(--cash-box-width);
 }
 
 /* The answer, in the colour it means: green comes back, red is still short, blue goes by card. */
 .mb-payment__answer {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  padding-left: var(--space-1);
   font-family: var(--font-num);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
   line-height: var(--line-tight);
-  text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1208,34 +1224,27 @@
 
 /* The keyboard: suggestions, the busy-table chooser, help. */
 
+/* The kit sheet, popped under the search box. */
 .mb-suggestions {
   position: absolute;
   z-index: var(--layer-panel);
   width: 100%;
   max-height: var(--suggestions-height);
   margin: var(--space-1) 0 0;
-  padding: var(--space-1);
   list-style: none;
-  background: var(--surface);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-pop);
   overflow-y: auto; /* mb-layout-allow: a <ul role=listbox> that pops over the box — not a page region */
 }
 
+/* A sheet row with three columns: the name, a note, the figure at the end. */
 .mb-suggestion {
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: var(--space-3);
   align-items: baseline;
   width: 100%;
+  height: auto;
   min-height: var(--control-md);
   padding: var(--space-2) var(--space-3);
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-radius: var(--radius-sm);
-  font: inherit;
   text-align: left;
   cursor: pointer;
 }
@@ -1256,58 +1265,19 @@
   font-size: var(--text-sm);
 }
 
-/* The highlight is a fill AND a stripe, so it survives grey-scale. */
-.mb-suggestion--on {
-  background: var(--accent-soft);
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--accent);
-}
-
-/* How many: the same box the suggestions pop in, with one number to type. */
+/* How many: the same sheet the suggestions pop in, with one number to type. */
+/* How many: one big number in the middle of the dialog, and the keys under it. */
 .mb-ask {
-  position: absolute;
-  z-index: var(--layer-panel);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  width: 100%;
-  margin: var(--space-1) 0 0;
-  padding: var(--space-3);
-  background: var(--surface);
-  border: var(--border-width) solid var(--accent);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-pop);
-}
-
-.mb-ask__what {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--gap-inline);
-}
-
-.mb-ask__name {
-  font-weight: var(--weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.mb-ask__price {
-  font-family: var(--font-num);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.mb-ask__row {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-field);
+  gap: var(--space-3);
 }
 
 .mb-ask__box {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-lg);
+  width: 100%;
+  height: var(--control-lg);
+  font-size: var(--text-2xl);
+  text-align: center;
 }
 
 .mb-ask__keys {

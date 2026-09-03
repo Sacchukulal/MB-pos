@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { render, screen, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { Receipt, dotsPerPixel } from '../src/preview/Receipt';
+import { Receipt, dotsPerPixel, drawsEveryDot } from '../src/preview/Receipt';
 import type { PreviewDoc } from '../src/ipc/generated/PreviewDoc';
 import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
 
@@ -41,6 +41,8 @@ const RASTER = {
 /** What the graphics engine sends: the raster, and the rows a test can read. */
 const BILL: PreviewDoc = {
   dots: 576,
+  paperMm: 80,
+  printableMm: 72,
   columns: 48,
   millimetres: 64,
   engine: 'raster',
@@ -52,6 +54,8 @@ const BILL: PreviewDoc = {
 /** What the text engine sends: no raster, rows of the printer's own characters. */
 const ROM: PreviewDoc = {
   dots: 576,
+  paperMm: 80,
+  printableMm: 72,
   columns: 48,
   millimetres: 64,
   engine: 'text',
@@ -106,10 +110,11 @@ describe('the graphics engine preview is the printer raster on one canvas', () =
   });
 
   it('chooses the finest ratio that fits the room it has', () => {
-    // 576 dots in 600 px: one dot a pixel fits; in 300 px it takes two; in 400, one and a half.
+    // 576 dots in 600 px: one dot a pixel fits; in 300 px it takes two; in 400, two as well —
+    // one and a half would smear every dot over parts of two pixels.
     expect(dotsPerPixel(576, 600)).toBe(1);
     expect(dotsPerPixel(576, 300)).toBe(2);
-    expect(dotsPerPixel(576, 400)).toBe(1.5);
+    expect(dotsPerPixel(576, 400)).toBe(2);
     expect(dotsPerPixel(576, 1200)).toBe(0.5);
     // Nothing measured yet is a sensible default, not a division by zero.
     expect(dotsPerPixel(576, 0)).toBe(2);
@@ -117,8 +122,18 @@ describe('the graphics engine preview is the printer raster on one canvas', () =
     expect(dotsPerPixel(832, 10)).toBe(8);
     for (const available of [97, 233, 401, 777]) {
       const ratio = dotsPerPixel(576, available);
-      expect(ratio * 2).toBe(Math.round(ratio * 2));
+      expect(ratio === 0.5 || Number.isInteger(ratio)).toBe(true);
     }
+  });
+
+  it('counts dots per DEVICE pixel on a scaled display', () => {
+    // At 125% scaling a CSS pixel is 1.25 device pixels, so one dot a device pixel is 1.25.
+    expect(dotsPerPixel(576, 600, 1.25)).toBe(1.25);
+    expect(dotsPerPixel(576, 300, 1.25)).toBe(2.5);
+    expect(dotsPerPixel(576, 0, 1.25)).toBe(2.5);
+    expect(drawsEveryDot(1.25, 1.25)).toBe(true);
+    expect(drawsEveryDot(2.5, 1.25)).toBe(false);
+    expect(drawsEveryDot(0.5, 1)).toBe(true);
   });
 
   it('says how much paper the bill costs, and which engine', () => {
@@ -244,7 +259,7 @@ describe('the preview draws on paper, not on the theme', () => {
   it('draws the raster dot for dot, from the two print tokens', () => {
     // Shrunk, the dots are averaged (paper from a step back); at one dot a pixel, every dot.
     expect(ruleFor('.mb-receipt__paper--raster')).toContain('image-rendering: auto');
-    expect(CSS).toContain("[data-dots-per-pixel='1'] {");
+    expect(CSS).toContain('.mb-receipt__paper--exact {');
     expect(CSS).toContain('  image-rendering: pixelated;');
     expect(TSX).toContain("getPropertyValue('--print-ink')");
     expect(TSX).toContain("getPropertyValue('--print-paper')");

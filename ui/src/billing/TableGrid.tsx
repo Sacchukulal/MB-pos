@@ -8,9 +8,6 @@ import type { TableView } from '../ipc/generated/TableView';
 /* The tile brings its own styling. */
 import './billing.css';
 
-/** Past this many tables the grid steps down a density. */
-export const DENSE_ABOVE = 24;
-
 /** How many person colours the theme has — `--person-1` … `--person-8` in tokens.css. */
 export const PERSON_COLOURS = 8;
 
@@ -50,8 +47,6 @@ export function TableGrid({
     );
   }, [tables, filter]);
 
-  const dense = shown.length > DENSE_ABOVE;
-
   const sections = useMemo(() => {
     const groups = new Map<string, TableView[]>();
     for (const table of shown) {
@@ -81,7 +76,7 @@ export function TableGrid({
   }
 
   return (
-    <div className={dense ? 'mb-floor--dense' : undefined} data-dense={dense}>
+    <div>
       {sections.map(([name, group]) => (
         <div className="mb-floor__section" key={name || 'no-table'}>
           <span className="mb-floor__heading">{name || 'No table'}</span>
@@ -90,7 +85,6 @@ export function TableGrid({
               <Tile
                 key={table.id}
                 table={table}
-                dense={dense}
                 onOpen={() => onOpen(table)}
                 onPrintBill={() => onPrintBill(table)}
                 onSplit={onSplit ? () => onSplit(table) : undefined}
@@ -113,11 +107,11 @@ export function TableGrid({
  *
  * A busy table wears its PERSON's colour on the border, so a room reads at a glance whose
  * tables are whose. Late and waiting stay in the timer: bold red, or amber — a state is a
- * form as well as a colour, and the person's colour is not overwritten by it.
+ * form as well as a colour, and the person's colour is not overwritten by it. Every floor,
+ * however big, draws the tile at the one size.
  */
 export function Tile({
   table,
-  dense = false,
   onOpen,
   onPrintBill,
   onSplit,
@@ -127,8 +121,6 @@ export function Tile({
   onDelete,
 }: {
   table: TableView;
-  /** The floor's dense step past `DENSE_ABOVE` tables. */
-  dense?: boolean;
   /** What pressing the tile does. */
   onOpen?: () => void;
   /** Carry the bill to this table. */
@@ -172,7 +164,7 @@ export function Tile({
         </span>
 
         {/* The second row: the money and whose it is, or how big the table is. */}
-        {dense ? null : busy ? (
+        {busy ? (
           <span className="mb-tile__row">
             {table.total ? <span className="mb-tile__amount">{table.total.text}</span> : null}
             {table.by ? (
@@ -188,8 +180,7 @@ export function Tile({
         )}
 
         {/* The third row: the timers and the chips, and the seats at the far end. */}
-        {dense ? null : (
-          <span className="mb-tile__meta">
+        <span className="mb-tile__meta">
             {table.minutes === null ? null : (
               <span
                 className={cx(
@@ -241,26 +232,7 @@ export function Tile({
                 {table.seats}
               </span>
             ) : null}
-          </span>
-        )}
-
-        {/*
-          Dense tiles keep the timer, because a late table is the one thing worth interrupting
-          somebody for.
-        */}
-        {dense && table.minutes !== null ? (
-          <span className="mb-tile__meta">
-            <span
-              className={cx(
-                'mb-tile__timer',
-                late && 'mb-tile__timer--late',
-                waiting && 'mb-tile__timer--waiting',
-              )}
-            >
-              {formatMinutes(table.minutes)}
-            </span>
-          </span>
-        ) : null}
+        </span>
       </Face>
 
       {/* The tick, top left: an empty circle on hover, filled once ticked. */}

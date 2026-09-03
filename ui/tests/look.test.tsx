@@ -226,18 +226,17 @@ describe('the documented-exception hatch', () => {
 // The top bar.
 
 describe('the top navigation', () => {
-  /** The bar is a fixed six and cannot grow. */
-  it('keeps the same six in the bar wherever you are', () => {
+  /** The bar is a fixed five and cannot grow. */
+  it('keeps the same five in the bar wherever you are', () => {
     const onBilling = splitScreens(SHIPPED_SCREENS, 'billing');
     const onStock = splitScreens(SHIPPED_SCREENS, 'stock');
 
     expect(onBilling.inBar.map((s) => s.id)).toEqual(onStock.inBar.map((s) => s.id));
-    expect(onBilling.inBar).toHaveLength(6);
+    expect(onBilling.inBar).toHaveLength(5);
     expect(onBilling.inBar.map((s) => s.id)).toEqual([
       'billing',
       'floor',
-      'credit',
-      'expenses',
+      'phones',
       'bills',
       'reports',
     ]);
@@ -248,6 +247,8 @@ describe('the top navigation', () => {
     expect(splitScreens(SHIPPED_SCREENS, 'billing').elsewhere).toBeNull();
     expect(splitScreens(SHIPPED_SCREENS, 'stock').elsewhere?.label).toBe('Stock');
     expect(splitScreens(SHIPPED_SCREENS, 'settings').elsewhere?.label).toBe('Settings');
+    // Settings › Phones has its own door in the bar, so More does not claim it.
+    expect(splitScreens(SHIPPED_SCREENS, 'settings', 'network').elsewhere).toBeNull();
   });
 
   /** Every destination is reachable and none is in both places. */
@@ -302,7 +303,7 @@ describe('the cart column', () => {
    * The item list gives way; the totals never do — a cashier must never lose the total.
    */
   it('lets the item list shrink and never the totals', () => {
-    const lines = css.slice(css.indexOf('.mb-cart__lines {'));
+    const lines = css.slice(css.indexOf('.mb-cart__bill {'));
     const linesShrink = /flex:\s*1\s+(\d+)/.exec(lines)?.[1];
     const totals = css.slice(css.indexOf('.mb-totals {'));
     expect(linesShrink).toBeDefined();

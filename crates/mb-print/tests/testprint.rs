@@ -28,7 +28,7 @@ fn t11_a_test_print_reaches_paper_with_no_database_and_no_printer() {
     let queue = Queue::start(
         vec![printer.clone()],
         Arc::new(MemoryStore::new()),
-        Arc::new(mb_print::font::OneFace::builtin().expect("the shipped face loads")),
+        Arc::new(mb_print::font::OneFace::default_face().expect("the default face loads")),
         QueueConfig::default(),
     );
 

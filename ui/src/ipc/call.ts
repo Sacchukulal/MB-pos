@@ -83,10 +83,8 @@ import type { PreviewView } from './generated/PreviewView';
 import type { PrintersView } from './generated/PrintersView';
 import type { LogoView } from './generated/LogoView';
 import type { PickedFile } from './generated/PickedFile';
-import type { PrinterEdit } from './generated/PrinterEdit';
 import type { BackupView } from './generated/BackupView';
 import type { VerifyView } from './generated/VerifyView';
-import type { ConfigPlanView } from './generated/ConfigPlanView';
 import type { NumberingView } from './generated/NumberingView';
 import type { CountArg } from './generated/CountArg';
 import type { DashboardView } from './generated/DashboardView';
@@ -117,6 +115,7 @@ export interface Commands {
   first_run: { args: void; returns: FirstRunView };
   create_shop: { args: { folder: string }; returns: FirstRunView };
   use_existing_shop: { args: { path: string }; returns: FirstRunView };
+  use_shop_folder: { args: { folder: string }; returns: string };
   /** Bring my shop from the cloud: the licence key, where the file goes, and whether to move a licence bound elsewhere. */
   restore_from_cloud: {
     args: { key: string; folder: string; moveHere: boolean };
@@ -544,7 +543,6 @@ export interface Commands {
 
   settings_all: { args: void; returns: SettingsView };
   /** After a restore, and whenever a screen wants to be sure. */
-  reload_settings: { args: void; returns: SettingsView };
   /** Returns the KEYS that match. */
   search_settings: { args: { text: string }; returns: string[] };
   save_settings: { args: { edits: SettingEdit[] }; returns: SavedView };
@@ -574,8 +572,11 @@ export interface Commands {
 
   // The printers.
   printer_setup: { args: void; returns: PrintersView };
-  save_printer: { args: { edit: PrinterEdit }; returns: PrintersView };
-  delete_printer: { args: { id: string }; returns: PrintersView };
+  choose_bill_printer: { args: { windowsName: string }; returns: PrintersView };
+  set_drawer: { args: { on: boolean }; returns: PrintersView };
+  set_kitchen_mode: { args: { mode: string }; returns: PrintersView };
+  set_ticket_style: { args: { style: string }; returns: PrintersView };
+  route_category_to: { args: { categoryId: string; windowsName: string }; returns: PrintersView };
   /** An empty printerId means "the default kitchen printer". */
   route_category: {
     args: { categoryId: string; printerId: string };
@@ -591,7 +592,6 @@ export interface Commands {
    * something — before this, the only way to change the default was a checkbox at the bottom of
    * the add-a-printer dialog, so shops kept printing to the stand-in that prints nothing.
    */
-  set_default_printer: { args: { printerId: string }; returns: PrintersView };
   /** How wide the roll is — 58 (2 inch), 80 (3 inch) or 100 (4 inch). */
   set_paper_size: { args: { mm: number }; returns: PrintersView };
   /** Print, look at the paper, nudge, print again. */
@@ -609,9 +609,6 @@ export interface Commands {
   find_shops: { args: void; returns: string[] };
 
   // The whole configuration, out and in — a dealer sets up the second shop by copying one file.
-  export_settings: { args: void; returns: string };
-  plan_settings_import: { args: { text: string }; returns: ConfigPlanView };
-  run_settings_import: { args: { text: string }; returns: SavedView };
 
   // The counters.
   numbering: { args: void; returns: NumberingView };

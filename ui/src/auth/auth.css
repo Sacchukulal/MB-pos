@@ -27,6 +27,33 @@
   box-shadow: var(--shadow-pop);
 }
 
+/* Signing in: the people down the left, the pad on the right, one card. */
+.mb-lock__card--split {
+  display: grid;
+  grid-template-columns: var(--lock-people-width) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: stretch;
+  max-width: var(--lock-split-width);
+}
+
+.mb-lock__people-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mb-lock__people-column .mb-lock__title {
+  font-size: var(--text-lg);
+}
+
+.mb-lock__pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
 .mb-lock__title {
   margin: 0;
   font-size: var(--text-xl);
@@ -40,6 +67,19 @@
   gap: var(--space-2);
   width: 100%;
   max-height: var(--lock-people-height);
+}
+
+/* Beside the pad the list takes the card's height and scrolls inside it. */
+.mb-lock__card--split .mb-lock__people {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.mb-lock__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 /*
