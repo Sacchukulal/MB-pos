@@ -359,7 +359,7 @@ fn t8_every_named_index_exists() {
 
 #[test]
 fn t17_the_document_and_the_database_agree() {
-    let doc = include_str!("../../../../docs/SCHEMA.md");
+    let doc = include_str!("../../../docs/SCHEMA.md");
     let documented = parse_schema_doc(doc);
 
     let db = Scratch::new("t17").open();
