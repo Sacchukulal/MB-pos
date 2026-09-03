@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { Button, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
@@ -9,11 +9,15 @@ import type { SetupView } from '../ipc/generated/SetupView';
 import type { PrintJobView } from '../ipc/generated/PrintJobView';
 import type { NoticesView } from '../ipc/generated/NoticesView';
 import type { PhonesView } from '../ipc/generated/PhonesView';
+import type { DayStateView } from '../ipc/generated/DayStateView';
 import { useTheme } from '../theme/ThemeProvider';
+import { useTick } from '../clock';
 import { Account } from '../account/Account';
 import { FirstRun } from '../setup/FirstRun';
 import { AlertsPanel, loudest, type Alert } from './Alerts';
+import { DayGate } from './DayGate';
 import { Billing } from '../billing/Billing';
+import { SettleDesk } from '../billing/SettleDesk';
 import { Health } from '../health/Health';
 import { Kitchen } from '../kitchen/Kitchen';
 import { Gallery } from '../gallery/Gallery';
@@ -36,6 +40,9 @@ import './shell.css';
 import '../auth/auth.css';
 
 const WORST: Record<Alert['tone'], number> = { danger: 3, warn: 2, accent: 1, info: 0 };
+
+/** How often the gate asks again while somebody stays signed in across the day boundary. */
+const GATE_EVERY_MS = 60 * 60 * 1000;
 
 export interface Screen {
   id: string;
@@ -309,6 +316,43 @@ export function Shell() {
     if (inApp()) call('phones_now').then(setPhones).catch(() => undefined);
   }, [lock, reloadNotices]);
 
+  /**
+   * The gate: a day left open is asked about whenever somebody signs in, and again every hour
+   * for the one who stays signed in past 5 am. `gateWaived` is the way past it while an open
+   * order from yesterday is settled; it lasts until the next ask.
+   */
+  const [dayState, setDayState] = useState<DayStateView | null>(null);
+  const [gateWaived, setGateWaived] = useState(false);
+  const reloadDay = useCallback(() => {
+    if (!inApp()) return;
+    call('day_state', { holidays: null })
+      // Checked, not trusted, like every other answer the shell draws.
+      .then((fresh) => {
+        if (fresh && Array.isArray(fresh.pending)) {
+          setDayState(fresh);
+          setGateWaived(false);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  const askedAt = useRef(0);
+  useEffect(() => {
+    if (lock === null || lock.signedInAs === null) {
+      setDayState(null);
+      return;
+    }
+    askedAt.current = Date.now();
+    reloadDay();
+  }, [lock, reloadDay]);
+  // The one shared clock, not a timer of its own: once an hour is enough to catch 5 am.
+  const tick = useTick();
+  useEffect(() => {
+    if (lock === null || lock.signedInAs === null) return;
+    if (Date.now() - askedAt.current < GATE_EVERY_MS) return;
+    askedAt.current = Date.now();
+    reloadDay();
+  }, [tick, lock, reloadDay]);
+
   // Rust pushes; React subscribes.
   useEffect(() => {
     if (!inApp()) return undefined;
@@ -415,7 +459,7 @@ export function Shell() {
   // Everything this person may open.
   const held = lock?.permissions ?? [];
   const allowed = SCREENS.filter((item) => {
-    if (item.id === 'kitchen' && !status?.kitchenScreen) return false;
+    // The kitchen screen is always listed; the page itself says when it is switched off (owner, 2026-09-03).
     if (item.needs && !held.includes(item.needs)) return false;
     if (item.needsAny && !item.needsAny.some((need) => held.includes(need))) return false;
     return true;
@@ -556,6 +600,20 @@ export function Shell() {
         onDismissAll={onDismissAll}
       />
 
+      {/* Billing waits: a day left open is closed, or called a holiday, before anything else. */}
+      {/* What the phones asked the counter to settle — over whichever screen is up. */}
+      {!locked ? <SettleDesk /> : null}
+      {!locked && dayState && dayState.pending.length > 0 && !gateWaived ? (
+        <DayGate
+          state={dayState}
+          onChange={setDayState}
+          onEscape={() => setGateWaived(true)}
+          onSignOut={() => {
+            call('lock_now').then(setLock).catch(() => undefined);
+          }}
+        />
+      ) : null}
+
       {/*
         Over everything, including the print queue panel and any toast — a toast floating above
         a locked screen is information leaking past the lock.
@@ -672,8 +730,7 @@ function TopBar({
   const window = inApp() ? getCurrentWindow() : null;
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const face: IconName =
-    themeIcon === 'moon' ? 'moon' : themeIcon === 'contrast' ? 'contrast' : 'sun';
+  const face: IconName = themeIcon === 'moon' ? 'moon' : 'sun';
 
   const { inBar, inMore, elsewhere } = splitScreens(screens, current);
 

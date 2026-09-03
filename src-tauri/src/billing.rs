@@ -398,6 +398,12 @@ pub struct TableView {
     /// A waiter asked for this table's bill from a phone, and it printed. The tile says so
     /// until the table is settled.
     pub bill_asked: bool,
+    /// A waiter asked, from a phone, for this bill to be settled; the desk on the counter's
+    /// screen has it until somebody there confirms or declines.
+    pub settle_asked: bool,
+    /// Who opened the order — the tile wears their colour, here and on the phones.
+    pub by: Option<String>,
+    pub by_id: Option<String>,
     pub order_id: Option<String>,
     /// The bill number this order has already claimed, formatted as it will be printed.
     pub bill_number: Option<String>,
@@ -728,6 +734,9 @@ pub fn floor_view(
                 kitchen_told: false,
                 kitchen_minutes: None,
                 bill_asked: false,
+                settle_asked: false,
+                by: None,
+                by_id: None,
                 order_id: None,
                 bill_number: None,
             },
@@ -811,6 +820,9 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         // Filled in by `floor::floor_on`, which is the only caller with the events table open.
         kitchen_minutes: None,
         bill_asked: false,
+        settle_asked: false,
+        by: None,
+        by_id: Some(core.created_by.as_str().to_owned()),
         order_id: Some(id.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
         // A table's tile is the table; a second party's tile, and a tile with no table, is the
@@ -823,6 +835,46 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         section,
         seats: crate::ipc::count(seats),
     }
+}
+
+/// The facts a tile carries that only the events table and the people list know: the kitchen
+/// timer, who opened the order, and what the phones asked. BOTH screens call this, so the
+/// billing grid and the floor plan can never disagree about a table.
+pub(crate) fn decorate(
+    tiles: &mut [TableView],
+    repos: &mb_db::Repos<'_>,
+    at: Timestamp,
+) -> Result<(), mb_db::DbError> {
+    let told = repos
+        .events()
+        .last_for_each(mb_db::repo::events::KITCHEN_TICKET)?;
+    let asked = repos
+        .events()
+        .last_for_each(mb_db::repo::events::BILL_ASKED)?;
+    let settles = repos.events().latest_of_two(
+        mb_db::repo::events::SETTLE_ASKED,
+        mb_db::repo::events::SETTLE_DECLINED,
+    )?;
+    let people = repos.people().list_staff(crate::state::OUTLET)?;
+    for tile in tiles.iter_mut() {
+        let Some(order_id) = tile.order_id.clone() else {
+            continue;
+        };
+        tile.kitchen_minutes = told
+            .iter()
+            .find(|(id, _)| id == &order_id)
+            .map(|(_, when)| crate::ipc::count(crate::floor::minutes_between(*when, at)));
+        tile.bill_asked = asked.iter().any(|(id, _)| id == &order_id);
+        tile.settle_asked = settles
+            .iter()
+            .any(|e| e.order_id == order_id && e.event == mb_db::repo::events::SETTLE_ASKED);
+        tile.by = tile
+            .by_id
+            .as_deref()
+            .and_then(|id| people.iter().find(|p| p.id.as_str() == id))
+            .map(|p| p.name.clone());
+    }
+    Ok(())
 }
 
 /// What the tile shows as the running total.

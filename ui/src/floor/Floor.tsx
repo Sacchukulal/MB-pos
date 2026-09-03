@@ -25,7 +25,7 @@ import {
 } from '../kit';
 import { call, subscribe } from '../ipc/call';
 /* The one table tile in the product. */
-import { Tile } from '../billing/TableGrid';
+import { AddTile, Tile } from '../billing/TableGrid';
 import type { FloorView } from '../ipc/generated/FloorView';
 import type { SectionView } from '../ipc/generated/SectionView';
 import type { TableRowView } from '../ipc/generated/TableRowView';
@@ -150,6 +150,8 @@ export function Floor() {
     onDelete: (tile: TableView) => setDeletingOne(rowFor(tile.id)),
     canTick: (tile: TableView) => pickable && isATable(tile.id),
     onPrintBill: printTheBill,
+    // The dashed card at the end of a room opens the panel that adds tables.
+    onAddTable: pickable ? () => setArrangeOpen(true) : undefined,
   };
   /** Open on a shop with no tables, folded once there are some. */
   const arranging = arrangeOpen ?? floor.tables.length === 0;
@@ -634,6 +636,7 @@ function Grid({
   onPrintBill,
   none,
   canArrange,
+  onAddTable,
 }: {
   tiles: readonly TableView[];
   picked: readonly string[];
@@ -647,6 +650,8 @@ function Grid({
   /** True when the shop has no tables at all, rather than none in this view. */
   none?: boolean;
   canArrange: boolean;
+  /** The dashed card after the last table; absent for somebody who may not arrange. */
+  onAddTable?: () => void;
 }) {
   if (tiles.length === 0) {
     // Two different emptinesses.
@@ -677,6 +682,7 @@ function Grid({
           onPrintBill={() => onPrintBill(tile)}
         />
       ))}
+      {onAddTable ? <AddTile onAdd={onAddTable} /> : null}
     </div>
   );
 }

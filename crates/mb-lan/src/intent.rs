@@ -79,6 +79,13 @@ pub enum What {
     /// Ask the counter to work the bill out AND print it, so the waiter can carry it to the
     /// table. The wire name is the old one; a phone one version behind still gets its bill.
     RequestBill,
+    /// Ask the counter to SETTLE the bill. The request lands on the cashier's screen, where a
+    /// person confirms it; the money is still taken at the counter. `payment` is what the
+    /// customer handed the waiter, when the waiter knows: "cash", "card" or "upi".
+    RequestSettle {
+        #[serde(default)]
+        payment: Option<String>,
+    },
 }
 
 impl What {
@@ -97,6 +104,7 @@ impl What {
             What::MoveTable { .. } => "move the order to another table",
             What::CancelOrder { .. } => "cancel the order",
             What::RequestBill => "print the bill",
+            What::RequestSettle { .. } => "settle the bill",
         }
     }
 }
@@ -275,6 +283,7 @@ mod tests {
                 reason: "r".to_owned(),
             },
             What::RequestBill,
+            What::RequestSettle { payment: None },
         ];
         let mut seen = std::collections::BTreeSet::new();
         for what in &all {

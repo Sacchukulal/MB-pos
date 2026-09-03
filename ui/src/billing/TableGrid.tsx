@@ -11,6 +11,19 @@ import './billing.css';
 /** Past this many tables the grid steps down a density. */
 export const DENSE_ABOVE = 24;
 
+/** How many person colours the theme has — `--person-1` … `--person-8` in tokens.css. */
+export const PERSON_COLOURS = 8;
+
+/**
+ * Which of the eight colours a person wears. The phone does the same sum over the same id
+ * (`personSlot` in MB-android's Palette.kt), so one waiter is one colour everywhere.
+ */
+export function personSlot(id: string): number {
+  let sum = 0;
+  for (let i = 0; i < id.length; i += 1) sum += id.charCodeAt(i);
+  return sum % PERSON_COLOURS;
+}
+
 export function TableGrid({
   tables,
   filter,
@@ -90,7 +103,18 @@ export function TableGrid({
   );
 }
 
-/** THE table tile. There is one, and this is it. */
+/**
+ * THE table tile. There is one, and this is it — the billing grid, the floor plan and the
+ * phone's Orders screen all draw the same card:
+ *
+ *   number ……………… print
+ *   amount ……………… who opened it        (a free table: "4 seats")
+ *   timer · chips ……… seats
+ *
+ * A busy table wears its PERSON's colour on the border, so a room reads at a glance whose
+ * tables are whose. Late and waiting stay in the timer: bold red, or amber — a state is a
+ * form as well as a colour, and the person's colour is not overwritten by it.
+ */
 export function Tile({
   table,
   dense = false,
@@ -124,12 +148,14 @@ export function Tile({
   onDelete?: () => void;
 }) {
   const late = table.state === 'late';
-  // Amber and red are two states, not one — see TableState::Waiting.
-  const overdue = late || table.state === 'waiting';
+  const waiting = table.state === 'waiting';
+  const busy = table.state !== 'free';
   // Two classes, never one.
   const classes = [
     'mb-tile',
     `mb-tile--${table.state}`,
+    busy ? 'mb-tile--busy' : '',
+    busy && table.byId ? `mb-tile--person-${personSlot(table.byId)}` : '',
     table.selected ? 'mb-tile--selected' : '',
     picked ? 'mb-tile--picked' : '',
   ]
@@ -145,17 +171,33 @@ export function Tile({
           {table.label}
         </span>
 
-        {table.total ? (
-          <span className="mb-tile__amount">{table.total.text}</span>
-        ) : null}
+        {/* The second row: the money and whose it is, or how big the table is. */}
+        {dense ? null : busy ? (
+          <span className="mb-tile__row">
+            {table.total ? <span className="mb-tile__amount">{table.total.text}</span> : null}
+            {table.by ? (
+              <span className="mb-tile__by" title={`Opened by ${table.by}`}>
+                {table.by}
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="mb-tile__seatsline">
+            {table.seats > 0 ? `${table.seats} seats` : ''}
+          </span>
+        )}
 
-        {/* The second line is what the dense step drops. */}
+        {/* The third row: the timers and the chips, and the seats at the far end. */}
         {dense ? null : (
           <span className="mb-tile__meta">
-            {table.minutes === null ? (
-              <span>{table.seats > 0 ? `${table.seats} seats` : ''}</span>
-            ) : (
-              <span className={overdue ? 'mb-tile__timer--late' : undefined}>
+            {table.minutes === null ? null : (
+              <span
+                className={cx(
+                  'mb-tile__timer',
+                  late && 'mb-tile__timer--late',
+                  waiting && 'mb-tile__timer--waiting',
+                )}
+              >
                 {formatMinutes(table.minutes)}
               </span>
             )}
@@ -180,11 +222,23 @@ export function Tile({
                 aria-label="The kitchen has not been told"
               />
             ) : null}
-            {/* A waiter asked for this table's bill from a phone; it printed. */}
-            {table.billAsked ? (
+            {/* A waiter asked, from a phone, for this table to be settled: the desk has it. */}
+            {table.settleAsked ? (
+              <span className="mb-tile__settle" title="A phone asked for this bill to be settled">
+                <Icon name="cash" size="sm" />
+                Settle
+              </span>
+            ) : table.billAsked ? (
+              /* A waiter asked for this table's bill from a phone; it printed. */
               <span className="mb-tile__bill" title="The bill was asked for from a phone">
                 <Icon name="file" size="sm" />
                 Bill
+              </span>
+            ) : null}
+            {table.seats > 0 ? (
+              <span className="mb-tile__seats" title={`${table.seats} seats`}>
+                <Icon name="users" size="sm" />
+                {table.seats}
               </span>
             ) : null}
           </span>
@@ -195,10 +249,16 @@ export function Tile({
           somebody for.
         */}
         {dense && table.minutes !== null ? (
-          <span
-            className={`mb-tile__meta ${overdue ? 'mb-tile__timer--late' : ''}`.trim()}
-          >
-            {formatMinutes(table.minutes)}
+          <span className="mb-tile__meta">
+            <span
+              className={cx(
+                'mb-tile__timer',
+                late && 'mb-tile__timer--late',
+                waiting && 'mb-tile__timer--waiting',
+              )}
+            >
+              {formatMinutes(table.minutes)}
+            </span>
           </span>
         ) : null}
       </Face>
@@ -276,6 +336,22 @@ export function Tile({
   );
 }
 
+/** The dashed card after the last table in a room: the way in to adding one. */
+export function AddTile({ onAdd }: { onAdd: () => void }) {
+  return (
+    <button
+      type="button"
+      className="mb-tile-add"
+      onClick={onAdd}
+      aria-label="Add table"
+      title="Add a table to this room"
+    >
+      <Icon name="plus" size="md" />
+      <span>Add table</span>
+    </button>
+  );
+}
+
 /** The tile's own surface. */
 function Face({
   onOpen,
@@ -317,8 +393,10 @@ function describe(table: TableView, picked?: boolean): string {
   // Said as well as the state, not instead of it — the same reason the ring is drawn on top of
   // the colour rather than replacing it.
   if (table.selected) parts.push('open in the cart');
+  if (table.by) parts.push(`opened by ${table.by}`);
   if (table.total) parts.push(table.total.text);
   if (table.minutes !== null) parts.push(formatMinutes(table.minutes));
+  if (table.settleAsked) parts.push('asked to be settled');
   return parts.join(', ');
 }
 

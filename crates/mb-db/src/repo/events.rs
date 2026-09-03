@@ -10,12 +10,27 @@ use crate::error::DbError;
 pub const KITCHEN_TICKET: &str = "kitchen_ticket";
 /// A phone asked for the bill and the counter printed it for the table.
 pub const BILL_ASKED: &str = "bill_asked";
+/// A phone asked the counter to settle the bill; a person at the counter confirms or declines.
+/// The detail is `{"payment": "cash" | "card" | "upi" | null}` — what the waiter was handed.
+pub const SETTLE_ASKED: &str = "settle_asked";
+/// Somebody at the counter declined a settle request; the tile goes quiet again.
+pub const SETTLE_DECLINED: &str = "settle_declined";
 /// The order moved to another table.
 pub const MOVED: &str = "moved";
 /// This order's food was folded into another bill.
 pub const MERGED: &str = "merged";
 /// Part of this order left for a bill of its own.
 pub const SPLIT: &str = "split";
+
+/// One order's latest event of a kind — see `EventsRepo::latest_of_two`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LatestEvent {
+    pub order_id: String,
+    pub at: Timestamp,
+    pub staff_id: Option<String>,
+    pub event: String,
+    pub detail: Option<String>,
+}
 
 #[derive(Debug)]
 pub struct EventsRepo<'a> {
@@ -117,6 +132,37 @@ impl<'a> EventsRepo<'a> {
         for row in rows {
             let (id, at) = row?;
             out.push((id, encode::timestamp_from_sql(at)));
+        }
+        Ok(out)
+    }
+
+    /// The LATEST of two events per order — which of "asked" and "declined" came last, with
+    /// who did it and the detail. One query for the whole floor.
+    pub fn latest_of_two(
+        &self,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<LatestEvent>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT e.order_id, e.at, e.staff_id, e.event, e.detail
+             FROM order_events e
+             JOIN (SELECT order_id, max(at) AS at FROM order_events
+                   WHERE event IN (?1, ?2) GROUP BY order_id) m
+               ON m.order_id = e.order_id AND m.at = e.at
+             WHERE e.event IN (?1, ?2)",
+        )?;
+        let rows = stmt.query_map([a, b], |row| {
+            Ok(LatestEvent {
+                order_id: row.get(0)?,
+                at: encode::timestamp_from_sql(row.get::<_, i64>(1)?),
+                staff_id: row.get(2)?,
+                event: row.get(3)?,
+                detail: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
         }
         Ok(out)
     }

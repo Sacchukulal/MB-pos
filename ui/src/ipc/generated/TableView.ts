@@ -32,7 +32,16 @@ kitchenMinutes: number | null,
  * A waiter asked for this table's bill from a phone, and it printed. The tile says so
  * until the table is settled.
  */
-billAsked: boolean, orderId: string | null, 
+billAsked: boolean, 
+/**
+ * A waiter asked, from a phone, for this bill to be settled; the desk on the counter's
+ * screen has it until somebody there confirms or declines.
+ */
+settleAsked: boolean, 
+/**
+ * Who opened the order — the tile wears their colour, here and on the phones.
+ */
+by: string | null, byId: string | null, orderId: string | null, 
 /**
  * The bill number this order has already claimed, formatted as it will be printed.
  */

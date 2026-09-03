@@ -140,13 +140,6 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                 let tables = repos.floor().list_tables(OUTLET)?;
                 let sections = repos.floor().list_sections(OUTLET)?;
                 let open = repos.orders().list_open(OUTLET)?;
-                let told = repos
-                    .events()
-                    .last_for_each(mb_db::repo::events::KITCHEN_TICKET)?;
-                let asked = repos
-                    .events()
-                    .last_for_each(mb_db::repo::events::BILL_ASKED)?;
-
                 let numbers = repos.floor().occupancy(OUTLET, today(at))?;
 
                 let mut tiles = floor_view(
@@ -162,16 +155,9 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                         config: &config,
                     },
                 );
-                // The second timer: minutes since the last kitchen ticket.
-                for tile in &mut tiles {
-                    if let Some(order_id) = &tile.order_id {
-                        tile.kitchen_minutes = told
-                            .iter()
-                            .find(|(id, _)| id == order_id)
-                            .map(|(_, when)| crate::ipc::count(minutes_between(*when, at)));
-                        tile.bill_asked = asked.iter().any(|(id, _)| id == order_id);
-                    }
-                }
+                // The kitchen timer, who opened each order, what the phones asked — the same
+                // call the billing grid makes.
+                crate::billing::decorate(&mut tiles, &repos, at)?;
 
                 let busy_ids: Vec<String> = open
                     .iter()
@@ -245,7 +231,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
     })
 }
 
-fn minutes_between(from: Timestamp, to: Timestamp) -> i64 {
+pub(crate) fn minutes_between(from: Timestamp, to: Timestamp) -> i64 {
     (to.millis() - from.millis()).div_euclid(60_000).max(0)
 }
 

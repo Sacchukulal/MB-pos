@@ -1,11 +1,12 @@
 import { render, screen, cleanup, within, act, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { PaymentModes } from '../src/billing/Billing';
+import { PaymentModes, paymentAnswer } from '../src/billing/Billing';
 import { Processing, ProcessingHead, processingOrders } from '../src/billing/Processing';
 import { DENSE_ABOVE, TableGrid } from '../src/billing/TableGrid';
 import { Totals } from '../src/billing/Totals';
 import type { BillView } from '../src/ipc/generated/BillView';
+import type { CartView } from '../src/ipc/generated/CartView';
 
 import type { MoneyView } from '../src/ipc/generated/MoneyView';
 import type { TableView } from '../src/ipc/generated/TableView';
@@ -26,6 +27,9 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     kitchenTold: true,
     kitchenMinutes: null,
     billAsked: false,
+    settleAsked: false,
+    by: null,
+    byId: null,
     orderId: null,
     billNumber: null,
     selected: false,
@@ -260,45 +264,147 @@ describe('an empty floor (P30.5)', () => {
   });
 });
 
-/** The payment modes. */
-describe('the payment modes (2026-08-23)', () => {
+/** The money row: Cash and its box, the answer, and the arrow that keeps the other ways. */
+describe('the payment modes (2026-08-23, one row 2026-09-03)', () => {
   /** The row is a CHOICE, not an action. */
   const mode = (label: string) =>
     screen.getByRole('button', { name: new RegExp(`^${label}`) });
+  const arrow = () => screen.getByRole('button', { name: /Other ways to pay/ });
+  const money = (paise: bigint) => ({ paise, text: (Number(paise) / 100).toFixed(2) });
+  /** A cart with only what the row reads. */
+  const cartWith = (over: {
+    balance?: bigint;
+    change?: bigint;
+    payments?: number;
+    isEmpty?: boolean;
+  }) =>
+    ({
+      isEmpty: over.isEmpty ?? false,
+      balance: money(over.balance ?? 0n),
+      change: money(over.change ?? 0n),
+      payments: Array.from({ length: over.payments ?? 0 }, (_, index) => ({
+        index,
+        mode: 'Cash',
+        amount: money(0n),
+        reference: null,
+      })),
+    }) as unknown as CartView;
+  const row = (over: Partial<Parameters<typeof PaymentModes>[0]> = {}) => (
+    <PaymentModes
+      mode="Cash"
+      onPick={vi.fn()}
+      onCredit={vi.fn()}
+      cash=""
+      onCash={vi.fn()}
+      onCashDone={vi.fn()}
+      cart={null}
+      {...over}
+    />
+  );
 
-  it('lights the mode it is given and no other', () => {
-    render(<PaymentModes mode="Cash" onPick={vi.fn()} onCredit={vi.fn()} />);
+  it('lights Cash on its own, with the box beside it and the arrow at the end', () => {
+    render(row());
     expect(mode('Cash').getAttribute('aria-pressed')).toBe('true');
-    for (const other of ['Card', 'UPI']) {
-      expect(mode(other).getAttribute('aria-pressed')).toBe('false');
-    }
+    expect(screen.getByRole('textbox', { name: 'Cash given' })).toBeTruthy();
+    expect(arrow().getAttribute('aria-pressed')).toBe('false');
+    // Card and UPI are behind the arrow, not on the row.
+    expect(screen.queryByRole('button', { name: /^Card/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^UPI/ })).toBeNull();
   });
 
   it('moves the light rather than taking money', () => {
     const onPick = vi.fn();
-    render(<PaymentModes mode="Cash" onPick={onPick} onCredit={vi.fn()} />);
-    mode('Card').click();
+    render(row({ onPick }));
+    act(() => arrow().click());
+    act(() => mode('Card').click());
     expect(onPick).toHaveBeenCalledWith('Card');
   });
 
-  it('never goes dead, because choosing a mode cannot fail', () => {
-    render(<PaymentModes mode="UPI" onPick={vi.fn()} onCredit={vi.fn()} />);
-    for (const label of ['Cash', 'Card', 'UPI']) expect(mode(label)).toBeEnabled();
+  it('says on the arrow which other way is in force, and the box stays for a split', () => {
+    render(row({ mode: 'UPI' }));
+    expect(mode('Cash').getAttribute('aria-pressed')).toBe('false');
+    const button = screen.getByRole('button', { name: /Paid by UPI/ });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.textContent).toContain('UPI');
+    expect(screen.getByRole('textbox', { name: 'Cash given' })).toBeTruthy();
   });
 
-  it('says nothing at all — no essay, no clear button', () => {
-    render(<PaymentModes mode="Cash" onPick={vi.fn()} onCredit={vi.fn()} />);
-    expect(screen.queryByText(/paid in full/i)).toBeNull();
+  it('never goes dead, because choosing a mode cannot fail', () => {
+    render(row({ mode: 'UPI' }));
+    expect(mode('Cash')).toBeEnabled();
+    act(() => arrow().click());
+    for (const label of ['Card', 'UPI', 'Credit']) expect(mode(label)).toBeEnabled();
+  });
+
+  it('says nothing at all with nothing typed — no essay, no clear button', () => {
+    render(row({ cart: cartWith({ balance: 2000n }) }));
+    expect(screen.queryByRole('status')).toBeNull();
     expect(screen.queryByRole('button', { name: /clear payments/i })).toBeNull();
   });
 
   it('keeps credit behind the arrow, and it opens the picker', () => {
     const onCredit = vi.fn();
-    render(<PaymentModes mode="Cash" onPick={vi.fn()} onCredit={onCredit} />);
+    render(row({ onCredit }));
     expect(screen.queryByRole('button', { name: /^Credit/ })).toBeNull();
-    act(() => screen.getByRole('button', { name: /Show credit billing/ }).click());
+    act(() => arrow().click());
     act(() => mode('Credit').click());
     expect(onCredit).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the cash box to whoever presses Cash', () => {
+    render(row({ mode: 'Card' }));
+    act(() => mode('Cash').click());
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Cash given' }));
+  });
+});
+
+/** What the row says beside the box. Rust did the sums; this only picks the sentence. */
+describe('the answer beside the cash box (2026-09-03)', () => {
+  const money = (paise: bigint) => ({ paise, text: (Number(paise) / 100).toFixed(2) });
+  const cartWith = (over: { balance?: bigint; change?: bigint; payments?: number }) =>
+    ({
+      isEmpty: false,
+      balance: money(over.balance ?? 0n),
+      change: money(over.change ?? 0n),
+      payments: Array.from({ length: over.payments ?? 0 }, () => ({})),
+    }) as unknown as CartView;
+
+  it('is silent on an empty cart', () => {
+    expect(paymentAnswer(null, 'Cash')).toBeNull();
+    expect(paymentAnswer({ isEmpty: true } as CartView, 'Cash')).toBeNull();
+  });
+
+  it('gives change back in green, whichever mode is lit', () => {
+    const cart = cartWith({ change: 1000n, payments: 1 });
+    expect(paymentAnswer(cart, 'Cash')).toEqual({ tone: 'back', text: 'Return 10.00' });
+    expect(paymentAnswer(cart, 'Card')).toEqual({ tone: 'back', text: 'Return 10.00' });
+  });
+
+  it('asks for the rest in red once some cash is down', () => {
+    expect(paymentAnswer(cartWith({ balance: 1000n, payments: 1 }), 'Cash')).toEqual({
+      tone: 'short',
+      text: 'Need 10.00',
+    });
+    // Nothing typed yet: nothing to say.
+    expect(paymentAnswer(cartWith({ balance: 2000n }), 'Cash')).toBeNull();
+  });
+
+  it('sends the rest by card or UPI — the whole bill, or what the cash left', () => {
+    expect(paymentAnswer(cartWith({ balance: 2000n }), 'UPI')).toEqual({
+      tone: 'by',
+      text: '20.00 by UPI',
+    });
+    expect(paymentAnswer(cartWith({ balance: 500n, payments: 1 }), 'Card')).toEqual({
+      tone: 'by',
+      text: '5.00 by Card',
+    });
+  });
+
+  it('says so when the cash was exact', () => {
+    expect(paymentAnswer(cartWith({ payments: 1 }), 'Cash')).toEqual({
+      tone: 'back',
+      text: 'Paid exactly',
+    });
   });
 });
 

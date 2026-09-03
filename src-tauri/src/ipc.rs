@@ -438,6 +438,10 @@ macro_rules! commands {
             $crate::flows::bill_pdf,
             $crate::flows::complete_bill,
             $crate::flows::print_open_bill,
+            // The settle desk: what the phones asked, and the cashier's answer.
+            $crate::orders::settle_requests,
+            $crate::orders::settle_from_floor,
+            $crate::orders::decline_settle,
             // Signing in, the people, the history.
             $crate::ipc::lock_state,
             $crate::ipc::login,
@@ -630,10 +634,16 @@ macro_rules! commands {
             $crate::reports::report_csv,
             $crate::reports::report_pdf,
             $crate::reports::dashboard,
-            $crate::dayclose::day_close,
-            $crate::dayclose::count_cash,
+            // The business day: the gate, the Days screen, and the drawer count beside them.
+            $crate::dayclose::day_state,
+            $crate::dayclose::close_pending,
+            $crate::dayclose::days,
             $crate::dayclose::close_day,
+            $crate::dayclose::mark_holiday,
+            $crate::dayclose::unmark_holiday,
             $crate::dayclose::reopen_day,
+            $crate::dayclose::count_cash,
+            $crate::dayclose::count_drawer,
             // The phones this counter serves.
             $crate::lan::network,
             $crate::lan::phones_now,
@@ -1160,36 +1170,38 @@ pub fn open_orders_on(app: &App) -> UiResult<Vec<TableView>> {
     // floor plan disagreeing about which table is late would be worse than neither of them
     // saying so.
     let (warn, late) = crate::floor::thresholds(app)?;
+    let at = crate::flows::now();
+    let config = app.shop_config();
     app.with_shop(|shop| {
-        let (tables, sections, open) = shop
-            .db
+        shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                Ok((
-                    repos.floor().list_tables(OUTLET)?,
-                    repos.floor().list_sections(OUTLET)?,
-                    repos.orders().list_open(OUTLET)?,
-                ))
+                let tables = repos.floor().list_tables(OUTLET)?;
+                let sections = repos.floor().list_sections(OUTLET)?;
+                let open = repos.orders().list_open(OUTLET)?;
+                let mut tiles = floor_view(
+                    &tables,
+                    &sections,
+                    &open,
+                    crate::billing::Room {
+                        // The billing grid IS the cart's view of the room, so it is the one
+                        // screen that marks a tile.
+                        cart_is_on: Some(crate::billing::CartIsOn {
+                            order: loaded.as_deref(),
+                            table: on_table.as_deref(),
+                            seat: on_seat.as_deref(),
+                        }),
+                        now: at,
+                        warn_after: warn,
+                        late_after: late,
+                        config: &config,
+                    },
+                );
+                // The same facts the floor screen adds, so the two grids never disagree.
+                crate::billing::decorate(&mut tiles, &repos, at)?;
+                Ok(tiles)
             })
-            .map_err(|e| words::from_db(&e))?;
-        Ok(floor_view(
-            &tables,
-            &sections,
-            &open,
-            crate::billing::Room {
-                // The billing grid IS the cart's view of the room, so it is the one screen that
-                // marks a tile.
-                cart_is_on: Some(crate::billing::CartIsOn {
-                    order: loaded.as_deref(),
-                    table: on_table.as_deref(),
-                    seat: on_seat.as_deref(),
-                }),
-                now: crate::flows::now(),
-                warn_after: warn,
-                late_after: late,
-                config: &app.shop_config(),
-            },
-        ))
+            .map_err(|e| words::from_db(&e))
     })
 }
 

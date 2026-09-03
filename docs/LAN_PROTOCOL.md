@@ -206,7 +206,7 @@ if the catalogue version changed, `GET /v1/catalogue`.
 
 | `kind` | when | `body` |
 |---|---|---|
-| `floor` | any table or open order changed, by anybody — the cashier, a phone, the kitchen. Bursts are collapsed into one push. | `{ "tables": [ { "id", "state": "free" \| "taken" \| "bill_asked", "order_id" } ], "orders": [ { "order_id", "table_id", "table_label", "order_type", "total", "token", "note", "lines": [ LineView ], "bill_asked": bool, "by": "Ravi" \| null, "by_id": "stf_…" \| null } ] }` — every open order, as an outcome would describe it; `by`/`by_id` name whoever opened it, so a phone can mark its own |
+| `floor` | any table or open order changed, by anybody — the cashier, a phone, the kitchen. Bursts are collapsed into one push. | `{ "tables": [ { "id", "state": "free" \| "taken" \| "bill_asked", "order_id" } ], "orders": [ { "order_id", "table_id", "table_label", "order_type", "total", "token", "note", "lines": [ LineView ], "bill_asked": bool, "settle_asked": bool, "minutes": 42, "by": "Ravi" \| null, "by_id": "stf_…" \| null } ], "warn_minutes": 20, "late_minutes": 45 }` — every open order, as an outcome would describe it; `by`/`by_id` name whoever opened it, so a phone can mark its own and colour it by person; `minutes` is how long the table has sat, by the counter's clock, so both screens show one number |
 | `catalogue` | the menu, a price, availability, a table or a section changed | `{ "version": "…" }` — compare with what you hold; fetch `/v1/catalogue` if different |
 
 **The floor is the whole floor.** A phone shows every open order — any waiter may look at,
@@ -277,11 +277,20 @@ taken as sending now.
 | `move_table` | `table_id` | `bill.create` |
 | `cancel_order` | `reason` (**compulsory**) | `order.cancel` |
 | `request_bill` | — | `bill.create` |
+| `request_settle` | `payment?` (`"cash"` \| `"card"` \| `"upi"`) | `bill.create` |
 
 `request_bill` makes the counter **print the bill** on its bill printer — the same "bill
 to the table" paper the counter's own Print bill makes, with the waiter's name on it —
 and marks the order `bill_asked` on the floor until it is settled. The waiter carries the
 paper over; the money is still taken at the counter.
+
+`request_settle` asks the counter to **settle the bill**. Nothing is settled by the phone:
+the request lands on the counter's screen as a list — every table that asked, oldest first —
+and a person there confirms one with Enter (or declines it). The counter then completes the
+bill exactly as if the cashier had opened the order and pressed Complete bill, in the payment
+mode the waiter named or the one the cashier picks. Until then the order is `settle_asked` on
+the floor; a decline clears it; a settle removes the order from the floor, which is how the
+phone learns the bill is done.
 
 `qty` is a **decimal string**, never a float: `"0.5"`, `"2"`. A quantity
 multiplies a price and floating point has no place near money.

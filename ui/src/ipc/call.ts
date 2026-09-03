@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 import type { AppStatus } from './generated/AppStatus';
+import type { SettleRequestView } from './generated/SettleRequestView';
 import type { FirstRunView } from './generated/FirstRunView';
 import type { PrintJobView } from './generated/PrintJobView';
 import type { PreviewDoc } from './generated/PreviewDoc';
@@ -89,7 +90,9 @@ import type { ConfigPlanView } from './generated/ConfigPlanView';
 import type { NumberingView } from './generated/NumberingView';
 import type { CountArg } from './generated/CountArg';
 import type { DashboardView } from './generated/DashboardView';
-import type { DayCloseView } from './generated/DayCloseView';
+import type { DayStateView } from './generated/DayStateView';
+import type { DaysView } from './generated/DaysView';
+import type { DrawerView } from './generated/DrawerView';
 import type { LicenceView } from './generated/LicenceView';
 import type { HealthView } from './generated/HealthView';
 import type { BundlePlanView } from './generated/BundlePlanView';
@@ -172,6 +175,12 @@ export interface Commands {
   complete_bill: { args: { mode: string | null }; returns: string };
   /** The bill a waiter carries to the table, before anybody has paid. */
   print_open_bill: { args: { orderId: string }; returns: string };
+  /** The settle desk: what the phones asked the counter to settle, oldest first. */
+  settle_requests: { args: void; returns: SettleRequestView[] };
+  /** The cashier confirmed one: the bill completes in that mode; their own cart is kept. */
+  settle_from_floor: { args: { orderId: string; mode: string }; returns: string };
+  /** The cashier said no: the request leaves the desk. */
+  decline_settle: { args: { orderId: string }; returns: null };
   /** Development only — the command does not exist in a release build. */
   seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
@@ -626,13 +635,21 @@ export interface Commands {
   refuse_device: { args: { requestId: string }; returns: NetworkView };
   revoke_device: { args: { deviceId: string }; returns: NetworkView };
 
-  day_close: { args: void; returns: DayCloseView };
-  count_cash: { args: { counts: CountArg[] }; returns: DayCloseView };
-  close_day: {
+  // The business day. `holidays` is what the person has switched so far; null keeps Rust's
+  // suggestions.
+  day_state: { args: { holidays: string[] | null }; returns: DayStateView };
+  close_pending: { args: { holidays: string[] }; returns: DayStateView };
+  days: { args: void; returns: DaysView };
+  close_day: { args: { day: string }; returns: DaysView };
+  mark_holiday: { args: { days: string[] }; returns: DaysView };
+  unmark_holiday: { args: { days: string[] }; returns: DaysView };
+  reopen_day: { args: { day: string; reason: string }; returns: DaysView };
+  // The drawer count beside it, optional and locking nothing.
+  count_cash: { args: { counts: CountArg[] | null }; returns: DrawerView };
+  count_drawer: {
     args: { counts: CountArg[]; reason: string; print: boolean };
-    returns: DayCloseView;
+    returns: DrawerView;
   };
-  reopen_day: { args: { reason: string }; returns: DayCloseView };
 
   // The licence.
   account: { args: void; returns: LicenceView };

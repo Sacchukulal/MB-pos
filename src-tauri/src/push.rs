@@ -146,7 +146,7 @@ fn start_phone_pusher(app: AppHandle) -> std::sync::mpsc::Sender<PhoneNews> {
 }
 
 fn tell_the_phones(phones: &std::sync::mpsc::Sender<PhoneNews>, tables: &BTreeSet<String>) {
-    const FLOOR: &[&str] = &["orders", "order_lines", "payments", "dining_tables", "sections"];
+    const FLOOR: &[&str] = &["orders", "order_lines", "payments", "dining_tables", "sections", "order_events"];
     const CATALOGUE: &[&str] = &["items", "categories", "item_variants", "dining_tables", "sections"];
     let touched = |names: &[&str]| names.iter().any(|name| tables.contains(*name));
     if touched(CATALOGUE) {
@@ -167,6 +167,8 @@ fn emit_changes(app: &AppHandle, tables: &BTreeSet<String>) {
         "sections",
         "reservations",
         "waitlist",
+        // A settle request asked or declined is an event on the order, nothing else.
+        "order_events",
     ];
     const KITCHEN: &[&str] = &["orders", "order_lines", "kitchen_deliveries"];
     let touched = |names: &[&str]| names.iter().any(|name| tables.contains(*name));

@@ -80,6 +80,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         Access::Needs(Permission::BillCreate),
     ),
     ("complete_bill", Access::Needs(Permission::BillCreate)),
+    // The settle desk — the same permission as completing the bill by hand.
+    ("settle_requests", Access::Needs(Permission::BillCreate)),
+    ("settle_from_floor", Access::Needs(Permission::BillCreate)),
+    ("decline_settle", Access::Needs(Permission::BillCreate)),
     // Carrying the bill to the table.
     ("print_open_bill", Access::Needs(Permission::BillCreate)),
     (
@@ -90,8 +94,14 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // therefore a thing it permits.
     ("retry_print_job", Access::Needs(Permission::BillReprint)),
     ("dismiss_print_job", Access::Needs(Permission::BillReprint)),
-    ("retry_parked_print_jobs", Access::Needs(Permission::BillReprint)),
-    ("dismiss_all_print_jobs", Access::Needs(Permission::BillReprint)),
+    (
+        "retry_parked_print_jobs",
+        Access::Needs(Permission::BillReprint),
+    ),
+    (
+        "dismiss_all_print_jobs",
+        Access::Needs(Permission::BillReprint),
+    ),
     ("list_staff", Access::Needs(Permission::StaffManage)),
     ("save_staff_member", Access::Needs(Permission::StaffManage)),
     ("set_staff_pin", Access::Needs(Permission::StaffManage)),
@@ -337,10 +347,23 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // The dashboard is the day's takings on a screen, like every other report.
     ("dashboard", Access::Needs(Permission::ReportsView)),
     // Closing the day.
-    ("day_close", Access::Needs(Permission::ReportsView)),
-    ("count_cash", Access::Needs(Permission::ReportsView)),
+    // The day. The gate asks whoever signed in; the Days screen and the drawer count open to
+    // anybody who reads reports or closes days; the writes need the permission a cashier has.
+    ("day_state", Access::SignedIn),
+    ("close_pending", Access::Needs(Permission::DayClose)),
+    (
+        "days",
+        Access::NeedsAny(&[Permission::ReportsView, Permission::DayClose]),
+    ),
     ("close_day", Access::Needs(Permission::DayClose)),
+    ("mark_holiday", Access::Needs(Permission::DayClose)),
+    ("unmark_holiday", Access::Needs(Permission::DayClose)),
     ("reopen_day", Access::Needs(Permission::DayClose)),
+    (
+        "count_cash",
+        Access::NeedsAny(&[Permission::ReportsView, Permission::DayClose]),
+    ),
+    ("count_drawer", Access::Needs(Permission::DayClose)),
     // The phones this counter serves.
     ("network", Access::Needs(Permission::ReportsView)),
     // The top bar's number: how many phones are live. No permission — it is a count.

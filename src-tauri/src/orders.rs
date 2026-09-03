@@ -204,7 +204,8 @@ const fn needs(what: &What) -> Option<Permission> {
         | What::SetOrderNote { .. }
         | What::SetCovers { .. }
         | What::SendToKitchen
-        | What::RequestBill => Some(Permission::BillCreate),
+        | What::RequestBill
+        | What::RequestSettle { .. } => Some(Permission::BillCreate),
         // Taking something back is the permission the counter uses for the same act, and for
         // the same reason.
         What::VoidItem { .. } => Some(Permission::OrderItemVoid),
@@ -516,6 +517,44 @@ fn do_it(
                 None => "The bill is printing at the counter.".to_owned(),
             });
         }
+
+        What::RequestSettle { payment } => {
+            if open.core.cart.is_empty() {
+                return Ok(refused("There is nothing on this order to settle yet."));
+            }
+            // Written down with what the waiter was handed, so the desk on the counter's
+            // screen can offer that mode first. The cashier confirms; nothing is settled here.
+            let payment = payment
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_lowercase);
+            let detail = serde_json::json!({ "payment": payment }).to_string();
+            repos.events().record(
+                order_id,
+                at,
+                day,
+                mb_db::repo::events::SETTLE_ASKED,
+                Some(staff),
+                Some(&detail),
+            )?;
+            let label = open.core.table().and_then(|t| {
+                repos
+                    .floor()
+                    .list_tables(OUTLET)
+                    .ok()?
+                    .into_iter()
+                    .find(|row| &row.id == t)
+                    .map(|row| row.label)
+            });
+            note = Some(match label {
+                Some(label) => format!(
+                    "The counter has been asked to settle table {label}. Somebody there confirms it."
+                ),
+                None => "The counter has been asked to settle this bill. Somebody there confirms it."
+                    .to_owned(),
+            });
+        }
     }
 
     repos
@@ -707,6 +746,10 @@ fn view_of(
 /// touched; an order missing from this list is one the counter has finished with.
 pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
     let config = app.shop_config();
+    let at = now();
+    // The same two thresholds the counter's own tiles use, so a phone turns a table amber and
+    // red at the same minute the counter does.
+    let (warn_minutes, late_minutes) = crate::floor::thresholds(app)?;
     app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
@@ -718,6 +761,15 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                 let asked = repos
                     .events()
                     .last_for_each(mb_db::repo::events::BILL_ASKED)?;
+                let settles = repos.events().latest_of_two(
+                    mb_db::repo::events::SETTLE_ASKED,
+                    mb_db::repo::events::SETTLE_DECLINED,
+                )?;
+                let settle_asked = |order_id: &str| {
+                    settles
+                        .iter()
+                        .any(|e| e.order_id == order_id && e.event == mb_db::repo::events::SETTLE_ASKED)
+                };
                 let people = repos.people().list_staff(OUTLET)?;
                 let name_of = |id: &StaffId| {
                     people
@@ -783,6 +835,10 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                                 "note": note.or_else(|| open.core.note.clone()),
                                 "lines": lines,
                                 "bill_asked": bill_asked(open.core.id.as_str()),
+                                "settle_asked": settle_asked(open.core.id.as_str()),
+                                // How long the table has been sitting, by the counter's clock —
+                                // the same number its own tile shows.
+                                "minutes": (at.millis() - open.core.created_at.millis()).div_euclid(60_000).max(0),
                                 "by": name_of(&open.core.created_by),
                                 "by_id": open.core.created_by.as_str(),
                             }),
@@ -791,7 +847,12 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                     })
                     .filter(|v| !v.is_null())
                     .collect();
-                Ok(serde_json::json!({ "tables": table_rows, "orders": order_rows }))
+                Ok(serde_json::json!({
+                    "tables": table_rows,
+                    "orders": order_rows,
+                    "warn_minutes": warn_minutes,
+                    "late_minutes": late_minutes,
+                }))
             })
             .map_err(|e| words::from_db(&e))
     })
@@ -1093,6 +1154,7 @@ mod tests {
                 reason: "r".to_owned(),
             },
             What::RequestBill,
+            What::RequestSettle { payment: None },
         ];
         for what in &all {
             assert!(
@@ -1117,4 +1179,179 @@ mod tests {
             Some(Permission::OrderCancel)
         );
     }
+}
+
+// The settle desk: what the phones asked the counter to settle, and the cashier's answer.
+
+/// One request on the desk — a waiter asked, from a phone, for this bill to be settled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct SettleRequestView {
+    pub order_id: String,
+    /// "Table 4", "Parcel", "Self service".
+    pub place: String,
+    pub token: Option<String>,
+    /// The running total, formatted.
+    pub total: String,
+    /// Who asked, by name.
+    pub waiter: String,
+    /// The counter's own mode word — "Cash", "Card", "UPI" — when the waiter said what they
+    /// were handed; `None` when they did not.
+    pub payment: Option<String>,
+    /// Minutes since they asked.
+    pub minutes: u32,
+    /// The whole sentence: "Ravi asks to settle table 4 — 840.00, paid by cash."
+    pub says: String,
+}
+
+/// The counter's word for what a phone said it was handed.
+fn payment_word(detail: Option<&str>) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(detail?).ok()?;
+    match parsed.get("payment")?.as_str()? {
+        "cash" => Some("Cash".to_owned()),
+        "card" => Some("Card".to_owned()),
+        "upi" => Some("UPI".to_owned()),
+        _ => None,
+    }
+}
+
+/// Every settle request still waiting, oldest first.
+pub fn settle_requests_on(app: &App) -> UiResult<Vec<SettleRequestView>> {
+    guard::require(app, Permission::BillCreate)?;
+    let at = now();
+    let config = app.shop_config();
+    app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let mut asked: Vec<_> = repos
+                    .events()
+                    .latest_of_two(
+                        mb_db::repo::events::SETTLE_ASKED,
+                        mb_db::repo::events::SETTLE_DECLINED,
+                    )?
+                    .into_iter()
+                    .filter(|e| e.event == mb_db::repo::events::SETTLE_ASKED)
+                    .collect();
+                asked.sort_by_key(|e| e.at.millis());
+                if asked.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let open = repos.orders().list_open(OUTLET)?;
+                let tables = repos.floor().list_tables(OUTLET)?;
+                let people = repos.people().list_staff(OUTLET)?;
+                let mut out = Vec::new();
+                for e in asked {
+                    let Some(order) = open.iter().find(|o| o.core().id.as_str() == e.order_id) else {
+                        // Settled or gone since: nothing left to ask.
+                        continue;
+                    };
+                    let AnyOrder::Open(open_order) = order else { continue };
+                    let place = match order.core().table() {
+                        Some(t) => format!(
+                            "Table {}",
+                            tables
+                                .iter()
+                                .find(|row| &row.id == t)
+                                .map_or_else(|| t.as_str().to_owned(), |row| row.label.clone())
+                        ),
+                        None => crate::billing::order_type_label(order.core().order_type()).to_owned(),
+                    };
+                    let waiter = e
+                        .staff_id
+                        .as_deref()
+                        .and_then(|id| people.iter().find(|p| p.id.as_str() == id))
+                        .map_or_else(|| "The floor".to_owned(), |p| p.name.clone());
+                    let (total, token) = match view_of(open_order, None, &config) {
+                        Outcome::Ok { total, token, .. } => (total, token),
+                        _ => continue,
+                    };
+                    let payment = payment_word(e.detail.as_deref());
+                    let paid = payment
+                        .as_deref()
+                        .map(|p| format!(", paid by {}", p.to_lowercase()))
+                        .unwrap_or_default();
+                    let says = format!("{waiter} asks to settle {} — {total}{paid}.", place.to_lowercase());
+                    out.push(SettleRequestView {
+                        order_id: e.order_id.clone(),
+                        place,
+                        token,
+                        total,
+                        waiter,
+                        payment,
+                        minutes: crate::ipc::count((at.millis() - e.at.millis()).div_euclid(60_000).max(0)),
+                        says,
+                    });
+                }
+                Ok(out)
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// The cashier confirmed a request: the bill completes in `mode`, exactly as if they had
+/// opened the order and pressed "Complete bill". Whatever the cashier was typing is kept —
+/// parked first, brought back after — so a request never costs them their own bill.
+pub fn settle_from_floor_on(app: &App, order_id: String, mode: String) -> UiResult<String> {
+    guard::require(app, Permission::BillCreate)?;
+    let (loaded, has_lines) = app.with_cart(|state| {
+        Ok((state.order_id().map(str::to_owned), !state.cart.is_empty()))
+    })?;
+    let bring_back = if loaded.as_deref() == Some(order_id.as_str()) {
+        None
+    } else if has_lines {
+        Some(crate::flows::park_open_order(app)?.core.id.as_str().to_owned())
+    } else {
+        loaded
+    };
+    crate::ipc::open_order_on(app, order_id.clone())?;
+    let number = crate::flows::complete_bill_on(app, Some(mode))?;
+    crate::log_info!("order={order_id} settled from the floor's request as bill {number}");
+    if let Some(id) = bring_back
+        && id != order_id
+        && let Err(e) = crate::ipc::open_order_on(app, id.clone())
+    {
+        // Their bill is on disk as an open order; the Processing list has it.
+        crate::log_warn!("order={id} could not be brought back to the cart after a settle: {}", e.message);
+    }
+    Ok(number)
+}
+
+/// The cashier said no: the request leaves the desk and the tile goes quiet. The waiter sees
+/// the tile change; a word to them is the cashier's to say.
+pub fn decline_settle_on(app: &App, order_id: String) -> UiResult<()> {
+    let who = guard::require(app, Permission::BillCreate)?;
+    let at = now();
+    let day = today(at);
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                repos.events().record(
+                    &order_id,
+                    at,
+                    day,
+                    mb_db::repo::events::SETTLE_DECLINED,
+                    Some(&who.staff_id),
+                    None,
+                )
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+#[tauri::command]
+pub fn settle_requests(app: tauri::State<'_, App>) -> UiResult<Vec<SettleRequestView>> {
+    settle_requests_on(&app)
+}
+
+#[tauri::command]
+pub fn settle_from_floor(app: tauri::State<'_, App>, order_id: String, mode: String) -> UiResult<String> {
+    settle_from_floor_on(&app, order_id, mode)
+}
+
+#[tauri::command]
+pub fn decline_settle(app: tauri::State<'_, App>, order_id: String) -> UiResult<()> {
+    decline_settle_on(&app, order_id)
 }

@@ -35,15 +35,18 @@
   /* Icon to its label, a number to its unit — inside one thing. */
   --gap-inline: var(--space-2);
   /* Between two controls that belong to each other. */
-  --gap-field: var(--space-3);
+  --gap-field: 0.625rem;
   /* Between two groups of controls under one heading. */
-  --gap-group: var(--space-5);
+  --gap-group: 0.875rem;
   /* Between two sections of a page. */
-  --gap-section: var(--space-6);
-  /* The page's own margin — the same on all four sides. Wider on a wide screen (below). */
-  --page-pad: var(--space-5);
+  --gap-section: 1.25rem;
+  /*
+   * The page's own margin — the same on all four sides, and SMALL: a desktop application
+   * uses its window. A little wider on a wide screen (below).
+   */
+  --page-pad: var(--space-3);
   --page-pad-x: var(--page-pad);
-  --page-pad-y: var(--space-4);
+  --page-pad-y: var(--page-pad);
   /* How wide the scrollbar is. */
   --scrollbar: 0.5rem;
 
@@ -81,10 +84,15 @@
   /* How narrow a kitchen ticket may get before it wraps. */
   --kds-card-min: 18rem;
 
-  /* Radius. Modest: a card is softer than a control, a chip is a pill. */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  /*
+   * Radius. One family, and it is ROUNDED: a control reads as a button from across the
+   * counter, a panel as a card. Owner ruling, 2026-09-03 (afternoon): the old near-square
+   * look "was not good"; the shape of the previous counter is the reference. A chip is the
+   * one pill.
+   */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
 
   /* Type. Inter, bundled; the OS face behind it if the file is ever missing. */
@@ -101,13 +109,16 @@
    */
   --type-scale: 1;
 
-  /* Six steps. Body is 14px: this is software, not a document. */
-  --text-xs: calc(0.75rem * var(--type-scale));
-  --text-sm: calc(0.8125rem * var(--type-scale));
-  --text-md: calc(0.875rem * var(--type-scale));
-  --text-lg: calc(1rem * var(--type-scale));
-  --text-xl: calc(1.25rem * var(--type-scale));
-  --text-2xl: calc(1.75rem * var(--type-scale));
+  /*
+   * Six steps. Body is 15px and a cell is 14px: this is software read standing at a counter
+   * across a 1366-pixel screen, not a document held in the hand.
+   */
+  --text-xs: calc(0.78125rem * var(--type-scale));
+  --text-sm: calc(0.875rem * var(--type-scale));
+  --text-md: calc(0.9375rem * var(--type-scale));
+  --text-lg: calc(1.0625rem * var(--type-scale));
+  --text-xl: calc(1.375rem * var(--type-scale));
+  --text-2xl: calc(1.875rem * var(--type-scale));
 
   --weight-normal: 400;
   --weight-medium: 500;
@@ -144,14 +155,14 @@
    * md — a page's own buttons, inputs, selects, segments.
    * sm — a control inside a row: a row action, a stepper, a chip.
    */
-  --control-lg: 2.75rem;
-  --control-md: 2.25rem;
-  --control-sm: 1.75rem;
+  --control-lg: 2.875rem;
+  --control-md: 2.375rem;
+  --control-sm: 1.875rem;
   /* The touch floor (§7). Only the lg controls stand on it. */
   --target-min: var(--control-lg);
   --target-small: var(--control-sm);
   /* How wide the − and + of a stepper are. */
-  --stepper-step: 1.75rem;
+  --stepper-step: 1.875rem;
 
   /*
    * THE FIELD-SIZE SCALE. A form row picks from these, so four fields never show four
@@ -180,7 +191,7 @@
   /* A "find something on this screen" box. */
   --find-width: var(--field-lg);
   --modal-width: 28rem;
-  --modal-width-wide: 42rem;
+  --modal-width-wide: 52rem;
   --panel-width: 22rem;
   --toast-width-min: 14rem;
   --toast-width-max: 20rem;
@@ -193,10 +204,11 @@
   --queue-width: 16rem;
   --tile-min: 7.5rem;
   --tile-min-dense: 5.5rem;
-  --tile-height: 5.5rem;
-  --tile-height-dense: 3.5rem;
+  /* A tile's FLOOR. It grows for its content; it never cuts a timer in half. */
+  --tile-height: 5.75rem;
+  --tile-height-dense: 3.75rem;
   /* Print, edit, delete — the small buttons that sit on a tile. */
-  --tile-button: 1.5rem;
+  --tile-button: 1.625rem;
   /* The state stripe down a tile's left edge. */
   --tile-stripe: 3px;
   --suggestions-height: 22rem;
@@ -265,7 +277,7 @@
   /* How narrow a table may get before it scrolls sideways instead of wrapping. */
   --table-min: 34rem;
   /* A table row. */
-  --row-height: 2.5rem;
+  --row-height: 2.625rem;
 
   /*
    * THE LAYER CONTRACT. Same argument as spacing and type: a screen names a JOB, never a
@@ -299,134 +311,132 @@
 /* A wide screen gets a wider margin; nothing else changes. */
 @media (min-width: 1600px) { /* mb-tokens-allow: media queries cannot use var() */
   :root {
-    --page-pad: var(--space-6);
-    --page-pad-y: var(--space-5);
+    --page-pad: var(--space-4);
+    --page-pad-y: var(--space-4);
   }
 }
 
-/* LIGHT — the default. A white sheet on a grey desk. */
+/*
+ * LIGHT — the default. Navy ink on cool white paper. The greys carry a little blue so a
+ * panel stands off the page, the accent is the navy that fills a chosen button, and one
+ * BRAND blue is kept for the small marks that point (an icon in a box, the New-order key,
+ * a mode taken by card). Red, green and amber still mean what they mean — a void, money back,
+ * a warning — on a chip, a stripe, the answer beside the cash box, and the one
+ * confirm-delete button. Owner rulings, 2026-09-03.
+ */
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg: #f3f4f7;
+  --bg: #eef2f7;
   --surface: #ffffff;
-  --surface-2: #eceef3;
-  --surface-sunk: #e4e7ec;
+  --surface-2: #f3f6fa;
+  --surface-sunk: #e4e9f1;
 
   /* Line — two weights and they do different jobs. */
-  --border: #c0c5ce;
-  --border-strong: #868d9b;
-  /* A card's edge. Invisible here: the fill and the shadow carry it. */
-  --panel-border: #ffffff;
+  --border: #b9c3d2;
+  --border-strong: #75839a;
+  /* A panel's edge. */
+  --panel-border: #b9c3d2;
 
-  /* Text — three steps, and the gap between them is deliberate. */
-  --text: #111827;
-  --text-muted: #4b5563;
-  --text-faint: #667085;
+  /* Text — three steps, all of them dark enough to read from a step back. */
+  --text: #0f172a;
+  --text-muted: #475569;
+  --text-faint: #6b7a90;
 
-  /* Accent — indigo. */
-  --accent: #4338ca;
+  /* Accent — navy. A chosen segment, the primary button, a pressed toggle. */
+  --accent: #111c33;
   --accent-ink: #ffffff;
-  --accent-hover: #3730a3;
-  --accent-soft: #eef0fb;
-  --accent-line: #c7ccf3;
+  --accent-hover: #1e2b47;
+  --accent-soft: #e2e8f2;
+  --accent-line: #111c33;
+
+  /* Brand — the blue that points. Never a fill behind words. */
+  --brand: #2563eb;
+  --brand-soft: #dbe7fd;
 
   /* Semantic — never rendered with --accent, never the only signal. */
   --ok: #15803d;
-  --ok-soft: #dcfce7;
-  --warn: #a16207;
-  --warn-soft: #fef3c7;
-  --danger: #b91c1c;
-  --danger-soft: #fee2e2;
-  --info: #0e6b8c;
-  --info-soft: #e0f2fe;
+  --ok-soft: #dcf5e3;
+  --warn: #9a6700;
+  --warn-soft: #fbefc6;
+  --danger: #dc2626;
+  --danger-soft: #fde2e4;
+  /* "Info" is not a colour any more: a neutral note is grey. */
+  --info: #475569;
+  --info-soft: #f3f6fa;
 
-  /* Elevation — the contract above, given colour. */
-  --level-raised: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 1px rgb(16 24 40 / 4%);
-  --level-pop: 0 4px 12px rgb(16 24 40 / 8%), 0 16px 32px rgb(16 24 40 / 14%);
+  /*
+   * One colour per PERSON on the floor: a waiter's tables all wear it, on this screen and on
+   * every phone (MB-android's Palette.kt lists the same eight in the same order, and picks
+   * by the same sum of the id's characters). Eight is what a room tells apart at a glance.
+   */
+  --person-1: #0d9488;
+  --person-2: #2563eb;
+  --person-3: #7c3aed;
+  --person-4: #db2777;
+  --person-5: #ea580c;
+  --person-6: #ca8a04;
+  --person-7: #65a30d;
+  --person-8: #0284c7;
+
+  /* Elevation — a panel is a line on a cool ground; only something lying OVER the page casts a shadow. */
+  --level-raised: none;
+  --level-pop: 0 4px 14px rgb(15 23 42 / 14%), 0 12px 32px rgb(15 23 42 / 12%);
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
-  --overlay: rgb(16 24 40 / 45%);
+  --overlay: rgb(15 23 42 / 45%);
 }
 
+/* DARK — white ink on navy paper. Not light inverted: the blues are chosen again. */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* Dark is NOT the light theme inverted. */
-  --bg: #0f1117;
-  --surface: #171a22;
-  --surface-2: #1f232d;
-  --surface-sunk: #0b0d12;
+  --bg: #0b1120;
+  --surface: #111a2e;
+  --surface-2: #182338;
+  --surface-sunk: #1f2c45;
 
-  --border: #3a4150;
-  --border-strong: #6b7383;
-  /* On a dark ground a shadow is nearly invisible, so a card's edge is a line. */
-  --panel-border: #262b36;
+  --border: #2b3a55;
+  --border-strong: #56698a;
+  --panel-border: #2b3a55;
 
-  --text: #e5e7eb;
-  --text-muted: #a3aab8;
-  --text-faint: #7f8797;
+  --text: #f1f5f9;
+  --text-muted: #b7c3d6;
+  --text-faint: #8a99b3;
 
-  /* The same indigo, lifted so it holds its contrast on a dark ground. */
-  --accent: #818cf8;
-  --accent-ink: #0f1117;
-  --accent-hover: #a5b4fc;
-  --accent-soft: #23264a;
-  --accent-line: #3f4586;
+  /* Accent — white on navy: the chosen segment, the primary button. */
+  --accent: #f8fafc;
+  --accent-ink: #0f172a;
+  --accent-hover: #e2e8f0;
+  --accent-soft: #1f2c45;
+  --accent-line: #f8fafc;
+
+  --brand: #60a5fa;
+  --brand-soft: #172a4a;
 
   --ok: #4ade80;
-  --ok-soft: #10281c;
+  --ok-soft: #12291a;
   --warn: #fbbf24;
-  --warn-soft: #2c210b;
+  --warn-soft: #2b2208;
   --danger: #f87171;
-  --danger-soft: #331414;
-  --info: #67c3e3;
-  --info-soft: #0e2530;
+  --danger-soft: #331515;
+  --info: #b7c3d6;
+  --info-soft: #182338;
 
-  --level-raised: 0 1px 2px rgb(0 0 0 / 40%);
-  --level-pop: 0 4px 12px rgb(0 0 0 / 40%), 0 16px 32px rgb(0 0 0 / 55%);
+  --person-1: #2dd4bf;
+  --person-2: #60a5fa;
+  --person-3: #a78bfa;
+  --person-4: #f472b6;
+  --person-5: #fb923c;
+  --person-6: #facc15;
+  --person-7: #a3e635;
+  --person-8: #38bdf8;
+
+  --level-raised: none;
+  --level-pop: 0 4px 14px rgb(0 0 0 / 55%), 0 12px 32px rgb(0 0 0 / 60%);
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
-  --overlay: rgb(0 0 0 / 65%);
-}
-
-/* HIGH CONTRAST — and note that it is a THEME, not a mode. */
-[data-theme="contrast"] {
-  color-scheme: light;
-
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #f0f0f0;
-  --surface-sunk: #e6e6e6;
-
-  --border: #000000;
-  --border-strong: #000000;
-  --panel-border: #000000;
-
-  --text: #000000;
-  --text-muted: #1a1a1a;
-  --text-faint: #3d3d3d;
-
-  --accent: #0033b3;
-  --accent-ink: #ffffff;
-  --accent-hover: #002685;
-  --accent-soft: #dfe6fb;
-  --accent-line: #0033b3;
-
-  --ok: #005c2e;
-  --ok-soft: #d8f0e3;
-  --warn: #6b4200;
-  --warn-soft: #f7e9cd;
-  --danger: #98000f;
-  --danger-soft: #fadddd;
-  --info: #004b63;
-  --info-soft: #d9eef5;
-
-  --level-raised: 0 0 0 1px #000000;
-  --level-pop: 0 0 0 2px #000000;
-  --shadow: var(--level-raised);
-  --shadow-pop: var(--level-pop);
-  --overlay: rgb(0 0 0 / 65%);
+  --overlay: rgb(3 7 18 / 65%);
 }
 
 /* The base. Small on purpose: everything else is a component. */
