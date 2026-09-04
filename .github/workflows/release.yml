@@ -157,10 +157,11 @@ jobs:
         run: npm ci
 
       # From the repository root: the CLI finds src-tauri/ from where it is run,
-      # and from ui/ it finds nothing.
+      # and from ui/ it finds nothing. Bash, not pwsh: PowerShell swallows the
+      # bare  that tells the CLI where cargo's own arguments begin.
       - name: Build the installer
-        shell: pwsh
-        run: ui/node_modules/.bin/tauri build -- --locked
+        shell: bash
+        run: ./ui/node_modules/.bin/tauri build -- --locked
 
       - name: Name the installer, measure it, fingerprint it
         id: installer
