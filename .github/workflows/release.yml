@@ -76,9 +76,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # One cache per slice: they compile different things.
+          # One cache per slice: they compile different things. Saved only after a
+          # green run: a run that fell over before compiling once saved a near-empty
+          # cache under the key, and every run after restored it, matched it, and
+          # kept it — so the caches were always warm and the builds always cold.
           shared-key: checks-${{ matrix.part }}
-          cache-on-failure: true
           save-if: ${{ github.ref_type == 'branch' }}
 
       - uses: actions/setup-node@v4
@@ -172,7 +174,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
-          cache-on-failure: true
           save-if: ${{ github.ref_type == 'branch' }}
 
       - uses: actions/setup-node@v4
