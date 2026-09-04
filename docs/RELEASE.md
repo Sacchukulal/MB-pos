@@ -149,6 +149,11 @@ not reshuffle on every check, which is what makes watching it meaningful.
 `rollout.shops` names shops that get it whatever the percentage says: use it for
 the shop that reported the bug this release fixes.
 
+The manifest is rewritten and signed by CI, never by hand:
+`gh workflow run release.yml -f tag=v1.6.2 -f percent=25` downloads the installer that
+shipped, takes its hash again, reads the notes from the tag, and replaces `manifest.json`
+and its signature on the release. The same command with `percent=0` is section 4.
+
 ---
 
 ## 4. Pulling a release back

@@ -39,8 +39,20 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-  # So the pipeline can be exercised without publishing anything.
+  # Run by hand with no inputs: the whole pipeline, publishing nothing. With a
+  # tag: only `manifest` below — the manifest of that release, written and
+  # signed again, which is how a rollout is staged or pulled back (RELEASE.md
+  # sections 3 and 4) and how wrong notes are corrected.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Republish the manifest of this release (v1.6.2)'
+        required: false
+        default: ''
+      percent:
+        description: 'rollout.percent for it (0 pulls the release back)'
+        required: false
+        default: '100'
 
 permissions:
   contents: write
@@ -64,6 +76,7 @@ jobs:
   # would have told it.
   # ---------------------------------------------------------------------------
   checks:
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     strategy:
       fail-fast: false
       matrix:
@@ -160,15 +173,19 @@ jobs:
   # seconds instead of compiled from source in ten minutes.
   # ---------------------------------------------------------------------------
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The whole history, so the tag arrives as the annotated object it is. A shallow
-          # checkout leaves a lightweight ref behind, and `%(contents:subject)` then reads the
-          # commit message instead of the tag's — which is how a developer's commit subject
-          # reached a shopkeeper as the release notes in 1.5.3.
-          fetch-depth: 0
+
+      # The checkout action writes the pushed tag as a plain pointer at the commit, so
+      # `git tag -l --format='%(contents:subject)'` read the COMMIT's subject — which is how
+      # a developer's commit line reached shopkeepers as the notes of 1.5.3 and 1.6.2. The
+      # annotated tag, with the two sentences on it, has to be fetched back on purpose.
+      - name: The tag itself, not a pointer at its commit
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -267,3 +284,60 @@ jobs:
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: false
+
+  # ---------------------------------------------------------------------------
+  # The manifest of a release that is already out, written and signed again:
+  # the same installer, its hash taken afresh, the notes from the tag, and the
+  # rollout percentage given. Nothing is rebuilt, and no installer is touched.
+  # ---------------------------------------------------------------------------
+  manifest:
+    if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: The tag itself, not a pointer at its commit
+        shell: bash
+        run: git fetch --force origin "refs/tags/${{ inputs.tag }}:refs/tags/${{ inputs.tag }}"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: The installer that shipped
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release download "${{ inputs.tag }}" --pattern 'Magic-Bill-*-setup.exe' --dir dist
+
+      - name: Write and sign the manifest
+        env:
+          MB_RELEASE_KEY: ${{ secrets.MB_RELEASE_KEY }}
+          TAG: ${{ inputs.tag }}
+          PERCENT: ${{ inputs.percent }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$MB_RELEASE_KEY" ]; then
+            echo "MB_RELEASE_KEY is not set — see docs/RELEASE.md section 5. This is POS-C9." >&2
+            exit 1
+          fi
+          version="${TAG#v}"
+          exe="dist/Magic-Bill-$version-setup.exe"
+          [ -f "$exe" ] || { echo "no $exe on the release" >&2; exit 1; }
+          sha=$(sha256sum "$exe" | cut -d' ' -f1)
+          notes=$(git tag -l --format='%(contents:subject)' "$TAG" | sed 's/[[:space:]]*$//')
+          [ -n "$notes" ] || notes="Version $version."
+          case "$PERCENT" in ''|*[!0-9]*) echo "percent must be a whole number: $PERCENT" >&2; exit 1;; esac
+          jq -cn --arg v "$version" --arg n "$notes" --arg s "$sha" --argjson p "$PERCENT" \
+            --arg u "https://github.com/${{ github.repository }}/releases/download/$TAG/Magic-Bill-$version-setup.exe" \
+            '{version: $v, notes: $n, url: $u, sha256: $s, rollout: {percent: $p, shops: []}}' \
+            > dist/manifest.json
+          cargo run --locked -p mb-license --example sign -- dist/manifest.json
+          cat dist/manifest.json
+
+      - name: Replace it on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "${{ inputs.tag }}" dist/manifest.json dist/manifest.json.sig --clobber
