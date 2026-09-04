@@ -205,6 +205,10 @@ pub enum QueueEvent {
         id: String,
         printer_id: String,
         kind: JobKind,
+        /// What the counter called it — "bill 0001", "copy 2", "cancellation". A printed job
+        /// leaves the queue at once, so this event is the one record of a slip that a
+        /// listener can rely on; without the reason it could only say that *something* went.
+        reason: Option<String>,
     },
     Started {
         id: String,
@@ -462,6 +466,7 @@ impl Queue {
             id: id.clone(),
             printer_id: job.printer_id.clone(),
             kind: job.kind,
+            reason: stored.reason.clone(),
         });
         self.dispatch(stored);
         Ok(id)

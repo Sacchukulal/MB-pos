@@ -18,19 +18,36 @@ use crate::ipc::{
 };
 use crate::state::{App, OUTLET};
 
-/// Every job the queue took in while `act` ran. The spool forgets a printed job at once, so
-/// a test proves a slip existed by listening, never by counting what is left.
-pub fn queue_took<T>(app: &App, act: impl FnOnce() -> T) -> (T, Vec<mb_print::queue::JobKind>) {
+/// Every slip the queue took in while `act` ran — its kind and what the counter called it.
+/// The spool forgets a printed job at once, and the test printer prints at once on its own
+/// thread, so a test proves a slip existed by listening, never by counting what is left.
+pub fn slips_taken<T>(
+    app: &App,
+    act: impl FnOnce() -> T,
+) -> (T, Vec<(mb_print::queue::JobKind, Option<String>)>) {
     let events = app.subscribe_to_queue().expect("a shop with a queue");
     let out = act();
-    let kinds = events
+    let slips = events
         .try_iter()
         .filter_map(|event| match event {
-            mb_print::queue::QueueEvent::Queued { kind, .. } => Some(kind),
+            mb_print::queue::QueueEvent::Queued { kind, reason, .. } => Some((kind, reason)),
             _ => None,
         })
         .collect();
-    (out, kinds)
+    (out, slips)
+}
+
+/// The kinds alone, for a test that cares what went and not what it said.
+pub fn queue_took<T>(app: &App, act: impl FnOnce() -> T) -> (T, Vec<mb_print::queue::JobKind>) {
+    let (out, slips) = slips_taken(app, act);
+    (out, slips.into_iter().map(|(kind, _)| kind).collect())
+}
+
+/// Whether one of the slips carried these words.
+pub fn a_slip_said(slips: &[(mb_print::queue::JobKind, Option<String>)], words: &str) -> bool {
+    slips
+        .iter()
+        .any(|(_, reason)| reason.as_deref() == Some(words))
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -723,20 +740,20 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
 
     // The whole point: this must not fail on a shop with no store profile, no logo and no GSTIN
     // — which is every shop on day one.
-    crate::flows::queue_bill(
-        &app,
-        &mb_core::AnyOrder::Settled(settled.clone()),
-        &bill,
-        "Rekha",
-        mb_print::template::Copy::Original,
-    )
-    .expect("the real bill could not be built");
+    let (built, slips) = slips_taken(&app, || {
+        crate::flows::queue_bill(
+            &app,
+            &mb_core::AnyOrder::Settled(settled.clone()),
+            &bill,
+            "Rekha",
+            mb_print::template::Copy::Original,
+        )
+    });
+    built.expect("the real bill could not be built");
 
-    let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter()
-            .any(|j| j.reason.as_deref() == Some("bill 0001")),
-        "the bill did not reach the queue: {jobs:?}"
+        a_slip_said(&slips, "bill 0001"),
+        "the bill did not reach the queue: {slips:?}"
     );
 }
 
@@ -1044,15 +1061,14 @@ fn a_reprint_says_which_copy_it_is() {
     let bills = list_bills_on(&app).expect("bills");
     let target = bills[0].order_id.clone();
 
-    let said = reprint_bill_on(&app, target.clone(), "Customer asked for a copy".to_owned())
-        .expect("reprinted");
+    let (said, slips) = slips_taken(&app, || {
+        reprint_bill_on(&app, target.clone(), "Customer asked for a copy".to_owned())
+    });
+    let said = said.expect("reprinted");
     assert!(said.contains("Copy 2"), "{said}");
-    // Asked while this copy is still queued. A printed job leaves the queue, so looking only
-    // after the next reprint is a race against the worker that drains it.
-    let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter().any(|j| j.reason.as_deref() == Some("copy 2")),
-        "the copy did not reach the printer: {jobs:?}"
+        a_slip_said(&slips, "copy 2"),
+        "the copy did not reach the printer: {slips:?}"
     );
 
     let said =
@@ -1068,13 +1084,13 @@ fn a_reprint_says_which_copy_it_is() {
 
     // And a voided bill reprints as VOIDED — the more important fact about that piece of paper.
     void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
-    reprint_bill_on(&app, target, "Customer asked for a copy".to_owned())
-        .expect("a voided bill could not be reprinted");
-    let jobs = app.print_queue_snapshot();
+    let (reprinted, slips) = slips_taken(&app, || {
+        reprint_bill_on(&app, target, "Customer asked for a copy".to_owned())
+    });
+    reprinted.expect("a voided bill could not be reprinted");
     assert!(
-        jobs.iter()
-            .any(|j| j.reason.as_deref() == Some("voided copy")),
-        "the voided copy printed as an ordinary duplicate: {jobs:?}"
+        a_slip_said(&slips, "voided copy"),
+        "the voided copy printed as an ordinary duplicate: {slips:?}"
     );
 }
 
@@ -1146,7 +1162,10 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
         "the table is not busy after the kitchen was told: {busy:?}"
     );
 
-    cancel_order_on(&app, order_id, "Customer left".to_owned()).expect("cancelled");
+    let (cancelled, slips) = slips_taken(&app, || {
+        cancel_order_on(&app, order_id, "Customer left".to_owned())
+    });
+    cancelled.expect("cancelled");
 
     let free = crate::ipc::open_orders_on(&app).expect("floor");
     let table = free.iter().find(|t| t.id == "tbl_7").expect("table 7");
@@ -1156,11 +1175,9 @@ fn a_cancel_frees_the_table_and_a_void_does_not() {
     );
 
     // And the kitchen was told to stop.
-    let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter()
-            .any(|j| j.reason.as_deref() == Some("cancellation")),
-        "the kitchen was never told to stop: {jobs:?}"
+        a_slip_said(&slips, "cancellation"),
+        "the kitchen was never told to stop: {slips:?}"
     );
 }
 
@@ -1171,22 +1188,16 @@ fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
 
     order_teas(&app, 3);
     crate::flows::print_kitchen_ticket_on(&app).expect("told");
-    let before = app.print_queue_snapshot().len();
 
-    let view = void_line_on(&app, 0, "Ordered by mistake".to_owned()).expect("voided");
+    let (view, slips) = slips_taken(&app, || {
+        void_line_on(&app, 0, "Ordered by mistake".to_owned())
+    });
+    let view = view.expect("voided");
     assert!(view.lines.is_empty(), "the line is still on the bill");
 
     // Exactly one slip, and it is a cancellation.
-    let jobs = app.print_queue_snapshot();
-    assert_eq!(
-        jobs.len(),
-        before + 1,
-        "expected exactly one cancellation slip"
-    );
-    assert!(
-        jobs.iter()
-            .any(|j| j.reason.as_deref() == Some("cancellation"))
-    );
+    assert_eq!(slips.len(), 1, "expected exactly one cancellation slip: {slips:?}");
+    assert!(a_slip_said(&slips, "cancellation"), "{slips:?}");
 
     // Nothing comes back.
     let nothing = crate::flows::print_kitchen_ticket_on(&app)

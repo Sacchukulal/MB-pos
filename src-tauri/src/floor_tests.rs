@@ -18,7 +18,7 @@ use crate::floor::{
     SplitRequest, floor_on, merge_orders_on, move_order_on, save_thresholds_on,
     split_order_on,
 };
-use crate::signin_tests::Scratch;
+use crate::signin_tests::{Scratch, a_slip_said, slips_taken};
 use crate::state::{App, OUTLET};
 
 fn at(n: i64) -> mb_core::Timestamp {
@@ -530,8 +530,10 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     );
 
     let before = read(&app, &order);
-    let said = crate::flows::print_open_bill_on(&app, order.as_str().to_owned())
-        .expect("the bill printed");
+    let (said, slips) = slips_taken(&app, || {
+        crate::flows::print_open_bill_on(&app, order.as_str().to_owned())
+    });
+    let said = said.expect("the bill printed");
 
     // What the SHOP calls the table.
     assert_eq!(said, "The bill for table 3 is printing.", "{said}");
@@ -541,11 +543,9 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     );
 
     // Paper. And marked, so it can never be mistaken for a paid bill.
-    let jobs = app.print_queue_snapshot();
     assert!(
-        jobs.iter()
-            .any(|j| j.reason.as_deref() == Some("bill to the table")),
-        "nothing reached the printer: {jobs:?}"
+        a_slip_said(&slips, "bill to the table"),
+        "nothing reached the printer: {slips:?}"
     );
 
     // And nothing else. Same state, same table, same bill number — a settled order here would
