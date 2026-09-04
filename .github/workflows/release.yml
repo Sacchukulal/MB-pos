@@ -7,8 +7,23 @@
 # depend on one laptop or one person (POS-C9), and a build from a tag can
 # always be reproduced.
 #
-# **It builds from a TAG and never from a branch.** What shipped has to be
+# **It publishes from a TAG and never from a branch.** What shipped has to be
 # something anybody can rebuild, and "main at the time" is not that.
+#
+# It RUNS on every push to main as well, for two reasons that are really one:
+#
+# * A push to main is the rehearsal. The suite, clippy, the front-end guards and
+#   the installer all run before anything is tagged, so a red build costs a
+#   commit and not a version number. Tag only a green main.
+# * GitHub scopes its caches to the ref that saved them, and a tag is its own
+#   ref: a cache saved by v1.5.3 was invisible to v1.6.0. Every tag build
+#   started from nothing — 15 minutes of tests and 12 of release compile, every
+#   time. A cache saved on main is what a tag run is allowed to read, so main is
+#   where it is saved (and only there: `save-if` below).
+#
+# Three jobs. `checks` and `build` run side by side on two Windows runners, so
+# the wall clock is the longer of them and not the sum; `publish` waits for
+# both, and is the only place anything reaches a shopkeeper.
 #
 # What comes out: a GitHub Release for the tag carrying the installer,
 # `manifest.json` and `manifest.json.sig`. A counter looks at
@@ -17,9 +32,11 @@
 # installs it silently and comes back on the new version.
 
 name: release
+run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || format('check main @ {0}', github.sha) }}
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   # So the pipeline can be exercised without publishing anything.
   workflow_dispatch:
@@ -27,8 +44,91 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  windows:
+  # ---------------------------------------------------------------------------
+  # Nothing is published until everything passes. A release that skips the
+  # suite to get out faster is the release that needs rolling back.
+  #
+  # Cheapest gate first: the front end answers in under two minutes and the
+  # suite takes far longer, and 1.6.0 spent 25 minutes finding out what 45
+  # seconds would have told it.
+  # ---------------------------------------------------------------------------
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: checks
+          cache-on-failure: true
+          save-if: ${{ github.ref_type == 'branch' }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install the front end
+        working-directory: ui
+        run: npm ci
+
+      # The versions must agree. Three files carry it (and Cargo.lock behind
+      # them), and a release where they disagree is a counter that offers itself
+      # an update forever.
+      - name: The versions agree with the tag
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $tauri = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $ui    = (Get-Content ui/package.json -Raw | ConvertFrom-Json).version
+          "tag=$tag cargo=$cargo tauri=$tauri ui=$ui"
+          if ($tag -ne $cargo -or $tag -ne $tauri -or $tag -ne $ui) {
+            throw "the tag and the three version fields do not agree"
+          }
+
+      # Cargo.lock carries the workspace version too; `--locked` refuses a lock
+      # that was not brought along, here rather than 15 minutes in.
+      - name: Cargo.lock is current
+        shell: pwsh
+        run: cargo metadata --locked --format-version 1 > $null
+
+      - name: Front-end types
+        working-directory: ui
+        run: npm run typecheck
+
+      - name: The front-end guards
+        working-directory: ui
+        run: npm run lint
+
+      - name: Front-end tests
+        working-directory: ui
+        run: npm run test
+
+      - name: The whole suite
+        run: cargo test --workspace --locked
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # The installer: `tauri build` runs `npm run build`, builds the release
+  # binary with the custom protocol (without it the binary looks for a dev
+  # server that is not there) and bundles the NSIS installer — the .exe only,
+  # `bundle.targets` in tauri.conf.json.
+  #
+  # The CLI is the npm package in ui/devDependencies: the same tauri-cli, the
+  # same version as `cargo tauri` on the developer's PC, arriving prebuilt in
+  # seconds instead of compiled from source in ten minutes.
+  # ---------------------------------------------------------------------------
+  build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +141,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build
+          cache-on-failure: true
+          save-if: ${{ github.ref_type == 'branch' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -52,51 +156,11 @@ jobs:
         working-directory: ui
         run: npm ci
 
-      # ---------------------------------------------------------------------
-      # Nothing is signed until everything passes. A release that skips the
-      # suite to get out faster is the release that needs rolling back.
-      # ---------------------------------------------------------------------
-      - name: The whole suite
-        run: cargo test --workspace
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: The front-end guards
-        working-directory: ui
-        run: npm run lint
-
-      - name: Front-end types and tests
-        working-directory: ui
-        run: npm run typecheck && npm run test
-
-      # ---------------------------------------------------------------------
-      # The versions must agree. Three files carry it, and a release where they
-      # disagree is a counter that offers itself an update forever.
-      # ---------------------------------------------------------------------
-      - name: The three versions agree with the tag
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}" -replace '^v',''
-          $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          $tauri = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $ui    = (Get-Content ui/package.json -Raw | ConvertFrom-Json).version
-          "tag=$tag cargo=$cargo tauri=$tauri ui=$ui"
-          if ($tag -ne $cargo -or $tag -ne $tauri -or $tag -ne $ui) {
-            throw "the tag and the three version fields do not agree"
-          }
-
-      # ---------------------------------------------------------------------
-      # `cargo tauri build` runs `npm run build`, builds the release binary with
-      # the custom protocol (without it the binary looks for a dev server that
-      # is not there) and bundles the NSIS installer.
-      # ---------------------------------------------------------------------
-      - name: Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
+      # From the repository root: the CLI finds src-tauri/ from where it is run,
+      # and from ui/ it finds nothing.
       - name: Build the installer
-        run: cargo tauri build
+        shell: pwsh
+        run: ui/node_modules/.bin/tauri build -- --locked
 
       - name: Name the installer, measure it, fingerprint it
         id: installer
@@ -105,23 +169,22 @@ jobs:
           $exe = Get-ChildItem -Recurse -Filter '*-setup.exe' target/release/bundle | Select-Object -First 1
           if (-not $exe) { throw "no installer was produced" }
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $named = Join-Path $exe.DirectoryName "Magic-Bill-$version-setup.exe"
+          New-Item -ItemType Directory -Force dist > $null
+          $named = Join-Path (Resolve-Path dist) "Magic-Bill-$version-setup.exe"
           Move-Item $exe.FullName $named -Force
           $mb = [math]::Round((Get-Item $named).Length / 1MB, 1)
           "installer: $named ($mb MB; S4 budget 20 MB, ceiling 30 MB)"
           if ($mb -gt 30) { throw "the installer is past its S4 ceiling at $mb MB" }
           if ($mb -gt 20) { Write-Warning "the installer is past its S4 budget at $mb MB" }
           $sha = (Get-FileHash $named -Algorithm SHA256).Hash.ToLower()
-          "path=$named" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           "sha256=$sha" >> $env:GITHUB_OUTPUT
 
-      # ---------------------------------------------------------------------
       # The manifest: what the counter reads. Signed with the release key (the
       # licence key — one trust root). ANDROID-G2: the counter checks the
       # signature AND the hash, because they answer different questions — "we
-      # published it" and "all of it arrived".
-      # ---------------------------------------------------------------------
+      # published it" and "all of it arrived". Written on a main run too, so the
+      # whole pipeline is rehearsed; it goes nowhere from there.
       - name: Write and sign the manifest
         env:
           MB_RELEASE_KEY: ${{ secrets.MB_RELEASE_KEY }}
@@ -142,26 +205,33 @@ jobs:
             rollout = [ordered]@{ percent = 100; shops = @() }
           }
           $json = $manifest | ConvertTo-Json -Compress -Depth 4
-          [IO.File]::WriteAllText("manifest.json", $json)
-          cargo run -p mb-license --example sign -- manifest.json
-          Get-Content manifest.json
-
-      - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.installer.outputs.path }}
-            manifest.json
-            manifest.json.sig
-          fail_on_unmatched_files: true
-          generate_release_notes: false
+          [IO.File]::WriteAllText("dist/manifest.json", $json)
+          cargo run --locked -p mb-license --example sign -- dist/manifest.json
+          Get-Content dist/manifest.json
 
       - uses: actions/upload-artifact@v4
         with:
           name: magic-bill-windows
-          path: |
-            ${{ steps.installer.outputs.path }}
-            manifest.json
-            manifest.json.sig
+          path: dist/
           if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # The only step that reaches a shopkeeper, and it waits for both of the
+  # others. A tag whose suite failed publishes nothing.
+  # ---------------------------------------------------------------------------
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [checks, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: magic-bill-windows
+          path: dist
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: false

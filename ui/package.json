@@ -1,7 +1,7 @@
 {
   "name": "magic-bill-ui",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.1",
   "type": "module",
   "description": "Magic Bill — the screens. Renders and collects input; every rule and every rupee lives in Rust (R8).",
   "scripts": {
@@ -27,6 +27,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",

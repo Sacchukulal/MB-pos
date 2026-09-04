@@ -35,16 +35,7 @@ import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
 import { HelpSheet, HowMany, Suggestions, TableBox } from './Keys';
-import {
-  initial as initialKeys,
-  reduce as reduceKeys,
-  type Command as KeyCommand,
-  type Event as KeyEvent,
-  type State as KeyboardState,
-} from './keyboard';
-
-/** The reducer's state, plus the commands it last asked for. */
-type KeyState = KeyboardState & { outbox: KeyCommand[]; seq: number };
+import { carry, reduceCarried, type Command as KeyCommand } from './keyboard';
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
 import { DiscountDialog } from './Discount';
@@ -125,14 +116,10 @@ export function Billing() {
   const [hasScale, setHasScale] = useState(false);
   const [hasLabels, setHasLabels] = useState(false);
 
-  // The reducer is PURE, and the commands ride in the state.
-  const [keys, dispatch] = useReducer(
-    (state: KeyState, event: KeyEvent): KeyState => {
-      const [next, commands] = reduceKeys(state, event);
-      return { ...next, outbox: commands, seq: state.seq + 1 };
-    },
-    { ...initialKeys(), outbox: [] as KeyCommand[], seq: 0 },
-  );
+  // The reducer is PURE, and the commands ride in the state until they are performed.
+  const [keys, dispatch] = useReducer(reduceCarried, undefined, carry);
+  /** The number of the last command performed; a render re-run must not perform it again. */
+  const performed = useRef(0);
 
   const strokes = useRef<{ text: string; gaps: number[]; at: number }>({
     text: '',
@@ -592,11 +579,17 @@ export function Billing() {
     [addItem, completeBill, newOrder, openOrderById, openTableById, printKitchen, setOrderType],
   );
 
-  // Perform one batch per committed dispatch.
+  // Perform everything waiting, in the order it was asked for, then say so.
   useEffect(() => {
-    for (const command of keys.outbox) void perform(command);
+    const due = keys.pending.filter((q) => q.seq > performed.current);
+    if (due.length === 0) return;
+    for (const { seq, command } of due) {
+      performed.current = seq;
+      void perform(command);
+    }
+    dispatch({ kind: 'performed', upTo: performed.current });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keys.seq]);
+  }, [keys.pending]);
 
   // Keep the reducer's picture of the world in step.
   useEffect(() => {

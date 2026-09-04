@@ -6,9 +6,11 @@ import {
   MAX_SUGGESTIONS,
   ORDER_TYPES,
   SHORTCUTS,
+  carry,
   initial,
   quantityOf,
   reduce,
+  reduceCarried,
   type Command,
   type Event,
   type State,
@@ -474,5 +476,34 @@ describe('the whole counter flow, by keyboard alone', () => {
       press('Enter'),
     );
     expect(commands).toEqual([{ do: 'complete-bill' }]);
+  });
+});
+
+describe('the commands wait for the screen', () => {
+  it('keeps a keystroke’s search when the floor re-reads itself in the same render', () => {
+    // React folds dispatches that land together into one render, and the screen sees only the
+    // state at the end of it. This is exactly that: typing, then the floor and the processing
+    // list arriving before the screen looked.
+    let state = carry(initial());
+    state = reduceCarried(state, type('dosa'));
+    state = reduceCarried(state, { kind: 'tables', tables: [] });
+    state = reduceCarried(state, cooking());
+    expect(state.pending.map((q) => q.command)).toEqual([{ do: 'search', text: 'dosa' }]);
+
+    // The screen performs it and says so; only then does it leave.
+    state = reduceCarried(state, { kind: 'performed', upTo: 1 });
+    expect(state.pending).toEqual([]);
+  });
+
+  it('numbers commands so a later one is never mistaken for one already performed', () => {
+    let state = carry(initial());
+    state = reduceCarried(state, type('d'));
+    state = reduceCarried(state, type('do'));
+    expect(state.pending.map((q) => q.seq)).toEqual([1, 2]);
+    // The screen has done the first; the second still waits.
+    state = reduceCarried(state, { kind: 'performed', upTo: 1 });
+    expect(state.pending.map((q) => q.command)).toEqual([{ do: 'search', text: 'do' }]);
+    // Saying so again with nothing new to take changes nothing, so React need not redraw.
+    expect(reduceCarried(state, { kind: 'performed', upTo: 1 })).toBe(state);
   });
 });

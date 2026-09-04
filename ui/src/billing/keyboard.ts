@@ -74,6 +74,46 @@ export type Command =
   | { do: 'set-order-type'; value: string }
   | { do: 'focus-search' };
 
+/**
+ * A command waiting for the screen, numbered, so the screen can tell which it has performed.
+ *
+ * The commands ride in the state, and every one waits here until the screen says it has done
+ * it. They must, because React may fold several dispatches into one render — a keystroke and
+ * the floor re-reading itself in the same instant — and only the state at the end of that
+ * render is ever seen. A command that lived only in the state of its own dispatch was gone by
+ * then: on a busy machine a search never went out, and an Enter could have gone the same way.
+ */
+export interface Queued {
+  seq: number;
+  command: Command;
+}
+
+/** The keyboard's state as the screen carries it. */
+export interface Carried extends State {
+  pending: readonly Queued[];
+  /** The number the last command was given. */
+  issued: number;
+}
+
+/** What the screen may say back: the commands up to `upTo` are done. */
+export type CarriedEvent = Event | { kind: 'performed'; upTo: number };
+
+export function carry(state: State = initial()): Carried {
+  return { ...state, pending: [], issued: 0 };
+}
+
+/** The keyboard, with its queue: the screen's reducer. */
+export function reduceCarried(state: Carried, event: CarriedEvent): Carried {
+  if (event.kind === 'performed') {
+    const pending = state.pending.filter((q) => q.seq > event.upTo);
+    return pending.length === state.pending.length ? state : { ...state, pending };
+  }
+  const [next, commands] = reduce(state, event);
+  let issued = state.issued;
+  const queued = commands.map((command) => ({ seq: ++issued, command }));
+  return { ...next, pending: [...state.pending, ...queued], issued };
+}
+
 export function initial(orderType = 'Dine in'): State {
   return {
     mode: { kind: 'searching' },

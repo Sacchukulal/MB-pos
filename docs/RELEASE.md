@@ -60,21 +60,36 @@ Until that box is ticked, assume the worst case.
 ## 2. Cutting a release
 
 1. **Decide the version.** `Cargo.toml`, `tauri.conf.json` and `ui/package.json`
-   all carry it and they must agree. It is three numbers — see D96, and
-   ANDROID-G4 for what a version *name* cost.
-2. **Tag it.** `git tag v1.5.0 && git push --tags`. CI builds from the tag,
-   never from a branch, so what shipped can always be rebuilt.
-3. CI (`.github/workflows/release.yml`) then:
-   * builds `cargo build --release -p magic-bill --features custom-protocol`
-     — **the feature is not optional**; without it the binary looks for a dev
-     server and opens on "localhost refused to connect";
-   * runs the whole suite, clippy, and the four front-end guards;
-   * bundles the NSIS installer;
-   * code-signs the `.exe`;
-   * computes its **SHA-256** (ANDROID-G2 — the counter checks this as well as
-     the signature, because a truncated download passes one and fails the other);
-   * writes `manifest.json`, signs it with the release key, and publishes both.
-4. **Check the manifest before it goes out.** `notes` is shown to a shopkeeper
+   all carry it and they must agree; `Cargo.lock` and `ui/package-lock.json`
+   follow them (`cargo metadata` at the root and `npm install` in `ui/` after
+   the bump). It is three numbers — see D96, and ANDROID-G4 for what a version
+   *name* cost. The last number is the one that moves: a round of fixes is a
+   patch, not a minor.
+2. **Push main first, and wait for it.** Every push to main runs the whole
+   workflow without publishing: the suite, clippy, the front-end guards and
+   the installer. That run is the rehearsal, and it fills the caches a tag
+   build reads — GitHub keeps caches per ref and a tag is its own ref, so a
+   tag that runs cold takes 40 minutes and a tag after a green main about ten.
+   `gh run watch` until it is green. A red main costs a commit; a red tag
+   costs a version number, because a tag is never reused.
+3. **Tag it, with the notes.** `git tag -a v1.6.1 -m "<two sentences>" && git
+   push origin v1.6.1`. The tag's message is what a shopkeeper reads. CI
+   publishes from the tag, never from a branch, so what shipped can always be
+   rebuilt.
+4. CI (`.github/workflows/release.yml`) then, in two jobs side by side:
+   * *checks*: the versions agree with the tag, the front-end types, guards
+     and tests, the whole suite, clippy;
+   * *build*: `tauri build` — the npm CLI in `ui/devDependencies`, the same
+     tauri-cli as `cargo tauri` on the PC — makes the release binary with the
+     custom protocol (**not optional**; without it the binary looks for a dev
+     server and opens on "localhost refused to connect") and the NSIS `.exe`,
+     nothing else; computes its **SHA-256** (ANDROID-G2 — the counter checks
+     this as well as the signature, because a truncated download passes one
+     and fails the other); writes `manifest.json` and signs it with the
+     release key;
+   * *publish*, only when both are green, puts the three files on the GitHub
+     Release.
+5. **Check the manifest before it goes out.** `notes` is shown to a shopkeeper
    in a paragraph. Two sentences, in plain words, about what changed for them —
    not a changelog. Long notes buried v1's install button.
 
