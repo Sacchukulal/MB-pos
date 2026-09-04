@@ -306,7 +306,7 @@ can type the reference, and the payment is recorded as **not confirmed** until
 somebody says the money arrived.
 
 - [ ] Take a UPI payment and settle the bill.
-- [ ] Open Reports → **Close the day**. There is a **Not confirmed yet** list
+- [ ] Open **More → Day close**. There is a **Not confirmed yet** list
       with that payment on it, its reference, and an **It arrived** button.
 - [ ] Check your bank app, press **It arrived**, and watch it leave the list.
 - [ ] At the end of a real evening, look at that list before you close. **That
@@ -320,6 +320,29 @@ somebody says the money arrived.
   billing code does not change.
 - **A card terminal** that takes a pushed amount needs the acquiring bank's own
   SDK, which differs per bank. Tell me which bank's machine you have.
+
+---
+
+## 9a. The day close — only a real evening tests it
+
+- [ ] **More → Day close.** Everything for the night is on it: what today came
+      to, the notes and coins, and the one button that finishes it.
+- [ ] Type the drawer count, press **Close today**, and read what it asks. It
+      names the difference before you agree to anything.
+- [ ] Do it again on another night **without** typing a count. It closes just the
+      same and says so — the count is optional and always was.
+- [ ] With today closed, try to take a bill. The counter refuses and the bell
+      says *"Today is closed"* with a button straight back here. Try an expense,
+      a credit repayment and a supplier payment: all four refuse with the same
+      sentence, which is the point.
+- [ ] Press **Open today again**, give a reason, and bill. The reason is in
+      History against your name.
+- [ ] **Settings → The day → Close the day every day.** Switch it off. The Day
+      close screen keeps every figure and the drawer count, and has nothing to
+      press. Nothing is refused anywhere. Switch it back on and the same days
+      lock again.
+- [ ] **Your day starts at** on the same page. Set it to 06:00, print a bill at
+      05:30 the next morning, and check it lands on the night before.
 
 ---
 

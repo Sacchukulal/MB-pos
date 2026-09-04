@@ -723,7 +723,7 @@ fn a_locked_day_refuses_the_corrections_that_would_change_it() {
 
     // No count needed: the day is a thing of its own.
     let today = crate::flows::today(crate::flows::now());
-    crate::dayclose::close_day_on(&app, today.to_string()).expect("closed");
+    crate::dayclose::close_day_on(&app, today.to_string(), None, String::new(), false).expect("closed");
 
     let bills = crate::corrections::list_bills_on(&app).expect("the bills");
     let row = bills

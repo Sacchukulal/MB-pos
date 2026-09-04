@@ -63,14 +63,18 @@ pub struct DayFigures {
     pub cash: Money,
     pub upi_and_card: Money,
     pub expenses: Money,
+    /// Everything else that moved that day: cash in or out of a drawer, credit collected, a
+    /// supplier paid. Not shown anywhere — it is only here to answer "was this a holiday?".
+    pub moved: Money,
 }
 
 impl DayFigures {
-    /// Nothing happened: no bill of any kind and no money spent. The only day that may be a
-    /// holiday.
+    /// Nothing happened at all: no bill of any kind, nothing spent, and no money moved. The
+    /// only day that may be called a holiday — a day the shop banked its takings and collected
+    /// on an account was a day somebody was standing in it.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.bills == 0 && self.expenses.is_zero()
+        self.bills == 0 && self.expenses.is_zero() && self.moved.is_zero()
     }
 }
 
@@ -129,7 +133,9 @@ impl<'a> DaysRepo<'a> {
                            is_locked  = 1,
                            closed_at  = excluded.closed_at,
                            closed_by  = excluded.closed_by,
-                           note       = excluded.note,
+                           -- The reason somebody gave to open the day again outlives the close
+                           -- that follows it; that is the whole value of having asked for one.
+                           note       = COALESCE(excluded.note, business_days.note),
                            bills      = excluded.bills,
                            net        = excluded.net,
                            cash_taken = excluded.cash_taken",
@@ -148,6 +154,30 @@ impl<'a> DaysRepo<'a> {
             ],
         )?;
         Ok(())
+    }
+
+    /// Freeze a locked day's figures again from the rows as they stand. A bill forwarded from
+    /// another till after the close would otherwise leave this row saying one thing for ever
+    /// while every other report said another. `false` when the day is not locked — an open day
+    /// is read live.
+    pub fn refreeze(&self, outlet: &str, day: BusinessDay) -> Result<bool, DbError> {
+        if !self.is_locked(outlet, day)? {
+            return Ok(false);
+        }
+        let figures = self.figures(outlet, day)?;
+        let changed = self.tx.execute(
+            "UPDATE business_days
+                SET bills = ?3, net = ?4, cash_taken = ?5
+              WHERE outlet_id = ?1 AND business_day = ?2 AND is_locked = 1",
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(day),
+                figures.bills,
+                encode::money_to_sql(figures.net),
+                encode::money_to_sql(figures.cash),
+            ],
+        )?;
+        Ok(changed > 0)
     }
 
     /// Open a locked day again. A reopened holiday is a trading day: it is open for billing,
@@ -276,12 +306,26 @@ impl<'a> DaysRepo<'a> {
             |row| row.get(0),
         )?;
 
+        // Money that moved without a bill behind it. Absolute values: a payout and a top-up of
+        // the same size are two things that happened, not nothing.
+        let moved: i64 = self.tx.query_row(
+            "SELECT COALESCE((SELECT SUM(ABS(amount)) FROM cash_movements
+                               WHERE outlet_id = ?1 AND business_day = ?2), 0)
+                  + COALESCE((SELECT SUM(ABS(amount)) FROM customer_payments
+                               WHERE outlet_id = ?1 AND business_day = ?2), 0)
+                  + COALESCE((SELECT SUM(ABS(amount)) FROM supplier_payments
+                               WHERE outlet_id = ?1 AND business_day = ?2), 0)",
+            rusqlite::params![outlet, day_sql],
+            |row| row.get(0),
+        )?;
+
         Ok(DayFigures {
             bills: totals.bills,
             net: totals.net,
             cash: encode::money_from_sql(cash),
             upi_and_card: encode::money_from_sql(electronic),
             expenses: encode::money_from_sql(expenses),
+            moved: encode::money_from_sql(moved),
         })
     }
 }

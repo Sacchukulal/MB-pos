@@ -33,6 +33,7 @@ import { Floor } from '../floor/Floor';
 import { Delivery } from '../delivery/Delivery';
 import { Devices } from '../devices/Devices';
 import { Menu } from '../menu/Menu';
+import { Days } from '../reports/Days';
 import { Reports } from '../reports/Reports';
 import { Settings } from '../settings/Settings';
 
@@ -94,6 +95,15 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     at: 'settings/network',
     render: () => null,
     needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
+  },
+  {
+    // First in the More sheet: it is done every night, and a cashier who may close a day
+    // cannot open Reports, so this is their only door to it.
+    id: 'dayclose',
+    label: 'Day close',
+    icon: 'calendar',
+    render: () => <Days />,
+    needsAny: ['day.close', 'reports.view'],
   },
   {
     id: 'credit',
@@ -336,14 +346,19 @@ export function Shell() {
    */
   const [dayState, setDayState] = useState<DayStateView | null>(null);
   const [gateWaived, setGateWaived] = useState(false);
-  const reloadDay = useCallback(() => {
+  /**
+   * `asking` is a fresh ask — signing in, or the hour turning — and only those put the gate
+   * back up. Reading the day again because somebody walked to another screen must not, or the
+   * way past it would last exactly as long as standing still.
+   */
+  const reloadDay = useCallback((asking: boolean) => {
     if (!inApp()) return;
     call('day_state', { holidays: null })
       // Checked, not trusted, like every other answer the shell draws.
       .then((fresh) => {
         if (fresh && Array.isArray(fresh.pending)) {
           setDayState(fresh);
-          setGateWaived(false);
+          if (asking) setGateWaived(false);
         }
       })
       .catch(() => undefined);
@@ -355,7 +370,7 @@ export function Shell() {
       return;
     }
     askedAt.current = Date.now();
-    reloadDay();
+    reloadDay(true);
   }, [lock, reloadDay]);
   // The one shared clock, not a timer of its own: once an hour is enough to catch 5 am.
   const tick = useTick();
@@ -363,8 +378,14 @@ export function Shell() {
     if (lock === null || lock.signedInAs === null) return;
     if (Date.now() - askedAt.current < GATE_EVERY_MS) return;
     askedAt.current = Date.now();
-    reloadDay();
+    reloadDay(true);
   }, [tick, lock, reloadDay]);
+  // And again on arriving at another screen. Somebody who has just closed today walks straight
+  // back to Billing, and the counter must already know it will not take money.
+  useEffect(() => {
+    if (lock === null || lock.signedInAs === null) return;
+    reloadDay(false);
+  }, [screen, lock, reloadDay]);
 
   // Rust pushes; React subscribes.
   useEffect(() => {
@@ -509,6 +530,19 @@ export function Shell() {
       says: 'Add a PIN in Staff so the counter locks itself.',
       goTo: 'staff',
       goLabel: 'Open Staff',
+    });
+  }
+  // The counter has stopped taking money and the billing screen cannot say so itself: without
+  // this the first anybody knows is a refused bill with a customer standing there.
+  if (dayState && dayState.todayState !== 'open') {
+    alerts.push({
+      id: 'day-closed',
+      tone: 'warn',
+      icon: 'calendar',
+      title: dayState.todayState === 'holiday' ? 'Today is a holiday' : 'Today is closed',
+      says: `${dayState.todayClosedSays} Nothing more can be billed into it until somebody opens it again.`,
+      goTo: dayState.mayAct ? 'dayclose' : undefined,
+      goLabel: dayState.mayAct ? 'Open Day close' : undefined,
     });
   }
   if (tillsSay) {

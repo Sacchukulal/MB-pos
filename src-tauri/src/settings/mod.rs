@@ -309,6 +309,10 @@ impl Billing {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Day {
+    /// Whether this shop closes its days at all. On, and a day that was left open is asked
+    /// about at sign-in and a closed day takes no more money. Off, and no day is ever locked:
+    /// every figure is still there, but nothing is refused and nobody is asked.
+    pub must_close: bool,
     /// Minutes past midnight. 300 is 5 a.m., the default every Indian restaurant recognises.
     pub starts_at_minutes: u32,
     /// Above this difference between counted and expected cash, closing the day asks why — and
@@ -322,6 +326,9 @@ pub struct Day {
 impl Default for Day {
     fn default() -> Self {
         Day {
+            // On, because it is what every shop that already runs Magic Bill does today, and a
+            // setting whose default changes under a shop on upgrade is not a setting.
+            must_close: true,
             starts_at_minutes: u32::from(mb_core::DayRule::DEFAULT.starts_at_minutes()),
             // ₹20. Small enough that a real shortage is caught, large enough that a rounded-off
             // bill does not make a cashier fill in a form.

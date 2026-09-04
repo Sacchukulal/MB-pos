@@ -95,7 +95,7 @@ pub struct DayRowView {
     pub may_be_holiday: bool,
 }
 
-/// Reports › Days.
+/// The Day close screen — reached from the bar, and from Reports › Days.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -105,6 +105,11 @@ pub struct DaysView {
     pub today_state: String,
     pub today_closed_says: String,
     pub may_act: bool,
+    /// Why nothing on this screen can be pressed, when this shop does not close its days — or
+    /// empty.
+    pub closing_says: String,
+    /// The shop's day rule as a sentence: "Your day runs from 5:00 am to 5:00 am…".
+    pub day_runs_says: String,
     /// What closing today will leave in the drawer, in words — or empty.
     pub carry_says: String,
     /// Today and the thirteen days before it, newest first.
@@ -166,7 +171,13 @@ fn look_at(
 fn pending_in(
     repos: &mb_db::Repos<'_>,
     today: BusinessDay,
+    closes_days: bool,
 ) -> Result<Vec<BusinessDay>, mb_db::DbError> {
+    // A shop that does not close its days has nothing pending, ever — so the gate never comes
+    // up, and it comes up for no other reason either. One answer, one place.
+    if !closes_days {
+        return Ok(Vec::new());
+    }
     let yesterday = today.previous();
     let start = match repos.days().last_locked_before(OUTLET, today)? {
         Some(last) => last.next(),
@@ -243,7 +254,8 @@ fn count_of(bills: i64) -> u32 {
 /// words follow their choice; `None` means the suggestions stand.
 pub fn day_state_on(app: &App, holidays: Option<Vec<String>>) -> UiResult<DayStateView> {
     let who = guard::require_signed_in(app)?;
-    let may_act = who.must(Permission::DayClose).is_ok();
+    let closes_days = app.closes_days();
+    let may_act = closes_days && who.must(Permission::DayClose).is_ok();
     let today = today(now());
     let chosen: Option<BTreeSet<BusinessDay>> = holidays.map(|list| {
         list.iter()
@@ -260,7 +272,7 @@ pub fn day_state_on(app: &App, holidays: Option<Vec<String>>) -> UiResult<DaySta
 
                 let mut pending = Vec::new();
                 let (mut closes, mut holidays, mut blocked) = (Vec::new(), Vec::new(), 0_usize);
-                for day in pending_in(&repos, today)? {
+                for day in pending_in(&repos, today, closes_days)? {
                     let look = look_at(&repos, &tables, &open, day)?;
                     let looks_like_holiday = look.figures.is_empty() && look.open_orders.is_empty();
                     let holiday = match &chosen {
@@ -299,13 +311,18 @@ pub fn day_state_on(app: &App, holidays: Option<Vec<String>>) -> UiResult<DaySta
                         String::new()
                     } else {
                         format!(
-                            "Closing a day needs permission, and {} does not have it. Ask \
-                             somebody who can, or sign out.",
+                            "Closing a day needs permission, and {} does not have it. Carry \
+                             on — whoever can close it will be asked the next time they sign \
+                             in, and nothing here is lost until they do.",
                             who.name
                         )
                     },
                     action_label: action_words(&closes, &holidays),
-                    escape_label: if blocked > 0 {
+                    // The way past. Somebody who cannot close a day at all is told and let
+                    // through; holding a waiter here stops the shop taking orders.
+                    escape_label: if !may_act {
+                        "Carry on".to_owned()
+                    } else if blocked > 0 {
                         "Finish the open orders first".to_owned()
                     } else {
                         String::new()
@@ -348,10 +365,26 @@ fn action_words(closes: &[BusinessDay], holidays: &[BusinessDay]) -> String {
     }
 }
 
-/// Reports › Days.
+/// The shop's day rule as a sentence: which bills land on which day, and where to change it.
+fn day_runs_words(starts_at_minutes: u32) -> String {
+    let at = words::clock(starts_at_minutes);
+    if starts_at_minutes == 0 {
+        return "Your day runs from midnight to midnight, so a bill printed after midnight \
+                belongs to the new day."
+            .to_owned();
+    }
+    format!(
+        "Your day runs from {at} to {at}, so a bill printed before {at} belongs to the day \
+         before. Change it under Settings › The day."
+    )
+}
+
+/// The Day close screen, and Reports › Days.
 pub fn days_on(app: &App) -> UiResult<DaysView> {
     let who = guard::require_any(app, &[Permission::ReportsView, Permission::DayClose])?;
-    let may_act = who.must(Permission::DayClose).is_ok();
+    let closes_days = app.closes_days();
+    // A shop that does not close its days has nothing here to press, whoever is looking.
+    let may_act = closes_days && who.must(Permission::DayClose).is_ok();
     let today = today(now());
     let config = app.shop_config();
     let from = BusinessDay::from_days_since_epoch(
@@ -393,7 +426,19 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                     today_state,
                     today_closed_says,
                     may_act,
-                    carry_says: if config.day.carry_float && config.day.float_amount.is_positive() {
+                    closing_says: if closes_days {
+                        String::new()
+                    } else {
+                        "This shop does not close its days: nothing is locked and nobody is \
+                         asked. What each day came to is still below, and the drawer can \
+                         still be counted. Turn it on under Settings › The day."
+                            .to_owned()
+                    },
+                    day_runs_says: day_runs_words(config.day.starts_at_minutes),
+                    carry_says: if closes_days
+                        && config.day.carry_float
+                        && config.day.float_amount.is_positive()
+                    {
                         format!(
                             "{} will be left in the drawer and counted as tomorrow's opening \
                              float.",
@@ -443,49 +488,116 @@ fn row_view(
         net: MoneyView::from(net),
         closed_says,
         state,
-        may_be_holiday: may_act && look.figures.is_empty() && look.open_orders.is_empty(),
+        may_be_holiday: may_act
+            && locked.is_none()
+            && look.figures.is_empty()
+            && look.open_orders.is_empty(),
     })
 }
 
 // The lock.
 
-/// When a day was locked, or `None` while it is open.
-pub fn locked_since(app: &App, day: BusinessDay) -> UiResult<Option<Timestamp>> {
+/// **The** day lock. Every path that moves money in a day asks this and nothing asks anything
+/// else: `Ok(None)` means the day may be written to — either this shop does not close its days,
+/// or this day is not closed. Ask it inside the transaction that does the writing, so there is
+/// no moment between the answer and the row.
+pub fn day_refusal(
+    app: &App,
+    repos: &mb_db::Repos<'_>,
+    day: BusinessDay,
+    code: &str,
+    then: &str,
+) -> Result<Option<UiError>, mb_db::DbError> {
+    if !app.closes_days() {
+        return Ok(None);
+    }
+    Ok(repos
+        .days()
+        .locked_at(OUTLET, day)?
+        .map(|since| locked_refusal(code, since, then)))
+}
+
+/// The same question with no transaction open, for a path that decides before it starts one.
+pub fn day_refusal_on(
+    app: &App,
+    day: BusinessDay,
+    code: &str,
+    then: &str,
+) -> UiResult<Option<UiError>> {
     app.with_shop(|shop| {
         shop.db
-            .read_transaction(|tx| mb_db::Repos::new(tx).days().locked_at(OUTLET, day))
+            .read_transaction(|tx| day_refusal(app, &mb_db::Repos::new(tx), day, code, then))
             .map_err(|e| words::from_db(&e))
     })
 }
 
-/// The refusal a locked day gives, wherever money would have moved in it. `then` is what the
-/// person was trying to do: "keep billing", "void this bill".
-#[must_use]
-pub fn locked_refusal(code: &str, since: Timestamp, then: &str) -> UiError {
+/// The refusal a closed day gives, wherever money would have moved in it. `then` is what the
+/// person was trying to do: "keep billing", "void this bill". Private: the way to ask is
+/// `day_refusal`, which knows whether this shop closes its days at all.
+fn locked_refusal(code: &str, since: Timestamp, then: &str) -> UiError {
     UiError::new(
         code,
         format!(
-            "That day was closed at {}. Open it again under Reports › Days to {then}.",
+            "That day was closed at {}. Open it again under Day close to {then}.",
             words::when(since)
         ),
     )
+}
+
+/// Closing days is something this shop does. The refusal when it is not — so a screen left open
+/// across the switch cannot lock a day in a shop that has stopped closing them.
+fn closing_must_be_on(app: &App) -> UiResult<()> {
+    if app.closes_days() {
+        return Ok(());
+    }
+    Err(UiError::new(
+        "day.closing_off",
+        "This shop does not close its days. Turn on \"Close the day every day\" under \
+         Settings › The day first.",
+    ))
 }
 
 // Closing, holidays, opening again.
 
 /// Close one day: freeze its figures, lock it, carry the float, sweep the kitchen, freeze the
 /// stock. No count required.
-fn close_one(app: &App, who: &mb_auth::Actor, at: Timestamp, day: BusinessDay) -> UiResult<()> {
-    let today = today(at);
+/// The day as it stands, or why it cannot be closed. `close_one` locks from the `Look` this
+/// gives back; `close_day_on` asks first, so a close that is going to be refused does not leave
+/// a drawer count behind it.
+fn look_to_close(
+    repos: &mb_db::Repos<'_>,
+    day: BusinessDay,
+    today: BusinessDay,
+) -> Result<Result<Look, UiError>, mb_db::DbError> {
     if day > today {
-        return Err(UiError::new(
+        return Ok(Err(UiError::new(
             "day.future",
             format!(
                 "{} has not happened yet.",
                 words::day_with_weekday(day, today)
             ),
-        ));
+        )));
     }
+    if repos.days().locked_at(OUTLET, day)?.is_some() {
+        return Ok(Err(UiError::new(
+            "day.already_closed",
+            format!("{} is already closed.", words::day_with_weekday(day, today)),
+        )));
+    }
+    let tables = repos.floor().list_tables(OUTLET)?;
+    let open = repos.orders().list_open(OUTLET)?;
+    let look = look_at(repos, &tables, &open, day)?;
+    if !look.open_orders.is_empty() {
+        return Ok(Err(UiError::new(
+            "day.open_orders",
+            open_words(&look.open_orders),
+        )));
+    }
+    Ok(Ok(look))
+}
+
+fn close_one(app: &App, who: &mb_auth::Actor, at: Timestamp, day: BusinessDay) -> UiResult<()> {
+    let today = today(at);
     let config = app.shop_config();
     let carried = config.day.carry_float.then_some(config.day.float_amount);
     let day_key = day.days_since_epoch().to_string();
@@ -494,21 +606,10 @@ fn close_one(app: &App, who: &mb_auth::Actor, at: Timestamp, day: BusinessDay) -
         shop.db
             .transaction(|tx| -> Result<Result<(), UiError>, mb_db::DbError> {
                 let repos = mb_db::Repos::new(tx);
-                if repos.days().locked_at(OUTLET, day)?.is_some() {
-                    return Ok(Err(UiError::new(
-                        "day.already_closed",
-                        format!("{} is already closed.", words::day_with_weekday(day, today)),
-                    )));
-                }
-                let tables = repos.floor().list_tables(OUTLET)?;
-                let open = repos.orders().list_open(OUTLET)?;
-                let look = look_at(&repos, &tables, &open, day)?;
-                if !look.open_orders.is_empty() {
-                    return Ok(Err(UiError::new(
-                        "day.open_orders",
-                        open_words(&look.open_orders),
-                    )));
-                }
+                let look = match look_to_close(&repos, day, today)? {
+                    Ok(look) => look,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
 
                 repos.days().lock(
                     OUTLET,
@@ -578,10 +679,47 @@ fn close_one(app: &App, who: &mb_auth::Actor, at: Timestamp, day: BusinessDay) -
     })?
 }
 
-/// Close one day from the Days screen.
-pub fn close_day_on(app: &App, day: String) -> UiResult<DaysView> {
+/// Close one day, taking the drawer count that is on the screen if anything has been typed into
+/// it. The count is optional — a shop that never counts still closes its days — and it is
+/// written through `count_drawer_on`, the one path a drawer is ever counted by. Closing does
+/// not invent a second one.
+pub fn close_day_on(
+    app: &App,
+    day: String,
+    counts: Option<Vec<CountArg>>,
+    reason: String,
+    print: bool,
+) -> UiResult<DaysView> {
     let who = guard::require(app, Permission::DayClose)?;
-    close_one(app, &who, now(), parse_day(&day)?)?;
+    closing_must_be_on(app)?;
+    let at = now();
+    let day = parse_day(&day)?;
+
+    if let Some(counts) = counts.filter(|rows| !rows.is_empty()) {
+        if day != today(at) {
+            return Err(UiError::new(
+                "day.count_not_today",
+                "A drawer is counted for the day it is standing in. That day has gone, so it \
+                 closes without a count.",
+            ));
+        }
+        // Ask whether the day can close before writing anything: a press that is about to be
+        // refused for an open table must not leave a drawer count behind it.
+        if let Some(refusal) = app.with_shop(|shop| {
+            shop.db
+                .read_transaction(|tx| {
+                    look_to_close(&mb_db::Repos::new(tx), day, today(at)).map(Result::err)
+                })
+                .map_err(|e| words::from_db(&e))
+        })? {
+            return Err(refusal);
+        }
+        // And the count second, because a drawer out by more than the shop's threshold has to
+        // say why — and that refusal must arrive with the day still open.
+        count_drawer_on(app, counts, reason, print)?;
+    }
+
+    close_one(app, &who, at, day)?;
     days_on(app)
 }
 
@@ -589,6 +727,7 @@ pub fn close_day_on(app: &App, day: String) -> UiResult<DaysView> {
 /// a holiday, and the refusal says so.
 pub fn set_holiday_on(app: &App, days: Vec<String>, on: bool) -> UiResult<DaysView> {
     let who = guard::require(app, Permission::DayClose)?;
+    closing_must_be_on(app)?;
     let at = now();
     let today = today(at);
     let mut wanted = Vec::new();
@@ -609,6 +748,20 @@ pub fn set_holiday_on(app: &App, days: Vec<String>, on: bool) -> UiResult<DaysVi
                     let day = *day;
                     let says = words::day_with_weekday(day, today);
                     if on {
+                        // A day already closed is a record, not a label to change: opening it
+                        // again leaves a mark and this must not be the way round that.
+                        if let Some(row) = repos.days().find(OUTLET, day)?
+                            && row.is_locked
+                            && row.kind == DayKind::Trading
+                        {
+                            return Ok(Err(UiError::new(
+                                "day.already_closed",
+                                format!(
+                                    "{says} is already closed. Open it again first if it was \
+                                     really a holiday."
+                                ),
+                            )));
+                        }
                         let look = look_at(&repos, &tables, &open, day)?;
                         if !look.figures.is_empty() {
                             return Ok(Err(UiError::new(
@@ -692,6 +845,7 @@ pub fn set_holiday_on(app: &App, days: Vec<String>, on: bool) -> UiResult<DaysVi
 /// Open a locked day again — the override, and it leaves a mark.
 pub fn reopen_day_on(app: &App, day: String, reason: String) -> UiResult<DaysView> {
     let who = guard::require(app, Permission::DayClose)?;
+    closing_must_be_on(app)?;
     let at = now();
     let day = parse_day(&day)?;
     let reason = reason.trim().to_owned();
@@ -713,6 +867,14 @@ pub fn reopen_day_on(app: &App, day: String, reason: String) -> UiResult<DaysVie
                 {
                     return Ok(false);
                 }
+                // The float this day left for the next one goes back with it. A day that was
+                // never finished left nothing in the drawer, and closing it again writes the
+                // same row under the same id.
+                repos.money().delete_cash_movement(
+                    OUTLET,
+                    &format!("float_{}", day.next().days_since_epoch()),
+                    at,
+                )?;
                 for table in mb_db::repo::wire::TOTALS_TABLES {
                     repos.outbox().enqueue(
                         OUTLET,
@@ -752,6 +914,7 @@ pub fn reopen_day_on(app: &App, day: String, reason: String) -> UiResult<DaysVie
 /// switched it to one. A day with open orders is left for later.
 pub fn close_pending_on(app: &App, holidays: Vec<String>) -> UiResult<DayStateView> {
     let who = guard::require(app, Permission::DayClose)?;
+    closing_must_be_on(app)?;
     let at = now();
     let state = day_state_on(app, Some(holidays))?;
     let mut mark = Vec::new();
@@ -943,6 +1106,7 @@ pub fn drawer_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DrawerVie
                         .unwrap_or(position.cash_sales),
                 ),
                 line("Tips in the drawer", position.cash_tips),
+                line("Credit collected in cash", position.credit_collected),
                 line("Put in", position.top_ups),
                 line("Spent from the drawer", position.cash_expenses),
                 line("Paid out", position.payouts),
@@ -1269,8 +1433,14 @@ pub fn days(app: tauri::State<'_, App>) -> UiResult<DaysView> {
 }
 
 #[tauri::command]
-pub fn close_day(app: tauri::State<'_, App>, day: String) -> UiResult<DaysView> {
-    close_day_on(&app, day)
+pub fn close_day(
+    app: tauri::State<'_, App>,
+    day: String,
+    counts: Option<Vec<CountArg>>,
+    reason: String,
+    print: bool,
+) -> UiResult<DaysView> {
+    close_day_on(&app, day, counts, reason, print)
 }
 
 #[tauri::command]
@@ -1418,7 +1588,7 @@ mod tests {
         assert!(
             refused
                 .message
-                .ends_with("Open it again under Reports › Days to keep billing."),
+                .ends_with("Open it again under Day close to keep billing."),
             "{}",
             refused.message
         );

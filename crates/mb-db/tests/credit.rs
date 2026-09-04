@@ -193,6 +193,7 @@ fn the_account_is_the_sum_of_its_movements() {
                 received_at: at(3),
                 received_by: Some(StaffId::new("staff_1")),
                 business_day: day(5),
+                terminal: None,
             },
         )?;
 

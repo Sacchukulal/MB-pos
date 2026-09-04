@@ -32,6 +32,8 @@ pub struct CreditPayment {
     pub received_at: Timestamp,
     pub received_by: Option<StaffId>,
     pub business_day: BusinessDay,
+    /// Whose drawer the cash landed in.
+    pub terminal: Option<String>,
 }
 
 /// An opening balance, a write-off, or a correction.
@@ -104,8 +106,10 @@ pub struct CashPosition {
     pub suppliers_paid: Money,
     pub cash_tips: Money,
     pub with_riders: Money,
-    /// Float + sales + top-ups − expenses − payouts − drops − suppliers paid − what riders are
-    /// still carrying.
+    /// Cash handed over against a credit account.
+    pub credit_collected: Money,
+    /// Float + sales + credit collected + top-ups − expenses − payouts − drops − suppliers paid
+    /// − what riders are still carrying.
     pub expected: Money,
 }
 
@@ -422,8 +426,8 @@ impl<'a> MoneyRepo<'a> {
     ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO customer_payments (id, outlet_id, customer_id, amount, mode, reference,
-                                            received_at, received_by, business_day)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                            received_at, received_by, business_day, terminal_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 payment.id,
                 outlet,
@@ -434,6 +438,7 @@ impl<'a> MoneyRepo<'a> {
                 encode::timestamp_to_sql(payment.received_at),
                 payment.received_by.as_ref().map(StaffId::as_str),
                 encode::business_day_to_sql(payment.business_day),
+                payment.terminal.as_deref(),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(
@@ -450,7 +455,8 @@ impl<'a> MoneyRepo<'a> {
         customer: &CustomerId,
     ) -> Result<Vec<CreditPayment>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT id, amount, mode, reference, received_at, received_by, business_day
+            "SELECT id, amount, mode, reference, received_at, received_by, business_day,
+                    terminal_id
                FROM customer_payments WHERE customer_id = ?1 ORDER BY received_at",
         )?;
         let rows = stmt.query_map([customer.as_str()], |row| {
@@ -462,11 +468,12 @@ impl<'a> MoneyRepo<'a> {
                 row.get::<_, i64>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, amount, mode, reference, received_at, received_by, day) = row?;
+            let (id, amount, mode, reference, received_at, received_by, day, terminal) = row?;
             out.push(CreditPayment {
                 id,
                 customer_id: customer.clone(),
@@ -476,6 +483,7 @@ impl<'a> MoneyRepo<'a> {
                 received_at: encode::timestamp_from_sql(received_at),
                 received_by: received_by.map(StaffId::new),
                 business_day: encode::business_day_from_sql(day, "customer_payments.business_day")?,
+                terminal,
             });
         }
         Ok(out)
@@ -1004,10 +1012,22 @@ impl<'a> MoneyRepo<'a> {
             rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
+        // Scoped the same way `collected` above is, or one till's drawer would be short by a
+        // handback the other till took.
         let handed_back: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM rider_handbacks
-              WHERE outlet_id = ?1 AND business_day = ?2",
-            rusqlite::params![outlet, day_sql],
+              WHERE outlet_id = ?1 AND business_day = ?2
+                AND (?3 IS NULL OR COALESCE(terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
+            |r| r.get(0),
+        )?;
+        // Cash handed over against a credit account. It is in the box like any other note, and
+        // leaving it out of the expected figure read as "over" by exactly that amount.
+        let credit_collected: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM customer_payments
+              WHERE outlet_id = ?1 AND business_day = ?2 AND mode = 'cash'
+                AND (?3 IS NULL OR COALESCE(terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
         // Never negative: a rider who hands back more than they collected has made an
@@ -1025,8 +1045,14 @@ impl<'a> MoneyRepo<'a> {
             suppliers_paid: encode::money_from_sql(paid_out),
             cash_tips: encode::money_from_sql(tips),
             with_riders: encode::money_from_sql(with_riders),
+            credit_collected: encode::money_from_sql(credit_collected),
             expected: encode::money_from_sql(
-                float + taken + top_ups - spent - payouts - drops - paid_out - with_riders,
+                float + taken + credit_collected + top_ups
+                    - spent
+                    - payouts
+                    - drops
+                    - paid_out
+                    - with_riders,
             ),
         })
     }

@@ -2,9 +2,18 @@
 import type { DayRowView } from "./DayRowView";
 
 /**
- * Reports › Days.
+ * The Day close screen — reached from the bar, and from Reports › Days.
  */
 export type DaysView = { today: string, todaySays: string, todayState: string, todayClosedSays: string, mayAct: boolean, 
+/**
+ * Why nothing on this screen can be pressed, when this shop does not close its days — or
+ * empty.
+ */
+closingSays: string, 
+/**
+ * The shop's day rule as a sentence: "Your day runs from 5:00 am to 5:00 am…".
+ */
+dayRunsSays: string, 
 /**
  * What closing today will leave in the drawer, in words — or empty.
  */

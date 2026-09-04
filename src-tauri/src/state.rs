@@ -393,6 +393,14 @@ impl App {
         *lock(&self.shop_config) = config;
     }
 
+    /// Whether this shop closes its days. Read on every money path, so it does not clone the
+    /// whole configuration to look at one flag — and it belongs to this shop rather than to the
+    /// process, so two shops open at once cannot answer for each other.
+    #[must_use]
+    pub fn closes_days(&self) -> bool {
+        lock(&self.shop_config).day.must_close
+    }
+
     #[must_use]
     pub fn sessions(&self) -> &Sessions {
         &self.sessions

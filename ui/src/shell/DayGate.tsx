@@ -99,7 +99,8 @@ export function DayGate({ state, onChange, onEscape, onSignOut }: DayGateProps) 
       open
       wide
       title={state.pendingSays}
-      // No way out: the day is closed, called a holiday, or the person signs out.
+      // No way out for somebody who can close the day: it is closed, called a holiday, or they
+      // sign out. Somebody who cannot gets "Carry on", which Rust decides.
       onClose={() => undefined}
       actions={
         state.mayAct ? (
@@ -115,7 +116,16 @@ export function DayGate({ state, onChange, onEscape, onSignOut }: DayGateProps) 
             </Button>
           </>
         ) : (
-          <Button onClick={onSignOut}>Sign out</Button>
+          // Told, then let through: holding a waiter here stops the shop taking orders. The
+          // days stay pending, and whoever can close them meets this same modal.
+          <>
+            <Button onClick={onSignOut}>Sign out</Button>
+            {state.escapeLabel ? (
+              <Button variant="primary" onClick={onEscape}>
+                {state.escapeLabel}
+              </Button>
+            ) : null}
+          </>
         )
       }
     >

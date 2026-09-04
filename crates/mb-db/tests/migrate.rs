@@ -18,6 +18,13 @@ fn every_version() -> Vec<u32> {
     MIGRATIONS.iter().map(|m| m.version).collect()
 }
 
+/// What `apply_all` has left to do on a database standing one step before `from`. Written from
+/// `MIGRATIONS` rather than as a list of numbers, so adding a migration does not break three
+/// tests that are not about it.
+fn from_version(from: u32) -> Vec<u32> {
+    every_version().into_iter().filter(|v| *v >= from).collect()
+}
+
 /// A fresh database runs every migration, in order, and records one row each — not a high-water
 /// mark.
 #[test]
@@ -337,7 +344,7 @@ fn every_old_row_survives_the_tax_rework_with_its_values_intact() {
     let applied = migrate::apply_all(&mut conn).expect("0004 runs");
     assert_eq!(
         applied.ran,
-        vec![4, 5, 6, 7, 8, 9, 10, 11],
+        from_version(4),
         "the rework and what came after it should have been left to do"
     );
 
@@ -712,7 +719,7 @@ fn the_tax_book_moves_every_copy_into_the_slabs() {
     conn.execute_batch(OLD_ROWS).expect("seed old-format rows");
 
     let applied = migrate::apply_all(&mut conn).expect("0008 runs");
-    assert_eq!(applied.ran, vec![8, 9, 10, 11]);
+    assert_eq!(applied.ran, from_version(8));
 
     // The copied columns are gone from items; the slab pointer is what is left.
     let columns: Vec<String> = mb_db::schema::columns(&conn, "items")
@@ -875,7 +882,7 @@ fn the_business_days_backfill_keeps_the_lock_and_skips_the_drawers() {
     conn.execute_batch(OLD_ROWS).expect("seed old-format rows");
 
     let applied = migrate::apply_all(&mut conn).expect("0011 runs");
-    assert_eq!(applied.ran, vec![11]);
+    assert_eq!(applied.ran, from_version(11));
 
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM business_days", [], |r| r.get(0))

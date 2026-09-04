@@ -220,12 +220,13 @@ pub fn void_bill_on(
         ));
     };
 
-    if let Some(since) = crate::dayclose::locked_since(app, settled.core.business_day)? {
-        return Err(crate::dayclose::locked_refusal(
-            "void.day_closed",
-            since,
-            "void this bill",
-        ));
+    if let Some(refusal) = crate::dayclose::day_refusal_on(
+        app,
+        settled.core.business_day,
+        "void.day_closed",
+        "void this bill",
+    )? {
+        return Err(refusal);
     }
 
     // The second person.
@@ -659,12 +660,10 @@ pub fn refund_on(
         ));
     }
     // A refund is money out of today's drawer, and a closed day takes none.
-    if let Some(since) = crate::dayclose::locked_since(app, day)? {
-        return Err(crate::dayclose::locked_refusal(
-            "refund.day_closed",
-            since,
-            "refund this",
-        ));
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "refund.day_closed", "refund this")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {

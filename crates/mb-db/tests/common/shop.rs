@@ -569,6 +569,7 @@ fn seed_money(db: &Db) {
                 received_at: at(500),
                 received_by: Some(StaffId::new("staff_1")),
                 business_day: day(1),
+                terminal: None,
             },
         )?;
 

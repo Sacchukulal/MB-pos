@@ -673,6 +673,13 @@ pub fn save_purchase_on(app: &App, edit: PurchaseEdit) -> UiResult<BuyingView> {
             shop.db
             .transaction(|tx| -> Result<Result<buying::Purchase, UiError>, mb_db::DbError> {
                 let repos = mb_db::Repos::new(tx);
+                // A delivery lands stock and, when it is paid for now, cash — both against this
+                // day. The same door the cancel above goes through.
+                if let Some(refusal) =
+                    crate::dayclose::day_refusal(app, &repos, day, "purchase.day_locked", "record this")?
+                {
+                    return Ok(Err(refusal));
+                }
                 let buying = repos.buying();
                 let Some(supplier) = buying.supplier(OUTLET, edit.supplier_id.trim())? else {
                     return Ok(Err(UiError::new(
@@ -808,12 +815,14 @@ pub fn cancel_purchase_on(app: &App, id: String, reason: String) -> UiResult<Buy
                     )));
                 };
                 // The day lock has a door, not a back door.
-                if let Some(since) = repos.days().locked_at(OUTLET, purchase.business_day)? {
-                    return Ok(Err(crate::dayclose::locked_refusal(
-                        "purchase.day_locked",
-                        since,
-                        "cancel this",
-                    )));
+                if let Some(refusal) = crate::dayclose::day_refusal(
+                    app,
+                    &repos,
+                    purchase.business_day,
+                    "purchase.day_locked",
+                    "cancel this",
+                )? {
+                    return Ok(Err(refusal));
                 }
                 repos.buying().cancel_purchase(
                     OUTLET,
@@ -866,6 +875,12 @@ pub fn record_supplier_payment_on(
             "payment.mode",
             "Pay in cash, by bank, UPI or card.",
         ));
+    }
+    // Cash to a supplier comes out of a drawer, and a closed day's drawer is settled.
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "payment.day_closed", "pay this")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {
@@ -927,6 +942,14 @@ pub fn save_supplier_adjustment_on(
             "adjustment.reason",
             "Say why the account is being changed.",
         ));
+    }
+    if let Some(refusal) = crate::dayclose::day_refusal_on(
+        app,
+        day,
+        "adjustment.day_closed",
+        "adjust this account",
+    )? {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {

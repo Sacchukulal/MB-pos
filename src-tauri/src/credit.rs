@@ -379,6 +379,12 @@ pub fn record_repayment_on(
             ));
         }
     };
+    // Money arriving is money in a day, and a closed day takes none of it.
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "credit.day_closed", "take this money")?
+    {
+        return Err(refusal);
+    }
 
     app.with_shop(|shop| {
         shop.db
@@ -395,6 +401,7 @@ pub fn record_repayment_on(
                         received_at: at,
                         received_by: Some(who.staff_id.clone()),
                         business_day: day,
+                        terminal: Some(app.terminal_id().to_owned()),
                     },
                 )?;
                 repos.audit().append(
@@ -442,6 +449,11 @@ pub fn save_adjustment_on(
             "credit.reason",
             "Say why. An adjustment without a reason is a mistake with paperwork.",
         ));
+    }
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "credit.day_closed", "adjust this account")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {

@@ -922,6 +922,7 @@ fn t16_the_credit_balance_is_computed_not_stored() {
                 received_at: Timestamp::from_millis(2),
                 received_by: None,
                 business_day: mb_core::BusinessDay::from_days_since_epoch(20_601),
+                terminal: None,
             },
         )
     })

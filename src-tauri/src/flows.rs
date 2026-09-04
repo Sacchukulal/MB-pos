@@ -508,17 +508,19 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
                 let repos = mb_db::Repos::new(tx);
                 Ok((
                     repos.orders().find(&core.id)?,
-                    repos.days().locked_at(OUTLET, core.business_day)?,
+                    crate::dayclose::day_refusal(
+                        app,
+                        &repos,
+                        core.business_day,
+                        "bill.day_closed",
+                        "keep billing",
+                    )?,
                 ))
             })
             .map_err(|e| words::from_db(&e))?;
         // A closed day takes no more money: the one check, the same one a void makes.
-        if let Some(since) = locked {
-            return Err(crate::dayclose::locked_refusal(
-                "bill.day_closed",
-                since,
-                "keep billing",
-            ));
+        if let Some(refusal) = locked {
+            return Err(refusal);
         }
 
         let open = match existing {
@@ -1022,10 +1024,27 @@ pub(crate) fn park_open_order(app: &App) -> UiResult<mb_core::OpenOrder> {
 
     let open = app.with_shop(|shop| {
         let till = mb_db::Till::new(OUTLET, app.terminal_id());
-        let found = shop
+        let (found, refusal) = shop
             .db
-            .transaction(|tx| mb_db::Repos::new(tx).orders().find(&core.id))
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                Ok((
+                    repos.orders().find(&core.id)?,
+                    crate::dayclose::day_refusal(
+                        app,
+                        &repos,
+                        core.business_day,
+                        "order.day_closed",
+                        "take this order",
+                    )?,
+                ))
+            })
             .map_err(|e| words::from_db(&e))?;
+        // Before the kitchen, not after it: a day the till will refuse to settle is a day the
+        // kitchen must not cook for, and this is the last moment nothing has been cooked.
+        if let Some(refusal) = refusal {
+            return Err(refusal);
+        }
         match found {
             Some(AnyOrder::Open(mut open)) => {
                 open.core = core.clone();

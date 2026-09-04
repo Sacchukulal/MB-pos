@@ -1046,6 +1046,7 @@ ordinary table with an ordinary outbox entry.
 | received_at | INTEGER | no | |
 | received_by | TEXT | yes | |
 | business_day | INTEGER | no | |
+| terminal_id | TEXT | yes | **0012.** Whose drawer the cash landed in, read as `COALESCE(terminal_id, the master)` like every other money row. Before it existed, `cash_position_of` left credit collected in cash out of the expected drawer entirely, so a shop that took a repayment in cash read "over" by exactly that amount every evening. |
 | note | TEXT | yes | |
 
 ### expense_categories
@@ -1144,8 +1145,10 @@ independent query that could disagree with them.
 
 **Since 0011 (core round 2026-09-03) a count locks nothing.** The day is a thing
 of its own — `business_days` — and closing it needs no count at all. Counting the
-drawer is the optional second section of Reports › Days. `is_locked` stays for
-the rows written before 0011 and is never set again.
+drawer is the first panel of the Day close screen, and **Close today** carries
+whatever is in that grid through `count_drawer_on`, the one path a drawer is ever
+counted by; **Write the count on its own** is the same path at a shift handover.
+`is_locked` stays for the rows written before 0011 and is never set again.
 
 | column | type | null | notes |
 |---|---|---|---|
@@ -1184,12 +1187,28 @@ Before this there was no day entity: "closed" meant a shop roll-up row in
 had nowhere to be called a holiday.
 
 One row per day the shop has said something about. **`is_locked` here is the one
-lock every money path checks** — a settle, a void, a refund, an expense, a cash
-movement, a stock-count approval, a purchase cancel — through
-`DaysRepo::locked_at`. The gate at sign-in asks the one question *"which days from
-the last locked one to yesterday have no locked row?"* (bounded to sixty days; a
-shop that has never closed anything starts counting from the first day anything
-happened).
+lock every money path checks**, through the one function `dayclose::day_refusal` —
+a settle, an order parked for the kitchen, a void, a refund, an expense, a cash
+movement, a credit collection or adjustment, a supplier payment or adjustment, a
+delivery received, a staff advance, a payroll approval, a rider's handback, a
+stock-count approval, a purchase cancel. Nothing calls `DaysRepo::locked_at` on its
+own: a path that writes a `business_day` and does not go through `day_refusal` is a
+hole, and there were six of them before that function existed.
+
+**A shop can switch the whole thing off** — `day.must_close`, on by default. Off,
+`day_refusal` answers "not closed" whatever the row says, the gate never asks, and
+the Day close screen has nothing to press; every figure stays where it is, so
+switching it back on locks the same days again. `App::closes_days` is the one reader.
+
+The gate at sign-in asks the one question *"which days from the last locked one to
+yesterday have no locked row?"* (bounded to sixty days; a shop that has never closed
+anything starts counting from the first day anything happened). Somebody without
+`day.close` is told and let past it — holding a waiter at the counter's bookkeeping
+stops the shop taking orders.
+
+A bill forwarded from another till into a day that is already closed is **stored, not
+refused** — a refusal would bounce between two tills for ever — and
+`DaysRepo::refreeze` makes the frozen figures below true again. The day stays closed.
 
 | column | type | null | notes |
 |---|---|---|---|
@@ -2236,6 +2255,7 @@ it, and the day it does, nobody can tell which one is lying.
 | amount | INTEGER | no | Paise. Must be positive: a negative handback is money going the other way, which is a payout and has its own table. |
 | at | INTEGER | no | |
 | taken_by | TEXT | yes | Who was at the till when the money changed hands. **Not the rider** — the whole point of a handback is that two people saw it. |
+| terminal_id | TEXT | yes | **0012.** Which till took the money, read as `COALESCE(terminal_id, the master)`. `cash_position_of` scopes `collected` by terminal, so it has to scope the handback the same way — otherwise one till's drawer is short by a handback the other till took. |
 | note | TEXT | yes | |
 
 ### attachments

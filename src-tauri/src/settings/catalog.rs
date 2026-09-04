@@ -1729,6 +1729,28 @@ pub const CATALOG: &[Entry] = &[
         billing.kitchen_screen
     ),
     // The day.
+    // First, because it decides whether anything below it happens at all.
+    flag!(
+        "day.must_close",
+        Day,
+        Row,
+        "Close the day every day",
+        "Whoever signs in is asked about a day that was left open, and a day that has been \
+         closed takes no more money until somebody opens it again. Switch this off and no \
+         day is ever locked: every figure is still there and the drawer can still be \
+         counted, but nothing is refused and nobody is asked.",
+        [
+            "day",
+            "close",
+            "closing",
+            "lock",
+            "every day",
+            "eod",
+            "z report",
+            "end of day"
+        ],
+        day.must_close
+    ),
     // A clock time, not a count of minutes (B6, 2026-09-03).
     Entry {
         key: "day.starts_at_minutes",

@@ -354,6 +354,12 @@ pub fn record_handback_on(
             "Type how much the rider handed over.",
         ));
     }
+    // A handback is cash arriving in a drawer, and it changes what that day expected.
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "delivery.day_closed", "take this money")?
+    {
+        return Err(refusal);
+    }
 
     app.with_shop(|shop| {
         shop.db
@@ -377,6 +383,7 @@ pub fn record_handback_on(
                     day,
                     Some(who.staff_id.as_str()),
                     blank_to_none(&note).as_deref(),
+                    Some(app.terminal_id()),
                 )?;
 
                 let after = d

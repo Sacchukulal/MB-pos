@@ -287,6 +287,10 @@ impl<'a> DeliveryRepo<'a> {
 
     /// Money handed over the counter by a rider.
     #[allow(clippy::too_many_arguments, reason = "a ledger row IS this many facts")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one row, one argument each; a struct would let a caller build half of one"
+    )]
     pub fn record_handback(
         &self,
         outlet: &str,
@@ -297,11 +301,12 @@ impl<'a> DeliveryRepo<'a> {
         day: BusinessDay,
         taken_by: Option<&str>,
         note: Option<&str>,
+        terminal: Option<&str>,
     ) -> Result<(), DbError> {
         self.tx.execute(
             "INSERT INTO rider_handbacks
-                 (id, outlet_id, rider_id, business_day, amount, at, taken_by, note)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (id, outlet_id, rider_id, business_day, amount, at, taken_by, note, terminal_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 outlet,
@@ -311,6 +316,7 @@ impl<'a> DeliveryRepo<'a> {
                 encode::timestamp_to_sql(at),
                 taken_by,
                 note,
+                terminal,
             ],
         )?;
         Ok(())

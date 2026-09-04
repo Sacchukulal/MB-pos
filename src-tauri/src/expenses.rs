@@ -362,12 +362,10 @@ pub fn save_expense_on(app: &App, edit: ExpenseEdit) -> UiResult<ExpensesView> {
     })?;
     // An expense written into a closed day would change a figure that was frozen.
     let dated = before.as_ref().map_or(day, |b| b.business_day);
-    if let Some(since) = crate::dayclose::locked_since(app, dated)? {
-        return Err(crate::dayclose::locked_refusal(
-            "expense.day_closed",
-            since,
-            "record this",
-        ));
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, dated, "expense.day_closed", "record this")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {
@@ -438,12 +436,10 @@ pub fn delete_expense_on(app: &App, id: String) -> UiResult<ExpensesView> {
     let who = guard::require(app, Permission::ExpensesManage)?;
     let at = now();
     let day = today(at);
-    if let Some(since) = crate::dayclose::locked_since(app, day)? {
-        return Err(crate::dayclose::locked_refusal(
-            "expense.day_closed",
-            since,
-            "delete this",
-        ));
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "expense.day_closed", "delete this")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {
@@ -505,12 +501,10 @@ pub fn save_movement_on(
             "Say why. Money leaving a drawer without a reason is how a shortfall becomes an argument.",
         ));
     }
-    if let Some(since) = crate::dayclose::locked_since(app, day)? {
-        return Err(crate::dayclose::locked_refusal(
-            "cash.day_closed",
-            since,
-            "move this",
-        ));
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "cash.day_closed", "move this")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {

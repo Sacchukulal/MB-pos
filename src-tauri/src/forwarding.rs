@@ -18,6 +18,7 @@ pub fn receive_on(app: &App, forwarded: &Forwarded) -> UiResult<Receipt> {
                 let repos = mb_db::Repos::new(tx);
                 let mut stored = Vec::new();
                 let mut refused = Vec::new();
+                let mut touched = std::collections::BTreeSet::new();
 
                 // The master learns about a till the first time it hears from one.
                 let known = repos.terminals().find(OUTLET, &sender)?;
@@ -83,7 +84,15 @@ pub fn receive_on(app: &App, forwarded: &Forwarded) -> UiResult<Receipt> {
                     repos
                         .events()
                         .remember(OUTLET, &event, "forward", "stored", at)?;
+                    touched.insert(order.core().business_day);
                     stored.push((id, true));
+                }
+
+                // A bill that arrives after its day was closed is still that day's bill, and
+                // refusing it would bounce it between two tills for ever. It is stored and the
+                // day's frozen figures are made true again; the day stays closed.
+                for day in touched {
+                    repos.days().refreeze(OUTLET, day)?;
                 }
 
                 let says = if refused.is_empty() {

@@ -82,6 +82,8 @@ const days: DaysView = {
   todayState: 'open',
   todayClosedSays: '',
   mayAct: true,
+  closingSays: '',
+  dayRunsSays: 'Your day runs from 5:00 am to 5:00 am.',
   carrySays: '',
   days: [
     {
@@ -208,14 +210,23 @@ it('asks Rust again when a switch moves, and sends the choice with the press', a
   await waitFor(() => expect(onChange).toHaveBeenCalledWith(done));
 });
 
-it('offers only the way out to somebody who may not close a day', () => {
-  const { onSignOut } = openGate({
+/// A waiter meets the gate too, and a waiter cannot close a day. Holding them at it until an
+/// owner walks in stops the shop, so they are told and then let through.
+it('tells somebody who may not close a day, and lets them carry on', () => {
+  const { onSignOut, onEscape } = openGate({
     ...gate,
     mayAct: false,
-    blockedSays: 'Closing a day needs permission, and Priya does not have it. Ask somebody who can, or sign out.',
+    blockedSays:
+      'Closing a day needs permission, and Priya does not have it. Carry on — whoever can ' +
+      'close it will be asked the next time they sign in.',
+    escapeLabel: 'Carry on',
   });
   expect(screen.getByText(/Priya does not have it/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Close 1 day and mark 1 holiday' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Carry on' }));
+  expect(onEscape).toHaveBeenCalled();
+  // And signing out is still there for whoever would rather hand the counter over.
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
   expect(onSignOut).toHaveBeenCalled();
 });
@@ -247,21 +258,100 @@ function openDays() {
   );
 }
 
-it('lists the last days with the chip and the sentence Rust wrote, and closes today in one press', async () => {
+it('lists the last days with the chip and the sentence Rust wrote, and asks before closing today', async () => {
   openDays();
   await waitFor(() => expect(screen.getByText('Tuesday 1 September')).toBeTruthy());
   expect(screen.getByText('Holiday, marked 3 Sep, 9:02 am by Meena.')).toBeTruthy();
   expect(screen.getAllByText('Holiday').length).toBeGreaterThan(0);
   expect(screen.getByText('Closed')).toBeTruthy();
 
+  // Closing today stops the counter taking money, so the press asks first and never closes
+  // straight off the header button.
   fireEvent.click(screen.getByRole('button', { name: 'Close today' }));
-  await waitFor(() => expect(call).toHaveBeenCalledWith('close_day', { day: '2026-09-03' }));
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Close today?' })).toBeTruthy());
+  expect(call).not.toHaveBeenCalledWith('close_day', expect.anything());
+  // Nothing has been typed into the grid, and the words say so rather than demanding one.
+  expect(screen.getByText(/No drawer count has been typed, and one is not needed/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close the day' }));
+  await waitFor(() =>
+    expect(call).toHaveBeenCalledWith('close_day', {
+      day: '2026-09-03',
+      counts: null,
+      reason: '',
+      print: false,
+    }),
+  );
 
   // A holiday can be taken back from its row.
   fireEvent.click(screen.getByRole('button', { name: 'Not a holiday' }));
   await waitFor(() =>
     expect(call).toHaveBeenCalledWith('unmark_holiday', { days: ['2026-09-02'] }),
   );
+});
+
+/// The count is optional, and when it is there it travels with the day rather than beside it.
+it('sends the drawer count with the day when there is one', async () => {
+  // The grid as Rust answers once four 500s have been typed into it.
+  const counted: DrawerView = {
+    ...drawer,
+    denominations: [
+      { value: 50_000, label: '500', count: 4, total: money(200_000, '2000.00') },
+      { value: 1_000, label: '10', count: 0, total: money(0, '0.00') },
+    ],
+    counted: money(200_000, '2000.00'),
+    variance: money(-36_000, '-360.00'),
+    varianceSays: 'Short by 360.00.',
+    needsReason: false,
+    reasonSays: '',
+  };
+  call.mockImplementation((command: string) => {
+    if (command === 'days') return Promise.resolve(days);
+    if (command === 'count_cash') return Promise.resolve(counted);
+    if (command === 'close_day') return Promise.resolve(days);
+    return Promise.resolve(null);
+  });
+
+  openDays();
+  await waitFor(() => expect(screen.getByText('Short by 360.00.')).toBeTruthy());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close today' }));
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Close today?' })).toBeTruthy());
+  // The difference is repeated where the decision is made, not left behind on the panel.
+  expect(screen.getByText(/The drawer count on this screen goes with it\. Short by 360\.00\./)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Close it without printing' }));
+  await waitFor(() =>
+    expect(call).toHaveBeenCalledWith('close_day', {
+      day: '2026-09-03',
+      counts: [{ value: 50_000, count: 4 }],
+      reason: '',
+      print: false,
+    }),
+  );
+});
+
+/// The whole thing is the owner's to switch off.
+it('says why there is nothing to press when the shop does not close its days', async () => {
+  call.mockImplementation((command: string) => {
+    if (command === 'days') {
+      return Promise.resolve({
+        ...days,
+        mayAct: false,
+        mayPlanHoliday: false,
+        closingSays:
+          'This shop does not close its days: nothing is locked and nobody is asked.',
+      });
+    }
+    if (command === 'count_cash') return Promise.resolve(drawer);
+    return Promise.resolve(null);
+  });
+
+  openDays();
+  await waitFor(() => expect(screen.getByText(/does not close its days/)).toBeTruthy());
+  expect(screen.queryByRole('button', { name: 'Close today' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Mark today a holiday' })).toBeNull();
+  // The drawer can still be counted: that is a record, not a lock.
+  expect(screen.getByLabelText('How many 500 notes')).toBeTruthy();
 });
 
 it('opens a closed day again only with a reason', async () => {
@@ -292,7 +382,7 @@ it('counts the drawer through Rust and writes it without locking anything', asyn
   fireEvent.change(screen.getByLabelText('Why is the drawer out?'), {
     target: { value: 'paid the vegetable man' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Write the count' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Write the count on its own' }));
   await waitFor(() => expect(screen.getByText('Write it without printing')).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'Write it without printing' }));
   await waitFor(() =>

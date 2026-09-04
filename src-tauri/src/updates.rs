@@ -544,9 +544,7 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
 /// detached from this process, because this process is about to exit.
 fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<()> {
     let exe = std::env::current_exe().map_err(|e| crate::words::from_io("Finding the program", &e))?;
-    let line = relaunch_line(installer, &exe);
-    std::process::Command::new("cmd.exe")
-        .args(["/C", &line])
+    cmd_line(&relaunch_line(installer, &exe))
         .spawn()
         .map_err(|e| crate::words::from_io("Starting the installer", &e))?;
     if let Some(handle) = handle {
@@ -558,6 +556,21 @@ fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::
         });
     }
     Ok(())
+}
+
+/// One `cmd` line, handed to Windows exactly as written.
+///
+/// `raw_arg` and not `arg`: Rust quotes an argument the way a normal Windows program reads one,
+/// which escapes the quotes already inside the line as `\"` — and cmd.exe does not read `\"` as
+/// a quote. `start "" /wait "C:\...\Setup.exe" /S` arrived as `start \"\" /wait \"C:\...`, so
+/// `start` was handed a lone backslash and Windows answered *cannot find '\'*. Every quote in
+/// the line has to survive the trip.
+pub(crate) fn cmd_line(line: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt as _;
+
+    let mut command = std::process::Command::new("cmd.exe");
+    command.raw_arg("/C ").raw_arg(line);
+    command
 }
 
 /// The `cmd` line: wait for this process to let go, install silently, start the program again.
@@ -892,6 +905,37 @@ mod github_tests {
         assert!(line.ends_with(r#"start "" "C:\Program Files\Magic Bill\magic-bill.exe""#), "{line}");
         // The wait comes first: the installer must not start while this process still holds the exe.
         assert!(line.starts_with("ping"), "{line}");
+    }
+
+    /// The line is right and it never arrived. `Command::arg` escapes the quotes inside it as
+    /// `\"`, cmd.exe does not read `\"` as a quote, and `start` was handed a lone backslash —
+    /// *"Windows cannot find '\'"*, with the update never installed. This runs a real cmd and
+    /// reads back what it parsed, because asserting on the string is what let it ship.
+    #[test]
+    fn the_line_reaches_cmd_with_every_quote_it_was_written_with() {
+        // The shape that broke: an empty quoted title, then a quoted path with spaces in it.
+        let shape = r#"start "" /wait "C:\Program Files\Magic Bill\Setup.exe" /S"#;
+
+        let sent = cmd_line(&format!("echo {shape}"))
+            .output()
+            .expect("cmd ran");
+        assert_eq!(
+            String::from_utf8_lossy(&sent.stdout).trim(),
+            shape,
+            "cmd did not get the line it was given"
+        );
+
+        // And the way it used to be handed over still mangles it, so this test keeps meaning
+        // something if somebody swaps `raw_arg` back for `arg`.
+        let mangled = std::process::Command::new("cmd.exe")
+            .args(["/C", &format!("echo {shape}")])
+            .output()
+            .expect("cmd ran");
+        assert_ne!(
+            String::from_utf8_lossy(&mangled.stdout).trim(),
+            shape,
+            "arg() no longer escapes quotes, so this test is guarding nothing"
+        );
     }
 
     #[test]

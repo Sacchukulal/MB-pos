@@ -1569,6 +1569,12 @@ pub fn give_advance_on(
         ));
     }
     let instalments = instalments.max(1);
+    // An advance is a payout from today's drawer, so a closed day refuses it like any other.
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "advance.day_closed", "give this advance")?
+    {
+        return Err(refusal);
+    }
 
     app.with_shop(|shop| {
         shop.db
@@ -2092,6 +2098,12 @@ pub fn approve_payroll_on(app: &App, run_id: String, paid_by: String) -> UiResul
             "payroll.paid_by",
             "Pay it in cash or by bank.",
         ));
+    }
+    // Approving a run writes an expense and a drawer row against today.
+    if let Some(refusal) =
+        crate::dayclose::day_refusal_on(app, day, "payroll.day_closed", "approve this run")?
+    {
+        return Err(refusal);
     }
 
     app.with_shop(|shop| {

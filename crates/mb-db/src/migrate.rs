@@ -88,6 +88,13 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0011_business_days",
         sql: include_str!("migrations/0011_business_days.sql"),
     },
+    // A credit collection and a rider's handback name the till whose drawer they landed in,
+    // like every other money row.
+    Migration {
+        version: 12,
+        name: "0012_money_has_a_till",
+        sql: include_str!("migrations/0012_money_has_a_till.sql"),
+    },
 ];
 
 /// The highest version this build understands.

@@ -154,6 +154,25 @@ pub fn list(items: &[String]) -> String {
     }
 }
 
+/// A time of day as a person says it: `5:00 am`, `12:30 pm`. Minutes past midnight, and the one
+/// place a clock is turned into words — `when` reads it and so does the day's own sentence.
+#[must_use]
+#[allow(
+    clippy::integer_division,
+    reason = "a clock is the one place a remainder is not a loss"
+)]
+pub fn clock(minutes_of_day: u32) -> String {
+    let hour24 = (minutes_of_day / 60) % 24;
+    let minute = minutes_of_day % 60;
+    let suffix = if hour24 < 12 { "am" } else { "pm" };
+    // 0 is midnight and 12 is noon, both of which read as 12.
+    let hour = match hour24 % 12 {
+        0 => 12,
+        h => h,
+    };
+    format!("{hour}:{minute:02} {suffix}")
+}
+
 #[must_use]
 #[allow(
     clippy::integer_division,
@@ -165,20 +184,11 @@ pub fn when(at: mb_core::Timestamp) -> String {
     ];
     let (days, seconds) = at.to_local_parts(mb_core::UtcOffset::INDIA);
     let (_, month, day) = mb_core::time::civil_from_days(days);
-    let minutes_of_day = seconds / 60;
-    let hour24 = minutes_of_day / 60;
-    let minute = minutes_of_day % 60;
-    let suffix = if hour24 < 12 { "am" } else { "pm" };
-    // 0 is midnight and 12 is noon, both of which read as 12.
-    let hour = match hour24 % 12 {
-        0 => 12,
-        h => h,
-    };
     let month_name = MONTHS
         .get(usize::try_from(month.saturating_sub(1)).unwrap_or(0))
         .copied()
         .unwrap_or("?");
-    format!("{day} {month_name}, {hour}:{minute:02} {suffix}")
+    format!("{day} {month_name}, {}", clock(seconds / 60))
 }
 
 /// A size a person reads.

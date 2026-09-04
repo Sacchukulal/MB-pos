@@ -637,11 +637,16 @@ export interface Commands {
   day_state: { args: { holidays: string[] | null }; returns: DayStateView };
   close_pending: { args: { holidays: string[] }; returns: DayStateView };
   days: { args: void; returns: DaysView };
-  close_day: { args: { day: string }; returns: DaysView };
+  /** `counts` is whatever the drawer grid has in it — null or empty closes without one. */
+  close_day: {
+    args: { day: string; counts: CountArg[] | null; reason: string; print: boolean };
+    returns: DaysView;
+  };
   mark_holiday: { args: { days: string[] }; returns: DaysView };
   unmark_holiday: { args: { days: string[] }; returns: DaysView };
   reopen_day: { args: { day: string; reason: string }; returns: DaysView };
-  // The drawer count beside it, optional and locking nothing.
+  // The drawer count: `count_cash` reads it, `count_drawer` writes one on its own (a shift
+  // handover mid-day), and `close_day` above writes one with the day. One path, three doors.
   count_cash: { args: { counts: CountArg[] | null }; returns: DrawerView };
   count_drawer: {
     args: { counts: CountArg[]; reason: string; print: boolean };

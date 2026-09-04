@@ -1,4 +1,7 @@
-/** Reports › Days: today's state, the last fourteen days, holidays ahead, and the drawer count. */
+/**
+ * Day close: today's state, the drawer count that goes with it, the last fourteen days and the
+ * holidays ahead. One screen, reached from the bar and from Reports › Days.
+ */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -48,6 +51,8 @@ export function Days() {
   const [counts, setCounts] = useState<Record<number, number>>({});
   const [reason, setReason] = useState('');
   const [confirming, setConfirming] = useState(false);
+  /** Closing today stops the counter taking money, so it is asked about first. */
+  const [confirmingClose, setConfirmingClose] = useState(false);
   /** The day being opened again, and why. */
   const [reopening, setReopening] = useState<string | null>(null);
   const [why, setWhy] = useState('');
@@ -146,7 +151,16 @@ export function Days() {
       render: (row) => (
         <Row gap="inline" wrap={false}>
           {view.mayAct && row.state === 'pending' ? (
-            <Button size="sm" onClick={() => act(call('close_day', { day: row.day }), `${row.daySays} is closed.`)}>
+            <Button
+              size="sm"
+              // A day that has gone takes no count: the drawer standing here is today's.
+              onClick={() =>
+                act(
+                  call('close_day', { day: row.day, counts: null, reason: '', print: false }),
+                  `${row.daySays} is closed.`,
+                )
+              }
+            >
               Close
             </Button>
           ) : null}
@@ -177,13 +191,31 @@ export function Days() {
     },
   ];
 
+  /** Whether anything at all has been typed into the grid — Rust's copy, not the local one. */
+  const anyCounted = drawer !== null && drawer.denominations.some((row) => row.count > 0);
+
+  /** Close today, with the count on the screen if there is one. */
+  const closeToday = (print: boolean) => {
+    setConfirmingClose(false);
+    act(
+      call('close_day', {
+        day: view.today,
+        counts: anyCounted ? asCounts(counts) : null,
+        reason,
+        print,
+      }),
+      'Today is closed.',
+    );
+  };
+
   const todayActions = view.mayAct ? (
     view.todayState === 'open' ? (
       <>
         <Button onClick={() => act(call('mark_holiday', { days: [view.today] }), 'Today is a holiday.')}>
           Mark today a holiday
         </Button>
-        <Button variant="primary" onClick={() => act(call('close_day', { day: view.today }), 'Today is closed.')}>
+        {/* Asked about first: this is the press that stops the counter taking money. */}
+        <Button variant="primary" onClick={() => setConfirmingClose(true)}>
           Close today
         </Button>
       </>
@@ -195,73 +227,24 @@ export function Days() {
   return (
     <Scroller className="mb-days">
       <PageHeader
-        title="Days"
+        title="Day close"
         subtitle={view.todayClosedSays || view.todaySays}
-        note={view.carrySays || undefined}
+        note={
+          <>
+            {view.dayRunsSays}
+            {view.carrySays ? ` ${view.carrySays}` : ''}
+          </>
+        }
         actions={todayActions}
       />
 
       <Sections>
-        <Panel title="The last 14 days" flush>
-          <Table columns={columns} rows={view.days} rowKey={(row) => row.day} />
-        </Panel>
-
-        {view.mayPlanHoliday ? (
-          <Panel
-            title="Holidays ahead"
-            actions={
-              <Row gap="inline" wrap={false}>
-                <Input
-                  aria-label="A day the shop will be shut"
-                  type="date"
-                  value={ahead}
-                  onChange={(event) => setAhead(event.target.value)}
-                />
-                <Button
-                  disabled={ahead === ''}
-                  onClick={() => {
-                    act(call('mark_holiday', { days: [ahead] }), 'Marked as a holiday.');
-                    setAhead('');
-                  }}
-                >
-                  Mark a holiday
-                </Button>
-              </Row>
-            }
-            flush={view.upcoming.length > 0}
-          >
-            {view.upcoming.length > 0 ? (
-              <Table
-                columns={[
-                  { key: 'day', header: 'Day', nowrap: true, render: (row: DayRowView) => row.daySays },
-                  { key: 'says', header: '', render: (row: DayRowView) => <span className="mb-muted">{row.closedSays}</span> },
-                  {
-                    key: 'act',
-                    header: '',
-                    render: (row: DayRowView) => (
-                      <Button
-                        size="sm"
-                        variant="quiet"
-                        onClick={() => act(call('unmark_holiday', { days: [row.day] }), `${row.daySays} is not a holiday.`)}
-                      >
-                        Not a holiday
-                      </Button>
-                    ),
-                  },
-                ]}
-                rows={view.upcoming}
-                rowKey={(row) => row.day}
-              />
-            ) : (
-              <p className="mb-muted">None yet.</p>
-            )}
-          </Panel>
-        ) : null}
-
+        {/* Not a tip: it is why the buttons that were here are not. */}
+        {view.closingSays ? <p className="mb-muted">{view.closingSays}</p> : null}
         {drawer ? (
           <Panel
             title="Count the drawer"
-            note="Optional. Counting the box under this till records what was in it; it does not close the day."
+            note="Optional. What is in the box under this till. Whatever is typed here goes with the day when you press Close today — or write it on its own at a shift handover, which records the drawer without closing anything."
             actions={drawer.countedSays ? <span className="mb-muted">{drawer.countedSays}</span> : null}
           >
             {drawer.tillsSay ? <p className="mb-muted">{drawer.tillsSay}</p> : null}
@@ -362,14 +345,93 @@ export function Days() {
 
             {drawer.mayCount ? (
               <Row end>
-                <Button variant="primary" onClick={() => setConfirming(true)}>
-                  Write the count
+                {/* Quiet, because the press that finishes the night is Close today above. */}
+                <Button variant="quiet" onClick={() => setConfirming(true)}>
+                  Write the count on its own
                 </Button>
               </Row>
             ) : null}
           </Panel>
         ) : null}
+
+        <Panel title="The last 14 days" flush>
+          <Table columns={columns} rows={view.days} rowKey={(row) => row.day} />
+        </Panel>
+
+        {view.mayPlanHoliday ? (
+          <Panel
+            title="Holidays ahead"
+            actions={
+              <Row gap="inline" wrap={false}>
+                <Input
+                  aria-label="A day the shop will be shut"
+                  type="date"
+                  value={ahead}
+                  onChange={(event) => setAhead(event.target.value)}
+                />
+                <Button
+                  disabled={ahead === ''}
+                  onClick={() => {
+                    act(call('mark_holiday', { days: [ahead] }), 'Marked as a holiday.');
+                    setAhead('');
+                  }}
+                >
+                  Mark a holiday
+                </Button>
+              </Row>
+            }
+            flush={view.upcoming.length > 0}
+          >
+            {view.upcoming.length > 0 ? (
+              <Table
+                columns={[
+                  { key: 'day', header: 'Day', nowrap: true, render: (row: DayRowView) => row.daySays },
+                  { key: 'says', header: '', render: (row: DayRowView) => <span className="mb-muted">{row.closedSays}</span> },
+                  {
+                    key: 'act',
+                    header: '',
+                    render: (row: DayRowView) => (
+                      <Button
+                        size="sm"
+                        variant="quiet"
+                        onClick={() => act(call('unmark_holiday', { days: [row.day] }), `${row.daySays} is not a holiday.`)}
+                      >
+                        Not a holiday
+                      </Button>
+                    ),
+                  },
+                ]}
+                rows={view.upcoming}
+                rowKey={(row) => row.day}
+              />
+            ) : (
+              <p className="mb-muted">None yet.</p>
+            )}
+          </Panel>
+        ) : null}
+
       </Sections>
+
+      {/*
+        Closing today is the one press on this screen that stops the counter taking money, so it
+        is the one press that asks. What it says depends on whether a count is going with it.
+      */}
+      {confirmingClose ? (
+        <ConfirmDialog
+          open
+          title="Close today?"
+          body={
+            anyCounted && drawer
+              ? `The drawer count on this screen goes with it. ${drawer.varianceSays} No more bills, expenses or payments can be put into today until somebody opens it again, and opening it is recorded against your name.`
+              : 'No drawer count has been typed, and one is not needed. No more bills, expenses or payments can be put into today until somebody opens it again, and opening it is recorded against your name.'
+          }
+          confirmLabel={anyCounted ? 'Close it and print the slip' : 'Close the day'}
+          otherLabel={anyCounted ? 'Close it without printing' : undefined}
+          onConfirm={() => closeToday(anyCounted)}
+          onOther={anyCounted ? () => closeToday(false) : undefined}
+          onCancel={() => setConfirmingClose(false)}
+        />
+      ) : null}
 
       {confirming && drawer ? (
         <ConfirmDialog
