@@ -10,16 +10,19 @@
 # **It publishes from a TAG and never from a branch.** What shipped has to be
 # something anybody can rebuild, and "main at the time" is not that.
 #
-# It RUNS on every push to main as well, for two reasons that are really one:
+# It RUNS on a push to main as well, for two reasons that are really one:
 #
 # * A push to main is the rehearsal. The suite, clippy, the front-end guards and
 #   the installer all run before anything is tagged, so a red build costs a
-#   commit and not a version number. Tag only a green main.
+#   commit and not a version number.
 # * GitHub scopes its caches to the ref that saved them, and a tag is its own
 #   ref: a cache saved by v1.5.3 was invisible to v1.6.0. Every tag build
 #   started from nothing — 15 minutes of tests and 12 of release compile, every
 #   time. A cache saved on main is what a tag run is allowed to read, so main is
 #   where it is saved (and only there: `save-if` below).
+#
+# But not twice for one commit: when main and a release tag arrive together the
+# tag's run is the build, and the push to main does nothing (`decide` below).
 #
 # Three jobs. `checks` (three runners, one per slice of the suite) and `build`
 # run side by side, so the wall clock is the longest of them and not the sum;
@@ -39,6 +42,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # Words are not built. (GitHub ignores path filters for tags, as it should.)
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   # Run by hand with no inputs: the whole pipeline, publishing nothing. With a
   # tag: only `manifest` below — the manifest of that release, written and
   # signed again, which is how a rollout is staged or pulled back (RELEASE.md
@@ -62,6 +69,31 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # One question, answered in seconds on the cheapest runner: is this push to
+  # main the same commit a release tag points at? Then the tag's run is the
+  # build, and this one would be the same twenty minutes again.
+  # ---------------------------------------------------------------------------
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.same.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.ref_type == 'branch'
+        with:
+          fetch-tags: true
+      - id: same
+        if: github.ref_type == 'branch'
+        run: |
+          tag=$(git tag --points-at HEAD | grep '^v' | head -n 1 || true)
+          if [ -n "$tag" ]; then
+            echo "this commit is $tag; its release run is the build"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
   # Nothing is published until everything passes. A release that skips the
   # suite to get out faster is the release that needs rolling back.
   #
@@ -76,7 +108,8 @@ jobs:
   # would have told it.
   # ---------------------------------------------------------------------------
   checks:
-    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    needs: decide
+    if: needs.decide.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.tag == '')
     strategy:
       fail-fast: false
       matrix:
@@ -173,7 +206,8 @@ jobs:
   # seconds instead of compiled from source in ten minutes.
   # ---------------------------------------------------------------------------
   build:
-    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    needs: decide
+    if: needs.decide.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.tag == '')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
