@@ -65,17 +65,18 @@ Until that box is ticked, assume the worst case.
    the bump). It is three numbers — see D96, and ANDROID-G4 for what a version
    *name* cost. The last number is the one that moves: a round of fixes is a
    patch, not a minor.
-2. **Push main first, and wait for it.** Every push to main runs the whole
-   workflow without publishing: the suite, clippy, the front-end guards and
-   the installer. That run is the rehearsal, and it fills the caches a tag
-   build reads — GitHub keeps caches per ref and a tag is its own ref, so a
-   tag that runs cold takes 40 minutes and a tag after a green main about ten.
-   `gh run watch` until it is green. A red main costs a commit; a red tag
-   costs a version number, because a tag is never reused.
-3. **Tag it, with the notes.** `git tag -a v1.6.1 -m "<two sentences>" && git
-   push origin v1.6.1`. The tag's message is what a shopkeeper reads. CI
-   publishes from the tag, never from a branch, so what shipped can always be
-   rebuilt.
+2. **Run the gates here first.** `cargo test --workspace`, clippy on the newest
+   stable, and `npm run check` in `ui/` — CI runs the same ones and a red run
+   is twenty minutes.
+3. **Tag it, with the notes, and push both.** `git tag -a v1.6.3 -m "<two
+   sentences>" && git push origin main v1.6.3`. The tag's message is what a
+   shopkeeper reads. CI publishes from the tag, never from a branch, so what
+   shipped can always be rebuilt. The push to main runs the same workflow
+   without publishing and is what fills the caches — GitHub keeps caches per
+   ref and a tag is its own ref. `gh run watch` the tag's run. **A red run
+   keeps its version number:** re-run it when the runner was the cause, or
+   move the tag onto the fix (`git tag -f`, `git push -f origin v1.6.3`) when
+   code changed. Nothing was published, so nothing is being replaced.
 4. CI (`.github/workflows/release.yml`) then, in two jobs side by side:
    * *checks*: the versions agree with the tag, the front-end types, guards
      and tests, the whole suite, clippy;
