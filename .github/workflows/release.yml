@@ -21,9 +21,10 @@
 #   time. A cache saved on main is what a tag run is allowed to read, so main is
 #   where it is saved (and only there: `save-if` below).
 #
-# Three jobs. `checks` and `build` run side by side on two Windows runners, so
-# the wall clock is the longer of them and not the sum; `publish` waits for
-# both, and is the only place anything reaches a shopkeeper.
+# Three jobs. `checks` (three runners, one per slice of the suite) and `build`
+# run side by side, so the wall clock is the longest of them and not the sum;
+# `publish` waits for all of them, and is the only place anything reaches a
+# shopkeeper.
 #
 # What comes out: a GitHub Release for the tag carrying the installer,
 # `manifest.json` and `manifest.json.sig`. A counter looks at
@@ -52,11 +53,22 @@ jobs:
   # Nothing is published until everything passes. A release that skips the
   # suite to get out faster is the release that needs rolling back.
   #
-  # Cheapest gate first: the front end answers in under two minutes and the
-  # suite takes far longer, and 1.6.0 spent 25 minutes finding out what 45
-  # seconds would have told it.
+  # The suite is every test, but not on one runner: compiled warm it is a
+  # minute and a half of building and eleven of running, most of that the
+  # counter's own tests and mb-db's. So the counter, mb-db and the rest each get
+  # a runner, and the rest's runner also carries clippy and the front end.
+  # Nothing is dropped; the slices only stop waiting for each other.
+  #
+  # Cheapest gate first on the runner that has them: the front end answers in
+  # under two minutes, and 1.6.0 spent 25 minutes finding out what 45 seconds
+  # would have told it.
   # ---------------------------------------------------------------------------
   checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [counter, db, rest]
+    name: checks (${{ matrix.part }})
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,17 +76,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: checks
+          # One cache per slice: they compile different things.
+          shared-key: checks-${{ matrix.part }}
           cache-on-failure: true
           save-if: ${{ github.ref_type == 'branch' }}
 
       - uses: actions/setup-node@v4
+        if: matrix.part == 'rest'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
       - name: Install the front end
+        if: matrix.part == 'rest'
         working-directory: ui
         run: npm ci
 
@@ -82,7 +97,7 @@ jobs:
       # them), and a release where they disagree is a counter that offers itself
       # an update forever.
       - name: The versions agree with the tag
-        if: github.ref_type == 'tag'
+        if: matrix.part == 'rest' && github.ref_type == 'tag'
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}" -replace '^v',''
@@ -97,25 +112,39 @@ jobs:
       # Cargo.lock carries the workspace version too; `--locked` refuses a lock
       # that was not brought along, here rather than 15 minutes in.
       - name: Cargo.lock is current
+        if: matrix.part == 'rest'
         shell: pwsh
         run: cargo metadata --locked --format-version 1 > $null
 
       - name: Front-end types
+        if: matrix.part == 'rest'
         working-directory: ui
         run: npm run typecheck
 
       - name: The front-end guards
+        if: matrix.part == 'rest'
         working-directory: ui
         run: npm run lint
 
       - name: Front-end tests
+        if: matrix.part == 'rest'
         working-directory: ui
         run: npm run test
 
-      - name: The whole suite
-        run: cargo test --workspace --locked
+      - name: The counter's tests
+        if: matrix.part == 'counter'
+        run: cargo test -p magic-bill --locked
+
+      - name: The database's tests
+        if: matrix.part == 'db'
+        run: cargo test -p mb-db --locked
+
+      - name: Every other crate's tests
+        if: matrix.part == 'rest'
+        run: cargo test --workspace --exclude magic-bill --exclude mb-db --locked
 
       - name: Clippy
+        if: matrix.part == 'rest'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   # ---------------------------------------------------------------------------
@@ -158,7 +187,7 @@ jobs:
 
       # From the repository root: the CLI finds src-tauri/ from where it is run,
       # and from ui/ it finds nothing. Bash, not pwsh: PowerShell swallows the
-      # bare  that tells the CLI where cargo's own arguments begin.
+      # bare "--" that tells the CLI where cargo's own arguments begin.
       - name: Build the installer
         shell: bash
         run: ./ui/node_modules/.bin/tauri build -- --locked
@@ -196,7 +225,8 @@ jobs:
           }
           $version = "${{ steps.installer.outputs.version }}"
           # The notes are the tag's message: two plain sentences for a shopkeeper.
-          $notes = (git tag -l --format='%(contents:subject)' "v$version").Trim()
+          # On a main run there is no tag yet, and git answers with nothing.
+          $notes = "$(git tag -l --format='%(contents:subject)' "v$version")".Trim()
           if (-not $notes) { $notes = "Version $version." }
           $manifest = [ordered]@{
             version = $version
@@ -217,7 +247,7 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # The only step that reaches a shopkeeper, and it waits for both of the
+  # The only step that reaches a shopkeeper, and it waits for all of the
   # others. A tag whose suite failed publishes nothing.
   # ---------------------------------------------------------------------------
   publish:
