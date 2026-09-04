@@ -32,6 +32,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The whole history, so the tag arrives as the annotated object it is. A shallow
+          # checkout leaves a lightweight ref behind, and `%(contents:subject)` then reads the
+          # commit message instead of the tag's — which is how a developer's commit subject
+          # reached a shopkeeper as the release notes in 1.5.3.
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
