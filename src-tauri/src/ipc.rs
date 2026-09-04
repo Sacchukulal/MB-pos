@@ -555,8 +555,8 @@ macro_rules! commands {
             $crate::devices::print_label,
             // The first run, and making a shop at all.
             $crate::firstrun::first_run,
-            $crate::firstrun::create_shop,
-            $crate::firstrun::use_existing_shop,
+            $crate::firstrun::sign_in_owner,
+            $crate::firstrun::open_as_owner,
             $crate::firstrun::use_shop_folder,
             // The logo, and the two Browse buttons that did not exist.
             $crate::logo::logo,
@@ -671,7 +671,6 @@ macro_rules! commands {
             $crate::updates::go_back_a_version,
             $crate::updates::install_update,
             // The cloud copy, and what comes back down it.
-            $crate::firstrun::restore_from_cloud,
             $crate::ipc::notices,
             $crate::ipc::notices_seen,
             $crate::ipc::pull_from_cloud,

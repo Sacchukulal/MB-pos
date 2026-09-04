@@ -1,18 +1,35 @@
 /** The first five minutes. */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
-import { Button, Checkbox, freshId, Icon, Input, Logo, MoneyInput, Notice, PhoneInput, Scroller, Select, NumberInput } from '../kit';
+import {
+  Button,
+  Checkbox,
+  freshId,
+  Icon,
+  InfoTip,
+  Input,
+  Logo,
+  MoneyInput,
+  Notice,
+  PhoneInput,
+  Scroller,
+  Select,
+  NumberInput,
+} from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
+import type { OwnerShopView } from '../ipc/generated/OwnerShopView';
+import type { OwnerSignInView } from '../ipc/generated/OwnerSignInView';
 import type { TaxSlabView } from '../ipc/generated/TaxSlabView';
 
 import './firstrun.css';
 
 /** The steps, in the order somebody actually does them. */
 const STEPS = [
-  { id: 'shop', label: 'Shop file', must: true },
+  { id: 'folder', label: 'Shop folder', must: true },
+  { id: 'signin', label: 'Sign in', must: true },
   { id: 'details', label: 'Shop name', must: true },
   { id: 'pin', label: 'Your PIN', must: true },
   { id: 'menu', label: 'Your items', must: false },
@@ -34,11 +51,44 @@ function stepAfterPin(view: FirstRunView | null): StepId {
   return 'menu';
 }
 
+/** Where a shop that is already open picks up. */
+function stepFor(view: FirstRunView): StepId {
+  if (!view.hasShop) return 'folder';
+  if (view.hasDetails && view.hasPin) return stepAfterPin(view);
+  if (view.hasDetails) return 'pin';
+  return 'details';
+}
+
+/** A step's heading, with its explanation behind the tip rather than under the title. */
+function Heading({ title, tip }: { title: string; tip: ReactNode }) {
+  return (
+    <div className="mb-firstrun__heading">
+      <h1 className="mb-firstrun__title">{title}</h1>
+      <InfoTip label={`About ${title}`}>{tip}</InfoTip>
+    </div>
+  );
+}
+
 export function FirstRun({ onDone }: { onDone: () => void }) {
   const [view, setView] = useState<FirstRunView | null>(null);
-  const [step, setStep] = useState<StepId>('shop');
+  const [step, setStep] = useState<StepId>('folder');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
+  /** Rust's code for the problem, for the one refusal a checkbox answers. */
+  const [problemCode, setProblemCode] = useState('');
+
+  /** Where the shop's data will go. Nobody chooses it but the owner. */
+  const [folder, setFolder] = useState('');
+
+  // The owner's account.
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [signedIn, setSignedIn] = useState<OwnerSignInView | null>(null);
+  /** The shop being opened, kept for a second press after "move the licence here". */
+  const [opening, setOpening] = useState('');
+  const [moveHere, setMoveHere] = useState(false);
+  /** What came down, in Rust's words. */
+  const [cameDown, setCameDown] = useState('');
 
   // The shop's details.
   const [name, setName] = useState('');
@@ -54,8 +104,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   /** The recovery code is shown once and never again. */
   const [wroteItDown, setWroteItDown] = useState(false);
   /**
-   * The row we made for whoever is in charge, kept so a SECOND press of Next edits that person
-   * rather than hiring another one.
+   * The owner's row: the one Rust made from the account, or the one a second press of Next
+   * edits rather than hiring another one.
    */
   const [personId, setPersonId] = useState('');
 
@@ -67,16 +117,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   // The shop's own classes, not a fourth copy of the slab list.
   const [classes, setClasses] = useState<readonly TaxSlabView[]>([]);
 
-  /** Where the shop's data will go. */
-  const [folder, setFolder] = useState('');
-
-  // Bring my shop from the cloud: the licence key names the shop.
-  const [fromCloud, setFromCloud] = useState(false);
-  const [cloudKey, setCloudKey] = useState('');
-  const [moveHere, setMoveHere] = useState(false);
-  /** What came down, in Rust's words. */
-  const [cameDown, setCameDown] = useState('');
-
   // The room: how many tables, numbered from one.
   const [tableCount, setTableCount] = useState('');
   // The printer: one of the ones Windows knows about.
@@ -85,23 +125,36 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
   const complain = useCallback((cause: unknown) => {
     const said = isUiError(cause) ? cause.message : String(cause);
+    setProblemCode(isUiError(cause) ? cause.code : '');
     // Rust writes its refusals as fragments — "a PIN is 6 to 8 digits" — because most of them
     // are read inside a longer sentence.
     setProblem(said.charAt(0).toUpperCase() + said.slice(1));
   }, []);
 
+  const clear = () => {
+    setProblem('');
+    setProblemCode('');
+  };
+
+  /** A view from Rust: what it says about the owner's row is what the PIN step edits. */
+  const take = useCallback((fresh: FirstRunView) => {
+    setView(fresh);
+    if (fresh.owner) {
+      setPersonId(fresh.owner.id);
+      setPerson((was) => (was === '' ? fresh.owner?.name ?? '' : was));
+    }
+  }, []);
+
   useEffect(() => {
     call('first_run')
       .then((fresh) => {
-        setView(fresh);
-        // Somebody who already has a shop and a name lands where they left off rather than
-        // being asked again.
-        if (fresh.hasShop && fresh.hasDetails && fresh.hasPin) setStep(stepAfterPin(fresh));
-        else if (fresh.hasShop && fresh.hasDetails) setStep('pin');
-        else if (fresh.hasShop) setStep('details');
+        take(fresh);
+        // Somebody who already has a shop lands where they left off rather than being asked
+        // again.
+        setStep(stepFor(fresh));
       })
       .catch(complain);
-  }, [complain]);
+  }, [complain, take]);
 
   // The tax classes are read when the items step opens.
   useEffect(() => {
@@ -129,60 +182,62 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   // `code` has no dot of its own — it is the back half of the PIN step.
   const index = STEPS.findIndex((s) => s.id === (step === 'code' ? 'pin' : step));
 
-  const makeShop = (folder: string) => {
-    setBusy(true);
-    setProblem('');
-    call('create_shop', { folder })
-      .then((fresh) => {
-        setView(fresh);
-        setStep('details');
-      })
-      .catch(complain)
-      .finally(() => setBusy(false));
+  const go = (to: StepId) => {
+    clear();
+    setStep(to);
   };
 
-  /** A new computer: the shop comes down from the cloud before it is opened. */
-  const restoreFromCloud = () => {
-    setBusy(true);
-    setProblem('');
-    call('restore_from_cloud', { key: cloudKey, folder, moveHere })
-      .then((fresh) => {
-        setView(fresh.firstRun);
-        setCameDown(fresh.says);
-        setFromCloud(false);
-        // The shop that came down already has a name and a PIN; what it may still lack is
-        // whatever the old computer never had.
-        if (fresh.firstRun.hasDetails && fresh.firstRun.hasPin) setStep('menu');
-        else if (fresh.firstRun.hasDetails) setStep('pin');
-        else setStep('details');
-      })
-      .catch(complain)
-      .finally(() => setBusy(false));
-  };
-
-  /**
-   * Adopt a database that is already on this computer — a reinstall, or a drive letter that
-   * changed.
-   */
-  const openExisting = (path: string) => {
-    setBusy(true);
-    setProblem('');
-    call('use_existing_shop', { path })
-      .then((fresh) => {
-        setView(fresh);
-        setStep(fresh.hasDetails ? 'pin' : 'details');
-      })
-      .catch(complain)
-      .finally(() => setBusy(false));
-  };
-
-  /** Browse for a folder. */
+  /** Browse for the folder. */
   const browseForFolder = () => {
     setBusy(true);
-    setProblem('');
-    call('pick_a_folder', { start: view?.defaultFolder ?? null })
-      .then((folder) => {
-        if (folder) setFolder(folder);
+    clear();
+    call('pick_a_folder', { start: folder === '' ? null : folder })
+      .then((chosen) => {
+        if (chosen) setFolder(chosen);
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  /** Open one of the account's shops in the chosen folder. */
+  const openShop = (restaurantId: string) => {
+    setOpening(restaurantId);
+    setBusy(true);
+    clear();
+    call('open_as_owner', { restaurantId, folder, moveHere })
+      .then((opened) => {
+        take(opened.firstRun);
+        if (opened.cameDown) setCameDown(opened.cameDown);
+        // The details step starts with what the account already knows about the shop.
+        setName((was) => (was === '' ? opened.shop.name : was));
+        setAddress((was) => (was === '' ? opened.shop.address : was));
+        setGstin((was) => (was === '' ? opened.shop.gstin : was));
+        // A shop that came back whole — a reinstall — needs nothing more from here.
+        if (!opened.firstRun.needed) {
+          onDone();
+          return;
+        }
+        setStep(stepFor(opened.firstRun));
+      })
+      .catch(complain)
+      .finally(() => setBusy(false));
+  };
+
+  /** The owner's account: which shops it owns is the answer. */
+  const signIn = () => {
+    if (email.trim() === '' || password === '') {
+      setProblem('Type the email and the password of your Magic Bill account.');
+      return;
+    }
+    setBusy(true);
+    clear();
+    call('sign_in_owner', { email: email.trim(), password })
+      .then((who) => {
+        setSignedIn(who);
+        setPassword('');
+        // One shop is the usual answer, and it opens without another press.
+        const only = who.shops.length === 1 ? who.shops[0] : undefined;
+        if (only) openShop(only.id);
       })
       .catch(complain)
       .finally(() => setBusy(false));
@@ -194,7 +249,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       return;
     }
     setBusy(true);
-    setProblem('');
+    clear();
     call('save_settings', {
       edits: [
         { key: 'store.name', value: name.trim() },
@@ -230,7 +285,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       return;
     }
     setBusy(true);
-    setProblem('');
+    clear();
     const id = personId === '' ? freshId('staff') : personId;
     setPersonId(id);
     call('save_staff_member', {
@@ -257,11 +312,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const addTables = () => {
     const count = Number(tableCount);
     if (!(count > 0)) {
-      setStep('printer');
+      go('printer');
       return;
     }
     setBusy(true);
-    setProblem('');
+    clear();
     call('add_dining_tables', {
       sectionId: null,
       prefix: '',
@@ -281,7 +336,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       return;
     }
     setBusy(true);
-    setProblem('');
+    clear();
     call('choose_bill_printer', { windowsName: printerName })
       .then(() => onDone())
       .catch(complain)
@@ -291,7 +346,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const addItem = () => {
     if (itemName.trim() === '' || itemPrice.trim() === '') return;
     setBusy(true);
-    setProblem('');
+    clear();
     call('save_menu_item', {
       edit: {
         id: freshId('itm'),
@@ -324,6 +379,16 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .finally(() => setBusy(false));
   };
 
+  /** The way back, on the left of every step that has one. */
+  const back = (to: StepId) => (
+    <Button variant="quiet" className="mb-firstrun__back" disabled={busy} onClick={() => go(to)}>
+      <Icon name="chevron-left" size="sm" />
+      Back
+    </Button>
+  );
+
+  const shopsToPick = signedIn && signedIn.shops.length > 1 ? signedIn.shops : [];
+
   return (
     <Scroller inset className="mb-firstrun">
       <div className="mb-firstrun__panel">
@@ -353,121 +418,141 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
           <Notice tone="danger">{problem}</Notice>
         ) : null}
 
-        {step === 'shop' ? (
+        {step === 'folder' ? (
           <section className="mb-firstrun__body">
             <Logo size="lg" />
-            <h1 className="mb-firstrun__title">Welcome to Magic Bill</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              Two minutes and your counter is ready. Nothing here goes to the
-              internet — your shop&rsquo;s data stays on this computer.
-            </p>
+            <Heading
+              title="Welcome to Magic Bill"
+              tip={
+                <>
+                  Two minutes and your counter is ready. Everything about your shop — bills,
+                  menu, staff, settings and licence — lives in one folder on this computer,
+                  and you choose which. Keep it on a drive you back up. A reinstall opens the
+                  same folder and finds the shop as it was.
+                </>
+              }
+            />
 
-            {/* The folder, and a way to change it. */}
             <div className="mb-firstrun__where">
-              <span className="mb-firstrun__label">Your data will be kept in</span>
+              <span className="mb-firstrun__label">Where your shop&rsquo;s data will be kept</span>
               <code className="mb-firstrun__path">
-                {folder === '' ? view.defaultFolder : folder}
+                {folder === '' ? 'No folder chosen yet' : folder}
               </code>
               <div className="mb-row">
                 <Button variant="secondary" disabled={busy} onClick={browseForFolder}>
                   <Icon name="folder" size="sm" />
-                  Choose a different folder
+                  {folder === '' ? 'Choose the folder' : 'Choose a different folder'}
                 </Button>
-                {folder === '' ? null : (
-                  <Button variant="quiet" disabled={busy} onClick={() => setFolder('')}>
-                    Use the usual place
-                  </Button>
-                )}
               </div>
             </div>
 
             <div className="mb-firstrun__actions">
               <Button
                 variant="primary"
-                disabled={busy}
-                onClick={() => makeShop(folder)}
+                disabled={busy || folder === ''}
+                onClick={() => go('signin')}
               >
-                Start a new shop
-              </Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setFromCloud((was) => !was)}>
-                <Icon name="download" size="sm" />
-                Bring my shop from the cloud
+                Next
               </Button>
             </div>
+          </section>
+        ) : null}
 
-            {fromCloud ? (
+        {step === 'signin' ? (
+          <section className="mb-firstrun__body">
+            <Heading
+              title="Sign in"
+              tip={
+                <>
+                  Use the email and password of your Magic Bill account — the one you started
+                  your trial or bought your plan with at magicbill.in. The shop this counter
+                  opens is the one that account owns; the licence comes with it, so there is
+                  no key to type. The same login works in the phone app. Staff never sign in
+                  here — they get a PIN from you.
+                </>
+              }
+            />
+
+            <div className="mb-firstrun__where">
+              <span className="mb-firstrun__label">Shop folder</span>
+              <code className="mb-firstrun__path">{folder}</code>
+            </div>
+
+            {signedIn === null ? (
               <div className="mb-firstrun__fields">
-                {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-                <p className="mb-firstrun__lede">
-                  Your licence key names the shop. The last 30 days of bills, your
-                  menu, staff, customers and settings come down before the counter
-                  opens; older days come as totals. Your pen-drive backup holds
-                  everything.
-                </p>
                 <Input
-                  label="Licence key"
-                  value={cloudKey}
-                  autoComplete="off"
+                  label="Email"
+                  type="email"
+                  autoComplete="username"
                   autoFocus
-                  onChange={(e) => setCloudKey(e.target.value)}
+                  value={email}
+                  placeholder="you@example.com"
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <Input
+                  label="Password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') restoreFromCloud();
+                    if (e.key === 'Enter') signIn();
                   }}
                 />
-                <Checkbox
-                  label="The old computer is gone — move the licence here"
-                  checked={moveHere}
-                  onChange={(e) => setMoveHere(e.target.checked)}
-                />
-                <div className="mb-firstrun__actions">
-                  <Button
-                    variant="primary"
-                    disabled={busy || cloudKey.trim() === ''}
-                    onClick={restoreFromCloud}
-                  >
-                    Bring it down
-                  </Button>
-                </div>
               </div>
-            ) : null}
+            ) : (
+              <div className="mb-firstrun__where">
+                <span className="mb-firstrun__label">Signed in as</span>
+                <code className="mb-firstrun__path">
+                  {signedIn.name} · {signedIn.email}
+                </code>
+              </div>
+            )}
 
-            {view.found.length > 0 ? (
-              <div className="mb-firstrun__found">
-                <span className="mb-firstrun__label">
-                  Or open a shop already on this computer
-                </span>
-                {view.found.map((found) => (
+            {shopsToPick.length > 0 ? (
+              <div className="mb-firstrun__shops">
+                <span className="mb-firstrun__label">Which shop is this counter for?</span>
+                {shopsToPick.map((shop: OwnerShopView) => (
                   <Button
-                    key={found}
-                    variant="secondary"
+                    key={shop.id}
+                    variant={opening === shop.id ? 'primary' : 'secondary'}
                     disabled={busy}
-                    onClick={() => openExisting(found.split(' — ')[0] ?? found)}
+                    onClick={() => openShop(shop.id)}
                   >
-                    {found}
+                    {shop.name}
+                    {shop.address ? ` — ${shop.address}` : ''}
                   </Button>
                 ))}
               </div>
             ) : null}
 
-            {/* A database somewhere this counter did not look. */}
-            <div className="mb-firstrun__found">
-              <Button
-                variant="quiet"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  setProblem('');
-                  call('pick_a_folder', { start: null })
-                    .then((chosen) => {
-                      if (chosen) openExisting(chosen);
-                    })
-                    .catch(complain)
-                    .finally(() => setBusy(false));
-                }}
-              >
-                My shop&rsquo;s data is somewhere else — find it
-              </Button>
+            {problemCode === 'licence.bound_elsewhere' ? (
+              <Checkbox
+                label="The old computer is gone — move the licence here"
+                checked={moveHere}
+                onChange={(e) => setMoveHere(e.target.checked)}
+              />
+            ) : null}
+
+            <div className="mb-firstrun__actions">
+              {back('folder')}
+              {signedIn === null ? (
+                <Button
+                  variant="primary"
+                  disabled={busy || email.trim() === '' || password === ''}
+                  onClick={signIn}
+                >
+                  Sign in
+                </Button>
+              ) : problemCode === 'licence.bound_elsewhere' ? (
+                <Button
+                  variant="primary"
+                  disabled={busy || !moveHere || opening === ''}
+                  onClick={() => openShop(opening)}
+                >
+                  Open it here
+                </Button>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -476,12 +561,16 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'details' ? (
           <section className="mb-firstrun__body">
-            <h1 className="mb-firstrun__title">Your shop</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              This goes at the top of every bill you print. A bill without it is
-              not one a customer can claim.
-            </p>
+            <Heading
+              title="Your shop"
+              tip={
+                <>
+                  This goes at the top of every bill you print. A bill without it is not one a
+                  customer can claim. What your account already knows is filled in — correct
+                  anything that is wrong.
+                </>
+              }
+            />
 
             <div className="mb-firstrun__fields">
               <Input
@@ -523,13 +612,17 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'pin' ? (
           <section className="mb-firstrun__body">
-            <h1 className="mb-firstrun__title">Who is in charge</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              Until somebody has a PIN, anybody who walks behind the counter can
-              open your reports and change your prices. This is you — you can
-              add your staff later.
-            </p>
+            <Heading
+              title="Your PIN"
+              tip={
+                <>
+                  Until somebody has a PIN, anybody who walks behind the counter can open your
+                  reports and change your prices. This is you, the owner — four digits you
+                  type at the counter every day. Your staff get their own PINs later, from the
+                  Staff screen.
+                </>
+              }
+            />
 
             <div className="mb-firstrun__fields">
               <Input
@@ -561,6 +654,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             </div>
 
             <div className="mb-firstrun__actions">
+              {back('details')}
               <Button variant="primary" disabled={busy} onClick={savePin}>
                 Next
               </Button>
@@ -570,14 +664,16 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'code' ? (
           <section className="mb-firstrun__body">
-            <h1 className="mb-firstrun__title">Write this down</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              If the PIN is ever forgotten, this code is the only way back into
-              your shop. It is not shown again. It is printing on your printer
-              now as well — but write it down, because a first run often has no
-              printer set up yet.
-            </p>
+            <Heading
+              title="Write this down"
+              tip={
+                <>
+                  If the PIN is ever forgotten, this code is the only way back into your shop.
+                  It is not shown again. It is printing on your printer now as well — but write
+                  it down, because a first run often has no printer set up yet.
+                </>
+              }
+            />
 
             <p className="mb-firstrun__code">{recovery}</p>
 
@@ -597,7 +693,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               <Button
                 variant="primary"
                 disabled={!wroteItDown}
-                onClick={() => setStep(stepAfterPin(view))}
+                onClick={() => go(stepAfterPin(view))}
               >
                 Next
               </Button>
@@ -607,12 +703,15 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'menu' ? (
           <section className="mb-firstrun__body">
-            <h1 className="mb-firstrun__title">What you sell</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              Add two or three now so you can print a real bill and see it. The
-              rest can wait — the Menu screen imports a whole list.
-            </p>
+            <Heading
+              title="What you sell"
+              tip={
+                <>
+                  Add two or three now so you can print a real bill and see it. The rest can
+                  wait — the Menu screen imports a whole list.
+                </>
+              }
+            />
 
             <div className="mb-firstrun__row">
               <Input
@@ -666,9 +765,10 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               </ul>
             ) : null}
 
-            {/* One button, because there is only one outcome. */}
+            {/* One button forward, because there is only one outcome. */}
             <div className="mb-firstrun__actions">
-              <Button variant="primary" onClick={() => setStep(view.hasTables ? 'printer' : 'tables')}>
+              {back('details')}
+              <Button variant="primary" onClick={() => go(view.hasTables ? 'printer' : 'tables')}>
                 {added.length > 0 ? 'Next' : 'Skip this — next'}
               </Button>
             </div>
@@ -677,12 +777,15 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'tables' ? (
           <section className="mb-firstrun__body">
-            <h1 className="mb-firstrun__title">Your tables</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              How many tables does the room have? They are numbered from 1; the
-              Floor screen renames and arranges them later.
-            </p>
+            <Heading
+              title="Your tables"
+              tip={
+                <>
+                  How many tables does the room have? They are numbered from 1; the Floor
+                  screen renames and arranges them later.
+                </>
+              }
+            />
             <div className="mb-firstrun__fields">
               <NumberInput
                 label="Tables"
@@ -696,6 +799,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
             </div>
             <div className="mb-firstrun__actions">
+              {back('menu')}
               <Button variant="primary" disabled={busy} onClick={addTables}>
                 {Number(tableCount) > 0 ? 'Add them — next' : 'Skip this — next'}
               </Button>
@@ -705,12 +809,15 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         {step === 'printer' ? (
           <section className="mb-firstrun__body">
-            <h1 className="mb-firstrun__title">Your printer</h1>
-            {/* mb-layout-allow: a wizard step is one instruction — behind a tip it is a step nobody reads */}
-            <p className="mb-firstrun__lede">
-              Bills and kitchen tickets go to this one. Settings › Printers adds
-              more, and a second printer for the kitchen.
-            </p>
+            <Heading
+              title="Your printer"
+              tip={
+                <>
+                  Bills and kitchen tickets go to this one. Settings › Printers adds more, and a
+                  second printer for the kitchen.
+                </>
+              }
+            />
             <div className="mb-firstrun__fields">
               <Select
                 label="Printer"
@@ -723,6 +830,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
             </div>
             <div className="mb-firstrun__actions">
+              {back(view.hasTables ? 'menu' : 'tables')}
               <Button variant="primary" disabled={busy} onClick={usePrinter}>
                 {printerName === '' ? 'Skip this — start billing' : 'Use it — start billing'}
               </Button>

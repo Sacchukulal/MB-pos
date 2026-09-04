@@ -395,14 +395,13 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("notices", Access::SignedIn),
     ("notices_seen", Access::SignedIn),
     ("pull_from_cloud", Access::SignedIn),
-    // A new computer, before it has a shop.
-    ("restore_from_cloud", Access::FirstRun),
     // Public, and it is a decision.
     ("setup_list", Access::Public),
     // The first run.
     ("first_run", Access::FirstRun),
-    ("create_shop", Access::FirstRun),
-    ("use_existing_shop", Access::FirstRun),
+    // The owner, by the account they made at magicbill.in; then the shop their licence names.
+    ("sign_in_owner", Access::FirstRun),
+    ("open_as_owner", Access::FirstRun),
     // Move to another folder's shop; once set up, it asks for the backup permission itself.
     ("use_shop_folder", Access::FirstRun),
     // Browse for a folder — the other thing a fresh install needs and could not do.

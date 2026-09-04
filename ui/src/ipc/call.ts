@@ -105,7 +105,8 @@ import type { ReportView } from './generated/ReportView';
 import type { SavedFileView } from './generated/SavedFileView';
 import type { CounterEdit } from './generated/CounterEdit';
 import type { NoticesView } from './generated/NoticesView';
-import type { CloudRestoreView } from './generated/CloudRestoreView';
+import type { OwnerOpenedView } from './generated/OwnerOpenedView';
+import type { OwnerSignInView } from './generated/OwnerSignInView';
 
 /** Every command, with what it takes and what it gives back. */
 export interface Commands {
@@ -113,14 +114,14 @@ export interface Commands {
 
   // 5, the first run.
   first_run: { args: void; returns: FirstRunView };
-  create_shop: { args: { folder: string }; returns: FirstRunView };
-  use_existing_shop: { args: { path: string }; returns: FirstRunView };
-  use_shop_folder: { args: { folder: string }; returns: string };
-  /** Bring my shop from the cloud: the licence key, where the file goes, and whether to move a licence bound elsewhere. */
-  restore_from_cloud: {
-    args: { key: string; folder: string; moveHere: boolean };
-    returns: CloudRestoreView;
+  /** The owner, by the email and password of their Magic Bill account: the shops it owns. */
+  sign_in_owner: { args: { email: string; password: string }; returns: OwnerSignInView };
+  /** Open one of them in the chosen folder; `moveHere` moves a licence bound to a computer that is gone. */
+  open_as_owner: {
+    args: { restaurantId: string; folder: string; moveHere: boolean };
+    returns: OwnerOpenedView;
   };
+  use_shop_folder: { args: { folder: string }; returns: string };
   reveal_logs: { args: void; returns: string };
   print_test_page: { args: { printerId: string }; returns: string };
   list_print_jobs: { args: void; returns: PrintJobView[] };

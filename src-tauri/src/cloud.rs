@@ -89,8 +89,23 @@ pub struct Page {
     pub total: Option<usize>,
 }
 
+/// An owner's own login — the account they made at magicbill.in — for the one minute the
+/// first run needs it: to ask which shops are theirs. The token is never written down; the
+/// counter's own login, handed over when the licence is activated, is what it keeps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerLogin {
+    pub access_token: String,
+    /// The name on the account, or the email's first half when the account has none.
+    pub name: String,
+    pub email: String,
+}
+
 /// Everything the sender, the pull, the restore and the updater need from the cloud.
 pub trait Link: Send + Sync + std::fmt::Debug + 'static {
+    /// `POST /auth/v1/token?grant_type=password`: the owner, by email and password.
+    fn password_login(&self, _email: &str, _password: &str) -> Result<OwnerLogin, LinkError> {
+        Err(LinkError::Unreachable)
+    }
     /// `POST /rest/v1/rpc/{name}` under the login.
     fn rpc(&self, name: &str, body: &Value, token: &str) -> Result<Value, LinkError>;
     /// `GET /rest/v1/{path}` under the login, rows `from..=to`.
@@ -369,6 +384,70 @@ impl Cloud for Http {
 }
 
 impl Link for Http {
+    fn password_login(&self, email: &str, password: &str) -> Result<OwnerLogin, LinkError> {
+        let url = format!("{}/auth/v1/token?grant_type=password", self.base);
+        let request = self
+            .client
+            .post(&url)
+            .header("apikey", &self.anon)
+            .timeout(CALL_TIMEOUT)
+            .json(&json!({ "email": email, "password": password }));
+        let (status, text) = Http::run(async move {
+            let response = request.send().await?;
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap_or_default();
+            Ok::<_, reqwest::Error>((status, text))
+        })
+        .map_err(|e| {
+            log_warn!("the sign-in could not reach our server: {e}");
+            LinkError::Unreachable
+        })?;
+        match status {
+            200 => {}
+            429 => {
+                return Err(LinkError::Refused(
+                    "Too many tries. Wait a minute, then sign in again.".to_owned(),
+                ));
+            }
+            s if s >= 500 => return Err(Http::link_error(status, &text)),
+            // A wrong password, an unknown email, a disabled account: one sentence, because
+            // saying which is telling a stranger which emails have accounts.
+            _ => {
+                return Err(LinkError::Refused(
+                    "That email and password do not match a Magic Bill account. Check them, \
+                     or reset the password at magicbill.in."
+                        .to_owned(),
+                ));
+            }
+        }
+        let body: Value = serde_json::from_str(&text).map_err(|_| LinkError::Unreadable)?;
+        let access_token = body
+            .get("access_token")
+            .and_then(Value::as_str)
+            .ok_or(LinkError::Unreadable)?
+            .to_owned();
+        let user = body.get("user").cloned().unwrap_or(Value::Null);
+        let email = user
+            .get("email")
+            .and_then(Value::as_str)
+            .unwrap_or(email)
+            .to_owned();
+        let name = ["name", "full_name"]
+            .iter()
+            .filter_map(|k| user.get("user_metadata")?.get(k)?.as_str())
+            .map(str::trim)
+            .find(|n| !n.is_empty())
+            .map_or_else(
+                || email.split('@').next().unwrap_or("Owner").to_owned(),
+                str::to_owned,
+            );
+        Ok(OwnerLogin {
+            access_token,
+            name,
+            email,
+        })
+    }
+
     fn rpc(&self, name: &str, body: &Value, token: &str) -> Result<Value, LinkError> {
         let url = format!("{}/rest/v1/rpc/{name}", self.base);
         let request = self.client.post(&url).json(body);

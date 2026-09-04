@@ -57,6 +57,9 @@ pub struct App {
     sender_wakeup: Arc<crate::cloud::Wakeup>,
     /// Wake the daily licence check now.
     refresher_wakeup: Arc<crate::cloud::Wakeup>,
+    /// The owner who has signed in on the first run and not yet opened a folder. Held here and
+    /// never on disk: it carries the licence key.
+    owner_sign_in: Mutex<Option<crate::firstrun::OwnerSignIn>>,
 }
 
 /// An open shop: the data and everything that hangs off it.
@@ -112,7 +115,16 @@ impl App {
             sync: Mutex::new(sync),
             sender_wakeup: crate::cloud::Wakeup::new(),
             refresher_wakeup: crate::cloud::Wakeup::new(),
+            owner_sign_in: Mutex::new(None),
         })
+    }
+
+    /// The owner signed in on the first run, if one is.
+    pub fn with_owner_sign_in<T>(
+        &self,
+        f: impl FnOnce(&mut Option<crate::firstrun::OwnerSignIn>) -> T,
+    ) -> T {
+        f(&mut lock(&self.owner_sign_in))
     }
 
     /// The cloud, under the login.

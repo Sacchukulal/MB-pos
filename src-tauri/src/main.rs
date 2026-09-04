@@ -50,6 +50,8 @@ mod expenses;
 /// create a shop.
 mod firewall;
 mod firstrun;
+#[cfg(test)]
+mod firstrun_tests;
 mod floor;
 #[cfg(test)]
 mod floor_tests;
