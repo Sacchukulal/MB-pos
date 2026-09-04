@@ -231,3 +231,39 @@
   flex-direction: column;
   gap: var(--space-2);
 }
+
+/* The two doors on the sign-in step, and the line between them. */
+.mb-firstrun__or {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-firstrun__or::before,
+.mb-firstrun__or::after {
+  content: '';
+  flex: 1;
+  border-top: var(--border-width) solid var(--border);
+}
+
+/* The sign-up dialog: the code on the left, what to do with it on the right. */
+.mb-firstrun__signup {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-group);
+}
+
+.mb-firstrun__signup-words {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  line-height: var(--line-normal);
+}
+
+.mb-firstrun__signup-words p {
+  margin: 0;
+}

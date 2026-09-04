@@ -3,7 +3,7 @@
 /**
  * A shop the owner may open here. The key stays in Rust.
  */
-export type OwnerShopView = { id: string, name: string, address: string, gstin: string, shortCode: string, 
+export type OwnerShopView = { id: string, name: string, address: string, phone: string, gstin: string, shortCode: string, 
 /**
  * The licence's standing, in the cloud's word.
  */

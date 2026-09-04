@@ -557,6 +557,7 @@ macro_rules! commands {
             $crate::firstrun::first_run,
             $crate::firstrun::sign_in_owner,
             $crate::firstrun::open_as_owner,
+            $crate::firstrun::open_with_key,
             $crate::firstrun::use_shop_folder,
             // The logo, and the two Browse buttons that did not exist.
             $crate::logo::logo,
@@ -668,6 +669,7 @@ macro_rules! commands {
             $crate::diagnostics::write_diagnostics,
             // The update, and the way back.
             $crate::updates::look_for_an_update,
+            $crate::updates::android_app,
             $crate::updates::go_back_a_version,
             $crate::updates::install_update,
             // The cloud copy, and what comes back down it.

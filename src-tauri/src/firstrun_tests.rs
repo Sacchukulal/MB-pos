@@ -10,7 +10,7 @@ use mb_license::{Cloud, LicenceFile, Licensing};
 use serde_json::{Value, json};
 
 use crate::cloud::{Link, LinkError, OwnerLogin, Page, Session};
-use crate::firstrun::{look_on, open_as_owner_on, sign_in_owner_on};
+use crate::firstrun::{look_on, open_as_owner_on, open_with_key_on, sign_in_owner_on};
 use crate::licence_tests::machine;
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
@@ -46,15 +46,26 @@ impl Link for OwnerCloud {
         })
     }
     fn rpc(&self, name: &str, _: &Value, token: &str) -> Result<Value, LinkError> {
-        assert_eq!(
-            token, "owner-token",
-            "the shops are asked for under the owner's login"
+        assert!(
+            token == "owner-token" || token.starts_with("stub-access-"),
+            "the shops are asked for under the owner's login, or the counter's own: {token}"
         );
         assert_eq!(name, "mb_my_restaurants");
         Ok(self.restaurants.lock().unwrap().clone())
     }
-    // A brand-new shop has nothing in the cloud: every table comes back empty.
-    fn rest(&self, _: &str, _: &str, _: usize, _: usize) -> Result<Page, LinkError> {
+    // The account's own row answers with the mobile from the signup; a brand-new shop has
+    // nothing else in the cloud, so every table comes back empty.
+    fn rest(&self, path: &str, token: &str, _: usize, _: usize) -> Result<Page, LinkError> {
+        if path.starts_with("accounts?") {
+            assert_eq!(
+                token, "owner-token",
+                "the account is read under the owner's login"
+            );
+            return Ok(Page {
+                rows: vec![json!({ "phone": "+919840011223" })],
+                total: Some(1),
+            });
+        }
         Ok(Page {
             rows: Vec::new(),
             total: Some(0),
@@ -161,6 +172,10 @@ fn signing_in_lists_the_shops_the_account_owns_and_none_it_only_works_at() {
     assert_eq!(view.shops[0].name, "Anand Bhavan");
     assert_eq!(view.shops[0].licence, "active");
     assert_eq!(view.shops[0].gstin, "33AAAAA0000A1Z5");
+    assert_eq!(
+        view.shops[0].phone, "9840011223",
+        "the mobile from the signup, as the counter keeps a number"
+    );
 }
 
 #[test]
@@ -359,5 +374,118 @@ fn a_folder_holding_this_shops_data_is_opened_as_it_is() {
     assert_eq!(
         look_on(&app).expect("view").shop_path,
         path.display().to_string()
+    );
+}
+
+// The other way in: the licence key from the magicbill.in dashboard.
+
+/// The stub licence office's restaurant, as `mb_my_restaurants` describes it to a counter.
+const STUB_RESTAURANT: &str = "00000000-0000-0000-0000-00000000stub";
+
+fn counters_own(id: &str, name: &str) -> Value {
+    json!({
+        "id": id, "name": name, "short_code": "STUB01",
+        "address": "2 Temple Road, Madurai", "gstin": "33BBBBB0000B1Z6",
+        "role": "counter", "staff": null, "permissions": [],
+        "licence": { "status": "active", "plan": "starter", "plan_name": "Starter",
+                     "features": [], "key": null, "bound": true, "bound_device": null }
+    })
+}
+
+#[test]
+fn a_pasted_licence_key_opens_the_shop_it_names_with_no_password() {
+    let scratch = Scratch::new("firstrun_key");
+    let app = a_bare_counter(
+        &scratch,
+        json!([counters_own(STUB_RESTAURANT, "Anna's Kitchen")]),
+    );
+    let config = config_dir(&scratch);
+    let folder = shop_folder(&scratch, "Anna's Kitchen");
+
+    let blank = open_with_key_on(&app, &config, "  ", folder.to_str().unwrap(), false)
+        .expect_err("no key was pasted");
+    assert_eq!(blank.code, "licence.blank");
+
+    // Typed in lower case with spaces round it: the key is the key.
+    let opened = open_with_key_on(
+        &app,
+        &config,
+        " mb-stub-0001 ",
+        folder.to_str().unwrap(),
+        false,
+    )
+    .expect("the shop opens");
+    assert!(app.has_shop());
+    assert!(folder.join("magicbill.db").is_file());
+    assert!(
+        app.device_login().is_some(),
+        "activation handed the counter its own login"
+    );
+    // The details step starts with what the cloud knows about the shop the licence names.
+    assert_eq!(opened.shop.id, STUB_RESTAURANT);
+    assert_eq!(opened.shop.name, "Anna's Kitchen");
+    assert_eq!(opened.shop.address, "2 Temple Road, Madurai");
+    assert_eq!(opened.shop.gstin, "33BBBBB0000B1Z6");
+    assert_eq!(opened.shop.licence, "active");
+    // Nobody signed in, so the owner's row has the plain name until the PIN step edits it.
+    assert_eq!(owners_in(&app), vec!["Owner".to_owned()]);
+    assert!(opened.first_run.needed);
+}
+
+#[test]
+fn a_key_the_licence_office_does_not_know_opens_nothing() {
+    let scratch = Scratch::new("firstrun_wrong_key");
+    let app = a_bare_counter(&scratch, json!([]));
+    let config = config_dir(&scratch);
+    let folder = shop_folder(&scratch, "nowhere");
+
+    let refused = open_with_key_on(
+        &app,
+        &config,
+        "MB-NOPE-0000-0000",
+        folder.to_str().unwrap(),
+        false,
+    )
+    .expect_err("not a key");
+    assert!(
+        refused.message.contains("not recognised"),
+        "{}",
+        refused.message
+    );
+    assert!(!app.has_shop());
+    assert!(
+        !folder.join("magicbill.db").exists(),
+        "nothing is written before the licence answers"
+    );
+}
+
+#[test]
+fn a_key_does_not_open_a_folder_that_holds_another_shop() {
+    let scratch = Scratch::new("firstrun_key_foreign");
+    let app = a_bare_counter(&scratch, json!([]));
+    let config = config_dir(&scratch);
+    let folder = shop_folder(&scratch, "somebody-elses");
+    let path = folder.join("magicbill.db");
+    drop(Db::open(&DbConfig::new(path.clone())).expect("their shop"));
+    LicenceFile {
+        device: Some(DeviceLogin {
+            device_id: "dev_1".to_owned(),
+            restaurant_id: "rest_saravana".to_owned(),
+            access_token: "a".to_owned(),
+            refresh_token: "r".to_owned(),
+            expires_at: mb_core::Timestamp::EPOCH,
+        }),
+        ..LicenceFile::default()
+    }
+    .save(&folder)
+    .expect("their licence");
+
+    let refused = open_with_key_on(&app, &config, KEY, folder.to_str().unwrap(), false)
+        .expect_err("not this licence's folder");
+    assert_eq!(refused.code, "shop.foreign");
+    assert!(!app.has_shop());
+    assert!(
+        app.device_login().is_none(),
+        "the licence was not activated for a folder that was refused"
     );
 }

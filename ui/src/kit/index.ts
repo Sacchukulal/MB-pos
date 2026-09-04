@@ -68,6 +68,7 @@ export {
   Locked,
   Money,
   Numeric,
+  QrCode,
   SaveBar,
   SectionHeader,
   Spinner,

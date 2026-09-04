@@ -964,3 +964,119 @@ mod github_tests {
         assert_eq!(releases.latest(), Ok(("shelf".to_owned(), "sig".to_owned())));
     }
 }
+
+// The phone app: where a new owner starts.
+
+/// The repository whose Releases page holds the phone app.
+pub const ANDROID_REPO: &str = "Sacchukulal/MB-android";
+
+/// The phone app's newest release, as GitHub describes it, with its download as a QR code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct AndroidAppView {
+    pub version: String,
+    pub apk_url: String,
+    /// The QR code for `apk_url`: rows of modules, true where the module is dark.
+    pub qr: Vec<Vec<bool>>,
+}
+
+/// Every phone release attaches `version.json`, and GitHub's `latest/download` URL always
+/// points at the newest one.
+#[must_use]
+pub fn android_version_url() -> String {
+    format!("https://github.com/{ANDROID_REPO}/releases/latest/download/version.json")
+}
+
+/// A QR code for a piece of text, as rows of dark-or-light modules.
+pub fn qr_modules(text: &str) -> Result<Vec<Vec<bool>>, String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).map_err(|e| e.to_string())?;
+    let width = code.width();
+    let dark: Vec<bool> = code
+        .to_colors()
+        .into_iter()
+        .map(|c| c == qrcode::Color::Dark)
+        .collect();
+    Ok(dark.chunks(width).map(<[bool]>::to_vec).collect())
+}
+
+/// The view from the text of `version.json`.
+pub fn android_app_from(version_json: &str) -> Result<AndroidAppView, String> {
+    let body: serde_json::Value =
+        serde_json::from_str(version_json).map_err(|e| format!("version.json is not JSON: {e}"))?;
+    let text = |key: &str| {
+        body.get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    let version = text("version").ok_or("version.json names no version")?;
+    let apk_url = text("apk_url").ok_or("version.json names no apk_url")?;
+    let qr = qr_modules(&apk_url)?;
+    Ok(AndroidAppView {
+        version,
+        apk_url,
+        qr,
+    })
+}
+
+/// The phone app's newest release, fetched from GitHub now.
+pub fn android_app_on(app: &crate::state::App) -> crate::words::UiResult<AndroidAppView> {
+    let to = crate::config::AppConfig::directory()
+        .join("updates")
+        .join("android-version.json");
+    let unreachable = |why: String| {
+        crate::log_info!("the phone app's version could not be read: {why}");
+        crate::words::UiError::new(
+            "android.unreachable",
+            "GitHub did not answer, so the phone app's download could not be fetched. Check \
+             the internet connection and try again — or open magicbill.in/downloads on the \
+             phone.",
+        )
+    };
+    app.link()
+        .download(&android_version_url(), &to)
+        .map_err(|e| unreachable(format!("{e:?}")))?;
+    let text = std::fs::read_to_string(&to).map_err(|e| unreachable(e.to_string()))?;
+    android_app_from(&text).map_err(unreachable)
+}
+
+#[tauri::command]
+pub fn android_app(
+    app: tauri::State<'_, crate::state::App>,
+) -> crate::words::UiResult<AndroidAppView> {
+    android_app_on(&app)
+}
+
+#[cfg(test)]
+mod android_tests {
+    use super::*;
+
+    #[test]
+    fn the_phone_apps_version_and_download_come_from_github_not_from_here() {
+        assert_eq!(
+            android_version_url(),
+            "https://github.com/Sacchukulal/MB-android/releases/latest/download/version.json"
+        );
+        let view = android_app_from(
+            r#"{"version":"2.5.1","version_code":22,"apk_url":"https://github.com/Sacchukulal/MB-android/releases/download/v2.5.1/magic-bill.apk","release_notes":"x"}"#,
+        )
+        .expect("a release");
+        assert_eq!(view.version, "2.5.1");
+        assert!(view.apk_url.ends_with("/v2.5.1/magic-bill.apk"));
+        // A QR code is square, and its finder pattern starts dark in the top-left corner.
+        assert!(!view.qr.is_empty());
+        assert!(view.qr.iter().all(|row| row.len() == view.qr.len()));
+        assert!(view.qr[0][0]);
+        // The URL is what the code says, so a newer release draws a different code.
+        let other = qr_modules("https://example.com/other.apk").expect("a code");
+        assert_ne!(other, view.qr);
+    }
+
+    #[test]
+    fn a_version_file_with_no_download_is_refused() {
+        assert!(android_app_from(r#"{"version":"2.5.1"}"#).is_err());
+        assert!(android_app_from("not json").is_err());
+    }
+}

@@ -12,6 +12,7 @@ vi.mock('../src/ipc/call', () => ({
 
 const { FirstRun } = await import('../src/setup/FirstRun');
 
+import type { AndroidAppView } from '../src/ipc/generated/AndroidAppView';
 import type { FirstRunView } from '../src/ipc/generated/FirstRunView';
 import type { OwnerOpenedView } from '../src/ipc/generated/OwnerOpenedView';
 import type { OwnerShopView } from '../src/ipc/generated/OwnerShopView';
@@ -58,9 +59,21 @@ const anand: OwnerShopView = {
   id: 'rest_anand',
   name: 'Anand Bhavan',
   address: '14 Kamaraj Street, Chennai',
+  phone: '9840011223',
   gstin: '33AAAAA0000A1Z5',
   shortCode: 'ABC123',
   licence: 'active',
+};
+
+/** The phone app as GitHub's newest release describes it, drawn small. */
+const phoneApp: AndroidAppView = {
+  version: '2.5.1',
+  apkUrl: 'https://github.com/Sacchukulal/MB-android/releases/download/v2.5.1/magic-bill.apk',
+  qr: [
+    [true, true, false],
+    [true, false, true],
+    [false, true, true],
+  ],
 };
 
 const saravana: OwnerShopView = { ...anand, id: 'rest_saravana', name: 'Saravana', address: '' };
@@ -182,6 +195,78 @@ it('signs the owner in and opens the one shop the account owns, in the chosen fo
   expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe(
     '14 Kamaraj Street, Chennai',
   );
+  expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('9840011223');
+});
+
+/** The other door: the key from the dashboard, with no password asked for. */
+it('opens the shop a pasted licence key names, without signing in', async () => {
+  wire({}, { open_with_key: opened() });
+  render(<FirstRun onDone={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
+  await screen.findByText('D:\\Anand Bhavan');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+  const go = (await screen.findByRole('button', { name: 'Continue' })) as HTMLButtonElement;
+  expect(go.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Licence key'), {
+    target: { value: ' mb-qyf8-xbgj-vxcq ' },
+  });
+  expect(go.disabled).toBe(false);
+  fireEvent.click(go);
+
+  await waitFor(() =>
+    expect(call).toHaveBeenCalledWith('open_with_key', {
+      key: 'mb-qyf8-xbgj-vxcq',
+      folder: 'D:\\Anand Bhavan',
+      moveHere: false,
+    }),
+  );
+  expect(call).not.toHaveBeenCalledWith('sign_in_owner', expect.anything());
+  expect(await screen.findByRole('heading', { name: 'Your shop' })).toBeTruthy();
+  expect((screen.getByLabelText('Shop name') as HTMLInputElement).value).toBe('Anand Bhavan');
+});
+
+/** Sign up happens on the phone: the dialog shows the newest app, fetched when it opens. */
+it('shows the phone app download as a QR code behind Sign up, fetched live', async () => {
+  wire({}, { android_app: phoneApp });
+  render(<FirstRun onDone={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
+  await screen.findByText('D:\\Anand Bhavan');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  expect(call).not.toHaveBeenCalledWith('android_app');
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign up' }));
+  expect(await screen.findByRole('dialog')).toBeTruthy();
+  expect(call).toHaveBeenCalledWith('android_app');
+  expect(
+    await screen.findByRole('img', { name: 'Download Magic Bill for Android 2.5.1' }),
+  ).toBeTruthy();
+  expect(screen.getByText(phoneApp.apkUrl)).toBeTruthy();
+  expect(screen.getByText(/version 2\.5\.1/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+/** No internet: the dialog says so, and offers to try again rather than a stale code. */
+it('says so when GitHub cannot be reached for the phone app', async () => {
+  wire(
+    {},
+    {
+      android_app: refusal(
+        'android.unreachable',
+        'GitHub did not answer, so the phone app\u2019s download could not be fetched.',
+      ),
+    },
+  );
+  render(<FirstRun onDone={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
+  await screen.findByText('D:\\Anand Bhavan');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign up' }));
+  expect(await screen.findByText(/GitHub did not answer/)).toBeTruthy();
+  expect(screen.queryByRole('img')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await waitFor(() => expect(call.mock.calls.filter(([n]) => n === 'android_app').length).toBe(2));
 });
 
 /** Two shops on one account: the owner says which. */

@@ -1156,3 +1156,14 @@ textarea.mb-input {
 .mb-adorned:has(> .mb-input--lg) {
   width: var(--field-lg);
 }
+
+/* A QR code: ink on paper whatever the theme, with the quiet zone a camera needs round it. */
+.mb-qr {
+  display: block;
+  width: var(--qr-size);
+  height: var(--qr-size);
+  padding: var(--space-3);
+  background: var(--print-paper);
+  border-radius: var(--radius-md);
+  fill: var(--print-ink);
+}

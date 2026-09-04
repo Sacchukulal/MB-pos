@@ -10,16 +10,21 @@ import {
   InfoTip,
   Input,
   Logo,
+  Modal,
   MoneyInput,
   Notice,
   PhoneInput,
+  QrCode,
   Scroller,
   Select,
+  Spinner,
   NumberInput,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
+import type { AndroidAppView } from '../ipc/generated/AndroidAppView';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
+import type { OwnerOpenedView } from '../ipc/generated/OwnerOpenedView';
 import type { OwnerShopView } from '../ipc/generated/OwnerShopView';
 import type { OwnerSignInView } from '../ipc/generated/OwnerSignInView';
 import type { TaxSlabView } from '../ipc/generated/TaxSlabView';
@@ -89,6 +94,12 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [moveHere, setMoveHere] = useState(false);
   /** What came down, in Rust's words. */
   const [cameDown, setCameDown] = useState('');
+  /** The other way in: the licence key from the magicbill.in dashboard. */
+  const [keyText, setKeyText] = useState('');
+  /** The sign-up dialog: the phone app's download, fetched from GitHub when it opens. */
+  const [signup, setSignup] = useState(false);
+  const [android, setAndroid] = useState<AndroidAppView | null>(null);
+  const [androidProblem, setAndroidProblem] = useState('');
 
   // The shop's details.
   const [name, setName] = useState('');
@@ -199,28 +210,60 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .finally(() => setBusy(false));
   };
 
-  /** Open one of the account's shops in the chosen folder. */
-  const openShop = (restaurantId: string) => {
-    setOpening(restaurantId);
+  /** A shop Rust opened, whichever way in: the details step starts with what the cloud knows. */
+  const opened = (opening: Promise<OwnerOpenedView>) => {
     setBusy(true);
     clear();
-    call('open_as_owner', { restaurantId, folder, moveHere })
-      .then((opened) => {
-        take(opened.firstRun);
-        if (opened.cameDown) setCameDown(opened.cameDown);
-        // The details step starts with what the account already knows about the shop.
-        setName((was) => (was === '' ? opened.shop.name : was));
-        setAddress((was) => (was === '' ? opened.shop.address : was));
-        setGstin((was) => (was === '' ? opened.shop.gstin : was));
+    opening
+      .then((shop) => {
+        take(shop.firstRun);
+        if (shop.cameDown) setCameDown(shop.cameDown);
+        setName((was) => (was === '' ? shop.shop.name : was));
+        setAddress((was) => (was === '' ? shop.shop.address : was));
+        setPhone((was) => (was === '' ? shop.shop.phone : was));
+        setGstin((was) => (was === '' ? shop.shop.gstin : was));
         // A shop that came back whole — a reinstall — needs nothing more from here.
-        if (!opened.firstRun.needed) {
+        if (!shop.firstRun.needed) {
           onDone();
           return;
         }
-        setStep(stepFor(opened.firstRun));
+        setStep(stepFor(shop.firstRun));
       })
       .catch(complain)
       .finally(() => setBusy(false));
+  };
+
+  /** Open one of the account's shops in the chosen folder. */
+  const openShop = (restaurantId: string) => {
+    setOpening(restaurantId);
+    opened(call('open_as_owner', { restaurantId, folder, moveHere }));
+  };
+
+  /** Open the shop the pasted licence key names. */
+  const openWithKey = () => {
+    setOpening('');
+    opened(call('open_with_key', { key: keyText.trim(), folder, moveHere }));
+  };
+
+  /** The way back in after "move the licence here": whichever door was tried. */
+  const openAgain = () => {
+    if (opening !== '') openShop(opening);
+    else openWithKey();
+  };
+
+  /** The phone app's newest release, fetched when the sign-up dialog opens. */
+  const fetchAndroid = () => {
+    setAndroidProblem('');
+    call('android_app')
+      .then(setAndroid)
+      .catch((cause: unknown) =>
+        setAndroidProblem(isUiError(cause) ? cause.message : String(cause)),
+      );
+  };
+
+  const openSignup = () => {
+    setSignup(true);
+    if (android === null) fetchAndroid();
   };
 
   /** The owner's account: which shops it owns is the answer. */
@@ -466,9 +509,10 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 <>
                   Use the email and password of your Magic Bill account — the one you started
                   your trial or bought your plan with at magicbill.in. The shop this counter
-                  opens is the one that account owns; the licence comes with it, so there is
-                  no key to type. The same login works in the phone app. Staff never sign in
-                  here — they get a PIN from you.
+                  opens is the one that account owns, and the licence comes with it. The
+                  licence key from your dashboard opens the same shop without the password.
+                  No account yet? Sign up on your phone. Staff never sign in here — they get a
+                  PIN from you.
                 </>
               }
             />
@@ -479,27 +523,66 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             </div>
 
             {signedIn === null ? (
-              <div className="mb-firstrun__fields">
-                <Input
-                  label="Email"
-                  type="email"
-                  autoComplete="username"
-                  autoFocus
-                  value={email}
-                  placeholder="you@example.com"
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-                <Input
-                  label="Password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') signIn();
-                  }}
-                />
-              </div>
+              <>
+                <div className="mb-firstrun__fields">
+                  <Input
+                    label="Email"
+                    type="email"
+                    autoComplete="username"
+                    autoFocus
+                    value={email}
+                    placeholder="you@example.com"
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                  <Input
+                    label="Password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') signIn();
+                    }}
+                  />
+                </div>
+
+                <div className="mb-firstrun__actions">
+                  {back('folder')}
+                  <Button variant="secondary" disabled={busy} onClick={openSignup}>
+                    Sign up
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={busy || email.trim() === '' || password === ''}
+                    onClick={signIn}
+                  >
+                    Sign in
+                  </Button>
+                </div>
+
+                {/* The other door: the key from the dashboard, for whoever has it to hand. */}
+                <p className="mb-firstrun__or" role="separator">
+                  or paste the licence key from your magicbill.in dashboard
+                </p>
+                <div className="mb-firstrun__row">
+                  <Input
+                    label="Licence key"
+                    value={keyText}
+                    placeholder="MB-XXXX-XXXX-XXXX"
+                    onChange={(e) => setKeyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && keyText.trim() !== '') openWithKey();
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={busy || keyText.trim() === ''}
+                    onClick={openWithKey}
+                  >
+                    Continue
+                  </Button>
+                </div>
+              </>
             ) : (
               <div className="mb-firstrun__where">
                 <span className="mb-firstrun__label">Signed in as</span>
@@ -534,28 +617,62 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
             ) : null}
 
-            <div className="mb-firstrun__actions">
-              {back('folder')}
-              {signedIn === null ? (
-                <Button
-                  variant="primary"
-                  disabled={busy || email.trim() === '' || password === ''}
-                  onClick={signIn}
-                >
-                  Sign in
-                </Button>
-              ) : problemCode === 'licence.bound_elsewhere' ? (
-                <Button
-                  variant="primary"
-                  disabled={busy || !moveHere || opening === ''}
-                  onClick={() => openShop(opening)}
-                >
-                  Open it here
-                </Button>
-              ) : null}
-            </div>
+            {signedIn !== null || problemCode === 'licence.bound_elsewhere' ? (
+              <div className="mb-firstrun__actions">
+                {signedIn === null ? null : back('folder')}
+                {problemCode === 'licence.bound_elsewhere' ? (
+                  <Button variant="primary" disabled={busy || !moveHere} onClick={openAgain}>
+                    Open it here
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         ) : null}
+
+        <Modal
+          open={signup}
+          title="Sign up on your phone"
+          note="Magic Bill for Android, straight from the newest release."
+          onClose={() => setSignup(false)}
+          actions={
+            <Button variant="primary" onClick={() => setSignup(false)}>
+              Done
+            </Button>
+          }
+        >
+          {android !== null ? (
+            <div className="mb-firstrun__signup">
+              <QrCode
+                modules={android.qr}
+                label={`Download Magic Bill for Android ${android.version}`}
+              />
+              <div className="mb-firstrun__signup-words">
+                <p>
+                  Scan with the phone&rsquo;s camera to install Magic Bill for Android,
+                  version {android.version}.
+                </p>
+                <p>
+                  Create your Magic Bill account at magicbill.in, start the free trial or buy
+                  a plan, then come back here: sign in with the same email and password, or
+                  paste the licence key from your dashboard.
+                </p>
+                <code className="mb-firstrun__path">{android.apkUrl}</code>
+              </div>
+            </div>
+          ) : androidProblem !== '' ? (
+            <>
+              <Notice tone="danger">{androidProblem}</Notice>
+              <div className="mb-row">
+                <Button variant="secondary" onClick={fetchAndroid}>
+                  Try again
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Spinner label="Fetching the newest phone app" />
+          )}
+        </Modal>
 
         {cameDown !== '' ? <Notice tone="info">{cameDown}</Notice> : null}
 

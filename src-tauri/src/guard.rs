@@ -402,6 +402,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // The owner, by the account they made at magicbill.in; then the shop their licence names.
     ("sign_in_owner", Access::FirstRun),
     ("open_as_owner", Access::FirstRun),
+    // The licence key from the dashboard opens the same shop without the password.
+    ("open_with_key", Access::FirstRun),
+    // The phone app's download for the sign-up dialog: nothing of the shop is touched.
+    ("android_app", Access::FirstRun),
     // Move to another folder's shop; once set up, it asks for the backup permission itself.
     ("use_shop_folder", Access::FirstRun),
     // Browse for a folder — the other thing a fresh install needs and could not do.

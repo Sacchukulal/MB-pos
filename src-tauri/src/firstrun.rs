@@ -112,12 +112,14 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
 
 // The owner, signed in.
 
-/// A shop the signed-in account owns, as the cloud described it.
+/// A shop the account owns, as the cloud described it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerShop {
     pub id: String,
     pub name: String,
     pub address: String,
+    /// The owner's mobile, ten digits, when the account has one: the shop's own until edited.
+    pub phone: String,
     pub gstin: String,
     pub short_code: String,
     /// active · trial · suspended · revoked · cancelled — the cloud's word.
@@ -142,6 +144,7 @@ pub struct OwnerShopView {
     pub id: String,
     pub name: String,
     pub address: String,
+    pub phone: String,
     pub gstin: String,
     pub short_code: String,
     /// The licence's standing, in the cloud's word.
@@ -177,6 +180,7 @@ impl OwnerShop {
             id: self.id.clone(),
             name: self.name.clone(),
             address: self.address.clone(),
+            phone: self.phone.clone(),
             gstin: self.gstin.clone(),
             short_code: self.short_code.clone(),
             licence: self.status.clone(),
@@ -193,47 +197,70 @@ fn text(value: &Value, key: &str) -> String {
         .to_owned()
 }
 
-/// The shops in a `mb_my_restaurants` answer, and whether any of them is the caller's as staff
-/// rather than as owner.
-fn shops_in(answer: &Value) -> (Vec<OwnerShop>, bool) {
+/// A mobile number as the counter keeps it, by the one rule (`mb_core::Phone`): the cloud writes
+/// `+919840011223`, the counter keeps the ten digits. Anything else is left blank.
+fn local_phone(cloud_says: &str) -> String {
+    mb_core::Phone::parse_optional(cloud_says)
+        .ok()
+        .flatten()
+        .map(|p| p.as_str().to_owned())
+        .unwrap_or_default()
+}
+
+/// One row of a `mb_my_restaurants` answer.
+fn shop_in(row: &Value, phone: &str) -> OwnerShop {
+    let licence = row.get("licence").cloned().unwrap_or(Value::Null);
+    OwnerShop {
+        id: text(row, "id"),
+        name: text(row, "name"),
+        address: text(row, "address"),
+        phone: phone.to_owned(),
+        gstin: text(row, "gstin"),
+        short_code: text(row, "short_code"),
+        status: text(&licence, "status"),
+        key: licence
+            .get("key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_owned),
+    }
+}
+
+/// The shops in a `mb_my_restaurants` answer that the caller owns, and whether any of them is
+/// the caller's as staff rather than as owner.
+fn shops_in(answer: &Value, phone: &str) -> (Vec<OwnerShop>, bool) {
     let mut owned = Vec::new();
     let mut staff_at_one = false;
     for row in answer.as_array().into_iter().flatten() {
-        let role = text(row, "role");
-        if !OWNER_ROLES.contains(&role.as_str()) {
+        if OWNER_ROLES.contains(&text(row, "role").as_str()) {
+            owned.push(shop_in(row, phone));
+        } else {
             staff_at_one = true;
-            continue;
         }
-        let licence = row.get("licence").cloned().unwrap_or(Value::Null);
-        owned.push(OwnerShop {
-            id: text(row, "id"),
-            name: text(row, "name"),
-            address: text(row, "address"),
-            gstin: text(row, "gstin"),
-            short_code: text(row, "short_code"),
-            status: text(&licence, "status"),
-            key: licence
-                .get("key")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|k| !k.is_empty())
-                .map(str::to_owned),
-        });
     }
     (owned, staff_at_one)
+}
+
+/// The mobile on the signed-in account, or nothing: the details step is not held up by it.
+fn account_phone(link: &dyn crate::cloud::Link, token: &str) -> String {
+    match link.rest("accounts?select=phone&limit=1", token, 0, 0) {
+        Ok(page) => page
+            .rows
+            .first()
+            .map(|row| local_phone(&text(row, "phone")))
+            .unwrap_or_default(),
+        Err(e) => {
+            crate::log_info!("the account's mobile could not be read: {e:?}");
+            String::new()
+        }
+    }
 }
 
 /// The owner, by the email and password of their Magic Bill account. Answers with the shops
 /// that account owns and holds a licence for; the counter cannot open anything else.
 pub fn sign_in_owner_on(app: &App, email: String, password: String) -> UiResult<OwnerSignInView> {
-    only_before_set_up(app)?;
-    if app.has_shop() {
-        return Err(UiError::new(
-            "shop.exists",
-            "This computer already has a shop open. Settings › Backup is where another folder \
-             is chosen.",
-        ));
-    }
+    nothing_open_yet(app)?;
     let email = email.trim().to_owned();
     if email.is_empty() || password.is_empty() {
         return Err(UiError::new(
@@ -249,7 +276,8 @@ pub fn sign_in_owner_on(app: &App, email: String, password: String) -> UiResult<
     let answer = link
         .rpc("mb_my_restaurants", &json!({}), &login.access_token)
         .map_err(|e| crate::words::from_link(&e))?;
-    let (shops, staff_at_one) = shops_in(&answer);
+    let phone = account_phone(link.as_ref(), &login.access_token);
+    let (shops, staff_at_one) = shops_in(&answer, &phone);
     let licensed: Vec<OwnerShop> = shops.into_iter().filter(|s| s.key.is_some()).collect();
     if licensed.is_empty() {
         return Err(UiError::new(
@@ -295,7 +323,8 @@ enum Holds {
 }
 
 /// Whose shop a folder holds, read from the licence beside the data — never by opening it.
-fn folder_holds(folder: &std::path::Path, shop: &OwnerShop) -> Holds {
+/// Before a key has been activated the shop's id is not known yet, and the key alone decides.
+fn folder_holds(folder: &std::path::Path, shop_id: Option<&str>, key: &str) -> Holds {
     let Some(path) = data_file_in(folder) else {
         return Holds::Nothing;
     };
@@ -314,8 +343,8 @@ fn folder_holds(folder: &std::path::Path, shop: &OwnerShop) -> Holds {
         .map(str::to_owned);
 
     let unclaimed = device_says.is_none() && key_says.is_none();
-    let same_shop = device_says.as_deref() == Some(shop.id.as_str());
-    let same_key = key_says.is_some() && key_says == shop.key;
+    let same_shop = shop_id.is_some() && device_says.as_deref() == shop_id;
+    let same_key = key_says.as_deref() == Some(key);
     if unclaimed || same_shop || same_key {
         return Holds::Theirs(path);
     }
@@ -397,15 +426,8 @@ fn ensure_owner_row(app: &App, name: &str) -> UiResult<()> {
     })
 }
 
-/// Open the shop the signed-in owner chose, in the folder they chose. `config_dir` is where the
-/// pointer to the folder is written — the app's own, or a test's.
-pub fn open_as_owner_on(
-    app: &App,
-    config_dir: &std::path::Path,
-    restaurant_id: &str,
-    folder: &str,
-    move_here: bool,
-) -> UiResult<OwnerOpenedView> {
+/// The first run may open a shop only while this computer has none.
+fn nothing_open_yet(app: &App) -> UiResult<()> {
     only_before_set_up(app)?;
     if app.has_shop() {
         return Err(UiError::new(
@@ -414,6 +436,11 @@ pub fn open_as_owner_on(
              is chosen.",
         ));
     }
+    Ok(())
+}
+
+/// The folder the owner chose, which must exist.
+fn chosen_folder(folder: &str) -> UiResult<std::path::PathBuf> {
     let folder = std::path::PathBuf::from(folder.trim());
     if folder.as_os_str().is_empty() {
         return Err(UiError::new("shop.folder", "Choose the folder first."));
@@ -424,44 +451,34 @@ pub fn open_as_owner_on(
             format!("There is no folder at {}.", folder.display()),
         ));
     }
-    let Some((owner_name, shop)) = app.with_owner_sign_in(|held| {
-        held.as_ref().and_then(|signed| {
-            signed
-                .shops
-                .iter()
-                .find(|s| s.id == restaurant_id)
-                .map(|s| (signed.name.clone(), s.clone()))
-        })
-    }) else {
-        return Err(UiError::new("owner.sign_in", "Sign in first."));
-    };
-    let Some(key) = shop.key.clone() else {
-        return Err(UiError::new(
-            "owner.no_licence",
-            format!(
-                "{} has no licence. Start one at magicbill.in first.",
-                shop.name
-            ),
-        ));
-    };
+    Ok(folder)
+}
 
-    let holds = folder_holds(&folder, &shop);
-    if let Holds::Another { name } = &holds {
+/// A folder that holds another shop's data is refused untouched.
+fn refuse_anothers(folder: &std::path::Path, holds: &Holds, shop_name: &str) -> UiResult<()> {
+    if let Holds::Another { name } = holds {
         return Err(UiError::new(
             "shop.foreign",
             format!(
-                "The folder {} holds {name}\u{2019}s data, not {}\u{2019}s. Nothing there has \
-                 been touched. Choose another folder.",
-                folder.display(),
-                shop.name
+                "The folder {} holds {name}\u{2019}s data, not {shop_name}\u{2019}s. Nothing \
+                 there has been touched. Choose another folder.",
+                folder.display()
             ),
         ));
     }
+    Ok(())
+}
 
-    // The licence first: it says which shop this is and hands the counter its login. Nothing
-    // is written to the folder until it has answered.
-    take_licence(app, &key, move_here)?;
-
+/// The shop's data into the folder and open: what the folder holds is used as it is, and an
+/// empty folder gets the cloud copy. The licence has already answered by now.
+fn bring_down_and_open(
+    app: &App,
+    config_dir: &std::path::Path,
+    folder: &std::path::Path,
+    holds: Holds,
+    shop: &OwnerShop,
+    owner_name: &str,
+) -> UiResult<OwnerOpenedView> {
     let mut came_down = None;
     let path = match holds {
         Holds::Theirs(path) => path,
@@ -494,7 +511,7 @@ pub fn open_as_owner_on(
             drop(db);
             path
         }
-        Holds::Another { .. } => unreachable!("refused above"),
+        Holds::Another { .. } => unreachable!("refused before the licence was taken"),
     };
 
     match crate::startup::adopt(config_dir, &path)? {
@@ -512,7 +529,7 @@ pub fn open_as_owner_on(
         }
     }
     crate::licensing::after_licence_change(app);
-    ensure_owner_row(app, &owner_name)?;
+    ensure_owner_row(app, owner_name)?;
     app.with_owner_sign_in(|held| *held = None);
 
     Ok(OwnerOpenedView {
@@ -520,6 +537,130 @@ pub fn open_as_owner_on(
         shop: shop.view(),
         came_down,
     })
+}
+
+/// Open the shop the signed-in owner chose, in the folder they chose. `config_dir` is where the
+/// pointer to the folder is written — the app's own, or a test's.
+pub fn open_as_owner_on(
+    app: &App,
+    config_dir: &std::path::Path,
+    restaurant_id: &str,
+    folder: &str,
+    move_here: bool,
+) -> UiResult<OwnerOpenedView> {
+    nothing_open_yet(app)?;
+    let folder = chosen_folder(folder)?;
+    let Some((owner_name, shop)) = app.with_owner_sign_in(|held| {
+        held.as_ref().and_then(|signed| {
+            signed
+                .shops
+                .iter()
+                .find(|s| s.id == restaurant_id)
+                .map(|s| (signed.name.clone(), s.clone()))
+        })
+    }) else {
+        return Err(UiError::new("owner.sign_in", "Sign in first."));
+    };
+    let Some(key) = shop.key.clone() else {
+        return Err(UiError::new(
+            "owner.no_licence",
+            format!(
+                "{} has no licence. Start one at magicbill.in first.",
+                shop.name
+            ),
+        ));
+    };
+
+    let holds = folder_holds(&folder, Some(&shop.id), &key);
+    refuse_anothers(&folder, &holds, &shop.name)?;
+    // The licence first: it says which shop this is and hands the counter its login. Nothing
+    // is written to the folder until it has answered.
+    take_licence(app, &key, move_here)?;
+    bring_down_and_open(app, config_dir, &folder, holds, &shop, &owner_name)
+}
+
+/// The shop an activated licence names, as the cloud describes it to the counter's own login.
+/// The signed licence is the fallback when the cloud cannot be asked again.
+fn shop_of_licence(app: &App) -> UiResult<OwnerShop> {
+    let Some(login) = app.device_login() else {
+        return Err(UiError::new(
+            "cloud.no_login",
+            "The licence was activated but our server gave this counter no login. Try again \
+             in a minute.",
+        ));
+    };
+    let (name, status, key) = app.with_licence(|l| {
+        let snapshot = l.snapshot();
+        (
+            snapshot
+                .as_ref()
+                .map(|s| s.licence.shop_name.clone())
+                .unwrap_or_default(),
+            snapshot
+                .as_ref()
+                .and_then(|s| serde_json::to_value(s.licence.status).ok())
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+            l.key(),
+        )
+    });
+    let from_cloud = app
+        .link()
+        .rpc("mb_my_restaurants", &json!({}), &login.access_token)
+        .ok()
+        .and_then(|answer| {
+            answer
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|row| text(row, "id") == login.restaurant_id)
+                .map(|row| shop_in(row, ""))
+        });
+    Ok(match from_cloud {
+        Some(mut shop) => {
+            if shop.name.is_empty() {
+                shop.name = name;
+            }
+            shop.key = key;
+            shop
+        }
+        None => OwnerShop {
+            id: login.restaurant_id.clone(),
+            name,
+            address: String::new(),
+            phone: String::new(),
+            gstin: String::new(),
+            short_code: String::new(),
+            status,
+            key,
+        },
+    })
+}
+
+/// Open the shop a licence key names, in the chosen folder: the way in for somebody who has the
+/// key from magicbill.in rather than the account's password to hand.
+pub fn open_with_key_on(
+    app: &App,
+    config_dir: &std::path::Path,
+    key: &str,
+    folder: &str,
+    move_here: bool,
+) -> UiResult<OwnerOpenedView> {
+    nothing_open_yet(app)?;
+    let key = key.trim().to_uppercase();
+    if key.is_empty() {
+        return Err(UiError::new(
+            "licence.blank",
+            "Paste the licence key from your magicbill.in dashboard, or sign in.",
+        ));
+    }
+    let folder = chosen_folder(folder)?;
+    let holds = folder_holds(&folder, None, &key);
+    refuse_anothers(&folder, &holds, "this licence")?;
+    take_licence(app, &key, move_here)?;
+    let shop = shop_of_licence(app)?;
+    crate::log_info!("first run: the licence key opened {}", shop.name);
+    bring_down_and_open(app, config_dir, &folder, holds, &shop, "")
 }
 
 /// The data file inside a folder, when the folder holds exactly one shop.
@@ -646,4 +787,20 @@ pub fn open_as_owner(
 #[tauri::command]
 pub fn use_shop_folder(app: tauri::State<'_, App>, folder: String) -> UiResult<String> {
     use_shop_folder_on(&app, folder)
+}
+
+#[tauri::command]
+pub fn open_with_key(
+    app: tauri::State<'_, App>,
+    key: String,
+    folder: String,
+    move_here: bool,
+) -> UiResult<OwnerOpenedView> {
+    open_with_key_on(
+        &app,
+        &crate::config::AppConfig::directory(),
+        &key,
+        &folder,
+        move_here,
+    )
 }

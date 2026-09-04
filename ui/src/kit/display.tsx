@@ -402,3 +402,30 @@ export function DateRangePicker({
     </div>
   );
 }
+
+/** A QR code from the modules Rust drew: one path, so it stays crisp at any size. */
+export function QrCode({
+  modules,
+  label,
+}: {
+  modules: readonly (readonly boolean[])[];
+  label: string;
+}) {
+  const side = modules.length;
+  const d = modules
+    .map((row, y) =>
+      row.map((dark, x) => (dark ? `M${x} ${y}h1v1h-1z` : '')).join(''),
+    )
+    .join('');
+  return (
+    <svg
+      className="mb-qr"
+      viewBox={`0 0 ${side} ${side}`}
+      shapeRendering="crispEdges"
+      role="img"
+      aria-label={label}
+    >
+      <path d={d} />
+    </svg>
+  );
+}

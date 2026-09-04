@@ -1,7 +1,7 @@
 {
   "name": "magic-bill-ui",
   "private": true,
-  "version": "1.6.3",
+  "version": "1.6.4",
   "type": "module",
   "description": "Magic Bill — the screens. Renders and collects input; every rule and every rupee lives in Rust (R8).",
   "scripts": {
