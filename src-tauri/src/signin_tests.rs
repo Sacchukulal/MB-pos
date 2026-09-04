@@ -1047,6 +1047,14 @@ fn a_reprint_says_which_copy_it_is() {
     let said = reprint_bill_on(&app, target.clone(), "Customer asked for a copy".to_owned())
         .expect("reprinted");
     assert!(said.contains("Copy 2"), "{said}");
+    // Asked while this copy is still queued. A printed job leaves the queue, so looking only
+    // after the next reprint is a race against the worker that drains it.
+    let jobs = app.print_queue_snapshot();
+    assert!(
+        jobs.iter().any(|j| j.reason.as_deref() == Some("copy 2")),
+        "the copy did not reach the printer: {jobs:?}"
+    );
+
     let said =
         reprint_bill_on(&app, target.clone(), "Printer jammed".to_owned()).expect("reprinted");
     assert!(said.contains("Copy 3"), "{said}");
@@ -1057,12 +1065,6 @@ fn a_reprint_says_which_copy_it_is() {
         .find(|b| b.order_id == target)
         .expect("the bill");
     assert_eq!(row.reprints, 2, "the copies were not counted");
-
-    let jobs = app.print_queue_snapshot();
-    assert!(
-        jobs.iter().any(|j| j.reason.as_deref() == Some("copy 2")),
-        "the copy did not reach the printer: {jobs:?}"
-    );
 
     // And a voided bill reprints as VOIDED — the more important fact about that piece of paper.
     void_bill_on(&app, target.clone(), "Billed twice".to_owned(), None, None).expect("voided");
