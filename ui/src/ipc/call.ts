@@ -92,6 +92,7 @@ import type { DashboardView } from './generated/DashboardView';
 import type { DayStateView } from './generated/DayStateView';
 import type { DaysView } from './generated/DaysView';
 import type { DrawerView } from './generated/DrawerView';
+import type { LicenceDoor } from './generated/LicenceDoor';
 import type { LicenceView } from './generated/LicenceView';
 import type { HealthView } from './generated/HealthView';
 import type { BundlePlanView } from './generated/BundlePlanView';
@@ -615,8 +616,7 @@ export interface Commands {
   verify_backup: { args: { path: string }; returns: VerifyView };
   request_restore: { args: { path: string }; returns: BackupView };
   cancel_restore: { args: void; returns: BackupView };
-  /** The screen somebody opens when everything else is broken. */
-  find_shops: { args: void; returns: string[] };
+  set_second_backup_folder: { args: { folder: string | null }; returns: BackupView };
 
   // The whole configuration, out and in — a dealer sets up the second shop by copying one file.
 
@@ -666,9 +666,13 @@ export interface Commands {
   // The licence.
   account: { args: void; returns: LicenceView };
   refresh_licence: { args: void; returns: LicenceView };
-  activate: { args: { key: string }; returns: LicenceView };
-  deactivate: { args: void; returns: LicenceView };
-  transfer_here: { args: { key: string }; returns: LicenceView };
+  licence_shops: { args: { email: string; password: string }; returns: OwnerSignInView };
+  change_licence: {
+    args: { door: LicenceDoor; moveHere: boolean; newPin: string };
+    returns: LicenceView;
+  };
+  sign_out_licence: { args: void; returns: LicenceView };
+  bring_licence_here: { args: void; returns: LicenceView };
   use_emergency_code: { args: { code: string }; returns: LicenceView };
 
   // Is this counter healthy, and what can we send to support.

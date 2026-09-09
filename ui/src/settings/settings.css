@@ -286,8 +286,7 @@
   --receipt-char: var(--text-xs);
 }
 
-.mb-printers,
-.mb-backup {
+.mb-printers {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -307,81 +306,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
   gap: var(--space-3);
-}
-
-/* The one line that has to be read. */
-.mb-backup__headline {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border-left: var(--tile-stripe) solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  font-size: var(--text-md);
-  color: var(--text);
-}
-
-.mb-backup__headline--ok {
-  border-left-color: var(--ok);
-  background: var(--ok-soft);
-}
-
-.mb-backup__headline--warn {
-  border-left-color: var(--warn);
-  background: var(--warn-soft);
-}
-
-.mb-backup__headline--danger {
-  border-left-color: var(--danger);
-  background: var(--danger-soft);
-  font-weight: var(--weight-medium);
-}
-
-.mb-backup__where {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-  font-size: var(--text-sm);
-}
-
-.mb-backup__where dt {
-  color: var(--text-muted);
-}
-
-.mb-backup__where dd {
-  margin: 0;
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-/* The folder row: the path, and the button that changes it. */
-.mb-backup__folder {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-.mb-backup__places {
-  margin: var(--space-3) 0 0;
-  padding-left: var(--space-5);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/* Colour AND a word, never colour alone. */
-.mb-backup__unchecked {
-  color: var(--warn);
-  font-weight: var(--weight-medium);
-}
-
-.mb-backup__good {
-  color: var(--ok);
-}
-
-.mb-backup__bad {
-  color: var(--danger);
-  font-weight: var(--weight-medium);
 }
 
 /* Numbering, appearance, and moving a configuration. */
@@ -657,53 +581,6 @@
   gap: var(--space-3);
   padding-top: var(--space-3);
   border-top: var(--border-width) solid var(--border);
-}
-
-/* This version. */
-
-.mb-updates {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-/*
- * Label above value, in two columns, so "Running / 2.4.5" reads as one fact rather than as a
- * sentence.
- */
-.mb-updates__facts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-}
-
-.mb-updates__facts dt {
-  color: var(--text-muted);
-  font-size: var(--type-label);
-}
-
-.mb-updates__facts dd {
-  margin: 0;
-}
-
-/* Inside the update dialog: a spinner beside its sentence, or the bar and its numbers. */
-.mb-updates__wait {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.mb-updates__progress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.mb-updates__stage {
-  display: flex;
-  justify-content: space-between;
-  font-weight: var(--weight-medium);
 }
 
 /* Settings › Tax — the slabs and the tick list. */

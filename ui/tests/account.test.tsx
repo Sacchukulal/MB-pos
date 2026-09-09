@@ -1,4 +1,4 @@
-/** The account screen. */
+/** The Account page: the licence panel and its doors. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -6,8 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const call = vi.fn();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
-  inApp: () => true,
-  isUiError: () => false,
+  inApp: () => false,
+  isUiError: (cause: unknown) => typeof cause === 'object' && cause !== null && 'code' in cause,
+  subscribe: () => Promise.resolve(() => undefined),
 }));
 
 const { Account } = await import('../src/account/Account');
@@ -15,19 +16,21 @@ const { ToastProvider } = await import('../src/kit');
 
 import type { LicenceView } from '../src/ipc/generated/LicenceView';
 
-const activated: LicenceView = {
+const active: LicenceView = {
   standing: 'fine',
   chip: 'Active',
   tone: 'ok',
   headline: '',
+  hasLicence: true,
+  boundElsewhere: false,
+  ownerName: 'Anna Kuteera',
+  ownerPhone: '9840011223',
   shopName: "Anna's Kitchen",
   planName: 'Restaurant Standard',
-  renewsOn: '12 September',
-  renewalSentence: 'Your plan renews on 12 September.',
-  registeredContact: '+91 98••••••10',
-  machine: '4C4C4544',
-  machineHow: 'from Windows',
-  machineIsFragile: false,
+  dateLabel: 'Renews on',
+  date: '12 September',
+  key: 'MB-1234-5678-9ABC',
+  restaurantCode: 'ANNA01',
   phonesAllowed: 4,
   tillsAllowed: 1,
   included: ['reports', 'phone ordering'],
@@ -35,15 +38,32 @@ const activated: LicenceView = {
   stillHeld: '',
   clockNote: '',
   mayManage: true,
-  isActivated: true,
-  restaurantCode: 'ANNA01',
-  cloudCopy: 'Last copied to the cloud: 9 Aug, 6:10 pm. No rows waiting.',
+  cloudCopy: 'Last copied to the cloud: 9 Aug, 6:10 pm. Nothing waiting.',
   cloudTone: 'ok',
-  trialSentence: 'Start your free trial at magicbill.in, then enter the key here.',
+};
+
+const none: LicenceView = {
+  ...active,
+  standing: 'never-activated',
+  chip: 'Not activated',
+  tone: 'warn',
+  headline: 'This computer has no licence yet. You can bill and print.',
+  hasLicence: false,
+  ownerName: '',
+  ownerPhone: '',
+  shopName: '',
+  planName: 'No plan',
+  dateLabel: '',
+  date: '',
+  key: '',
+  restaurantCode: '',
+  included: [],
 };
 
 function show(view: LicenceView) {
-  call.mockResolvedValue(view);
+  call.mockImplementation((command: string) =>
+    command === 'account' ? Promise.resolve(view) : Promise.resolve(null),
+  );
   return render(
     <ToastProvider>
       <Account />
@@ -54,131 +74,134 @@ function show(view: LicenceView) {
 beforeEach(() => call.mockReset());
 afterEach(cleanup);
 
-it('shows the renewal as a sentence and not as a date field', async () => {
-  show(activated);
-  // 2.10: "your plan renews on 12 September" beats a date field, and the difference is that one
-  // of them is a sentence.
-  expect(await screen.findByText('Your plan renews on 12 September.')).toBeTruthy();
-  // The shop and its plan share the one line under the title.
-  expect(screen.getByText(/Anna's Kitchen/)).toBeTruthy();
-  expect(screen.getAllByText(/Restaurant Standard/).length).toBeGreaterThan(0);
+it('shows every fact in its own place', async () => {
+  show(active);
+  expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
+  expect(screen.getByText('9840011223')).toBeTruthy();
+  expect(screen.getAllByText(/Anna's Kitchen/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('Restaurant Standard').length).toBeGreaterThan(0);
+  expect(screen.getByText('Renews on')).toBeTruthy();
+  expect(screen.getByText('12 September')).toBeTruthy();
+  expect(screen.getByText('MB-1234-5678-9ABC')).toBeTruthy();
+  expect(screen.getByText('ANNA01')).toBeTruthy();
+  expect(screen.getByText(/Last copied to the cloud/)).toBeTruthy();
   expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
 });
 
-it('shows the machine id, because support asks for it', async () => {
-  show(activated);
-  expect(await screen.findByText('4C4C4544')).toBeTruthy();
-  expect(screen.getByText('from Windows')).toBeTruthy();
+it('offers Check now, Manage plan, Sign out and Change licence on a licensed counter', async () => {
+  show(active);
+  expect(await screen.findByRole('button', { name: 'Check now' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Manage plan' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Sign out of this computer' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Change licence' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Code from support' })).toBeNull();
 });
 
-/** The screen writes nothing. */
 it('shows the sentences Rust wrote, whatever they say', async () => {
   show({
-    ...activated,
+    ...active,
     standing: 'expired',
     chip: 'ZZZ-CHIP',
     tone: 'danger',
     headline: 'ZZZ-HEADLINE about the plan.',
-    renewalSentence: '',
+    dateLabel: 'Ran out on',
     clockNote: 'ZZZ-CLOCK note.',
   });
   expect(await screen.findByText('ZZZ-HEADLINE about the plan.')).toBeTruthy();
-  // The chip stands in the header and again beside the licence.
-  expect(screen.getAllByText('ZZZ-CHIP').length).toBeGreaterThan(0);
+  expect(screen.getByText('ZZZ-CHIP')).toBeTruthy();
   expect(screen.getByText('ZZZ-CLOCK note.')).toBeTruthy();
+  expect(screen.getByText('Ran out on')).toBeTruthy();
+  // Support's code is offered only when something is wrong.
+  expect(screen.getByRole('button', { name: 'Code from support' })).toBeTruthy();
 });
 
-it('says the licence is still held when a deactivate could not reach the server', async () => {
+it('hides the key when this person may not change the licence', async () => {
+  show({ ...active, mayManage: false, key: '' });
+  await screen.findByText('Anna Kuteera');
+  expect(screen.queryByText('Licence key')).toBeNull();
+});
+
+it('offers one button to bring a licence back from another computer', async () => {
   show({
-    ...activated,
-    stillHeld:
-      'This computer has stopped using the licence, but we could not tell our ' +
-      'server. The licence is still held — we will keep trying.',
+    ...active,
+    standing: 'bound-elsewhere',
+    chip: 'Another computer',
+    tone: 'danger',
+    boundElsewhere: true,
+    headline: 'This licence is on another computer.',
   });
-  expect(await screen.findByText(/The licence is still held/)).toBeTruthy();
-});
-
-it('shows the shop code staff type on a phone, and the cloud copy in a sentence', async () => {
-  show(activated);
-  expect(await screen.findByText('ANNA01')).toBeTruthy();
-  expect(screen.getByText(/Last copied to the cloud/)).toBeTruthy();
-});
-
-it('offers a key and an emergency code when nothing is activated, and the trial is one sentence', async () => {
-  show({
-    ...activated,
-    standing: 'never-activated',
-    chip: 'Not activated',
-    tone: 'warn',
-    isActivated: false,
-    shopName: '',
-    planName: 'No plan',
-    renewsOn: '',
-    renewalSentence: '',
-    headline: 'This computer has no licence yet. You can bill and print.',
-  });
-  expect(await screen.findByRole('button', { name: 'Enter licence key' })).toBeTruthy();
-  // No trial dialog, no contact box: the trial is the website's.
-  expect(screen.queryByRole('button', { name: 'Start a free trial' })).toBeNull();
-  // The headline takes the one sentence; the trial sentence shows when there is no headline.
-  expect(screen.queryByText(/Start your free trial at magicbill.in/)).toBeNull();
-  expect(screen.getByRole('button', { name: 'Emergency code' })).toBeTruthy();
-  // Nothing to deactivate.
-  expect(screen.queryByRole('button', { name: 'Deactivate' })).toBeNull();
-  // And it still says billing works, because that is the thing an owner is actually worried
-  // about.
-  expect(screen.getByText(/You can bill and print/)).toBeTruthy();
-});
-
-it('does not let somebody without licence.manage press anything that changes it', async () => {
-  show({ ...activated, mayManage: false });
-  await screen.findByText(/Anna's Kitchen/);
-  expect(screen.getByRole('button', { name: 'Deactivate' }).hasAttribute('disabled')).toBe(true);
-  expect(
-    screen.getByRole('button', { name: 'Move a licence here' }).hasAttribute('disabled'),
-  ).toBe(true);
-  // Reading is `reports.view`, so Check again stays live.
-  expect(screen.getByRole('button', { name: 'Check again' }).hasAttribute('disabled')).toBe(false);
-});
-
-/** Activation sends the key and the proof. */
-/** The key is the proof: it is shown only to whoever bought it, so there is no code box. */
-it('activates on the key alone', async () => {
-  show({
-    ...activated,
-    isActivated: false,
-    standing: 'never-activated',
-    chip: 'Not activated',
-  });
-  fireEvent.click(await screen.findByRole('button', { name: 'Enter licence key' }));
-
-  const key = await screen.findByLabelText('Licence key');
-  expect(screen.queryByLabelText('Code we sent you')).toBeNull();
-  const activate = screen.getByRole('button', { name: 'Activate' });
-  expect(activate.hasAttribute('disabled')).toBe(true);
-
-  fireEvent.change(key, { target: { value: 'MB-1234-5678' } });
-  expect(activate.hasAttribute('disabled')).toBe(false);
-
-  fireEvent.click(activate);
+  fireEvent.click(await screen.findByRole('button', { name: 'Use it on this computer' }));
   await waitFor(() => {
-    expect(call).toHaveBeenCalledWith('activate', { key: 'MB-1234-5678' });
+    expect(call).toHaveBeenCalledWith('bring_licence_here');
   });
 });
 
-/** Every command returns the whole view, so the screen never merges state. */
-it('takes the whole view back from a command', async () => {
-  show({ ...activated, isActivated: false, standing: 'never-activated', planName: 'No plan' });
-  fireEvent.click(await screen.findByRole('button', { name: 'Enter licence key' }));
-  fireEvent.change(await screen.findByLabelText('Licence key'), {
-    target: { value: 'MB-1234-5678' },
+it('shows the two doors and nothing else when there is no licence', async () => {
+  show(none);
+  expect(await screen.findByText(/You can bill and print/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Buy a plan' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Sign out of this computer' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Check now' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  expect(await screen.findByLabelText('Email')).toBeTruthy();
+  expect(screen.getByLabelText('Password')).toBeTruthy();
+  expect(screen.getByLabelText('Licence key')).toBeTruthy();
+});
+
+it('takes the key, then the PIN twice, then changes the licence', async () => {
+  show(active);
+  fireEvent.click(await screen.findByRole('button', { name: 'Change licence' }));
+
+  const next = await screen.findByRole('button', { name: 'Next' });
+  expect(next.hasAttribute('disabled')).toBe(true);
+  fireEvent.change(screen.getByLabelText('Licence key'), { target: { value: 'MB-NEW-0001' } });
+  expect(next.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(next);
+
+  const pin = await screen.findByLabelText('Your PIN');
+  fireEvent.change(pin, { target: { value: '4839' } });
+  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '4839' } });
+
+  call.mockResolvedValueOnce({ ...active, ownerName: 'Ravi', shopName: "Ravi's Cafe" });
+  fireEvent.click(screen.getByRole('button', { name: 'Use this licence' }));
+  await waitFor(() => {
+    expect(call).toHaveBeenCalledWith('change_licence', {
+      door: { by: 'key', key: 'MB-NEW-0001' },
+      moveHere: false,
+      newPin: '4839',
+    });
   });
+  expect(await screen.findByText('Ravi')).toBeTruthy();
+});
+
+it('asks the account which shop when it owns more than one', async () => {
+  show(active);
+  fireEvent.click(await screen.findByRole('button', { name: 'Change licence' }));
+  fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'r@x.in' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
 
   call.mockResolvedValueOnce({
-    ...activated,
-    planName: 'Restaurant Plus',
-    chip: 'Active',
+    name: 'Ravi',
+    email: 'r@x.in',
+    shops: [
+      { id: 'r1', name: 'Cafe One', address: '', phone: '', gstin: '', shortCode: '', licence: 'active' },
+      { id: 'r2', name: 'Cafe Two', address: '', phone: '', gstin: '', shortCode: '', licence: 'active' },
+    ],
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
-  expect(await screen.findByText('Restaurant Plus')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Cafe Two' }));
+  expect(await screen.findByLabelText('Your PIN')).toBeTruthy();
+  expect(screen.getByText(/Cafe Two takes over this counter/)).toBeTruthy();
+});
+
+it('asks before signing out, and takes the whole view back', async () => {
+  show(active);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign out of this computer' }));
+  call.mockResolvedValueOnce(none);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+  await waitFor(() => {
+    expect(call).toHaveBeenCalledWith('sign_out_licence');
+  });
+  expect(await screen.findByRole('button', { name: 'Buy a plan' })).toBeTruthy();
 });

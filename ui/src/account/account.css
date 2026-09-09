@@ -1,4 +1,4 @@
-/* The account screen. */
+/* The Account page: three panels down the page, each a run of facts and a row of buttons. */
 
 .mb-account {
   /* The page margin is the SHELL's. */
@@ -16,95 +16,18 @@
   gap: var(--gap-group);
 }
 
-/* The three smaller panels stand side by side, and stack when the window is narrow. */
-.mb-account__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--account-col), 1fr));
-  gap: var(--gap-group);
-}
-
-/* The three stand level, and a panel's button sits on its floor. */
-.mb-account__grid > .mb-panel > .mb-panel__body {
-  flex: 1;
-}
-
-.mb-account__grid .mb-row--end {
-  margin-top: auto;
-}
-
 .mb-account__label {
   font-size: var(--type-caption);
   font-weight: var(--type-label-weight);
   color: var(--text-muted);
 }
 
-/* The verdict: a tile with a mark, the standing in a word, and the sentence. */
-.mb-account__verdict {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--gap-group);
-}
-
-.mb-account__face {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: var(--account-face);
-  height: var(--account-face);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunk);
-  color: var(--text-muted);
-}
-
-.mb-account__face--ok {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.mb-account__face--warn {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-
-.mb-account__face--danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.mb-account__said {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-  /* Level with the tile's centre when there is only the one word. */
-  min-height: var(--account-face);
-  justify-content: center;
-}
-
-.mb-account__standing {
-  font-size: var(--text-xl);
-  font-weight: var(--weight-bold);
-  line-height: var(--line-tight);
-  color: var(--text);
-}
-
-.mb-account__sentence {
-  margin: 0;
-  font-size: var(--type-body);
-  color: var(--text-muted);
-  max-width: var(--prose-max);
-}
-
 /* Label over value, in equal columns. */
 .mb-account__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--account-fact), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--account-fact), 1fr));
   gap: var(--gap-field) var(--gap-group);
   margin: 0;
-  padding: var(--space-3) 0;
-  border-top: var(--border-width) solid var(--border);
-  border-bottom: var(--border-width) solid var(--border);
 }
 
 .mb-account__fact {
@@ -134,14 +57,12 @@
   letter-spacing: var(--tracking-code);
 }
 
-/* What staff type on a phone: the biggest thing on its panel. */
-.mb-account__shopcode {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-code);
-  line-height: var(--line-tight);
-  color: var(--text);
+/* The key and its Copy button on one line. */
+.mb-account__key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  flex-wrap: wrap;
 }
 
 .mb-account__included {
@@ -151,30 +72,87 @@
   gap: var(--gap-inline);
 }
 
-/* The way out on the left, the way forward on the right. */
-.mb-account__actions {
+/* The cloud copy: its state as a chip, then the sentence. */
+.mb-account__cloud,
+.mb-account__last {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-group);
   flex-wrap: wrap;
+  gap: var(--gap-inline) var(--gap-field);
+  font-size: var(--type-body);
+  color: var(--text);
 }
 
-.mb-account__aside {
+/* The folders: label, path, buttons, one line each. */
+.mb-account__folders {
   display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+}
+
+.mb-account__folder {
+  display: grid;
+  grid-template-columns: var(--account-folder-label) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--gap-field);
-  min-width: 0;
 }
 
-.mb-account__only {
-  font-size: var(--type-label);
-  color: var(--text-muted);
+.mb-account__path {
+  font-family: var(--font-mono);
+  font-size: var(--type-cell);
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
-.mb-account__note {
+.mb-account__folderactions {
+  display: flex;
+  gap: var(--gap-inline);
+}
+
+/* Colour AND a word, never colour alone. */
+.mb-account__good {
+  color: var(--ok);
+}
+
+.mb-account__bad {
+  color: var(--danger);
+  font-weight: var(--weight-medium);
+}
+
+.mb-account__unchecked {
+  color: var(--warn);
+  font-weight: var(--weight-medium);
+}
+
+/* The licence dialog: fields down the page. */
+.mb-account__door {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+}
+
+.mb-account__or {
   margin: 0;
   font-size: var(--type-label);
   color: var(--text-muted);
-  max-width: var(--prose-max);
+  text-align: center;
+}
+
+/* Inside the update dialog: a spinner beside its sentence, or the bar and its numbers. */
+.mb-account__wait {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mb-account__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mb-account__stage {
+  display: flex;
+  justify-content: space-between;
+  font-weight: var(--weight-medium);
 }

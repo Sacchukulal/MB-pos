@@ -169,6 +169,16 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'reports.view',
   },
   {
+    // In the bar, after Reports: the owner opens it to check the plan, take a backup, or
+    // update. Staff never see it.
+    id: 'account',
+    daily: true,
+    label: 'Account',
+    icon: 'badge',
+    render: () => <Account />,
+    needs: 'licence.manage',
+  },
+  {
     id: 'menu',
     label: 'Menu',
     icon: 'book',
@@ -197,15 +207,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     icon: 'settings',
     render: (_go, sub) => <Settings initial={sub} />,
     needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
-  },
-  {
-    // Below Settings, because it is opened once a year — and above the Kit, because the Kit is
-    // not a screen a shop has any use for.
-    id: 'account',
-    label: 'Account',
-    icon: 'badge',
-    render: () => <Account />,
-    needs: 'reports.view',
   },
   {
     // On the counter it is a screen like any other, so a shop with one machine can run the

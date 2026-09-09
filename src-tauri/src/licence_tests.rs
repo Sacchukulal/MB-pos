@@ -391,7 +391,7 @@ fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
     stub.behave(Behaviour::Unreachable);
     app.use_licensing(licensing);
 
-    let view = crate::licensing::deactivate_on(&app).expect("deactivates locally");
+    let view = crate::licensing::sign_out_on(&app).expect("deactivates locally");
     assert!(
         view.still_held.contains("still held"),
         "the screen did not say the licence is still held: {}",
@@ -432,10 +432,11 @@ fn the_account_screen_draws_on_a_first_run() {
     let view = crate::licensing::view_on(&app);
     assert_eq!(view.standing, "never-activated");
     assert_eq!(view.chip, "Not activated");
-    assert!(!view.is_activated);
+    assert!(!view.has_licence);
+    assert!(view.key.is_empty(), "a key on a counter with no licence");
     assert!(
-        !view.machine.is_empty(),
-        "no machine id to read out to support"
+        view.date_label.is_empty(),
+        "a date row with no date to show"
     );
     assert!(!view.headline.is_empty());
     assert!(view.phones_allowed > 0);
@@ -517,4 +518,76 @@ fn a_lapsed_plan_does_not_keep_anybody_out() {
         Standing::Ending { days_left: 5 }
     );
     assert!(app.entitlement().operating());
+}
+
+/// Putting a licence on a counter from the Account page: the owner's row takes the licence
+/// holder's name, gets the PIN that was typed, and that person is signed in.
+#[test]
+fn change_licence_names_the_owner_sets_the_pin_and_signs_them_in() {
+    let scratch = Scratch::new("change_licence");
+    let app = a_trading_shop(&scratch, "change_licence");
+    app.use_licensing(crate::licensing::for_tests_blank());
+    // The row the first run left behind, under a name that is not the account's.
+    crate::firstrun::owner_row_named(&app, "Owner", false).expect("an owner row");
+
+    let view = crate::licensing::change_licence_on(
+        &app,
+        crate::licensing::LicenceDoor::Key {
+            key: "MB-STUB-0001".to_owned(),
+        },
+        false,
+        "4839".to_owned(),
+    )
+    .expect("the stub licence goes on");
+
+    assert!(view.has_licence);
+    assert_eq!(
+        view.owner_name, "Anna Kuteera",
+        "the owner's name is the licence holder's"
+    );
+    assert_eq!(view.owner_phone, "9840011223");
+    assert_eq!(view.key, "MB-STUB-0001", "the owner sees the key");
+
+    let owners: Vec<(String, bool)> = app
+        .with_shop(|shop| {
+            shop.db
+                .transaction(|tx| {
+                    Ok(Repos::new(tx)
+                        .people()
+                        .list_staff(OUTLET)?
+                        .into_iter()
+                        .filter(|p| p.role_id.as_deref() == Some("role_owner"))
+                        .map(|p| (p.name, p.pin_hash.is_some()))
+                        .collect())
+                })
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the staff list");
+    assert_eq!(
+        owners,
+        vec![("Anna Kuteera".to_owned(), true)],
+        "one owner row, renamed, holding the new PIN"
+    );
+    let current = app.sessions().current().expect("somebody is signed in");
+    assert_eq!(current.actor.name, "Anna Kuteera");
+    assert!(
+        crate::ipc::login_on(
+            &app,
+            current.actor.staff_id.as_str().to_owned(),
+            "4839".to_owned()
+        )
+        .is_ok(),
+        "the typed PIN signs the owner in"
+    );
+
+    // The same key again is refused: nothing to change.
+    let again = crate::licensing::change_licence_on(
+        &app,
+        crate::licensing::LicenceDoor::Key {
+            key: "MB-STUB-0001".to_owned(),
+        },
+        false,
+        "4839".to_owned(),
+    );
+    assert_eq!(again.expect_err("refused").code, "licence.same");
 }

@@ -322,6 +322,16 @@ pub fn prove_owner(app: &App, proof: &OwnerProof) -> UiResult<()> {
 /// that account owns and holds a licence for; the counter cannot open anything else.
 pub fn sign_in_owner_on(app: &App, email: String, password: String) -> UiResult<OwnerSignInView> {
     nothing_open_yet(app)?;
+    owner_shops_by_password(app, email, password)
+}
+
+/// The licensed shops an account owns, held for the step that opens one. The first run and
+/// the Account screen's Change licence both come through here.
+pub(crate) fn owner_shops_by_password(
+    app: &App,
+    email: String,
+    password: String,
+) -> UiResult<OwnerSignInView> {
     let email = email.trim().to_owned();
     if email.is_empty() || password.is_empty() {
         return Err(UiError::new(
@@ -426,54 +436,64 @@ fn take_licence(app: &App, key: &str, move_here: bool) -> UiResult<()> {
             licensing.activate(key, at, mb_license::deadline::DEADLINE)
         }
     });
-    outcome.map_err(|e| {
-        let said = crate::words::from_licence(&e);
-        // Its own code, because the screen answers it with a checkbox rather than a sentence.
-        if matches!(
-            e,
-            mb_license::LicenceError::Cloud(mb_license::CloudError::BoundElsewhere { .. })
-        ) {
-            UiError::new("licence.bound_elsewhere", said.message)
-        } else {
-            said
-        }
-    })
+    outcome.map_err(|e| licence_said(&e))
 }
 
-/// The owner's own row in the staff list, made if the shop has none. Named after the account;
-/// the PIN step lets them correct the name and gives them the PIN.
-fn ensure_owner_row(app: &App, name: &str) -> UiResult<()> {
-    let at = crate::flows::now();
-    let name = if name.trim().is_empty() {
-        "Owner"
+/// A licence refusal in the screen's words. Bound elsewhere gets its own code, because the
+/// screen answers it with a checkbox rather than a sentence.
+pub(crate) fn licence_said(e: &mb_license::LicenceError) -> UiError {
+    let said = crate::words::from_licence(e);
+    if matches!(
+        e,
+        mb_license::LicenceError::Cloud(mb_license::CloudError::BoundElsewhere { .. })
+    ) {
+        UiError::new("licence.bound_elsewhere", said.message)
     } else {
-        name.trim()
-    };
+        said
+    }
+}
+
+/// The owner's row in the staff list: made when the shop has none, and, with `rename`, named
+/// after whoever holds the licence now. A blank name leaves an existing row's name alone.
+pub(crate) fn owner_row_named(
+    app: &App,
+    name: &str,
+    rename: bool,
+) -> UiResult<mb_db::repo::people::StaffMember> {
+    let at = crate::flows::now();
+    let name = name.trim();
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let owner_role = mb_auth::RolePreset::Owner.id();
-                let has_one = repos
+                let existing = repos
                     .people()
                     .list_staff(OUTLET)?
-                    .iter()
-                    .any(|p| p.role_id.as_deref() == Some(owner_role));
-                if has_one {
-                    return Ok(());
-                }
-                let member = mb_db::repo::people::StaffMember {
-                    id: mb_core::StaffId::new(crate::newid::fresh_at("staff", at)),
-                    name: name.to_owned(),
-                    role_id: Some(owner_role.to_owned()),
-                    role_name: None,
-                    pin_hash: None,
-                    status: mb_db::repo::people::StaffStatus::Active,
-                    permissions: mb_auth::PermissionSet::new(),
-                    max_discount_bp: None,
-                    max_discount: None,
+                    .into_iter()
+                    .find(|p| p.role_id.as_deref() == Some(owner_role));
+                let member = match existing {
+                    Some(mut member) => {
+                        if !rename || name.is_empty() || member.name == name {
+                            return Ok(member);
+                        }
+                        member.name = name.to_owned();
+                        member
+                    }
+                    None => mb_db::repo::people::StaffMember {
+                        id: mb_core::StaffId::new(crate::newid::fresh_at("staff", at)),
+                        name: if name.is_empty() { "Owner" } else { name }.to_owned(),
+                        role_id: Some(owner_role.to_owned()),
+                        role_name: None,
+                        pin_hash: None,
+                        status: mb_db::repo::people::StaffStatus::Active,
+                        permissions: mb_auth::PermissionSet::new(),
+                        max_discount_bp: None,
+                        max_discount: None,
+                    },
                 };
-                repos.people().save_staff(OUTLET, &member, at)
+                repos.people().save_staff(OUTLET, &member, at)?;
+                Ok(member)
             })
             .map_err(|e| crate::words::from_db(&e))
     })
@@ -485,8 +505,8 @@ fn nothing_open_yet(app: &App) -> UiResult<()> {
     if app.has_shop() {
         return Err(UiError::new(
             "shop.exists",
-            "This computer already has a shop open. Settings › Backup is where another folder \
-             is chosen.",
+            "This computer already has a shop open. Account is where another folder is \
+             chosen.",
         ));
     }
     Ok(())
@@ -582,7 +602,7 @@ fn bring_down_and_open(
         }
     }
     crate::licensing::after_licence_change(app);
-    ensure_owner_row(app, owner_name)?;
+    owner_row_named(app, owner_name, false)?;
     app.with_owner_sign_in(|held| *held = None);
 
     Ok(OwnerOpenedView {

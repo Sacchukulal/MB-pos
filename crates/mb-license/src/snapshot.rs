@@ -171,6 +171,8 @@ mod tests {
                 trial_ends_on: None,
                 auto_renews: None,
                 registered_contact: "+91 98••••••10".to_owned(),
+                owner_name: "Anna Kuteera".to_owned(),
+                owner_phone: "+919840011223".to_owned(),
                 restaurant_id: None,
                 short_code: None,
             },

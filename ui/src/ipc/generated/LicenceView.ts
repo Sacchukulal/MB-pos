@@ -17,27 +17,39 @@ tone: string,
 /**
  * The sentence. Empty when there is nothing to say.
  */
-headline: string, shopName: string, planName: string, 
+headline: string, 
 /**
- * "12 September", not a date field (2.10).
+ * True while this computer holds a licence.
  */
-renewsOn: string, 
+hasLicence: boolean, 
 /**
- * "Your plan renews on 12 September." Built here, shown as-is.
+ * True when the licence is on another computer now.
  */
-renewalSentence: string, registeredContact: string, 
+boundElsewhere: boolean, 
 /**
- * This computer, for a support call: "4C4C4544".
+ * The name on the account that holds the licence. Blank until the cloud has said.
  */
-machine: string, 
+ownerName: string, 
 /**
- * "from Windows", "made by Magic Bill on this computer".
+ * That account's mobile, ten digits, or blank.
  */
-machineHow: string, 
+ownerPhone: string, shopName: string, planName: string, 
 /**
- * True when losing the config folder would lose the identity.
+ * "Renews on" · "Ends on" · "Ended on" · "Trial ends on". Empty when there is no date.
  */
-machineIsFragile: boolean, phonesAllowed: number, tillsAllowed: number, 
+dateLabel: string, 
+/**
+ * "12 September", not a date field.
+ */
+date: string, 
+/**
+ * The key, only for somebody who may change the licence; blank otherwise.
+ */
+key: string, 
+/**
+ * What staff type on a phone to reach this shop. Empty until the cloud says.
+ */
+restaurantCode: string, phonesAllowed: number, tillsAllowed: number, 
 /**
  * What the plan includes, in the shop's words.
  */
@@ -53,11 +65,7 @@ clockNote: string,
 /**
  * Whether this person may press anything on this screen.
  */
-mayManage: boolean, isActivated: boolean, 
-/**
- * What staff type on a phone to reach this shop. Empty until the cloud says.
- */
-restaurantCode: string, 
+mayManage: boolean, 
 /**
  * The cloud copy, in one sentence.
  */
@@ -65,8 +73,4 @@ cloudCopy: string,
 /**
  * `ok`, `warn` or `danger`, for the sentence above.
  */
-cloudTone: string, 
-/**
- * Where a trial starts. One sentence, no dialog.
- */
-trialSentence: string, };
+cloudTone: string, };

@@ -44,8 +44,22 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
     app.use_licensing(licensing);
 
     // A refused activation, then a good one.
-    let _ = crate::licensing::activate_on(app, "MB-4KQ7-9WTX-2100".to_owned());
-    let _ = crate::licensing::activate_on(app, "MB-STUB-0001".to_owned());
+    let _ = crate::licensing::change_licence_on(
+        app,
+        crate::licensing::LicenceDoor::Key {
+            key: "MB-4KQ7-9WTX-2100".to_owned(),
+        },
+        false,
+        "4839".to_owned(),
+    );
+    let _ = crate::licensing::change_licence_on(
+        app,
+        crate::licensing::LicenceDoor::Key {
+            key: "MB-STUB-0001".to_owned(),
+        },
+        false,
+        "4839".to_owned(),
+    );
 
     // An emergency code, right and wrong.
     let _ = crate::licensing::use_emergency_code_on(app, "K7M2Q-9XR4T-BW8HN-3PZ6D".to_owned());
@@ -83,7 +97,7 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
 
     // And the licence screen, which reads all of it back.
     let _ = crate::licensing::view_on(app);
-    let _ = crate::licensing::deactivate_on(app);
+    let _ = crate::licensing::sign_out_on(app);
 }
 
 fn everything_written() -> String {

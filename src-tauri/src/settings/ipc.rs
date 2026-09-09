@@ -227,6 +227,7 @@ fn view_of(app: &App, config: &ShopConfig, allowed: &[Permission]) -> SettingsVi
     let trouble = app.with_shop(|_| Ok(())).err().map(|e| e.message);
     let groups = Group::ALL
         .iter()
+        .filter(|group| group.on_settings_screen())
         .map(|group| GroupView {
             code: group.code().to_owned(),
             label: group.label().to_owned(),

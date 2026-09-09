@@ -51,6 +51,7 @@ export type IconName =
   | 'more'
   | 'folder'
   | 'download'
+  | 'copy'
   | 'upload'
   | 'user'
   | 'phone'
@@ -285,6 +286,12 @@ const PATHS: Record<IconName, ReactNode> = {
     <path d="M3.5 6.5a1 1 0 0 1 1-1h4l2 2.5h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1z" />
   ),
   download: <path d="M12 3.5v12M7 10.5l5 5 5-5M4.5 20.5h15" />,
+  copy: (
+    <>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="1.5" />
+      <path d="M15.5 8.5v-3a1 1 0 0 0-1-1h-9a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" />
+    </>
+  ),
   upload: <path d="M12 20.5v-12M7 13.5l5-5 5 5M4.5 3.5h15" />,
   user: (
     <>

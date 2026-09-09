@@ -45,7 +45,7 @@ pub fn look(app: &App) -> SetupView {
 
     // Backups are FILES, not rows.
     let backups = i64::try_from(
-        mb_db::backup::list(&crate::settings::backup::folder_for(app, &config))
+        mb_db::backup::list(&crate::settings::backup::folder_for(app))
             .unwrap_or_default()
             .len(),
     )
@@ -138,12 +138,12 @@ pub fn look(app: &App) -> SetupView {
         },
         SetupStep {
             id: "backup".to_owned(),
-            title: "Choose where backups go, and take one".to_owned(),
-            why: "A copy on the same disk is not a backup. Pick a pen drive or \
-                  another folder, and take one now so you know it works."
+            title: "Take a backup".to_owned(),
+            why: "Backups go into the shop folder. Set a second copy on a pen drive or a \
+                  network share on the Account page, and take one now."
                 .to_owned(),
             done: counts.backups > 0,
-            go_to: "settings".to_owned(),
+            go_to: "account".to_owned(),
             matters_most: true,
         },
     ];

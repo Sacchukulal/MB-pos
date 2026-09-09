@@ -1100,11 +1100,7 @@ fn a_kitchen_only_printer_does_not_get_the_bills() {
 fn the_schedule_backs_up_when_the_newest_one_is_old() {
     let scratch = Scratch::new("backup_schedule");
     let app = a_shop(&scratch, "schedule");
-    let copies = scratch.dir().join("copies");
-    let mut config = app.shop_config();
-    config.backup.every_hours = 1;
-    config.backup.folder = copies.display().to_string();
-    app.publish_shop_config(config);
+    let folder = crate::settings::backup::folder_for(&app);
 
     assert!(
         crate::settings::backup::take_if_due(&app).expect("taken"),
@@ -1114,5 +1110,12 @@ fn the_schedule_backs_up_when_the_newest_one_is_old() {
         !crate::settings::backup::take_if_due(&app).expect("checked"),
         "a fresh backup was taken again"
     );
-    assert_eq!(mb_db::backup::list(&copies).expect("list").len(), 1);
+    assert_eq!(mb_db::backup::list(&folder).expect("list").len(), 1);
+    // Every backup is checked as it is written, so the screen never shows one unchecked.
+    let view = crate::settings::backup::status_on(&app).expect("status");
+    assert!(
+        view.backups[0].checked_ok,
+        "the backup was not checked when taken"
+    );
+    assert!(view.last.ends_with(", checked"), "{}", view.last);
 }

@@ -65,6 +65,12 @@ pub struct Licence {
     pub auto_renews: Option<bool>,
     /// Already masked by the cloud — `+91 98••••••10`.
     pub registered_contact: String,
+    /// The name on the account that holds the licence. Blank from a cloud before 0025.
+    #[serde(default)]
+    pub owner_name: String,
+    /// That account's mobile as the cloud writes it, `+919840011223`.
+    #[serde(default)]
+    pub owner_phone: String,
     /// The cloud's id for this shop. What a release rollout names.
     #[serde(default)]
     pub restaurant_id: Option<String>,

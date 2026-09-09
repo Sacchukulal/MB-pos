@@ -6,6 +6,10 @@ export type BackupRowView = { path: string, name: string,
  */
 takenAt: string, size: string, 
 /**
- * What the last verify of THIS file found, in words.
+ * "Checked", "Failed", or "Not checked" for a backup an older build took.
  */
-verified: string | null, verifiedOk: boolean, };
+checked: string, 
+/**
+ * True when the check passed, so a restore may use it.
+ */
+checkedOk: boolean, };

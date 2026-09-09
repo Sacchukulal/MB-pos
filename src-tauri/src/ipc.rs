@@ -618,7 +618,7 @@ macro_rules! commands {
             $crate::settings::backup::verify_backup,
             $crate::settings::backup::request_restore,
             $crate::settings::backup::cancel_restore,
-            $crate::settings::backup::find_shops,
+            $crate::settings::backup::set_second_backup_folder,
             $crate::settings::numbering::numbering,
             $crate::settings::numbering::save_counter,
             // Thirteen reports behind three commands, for the same reason the settings screen
@@ -652,9 +652,10 @@ macro_rules! commands {
             $crate::orders::dismiss_the_floors_items,
             // The licence.
             $crate::licensing::account,
-            $crate::licensing::activate,
-            $crate::licensing::deactivate,
-            $crate::licensing::transfer_here,
+            $crate::licensing::licence_shops,
+            $crate::licensing::change_licence,
+            $crate::licensing::sign_out_licence,
+            $crate::licensing::bring_licence_here,
             $crate::licensing::use_emergency_code,
             $crate::licensing::refresh_licence,
             // Is this counter healthy, and what can we send to support.
@@ -1625,7 +1626,7 @@ pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState>
 
 /// Somebody whose PIN, or whose account, has just been checked: their session starts, the
 /// history says so, and the next lock screen starts on them.
-fn admit(
+pub(crate) fn admit(
     app: &App,
     member: &mb_db::repo::people::StaffMember,
     at: Timestamp,
@@ -1940,7 +1941,7 @@ fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
 }
 
 /// A typed PIN, hashed; `None` when the PIN is being cleared.
-fn hashed_pin(pin: Option<&str>) -> UiResult<Option<PinHash>> {
+pub(crate) fn hashed_pin(pin: Option<&str>) -> UiResult<Option<PinHash>> {
     match pin.map(str::trim).filter(|p| !p.is_empty()) {
         Some(typed) => {
             let parsed = Pin::parse(typed).map_err(|e| {
@@ -1956,7 +1957,7 @@ fn hashed_pin(pin: Option<&str>) -> UiResult<Option<PinHash>> {
 }
 
 /// Write a person's PIN, or clear it, and say so in the history. `by` is whoever did it.
-fn write_pin(
+pub(crate) fn write_pin(
     app: &App,
     staff_id: &str,
     hashed: Option<&PinHash>,

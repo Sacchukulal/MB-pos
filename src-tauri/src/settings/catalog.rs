@@ -88,6 +88,13 @@ impl Group {
     pub fn from_code(code: &str) -> Option<Group> {
         Group::ALL.iter().copied().find(|g| g.code() == code)
     }
+
+    /// Whether the Settings screen lists this group. Backup lives on the Account screen; its
+    /// one setting is stored and searched like any other.
+    #[must_use]
+    pub const fn on_settings_screen(self) -> bool {
+        !matches!(self, Group::Backup)
+    }
 }
 
 /// One setting.
@@ -1819,35 +1826,16 @@ pub const CATALOG: &[Entry] = &[
         day.float_amount
     ),
     words!(
-        "backup.folder",
-        Backup,
-        Row,
-        "Backup folder",
-        "Where backups are written. Blank uses the folder beside your database.",
-        ["backup", "folder", "where", "copy"],
-        260,
-        Folder,
-        backup.folder
-    ),
-    words!(
         "backup.second_folder",
         Backup,
         Row,
-        "Second backup folder",
-        "A pen drive or a network share. One copy on one disk is not a backup.",
+        "Second copy",
+        "A pen drive or a network share that gets a copy of every backup.",
         ["backup", "second", "pen drive", "usb", "network"],
         260,
         Folder,
         backup.second_folder
     ),
-    number!("backup.every_hours", Backup, Row, "Back up every",
-        "Hours. 0 means only when you press the button.",
-        ["backup", "schedule", "automatic", "how often"], 0..=168 "hours", u32,
-        backup.every_hours),
-    number!("backup.keep_count", Backup, Row, "Keep this many backups",
-        "Older ones are deleted to save disk space.",
-        ["backup", "keep", "retention", "delete", "old"], 1..=365 "backups", u32,
-        backup.keep_count),
     flag!(
         "receipt.bill_barcode",
         Receipt,

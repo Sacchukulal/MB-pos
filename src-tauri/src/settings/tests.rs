@@ -166,7 +166,6 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
         ("5 am", "day.starts_at_minutes"),
         ("utgst", "store.state_code"),
         ("composition", "store.registration"),
-        ("pen drive", "backup.second_folder"),
         ("hsn", "receipt.show.hsn"),
         ("kot", "kitchen.show_title"),
     ] {
@@ -177,6 +176,11 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
             found.iter().map(|e| e.key).collect::<Vec<_>>()
         );
     }
+    // The backup setting lives on the Account page, so the Settings search never points at it.
+    assert!(
+        super::search("pen drive").is_empty(),
+        "the second copy folder came up in the Settings search"
+    );
 }
 
 /// A section's name finds the whole section.

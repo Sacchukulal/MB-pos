@@ -337,7 +337,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("verify_backup", Access::Needs(Permission::BackupRun)),
     ("request_restore", Access::Needs(Permission::BackupRun)),
     ("cancel_restore", Access::Needs(Permission::BackupRun)),
-    ("find_shops", Access::Needs(Permission::BackupRun)),
+    (
+        "set_second_backup_folder",
+        Access::Needs(Permission::BackupRun),
+    ),
     // The reports.
     ("report_list", Access::Needs(Permission::ReportsView)),
     ("report", Access::Needs(Permission::ReportsView)),
@@ -383,11 +386,15 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         Access::Needs(Permission::BillCreate),
     ),
     // The licence.
-    ("account", Access::Needs(Permission::ReportsView)),
-    ("refresh_licence", Access::Needs(Permission::ReportsView)),
-    ("activate", Access::Needs(Permission::LicenceManage)),
-    ("deactivate", Access::Needs(Permission::LicenceManage)),
-    ("transfer_here", Access::Needs(Permission::LicenceManage)),
+    ("account", Access::Needs(Permission::LicenceManage)),
+    ("refresh_licence", Access::Needs(Permission::LicenceManage)),
+    ("licence_shops", Access::Needs(Permission::LicenceManage)),
+    ("change_licence", Access::Needs(Permission::LicenceManage)),
+    ("sign_out_licence", Access::Needs(Permission::LicenceManage)),
+    (
+        "bring_licence_here",
+        Access::Needs(Permission::LicenceManage),
+    ),
     (
         "use_emergency_code",
         Access::Needs(Permission::LicenceManage),

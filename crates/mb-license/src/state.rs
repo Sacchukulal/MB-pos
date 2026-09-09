@@ -322,6 +322,48 @@ impl Licensing {
         self.accept(answer, now)
     }
 
+    /// Run on another licence from now on: the new key is taken first, so a refused key leaves
+    /// the old licence as it was, and the old key's binding is released once the new one is in
+    /// place. A release that fails is queued and retried on the next check.
+    pub fn switch_to(
+        &mut self,
+        key: &str,
+        move_here: bool,
+        now: Timestamp,
+        today: BusinessDay,
+        limit: std::time::Duration,
+    ) -> Result<(), LicenceError> {
+        let old = self.key().filter(|old| old != key);
+        if move_here {
+            self.transfer(key, now, today, limit)?;
+        } else {
+            self.activate(key, now, limit)?;
+        }
+        let Some(old) = old else {
+            return Ok(());
+        };
+        // The old shop's login must not write rows under the new licence's name.
+        let shop = self.stored().and_then(|s| s.licence.restaurant_id);
+        if self.file.device.as_ref().is_some_and(|d| Some(&d.restaurant_id) != shop.as_ref()) {
+            self.file.device = None;
+        }
+        self.file.emergency_until = None;
+        let ask = self.ask(&old);
+        let cloud = Arc::clone(&self.cloud);
+        let released = matches!(
+            deadline::within(limit, move || cloud.release(&ask)),
+            Ok(Ok(()))
+        );
+        if !released {
+            self.file.pending_release = Some(PendingRelease {
+                key: old,
+                machine: self.machine.value().to_owned(),
+                since: now,
+            });
+        }
+        self.file.save(&self.dir)
+    }
+
     pub fn deactivate(
         &mut self,
         now: Timestamp,

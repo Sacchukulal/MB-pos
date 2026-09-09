@@ -1560,7 +1560,11 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
         && let Ok(backup) = crate::settings::backup::status_on(app)
         && backup.tone != "ok"
     {
-        attention.push(needs_you(&backup.tone, "Backup", backup.headline));
+        attention.push(needs_you(
+            &backup.tone,
+            "Backup",
+            format!("Last backup: {}.", backup.last),
+        ));
     }
 
     // Money owed, and money the shop owes.

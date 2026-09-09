@@ -2,24 +2,30 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Card, Icon, Modal, Notice, plural, SectionHeader, Spinner, useToast } from '../kit';
+import {
+  Button,
+  ConfirmDialog,
+  Icon,
+  Modal,
+  Notice,
+  Panel,
+  Row,
+  Spinner,
+  plural,
+  useToast,
+} from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { Pushed } from '../ipc/generated/Pushed';
 import type { UpdateState } from '../ipc/generated/UpdateState';
+import { Fact, Facts } from './Facts';
 
 /** The one dialog every step of an update happens in. */
 type Dialog =
-  /** Asking the shelf. */
   | { kind: 'checking' }
-  /** Nothing newer. */
   | { kind: 'newest' }
-  /** Something newer, waiting for the word. */
   | { kind: 'found'; version: string; notes: string; downloaded: boolean }
-  /** On its way in — what Rust pushes as it goes. */
   | { kind: 'busy'; version: string; stage: string; percent: number; bytes: number; total: number }
-  /** Handed to the installer: the counter is closing. */
   | { kind: 'closing'; says: string }
-  /** The reason it stopped, in Rust's words. */
   | { kind: 'failed'; says: string };
 
 /** Bytes as a person reads them on a progress line. */
@@ -27,7 +33,7 @@ function megabytes(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
 }
 
-export function Updates() {
+export function Version() {
   const [view, setView] = useState<UpdateState | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [confirmingBack, setConfirmingBack] = useState(false);
@@ -42,7 +48,6 @@ export function Updates() {
 
   useEffect(() => {
     if (!inApp()) return;
-    // On open, not on a timer.
     call('look_for_an_update').then(setView).catch(complain);
   }, [complain]);
 
@@ -68,9 +73,14 @@ export function Updates() {
     return () => stop?.();
   }, []);
 
-  if (!view) return <Spinner label="Looking at this version" />;
+  if (!view) {
+    return (
+      <Panel title="Version">
+        <Spinner label="Looking at this version" />
+      </Panel>
+    );
+  }
 
-  /** Ask the shelf, and say what it answered. */
   const check = () => {
     setDialog({ kind: 'checking' });
     call('look_for_an_update')
@@ -90,12 +100,11 @@ export function Updates() {
       .catch((cause: unknown) => {
         setDialog({
           kind: 'failed',
-          says: isUiError(cause) ? cause.message : 'The update shelf could not be reached.',
+          says: isUiError(cause) ? cause.message : 'Magic Bill could not check for updates.',
         });
       });
   };
 
-  /** Download, check, keep the way back, hand over to the installer. */
   const install = (version: string) => {
     setDialog({ kind: 'busy', version, stage: 'downloading', percent: 0, bytes: 0, total: 0 });
     call('install_update')
@@ -129,50 +138,10 @@ export function Updates() {
   };
 
   return (
-    <Card className="mb-updates">
-      <SectionHeader
-        title="This version"
-        note="What this counter is running, what is waiting, and how to get off a new one if it goes wrong."
-      />
-
-      <dl className="mb-updates__facts">
-        <dt>Running</dt>
-        <dd className="mb-mono">
-          {view.running}
-          {view.isDevBuild ? ' (a development build)' : ''}
-        </dd>
-        <dt>Installed</dt>
-        <dd>
-          {view.daysOnThisVersion === 0
-            ? 'today'
-            : `${plural(view.daysOnThisVersion, 'day')} ago`}
-        </dd>
-        {view.previous ? (
-          <>
-            <dt>Before this</dt>
-            <dd className="mb-mono">{view.previous}</dd>
-          </>
-        ) : null}
-      </dl>
-
-      {view.available ? (
-        <Notice tone="info" icon="download">
-          <strong>Version {view.available} is ready to install.</strong>
-          {view.notes ? <p>{view.notes}</p> : null}
-        </Notice>
-      ) : (
-        <p className="mb-muted">
-          {view.isDevBuild
-            ? 'This is a development build, so it is not checked against the released ones.'
-            : 'This is the newest version we know about.'}
-        </p>
-      )}
-
-      <div className="mb-row mb-row--end">
-        <Button variant="danger" onClick={() => setConfirmingBack(true)}>
-          Go back a version
-        </Button>
-        {view.available ? (
+    <Panel
+      title="Version"
+      actions={
+        view.available ? (
           <Button
             variant="primary"
             onClick={() =>
@@ -184,37 +153,66 @@ export function Updates() {
               })
             }
           >
+            <Icon name="download" size="sm" />
             Install {view.available}
           </Button>
         ) : (
-          <Button variant="primary" onClick={check}>
+          <Button variant="secondary" onClick={check}>
             <Icon name="refresh" size="sm" />
             Check for updates
           </Button>
-        )}
-      </div>
-
-      {confirmingBack ? (
-        <Notice tone="warn" icon="warning">
-          <strong>Go back to the version you had before?</strong>
-          <p>
-            Your shop&rsquo;s data is not touched — only the program is. Do this
-            if a new version will not start, or has broken something you need
-            tonight.
-          </p>
-          <div className="mb-row mb-row--end">
-            <Button variant="quiet" onClick={() => setConfirmingBack(false)}>
-              Stay on this one
-            </Button>
-            <Button variant="danger" onClick={goBack}>
-              Go back
-            </Button>
-          </div>
+        )
+      }
+    >
+      {view.available ? (
+        <Notice tone="info" icon="download">
+          Version {view.available} is ready to install.
+          {view.notes ? ` ${view.notes}` : ''}
         </Notice>
       ) : null}
+      {view.isDevBuild ? (
+        <Notice tone="warn">This is a development build. It is not updated.</Notice>
+      ) : null}
 
-      {dialog ? <UpdateDialog dialog={dialog} onInstall={install} onClose={() => setDialog(null)} /> : null}
-    </Card>
+      <Facts>
+        <Fact label="Running" code>
+          {view.running}
+        </Fact>
+        <Fact label="Installed">
+          {view.daysOnThisVersion === 0
+            ? 'today'
+            : `${plural(view.daysOnThisVersion, 'day')} ago`}
+        </Fact>
+        {view.previous ? (
+          <Fact label="Before this" code>
+            {view.previous}
+          </Fact>
+        ) : null}
+      </Facts>
+
+      {view.previous ? (
+        <Row end>
+          <Button variant="quiet" onClick={() => setConfirmingBack(true)}>
+            Go back to {view.previous}
+          </Button>
+        </Row>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmingBack}
+        destructive
+        title={`Go back to ${view.previous ?? ''}?`}
+        body="Only the program changes. Your shop's data stays as it is. Magic Bill closes and opens again on the earlier version."
+        confirmLabel="Go back"
+        cancelLabel="Stay on this one"
+        onCancel={() => setConfirmingBack(false)}
+        onConfirm={goBack}
+      />
+
+      {dialog ? (
+        <UpdateDialog dialog={dialog} onInstall={install} onClose={() => setDialog(null)} />
+      ) : null}
+    </Panel>
   );
 }
 
@@ -244,9 +242,9 @@ function UpdateDialog({
   if (dialog.kind === 'checking') {
     return (
       <Modal open title="Checking for updates" onClose={stay}>
-        <div className="mb-updates__wait">
-          <Spinner label="Asking for the newest version" />
-          <span>Asking for the newest version…</span>
+        <div className="mb-account__wait">
+          <Spinner label="Checking" />
+          <span>Asking magicbill.in for the newest version.</span>
         </div>
       </Modal>
     );
@@ -256,7 +254,7 @@ function UpdateDialog({
     return (
       <Modal
         open
-        title="You are up to date"
+        title="Up to date"
         onClose={stay}
         actions={
           <Button variant="primary" onClick={onClose}>
@@ -264,7 +262,7 @@ function UpdateDialog({
           </Button>
         }
       >
-        <p>This counter is on the newest version of Magic Bill.</p>
+        <p>This is the newest version of Magic Bill.</p>
       </Modal>
     );
   }
@@ -289,9 +287,8 @@ function UpdateDialog({
       >
         {dialog.notes ? <p>{dialog.notes}</p> : null}
         <p className="mb-muted">
-          Magic Bill downloads it, checks it, then closes and opens again on the new version by
-          itself. Your shop&rsquo;s data is not touched, and the version you have now is kept so
-          you can go back. Best done after the last bill of the day.
+          Magic Bill closes and opens again on the new version. Your data is not touched. Best
+          done after the last bill of the day.
         </p>
       </Modal>
     );
@@ -302,10 +299,10 @@ function UpdateDialog({
     const downloading = dialog.stage === 'downloading';
     return (
       <Modal open title={`Updating to ${dialog.version}`} onClose={stay}>
-        <div className="mb-updates__progress">
-          <div className="mb-updates__stage">
-            <span>{downloading ? `${stage}…` : `${stage}…`}</span>
-            <span className="mb-mono">{downloading ? `${dialog.percent}%` : ''}</span>
+        <div className="mb-account__progress">
+          <div className="mb-account__stage">
+            <span>{stage}…</span>
+            <span className="mb-account__code">{downloading ? `${dialog.percent}%` : ''}</span>
           </div>
           <div
             className="mb-progress"
@@ -324,7 +321,7 @@ function UpdateDialog({
             {downloading && dialog.total > 0
               ? `${megabytes(dialog.bytes)} of ${megabytes(dialog.total)}`
               : dialog.stage === 'installing'
-                ? 'Magic Bill closes now and opens again on the new version by itself.'
+                ? 'Magic Bill closes now and opens again by itself.'
                 : 'One moment.'}
           </p>
         </div>
@@ -335,8 +332,8 @@ function UpdateDialog({
   if (dialog.kind === 'closing') {
     return (
       <Modal open title="Installing" onClose={stay}>
-        <div className="mb-updates__wait">
-          <Spinner label="Closing for the installer" />
+        <div className="mb-account__wait">
+          <Spinner label="Closing" />
           <span>{dialog.says}</span>
         </div>
       </Modal>

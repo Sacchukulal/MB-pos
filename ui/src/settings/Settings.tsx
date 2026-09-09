@@ -32,14 +32,12 @@ import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt, dotsPerPixel, marginDots } from '../preview/Receipt';
 import { Appearance } from './Appearance';
-import { Backup } from './Backup';
 import { Network } from './Network';
 import { Numbering } from './Numbering';
 import { Logo } from './Logo';
 import { Printers } from './Printers';
 import { Tax } from './Tax';
 import { Tills } from './Tills';
-import { Updates } from './Updates';
 
 import './settings.css';
 
@@ -52,11 +50,9 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   // could supply.
   receipt: () => <Logo />,
   numbering: () => <Numbering />,
-  backup: () => <Backup />,
   appearance: () => <Appearance />,
   network: () => <Network />,
   tills: () => <Tills />,
-  version: () => <Updates />,
 };
 
 /** Sections that are not settings. */
@@ -64,8 +60,6 @@ const EXTRA_SECTIONS = [
   { code: 'network', label: 'Phones', canEdit: true, settings: [] },
   // A till is a ROW too, for the same reason a phone is.
   { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
-  // A shop must be able to go back.
-  { code: 'version', label: 'This version', canEdit: true, settings: [] },
 ];
 
 /** Which sections show the paper beside them. */

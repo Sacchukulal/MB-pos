@@ -3,26 +3,26 @@ import type { BackupRowView } from "./BackupRowView";
 
 export type BackupView = { 
 /**
- * Where they go, resolved — never the empty string the setting may hold.
- */
-folder: string, secondFolder: string, 
-/**
- * Where the shop's live data file is, so a support call can ask for one folder.
- */
-database: string, 
-/**
  * The folder that holds the whole shop: its data file, its licence, its backups.
  */
-shopFolder: string, backups: Array<BackupRowView>, 
+shopFolder: string, 
 /**
- * The sentence at the top, and it is the whole point of the screen.
+ * Where the backups are, inside the shop folder.
  */
-headline: string, 
+folder: string, 
+/**
+ * The pen drive or network share every backup is copied to. Empty when there is none.
+ */
+secondFolder: string, backups: Array<BackupRowView>, 
+/**
+ * The last backup in one line: "9 Sep, 3:04 pm, checked".
+ */
+last: string, 
 /**
  * `ok`, `warn` or `danger`.
  */
 tone: string, 
 /**
- * True when a restore is already waiting for the next start.
+ * The backup a restore is waiting to put in place on the next start, if one is.
  */
 restoreWaiting: string | null, };

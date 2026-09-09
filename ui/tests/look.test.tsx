@@ -226,19 +226,20 @@ describe('the documented-exception hatch', () => {
 // The top bar.
 
 describe('the top navigation', () => {
-  /** The bar is a fixed five and cannot grow. */
-  it('keeps the same five in the bar wherever you are', () => {
+  /** The bar is a fixed six and cannot grow. */
+  it('keeps the same six in the bar wherever you are', () => {
     const onBilling = splitScreens(SHIPPED_SCREENS, 'billing');
     const onStock = splitScreens(SHIPPED_SCREENS, 'stock');
 
     expect(onBilling.inBar.map((s) => s.id)).toEqual(onStock.inBar.map((s) => s.id));
-    expect(onBilling.inBar).toHaveLength(5);
+    expect(onBilling.inBar).toHaveLength(6);
     expect(onBilling.inBar.map((s) => s.id)).toEqual([
       'billing',
       'floor',
       'phones',
       'bills',
       'reports',
+      'account',
     ]);
   });
 

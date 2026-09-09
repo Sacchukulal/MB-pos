@@ -150,6 +150,8 @@ impl Stub {
                 trial_ends_on: None,
                 auto_renews: Some(true),
                 registered_contact: "+91 98••••••10".to_owned(),
+                owner_name: "Anna Kuteera".to_owned(),
+                owner_phone: "+919840011223".to_owned(),
                 restaurant_id: Some("00000000-0000-0000-0000-00000000stub".to_owned()),
                 short_code: Some("STUB01".to_owned()),
             },

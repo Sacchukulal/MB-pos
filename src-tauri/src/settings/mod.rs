@@ -350,27 +350,13 @@ impl Day {
     }
 }
 
-/// Where backups go and how many are kept.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The one backup choice a shop makes. Backups themselves go into the shop folder, once a
+/// day, thirty kept; see `backup::EVERY_HOURS` and `backup::KEEP`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct BackupPolicy {
-    /// Empty means the usual place beside the database.
-    pub folder: String,
+    /// A pen drive or a network share that gets a copy of every backup. Empty means none.
     pub second_folder: String,
-    /// 0 means only when somebody presses the button.
-    pub every_hours: u32,
-    pub keep_count: u32,
-}
-
-impl Default for BackupPolicy {
-    fn default() -> Self {
-        BackupPolicy {
-            folder: String::new(),
-            second_folder: String::new(),
-            every_hours: 24,
-            keep_count: 30,
-        }
-    }
 }
 
 /// The whole configuration, as one value.
@@ -678,6 +664,7 @@ pub fn search(text: &str) -> Vec<&'static catalog::Entry> {
     }
     catalog::CATALOG
         .iter()
+        .filter(|entry| entry.group.on_settings_screen())
         .filter(|entry| {
             entry.label.to_lowercase().contains(&needle)
                 || entry.group.label().to_lowercase().contains(&needle)
