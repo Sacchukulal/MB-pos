@@ -673,7 +673,6 @@ export function Shell() {
           recoverable={lock?.recoverable ?? []}
           canRecover={lock?.canRecover ?? false}
           lastSignedIn={lock?.lastSignedIn ?? null}
-          door={lock?.door ?? null}
           onSignedIn={reloadLock}
         />
       ) : null}

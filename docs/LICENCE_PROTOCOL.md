@@ -17,20 +17,17 @@ document nobody trusts is worse than none.
 
 ## 0. The three things that are not negotiable
 
-### 0.1 The plan is the door, and billing is never gated inside
+### 0.1 Billing is never gated
 
-Since 1.6.6 (2026-09-09) a shop whose plan is not running cannot **sign in**: the
-lock screen shows the standing, the sentence, and the ways to open the door
-(renew at magicbill.in, check again, a licence key, an emergency code). A plan
-that stops running mid-shift ends the session at once.
-
-Inside the door nothing about billing is gated: not by this protocol, not by
-any answer the cloud can send, not by any failure of any call in it. The
-counter's `Feature` enum — the complete list of what a licence can refuse — has
-four values and none of them is billing, so the billing path never asks about
-the licence and a cloud answer cannot corrupt a bill in progress. A trial, a
-paid period and a grace period are all "running"; §3.3 says exactly when a plan
-stops.
+Not by this protocol, not by any answer the cloud can send, not by any failure
+of any call in it. The counter's `Feature` enum — the complete list of what a
+licence can refuse — has four values (reports, phone ordering, more than one
+till, stock) and none of them is billing. **A cloud response cannot stop a
+restaurant trading**, and the lock screen never asks about the plan: a PIN gets
+in whatever the licence says. (1.6.6 briefly closed sign-in on a lapsed plan;
+1.6.7 took that out the same day — the owner's ruling is that only the advanced
+features are behind the plan.) A trial, a paid period and a grace period are all
+"running"; §3.3 says exactly when a plan stops.
 
 ### 0.2 One idea of "may this shop work", in both programs
 

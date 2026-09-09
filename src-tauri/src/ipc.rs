@@ -666,9 +666,6 @@ macro_rules! commands {
             $crate::licensing::transfer_here,
             $crate::licensing::use_emergency_code,
             $crate::licensing::refresh_licence,
-            $crate::licensing::knock,
-            $crate::licensing::knock_with_key,
-            $crate::licensing::knock_with_code,
             // Is this counter healthy, and what can we send to support.
             $crate::health::health,
             $crate::diagnostics::diagnostics_plan,
@@ -1598,9 +1595,6 @@ pub struct LockState {
     pub recoverable: Vec<PersonView>,
     /// Who signed in last at this counter, so the lock screen starts on them.
     pub last_signed_in: Option<String>,
-    /// `Some` while the shop's plan is not running: nobody can sign in, and the lock screen
-    /// shows the way to open the door instead of the people.
-    pub door: Option<crate::licensing::DoorView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -1675,7 +1669,6 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
             .collect(),
         can_recover,
         last_signed_in,
-        door: crate::licensing::door_on(app),
     })
 }
 
@@ -1739,11 +1732,6 @@ fn lockout_message(
 pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState> {
     let at = crate::flows::now();
     let day = crate::flows::today(at);
-
-    // The door: no running plan, no sign-in. The sentence says how to open it.
-    if let Some(closed) = crate::licensing::door_closed(app) {
-        return Err(closed);
-    }
 
     let typed = Pin::parse(&pin).map_err(|e| {
         UiError::new("auth.pin_shape", format!("{e}. Try again.")).with_detail(e.to_string())

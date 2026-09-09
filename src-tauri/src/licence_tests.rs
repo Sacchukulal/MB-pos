@@ -281,10 +281,10 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
             refusal.code, "licence.not_operating",
             "{command} refused for the wrong reason: {refusal:?}"
         );
-        // And the sentence is the banner's own: it says what to do, not just no.
+        // And the sentence says what still works.
         assert!(
-            refusal.message.contains("call us") || refusal.message.contains("magicbill.in"),
-            "{command}'s refusal does not say what to do next: {}",
+            refusal.message.contains("bill"),
+            "{command}'s refusal does not say billing is unaffected: {}",
             refusal.message
         );
     }
@@ -496,80 +496,25 @@ fn l1_the_gate_is_cheap_enough_to_put_anywhere() {
     println!("L1: {each_ns} ns per gate check");
 }
 
-// THE DOOR.
-
-/// A shop whose plan is not running cannot sign in; the lock screen carries the door; a
-/// plan that is running again opens it. A plan that stops mid-shift ends the session.
+/// The lock screen never asks about the plan: a PIN gets in whatever the licence says.
 #[test]
-fn the_door_is_closed_without_a_running_plan_and_opens_with_one() {
-    let scratch = Scratch::new("door");
-    let app = a_trading_shop(&scratch, "door");
+fn a_lapsed_plan_does_not_keep_anybody_out() {
+    let scratch = Scratch::new("no_door");
+    let app = a_trading_shop(&scratch, "no_door");
     crate::signin_tests::hire(&app, "staff_boss", "Meena", mb_auth::RolePreset::Owner);
     crate::ipc::set_staff_pin_on(&app, "staff_boss".to_owned(), Some("2468".to_owned()))
         .expect("pin");
-
-    // Running: the door is open and the PIN gets in.
-    app.use_licensing(licence_in(&scratch, "door-open", Status::Active, 30));
-    let lock = crate::ipc::lock_state_on(&app).expect("the lock screen");
-    assert!(lock.door.is_none());
+    app.use_licensing(licence_in(&scratch, "no_door", Status::Active, -100));
+    assert!(!app.entitlement().operating());
     crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");
-    assert!(app.sessions().current().is_some());
-
-    // The plan runs out: the session ends and the door closes.
-    app.use_licensing(licence_in(&scratch, "door-expired", Status::Active, -100));
+    // The plan running out while somebody is signed in changes the banner, not the session.
     crate::licensing::after_licence_change(&app);
-    assert!(
-        app.sessions().current().is_none(),
-        "the session outlived the plan"
-    );
-    let lock = crate::ipc::lock_state_on(&app).expect("the lock screen");
-    let door = lock.door.expect("the door is drawn");
-    assert_eq!(door.standing, "expired");
-    assert!(door.may_renew);
-    assert!(door.says.contains("magicbill.in"), "{}", door.says);
-    let refused = crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned())
-        .expect_err("signed in through a closed door");
-    assert_eq!(refused.code, "licence.not_operating");
-    assert_eq!(refused.message, door.says);
-
-    // Cancelled and still inside the paid period: open, and it says so.
-    app.use_licensing(licence_in(&scratch, "door-ending", Status::Cancelled, 5));
+    assert!(app.sessions().current().is_some());
+    // And a cancelled plan inside its paid day is simply running.
+    app.use_licensing(licence_in(&scratch, "no_door_ending", Status::Cancelled, 5));
     assert_eq!(
         app.entitlement().standing,
         Standing::Ending { days_left: 5 }
     );
-    assert!(
-        crate::ipc::lock_state_on(&app)
-            .expect("the lock screen")
-            .door
-            .is_none()
-    );
-    crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");
-
-    // Cancelled and past it: closed, with no grace.
-    app.use_licensing(licence_in(
-        &scratch,
-        "door-cancelled",
-        Status::Cancelled,
-        -1,
-    ));
-    crate::licensing::after_licence_change(&app);
-    let door = crate::ipc::lock_state_on(&app)
-        .expect("the lock screen")
-        .door
-        .expect("closed");
-    assert_eq!(door.standing, "cancelled");
-
-    // Suspended: closed, and no plan to buy — a call.
-    app.use_licensing(licence_in(
-        &scratch,
-        "door-suspended",
-        Status::Suspended,
-        365,
-    ));
-    let door = crate::ipc::lock_state_on(&app)
-        .expect("the lock screen")
-        .door
-        .expect("closed");
-    assert!(!door.may_renew);
+    assert!(app.entitlement().operating());
 }

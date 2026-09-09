@@ -82,40 +82,6 @@
   color: var(--text-muted);
 }
 
-/* The door: the plan is not running, and every way to open it again on one card. */
-.mb-lock__door {
-  max-width: var(--lock-split-width);
-  text-align: center;
-}
-
-.mb-lock__door-says {
-  margin: 0;
-  max-width: var(--lock-door-measure);
-  font-size: var(--text-md);
-  line-height: var(--line-normal);
-  color: var(--text);
-}
-
-.mb-lock__door-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-3);
-}
-
-.mb-lock__door-row {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-3);
-  width: 100%;
-  max-width: var(--lock-width);
-  text-align: left;
-}
-
-.mb-lock__door-row > :first-child {
-  flex: 1;
-  min-width: 0;
-}
 
 /*
  * A name and a role on two lines, so a thirty-person shop is still scannable and a two-person

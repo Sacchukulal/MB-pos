@@ -38,11 +38,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("login", Access::Public),
     ("lock_now", Access::Public),
     ("recover_with_code", Access::Public),
-    // The door: a shop whose plan is not running cannot sign in, so the way to open it again
-    // has to work with nobody signed in. The key and the code are the credentials.
-    ("knock", Access::Public),
-    ("knock_with_key", Access::Public),
-    ("knock_with_code", Access::Public),
     // The print queue indicator stays visible while locked.
     ("list_print_jobs", Access::Public),
     // The preview of the built-in test slip needs no shop and no data.
@@ -925,9 +920,8 @@ mod tests {
             .iter()
             .filter(|(_, access)| *access == Access::Public)
             .count();
-        // The lock screen, the logs, the print queue, the setup list, the website, the door.
         assert!(
-            public <= 13,
+            public <= 10,
             "{public} public commands is too many to still be a decision"
         );
     }

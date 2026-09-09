@@ -98,8 +98,8 @@ fn breaking_the_licence_shows_in_health() {
         Some(licence_row.says.clone()),
         crate::words::licence_banner(&app.entitlement(), today)
     );
-    // And it says what to do, because every licensing sentence does.
-    assert!(licence_row.says.to_lowercase().contains("call us"));
+    // And it still says what works, because every licensing sentence does.
+    assert!(licence_row.says.to_lowercase().contains("bill"));
 }
 
 /// The version row, and ANDROID-G4.

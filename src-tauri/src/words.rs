@@ -285,23 +285,29 @@ pub fn licence_banner(
         mb_license::Standing::Fine => return None,
         mb_license::Standing::InGrace { days_left } => format!(
             "The payment due on {renews} has not come through. Everything keeps \
-             working for another {}, then the counter locks. Renew at magicbill.in.",
+             working for another {} — renew at magicbill.in before then.",
             count(i64::from(days_left), "day", "days")
         ),
         mb_license::Standing::Expired => format!(
-            "Your plan ran out on {renews}. The counter is locked until it is \
-             renewed at magicbill.in."
+            "Your plan ran out on {renews}. Reports, phone ordering and stock are \
+             paused until it is renewed at magicbill.in — billing and printing are \
+             not affected."
         ),
         mb_license::Standing::Suspended => {
-            "This licence has been suspended. Please call us.".to_owned()
+            "This licence has been suspended. Please call us. You can still bill \
+             and print as usual."
+                .to_owned()
         }
         mb_license::Standing::Revoked => {
-            "This licence has been stopped. Please call us.".to_owned()
+            "This licence has been stopped. Please call us. You can still bill \
+             and print as usual."
+                .to_owned()
         }
         // Their choice. Do not scold them for it.
         mb_license::Standing::Ending { days_left } => format!(
             "Renewal is switched off. Your plan runs until {renews} ({}); after \
-             that the counter locks. Choose a plan at magicbill.in to carry on.",
+             that reports and phone ordering pause — billing and printing carry on. \
+             Choose a plan at magicbill.in to carry on.",
             if days_left == 0 {
                 "today".to_owned()
             } else {
@@ -309,26 +315,31 @@ pub fn licence_banner(
             }
         ),
         mb_license::Standing::Cancelled => format!(
-            "Your plan ended on {renews}. Choose a plan at magicbill.in whenever \
-             you are ready — the counter opens again as soon as it is paid."
+            "Your plan ended on {renews}. Billing and printing carry on working — \
+             choose a plan at magicbill.in to get reports and phone ordering back."
         ),
         mb_license::Standing::TrialEnded => {
-            format!("Your trial ended on {renews}. Choose a plan at magicbill.in to carry on.")
+            format!(
+                "Your trial ended on {renews}. Billing and printing carry on working \
+                 — choose a plan at magicbill.in to get the rest back."
+            )
         }
         mb_license::Standing::NeverActivated => {
-            "This computer has no licence. Sign in with your magicbill.in account \
-             or enter your licence key."
+            "This computer has no licence yet. You can bill and print — sign in \
+             with your magicbill.in account or enter your licence key on the Account \
+             screen."
                 .to_owned()
         }
         mb_license::Standing::NeedsChecking => {
-            "Your licence could not be checked for a while. Connect this computer \
-             to the internet and check again, or enter an emergency code from \
-             support."
+            "Your licence could not be checked for a while. Reports and phone \
+             ordering are paused until it can be — billing and printing are not \
+             affected. Connect to the internet and check again, or enter an \
+             emergency code from support."
                 .to_owned()
         }
         mb_license::Standing::BoundElsewhere => {
-            "This licence belongs to another computer. Move it here from the \
-             Account screen, or call us."
+            "This licence belongs to another computer. Billing and printing work \
+             here — open Account to move the licence to this one."
                 .to_owned()
         }
         mb_license::Standing::Emergency { until } => format!(
@@ -471,9 +482,9 @@ mod tests {
         assert_eq!(sentence(""), "");
     }
 
-    /// Every licensing sentence says what to do next.
+    /// Every licensing sentence says that billing carries on.
     #[test]
-    fn every_licence_banner_says_what_to_do_next() {
+    fn every_licence_banner_says_billing_carries_on() {
         let today = mb_core::BusinessDay::from_ymd(2026, 8, 10);
         for standing in [
             mb_license::Standing::InGrace { days_left: 3 },
@@ -493,14 +504,12 @@ mod tests {
             entitlement.renews_on = Some(mb_core::BusinessDay::from_ymd(2026, 8, 2));
             let banner = licence_banner(&entitlement, today)
                 .unwrap_or_else(|| panic!("{standing:?} had nothing to say"));
-            // Either the website, or the phone: the owner is never left with only a no.
+            // Either it names billing, or it says everything still works — which is the
+            // stronger claim and the one grace makes.
             let says = banner.to_lowercase();
             assert!(
-                says.contains("magicbill.in")
-                    || says.contains("call us")
-                    || says.contains("support")
-                    || says.contains("account"),
-                "{standing:?} does not tell the owner what to do: {banner}"
+                says.contains("bill") || says.contains("everything keeps working"),
+                "{standing:?} does not tell the owner what still works: {banner}"
             );
             assert!(banner.ends_with('.'), "{standing:?}: {banner}");
         }

@@ -276,8 +276,6 @@
   --lock-width: 22rem;
   /* The sign-in card: the people down the left, the pad on the right. */
   --lock-split-width: 40rem;
-  /* The door's sentence: a measure a person reads in one go. */
-  --lock-door-measure: 34em;
   --lock-people-width: 15rem;
   --lock-people-height: 18rem;
   --dot-size: 0.625rem;
