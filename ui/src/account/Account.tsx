@@ -44,9 +44,6 @@ const CLOUD_CHIPS: Record<string, string> = {
   danger: 'Stopped',
 };
 
-/** magicbill.in, where a plan is actually bought. */
-const RENEW_AT = 'https://magicbill.in/renew';
-
 type Asking = 'activate' | 'transfer' | 'emergency' | null;
 
 /** One label over one value. */
@@ -188,8 +185,12 @@ export function Account() {
             <Button variant="quiet" disabled={!may} onClick={() => setAsking('emergency')}>
               Emergency code
             </Button>
+            {/* Renew goes to magicbill.in, where a plan is actually bought — in the browser, by Rust. */}
             {view.isActivated ? (
-              <Button variant="secondary" onClick={() => window.open(RENEW_AT, '_blank')}>
+              <Button
+                variant="secondary"
+                onClick={() => call('open_magicbill', { page: 'renew' }).catch(report)}
+              >
                 Renew
               </Button>
             ) : (

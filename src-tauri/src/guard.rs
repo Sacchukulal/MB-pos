@@ -404,8 +404,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("open_as_owner", Access::FirstRun),
     // The licence key from the dashboard opens the same shop without the password.
     ("open_with_key", Access::FirstRun),
-    // The phone app's download for the sign-up dialog: nothing of the shop is touched.
-    ("android_app", Access::FirstRun),
+    // A page of magicbill.in in the browser, by name: Sign up on the first run, Renew on
+    // Account. Nothing of the shop is touched, and the address is Rust's own.
+    ("open_magicbill", Access::Public),
     // Move to another folder's shop; once set up, it asks for the backup permission itself.
     ("use_shop_folder", Access::FirstRun),
     // Browse for a folder — the other thing a fresh install needs and could not do.

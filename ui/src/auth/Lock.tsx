@@ -93,6 +93,7 @@ export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn
 
   const onPad = useCallback((key: string) => {
     if (key === 'Backspace') dispatch({ kind: 'back' });
+    else if (key === 'Clear') dispatch({ kind: 'clear' });
     else if (key !== '.') dispatch({ kind: 'digit', digit: key });
   }, []);
 

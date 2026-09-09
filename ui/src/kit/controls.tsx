@@ -610,33 +610,34 @@ export function Stepper({
 }
 
 export interface KeypadProps {
+  /** A digit, '.', 'Backspace' for ⌫, or 'Clear' for C. */
   onPress: (key: string) => void;
   disabled?: boolean;
-  /** Whether the decimal point is one of the keys. */
+  /**
+   * Whether the decimal point is one of the keys. Without it — a PIN has none — the key left
+   * of 0 is C, which clears everything typed, so the bottom row is always three keys.
+   */
   dot?: boolean;
 }
 
 /** The touch keypad. */
 export function Keypad({ onPress, disabled, dot = true }: KeypadProps) {
-  const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', dot ? '.' : '', '0', '⌫'];
+  const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', dot ? '.' : 'C', '0', '⌫'];
+  const means = (key: string) => (key === '⌫' ? 'Backspace' : key === 'C' ? 'Clear' : key);
+  const said = (key: string) => (key === '⌫' ? 'Delete' : key === 'C' ? 'Clear' : key);
   return (
     <div className="mb-keypad" role="group" aria-label="Number pad">
-      {keys.map((key, index) =>
-        key === '' ? (
-          // The hole keeps 0 and ⌫ where fingers already expect them.
-          <span key={`gap-${index}`} className="mb-keypad__gap" aria-hidden="true" />
-        ) : (
-          <Button
-            key={key}
-            className="mb-keypad__key"
-            disabled={disabled}
-            onClick={() => onPress(key === '⌫' ? 'Backspace' : key)}
-            aria-label={key === '⌫' ? 'Delete' : key}
-          >
-            {key}
-          </Button>
-        ),
-      )}
+      {keys.map((key) => (
+        <Button
+          key={key}
+          className="mb-keypad__key"
+          disabled={disabled}
+          onClick={() => onPress(means(key))}
+          aria-label={said(key)}
+        >
+          {key}
+        </Button>
+      ))}
     </div>
   );
 }

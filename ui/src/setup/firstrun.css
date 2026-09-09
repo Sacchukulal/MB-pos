@@ -113,10 +113,7 @@
   gap: var(--gap-field);
 }
 
-/*
- * The item row on the last step: three fields and a button, on one line, because adding five
- * things should be five keystrokes and an Enter.
- */
+/* The licence key and its button, on one line. */
 .mb-firstrun__row {
   display: flex;
   align-items: flex-end;
@@ -126,23 +123,6 @@
 
 .mb-firstrun__row > *:first-child {
   flex: 2 1 var(--firstrun-item);
-}
-
-.mb-firstrun__added {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--ok);
-  font-size: var(--text-sm);
-}
-
-.mb-firstrun__added li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
 }
 
 /* The recovery code itself, on a page with nothing else to look at. */
@@ -247,23 +227,4 @@
   content: '';
   flex: 1;
   border-top: var(--border-width) solid var(--border);
-}
-
-/* The sign-up dialog: the code on the left, what to do with it on the right. */
-.mb-firstrun__signup {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--gap-group);
-}
-
-.mb-firstrun__signup-words {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
-  line-height: var(--line-normal);
-}
-
-.mb-firstrun__signup-words p {
-  margin: 0;
 }

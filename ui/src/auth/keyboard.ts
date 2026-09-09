@@ -66,6 +66,8 @@ export type Event =
   | { kind: 'typed'; text: string }
   /** Backspace. One digit. */
   | { kind: 'back' }
+  /** The pad's C key: everything typed on that pad goes, and nothing else moves. */
+  | { kind: 'clear' }
   /** Back, or a full clear of the pad. Leaves the step whole — never a digit at a time. */
   | { kind: 'cancel' }
   | { kind: 'submit' }
@@ -291,6 +293,21 @@ export function reduce(state: State, event: Event): State {
         // On the code box the browser is already editing the text itself, and on the list there
         // is nothing to rub out.
         return state;
+      }
+      return state;
+    }
+
+    case 'clear': {
+      // The pad is emptied where it stands: the same person, the same step.
+      if (state.busy) return state;
+      if (state.mode.kind === 'pin') {
+        return { ...state, problem: null, mode: { ...state.mode, digits: '' } };
+      }
+      if (state.mode.kind === 'recover') {
+        const mode = state.mode;
+        if (mode.step !== 'pin' && mode.step !== 'again') return state;
+        const field = mode.step === 'pin' ? 'newPin' : 'again';
+        return { ...state, problem: null, mode: { ...mode, [field]: '' } };
       }
       return state;
     }

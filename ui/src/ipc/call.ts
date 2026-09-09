@@ -106,7 +106,6 @@ import type { SavedFileView } from './generated/SavedFileView';
 import type { CounterEdit } from './generated/CounterEdit';
 import type { NoticesView } from './generated/NoticesView';
 import type { OwnerOpenedView } from './generated/OwnerOpenedView';
-import type { AndroidAppView } from './generated/AndroidAppView';
 import type { OwnerSignInView } from './generated/OwnerSignInView';
 
 /** Every command, with what it takes and what it gives back. */
@@ -127,8 +126,8 @@ export interface Commands {
     args: { key: string; folder: string; moveHere: boolean };
     returns: OwnerOpenedView;
   };
-  /** The phone app's newest release on GitHub, with its download as a QR code. */
-  android_app: { args: void; returns: AndroidAppView };
+  /** A page of magicbill.in, by name, in the browser: Sign up here, Renew on Account. Answers with the address. */
+  open_magicbill: { args: { page: 'signup' | 'renew' }; returns: string };
   use_shop_folder: { args: { folder: string }; returns: string };
   reveal_logs: { args: void; returns: string };
   print_test_page: { args: { printerId: string }; returns: string };

@@ -1,6 +1,6 @@
 /** The first five minutes. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const call = vi.fn();
@@ -12,45 +12,16 @@ vi.mock('../src/ipc/call', () => ({
 
 const { FirstRun } = await import('../src/setup/FirstRun');
 
-import type { AndroidAppView } from '../src/ipc/generated/AndroidAppView';
 import type { FirstRunView } from '../src/ipc/generated/FirstRunView';
 import type { OwnerOpenedView } from '../src/ipc/generated/OwnerOpenedView';
 import type { OwnerShopView } from '../src/ipc/generated/OwnerShopView';
 import type { OwnerSignInView } from '../src/ipc/generated/OwnerSignInView';
-import type { TaxSlabView } from '../src/ipc/generated/TaxSlabView';
-
-const shopsClasses: TaxSlabView[] = [
-  {
-    id: 'tax_food_5',
-    name: 'GST 5%',
-    rate: '5%',
-    rateBp: 500,
-    kind: 'gst',
-    basis: 'shop',
-    priceWords: 'Shop default (added on top)',
-    isActive: true,
-    itemsUsing: 0,
-  },
-  {
-    id: 'tax_liquor',
-    name: 'Liquor — state VAT',
-    rate: '20%',
-    rateBp: 2000,
-    kind: 'outside_gst',
-    basis: 'inclusive',
-    priceWords: 'In the price',
-    isActive: true,
-    itemsUsing: 0,
-  },
-];
 
 const fresh: FirstRunView = {
   needed: true,
   hasShop: false,
   hasDetails: false,
   hasPin: false,
-  hasItems: false,
-  hasTables: false,
   shopPath: '',
   owner: null,
 };
@@ -63,17 +34,6 @@ const anand: OwnerShopView = {
   gstin: '33AAAAA0000A1Z5',
   shortCode: 'ABC123',
   licence: 'active',
-};
-
-/** The phone app as GitHub's newest release describes it, drawn small. */
-const phoneApp: AndroidAppView = {
-  version: '2.5.1',
-  apkUrl: 'https://github.com/Sacchukulal/MB-android/releases/download/v2.5.1/magic-bill.apk',
-  qr: [
-    [true, true, false],
-    [true, false, true],
-    [false, true, true],
-  ],
 };
 
 const saravana: OwnerShopView = { ...anand, id: 'rest_saravana', name: 'Saravana', address: '' };
@@ -119,10 +79,8 @@ function wire(over: Partial<FirstRunView> = {}, answers: Record<string, unknown>
         return Promise.resolve('H8BVY-QGXWV');
       case 'login':
         return Promise.resolve({ signedIn: true });
-      case 'save_menu_item':
-        return Promise.resolve([]);
-      case 'tax_slabs':
-        return Promise.resolve(shopsClasses);
+      case 'open_magicbill':
+        return Promise.resolve('https://magicbill.in/signup');
       default:
         return Promise.resolve(null);
     }
@@ -226,35 +184,35 @@ it('opens the shop a pasted licence key names, without signing in', async () => 
   expect((screen.getByLabelText('Shop name') as HTMLInputElement).value).toBe('Anand Bhavan');
 });
 
-/** Sign up happens on the phone: the dialog shows the newest app, fetched when it opens. */
-it('shows the phone app download as a QR code behind Sign up, fetched live', async () => {
-  wire({}, { android_app: phoneApp });
+/** Sign up happens on the website: the browser opens on it, and the screen says where to. */
+it('opens magicbill.in sign-up in the browser behind Sign up, and says so', async () => {
+  wire();
   render(<FirstRun onDone={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
   await screen.findByText('D:\\Anand Bhavan');
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  expect(call).not.toHaveBeenCalledWith('android_app');
+  expect(call).not.toHaveBeenCalledWith('open_magicbill', expect.anything());
 
   fireEvent.click(await screen.findByRole('button', { name: 'Sign up' }));
-  expect(await screen.findByRole('dialog')).toBeTruthy();
-  expect(call).toHaveBeenCalledWith('android_app');
+  expect(call).toHaveBeenCalledWith('open_magicbill', { page: 'signup' });
   expect(
-    await screen.findByRole('img', { name: 'Download Magic Bill for Android 2.5.1' }),
+    await screen.findByText(/magicbill\.in\/signup is opening in your browser/),
   ).toBeTruthy();
-  expect(screen.getByText(phoneApp.apkUrl)).toBeTruthy();
-  expect(screen.getByText(/version 2\.5\.1/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  // No dialog, no QR code, and the sign-in doors are still right here for when they come back.
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByLabelText('Email')).toBeTruthy();
+  expect(screen.getByLabelText('Licence key')).toBeTruthy();
 });
 
-/** No internet: the dialog says so, and offers to try again rather than a stale code. */
-it('says so when GitHub cannot be reached for the phone app', async () => {
+/** No browser to hand the page to: one sentence, with the address in it. */
+it('says so when the browser could not be opened for sign-up', async () => {
   wire(
     {},
     {
-      android_app: refusal(
-        'android.unreachable',
-        'GitHub did not answer, so the phone app\u2019s download could not be fetched.',
+      open_magicbill: refusal(
+        'website.launch',
+        'The browser could not be opened. Open https://magicbill.in/signup on any phone or computer.',
       ),
     },
   );
@@ -263,10 +221,7 @@ it('says so when GitHub cannot be reached for the phone app', async () => {
   await screen.findByText('D:\\Anand Bhavan');
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Sign up' }));
-  expect(await screen.findByText(/GitHub did not answer/)).toBeTruthy();
-  expect(screen.queryByRole('img')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await waitFor(() => expect(call.mock.calls.filter(([n]) => n === 'android_app').length).toBe(2));
+  expect(await screen.findByText(/browser could not be opened/)).toBeTruthy();
 });
 
 /** Two shops on one account: the owner says which. */
@@ -370,8 +325,6 @@ it('goes straight to the counter when the folder held a shop that was already se
         needed: false,
         hasDetails: true,
         hasPin: true,
-        hasItems: true,
-        hasTables: true,
         owner: { id: 'staff_sachin', name: 'Sachin', hasPin: true },
       }),
     },
@@ -426,10 +379,14 @@ it('gives the PIN to the owner row that already exists, with the name filled in'
   expect(call).toHaveBeenCalledWith('login', expect.objectContaining({ pin: '4829' }));
 });
 
-/** The recovery code gets a page to itself, and it is a door you cannot walk past. */
-it('will not move on until the recovery code is written down', async () => {
+/**
+ * The recovery code gets a page to itself, it is a door you cannot walk past, and it is the
+ * LAST page: the counter opens straight after it.
+ */
+it('will not move on until the recovery code is written down, then opens the counter', async () => {
+  const done = vi.fn();
   wire({ hasShop: true, hasDetails: true });
-  render(<FirstRun onDone={vi.fn()} />);
+  render(<FirstRun onDone={done} />);
 
   await screen.findByLabelText('Your name');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
@@ -442,58 +399,51 @@ it('will not move on until the recovery code is written down', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
   expect(await screen.findByText('H8BVY-QGXWV')).toBeTruthy();
-  const next = screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement;
-  expect(next.disabled).toBe(true);
+  const out = screen.getByRole('button', { name: 'Start billing' }) as HTMLButtonElement;
+  expect(out.disabled).toBe(true);
+  expect(done).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByLabelText('I have written it down'));
-  expect(next.disabled).toBe(false);
-  fireEvent.click(next);
-
-  expect(await screen.findByText('What you sell')).toBeTruthy();
-});
-
-/** Every optional step says plainly that it can be skipped, each is ONE button, and each has a way back. */
-it('offers one way out of each optional step, and a way back', async () => {
-  wire({ hasShop: true, hasDetails: true, hasPin: true });
-  const done = vi.fn();
-  render(<FirstRun onDone={done} />);
-
-  // The items, the tables, the printer — three skips, one button each.
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip this — next' }));
-  expect(await screen.findByRole('heading', { name: 'Your tables' })).toBeTruthy();
-  // Back goes back.
-  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-  expect(await screen.findByRole('heading', { name: 'What you sell' })).toBeTruthy();
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip this — next' }));
-  await screen.findByRole('heading', { name: 'Your tables' });
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip this — next' }));
-  expect(await screen.findByRole('heading', { name: 'Your printer' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
-  const out = await screen.findByRole('button', { name: 'Skip this — start billing' });
-  expect(screen.queryByRole('button', { name: 'I will do this later' })).toBeNull();
+  expect(out.disabled).toBe(false);
   fireEvent.click(out);
   expect(done).toHaveBeenCalled();
 });
 
-/** The wizard offers the shop's own classes. */
-it('offers the shop own tax classes, not a hardcoded slab list', async () => {
-  wire({ hasShop: true, hasDetails: true, hasPin: true });
+/**
+ * Four steps and no more. The menu, the tables and the printer are the counter's own screens,
+ * not questions a first run asks, so nothing here ever reads or writes them.
+ */
+it('asks for the folder, the account, the shop and the PIN, and nothing else', async () => {
+  wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
+  await screen.findByLabelText('Your name');
 
-  const tax = (await screen.findByLabelText('Tax slab')) as HTMLSelectElement;
-  await waitFor(() => expect(tax.options.length).toBe(2));
-  expect([...tax.options].map((o) => o.value)).toEqual(['tax_food_5', 'tax_liquor']);
-  expect([...tax.options].some((o) => o.value === 'tax_packaged_12')).toBe(false);
+  const steps = screen.getByRole('list', { name: 'Setting up' });
+  expect(
+    within(steps)
+      .getAllByRole('listitem')
+      .map((li) => li.querySelector('.mb-firstrun__steplabel')?.textContent),
+  ).toEqual(['Shop folder', 'Sign in', 'Shop name', 'Your PIN']);
+  expect(screen.queryByText(/skip/i)).toBeNull();
+  for (const name of ['tax_slabs', 'printer_setup', 'save_menu_item', 'add_dining_tables']) {
+    expect(call).not.toHaveBeenCalledWith(name, expect.anything());
+    expect(call).not.toHaveBeenCalledWith(name);
+  }
+});
 
-  fireEvent.change(screen.getByLabelText('Item'), { target: { value: 'Beer' } });
-  fireEvent.change(screen.getByLabelText('Price'), { target: { value: '180' } });
-  fireEvent.change(tax, { target: { value: 'tax_liquor' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+/** A shop that already had its recovery code goes straight from the PIN to the counter. */
+it('opens the counter from the PIN step when there is no recovery code to show', async () => {
+  const done = vi.fn();
+  wire({ hasShop: true, hasDetails: true }, { set_staff_pin: null });
+  render(<FirstRun onDone={done} />);
 
-  await waitFor(() => {
-    const sent = call.mock.calls.find((c) => c[0] === 'save_menu_item');
-    expect((sent?.[1] as { edit: { taxClassId: string } }).edit.taxClassId).toBe('tax_liquor');
-  });
+  await screen.findByLabelText('Your name');
+  fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
+  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), { target: { value: '4829' } });
+  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '4829' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await waitFor(() => expect(done).toHaveBeenCalled());
+  expect(screen.queryByText('Write this down')).toBeNull();
 });
 
 /** Somebody who stopped halfway comes back where they stopped. */

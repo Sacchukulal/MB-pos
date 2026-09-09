@@ -10,58 +10,39 @@ import {
   InfoTip,
   Input,
   Logo,
-  Modal,
-  MoneyInput,
   Notice,
   PhoneInput,
-  QrCode,
   Scroller,
-  Select,
-  Spinner,
-  NumberInput,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
-import type { AndroidAppView } from '../ipc/generated/AndroidAppView';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
 import type { OwnerOpenedView } from '../ipc/generated/OwnerOpenedView';
 import type { OwnerShopView } from '../ipc/generated/OwnerShopView';
 import type { OwnerSignInView } from '../ipc/generated/OwnerSignInView';
-import type { TaxSlabView } from '../ipc/generated/TaxSlabView';
 
 import './firstrun.css';
 
-/** The steps, in the order somebody actually does them. */
+/**
+ * The steps, in the order somebody actually does them. Four, and every one is needed: the
+ * folder, the account, the name on the bill, the PIN. The menu, the tables and the printer are
+ * the counter's own screens, and the counter opens onto them.
+ */
 const STEPS = [
-  { id: 'folder', label: 'Shop folder', must: true },
-  { id: 'signin', label: 'Sign in', must: true },
-  { id: 'details', label: 'Shop name', must: true },
-  { id: 'pin', label: 'Your PIN', must: true },
-  { id: 'menu', label: 'Your items', must: false },
-  { id: 'tables', label: 'Your tables', must: false },
-  { id: 'printer', label: 'Your printer', must: false },
+  { id: 'folder', label: 'Shop folder' },
+  { id: 'signin', label: 'Sign in' },
+  { id: 'details', label: 'Shop name' },
+  { id: 'pin', label: 'Your PIN' },
 ] as const;
 
 /** `code` is a screen without a dot, and that is deliberate. */
 type StepId = (typeof STEPS)[number]['id'] | 'code';
 
-/**
- * The step after the PIN: a shop that already has items is not asked for items, and one that
- * already has tables is not asked for tables — a seeded or restored shop goes straight to the
- * printer.
- */
-function stepAfterPin(view: FirstRunView | null): StepId {
-  if (view && view.hasItems && view.hasTables) return 'printer';
-  if (view && view.hasItems) return 'tables';
-  return 'menu';
-}
-
 /** Where a shop that is already open picks up. */
 function stepFor(view: FirstRunView): StepId {
   if (!view.hasShop) return 'folder';
-  if (view.hasDetails && view.hasPin) return stepAfterPin(view);
-  if (view.hasDetails) return 'pin';
-  return 'details';
+  if (!view.hasDetails) return 'details';
+  return 'pin';
 }
 
 /** A step's heading, with its explanation behind the tip rather than under the title. */
@@ -96,10 +77,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [cameDown, setCameDown] = useState('');
   /** The other way in: the licence key from the magicbill.in dashboard. */
   const [keyText, setKeyText] = useState('');
-  /** The sign-up dialog: the phone app's download, fetched from GitHub when it opens. */
-  const [signup, setSignup] = useState(false);
-  const [android, setAndroid] = useState<AndroidAppView | null>(null);
-  const [androidProblem, setAndroidProblem] = useState('');
+  /** Where Sign up sent them, once the browser has been asked to open it. */
+  const [signupSaid, setSignupSaid] = useState('');
 
   // The shop's details.
   const [name, setName] = useState('');
@@ -119,20 +98,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
    * edits rather than hiring another one.
    */
   const [personId, setPersonId] = useState('');
-
-  // The first few items, so the till is not empty when it opens.
-  const [itemName, setItemName] = useState('');
-  const [itemPrice, setItemPrice] = useState('');
-  const [itemClass, setItemClass] = useState('');
-  const [added, setAdded] = useState<string[]>([]);
-  // The shop's own classes, not a fourth copy of the slab list.
-  const [classes, setClasses] = useState<readonly TaxSlabView[]>([]);
-
-  // The room: how many tables, numbered from one.
-  const [tableCount, setTableCount] = useState('');
-  // The printer: one of the ones Windows knows about.
-  const [windowsPrinters, setWindowsPrinters] = useState<readonly string[]>([]);
-  const [printerName, setPrinterName] = useState('');
 
   const complain = useCallback((cause: unknown) => {
     const said = isUiError(cause) ? cause.message : String(cause);
@@ -166,27 +131,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       })
       .catch(complain);
   }, [complain, take]);
-
-  // The tax classes are read when the items step opens.
-  useEffect(() => {
-    if (step !== 'menu') return;
-    call('tax_slabs')
-      .then((list) => {
-        const live = list.filter((c) => c.isActive);
-        setClasses(live);
-        setItemClass((was) => (was === '' && live[0] ? live[0].id : was));
-      })
-      .catch(() => undefined);
-  }, [step]);
-
-  // The printers Windows knows about are read when the printer step opens.
-  useEffect(() => {
-    if (step !== 'printer') return;
-    Promise.resolve()
-      .then(() => call('printer_setup'))
-      .then((setup) => setWindowsPrinters(setup?.windows ?? []))
-      .catch(() => setWindowsPrinters([]));
-  }, [step]);
 
   if (!view) return <div className="mb-firstrun" />;
 
@@ -251,19 +195,20 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     else openWithKey();
   };
 
-  /** The phone app's newest release, fetched when the sign-up dialog opens. */
-  const fetchAndroid = () => {
-    setAndroidProblem('');
-    call('android_app')
-      .then(setAndroid)
-      .catch((cause: unknown) =>
-        setAndroidProblem(isUiError(cause) ? cause.message : String(cause)),
-      );
-  };
-
+  /**
+   * No account yet: the website makes one. The browser opens on magicbill.in's sign-up, the
+   * owner comes back here with the email and password, or the key from the dashboard.
+   */
   const openSignup = () => {
-    setSignup(true);
-    if (android === null) fetchAndroid();
+    clear();
+    call('open_magicbill', { page: 'signup' })
+      .then((url) =>
+        setSignupSaid(
+          `${url} is opening in your browser. Make your account there, then sign in here ` +
+            'with it or paste the licence key from your dashboard.',
+        ),
+      )
+      .catch(complain);
   };
 
   /** The owner's account: which shops it owns is the answer. */
@@ -342,81 +287,14 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       .then(() => call('set_staff_pin', { staffId: id, pin }))
       .then((code) => {
         if (code) setRecovery(code);
-        // Sign them in with the PIN they just chose.
+        // Sign them in with the PIN they just chose. The recovery code is the last screen; a
+        // shop that already had one goes straight to the counter.
         return call('login', { staffId: id, pin })
           .catch(() => undefined)
-          .then(() => setStep(code ? 'code' : stepAfterPin(view)));
-      })
-      .catch(complain)
-      .finally(() => setBusy(false));
-  };
-
-  /** Tables 1 to N, four seats each, in no room — or none, and on to the printer. */
-  const addTables = () => {
-    const count = Number(tableCount);
-    if (!(count > 0)) {
-      go('printer');
-      return;
-    }
-    setBusy(true);
-    clear();
-    call('add_dining_tables', {
-      sectionId: null,
-      prefix: '',
-      from: 1,
-      to: Math.min(Math.floor(count), 200),
-      seats: 4,
-    })
-      .then(() => setStep('printer'))
-      .catch(complain)
-      .finally(() => setBusy(false));
-  };
-
-  /** The chosen printer becomes the default for bills and tickets alike — or none does. */
-  const usePrinter = () => {
-    if (printerName === '') {
-      onDone();
-      return;
-    }
-    setBusy(true);
-    clear();
-    call('choose_bill_printer', { windowsName: printerName })
-      .then(() => onDone())
-      .catch(complain)
-      .finally(() => setBusy(false));
-  };
-
-  const addItem = () => {
-    if (itemName.trim() === '' || itemPrice.trim() === '') return;
-    setBusy(true);
-    clear();
-    call('save_menu_item', {
-      edit: {
-        id: freshId('itm'),
-        name: itemName.trim(),
-        categoryId: null,
-        price: itemPrice.trim(),
-        // A tax CLASS, not a rate: one place decides what 5% means, so changing the rate later
-        // changes every item on it.
-        taxClassId: itemClass === '' ? null : itemClass,
-        priceBasis: null,
-        hsn: null,
-        shortCode: null,
-        cost: null,
-        course: null,
-        prepMinutes: null,
-        isOpenPrice: false,
-        isAvailable: true,
-      },
-    })
-      .then(() => {
-        setAdded((was) => [...was, `${itemName.trim()} — ${itemPrice.trim()}`]);
-        setItemName('');
-        setItemPrice('');
-        // Back to the Item box.
-        document
-          .querySelector<HTMLInputElement>('input[name="firstrun-item"]')
-          ?.focus();
+          .then(() => {
+            if (code) setStep('code');
+            else onDone();
+          });
       })
       .catch(complain)
       .finally(() => setBusy(false));
@@ -447,7 +325,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               ]
                 .filter(Boolean)
                 .join(' ')}
-              title={s.must ? undefined : 'You can skip this and do it later'}
             >
               <span className="mb-firstrun__dot">
                 {n < index ? <Icon name="check" size="sm" /> : n + 1}
@@ -511,8 +388,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                   your trial or bought your plan with at magicbill.in. The shop this counter
                   opens is the one that account owns, and the licence comes with it. The
                   licence key from your dashboard opens the same shop without the password.
-                  No account yet? Sign up on your phone. Staff never sign in here — they get a
-                  PIN from you.
+                  No account yet? Sign up opens magicbill.in in your browser; come back here
+                  once it is made. Staff never sign in here — they get a PIN from you.
                 </>
               }
             />
@@ -559,6 +436,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                     Sign in
                   </Button>
                 </div>
+
+                {signupSaid !== '' ? <Notice tone="info">{signupSaid}</Notice> : null}
 
                 {/* The other door: the key from the dashboard, for whoever has it to hand. */}
                 <p className="mb-firstrun__or" role="separator">
@@ -629,50 +508,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             ) : null}
           </section>
         ) : null}
-
-        <Modal
-          open={signup}
-          title="Sign up on your phone"
-          note="Magic Bill for Android, straight from the newest release."
-          onClose={() => setSignup(false)}
-          actions={
-            <Button variant="primary" onClick={() => setSignup(false)}>
-              Done
-            </Button>
-          }
-        >
-          {android !== null ? (
-            <div className="mb-firstrun__signup">
-              <QrCode
-                modules={android.qr}
-                label={`Download Magic Bill for Android ${android.version}`}
-              />
-              <div className="mb-firstrun__signup-words">
-                <p>
-                  Scan with the phone&rsquo;s camera to install Magic Bill for Android,
-                  version {android.version}.
-                </p>
-                <p>
-                  Create your Magic Bill account at magicbill.in, start the free trial or buy
-                  a plan, then come back here: sign in with the same email and password, or
-                  paste the licence key from your dashboard.
-                </p>
-                <code className="mb-firstrun__path">{android.apkUrl}</code>
-              </div>
-            </div>
-          ) : androidProblem !== '' ? (
-            <>
-              <Notice tone="danger">{androidProblem}</Notice>
-              <div className="mb-row">
-                <Button variant="secondary" onClick={fetchAndroid}>
-                  Try again
-                </Button>
-              </div>
-            </>
-          ) : (
-            <Spinner label="Fetching the newest phone app" />
-          )}
-        </Modal>
 
         {cameDown !== '' ? <Notice tone="info">{cameDown}</Notice> : null}
 
@@ -807,149 +642,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             />
 
             <div className="mb-firstrun__actions">
-              <Button
-                variant="primary"
-                disabled={!wroteItDown}
-                onClick={() => go(stepAfterPin(view))}
-              >
-                Next
-              </Button>
-            </div>
-          </section>
-        ) : null}
-
-        {step === 'menu' ? (
-          <section className="mb-firstrun__body">
-            <Heading
-              title="What you sell"
-              tip={
-                <>
-                  Add two or three now so you can print a real bill and see it. The rest can
-                  wait — the Menu screen imports a whole list.
-                </>
-              }
-            />
-
-            <div className="mb-firstrun__row">
-              <Input
-                label="Item"
-                autoFocus
-                name="firstrun-item"
-                value={itemName}
-                placeholder="Masala Dosa"
-                onChange={(e) => setItemName(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter goes to the price rather than doing nothing.
-                  if (e.key !== 'Enter') return;
-                  e.preventDefault();
-                  document
-                    .querySelector<HTMLInputElement>('input[name="firstrun-price"]')
-                    ?.focus();
-                }}
-              />
-              <MoneyInput
-                label="Price"
-                name="firstrun-price"
-                value={itemPrice}
-                placeholder="80"
-                onChange={setItemPrice}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') addItem();
-                }}
-              />
-              <Select
-                label="Tax slab"
-                value={itemClass}
-                onChange={(e) => setItemClass(e.target.value)}
-                options={
-                  classes.length === 0
-                    ? [{ value: '', label: 'No tax slab' }]
-                    : classes.map((c) => ({ value: c.id, label: c.name }))
-                }
-              />
-              <Button disabled={busy} onClick={addItem}>
-                Add
-              </Button>
-            </div>
-
-            {added.length > 0 ? (
-              <ul className="mb-firstrun__added">
-                {added.map((line) => (
-                  <li key={line}>
-                    <Icon name="check" size="sm" /> {line}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-
-            {/* One button forward, because there is only one outcome. */}
-            <div className="mb-firstrun__actions">
-              {back('details')}
-              <Button variant="primary" onClick={() => go(view.hasTables ? 'printer' : 'tables')}>
-                {added.length > 0 ? 'Next' : 'Skip this — next'}
-              </Button>
-            </div>
-          </section>
-        ) : null}
-
-        {step === 'tables' ? (
-          <section className="mb-firstrun__body">
-            <Heading
-              title="Your tables"
-              tip={
-                <>
-                  How many tables does the room have? They are numbered from 1; the Floor
-                  screen renames and arranges them later.
-                </>
-              }
-            />
-            <div className="mb-firstrun__fields">
-              <NumberInput
-                label="Tables"
-                autoFocus
-                value={tableCount}
-                placeholder="12"
-                onChange={(e) => setTableCount(e.target.value.replace(/[^0-9]/g, ''))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') addTables();
-                }}
-              />
-            </div>
-            <div className="mb-firstrun__actions">
-              {back('menu')}
-              <Button variant="primary" disabled={busy} onClick={addTables}>
-                {Number(tableCount) > 0 ? 'Add them — next' : 'Skip this — next'}
-              </Button>
-            </div>
-          </section>
-        ) : null}
-
-        {step === 'printer' ? (
-          <section className="mb-firstrun__body">
-            <Heading
-              title="Your printer"
-              tip={
-                <>
-                  Bills and kitchen tickets go to this one. Settings › Printers adds more, and a
-                  second printer for the kitchen.
-                </>
-              }
-            />
-            <div className="mb-firstrun__fields">
-              <Select
-                label="Printer"
-                value={printerName}
-                onChange={(e) => setPrinterName(e.target.value)}
-                options={[
-                  { value: '', label: 'No printer yet' },
-                  ...windowsPrinters.map((name) => ({ value: name, label: name })),
-                ]}
-              />
-            </div>
-            <div className="mb-firstrun__actions">
-              {back(view.hasTables ? 'menu' : 'tables')}
-              <Button variant="primary" disabled={busy} onClick={usePrinter}>
-                {printerName === '' ? 'Skip this — start billing' : 'Use it — start billing'}
+              <Button variant="primary" disabled={!wroteItDown} onClick={onDone}>
+                Start billing
               </Button>
             </div>
           </section>

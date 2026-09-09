@@ -204,6 +204,32 @@ describe('Backspace rubs out; Escape clears', () => {
     expect(state.mode.kind).toBe('pin');
   });
 
+  it('the C key empties the pad and keeps the same person marked', () => {
+    let state = drive([{ kind: 'choose', person: RAVI }, ...type('123')]);
+    state = reduce(state, { kind: 'clear' });
+    expect(digits(state)).toBe('');
+    expect(marked(state)).toBe('staff_2');
+    expect(state.mode.kind).toBe('pin');
+    // Nothing was sent: clearing is not a submit and not a cancel.
+    expect(take(state)[1]).toEqual([]);
+  });
+
+  it('the C key on a recovery pad empties that pad without stepping back', () => {
+    const state = drive([
+      { kind: 'start-recovery' },
+      { kind: 'typed', text: 'ABCDE-FGHJK' },
+      { kind: 'submit' },
+      { kind: 'choose', person: MEENA },
+      ...type('12'),
+      { kind: 'clear' },
+    ]);
+    expect(state.mode.kind).toBe('recover');
+    if (state.mode.kind !== 'recover') return;
+    expect(state.mode.step).toBe('pin');
+    expect(state.mode.newPin).toBe('');
+    expect(state.mode.person?.id).toBe('staff_3');
+  });
+
   it('Escape abandons a half-finished reset rather than stepping back through it', () => {
     const state = drive([
       { kind: 'start-recovery' },

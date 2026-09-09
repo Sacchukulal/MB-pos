@@ -83,7 +83,7 @@ fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
             says: "Copied. Paste it wherever you like.".to_owned(),
         }),
         Channel::WhatsApp => {
-            launch(&format!("whatsapp://send?text={}", escape(text)))?;
+            share_launch(&format!("whatsapp://send?text={}", escape(text)))?;
             Ok(ShareView {
                 text: text.to_owned(),
                 caveat: "The summary goes as text. If you want the full sheet, save the PDF \
@@ -93,7 +93,7 @@ fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
             })
         }
         Channel::Email => {
-            launch(&format!(
+            share_launch(&format!(
                 "mailto:?subject={}&body={}",
                 escape(title),
                 escape(text)
@@ -112,7 +112,7 @@ fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
                 UiError::new("share.folder", "That folder could not be opened.")
                     .with_detail(e.to_string())
             })?;
-            launch(&folder.display().to_string())?;
+            share_launch(&folder.display().to_string())?;
             Ok(ShareView {
                 text: text.to_owned(),
                 caveat: String::new(),
@@ -122,9 +122,9 @@ fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
     }
 }
 
-/// Hand a URL or a folder to Windows.
+/// Hand a URL or a folder to Windows, which opens it with whatever is set up for it.
 #[cfg(windows)]
-fn launch(target: &str) -> UiResult<()> {
+pub(crate) fn launch(target: &str) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     // CREATE_NO_WINDOW: without it a black console box flashes on the counter every time
     // somebody shares anything.
@@ -134,23 +134,70 @@ fn launch(target: &str) -> UiResult<()> {
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map(|_| ())
-        .map_err(|e| {
-            UiError::new(
-                "share.launch",
-                "Nothing on this computer is set up to open that. Copy the summary \
-                 instead and paste it where you want it.",
-            )
-            .with_detail(e.to_string())
-        })
 }
 
 #[cfg(not(windows))]
-fn launch(_target: &str) -> UiResult<()> {
-    Err(UiError::new(
-        "share.launch",
-        "Sharing opens WhatsApp or your mail program, and this build cannot do that. \
-         Copy the summary instead.",
+pub(crate) fn launch(_target: &str) -> std::io::Result<()> {
+    Err(std::io::Error::other(
+        "this build cannot open anything outside itself",
     ))
+}
+
+/// A share that could not be handed over, in the share screen's words.
+fn share_launch(target: &str) -> UiResult<()> {
+    launch(target).map_err(|e| {
+        UiError::new(
+            "share.launch",
+            "Nothing on this computer is set up to open that. Copy the summary instead and \
+             paste it where you want it.",
+        )
+        .with_detail(e.to_string())
+    })
+}
+
+// The website.
+
+/// The pages on magicbill.in the counter opens in the owner's browser, by name. A screen names
+/// a page and never hands Rust an address.
+const MAGICBILL_PAGES: &[(&str, &str)] = &[
+    // A new owner makes the account, starts the trial or buys a plan there, then signs in here.
+    ("signup", "https://magicbill.in/signup"),
+    // Where a plan is actually bought.
+    ("renew", "https://magicbill.in/renew"),
+];
+
+/// The address of one of the pages, or nothing for a name that is not on the list.
+#[must_use]
+pub fn magicbill_url(page: &str) -> Option<&'static str> {
+    MAGICBILL_PAGES
+        .iter()
+        .find(|(name, _)| *name == page)
+        .map(|(_, url)| *url)
+}
+
+/// Open one of the website's pages in the browser. Answers with the address, so the screen can
+/// say where the person is being sent.
+pub fn open_magicbill_on(page: &str) -> UiResult<String> {
+    let Some(url) = magicbill_url(page.trim()) else {
+        return Err(UiError::new(
+            "website.page",
+            "That page is not one the counter opens.",
+        ));
+    };
+    launch(url).map_err(|e| {
+        UiError::new(
+            "website.launch",
+            format!("The browser could not be opened. Open {url} on any phone or computer."),
+        )
+        .with_detail(e.to_string())
+    })?;
+    crate::log_info!("opened {url} in the browser");
+    Ok(url.to_owned())
+}
+
+#[tauri::command]
+pub fn open_magicbill(page: String) -> UiResult<String> {
+    open_magicbill_on(&page)
 }
 
 /// Percent-encode, because a report has spaces, newlines, `&` and `₹` in it and every one of
@@ -181,6 +228,17 @@ pub fn share_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The screen names a page; the address is Rust's, and a name off the list opens nothing.
+    #[test]
+    fn the_website_is_opened_by_page_name_and_only_the_listed_pages() {
+        assert_eq!(magicbill_url("signup"), Some("https://magicbill.in/signup"));
+        assert_eq!(magicbill_url("renew"), Some("https://magicbill.in/renew"));
+        assert_eq!(magicbill_url("https://evil.example"), None);
+        assert_eq!(magicbill_url(""), None);
+        let refused = open_magicbill_on("admin").expect_err("not a page the counter opens");
+        assert_eq!(refused.code, "website.page");
+    }
 
     #[test]
     fn a_summary_is_short_enough_to_read_on_a_phone() {

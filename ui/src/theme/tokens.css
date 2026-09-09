@@ -220,10 +220,8 @@
   --firstrun-width: 35rem;
   --firstrun-lede: 48ch;
   --firstrun-dot: 1.5rem;
-  /* How wide the item name wants to be on the last set-up step, before the row wraps. */
+  /* How wide the licence key box wants to be on the sign-in step, before the row wraps. */
   --firstrun-item: 12rem;
-  /* A QR code on screen: big enough to scan from across the counter. */
-  --qr-size: 14rem;
   /* How much of a device's raw output the device screen shows before it scrolls. */
   --raw-output-height: 12rem;
   /* How little of the cart may ever be on screen. */

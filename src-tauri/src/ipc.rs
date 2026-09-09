@@ -603,6 +603,7 @@ macro_rules! commands {
             $crate::terminals::join_master,
             $crate::terminals::send_waiting_bills,
             $crate::share::share_report,
+            $crate::share::open_magicbill,
             // The settings.
             $crate::settings::ipc::settings_all,
             $crate::settings::ipc::search_settings,
@@ -669,7 +670,6 @@ macro_rules! commands {
             $crate::diagnostics::write_diagnostics,
             // The update, and the way back.
             $crate::updates::look_for_an_update,
-            $crate::updates::android_app,
             $crate::updates::go_back_a_version,
             $crate::updates::install_update,
             // The cloud copy, and what comes back down it.

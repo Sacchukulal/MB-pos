@@ -38,10 +38,6 @@ pub struct FirstRunView {
     pub has_details: bool,
     /// True once somebody has a PIN.
     pub has_pin: bool,
-    /// True once the menu has an item — the wizard does not ask for what is already there.
-    pub has_items: bool,
-    /// True once the room has a table.
-    pub has_tables: bool,
     /// Where the shop's data file is, once there is one.
     pub shop_path: String,
     /// The owner's row, once the shop has one: the PIN step sets that person's PIN rather than
@@ -60,8 +56,6 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
             has_shop: false,
             has_details: false,
             has_pin: false,
-            has_items: false,
-            has_tables: false,
             shop_path: String::new(),
             owner: None,
         });
@@ -70,15 +64,14 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
     // A shop is open.
     let config = app.shop_config();
     let has_details = !config.store.name.trim().is_empty();
-    // One read for the facts the wizard skips steps on: a PIN, items, tables, and who owns it.
-    let (has_pin, has_items, has_tables, owner) = app
+    // One read for the two facts the first run turns on: a PIN, and who owns the shop. The menu,
+    // the tables and the printer are the counter's own screens, not questions asked here.
+    let (has_pin, owner) = app
         .with_shop(|shop| {
             shop.db
                 .transaction(|tx| {
                     let repos = mb_db::Repos::new(tx);
                     let people = repos.people().list_staff(OUTLET)?;
-                    let items = repos.menu().list_items(OUTLET, false)?;
-                    let tables = repos.floor().list_tables(OUTLET)?;
                     let owner = people
                         .iter()
                         .find(|p| p.role_id.as_deref() == Some(mb_auth::RolePreset::Owner.id()))
@@ -87,24 +80,17 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
                             name: p.name.clone(),
                             has_pin: p.pin_hash.is_some(),
                         });
-                    Ok((
-                        people.iter().any(|p| p.pin_hash.is_some()),
-                        !items.is_empty(),
-                        !tables.is_empty(),
-                        owner,
-                    ))
+                    Ok((people.iter().any(|p| p.pin_hash.is_some()), owner))
                 })
                 .map_err(|e| crate::words::from_db(&e))
         })
-        .unwrap_or((false, false, false, None));
+        .unwrap_or((false, None));
 
     Ok(FirstRunView {
         needed: !(has_details && has_pin),
         has_shop: true,
         has_details,
         has_pin,
-        has_items,
-        has_tables,
         shop_path,
         owner,
     })
