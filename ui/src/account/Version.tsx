@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   ConfirmDialog,
+  Fact,
+  Facts,
   Icon,
   Modal,
   Notice,
@@ -17,7 +19,6 @@ import {
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { Pushed } from '../ipc/generated/Pushed';
 import type { UpdateState } from '../ipc/generated/UpdateState';
-import { Fact, Facts } from './Facts';
 
 /** The one dialog every step of an update happens in. */
 type Dialog =
@@ -302,7 +303,7 @@ function UpdateDialog({
         <div className="mb-account__progress">
           <div className="mb-account__stage">
             <span>{stage}…</span>
-            <span className="mb-account__code">{downloading ? `${dialog.percent}%` : ''}</span>
+            <span className="mb-code">{downloading ? `${dialog.percent}%` : ''}</span>
           </div>
           <div
             className="mb-progress"

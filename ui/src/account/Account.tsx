@@ -6,6 +6,8 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  Fact,
+  Facts,
   Icon,
   Input,
   Modal,
@@ -21,7 +23,6 @@ import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
 import { Backup } from './Backup';
 import { ChangeLicence } from './ChangeLicence';
-import { Fact, Facts } from './Facts';
 import { Version } from './Version';
 
 import './account.css';

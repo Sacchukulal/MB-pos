@@ -73,7 +73,8 @@
   display: flex;
   align-items: center;
   gap: var(--topbar-item-gap);
-  flex: 1;
+  /* Never narrower than its buttons: the tools give way instead, by shortening the name. */
+  flex: 1 0 auto;
   min-width: 0;
   -webkit-app-region: no-drag;
 }
@@ -166,7 +167,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
   height: 100%;
   -webkit-app-region: no-drag;
 }
@@ -234,6 +236,10 @@
 .mb-who__name {
   font-weight: var(--weight-medium);
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .mb-who__role {
@@ -601,4 +607,19 @@
   max-width: var(--field-lg);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* The tools keep their size; when the bar is short of room the name shortens, nothing else. */
+.mb-topbar__tools > * {
+  flex-shrink: 0;
+}
+
+.mb-topbar__tools > .mb-who {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.mb-who__role,
+.mb-who__lock {
+  flex-shrink: 0;
 }

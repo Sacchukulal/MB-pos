@@ -22,41 +22,6 @@
   color: var(--text-muted);
 }
 
-/* Label over value, in equal columns. */
-.mb-account__facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--account-fact), 1fr));
-  gap: var(--gap-field) var(--gap-group);
-  margin: 0;
-}
-
-.mb-account__fact {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.mb-account__fact dt {
-  font-size: var(--type-caption);
-  font-weight: var(--type-label-weight);
-  color: var(--text-muted);
-}
-
-.mb-account__fact dd {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-medium);
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-/* Read out over the phone to support, so it is monospaced and spaced out. */
-.mb-account__code {
-  font-family: var(--font-mono);
-  letter-spacing: var(--tracking-code);
-}
-
 /* The key and its Copy button on one line. */
 .mb-account__key {
   display: inline-flex;

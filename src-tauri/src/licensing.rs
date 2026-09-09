@@ -83,6 +83,18 @@ pub fn gate(app: &App, feature: Feature) -> UiResult<()> {
     }
 }
 
+/// Refuse a phone when the plan is not running, or allows none. Phones are not a feature a
+/// plan can leave out: every running plan has them, and `limits.devices` says how many.
+pub fn gate_phones(app: &App) -> UiResult<()> {
+    let entitlement = app.entitlement();
+    match words::phones_refusal(&entitlement, today(now())) {
+        None => Ok(()),
+        Some(refusal) => Err(refusal),
+    }
+}
+
+/// Every command behind the plan. `open_pairing` and `allow_device` are behind `gate_phones`
+/// rather than a feature, and `PHONES_GATED` names them.
 #[cfg(test)]
 pub const GATED: &[(&str, Feature)] = &[
     // The reports screen and its exports.
@@ -91,8 +103,6 @@ pub const GATED: &[(&str, Feature)] = &[
     ("report_csv", Feature::Reports),
     ("report_pdf", Feature::Reports),
     ("dashboard", Feature::Reports),
-    ("open_pairing", Feature::MobileOrdering),
-    ("allow_device", Feature::MobileOrdering),
     // The stock book — the SCREENS, and only the screens.
     ("inventory", Feature::Inventory),
     ("recipe", Feature::Inventory),
@@ -105,6 +115,11 @@ pub const GATED: &[(&str, Feature)] = &[
     ("stock_variance", Feature::Inventory),
     ("buy_list_text", Feature::Inventory),
 ];
+
+/// The commands behind `gate_phones`: refused when the plan is not running, never for a
+/// missing feature code.
+#[cfg(test)]
+pub const PHONES_GATED: &[&str] = &["open_pairing", "allow_device"];
 
 // What the screen sees.
 

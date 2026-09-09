@@ -33,7 +33,7 @@ const active: LicenceView = {
   restaurantCode: 'ANNA01',
   phonesAllowed: 4,
   tillsAllowed: 1,
-  included: ['reports', 'phone ordering'],
+  included: ['reports', 'stock and recipes'],
   checked: '9 Aug, 6:12 pm',
   stillHeld: '',
   clockNote: '',

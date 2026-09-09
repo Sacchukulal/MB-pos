@@ -32,7 +32,6 @@ import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt, dotsPerPixel, marginDots } from '../preview/Receipt';
 import { Appearance } from './Appearance';
-import { Network } from './Network';
 import { Numbering } from './Numbering';
 import { Logo } from './Logo';
 import { Printers } from './Printers';
@@ -51,14 +50,12 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   receipt: () => <Logo />,
   numbering: () => <Numbering />,
   appearance: () => <Appearance />,
-  network: () => <Network />,
   tills: () => <Tills />,
 };
 
 /** Sections that are not settings. */
 const EXTRA_SECTIONS = [
-  { code: 'network', label: 'Phones', canEdit: true, settings: [] },
-  // A till is a ROW too, for the same reason a phone is.
+  // A till is a row, not a setting.
   { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
 ];
 
@@ -79,7 +76,7 @@ function withEdit(edits: Edits, key: string, value: string, saved: string | unde
   return next;
 }
 
-/** `initial` opens a section straight away — the top bar's phones button lands on Phones. */
+/** `initial` opens a section straight away — Billing's printer button lands on Printers. */
 export function Settings({ initial }: { initial?: string | null } = {}) {
   const [view, setView] = useState<SettingsView | null>(null);
   const [group, setGroup] = useState<string>(initial ?? 'store');

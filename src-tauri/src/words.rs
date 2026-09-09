@@ -376,6 +376,33 @@ pub fn licence_refusal(
     ))
 }
 
+/// Why a phone may not be added right now, or nothing when it may. Phones are not a plan
+/// feature: a running plan has them, and the plan's phone count is the only limit.
+#[must_use]
+pub fn phones_refusal(
+    entitlement: &mb_license::Entitlement,
+    today: mb_core::BusinessDay,
+) -> Option<UiError> {
+    let detail = format!("phones · {}", entitlement.standing.code());
+    if !entitlement.operating() {
+        let message = licence_banner(entitlement, today).unwrap_or_else(|| {
+            "Phones are paused until the plan is running. Billing and printing carry on.".to_owned()
+        });
+        return Some(UiError::new("licence.not_operating", message).with_detail(detail));
+    }
+    if entitlement.limits.devices == 0 {
+        return Some(
+            UiError::new(
+                "licence.no_phones",
+                "This plan has no phones. Billing and printing carry on as usual — choose a \
+                 plan with phones at magicbill.in.",
+            )
+            .with_detail(detail),
+        );
+    }
+    None
+}
+
 /// A licensing error — the cloud, the file, the emergency code, the cooldown.
 #[must_use]
 pub fn from_licence(error: &mb_license::LicenceError) -> UiError {

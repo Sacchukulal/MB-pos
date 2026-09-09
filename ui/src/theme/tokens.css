@@ -258,11 +258,13 @@
   /* Four stat cards across at 1366. */
   --dash-stat: 12rem;
 
-  /* The account screen: a fact's column, and the label column of a folder row. */
-  --account-fact: 12rem;
+  /* A fact's column on a page of facts, and the label column of a folder row. */
+  --fact-column: 12rem;
   --account-folder-label: 7rem;
 
   --qr-dot: 6px;
+  /* The "whose phone" dropdown on a phone asking to join. */
+  --phones-owner: 14rem;
   /* The two values in this file that a theme must NOT change. */
   --print-ink: #000000;
   --print-paper: #ffffff;

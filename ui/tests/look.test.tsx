@@ -248,8 +248,6 @@ describe('the top navigation', () => {
     expect(splitScreens(SHIPPED_SCREENS, 'billing').elsewhere).toBeNull();
     expect(splitScreens(SHIPPED_SCREENS, 'stock').elsewhere?.label).toBe('Stock');
     expect(splitScreens(SHIPPED_SCREENS, 'settings').elsewhere?.label).toBe('Settings');
-    // Settings › Phones has its own door in the bar, so More does not claim it.
-    expect(splitScreens(SHIPPED_SCREENS, 'settings', 'network').elsewhere).toBeNull();
   });
 
   /** Every destination is reachable and none is in both places. */

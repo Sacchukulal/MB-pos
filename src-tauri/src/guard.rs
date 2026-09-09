@@ -367,7 +367,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     ("count_drawer", Access::Needs(Permission::DayClose)),
     // The phones this counter serves.
-    ("network", Access::Needs(Permission::ReportsView)),
+    ("network", Access::Needs(Permission::DevicesPair)),
     // The top bar's number: how many phones are live. No permission — it is a count.
     ("phones_now", Access::SignedIn),
     ("open_pairing", Access::Needs(Permission::DevicesPair)),

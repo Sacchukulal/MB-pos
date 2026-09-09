@@ -23,7 +23,12 @@ certificateNote: string, devices: Array<DeviceRowView>, waiting: Array<WaitingVi
 /**
  * The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid.
  */
-qr: Array<string>, code: string, mayPair: boolean, 
+qr: Array<string>, code: string, 
+/**
+ * How many phones the plan allows, from the cloud: this licence, else its plan, else the
+ * global default. The screen shows "3 of 10" and stops offering the code at the limit.
+ */
+phonesAllowed: number, 
 /**
  * What Windows Firewall says about this program — the usual reason a phone cannot reach it.
  */

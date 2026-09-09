@@ -49,7 +49,7 @@ including the guest phones.
 
 ### 1b. The QR (always available)
 
-The counter's **Settings → Phones** screen shows a code containing:
+The counter's **Phones** screen shows a code containing:
 
 ```
 magicbill://pair?h=<host>&p=<port>&f=<fingerprint>&t=<token>

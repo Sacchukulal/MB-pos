@@ -1184,3 +1184,38 @@ textarea.mb-input {
 .mb-adorned:has(> .mb-input--lg) {
   width: var(--field-lg);
 }
+
+/* Facts: label over value, in equal columns. */
+.mb-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--fact-column), 1fr));
+  gap: var(--gap-field) var(--gap-group);
+  margin: 0;
+}
+
+.mb-fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-fact dt {
+  font-size: var(--type-caption);
+  font-weight: var(--type-label-weight);
+  color: var(--text-muted);
+}
+
+.mb-fact dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* A fact read out to support keeps the fact's size, spaced out. */
+.mb-fact .mb-code {
+  font-size: inherit;
+  letter-spacing: var(--tracking-code);
+}

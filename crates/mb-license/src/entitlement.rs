@@ -252,7 +252,7 @@ mod tests {
             assert!(entitlement.may(*feature).is_err(), "{feature:?}");
         }
         // ...and billing is not one of the things it can be asked.
-        assert_eq!(Feature::ALL.len(), 4);
+        assert_eq!(Feature::ALL.len(), 3);
     }
 
     #[test]
@@ -338,7 +338,7 @@ mod tests {
             Entitlement::from_licence(&licence, Standing::Fine, Timestamp::EPOCH, Timestamp::EPOCH);
         assert!(entitlement.may(Feature::Reports).is_ok());
         let refusal = entitlement
-            .may(Feature::MobileOrdering)
+            .may(Feature::Inventory)
             .expect_err("it was allowed");
         assert_eq!(refusal.why, Why::NotInThePlan);
         assert_eq!(refusal.code(), "licence.not_in_plan");
@@ -356,7 +356,7 @@ mod tests {
             Timestamp::EPOCH,
         );
         let refusal = entitlement
-            .may(Feature::MobileOrdering)
+            .may(Feature::Reports)
             .expect_err("it was allowed");
         assert_eq!(refusal.why, Why::NotOperating(Standing::Suspended));
     }

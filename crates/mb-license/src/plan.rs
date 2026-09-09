@@ -50,7 +50,8 @@ impl FeatureSet {
 /// The numbers a plan caps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
-    /// Phones that may be paired to this counter.
+    /// Phones that may be paired to this counter. This number is the whole of how a plan
+    /// controls phones: zero means none, and there is no feature code for them.
     pub devices: u32,
     /// Tills on this shop.
     pub terminals: u32,
@@ -101,7 +102,7 @@ mod tests {
         // A newer cloud talking to an older till.
         let set = FeatureSet::from_codes(["reports", "kitchen-display-v2"]);
         assert!(set.includes(Feature::Reports));
-        assert!(!set.includes(Feature::MobileOrdering));
+        assert!(!set.includes(Feature::Inventory));
         assert_eq!(set.known(), vec![Feature::Reports]);
     }
 

@@ -105,6 +105,32 @@ export function Badge({
   return <span className={`mb-badge mb-badge--${tone}`}>{children}</span>;
 }
 
+/** Label over value: one fact on a page, in a run of `Facts`. */
+export function Fact({
+  label,
+  children,
+  code = false,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  /** A string read out to support: monospaced and spaced. */
+  code?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cx('mb-fact', className)}>
+      <dt>{label}</dt>
+      <dd className={code ? 'mb-code' : undefined}>{children}</dd>
+    </div>
+  );
+}
+
+/** Facts in equal columns. */
+export function Facts({ children }: { children: ReactNode }) {
+  return <dl className="mb-facts">{children}</dl>;
+}
+
 export interface Column<Row> {
   key: string;
   header: string;

@@ -538,7 +538,9 @@ pub struct NetworkView {
     /// The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid.
     pub qr: Vec<String>,
     pub code: String,
-    pub may_pair: bool,
+    /// How many phones the plan allows, from the cloud: this licence, else its plan, else the
+    /// global default. The screen shows "3 of 10" and stops offering the code at the limit.
+    pub phones_allowed: u32,
     /// What Windows Firewall says about this program — the usual reason a phone cannot reach it.
     pub firewall: crate::firewall::FirewallState,
     pub firewall_says: String,
@@ -584,9 +586,10 @@ pub struct WaitingView {
 }
 
 pub fn view_on(app: &App) -> UiResult<NetworkView> {
-    let who = guard::require(app, Permission::ReportsView)?;
-    let may_pair = who.must(Permission::DevicesPair).is_ok();
+    // One permission for the whole screen: whoever may let a phone on may see the phones.
+    guard::require(app, Permission::DevicesPair)?;
     let network = app.network();
+    let phones_allowed = app.entitlement().limits.devices;
 
     let devices = app
         .with_shop(|shop| {
@@ -710,11 +713,11 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
             .unwrap_or_default(),
         qr,
         code,
-        may_pair,
+        phones_allowed,
         people: active_people(app),
         firewall,
         firewall_says,
-        may_fix_firewall: may_fix_firewall && may_pair,
+        may_fix_firewall,
         connected: network.as_ref().map_or(0, |n| {
             u32::try_from(n.shared.connected()).unwrap_or(u32::MAX)
         }),
@@ -757,7 +760,7 @@ fn staff_name(app: &App, staff_id: &str) -> Option<String> {
 /// Show a pairing code.
 pub fn open_pairing_on(app: &App) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
-    crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
+    crate::licensing::gate_phones(app)?;
     let network = app.network().ok_or_else(|| {
         UiError::new(
             "lan.off",
@@ -782,7 +785,7 @@ pub fn close_pairing_on(app: &App) -> UiResult<NetworkView> {
 pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
     // The gate is here as well as on `open_pairing`, deliberately.
-    crate::licensing::gate(app, mb_license::Feature::MobileOrdering)?;
+    crate::licensing::gate_phones(app)?;
     let network = app
         .network()
         .ok_or_else(|| UiError::new("lan.off", "The counter's network is switched off."))?;

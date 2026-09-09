@@ -65,6 +65,8 @@ export {
   Card,
   DateRangePicker,
   EmptyState,
+  Fact,
+  Facts,
   Locked,
   Money,
   Numeric,

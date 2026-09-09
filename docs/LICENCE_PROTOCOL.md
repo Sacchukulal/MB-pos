@@ -21,8 +21,9 @@ document nobody trusts is worse than none.
 
 Not by this protocol, not by any answer the cloud can send, not by any failure
 of any call in it. The counter's `Feature` enum — the complete list of what a
-licence can refuse — has four values (reports, phone ordering, more than one
-till, stock) and none of them is billing. **A cloud response cannot stop a
+licence can refuse — has three values (reports, more than one till, stock) and
+none of them is billing. Phones are not on it either (1.6.10): every running plan
+lets phones in, and `limits.devices` alone says how many. **A cloud response cannot stop a
 restaurant trading**, and the lock screen never asks about the plan: a PIN gets
 in whatever the licence says. (1.6.6 briefly closed sign-in on a lapsed plan;
 1.6.7 took that out the same day — the owner's ruling is that only the advanced
@@ -208,8 +209,8 @@ without one.
   "plan": {
     "code": "restaurant-standard",
     "name": "Restaurant Standard",
-    "features": ["reports", "mobile-ordering"],
-    "limits": { "devices": 4, "terminals": 1 }
+    "features": ["reports", "inventory"],
+    "limits": { "devices": 10, "terminals": 1 }
   },
   "status": "active",
   "renews_on": 20709,
@@ -225,10 +226,16 @@ without one.
 * `status` ∈ `active` · `trial` · `suspended` · `revoked` · `cancelled`.
 * `features` is a list of **stable codes**. A code the counter does not know is
   **ignored, not rejected** — a newer cloud must be able to talk to an older
-  till. The four codes a counter understands today are `reports`,
-  `mobile-ordering`, `multi-terminal`, `inventory` (`cloud-backup` was removed
-  on 2026-08-27: the copy goes up on every plan, so a gate there gated nothing). **There is no code for
-  billing or printing and there never will be** (§0.1).
+  till. The three codes a counter understands today are `reports`,
+  `multi-terminal`, `inventory` (`cloud-backup` was removed on 2026-08-27: the
+  copy goes up on every plan, so a gate there gated nothing; `mobile-ordering`
+  was removed on 2026-09-09: phones are counted, never switched off, and a plan
+  imported without the code was refusing a paying shop's phones — the cloud
+  still sends it for counters before 1.6.10, which ignore nothing). **There is
+  no code for billing or printing and there never will be** (§0.1).
+* `limits.devices` is the whole of how a plan controls phones. The cloud
+  resolves it: this licence's own override, else the plan's, else the global
+  default the admin panel sets. Zero means no phones.
 * A plan is data. Adding "Restaurant Plus, four phones" is a row in the admin
   panel and **never a counter release**.
 * `renews_on` is never null: for a trial the cloud puts `trial_ends_on` there.

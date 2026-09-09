@@ -638,7 +638,7 @@ export interface Commands {
   /** One UAC prompt; Windows Firewall then lets phones reach this program. */
   allow_firewall: { args: void; returns: NetworkView };
   close_pairing: { args: void; returns: NetworkView };
-  allow_device: { args: { requestId: string }; returns: NetworkView };
+  allow_device: { args: { requestId: string; staffId: string | null }; returns: NetworkView };
   refuse_device: { args: { requestId: string }; returns: NetworkView };
   revoke_device: { args: { deviceId: string }; returns: NetworkView };
 
