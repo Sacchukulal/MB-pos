@@ -258,14 +258,16 @@ impl<'a> DaysRepo<'a> {
         rows.collect::<Result<_, _>>().map_err(DbError::from)
     }
 
-    /// The first day anything happened — an order of any kind or an expense — so a shop that
-    /// has never closed a day is not asked about the weeks before it opened.
+    /// The first day anything happened — an order of any kind, an expense, or a day somebody
+    /// closed or marked — so a shop is never asked about, or shown, the weeks before it opened.
     pub fn first_activity(&self, outlet: &str) -> Result<Option<BusinessDay>, DbError> {
         let found: Option<i64> = self.tx.query_row(
             "SELECT MIN(day) FROM (
                 SELECT MIN(business_day) AS day FROM orders WHERE outlet_id = ?1
                 UNION ALL
                 SELECT MIN(business_day) FROM expenses WHERE outlet_id = ?1
+                UNION ALL
+                SELECT MIN(business_day) FROM business_days WHERE outlet_id = ?1
              )",
             rusqlite::params![outlet],
             |row| row.get(0),
@@ -273,6 +275,17 @@ impl<'a> DaysRepo<'a> {
         found
             .map(|d| encode::business_day_from_sql(d, "orders.business_day"))
             .transpose()
+    }
+
+    /// When the day opened: the moment its first order was started, or `None` on a day with
+    /// no order at all.
+    pub fn opened_at(&self, outlet: &str, day: BusinessDay) -> Result<Option<Timestamp>, DbError> {
+        let at: Option<i64> = self.tx.query_row(
+            "SELECT MIN(created_at) FROM orders WHERE outlet_id = ?1 AND business_day = ?2",
+            rusqlite::params![outlet, encode::business_day_to_sql(day)],
+            |row| row.get(0),
+        )?;
+        Ok(at.map(encode::timestamp_from_sql))
     }
 
     /// What a day came to, from the rows: the bills and net the reconciliation already sums,

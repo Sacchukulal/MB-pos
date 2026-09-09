@@ -191,6 +191,17 @@ pub fn when(at: mb_core::Timestamp) -> String {
     format!("{day} {month_name}, {}", clock(seconds / 60))
 }
 
+/// "9:02 am" — the clock time of an instant, in the shop's own time.
+#[must_use]
+#[allow(
+    clippy::integer_division,
+    reason = "a clock is the one place a remainder is not a loss"
+)]
+pub fn clock_of(at: mb_core::Timestamp) -> String {
+    let (_, seconds) = at.to_local_parts(mb_core::UtcOffset::INDIA);
+    clock(seconds / 60)
+}
+
 /// A size a person reads.
 #[must_use]
 #[allow(

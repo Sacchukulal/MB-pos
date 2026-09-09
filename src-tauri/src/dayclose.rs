@@ -20,7 +20,8 @@ use crate::words::{self, UiError, UiResult};
 /// How far back the gate looks. A shop that has not closed a day in two months is asked about
 /// the last sixty, not about the whole year.
 const PENDING_WINDOW_DAYS: i32 = 60;
-/// How many days the Days screen lists, today included.
+/// How many days the Day open/close screen lists at most, today included. A younger shop
+/// lists only the days since it opened.
 const DAYS_LISTED: i32 = 14;
 
 // The day.
@@ -74,7 +75,7 @@ pub struct DayStateView {
     pub escape_label: String,
 }
 
-/// One row of the Days screen.
+/// One row of the Day open/close screen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +87,8 @@ pub struct DayRowView {
     pub is_locked: bool,
     pub bills: u32,
     pub net: MoneyView,
+    /// "9:02 am" — when the first order of the day was started; empty on a day with none.
+    pub opened_says: String,
     /// "Closed 3 Sep, 11:14 pm by Ravi.", "Holiday, marked 1 Sep by Ravi.", "Never closed.",
     /// "Open."
     pub closed_says: String,
@@ -95,7 +98,7 @@ pub struct DayRowView {
     pub may_be_holiday: bool,
 }
 
-/// The Day close screen — reached from the bar, and from Reports › Days.
+/// The Day open/close screen — reached from the bar, and from Reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -108,11 +111,16 @@ pub struct DaysView {
     /// Why nothing on this screen can be pressed, when this shop does not close its days — or
     /// empty.
     pub closing_says: String,
-    /// The shop's day rule as a sentence: "Your day runs from 5:00 am to 5:00 am…".
+    /// The shop's day rule as a sentence: "A new day starts at 5:00 am…".
     pub day_runs_says: String,
+    /// When a new day starts, as the clock box shows it: "05:00".
+    pub starts_at: String,
+    /// Whether the person looking may change when the day starts.
+    pub may_set_day: bool,
     /// What closing today will leave in the drawer, in words — or empty.
     pub carry_says: String,
-    /// Today and the thirteen days before it, newest first.
+    /// Today and up to thirteen days before it, newest first — never a day before the shop
+    /// opened.
     pub days: Vec<DayRowView>,
     /// Holidays already marked for days that have not come yet.
     pub upcoming: Vec<DayRowView>,
@@ -145,6 +153,8 @@ struct Look {
     figures: DayFigures,
     open_orders: Vec<String>,
     row: Option<DayRow>,
+    /// When the first order of the day was started.
+    opened_at: Option<Timestamp>,
 }
 
 fn look_at(
@@ -162,6 +172,7 @@ fn look_at(
             .map(|order| crate::kitchen::place_and_token(order, tables))
             .collect(),
         row: repos.days().find(OUTLET, day)?,
+        opened_at: repos.days().opened_at(OUTLET, day)?,
     })
 }
 
@@ -365,29 +376,36 @@ fn action_words(closes: &[BusinessDay], holidays: &[BusinessDay]) -> String {
     }
 }
 
-/// The shop's day rule as a sentence: which bills land on which day, and where to change it.
+/// The shop's day rule as a sentence: which bills land on which day.
 fn day_runs_words(starts_at_minutes: u32) -> String {
-    let at = words::clock(starts_at_minutes);
     if starts_at_minutes == 0 {
-        return "Your day runs from midnight to midnight, so a bill printed after midnight \
-                belongs to the new day."
+        return "The day is the calendar date: a bill after midnight belongs to the new day."
             .to_owned();
     }
+    let at = words::clock(starts_at_minutes);
+    format!("A new day starts at {at}: a bill before {at} belongs to the day before.")
+}
+
+/// "05:00" — the day start as the clock box shows it.
+fn starts_at_words(starts_at_minutes: u32) -> String {
     format!(
-        "Your day runs from {at} to {at}, so a bill printed before {at} belongs to the day \
-         before. Change it under Settings › The day."
+        "{:02}:{:02}",
+        starts_at_minutes.saturating_div(60) % 24,
+        starts_at_minutes % 60
     )
 }
 
-/// The Day close screen, and Reports › Days.
+/// The Day open/close screen.
 pub fn days_on(app: &App) -> UiResult<DaysView> {
     let who = guard::require_any(app, &[Permission::ReportsView, Permission::DayClose])?;
     let closes_days = app.closes_days();
     // A shop that does not close its days has nothing here to press, whoever is looking.
     let may_act = closes_days && who.must(Permission::DayClose).is_ok();
+    // The same authority that saves it under Settings › The day.
+    let may_set_day = who.must(Permission::SettingsTax).is_ok();
     let today = today(now());
     let config = app.shop_config();
-    let from = BusinessDay::from_days_since_epoch(
+    let window = BusinessDay::from_days_since_epoch(
         today
             .days_since_epoch()
             .saturating_sub(DAYS_LISTED.saturating_sub(1)),
@@ -399,6 +417,13 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                 let repos = mb_db::Repos::new(tx);
                 let tables = repos.floor().list_tables(OUTLET)?;
                 let open = repos.orders().list_open(OUTLET)?;
+                // The list starts where the shop did: a day before its first bill, expense or
+                // close is not a day it left open. A shop opened today lists today.
+                let first = repos
+                    .days()
+                    .first_activity(OUTLET)?
+                    .map_or(today, |first| first.min(today));
+                let from = window.max(first);
 
                 let mut days = Vec::new();
                 let mut day = today;
@@ -414,6 +439,7 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                         figures: DayFigures::default(),
                         open_orders: Vec::new(),
                         row: Some(row),
+                        opened_at: None,
                     };
                     upcoming.push(row_view(&repos, &look, today, may_act)?);
                 }
@@ -429,12 +455,12 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                     closing_says: if closes_days {
                         String::new()
                     } else {
-                        "This shop does not close its days: nothing is locked and nobody is \
-                         asked. What each day came to is still below, and the drawer can \
-                         still be counted. Turn it on under Settings › The day."
+                        "This shop does not close its days. Turn it on under Settings › The day."
                             .to_owned()
                     },
                     day_runs_says: day_runs_words(config.day.starts_at_minutes),
+                    starts_at: starts_at_words(config.day.starts_at_minutes),
+                    may_set_day,
                     carry_says: if closes_days
                         && config.day.carry_float
                         && config.day.float_amount.is_positive()
@@ -486,6 +512,7 @@ fn row_view(
         is_locked: locked.is_some(),
         bills: count_of(bills),
         net: MoneyView::from(net),
+        opened_says: look.opened_at.map(words::clock_of).unwrap_or_default(),
         closed_says,
         state,
         may_be_holiday: may_act
@@ -538,7 +565,7 @@ fn locked_refusal(code: &str, since: Timestamp, then: &str) -> UiError {
     UiError::new(
         code,
         format!(
-            "That day was closed at {}. Open it again under Day close to {then}.",
+            "That day was closed at {}. Open it again under Day open/close to {then}.",
             words::when(since)
         ),
     )
@@ -1588,7 +1615,7 @@ mod tests {
         assert!(
             refused
                 .message
-                .ends_with("Open it again under Day close to keep billing."),
+                .ends_with("Open it again under Day open/close to keep billing."),
             "{}",
             refused.message
         );

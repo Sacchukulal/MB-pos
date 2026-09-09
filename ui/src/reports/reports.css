@@ -306,10 +306,15 @@
   color: var(--text-faint);
 }
 
-.mb-dash__stats {
+/* Two charts across; the run over time takes the row. */
+.mb-dash__charts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--dash-chart), 1fr));
   gap: var(--space-3);
+}
+
+.mb-dash__chart--wide {
+  grid-column: 1 / -1;
 }
 
 .mb-dash__note {

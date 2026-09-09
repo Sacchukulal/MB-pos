@@ -1457,17 +1457,22 @@ pub fn csv_of(report: &ReportView) -> String {
     out
 }
 
-// Today, at a glance — and the list of things that need somebody.
+// The dashboard — the period's figures in tiles and charts, and the list of things that need
+// somebody.
 
 /// The first thing an owner sees, and the reason it is first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardView {
-    /// "Today, so far.
+    /// "Today, so far", "Yesterday", "1 September to 9 September · 9 days".
     pub title: String,
+    /// The period the figures are for, as the date boxes show it.
+    pub from: String,
+    pub to: String,
     pub stats: Vec<StatView>,
     pub compare: Option<CompareView>,
+    pub charts: Vec<ChartView>,
     /// Things that need a person.
     pub attention: Vec<AttentionView>,
     pub quiet: String,
@@ -1481,6 +1486,39 @@ pub struct StatView {
     /// Already formatted, always. Even the counts.
     pub value: String,
     pub note: String,
+}
+
+/// One chart on the dashboard. The screen draws shapes; every number in it was computed here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct ChartView {
+    pub id: String,
+    pub title: String,
+    /// `columns` (a run over time), `bars` (a ranking) or `donut` (a share of the whole).
+    pub kind: String,
+    /// The one sentence under the title, or empty: "By quantity sold."
+    pub note: String,
+    /// What to say when there are no points.
+    pub empty: String,
+    pub points: Vec<PointView>,
+}
+
+/// One bar, column or slice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PointView {
+    /// "9 am", "1 Sep", "Cash".
+    pub label: String,
+    /// The figure, formatted.
+    pub value: String,
+    /// The second figure, formatted, or empty: "12 bills", "3 sold".
+    pub note: String,
+    /// Per mille of the largest point (columns, bars) or of the whole (donut): 0 to 1000.
+    pub share: u16,
+    /// 0 for the one hue every magnitude chart wears; 1 to 4 for a slice that is an identity.
+    pub hue: u8,
 }
 
 /// One thing that needs somebody.
@@ -1503,29 +1541,234 @@ fn needs_you(tone: &str, title: &str, detail: String) -> AttentionView {
     }
 }
 
-/// Today's figures, and everything that is waiting for a person.
-pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
+/// How many bars a ranking shows before the rest fold into "Other".
+const RANKED: usize = 8;
+
+/// Longer than this and a run by day is not filled in with the days nothing sold: the chart
+/// would be all gaps.
+const FILLED_DAYS: i32 = 62;
+
+/// `part` of `whole`, in per mille, never over 1000.
+fn permille(part: i64, whole: i64) -> u16 {
+    if whole <= 0 || part <= 0 {
+        return 0;
+    }
+    u16::try_from(part.saturating_mul(1_000).saturating_div(whole))
+        .unwrap_or(1_000)
+        .min(1_000)
+}
+
+/// "9 am", "12 pm" — the hour a column stands for.
+fn hour_words(hour: i64) -> String {
+    let hour = hour.rem_euclid(24);
+    let suffix = if hour < 12 { "am" } else { "pm" };
+    let shown = match hour % 12 {
+        0 => 12,
+        h => h,
+    };
+    format!("{shown} {suffix}")
+}
+
+/// "1 Sep" — the day a column stands for.
+fn short_day_words(day: BusinessDay) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (_, month, date) = day.to_ymd();
+    let name = MONTHS
+        .get(usize::try_from(month.saturating_sub(1)).unwrap_or(0))
+        .copied()
+        .unwrap_or("?");
+    format!("{date} {name}")
+}
+
+/// The identity colour a payment mode or an order type always wears, whichever chart it is on.
+fn hue_of(key: &str) -> u8 {
+    match key {
+        "cash" | "dine_in" => 1,
+        "upi" | "parcel" => 2,
+        "card" | "delivery" => 3,
+        _ => 4,
+    }
+}
+
+/// A run over time: one column per step, the largest column full height.
+fn columns(id: &str, title: &str, steps: Vec<(String, Money, i64)>) -> ChartView {
+    let most = steps.iter().map(|s| s.1.paise()).max().unwrap_or(0);
+    ChartView {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        kind: "columns".to_owned(),
+        note: String::new(),
+        empty: "Nothing sold.".to_owned(),
+        points: steps
+            .into_iter()
+            .map(|(label, amount, bills)| PointView {
+                label,
+                value: amount.to_plain_string(),
+                note: if bills > 0 {
+                    words::count(bills, "bill", "bills")
+                } else {
+                    String::new()
+                },
+                share: permille(amount.paise(), most),
+                hue: 0,
+            })
+            .collect(),
+    }
+}
+
+/// A ranking, largest first, the tail folded into "Other". `note_of` writes the second figure.
+fn ranking(
+    id: &str,
+    title: &str,
+    note: &str,
+    buckets: Vec<mb_db::repo::reports::Bucket>,
+    note_of: fn(&mb_db::repo::reports::Bucket) -> String,
+) -> ChartView {
+    let mut buckets = buckets;
+    buckets.sort_by_key(|b| std::cmp::Reverse(b.gross.paise()));
+    let most = buckets.first().map_or(0, |b| b.gross.paise());
+    let mut points: Vec<PointView> = buckets
+        .iter()
+        .take(RANKED)
+        .map(|b| PointView {
+            label: b.label.clone(),
+            value: b.gross.to_plain_string(),
+            note: note_of(b),
+            share: permille(b.gross.paise(), most),
+            hue: 0,
+        })
+        .collect();
+    if buckets.len() > RANKED {
+        let rest = buckets
+            .iter()
+            .skip(RANKED)
+            .fold(0_i64, |acc, b| acc.saturating_add(b.gross.paise()));
+        points.push(PointView {
+            label: "Other".to_owned(),
+            value: Money::from_paise(rest).to_plain_string(),
+            note: words::count(
+                i64::try_from(buckets.len() - RANKED).unwrap_or(i64::MAX),
+                "more",
+                "more",
+            ),
+            share: permille(rest, most),
+            hue: 0,
+        });
+    }
+    ChartView {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        kind: "bars".to_owned(),
+        note: note.to_owned(),
+        empty: "Nothing sold.".to_owned(),
+        points,
+    }
+}
+
+/// A share of the whole: each slice's colour is the thing it stands for.
+fn donut(id: &str, title: &str, buckets: Vec<mb_db::repo::reports::Bucket>) -> ChartView {
+    let whole = buckets
+        .iter()
+        .fold(0_i64, |acc, b| acc.saturating_add(b.gross.paise()));
+    let mut buckets = buckets;
+    buckets.sort_by_key(|b| std::cmp::Reverse(b.gross.paise()));
+    ChartView {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        kind: "donut".to_owned(),
+        note: String::new(),
+        empty: "Nothing sold.".to_owned(),
+        points: buckets
+            .iter()
+            .filter(|b| b.gross.is_positive())
+            .map(|b| PointView {
+                label: b.label.clone(),
+                value: b.gross.to_plain_string(),
+                note: words::count(b.bills, "bill", "bills"),
+                share: permille(b.gross.paise(), whole),
+                hue: hue_of(&b.key),
+            })
+            .collect(),
+    }
+}
+
+/// The dashboard's own name for the period.
+fn dashboard_title(period: Period, today: BusinessDay) -> String {
+    if period.days() == 1 {
+        if period.from == today {
+            return "Today, so far".to_owned();
+        }
+        if period.from == today.previous() {
+            return "Yesterday".to_owned();
+        }
+        return words::day_with_weekday(period.from, today);
+    }
+    format!(
+        "{} to {} · {} days",
+        words::day(period.from, today),
+        words::day(period.to, today),
+        period.days()
+    )
+}
+
+/// The period's figures, and everything that is waiting for a person. No period means today.
+pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardView> {
     let who = guard::require(app, Permission::ReportsView)?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
-    let day = crate::flows::today(crate::flows::now());
-    let period = Period::one_day(day);
+    let today = crate::flows::today(crate::flows::now());
+    let period = match period {
+        Some(arg) => arg.parse()?,
+        None => Period::one_day(today),
+    };
+    let one_day = period.days() == 1;
 
-    let (totals, position) = app.with_shop(|shop| {
-        shop.db
-            .read_transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                Ok((
-                    repos.corrections().day_totals(OUTLET, day)?,
-                    repos.money().cash_position(OUTLET, day)?,
-                ))
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
+    // The figures, summed day by day from the same rows the day close freezes.
+    let (bills, net, voids, voided_bills, cash, electronic, spent, position) =
+        app.with_shop(|shop| {
+            shop.db
+                .read_transaction(|tx| {
+                    let repos = mb_db::Repos::new(tx);
+                    let (mut bills, mut net, mut voids, mut voided, mut cash, mut upi, mut spent) =
+                        (0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64);
+                    let mut day = period.from;
+                    while day <= period.to {
+                        let totals = repos.corrections().day_totals(OUTLET, day)?;
+                        let figures = repos.days().figures(OUTLET, day)?;
+                        bills = bills.saturating_add(totals.bills);
+                        net = net.saturating_add(totals.net.paise());
+                        voids = voids.saturating_add(totals.voids.paise());
+                        voided = voided.saturating_add(totals.voided_bills);
+                        cash = cash.saturating_add(figures.cash.paise());
+                        upi = upi.saturating_add(figures.upi_and_card.paise());
+                        spent = spent.saturating_add(figures.expenses.paise());
+                        day = day.next();
+                    }
+                    // The drawer is a thing a single day has.
+                    let position = if one_day {
+                        Some(repos.money().cash_position(OUTLET, period.from)?)
+                    } else {
+                        None
+                    };
+                    Ok((
+                        bills,
+                        Money::from_paise(net),
+                        Money::from_paise(voids),
+                        voided,
+                        Money::from_paise(cash),
+                        Money::from_paise(upi),
+                        Money::from_paise(spent),
+                        position,
+                    ))
+                })
+                .map_err(|e| words::from_db(&e))
+        })?;
 
     // The average bill, computed here because it is money divided by a count and TypeScript may
     // do neither.
-    let average = if totals.bills > 0 {
-        Money::from_paise(totals.net.paise().saturating_div(totals.bills))
+    let average = if bills > 0 {
+        Money::from_paise(net.paise().saturating_div(bills))
     } else {
         Money::ZERO
     };
@@ -1675,67 +1918,171 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // The comparison against yesterday, through the same report the screen would run.
-    let compare_view = app.with_shop(|shop| {
+    // The comparison against the period before, and every chart, through the same grouped
+    // report the screen would run.
+    let (compare_view, charts) = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
                 let reports = mb_db::Repos::new(tx).reports();
                 let sum = |p: Period| -> Result<Money, mb_db::DbError> {
-                    Ok(reports
-                        .sales_by(OUTLET, p, SalesBy::Day)?
-                        .iter()
-                        .try_fold(Money::ZERO, |acc, b| acc.add(b.gross))
-                        .unwrap_or(Money::ZERO))
+                    Ok(Money::from_paise(
+                        reports
+                            .sales_by(OUTLET, p, SalesBy::Day)?
+                            .iter()
+                            .fold(0_i64, |acc, b| acc.saturating_add(b.gross.paise())),
+                    ))
                 };
-                Ok(compare(
-                    sum(period)?,
-                    sum(period.previous())?,
-                    period.previous(),
-                ))
+                let compare_view =
+                    compare(sum(period)?, sum(period.previous())?, period.previous());
+
+                // Every hour from the first sale to the last, the quiet ones included.
+                let by_hour = |id: &str| -> Result<ChartView, mb_db::DbError> {
+                    let buckets = reports.sales_by(OUTLET, period, SalesBy::Hour)?;
+                    let hours: std::collections::BTreeMap<i64, (Money, i64)> = buckets
+                        .iter()
+                        .map(|b| (b.key.parse().unwrap_or(0), (b.gross, b.bills)))
+                        .collect();
+                    let steps = match (hours.keys().next(), hours.keys().next_back()) {
+                        (Some(&first), Some(&last)) => (first..=last)
+                            .map(|hour| {
+                                let (gross, bills) =
+                                    hours.get(&hour).copied().unwrap_or((Money::ZERO, 0));
+                                (hour_words(hour), gross, bills)
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    Ok(columns(id, "Sales by hour", steps))
+                };
+
+                let mut charts = Vec::new();
+                if one_day {
+                    charts.push(by_hour("trend")?);
+                } else {
+                    let buckets = reports.sales_by(OUTLET, period, SalesBy::Day)?;
+                    let days: std::collections::BTreeMap<i32, (Money, i64)> = buckets
+                        .iter()
+                        .map(|b| (b.key.parse().unwrap_or(0), (b.gross, b.bills)))
+                        .collect();
+                    let steps = if period.days() <= FILLED_DAYS {
+                        let mut out = Vec::new();
+                        let mut day = period.from;
+                        while day <= period.to {
+                            let (gross, bills) = days
+                                .get(&day.days_since_epoch())
+                                .copied()
+                                .unwrap_or((Money::ZERO, 0));
+                            out.push((short_day_words(day), gross, bills));
+                            day = day.next();
+                        }
+                        out
+                    } else {
+                        days.iter()
+                            .map(|(key, (gross, bills))| {
+                                (
+                                    short_day_words(BusinessDay::from_days_since_epoch(*key)),
+                                    *gross,
+                                    *bills,
+                                )
+                            })
+                            .collect()
+                    };
+                    charts.push(columns("trend", "Sales by day", steps));
+                    charts.push(by_hour("hours")?);
+                }
+                charts.push(donut(
+                    "payment",
+                    "Payment modes",
+                    reports.sales_by(OUTLET, period, SalesBy::PaymentMode)?,
+                ));
+                charts.push(donut(
+                    "types",
+                    "Order types",
+                    reports.sales_by(OUTLET, period, SalesBy::OrderType)?,
+                ));
+                charts.push(ranking(
+                    "categories",
+                    "Categories",
+                    "",
+                    reports.sales_by(OUTLET, period, SalesBy::Category)?,
+                    |b| words::count(b.bills, "bill", "bills"),
+                ));
+                charts.push(ranking(
+                    "items",
+                    "Top selling",
+                    "",
+                    reports.sales_by(OUTLET, period, SalesBy::Item)?,
+                    |b| b.qty.map(|q| format!("{q} sold")).unwrap_or_default(),
+                ));
+                charts.push(ranking(
+                    "cashiers",
+                    "Cashiers",
+                    "",
+                    reports.sales_by(OUTLET, period, SalesBy::Cashier)?,
+                    |b| words::count(b.bills, "bill", "bills"),
+                ));
+                Ok((compare_view, charts))
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
+    let mut stats = vec![
+        StatView {
+            label: "Takings".to_owned(),
+            value: net.to_plain_string(),
+            note: words::count(bills, "bill", "bills"),
+        },
+        StatView {
+            label: "Average bill".to_owned(),
+            value: average.to_plain_string(),
+            note: if bills > 0 {
+                String::new()
+            } else {
+                "Nothing sold.".to_owned()
+            },
+        },
+    ];
+    stats.push(match position {
+        Some(position) => StatView {
+            label: "In the drawer".to_owned(),
+            value: position.expected.to_plain_string(),
+            note: "What the till expects, before counting.".to_owned(),
+        },
+        None => StatView {
+            label: "Cash taken".to_owned(),
+            value: cash.to_plain_string(),
+            note: format!("{} by UPI and card", electronic.to_plain_string()),
+        },
+    });
+    stats.push(StatView {
+        label: "Spent".to_owned(),
+        value: spent.to_plain_string(),
+        note: String::new(),
+    });
+    stats.push(StatView {
+        label: "Voided".to_owned(),
+        value: voids.to_plain_string(),
+        note: words::count(voided_bills, "bill", "bills"),
+    });
+    stats.push(StatView {
+        label: "Gross margin".to_owned(),
+        value: match margin {
+            Some(profit) => profit.gross_margin.to_plain_string(),
+            None => "—".to_owned(),
+        },
+        note: match margin.and_then(|p| p.margin_bp().map(|bp| (p, bp))) {
+            Some((_, bp)) => format!("{} of what you sold", margin_words(bp)),
+            None => "Add recipes to your dishes and this fills in.".to_owned(),
+        },
+    });
+
     Ok(DashboardView {
-        title: format!("Today, so far — {day}"),
-        stats: vec![
-            StatView {
-                label: "Takings".to_owned(),
-                value: totals.net.to_plain_string(),
-                note: words::count(totals.bills, "bill", "bills"),
-            },
-            StatView {
-                label: "Average bill".to_owned(),
-                value: average.to_plain_string(),
-                note: if totals.bills > 0 {
-                    String::new()
-                } else {
-                    "Nothing sold yet today.".to_owned()
-                },
-            },
-            StatView {
-                label: "In the drawer".to_owned(),
-                value: position.expected.to_plain_string(),
-                note: "What the till expects, before counting.".to_owned(),
-            },
-            StatView {
-                label: "Voided".to_owned(),
-                value: totals.voids.to_plain_string(),
-                note: words::count(totals.voided_bills, "bill", "bills"),
-            },
-            StatView {
-                label: "Gross margin".to_owned(),
-                value: match margin {
-                    Some(profit) => profit.gross_margin.to_plain_string(),
-                    None => "—".to_owned(),
-                },
-                note: match margin.and_then(|p| p.margin_bp().map(|bp| (p, bp))) {
-                    Some((_, bp)) => format!("{} of what you sold", margin_words(bp)),
-                    None => "Add recipes to your dishes and this fills in.".to_owned(),
-                },
-            },
-        ],
+        title: dashboard_title(period, today),
+        from: period.from.to_string(),
+        to: period.to.to_string(),
+        stats,
         compare: Some(compare_view),
+        charts,
         quiet: if attention.is_empty() {
             "Nothing needs you. The backup is current, everything printed, and \
              yesterday is closed."
@@ -1748,8 +2095,8 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
 }
 
 #[tauri::command]
-pub fn dashboard(app: tauri::State<'_, App>) -> UiResult<DashboardView> {
-    dashboard_on(&app)
+pub fn dashboard(app: tauri::State<'_, App>, period: Option<PeriodArg>) -> UiResult<DashboardView> {
+    dashboard_on(&app, period)
 }
 
 // Onto paper, and onto disk.

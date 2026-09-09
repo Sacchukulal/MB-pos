@@ -1,6 +1,7 @@
 /**
- * Day close: today's state, the drawer count that goes with it, the last fourteen days and the
- * holidays ahead. One screen, reached from the bar and from Reports › Days.
+ * Day open/close: today's state, when the day starts, the drawer count that goes with closing,
+ * the days since the shop opened and the holidays ahead. One screen, reached from the bar and
+ * from Reports.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -61,6 +62,8 @@ export function Days() {
   /** Every electronic payment nobody has said arrived yet. */
   const [unconfirmed, setUnconfirmed] = useState<readonly UnconfirmedView[]>([]);
   const [waiting, setWaiting] = useState('');
+  /** When a new day starts, as typed into the clock box. */
+  const [startsAt, setStartsAt] = useState('');
   const toast = useToast();
 
   const complain = useCallback(
@@ -81,8 +84,13 @@ export function Days() {
     );
   }, []);
 
+  const daysArrived = useCallback((fresh: DaysView) => {
+    setView(fresh);
+    setStartsAt(fresh.startsAt);
+  }, []);
+
   useEffect(() => {
-    call('days').then(setView).catch(complain);
+    call('days').then(daysArrived).catch(complain);
     // The drawer is optional: a shop that never counts still closes its days.
     call('count_cash', { counts: null })
       .then((fresh) => {
@@ -98,7 +106,18 @@ export function Days() {
         }
       })
       .catch(() => setUnconfirmed([]));
-  }, [complain, drawerArrived]);
+  }, [complain, daysArrived, drawerArrived]);
+
+  /** The day start goes through the settings, the one door every setting is saved by. */
+  const saveDayStart = () => {
+    call('save_settings', { edits: [{ key: 'day.starts_at_minutes', value: startsAt }] })
+      .then(() => call('days'))
+      .then((fresh) => {
+        daysArrived(fresh);
+        toast.show('ok', 'Saved.', fresh.dayRunsSays);
+      })
+      .catch(complain);
+  };
 
   /** Every write answers with the whole screen. */
   const act = (promise: Promise<DaysView>, said: string) => {
@@ -142,6 +161,7 @@ export function Days() {
       header: 'State',
       render: (row) => <Badge tone={TONES[row.state] ?? 'neutral'}>{STATE_WORDS[row.state] ?? row.state}</Badge>,
     },
+    { key: 'opened', header: 'Opened', nowrap: true, render: (row) => <Numeric>{row.openedSays}</Numeric> },
     { key: 'bills', header: 'Bills', numeric: true, render: (row) => <Numeric>{row.bills}</Numeric> },
     { key: 'net', header: 'Net', numeric: true, render: (row) => <Money value={row.net} /> },
     { key: 'says', header: '', render: (row) => <span className="mb-muted">{row.closedSays}</span> },
@@ -227,7 +247,7 @@ export function Days() {
   return (
     <Scroller className="mb-days">
       <PageHeader
-        title="Day close"
+        title="Day open/close"
         subtitle={view.todayClosedSays || view.todaySays}
         note={
           <>
@@ -241,6 +261,27 @@ export function Days() {
       <Sections>
         {/* Not a tip: it is why the buttons that were here are not. */}
         {view.closingSays ? <p className="mb-muted">{view.closingSays}</p> : null}
+
+        {view.maySetDay ? (
+          <Panel
+            title="The day"
+            actions={
+              <Row gap="inline" wrap={false}>
+                <Input
+                  aria-label="A new day starts at"
+                  type="time"
+                  value={startsAt}
+                  onChange={(event) => setStartsAt(event.target.value)}
+                />
+                <Button disabled={startsAt === '' || startsAt === view.startsAt} onClick={saveDayStart}>
+                  Save
+                </Button>
+              </Row>
+            }
+          >
+            <p className="mb-muted">{view.dayRunsSays}</p>
+          </Panel>
+        ) : null}
         {drawer ? (
           <Panel
             title="Count the drawer"
@@ -354,7 +395,7 @@ export function Days() {
           </Panel>
         ) : null}
 
-        <Panel title="The last 14 days" flush>
+        <Panel title="Days" flush>
           <Table columns={columns} rows={view.days} rowKey={(row) => row.day} />
         </Panel>
 

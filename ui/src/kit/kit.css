@@ -1228,3 +1228,228 @@ textarea.mb-input {
   font-size: inherit;
   letter-spacing: var(--tracking-code);
 }
+
+/* A chart: a card whose body is ink on a plot, every figure already written by Rust. */
+.mb-chart {
+  min-width: 0;
+}
+
+.mb-chart__note,
+.mb-chart__empty {
+  margin: 0;
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+}
+
+.mb-chart__empty {
+  padding: var(--space-4) 0;
+  text-align: center;
+}
+
+/* The one hue, and the four identities. */
+.mb-chart__mark--mono {
+  fill: var(--chart-mono);
+  stroke: var(--chart-mono);
+}
+
+.mb-chart__mark--hue-1 {
+  fill: var(--chart-1);
+  stroke: var(--chart-1);
+}
+
+.mb-chart__mark--hue-2 {
+  fill: var(--chart-2);
+  stroke: var(--chart-2);
+}
+
+.mb-chart__mark--hue-3 {
+  fill: var(--chart-3);
+  stroke: var(--chart-3);
+}
+
+.mb-chart__mark--hue-4 {
+  fill: var(--chart-4);
+  stroke: var(--chart-4);
+}
+
+/* Columns. */
+.mb-chart__columns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-chart__plot {
+  display: block;
+  overflow: visible;
+}
+
+/* The point under the pointer, or the tallest one until there is a pointer. */
+.mb-chart__tip {
+  margin: 0;
+  min-height: var(--line-normal);
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+}
+
+.mb-chart__axis {
+  stroke: var(--border);
+  stroke-width: var(--border-width);
+}
+
+.mb-chart__hit {
+  fill: transparent;
+}
+
+.mb-chart__step {
+  outline: none;
+}
+
+.mb-chart__step--on .mb-chart__hit,
+.mb-chart__step:focus-visible .mb-chart__hit {
+  fill: var(--surface-2);
+}
+
+.mb-chart__step .mb-chart__mark {
+  stroke: none;
+}
+
+.mb-chart__figure,
+.mb-chart__label {
+  font-family: var(--font-num);
+  font-size: var(--type-caption);
+  font-variant-numeric: tabular-nums;
+  fill: var(--text-muted);
+}
+
+.mb-chart__figure {
+  font-weight: var(--weight-medium);
+  fill: var(--text);
+}
+
+/* Bars: label, track, figure. */
+.mb-chart__bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mb-chart__row {
+  display: grid;
+  grid-template-columns: var(--chart-label) minmax(0, 1fr) var(--chart-figure);
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--type-cell);
+}
+
+.mb-chart__rowlabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.mb-chart__track {
+  display: block;
+  height: var(--chart-bar);
+}
+
+.mb-chart__track .mb-chart__mark {
+  stroke: none;
+}
+
+.mb-chart__trackline {
+  fill: var(--chart-track);
+  stroke: none;
+}
+
+.mb-chart__rowfigure,
+.mb-chart__keyfigure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: var(--line-tight);
+  color: var(--text);
+}
+
+.mb-chart__rownote {
+  font-size: var(--type-caption);
+  color: var(--text-faint);
+}
+
+/* The ring and its legend. */
+.mb-chart__donut {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.mb-chart__ring {
+  flex: 0 0 auto;
+  width: var(--donut-size);
+  height: var(--donut-size);
+  transform: rotate(-90deg);
+}
+
+.mb-chart__ring .mb-chart__trackline {
+  fill: none;
+  stroke: var(--chart-track);
+}
+
+.mb-chart__slice {
+  fill: none;
+}
+
+.mb-chart__legend {
+  display: flex;
+  flex: 1 1 var(--chart-label);
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  list-style: none;
+}
+
+.mb-chart__key {
+  display: grid;
+  grid-template-columns: var(--dot-size) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-cell);
+}
+
+.mb-chart__swatch {
+  display: inline-block;
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: var(--radius-sm);
+  background: var(--chart-mono);
+}
+
+.mb-chart__swatch.mb-chart__mark--hue-1 {
+  background: var(--chart-1);
+}
+
+.mb-chart__swatch.mb-chart__mark--hue-2 {
+  background: var(--chart-2);
+}
+
+.mb-chart__swatch.mb-chart__mark--hue-3 {
+  background: var(--chart-3);
+}
+
+.mb-chart__swatch.mb-chart__mark--hue-4 {
+  background: var(--chart-4);
+}
+
+.mb-chart__keylabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

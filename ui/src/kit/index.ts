@@ -81,6 +81,7 @@ export {
 } from './display';
 export type { BadgeTone, Column } from './display';
 export { InfoTip } from './InfoTip';
+export { Chart } from './charts';
 
 /** Join class names, dropping the falsy ones. */
 export { cx } from './cx';

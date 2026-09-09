@@ -400,7 +400,7 @@ fn a_locked_day_refuses_a_settle_an_expense_and_a_cash_movement() {
     assert!(
         refused
             .message
-            .ends_with("Open it again under Day close to keep billing."),
+            .ends_with("Open it again under Day open/close to keep billing."),
         "{}",
         refused.message
     );
@@ -465,7 +465,11 @@ fn a_closed_day_refuses_a_void_until_somebody_opens_it_again() {
     )
     .expect_err("it voided into a closed day");
     assert_eq!(refused.code, "void.day_closed");
-    assert!(refused.message.contains("Day close"), "{}", refused.message);
+    assert!(
+        refused.message.contains("Day open/close"),
+        "{}",
+        refused.message
+    );
 
     // Reopening needs a reason, for the same reason the close leaves a mark.
     let no_reason =
@@ -1094,10 +1098,11 @@ fn the_day_screen_says_when_the_shops_day_starts() {
 
     let view = days_on(&app).expect("the days");
     assert!(
-        view.day_runs_says.contains("5:00 am"),
+        view.day_runs_says.contains("calendar date"),
         "the standard rule is not said: {}",
         view.day_runs_says
     );
+    assert_eq!(view.starts_at, "00:00");
 
     let mut config = app.shop_config();
     config.day.starts_at_minutes = 390; // 06:30
@@ -1109,6 +1114,7 @@ fn the_day_screen_says_when_the_shops_day_starts() {
             .contains("6:30 am"),
         "the shop's rule is not the one said"
     );
+    assert_eq!(days_on(&app).expect("the days").starts_at, "06:30");
 
     let mut config = app.shop_config();
     config.day.starts_at_minutes = 0;
@@ -1117,8 +1123,8 @@ fn the_day_screen_says_when_the_shops_day_starts() {
         days_on(&app)
             .expect("the days")
             .day_runs_says
-            .contains("midnight"),
-        "a midnight rule should read as midnight, not as a clock time"
+            .contains("calendar date"),
+        "a midnight rule should read as the calendar date, not as a clock time"
     );
 }
 
@@ -1343,4 +1349,201 @@ fn opening_a_day_again_takes_back_the_float_it_left() {
     // Closing it again leaves it once, not twice.
     close_day_on(&app, today().to_string(), None, String::new(), false).expect("closed again");
     assert_eq!(float_of(&app, today().next()), 200_000);
+}
+
+// The list starts where the shop did.
+
+/// A shop opened today lists today and nothing before it; a day before its first bill is not a
+/// day it left open.
+#[test]
+fn the_days_list_starts_where_the_shop_did() {
+    let scratch = Scratch::new("day_list_start");
+    let app = a_shop(&scratch, "list_start");
+
+    // Nothing has ever happened: today alone, and it is open.
+    let fresh = days_on(&app).expect("the days");
+    let listed: Vec<&str> = fresh.days.iter().map(|row| row.day.as_str()).collect();
+    assert_eq!(listed, vec![today().to_string()]);
+    assert_eq!(fresh.days[0].state, "open");
+    assert_eq!(
+        fresh.days[0].opened_says, "",
+        "no order yet, so no opening time"
+    );
+
+    // The first bill opens the day, and says when.
+    a_cash_sale(&app);
+    let opened = days_on(&app).expect("the days");
+    assert_eq!(opened.days.len(), 1);
+    assert!(
+        opened.days[0].opened_says.ends_with(" am") || opened.days[0].opened_says.ends_with(" pm"),
+        "{}",
+        opened.days[0].opened_says
+    );
+
+    // A bill three days ago: the list reaches back to it, and no further.
+    let three_ago = today().previous().previous().previous();
+    move_today_to(&app, three_ago);
+    let view = days_on(&app).expect("the days");
+    let listed: Vec<String> = view.days.iter().map(|row| row.day.clone()).collect();
+    assert_eq!(
+        listed,
+        vec![
+            today().to_string(),
+            today().previous().to_string(),
+            three_ago.next().to_string(),
+            three_ago.to_string(),
+        ]
+    );
+    assert_eq!(row_for(&view, three_ago).state, "pending");
+    assert_eq!(row_for(&view, today().previous()).state, "pending");
+
+    // A holiday marked before the first bill is history too, and the list reaches it.
+    let five_ago = three_ago.previous().previous();
+    set_holiday_on(&app, vec![five_ago.to_string()], true).expect("a holiday");
+    let view = days_on(&app).expect("the days");
+    assert_eq!(view.days.len(), 6);
+    assert_eq!(row_for(&view, five_ago).state, "holiday");
+}
+
+/// The list never reaches further back than a fortnight, however old the shop is.
+#[test]
+fn the_days_list_is_at_most_a_fortnight() {
+    let scratch = Scratch::new("day_list_cap");
+    let app = a_shop(&scratch, "list_cap");
+    a_cash_sale(&app);
+    move_today_to(
+        &app,
+        BusinessDay::from_days_since_epoch(today().days_since_epoch() - 40),
+    );
+    let view = days_on(&app).expect("the days");
+    assert_eq!(view.days.len(), 14);
+    assert_eq!(view.days[0].day, today().to_string());
+}
+
+// The day start.
+
+/// The owner's day start is what the screen shows and what the next bill is dated by.
+#[test]
+fn the_day_start_is_the_owners_and_reaches_the_screen() {
+    let scratch = Scratch::new("day_start_owner");
+    let app = a_shop(&scratch, "start_owner");
+
+    let view = days_on(&app).expect("the days");
+    assert!(view.may_set_day, "the stand-in owner may set the day");
+    assert_eq!(view.starts_at, "00:00");
+
+    let edit = |value: &str| {
+        crate::settings::ipc::save_on(
+            &app,
+            vec![crate::settings::ipc::SettingEdit {
+                key: "day.starts_at_minutes".to_owned(),
+                value: value.to_owned(),
+            }],
+        )
+    };
+    edit("05:00").expect("saved");
+    let view = days_on(&app).expect("the days");
+    assert_eq!(view.starts_at, "05:00");
+    assert!(
+        view.day_runs_says.contains("5:00 am"),
+        "{}",
+        view.day_runs_says
+    );
+    assert_eq!(crate::flows::day_rule().starts_at_minutes(), 300);
+
+    // Not a time: refused, and the rule stands.
+    let refused = edit("half past").expect_err("nonsense was saved");
+    assert_eq!(refused.code, "settings.invalid");
+    assert_eq!(crate::flows::day_rule().starts_at_minutes(), 300);
+
+    // Back to the calendar date, because the day rule is process-wide.
+    edit("00:00").expect("saved");
+    assert_eq!(crate::flows::day_rule().starts_at_minutes(), 0);
+}
+
+// The dashboard.
+
+/// The dashboard draws the period it is asked for: the tiles, the charts and their shares all
+/// come from the same bills.
+#[test]
+fn the_dashboard_draws_the_period_it_is_asked_for() {
+    use crate::reports::{PeriodArg, dashboard_on};
+
+    let scratch = Scratch::new("dashboard_period");
+    let app = a_shop(&scratch, "dashboard");
+    let two_ago = today().previous().previous();
+
+    // Two bills two days ago, one today.
+    a_cash_sale(&app);
+    a_cash_sale(&app);
+    move_today_to(&app, two_ago);
+    let one = a_cash_sale(&app);
+
+    // Today: by the hour, and every chart says one bill.
+    let today_view = dashboard_on(&app, None).expect("today");
+    assert_eq!(today_view.title, "Today, so far");
+    assert_eq!(today_view.from, today().to_string());
+    assert_eq!(today_view.stats[0].label, "Takings");
+    assert_eq!(today_view.stats[0].value, one.to_plain_string());
+    assert_eq!(today_view.stats[0].note, "1 bill");
+    let ids: Vec<&str> = today_view.charts.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "trend",
+            "payment",
+            "types",
+            "categories",
+            "items",
+            "cashiers"
+        ]
+    );
+    let trend = &today_view.charts[0];
+    assert_eq!(trend.kind, "columns");
+    assert_eq!(trend.title, "Sales by hour");
+    assert_eq!(trend.points.len(), 1, "one selling hour, no gaps to fill");
+    assert_eq!(trend.points[0].share, 1000);
+    assert_eq!(trend.points[0].value, one.to_plain_string());
+    let payment = &today_view.charts[1];
+    assert_eq!(payment.kind, "donut");
+    assert_eq!(payment.points[0].label, "Cash");
+    assert_eq!(payment.points[0].share, 1000, "all of it was cash");
+    assert_eq!(payment.points[0].hue, 1);
+    let items = &today_view.charts[4];
+    assert_eq!(items.kind, "bars");
+    assert_eq!(items.points[0].label, "Masala Dosa");
+    assert_eq!(items.points[0].note, "1 sold");
+    assert_eq!(items.points[0].hue, 0);
+
+    // Three days: by the day, every day drawn, and the busier day is the full column.
+    let three = dashboard_on(
+        &app,
+        Some(PeriodArg {
+            from: two_ago.to_string(),
+            to: today().to_string(),
+        }),
+    )
+    .expect("three days");
+    assert!(three.title.ends_with("· 3 days"), "{}", three.title);
+    assert_eq!(three.stats[0].note, "3 bills");
+    assert_eq!(three.stats[2].label, "Cash taken");
+    let trend = &three.charts[0];
+    assert_eq!(trend.title, "Sales by day");
+    assert_eq!(trend.points.len(), 3);
+    assert_eq!(trend.points[0].share, 1000, "two bills two days ago");
+    assert_eq!(trend.points[1].share, 0, "nothing yesterday");
+    assert_eq!(trend.points[1].note, "");
+    assert_eq!(trend.points[2].share, 500, "one bill today is half of two");
+    assert_eq!(three.charts[1].id, "hours");
+
+    // A period that cannot be read is refused, not guessed.
+    let refused = dashboard_on(
+        &app,
+        Some(PeriodArg {
+            from: "soon".to_owned(),
+            to: today().to_string(),
+        }),
+    )
+    .expect_err("nonsense was drawn");
+    assert_eq!(refused.code, "report.period");
 }

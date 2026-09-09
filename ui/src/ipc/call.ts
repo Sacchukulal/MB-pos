@@ -637,7 +637,7 @@ export interface Commands {
   save_counter: { args: { edit: CounterEdit }; returns: NumberingView };
 
   // Thirteen reports behind four commands, because the report list is the screen.
-  dashboard: { args: void; returns: DashboardView };
+  dashboard: { args: { period: PeriodArg | null }; returns: DashboardView };
   report_list: { args: void; returns: ReportListView };
   report: { args: { id: string; period: PeriodArg }; returns: ReportView };
   report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };

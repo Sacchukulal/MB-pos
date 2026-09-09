@@ -313,7 +313,8 @@ pub struct Day {
     /// about at sign-in and a closed day takes no more money. Off, and no day is ever locked:
     /// every figure is still there, but nothing is refused and nobody is asked.
     pub must_close: bool,
-    /// Minutes past midnight. 300 is 5 a.m., the default every Indian restaurant recognises.
+    /// Minutes past midnight. 0 is the calendar date; a late-night place picks 5 a.m. so a bill
+    /// at 1 a.m. lands on the evening it was earned.
     pub starts_at_minutes: u32,
     /// Above this difference between counted and expected cash, closing the day asks why — and
     /// the answer goes on the slip and in the history.

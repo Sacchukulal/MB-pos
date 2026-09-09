@@ -255,8 +255,15 @@
   --dayclose-column: 22rem;
   --dayclose-face: 3rem;
   --dayclose-box: 5rem;
-  /* Four stat cards across at 1366. */
-  --dash-stat: 12rem;
+  /* Six stat cards across at 1366. */
+  --dash-stat: 10rem;
+  /* Two chart cards across at 1366; the run over time takes the whole row. */
+  --dash-chart: 24rem;
+  --chart-columns-height: 12rem;
+  --chart-bar: 0.75rem;
+  --chart-label: 8rem;
+  --chart-figure: 6rem;
+  --donut-size: 9rem;
   /* The totals column of an opened bill. */
   --bill-totals: 20rem;
 
@@ -367,6 +374,18 @@
   --brand: #2563eb;
   --brand-soft: #dbe7fd;
 
+  /*
+   * The charts. One hue for every chart that ranks or runs over time; four fixed identities
+   * for the slices of a whole (a payment mode, an order type), checked for colour blindness
+   * against this surface.
+   */
+  --chart-mono: var(--brand);
+  --chart-track: var(--surface-sunk);
+  --chart-1: #0d9488;
+  --chart-2: #ea580c;
+  --chart-3: #2563eb;
+  --chart-4: #db2777;
+
   /* Semantic — never rendered with --accent, never the only signal. */
   --ok: #15803d;
   --ok-soft: #dcf5e3;
@@ -426,6 +445,13 @@
 
   --brand: #60a5fa;
   --brand-soft: #172a4a;
+
+  --chart-mono: var(--brand);
+  --chart-track: var(--surface-sunk);
+  --chart-1: #0d9488;
+  --chart-2: #ea580c;
+  --chart-3: #3b82f6;
+  --chart-4: #db2777;
 
   --ok: #4ade80;
   --ok-soft: #12291a;

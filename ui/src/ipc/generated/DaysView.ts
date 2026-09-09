@@ -2,7 +2,7 @@
 import type { DayRowView } from "./DayRowView";
 
 /**
- * The Day close screen — reached from the bar, and from Reports › Days.
+ * The Day open/close screen — reached from the bar, and from Reports.
  */
 export type DaysView = { today: string, todaySays: string, todayState: string, todayClosedSays: string, mayAct: boolean, 
 /**
@@ -11,15 +11,24 @@ export type DaysView = { today: string, todaySays: string, todayState: string, t
  */
 closingSays: string, 
 /**
- * The shop's day rule as a sentence: "Your day runs from 5:00 am to 5:00 am…".
+ * The shop's day rule as a sentence: "A new day starts at 5:00 am…".
  */
 dayRunsSays: string, 
+/**
+ * When a new day starts, as the clock box shows it: "05:00".
+ */
+startsAt: string, 
+/**
+ * Whether the person looking may change when the day starts.
+ */
+maySetDay: boolean, 
 /**
  * What closing today will leave in the drawer, in words — or empty.
  */
 carrySays: string, 
 /**
- * Today and the thirteen days before it, newest first.
+ * Today and up to thirteen days before it, newest first — never a day before the shop
+ * opened.
  */
 days: Array<DayRowView>, 
 /**

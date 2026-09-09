@@ -64,9 +64,12 @@ function answer(command: string) {
   if (command === 'report_list') return Promise.resolve(list);
   if (command === 'dashboard') {
     return Promise.resolve({
-      title: 'Today, so far — 2026-08-09',
+      title: 'Today, so far',
+      from: '2026-08-09',
+      to: '2026-08-09',
       stats: [],
       compare: null,
+      charts: [],
       attention: [],
       quiet: 'Nothing needs you.',
     });
@@ -211,8 +214,8 @@ it('says why, on the screen, when the licence does not cover reports', async () 
 
 it('puts the days beside the dashboard, and opens them without asking for a report', async () => {
   open();
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Days' })).toBeTruthy());
-  fireEvent.click(screen.getByRole('button', { name: 'Days' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Day open/close' })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Day open/close' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
   // Today's state is the subtitle, and its one press is right there.
   await waitFor(() => expect(screen.getByText('Today, Sunday 9 August')).toBeTruthy());

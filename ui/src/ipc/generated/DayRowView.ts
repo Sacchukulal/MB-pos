@@ -2,13 +2,17 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * One row of the Days screen.
+ * One row of the Day open/close screen.
  */
 export type DayRowView = { day: string, daySays: string, 
 /**
  * `trading` or `holiday`.
  */
 kind: string, isLocked: boolean, bills: number, net: MoneyView, 
+/**
+ * "9:02 am" — when the first order of the day was started; empty on a day with none.
+ */
+openedSays: string, 
 /**
  * "Closed 3 Sep, 11:14 pm by Ravi.", "Holiday, marked 1 Sep by Ravi.", "Never closed.",
  * "Open."

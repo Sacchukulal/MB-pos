@@ -504,7 +504,7 @@ fn changing_the_day_start_does_not_move_a_bill_that_is_already_written() {
 
     let at = Timestamp::from_millis(1_785_704_400_000);
     let early = DayRule::new(60).expect("01:00 is a time");
-    let late = DayRule::DEFAULT;
+    let late = DayRule::FIVE_AM;
 
     let under_late = BusinessDay::of(at, late, UtcOffset::INDIA);
     let under_early = BusinessDay::of(at, early, UtcOffset::INDIA);
@@ -516,11 +516,15 @@ fn changing_the_day_start_does_not_move_a_bill_that_is_already_written() {
     let scratch = Scratch::new("settings-day");
     let app = a_shop(&scratch, "day");
 
-    // A bill written under the standard rule.
+    // A bill written under the late-night rule.
+    let old = app.shop_config();
+    let mut late_config = old.clone();
+    late_config.day.starts_at_minutes = 300;
+    save(&app, &old, &late_config);
     let day_written = crate::flows::today(at);
     assert_eq!(day_written, under_late);
 
-    let old = app.shop_config();
+    let old = late_config;
     let mut new = old.clone();
     new.day.starts_at_minutes = 60;
     save(&app, &old, &new);
@@ -535,7 +539,7 @@ fn changing_the_day_start_does_not_move_a_bill_that_is_already_written() {
     // assume the standard one.
     let old = new.clone();
     let mut back = old.clone();
-    back.day.starts_at_minutes = 300;
+    back.day.starts_at_minutes = 0;
     save(&app, &old, &back);
     assert_eq!(crate::flows::day_rule(), DayRule::DEFAULT);
 }

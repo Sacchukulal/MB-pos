@@ -119,18 +119,12 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   return (
     <div className="mb-reports">
       <Scroller inset className="mb-reports__rail">
-        {/*
-          At the top and on their own: one is the question an owner opens this screen to ask,
-          the other is the thing a shop does every single night — close the day.
-        */}
+        {/* At the top and on their own: the dashboard, the bills, and the day itself. */}
         <div className="mb-reports__group">
           {[
-            // Not just "Today": there is a period preset by that name three inches to the
-            // right, and two buttons saying the same word that do different things is how a
-            // screen teaches somebody to distrust it.
-            { id: TODAY, label: 'Today at a glance' },
+            { id: TODAY, label: 'Dashboard' },
             { id: BILLS, label: 'Bills' },
-            { id: DAYS, label: 'Days' },
+            { id: DAYS, label: 'Day open/close' },
           ].map((entry) => (
             <button
               type="button"
@@ -177,7 +171,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         ) : locked || !list ? (
           <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
         ) : chosen === TODAY ? (
-          <Dashboard />
+          <Dashboard presets={list.periods} />
         ) : (
           <>
         <div className="mb-reports__when">
@@ -301,7 +295,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   );
 }
 
-/** Not a report id — the one entry on this screen that is a thing to DO. */
+/** Not a report id — the day, opened and closed. */
 const DAYS = 'days';
 
 /** Nor are the bills: one at a time, with the ways to take one back. */

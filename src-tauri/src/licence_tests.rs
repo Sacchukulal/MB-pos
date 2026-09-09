@@ -263,7 +263,7 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
         ),
         (
             "dashboard",
-            crate::reports::dashboard_on(&app).expect_err("the dashboard was allowed"),
+            crate::reports::dashboard_on(&app, None).expect_err("the dashboard was allowed"),
         ),
         (
             "open_pairing",

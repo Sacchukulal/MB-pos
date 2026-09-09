@@ -96,7 +96,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     // First in the More sheet: it is done every night, and a cashier who may close a day
     // cannot open Reports, so this is their only door to it.
     id: 'dayclose',
-    label: 'Day close',
+    label: 'Day open/close',
     icon: 'calendar',
     render: () => <Days />,
     needsAny: ['day.close', 'reports.view'],
@@ -531,7 +531,7 @@ export function Shell() {
       title: dayState.todayState === 'holiday' ? 'Today is a holiday' : 'Today is closed',
       says: `${dayState.todayClosedSays} Nothing more can be billed into it until somebody opens it again.`,
       goTo: dayState.mayAct ? 'dayclose' : undefined,
-      goLabel: dayState.mayAct ? 'Open Day close' : undefined,
+      goLabel: dayState.mayAct ? 'Day open/close' : undefined,
     });
   }
   if (tillsSay) {

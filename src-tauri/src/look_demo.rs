@@ -322,8 +322,11 @@ fn demo_look() {
     let mut licensing = mb_license::Licensing::new(
         home.clone(),
         machine.clone(),
-        std::sync::Arc::new(mb_license::cloud::Stub::trial(&machine, 14, crate::flows::now()))
-            as std::sync::Arc<dyn mb_license::Cloud>,
+        std::sync::Arc::new(mb_license::cloud::Stub::trial(
+            &machine,
+            14,
+            crate::flows::now(),
+        )) as std::sync::Arc<dyn mb_license::Cloud>,
         env!("CARGO_PKG_VERSION"),
     );
     licensing
@@ -342,6 +345,7 @@ fn demo_look() {
     seed_open_orders(&app);
     seed_credit(&app);
     seed_expenses(&app);
+    spread_over_the_fortnight(&app);
     seed_shelf(&app);
     seed_people(&app);
     seed_delivery(&app);
@@ -437,8 +441,11 @@ fn seed_menu(app: &App) {
                             name: (*name).to_owned(),
                             unit_price: Money::from_paise(rupees * 100),
                             // The seeded slab for the rate; the demo menu is priced tax-in.
-                            tax_class_id: mb_core::seeded_slab_for(mb_core::TaxKind::Gst, rate_of(*rate))
-                                .expect("a seeded slab for every demo rate"),
+                            tax_class_id: mb_core::seeded_slab_for(
+                                mb_core::TaxKind::Gst,
+                                rate_of(*rate),
+                            )
+                            .expect("a seeded slab for every demo rate"),
                             price_basis: Some(mb_core::PriceBasis::Inclusive),
                             hsn: None,
                             // A cost on the food, so the food-cost and profit screens are not a
@@ -579,6 +586,126 @@ fn seed_settled_bills(app: &App) -> usize {
         done += 1;
     }
     done
+}
+
+/// How many days back each settled bill is moved, in turn, and by how many hours its clock is
+/// turned. The sixth day back gets nothing, so the days list has a holiday in it.
+const SPREAD: &[(i64, i64)] = &[
+    (0, 0),
+    (1, -3),
+    (2, 2),
+    (0, -5),
+    (3, 4),
+    (4, -1),
+    (1, 3),
+    (5, -6),
+    (7, 1),
+    (2, -2),
+    (8, 5),
+    (0, -8),
+    (9, -4),
+    (3, 6),
+    (10, 0),
+    (11, -3),
+    (1, -7),
+    (12, 2),
+    (13, -1),
+    (0, 3),
+    (4, -6),
+    (13, 4),
+    (2, -9),
+    (7, -2),
+    (0, 1),
+];
+
+/// Move the settled bills, the expenses and the payouts across the last two weeks and around the
+/// clock, so the dashboard has a fortnight to draw and the days list has history. The STORED
+/// business day is moved with the clock, the way the product itself would have stamped it; then
+/// every past day but yesterday is closed, and the empty one is a holiday.
+fn spread_over_the_fortnight(app: &App) {
+    let now = crate::flows::now();
+    let today = crate::flows::today(now);
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let mut ids = tx.prepare(
+                    "SELECT id FROM orders
+                      WHERE outlet_id = ?1 AND state = 'settled' ORDER BY created_at",
+                )?;
+                let orders: Vec<String> = ids
+                    .query_map([OUTLET], |row| row.get(0))?
+                    .collect::<Result<_, _>>()?;
+                drop(ids);
+                for (n, id) in orders.iter().enumerate() {
+                    let (back, hours) = SPREAD[n % SPREAD.len()];
+                    let shift = -back * 86_400_000 + hours * 3_600_000;
+                    let day = today.days_since_epoch() - i32::try_from(back).unwrap_or(0);
+                    tx.execute(
+                        "UPDATE orders SET business_day = ?2, created_at = created_at + ?3,
+                                           settled_at = settled_at + ?3
+                          WHERE id = ?1",
+                        (id.as_str(), i64::from(day), shift),
+                    )?;
+                    tx.execute(
+                        "UPDATE payments SET business_day = ?2 WHERE order_id = ?1",
+                        (id.as_str(), i64::from(day)),
+                    )?;
+                }
+                // What was spent goes with the bills; the opening float stays with today.
+                for (table, filter) in
+                    [("expenses", ""), ("cash_movements", " AND kind <> 'float'")]
+                {
+                    let mut ids = tx.prepare(&format!(
+                        "SELECT id FROM {table} WHERE outlet_id = ?1{filter} ORDER BY rowid"
+                    ))?;
+                    let rows: Vec<String> = ids
+                        .query_map([OUTLET], |row| row.get(0))?
+                        .collect::<Result<_, _>>()?;
+                    drop(ids);
+                    for (n, id) in rows.iter().enumerate() {
+                        let (back, _) = SPREAD[(n * 3) % SPREAD.len()];
+                        let day = today.days_since_epoch() - i32::try_from(back).unwrap_or(0);
+                        tx.execute(
+                            &format!("UPDATE {table} SET business_day = ?2 WHERE id = ?1"),
+                            (id.as_str(), i64::from(day)),
+                        )?;
+                    }
+                }
+                // Every past day is closed except yesterday, which the gate will ask about; the
+                // sixth day back had nothing on it and is a holiday.
+                let repos = Repos::new(tx);
+                for back in 2..14_i32 {
+                    let day = BusinessDay::from_days_since_epoch(today.days_since_epoch() - back);
+                    let figures = repos.days().figures(OUTLET, day)?;
+                    let holiday = figures.is_empty();
+                    repos.days().lock(
+                        OUTLET,
+                        &mb_db::repo::DayRow {
+                            day,
+                            kind: if holiday {
+                                mb_db::repo::DayKind::Holiday
+                            } else {
+                                mb_db::repo::DayKind::Trading
+                            },
+                            is_locked: true,
+                            closed_at: Some(Timestamp::from_millis(
+                                now.millis() - i64::from(back) * 86_400_000 + 3_600_000,
+                            )),
+                            closed_by: Some(StaffId::new(crate::state::DEFAULT_STAFF)),
+                            reopened_at: None,
+                            reopened_by: None,
+                            note: None,
+                            bills: figures.bills,
+                            net: figures.net,
+                            cash_taken: figures.cash,
+                        },
+                    )?;
+                }
+                Ok(())
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("spread");
 }
 
 fn mode_of(tag: &str) -> mb_core::PaymentMode {

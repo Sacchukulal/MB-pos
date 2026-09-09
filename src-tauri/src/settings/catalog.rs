@@ -1763,9 +1763,9 @@ pub const CATALOG: &[Entry] = &[
         key: "day.starts_at_minutes",
         group: Group::Day,
         storage: Storage::Row,
-        label: "Your day starts at",
-        help: "The time a new business day begins. At 05:00 a bill printed at 1 a.m. counts \
-               as yesterday's. This changes every report you will ever run.",
+        label: "A new day starts at",
+        help: "Midnight makes the day the calendar date. At 05:00 a bill printed at 1 a.m. \
+               counts as yesterday's. Set once; it changes which day every bill lands in.",
         synonyms: &["day", "business day", "5 am", "close", "midnight", "cutoff", "time"],
         kind: Kind::Time,
         read: |c| Value::Int(i64::from(c.day.starts_at_minutes)),

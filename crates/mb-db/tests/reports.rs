@@ -113,7 +113,7 @@ fn a_bill_after_midnight_appears_on_exactly_one_day_in_every_report() {
     shop::build(&db);
 
     let after_midnight = Timestamp::from_millis(1_785_696_900_000);
-    let belongs_to = BusinessDay::of(after_midnight, DayRule::DEFAULT, UtcOffset::INDIA);
+    let belongs_to = BusinessDay::of(after_midnight, DayRule::FIVE_AM, UtcOffset::INDIA);
     let calendar_date = BusinessDay::of(
         after_midnight,
         DayRule::new(0).expect("midnight"),

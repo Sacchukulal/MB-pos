@@ -12,9 +12,14 @@ pub struct DayRule {
 }
 
 impl DayRule {
-    /// 05:00 — late enough that a shop closing at 1 am still books the night's takings against
-    /// the evening it worked.
+    /// Midnight: until a shop chooses otherwise, its business day is the calendar date.
     pub const DEFAULT: DayRule = DayRule {
+        starts_at_minutes: 0,
+    };
+
+    /// 05:00 — the rule a late-night place picks, so a bill at 1 am is booked against the
+    /// evening it was earned.
+    pub const FIVE_AM: DayRule = DayRule {
         starts_at_minutes: 300,
     };
 
@@ -190,9 +195,20 @@ mod tests {
     #[test]
     fn the_quarter_past_midnight_bill_belongs_to_last_night() {
         let at = ist(2026, 8, 2, 0, 15);
-        let day = BusinessDay::of(at, DayRule::DEFAULT, UtcOffset::INDIA);
+        let day = BusinessDay::of(at, DayRule::FIVE_AM, UtcOffset::INDIA);
         assert_eq!(day, BusinessDay::from_ymd(2026, 8, 1));
         assert_eq!(day.to_string(), "2026-08-01");
+    }
+
+    #[test]
+    fn until_a_shop_chooses_the_day_is_the_calendar_date() {
+        assert_eq!(DayRule::default(), DayRule::DEFAULT);
+        assert_eq!(DayRule::DEFAULT.starts_at_minutes(), 0);
+        let at = ist(2026, 8, 2, 0, 15);
+        assert_eq!(
+            BusinessDay::of(at, DayRule::DEFAULT, UtcOffset::INDIA),
+            BusinessDay::from_ymd(2026, 8, 2)
+        );
     }
 
     #[test]
@@ -200,7 +216,7 @@ mod tests {
         let day_of = |hour, minute| {
             BusinessDay::of(
                 ist(2026, 8, 2, hour, minute),
-                DayRule::DEFAULT,
+                DayRule::FIVE_AM,
                 UtcOffset::INDIA,
             )
         };
@@ -231,7 +247,7 @@ mod tests {
         );
 
         // D5's answer: compute it ONCE, with the shop's own rule and offset, and store that.
-        let stored = BusinessDay::of(at, DayRule::DEFAULT, UtcOffset::INDIA);
+        let stored = BusinessDay::of(at, DayRule::FIVE_AM, UtcOffset::INDIA);
         assert_eq!(stored.to_string(), "2026-08-01", "the night it was earned");
     }
 
@@ -259,7 +275,7 @@ mod tests {
     fn the_range_is_half_open_so_the_boundary_bill_is_counted_once() {
         let day = BusinessDay::from_ymd(2026, 8, 1);
         let (start, end) = day
-            .range(DayRule::DEFAULT, UtcOffset::INDIA)
+            .range(DayRule::FIVE_AM, UtcOffset::INDIA)
             .expect("in range");
 
         assert_eq!(start, ist(2026, 8, 1, 5, 0));
@@ -267,19 +283,19 @@ mod tests {
 
         // The instant at `end` belongs to the NEXT day, not to this one.
         assert_eq!(
-            BusinessDay::of(end, DayRule::DEFAULT, UtcOffset::INDIA),
+            BusinessDay::of(end, DayRule::FIVE_AM, UtcOffset::INDIA),
             day.next()
         );
         // And `start` belongs to this one.
         assert_eq!(
-            BusinessDay::of(start, DayRule::DEFAULT, UtcOffset::INDIA),
+            BusinessDay::of(start, DayRule::FIVE_AM, UtcOffset::INDIA),
             day
         );
 
         // The next day's range begins exactly where this one ends — no gap and no overlap.
         let (next_start, _) = day
             .next()
-            .range(DayRule::DEFAULT, UtcOffset::INDIA)
+            .range(DayRule::FIVE_AM, UtcOffset::INDIA)
             .expect("in range");
         assert_eq!(next_start, end);
     }
