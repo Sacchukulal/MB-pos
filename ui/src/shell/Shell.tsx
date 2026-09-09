@@ -248,7 +248,7 @@ const SCREENS: readonly Screen[] = import.meta.env.DEV
 
 export function Shell() {
   const [screen, setScreenOnly] = useState<string>('billing');
-  /** The part of a screen that was asked for: `settings/network` → `network`. */
+  /** The part of a screen that was asked for: `settings/printers` → `printers`. */
   const [sub, setSub] = useState<string | null>(null);
   const setScreen = useCallback((id: string) => {
     const slash = id.indexOf('/');

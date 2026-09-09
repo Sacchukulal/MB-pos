@@ -241,11 +241,11 @@ fn network_row(app: &App) -> HealthRow {
             "network",
             "Phones",
             format!(
-                "{} Open Settings › Phones and press \"Allow Magic Bill through Windows Firewall\".",
+                "{} Open Phones and press \"Allow through Windows Firewall\".",
                 crate::firewall::words(firewall).0
             ),
         )
-        .go("settings");
+        .go("phones");
     }
     let allowed = app.entitlement().limits.devices;
     let paired = u32::try_from(network.shared.counter.devices().len()).unwrap_or(0);
@@ -256,10 +256,10 @@ fn network_row(app: &App) -> HealthRow {
             format!(
                 "{paired} phones are paired and your plan allows {allowed}. The \
                  extra ones will be refused — remove the phones you no longer \
-                 use in Settings, or change your plan.",
+                 use on the Phones screen, or change your plan.",
             ),
         )
-        .go("settings");
+        .go("phones");
     }
     HealthRow::ok(
         "network",
