@@ -20,12 +20,8 @@ import './auth.css';
 export interface LockProps {
   /** Who can sign in: active, and holding a PIN. */
   people: readonly PersonView[];
-  /**
-   * Who the recovery code may set a PIN for — Rust's `LockState::recoverable`, which is not a
-   * subset of `people`.
-   */
-  recoverable: readonly PersonView[];
-  canRecover: boolean;
+  /** The owner's name when the shop has one — Rust's `LockState::owner`, whose PIN a reset sets. */
+  owner: string | null;
   /** Who signed in last at this counter, so the mark starts on them. */
   lastSignedIn: string | null;
   /** Called when somebody got in. */
@@ -35,13 +31,13 @@ export interface LockProps {
 /** Keys the window takes even while a text box has focus. */
 const ALWAYS_OURS = new Set(['Enter', 'ArrowUp', 'ArrowDown']);
 
-export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn }: LockProps) {
+export function Lock({ people, owner, lastSignedIn, onSignedIn }: LockProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initial);
   const runningSeq = useRef(0);
 
   useEffect(() => {
-    dispatch({ kind: 'people', people, recoverable, canRecover, lastSignedIn });
-  }, [people, recoverable, canRecover, lastSignedIn]);
+    dispatch({ kind: 'people', people, owner, lastSignedIn });
+  }, [people, owner, lastSignedIn]);
 
   // The commands ride in the state.
   useEffect(() => {
@@ -56,16 +52,12 @@ export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn
         try {
           if (command.do === 'sign-in') {
             await call('login', { staffId: command.staffId, pin: command.pin });
-            dispatch({ kind: 'done' });
-            onSignedIn();
           } else {
-            const fresh = await call('recover_with_code', {
-              code: command.code,
-              staffId: command.staffId,
-              newPin: command.newPin,
-            });
-            dispatch({ kind: 'recovered', freshCode: fresh });
+            // Rust checks the proof, sets the owner's PIN and signs them in with it.
+            await call('reset_owner_pin', { proof: command.proof, newPin: command.newPin });
           }
+          dispatch({ kind: 'done' });
+          onSignedIn();
         } catch (cause) {
           const message = isUiError(cause)
             ? cause.message
@@ -105,13 +97,6 @@ export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn
     </p>
   ) : null;
 
-  const forgot =
-    canRecover && mode.kind !== 'recover' && mode.kind !== 'recovered' ? (
-      <Button variant="quiet" size="sm" onClick={() => dispatch({ kind: 'start-recovery' })}>
-        Forgotten your PIN?
-      </Button>
-    ) : null;
-
   if (mode.kind === 'pin') {
     return (
       <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Sign in">
@@ -120,14 +105,19 @@ export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn
             people={state.people}
             typed={mode.typed}
             marked={mode.person}
-            onType={(text) => dispatch({ kind: 'typed', text })}
+            onType={(text) => dispatch({ kind: 'typed', field: 'name', text })}
             onChoose={(person) => dispatch({ kind: 'choose', person })}
           />
           <div className="mb-lock__pad">
             <Logo size="lg" />
             <SignIn person={mode.person} digits={mode.digits} busy={state.busy} onPad={onPad} />
             {problem}
-            {forgot}
+            {/* The owner's way back in. Staff PINs are the owner's to reset, from Staff. */}
+            {state.owner !== null ? (
+              <Button variant="quiet" size="sm" onClick={() => dispatch({ kind: 'start-reset' })}>
+                Forgotten your PIN?
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -138,13 +128,11 @@ export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn
     <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Sign in">
       <div className="mb-lock__card">
         <Logo size="lg" />
-        {mode.kind === 'recovered' ? (
-          <Recovered code={mode.freshCode} onDone={() => dispatch({ kind: 'done' })} />
-        ) : (
-          <Recover state={state} dispatch={dispatch} onPad={onPad} />
-        )}
-        {problem}
-        {forgot}
+        {/* The body scrolls on a short window; the card never runs off it. */}
+        <Scroller inset className="mb-lock__body">
+          <Reset state={state} dispatch={dispatch} onPad={onPad} />
+          {problem}
+        </Scroller>
       </div>
     </div>
   );
@@ -275,8 +263,8 @@ function SignIn({
   );
 }
 
-/** The way back in, as four screens. */
-function Recover({
+/** The owner's way back in, as three screens: the proof, the new PIN, the same PIN again. */
+function Reset({
   state,
   dispatch,
   onPad,
@@ -285,9 +273,9 @@ function Recover({
   dispatch: (event: Event) => void;
   onPad: (key: string) => void;
 }) {
-  if (state.mode.kind !== 'recover') return null;
-  const { step, code, person, newPin, again } = state.mode;
-  const candidates = state.recoverable;
+  if (state.mode.kind !== 'reset') return null;
+  const { step, email, password, key, newPin, again } = state.mode;
+  const owner = state.owner ?? 'The owner';
 
   const actions = (next: string) => (
     <div className="mb-lock__actions">
@@ -295,64 +283,50 @@ function Recover({
         Back
       </Button>
       <Button variant="primary" onClick={() => dispatch({ kind: 'submit' })} disabled={state.busy}>
-        {state.busy ? 'Setting…' : next}
+        {state.busy ? 'Checking…' : next}
       </Button>
     </div>
   );
 
-  if (step === 'code') {
+  if (step === 'prove') {
     return (
       <>
         <h1 className="mb-lock__title">Forgotten PIN</h1>
         {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
         <p className="mb-muted">
-          Type the recovery code from the slip that printed when this shop was
-          set up. It can only set a PIN for somebody who manages staff, and
-          using it prints a new code.
+          A new PIN for {owner}. Prove it is you with your Magic Bill account, or with the
+          licence key from your dashboard. Staff PINs are set from the Staff screen.
         </p>
-        <Input
-          label="Recovery code"
-          value={code}
-          autoFocus
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="ABCDE-FGHJK"
-          onChange={(event) => dispatch({ kind: 'typed', text: event.target.value })}
-        />
-        {actions('Next')}
-      </>
-    );
-  }
-
-  if (step === 'who') {
-    return (
-      <>
-        <h1 className="mb-lock__title">Whose PIN?</h1>
-        {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
-        <p className="mb-muted">
-          {/* Only the people Rust will accept. */}
-          The recovery code sets a PIN for somebody who manages staff.
-        </p>
-        <div className="mb-lock__people">
-          {candidates.length === 0 ? (
-            <p className="mb-muted">
-              Nobody here manages staff, so this code has no PIN to set. Ring
-              support, with your licence key to hand.
-            </p>
-          ) : (
-            candidates.map((candidate) => (
-              <Button
-                key={candidate.id}
-                wide
-                variant={person?.id === candidate.id ? 'primary' : 'secondary'}
-                className="mb-lock__person"
-                onClick={() => dispatch({ kind: 'choose', person: candidate })}
-              >
-                <span className="mb-lock__name">{candidate.name}</span>
-                <span className="mb-lock__role">{candidate.role ?? ''}</span>
-              </Button>
-            ))
-          )}
+        <div className="mb-lock__proof">
+          <Input
+            label="Email"
+            type="email"
+            autoComplete="username"
+            autoFocus
+            value={email}
+            placeholder="you@example.com"
+            onChange={(event) => dispatch({ kind: 'typed', field: 'email', text: event.target.value })}
+          />
+          <Input
+            label="Password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) =>
+              dispatch({ kind: 'typed', field: 'password', text: event.target.value })
+            }
+          />
+          <p className="mb-lock__or" role="separator">
+            or the licence key
+          </p>
+          <Input
+            label="Licence key"
+            autoComplete="off"
+            spellCheck={false}
+            value={key}
+            placeholder="MB-XXXX-XXXX-XXXX"
+            onChange={(event) => dispatch({ kind: 'typed', field: 'key', text: event.target.value })}
+          />
         </div>
         {actions('Next')}
       </>
@@ -368,8 +342,8 @@ function Recover({
       {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
       <p className="mb-muted">
         {step === 'pin'
-          ? `${person?.name ?? 'This person'} will sign in with these ${PIN_DIGITS} digits.`
-          : 'Type it a second time, so one slipped finger does not lock them out.'}
+          ? `${owner} will sign in with these ${PIN_DIGITS} digits.`
+          : 'Type it a second time, so one slipped finger does not lock you out.'}
       </p>
 
       <Pad
@@ -379,25 +353,7 @@ function Recover({
         label={step === 'pin' ? 'The new PIN' : 'The new PIN again'}
       />
 
-      {actions(step === 'pin' ? 'Next' : 'Set the PIN')}
-    </>
-  );
-}
-
-function Recovered({ code, onDone }: { code: string; onDone: () => void }) {
-  return (
-    <>
-      <h1 className="mb-lock__title">Write this down</h1>
-      {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
-      <p className="mb-muted">
-        This is the shop&rsquo;s new recovery code. The old one no longer works,
-        and this one is shown here once and printed. Keep the slip somewhere
-        only you can reach.
-      </p>
-      <p className="mb-lock__code">{code}</p>
-      <Button variant="primary" wide onClick={onDone}>
-        I have written it down
-      </Button>
+      {actions(step === 'pin' ? 'Next' : 'Set the PIN and sign in')}
     </>
   );
 }

@@ -966,6 +966,21 @@ pub enum Pushed {
         /// of an empty table.
         idle: bool,
     },
+    /// An update is on its way in: how far, and what is happening to it.
+    Update {
+        /// The version coming in.
+        version: String,
+        /// downloading · checking · installing.
+        stage: String,
+        /// Of the download, 0 to 100.
+        percent: u32,
+        /// Bytes so far and the whole size, for the screen to say "12 of 60 MB". Plain numbers
+        /// on the wire: an installer is nowhere near what a JavaScript number cannot hold.
+        #[ts(type = "number")]
+        bytes: u64,
+        #[ts(type = "number")]
+        total: u64,
+    },
 }
 
 /// One line, as the customer sees it.

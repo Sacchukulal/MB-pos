@@ -43,8 +43,6 @@ pub enum JobKind {
     Drawer,
     DayClose,
     Delivery,
-    /// The shop's recovery code, on paper.
-    Recovery,
 }
 
 impl JobKind {
@@ -57,7 +55,6 @@ impl JobKind {
         JobKind::Drawer,
         JobKind::DayClose,
         JobKind::Delivery,
-        JobKind::Recovery,
     ];
 
     #[must_use]
@@ -70,7 +67,6 @@ impl JobKind {
             JobKind::Drawer => "drawer",
             JobKind::DayClose => "day_close",
             JobKind::Delivery => "delivery",
-            JobKind::Recovery => "recovery",
         }
     }
 
@@ -84,7 +80,6 @@ impl JobKind {
             "drawer" => Some(JobKind::Drawer),
             "day_close" => Some(JobKind::DayClose),
             "delivery" => Some(JobKind::Delivery),
-            "recovery" => Some(JobKind::Recovery),
             _ => None,
         }
     }
@@ -102,8 +97,6 @@ impl JobKind {
             // With the food, so it goes at kitchen speed and not at label speed: the rider is
             // standing there.
             JobKind::Delivery => 25,
-            // Ahead of a bill, and it is the only thing that is.
-            JobKind::Recovery => 6,
             JobKind::Test | JobKind::Label => 50,
         }
     }
@@ -415,8 +408,7 @@ impl Queue {
             | JobKind::Label
             | JobKind::Test
             | JobKind::Drawer
-            | JobKind::Delivery
-            | JobKind::Recovery => true,
+            | JobKind::Delivery => true,
         };
         if !allowed {
             return Err(PrintError::invalid(format!(
@@ -979,7 +971,10 @@ fn to_failure(e: TransportError) -> Failure {
 /// The job name a shop sees in the Windows print queue window.
 fn describe_job(job: &StoredJob, printer: &PrinterConfig) -> String {
     match &job.reason {
-        Some(reason) => format!("{OUR_DOCUMENTS} — {} ({reason}) — {}", job.kind, printer.name),
+        Some(reason) => format!(
+            "{OUR_DOCUMENTS} — {} ({reason}) — {}",
+            job.kind, printer.name
+        ),
         None => format!("{OUR_DOCUMENTS} — {} — {}", job.kind, printer.name),
     }
 }

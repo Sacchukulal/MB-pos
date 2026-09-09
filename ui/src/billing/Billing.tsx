@@ -22,7 +22,6 @@ import {
   RowMenu,
   Scroller,
   SearchField,
-  Spinner,
   Stepper,
   useAction,
   useReport,
@@ -55,7 +54,7 @@ const PROCESSING_KEY = 'mb.billing.processing';
 /** Whether the ← → keys may change the order type — a look preference, kept on this computer. */
 const ARROWS_KEY = 'mb.billing.arrows';
 
-export function Billing() {
+export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const toast = useToast();
   const [cart, setCart] = useState<CartView | null>(null);
   const [tables, setTables] = useState<readonly TableView[]>([]);
@@ -80,7 +79,6 @@ export function Billing() {
   const [discounting, setDiscounting] = useState(false);
   // The customer picker for a bill going on an account.
   const [onAccount, setOnAccount] = useState(false);
-  const [busy, setBusy] = useState(false);
   /** Which way this bill is being paid. */
   const [payMode, setPayMode] = useState('Cash');
   /** The cash handed over, as typed. */
@@ -517,20 +515,6 @@ export function Billing() {
     [report, toast],
   );
 
-  const seedDemo = useCallback(async () => {
-    setBusy(true);
-    try {
-      await call('seed_demo_shop');
-      setMenu(await call('menu_items'));
-      await refreshFloor();
-      toast.show('ok', 'A demo shop is in place.');
-    } catch (cause) {
-      report(cause);
-    } finally {
-      setBusy(false);
-    }
-  }, [refreshFloor, report, toast]);
-
   // Performing what the reducer asked for.
   const perform = useCallback(
     async (command: KeyCommand) => {
@@ -794,15 +778,27 @@ export function Billing() {
           )}
         >
         <Scroller inset className="mb-billing__floor">
-          {/* The set-up list is not on this screen any more. */}
+          {/* A shop with nothing in it yet: the three screens that make it a counter. */}
           {tables.length === 0 && menu.length === 0 ? (
             <EmptyState
-              title="This shop has no menu or tables yet"
-              hint="Add your items and tables in Settings — or put a demo shop in to see how the counter works."
+              title="Set up your counter"
+              hint="Three things and the counter is ready: the items you sell, the tables on your floor, and the printer your bills come out of. Each opens its own screen; come back here to bill."
+              says="Add your menu, your tables and your printer."
               action={
-                <Button variant="primary" onClick={() => void seedDemo()} disabled={busy}>
-                  {busy ? <Spinner /> : 'Add a demo shop'}
-                </Button>
+                <div className="mb-billing__setup">
+                  <Button variant="primary" onClick={() => onGoTo('menu')}>
+                    <Icon name="book" size="sm" />
+                    Add your menu
+                  </Button>
+                  <Button variant="secondary" onClick={() => onGoTo('floor')}>
+                    <Icon name="grid" size="sm" />
+                    Add your tables
+                  </Button>
+                  <Button variant="secondary" onClick={() => onGoTo('settings/printers')}>
+                    <Icon name="printer" size="sm" />
+                    Set up the printer
+                  </Button>
+                </div>
               }
             />
           ) : tables.length === 0 ? (

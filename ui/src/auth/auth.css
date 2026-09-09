@@ -25,6 +25,18 @@
   border: var(--border-width) solid var(--panel-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
+  /* A card taller than the window scrolls inside it (the body is a Scroller), never off it. */
+  max-height: 100%;
+}
+
+/* The reset's body, which scrolls when the window is short. */
+.mb-lock__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 0;
 }
 
 /* Signing in: the people down the left, the pad on the right, one card. */
@@ -140,17 +152,22 @@
   flex: 1;
 }
 
-/* The recovery code, read off a screen and typed into a phone or copied onto a slip. */
-.mb-lock__code {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  font-family: var(--font-mono);
-  font-size: var(--text-xl);
-  letter-spacing: var(--tracking-caps);
-  background: var(--surface-sunk);
-  border-radius: var(--radius-md);
-  user-select: all;
+/* The owner proving it is them: the account, or the key, stacked like the first run. */
+.mb-lock__proof {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+  width: 100%;
+  text-align: left;
 }
+
+.mb-lock__or {
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 
 /* Who is signed in, in the title bar. */
 

@@ -117,8 +117,14 @@ pub trait Link: Send + Sync + std::fmt::Debug + 'static {
     }
     /// A new access token from the refresh token. The old refresh token is spent either way.
     fn refresh_session(&self, refresh_token: &str) -> Result<Session, LinkError>;
-    /// Fetch a file to `to`; answers its SHA-256 as lowercase hex.
-    fn download(&self, url: &str, to: &Path) -> Result<String, LinkError>;
+    /// Fetch a file to `to`; answers its SHA-256 as lowercase hex. `progress` hears the bytes
+    /// so far and the whole size when the server said it, as the file comes down.
+    fn download(
+        &self,
+        url: &str,
+        to: &Path,
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<String, LinkError>;
 }
 
 /// The cloud that is not there: what a test `App` starts with.
@@ -137,7 +143,12 @@ impl Link for NoLink {
     fn refresh_session(&self, _: &str) -> Result<Session, LinkError> {
         Err(LinkError::Unreachable)
     }
-    fn download(&self, _: &str, _: &Path) -> Result<String, LinkError> {
+    fn download(
+        &self,
+        _: &str,
+        _: &Path,
+        _: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<String, LinkError> {
         Err(LinkError::Unreachable)
     }
 }
@@ -543,38 +554,56 @@ impl Link for Http {
         })
     }
 
-    fn download(&self, url: &str, to: &Path) -> Result<String, LinkError> {
-        let request = self.client.get(url).timeout(DOWNLOAD_TIMEOUT);
-        let (status, bytes) = Http::run(async move {
-            let response = request.send().await?;
-            let status = response.status().as_u16();
-            let bytes = response.bytes().await?;
-            Ok::<_, reqwest::Error>((status, bytes))
-        })
-        .map_err(|e| {
-            log_warn!("the download failed: {e}");
-            LinkError::Unreachable
-        })?;
-        if status != 200 {
-            return Err(LinkError::Server(format!("the file answered {status}")));
-        }
+    fn download(
+        &self,
+        url: &str,
+        to: &Path,
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<String, LinkError> {
+        use std::io::Write as _;
+
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|e| LinkError::Server(e.to_string()))?;
         }
-        std::fs::write(to, &bytes).map_err(|e| LinkError::Server(e.to_string()))?;
-        Ok(sha256_hex(&bytes))
+        let request = self.client.get(url).timeout(DOWNLOAD_TIMEOUT);
+        // Chunk by chunk to the disk and the hash, so a 60 MB installer is never held whole
+        // and the screen can say how far it has got.
+        let outcome = Http::run(async move {
+            let mut response = request.send().await.map_err(|e| e.to_string())?;
+            let status = response.status().as_u16();
+            if status != 200 {
+                return Err(format!("the file answered {status}"));
+            }
+            let total = response.content_length();
+            let mut file = std::fs::File::create(to).map_err(|e| e.to_string())?;
+            let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+            let mut so_far = 0u64;
+            progress(0, total);
+            while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+                file.write_all(&chunk).map_err(|e| e.to_string())?;
+                digest.update(&chunk);
+                so_far = so_far.saturating_add(chunk.len() as u64);
+                progress(so_far, total);
+            }
+            file.flush().map_err(|e| e.to_string())?;
+            Ok(hex_of(digest.finish().as_ref()))
+        });
+        outcome.map_err(|why| {
+            log_warn!("the download failed: {why}");
+            let _ = std::fs::remove_file(to);
+            LinkError::Server(why)
+        })
     }
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// SHA-256, lowercase hex — what a manifest's `sha256` is compared with.
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
-    digest
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    hex_of(ring::digest::digest(&ring::digest::SHA256, bytes).as_ref())
 }
 
 // A thread that sleeps until it is needed.
@@ -901,7 +930,9 @@ mod tests {
         let http = Http::at(&base, "anon-key");
         let dir = std::env::temp_dir().join(format!("mb-download-{}", std::process::id()));
         let to = dir.join("incoming").join("x.exe");
-        let sha = http.download(&format!("{base}/x.exe"), &to).expect("downloaded");
+        let sha = http
+            .download(&format!("{base}/x.exe"), &to, &mut |_, _| {})
+            .expect("downloaded");
         assert_eq!(std::fs::read_to_string(&to).expect("the file"), "hello installer");
         assert_eq!(sha, sha256_hex(b"hello installer"));
         assert_eq!(sha.len(), 64);

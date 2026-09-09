@@ -16,8 +16,6 @@ pub mod action {
     pub const LOCKED: AuditAction = "locked";
     pub const DENIED: AuditAction = "denied";
     pub const PIN_SET: AuditAction = "pin.set";
-    pub const RECOVERY_USED: AuditAction = "recovery.used";
-    pub const RECOVERY_ISSUED: AuditAction = "recovery.issued";
     pub const STAFF_SAVED: AuditAction = "staff.saved";
     pub const STAFF_STATUS: AuditAction = "staff.status";
     pub const ROLE_SAVED: AuditAction = "role.saved";
@@ -134,8 +132,6 @@ pub mod action {
         LOCKED,
         DENIED,
         PIN_SET,
-        RECOVERY_USED,
-        RECOVERY_ISSUED,
         STAFF_SAVED,
         STAFF_STATUS,
         ROLE_SAVED,
@@ -217,8 +213,9 @@ pub mod action {
             LOCKED => "Screen locked",
             DENIED => "Was not allowed to",
             PIN_SET => "Set a PIN",
-            RECOVERY_USED => "Used the recovery code",
-            RECOVERY_ISSUED => "New recovery code printed",
+            // Rows older shops wrote before the recovery code was retired.
+            "recovery.used" => "Used the recovery code",
+            "recovery.issued" => "Recovery code printed",
             STAFF_SAVED => "Changed a staff member",
             STAFF_STATUS => "Changed who works here",
             ROLE_SAVED => "Changed a role",

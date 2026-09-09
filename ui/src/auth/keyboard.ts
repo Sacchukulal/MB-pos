@@ -1,35 +1,40 @@
 /** The lock screen's keyboard, as a pure reducer. */
 
+import type { OwnerProof } from '../ipc/generated/OwnerProof';
 import type { PersonView } from '../ipc/generated/PersonView';
 
 /** How long a PIN is. */
 export const PIN_DIGITS = 4;
 
-/** Which part of the recovery flow is on screen. */
-export type RecoverStep = 'code' | 'who' | 'pin' | 'again';
+/** Which part of the owner's reset is on screen. */
+export type ResetStep = 'prove' | 'pin' | 'again';
+
+/** The text boxes the reset asks to be typed into, and the name filter on the sign-in side. */
+export type Field = 'name' | 'email' | 'password' | 'key';
 
 export type Mode =
   /** Signing in: the people down one side, the pad for whoever is marked. */
   | { kind: 'pin'; person: PersonView | null; digits: string; typed: string }
-  /** The recovery flow, as four steps rather than one screen. */
+  /**
+   * The owner's forgotten PIN: prove the account or the licence key, then a new PIN twice.
+   * Rust checks the proof and sets the owner's PIN; the screen never decides who the owner is.
+   */
   | {
-      kind: 'recover';
-      step: RecoverStep;
-      code: string;
-      person: PersonView | null;
+      kind: 'reset';
+      step: ResetStep;
+      email: string;
+      password: string;
+      key: string;
       newPin: string;
       again: string;
-    }
-  | { kind: 'recovered'; freshCode: string };
+    };
 
 export interface State {
   mode: Mode;
   /** Who can sign in — everybody active who has a PIN. */
   people: readonly PersonView[];
-  /** Who the recovery code may set a PIN for. */
-  recoverable: readonly PersonView[];
-  /** Whether this shop has a recovery code to offer at all. */
-  canRecover: boolean;
+  /** The owner's name when the shop has one, so "forgotten your PIN?" has somebody to reset. */
+  owner: string | null;
   /** Who signed in last, so the mark starts on them. */
   lastSignedIn: string | null;
   /** The last thing Rust said, shown under the pad. */
@@ -43,7 +48,7 @@ export interface State {
 
 export type Command =
   | { do: 'sign-in'; staffId: string; pin: string }
-  | { do: 'recover'; code: string; staffId: string; newPin: string };
+  | { do: 'reset'; proof: OwnerProof; newPin: string };
 
 export interface Queued {
   seq: number;
@@ -55,15 +60,14 @@ export type Event =
   | {
       kind: 'people';
       people: readonly PersonView[];
-      recoverable: readonly PersonView[];
-      canRecover: boolean;
+      owner: string | null;
       lastSignedIn: string | null;
     }
   | { kind: 'choose'; person: PersonView }
   /** The arrow keys: the mark moves one row. */
   | { kind: 'move'; by: 1 | -1 }
   | { kind: 'digit'; digit: string }
-  | { kind: 'typed'; text: string }
+  | { kind: 'typed'; field: Field; text: string }
   /** Backspace. One digit. */
   | { kind: 'back' }
   /** The pad's C key: everything typed on that pad goes, and nothing else moves. */
@@ -71,8 +75,7 @@ export type Event =
   /** Back, or a full clear of the pad. Leaves the step whole — never a digit at a time. */
   | { kind: 'cancel' }
   | { kind: 'submit' }
-  | { kind: 'start-recovery' }
-  | { kind: 'recovered'; freshCode: string }
+  | { kind: 'start-reset' }
   | { kind: 'failed'; message: string }
   | { kind: 'done' };
 
@@ -80,8 +83,7 @@ export function initial(): State {
   return {
     mode: signIn(null),
     people: [],
-    recoverable: [],
-    canRecover: false,
+    owner: null,
     lastSignedIn: null,
     problem: null,
     busy: false,
@@ -118,16 +120,26 @@ function queue(state: State, command: Command): State {
   };
 }
 
-/** A fresh recovery flow, at its first step. */
-function recovery(): Mode {
+/** A fresh reset, at its first step. */
+function reset(): Mode {
   return {
-    kind: 'recover',
-    step: 'code',
-    code: '',
-    person: null,
+    kind: 'reset',
+    step: 'prove',
+    email: '',
+    password: '',
+    key: '',
     newPin: '',
     again: '',
   };
+}
+
+/** The proof the boxes hold: the key when one was pasted, else the account. */
+export function proofOf(mode: Extract<Mode, { kind: 'reset' }>): OwnerProof | null {
+  if (mode.key.trim() !== '') return { by: 'key', key: mode.key.trim() };
+  if (mode.email.trim() !== '' && mode.password !== '') {
+    return { by: 'password', email: mode.email.trim(), password: mode.password };
+  }
+  return null;
 }
 
 /** Send the marked person's PIN, once it has the right number of digits. */
@@ -153,51 +165,22 @@ export function reduce(state: State, event: Event): State {
       const carried = {
         ...state,
         people: event.people,
-        recoverable: event.recoverable,
-        canRecover: event.canRecover,
+        owner: event.owner,
         lastSignedIn: event.lastSignedIn,
       };
-      const gone = (id: string, from: readonly PersonView[]) =>
-        !from.some((p) => p.id === id);
-
       if (mode.kind === 'pin') {
         // The mark stays on whoever it was on, as long as they are still on the list.
-        if (mode.person && !gone(mode.person.id, event.people)) {
-          const fresh = event.people.find((p) => p.id === mode.person?.id) ?? mode.person;
-          return { ...carried, mode: { ...mode, person: fresh } };
-        }
+        const fresh = mode.person && event.people.find((p) => p.id === mode.person?.id);
+        if (fresh) return { ...carried, mode: { ...mode, person: fresh } };
         return {
           ...carried,
           mode: signIn(startingMark(event.people, event.lastSignedIn), mode.typed),
-        };
-      }
-      // Somebody suspended halfway through a reset must not still be the person a new PIN is
-      // written to.
-      if (mode.kind === 'recover' && mode.person && gone(mode.person.id, event.recoverable)) {
-        return {
-          ...carried,
-          problem: 'That person is not on the staff list any more. Choose somebody else.',
-          mode: { ...mode, step: 'who', person: null, newPin: '', again: '' },
         };
       }
       return carried;
     }
 
     case 'choose':
-      // In the recovery flow, choosing a person means "this new PIN is theirs".
-      if (state.mode.kind === 'recover') {
-        return {
-          ...state,
-          problem: null,
-          mode: {
-            ...state.mode,
-            person: event.person,
-            step: 'pin',
-            newPin: '',
-            again: '',
-          },
-        };
-      }
       if (state.mode.kind === 'pin') {
         if (state.busy) return state;
         return { ...state, problem: null, mode: signIn(event.person, state.mode.typed) };
@@ -237,24 +220,21 @@ export function reduce(state: State, event: Event): State {
         return mode.digits.length === PIN_DIGITS ? submitPin(next, mode) : next;
       }
 
-      if (state.mode.kind === 'recover') {
-        // The same ceiling on both of the recovery flow's pads.
-        if (state.mode.step !== 'pin' && state.mode.step !== 'again') return state;
-        const field = state.mode.step === 'pin' ? 'newPin' : 'again';
-        const current = state.mode[field];
-        if (current.length >= PIN_DIGITS) return state;
-        return {
-          ...state,
-          problem: null,
-          mode: { ...state.mode, [field]: current + event.digit },
-        };
-      }
-
-      return state;
+      // The same ceiling on both of the reset's pads.
+      const field = padField(state.mode);
+      if (!field) return state;
+      const current = state.mode[field];
+      if (current.length >= PIN_DIGITS) return state;
+      return {
+        ...state,
+        problem: null,
+        mode: { ...state.mode, [field]: current + event.digit },
+      };
     }
 
     case 'typed':
       if (state.mode.kind === 'pin') {
+        if (event.field !== 'name') return state;
         const list = shown(state.people, event.text);
         const marked = state.mode.person;
         // Narrowing the list moves the mark onto it when the marked name has dropped out.
@@ -268,8 +248,8 @@ export function reduce(state: State, event: Event): State {
               : signIn(person, event.text),
         };
       }
-      if (state.mode.kind === 'recover' && state.mode.step === 'code') {
-        return { ...state, mode: { ...state.mode, code: event.text } };
+      if (state.mode.step === 'prove' && event.field !== 'name') {
+        return { ...state, mode: { ...state.mode, [event.field]: event.text } };
       }
       return state;
 
@@ -282,19 +262,12 @@ export function reduce(state: State, event: Event): State {
           mode: { ...state.mode, digits: state.mode.digits.slice(0, -1) },
         };
       }
-      if (state.mode.kind === 'recover') {
-        const mode = state.mode;
-        if (mode.step === 'pin' || mode.step === 'again') {
-          const field = mode.step === 'pin' ? 'newPin' : 'again';
-          const current = mode[field];
-          if (current === '') return reduce(state, { kind: 'cancel' });
-          return { ...state, mode: { ...mode, [field]: current.slice(0, -1) } };
-        }
-        // On the code box the browser is already editing the text itself, and on the list there
-        // is nothing to rub out.
-        return state;
-      }
-      return state;
+      const field = padField(state.mode);
+      // On the proof boxes the browser is already editing the text itself.
+      if (!field) return state;
+      const current = state.mode[field];
+      if (current === '') return reduce(state, { kind: 'cancel' });
+      return { ...state, mode: { ...state.mode, [field]: current.slice(0, -1) } };
     }
 
     case 'clear': {
@@ -303,35 +276,24 @@ export function reduce(state: State, event: Event): State {
       if (state.mode.kind === 'pin') {
         return { ...state, problem: null, mode: { ...state.mode, digits: '' } };
       }
-      if (state.mode.kind === 'recover') {
-        const mode = state.mode;
-        if (mode.step !== 'pin' && mode.step !== 'again') return state;
-        const field = mode.step === 'pin' ? 'newPin' : 'again';
-        return { ...state, problem: null, mode: { ...mode, [field]: '' } };
-      }
-      return state;
+      const field = padField(state.mode);
+      if (!field) return state;
+      return { ...state, problem: null, mode: { ...state.mode, [field]: '' } };
     }
 
     case 'cancel': {
       // One tap leaves, whatever has been typed.
       if (state.busy) return state;
 
-      if (state.mode.kind === 'recover') {
+      if (state.mode.kind === 'reset') {
         const mode = state.mode;
-        const previous: Record<RecoverStep, RecoverStep | null> = {
-          code: null, // out of the flow altogether
-          who: 'code',
-          pin: 'who',
+        const previous: Record<ResetStep, ResetStep | null> = {
+          prove: null, // out of the flow altogether
+          pin: 'prove',
           again: 'pin',
         };
         const step = previous[mode.step];
-        if (step === null) {
-          return {
-            ...state,
-            mode: signIn(startingMark(state.people, state.lastSignedIn)),
-            problem: null,
-          };
-        }
+        if (step === null) return leave(state);
         // Stepping back clears both pads, always.
         return {
           ...state,
@@ -340,31 +302,19 @@ export function reduce(state: State, event: Event): State {
         };
       }
 
-      if (state.mode.kind === 'pin') {
-        if (state.mode.digits === '' && state.problem === null) return state;
-        return { ...state, mode: { ...state.mode, digits: '' }, problem: null };
-      }
-      return state;
+      if (state.mode.digits === '' && state.problem === null) return state;
+      return { ...state, mode: { ...state.mode, digits: '' }, problem: null };
     }
 
     case 'submit': {
       if (state.busy) return state;
       if (state.mode.kind === 'pin') return submitPin(state, state.mode);
-      if (state.mode.kind === 'recover') return submitRecovery(state, state.mode);
-      return state;
+      return submitReset(state, state.mode);
     }
 
-    case 'start-recovery':
-      return { ...state, mode: recovery(), problem: null };
-
-    case 'recovered':
-      return {
-        ...state,
-        busy: false,
-        pending: [],
-        problem: null,
-        mode: { kind: 'recovered', freshCode: event.freshCode },
-      };
+    case 'start-reset':
+      if (state.owner === null) return state;
+      return { ...state, mode: reset(), problem: null };
 
     case 'failed':
       return {
@@ -372,21 +322,18 @@ export function reduce(state: State, event: Event): State {
         busy: false,
         pending: [],
         problem: event.message,
-        // The digits are cleared on a failure.
+        // The digits are cleared on a failure; a refused proof goes back to its boxes.
         mode:
           state.mode.kind === 'pin'
             ? { ...state.mode, digits: '' }
-            : state.mode.kind === 'recover'
-              ? { ...state.mode, step: 'code', newPin: '', again: '' }
-              : state.mode,
+            : { ...state.mode, step: 'prove', newPin: '', again: '' },
       };
 
     case 'done':
       return {
         ...initial(),
         people: state.people,
-        recoverable: state.recoverable,
-        canRecover: state.canRecover,
+        owner: state.owner,
         lastSignedIn: state.lastSignedIn,
         mode: signIn(startingMark(state.people, state.lastSignedIn)),
       };
@@ -396,27 +343,35 @@ export function reduce(state: State, event: Event): State {
   }
 }
 
-/** The recovery flow's Next button, which asks a different question at every step. */
-function submitRecovery(state: State, mode: Extract<Mode, { kind: 'recover' }>): State {
+/** Which of the reset's two pads is on screen, if either. */
+function padField(mode: Mode): 'newPin' | 'again' | null {
+  if (mode.kind !== 'reset') return null;
+  if (mode.step === 'pin') return 'newPin';
+  if (mode.step === 'again') return 'again';
+  return null;
+}
+
+/** Out of the reset and back to the sign-in screen, whatever was typed. */
+function leave(state: State): State {
+  return {
+    ...state,
+    mode: signIn(startingMark(state.people, state.lastSignedIn)),
+    problem: null,
+  };
+}
+
+/** The reset's Next button, which asks a different question at every step. */
+function submitReset(state: State, mode: Extract<Mode, { kind: 'reset' }>): State {
   switch (mode.step) {
-    case 'code': {
-      if (mode.code.trim() === '') {
-        return { ...state, problem: 'Type the recovery code from the printed slip.' };
-      }
-      // The code itself is NOT checked here.
-      if (state.recoverable.length === 0) {
+    case 'prove':
+      // Whether the proof is RIGHT is Rust's to say; only that something was typed is checked
+      // here.
+      if (proofOf(mode) === null) {
         return {
           ...state,
           problem:
-            'Nobody here manages staff, so this code has no PIN to set. Ring support.',
+            'Type the email and password of your Magic Bill account, or paste the licence key.',
         };
-      }
-      return { ...state, problem: null, mode: { ...mode, step: 'who' } };
-    }
-
-    case 'who':
-      if (!mode.person) {
-        return { ...state, problem: 'Choose who this new PIN is for.' };
       }
       return { ...state, problem: null, mode: { ...mode, step: 'pin' } };
 
@@ -439,29 +394,20 @@ function submitRecovery(state: State, mode: Extract<Mode, { kind: 'recover' }>):
           mode: { ...mode, step: 'pin', newPin: '', again: '' },
         };
       }
-      if (!mode.person) {
-        return { ...state, problem: 'Choose who this new PIN is for.' };
+      const proof = proofOf(mode);
+      if (proof === null) {
+        return { ...state, problem: 'Prove it is you first.', mode: { ...mode, step: 'prove' } };
       }
-      return queue(state, {
-        do: 'recover',
-        code: mode.code,
-        staffId: mode.person.id,
-        newPin: mode.newPin,
-      });
+      return queue(state, { do: 'reset', proof, newPin: mode.newPin });
     }
   }
 }
 
 function key(state: State, pressed: string): State {
   if (/^[0-9]$/.test(pressed)) {
-    if (state.mode.kind === 'pin') {
+    // Only the pads take loose digits; the proof boxes are the browser's.
+    if (state.mode.kind === 'pin' || padField(state.mode)) {
       return reduce(state, { kind: 'digit', digit: pressed });
-    }
-    if (state.mode.kind === 'recover') {
-      // Only the two pads take loose digits.
-      if (state.mode.step === 'pin' || state.mode.step === 'again') {
-        return reduce(state, { kind: 'digit', digit: pressed });
-      }
     }
     return state;
   }
@@ -474,12 +420,8 @@ function key(state: State, pressed: string): State {
     if (state.mode.kind === 'pin') {
       return { ...state, mode: signIn(state.mode.person), problem: null };
     }
-    // Out of the recovery flow, not one step back: a half-finished reset is not a thing to keep.
-    return {
-      ...state,
-      mode: signIn(startingMark(state.people, state.lastSignedIn)),
-      problem: null,
-    };
+    // Out of the reset, not one step back: a half-finished reset is not a thing to keep.
+    return leave(state);
   }
   return state;
 }

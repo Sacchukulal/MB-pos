@@ -37,7 +37,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("lock_state", Access::Public),
     ("login", Access::Public),
     ("lock_now", Access::Public),
-    ("recover_with_code", Access::Public),
+    ("reset_owner_pin", Access::Public),
     // The print queue indicator stays visible while locked.
     ("list_print_jobs", Access::Public),
     // The preview of the built-in test slip needs no shop and no data.
@@ -509,8 +509,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // Sharing a report is reading it, so it is the report's own permission and nothing weaker
     // â `report_on` checks it again anyway.
     ("share_report", Access::Needs(Permission::ReportsView)),
-    // Development only.
-    ("seed_demo_shop", Access::Needs(Permission::StaffManage)),
 ];
 
 /// Refuse, or hand back who is doing this.
@@ -905,12 +903,6 @@ mod tests {
         let declared = declared_commands();
         assert!(declared.contains("app_status"), "missed ipc.rs");
         assert!(declared.contains("complete_bill"), "missed flows.rs");
-        // One that is behind a #[cfg], which is the case that breaks a naive "the line after
-        // the attribute" scan.
-        assert!(
-            declared.contains("seed_demo_shop"),
-            "missed a cfg'd command"
-        );
     }
 
     /// Public is a decision, and a short list.

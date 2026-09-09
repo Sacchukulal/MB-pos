@@ -53,19 +53,8 @@ impl Link for OwnerCloud {
         assert_eq!(name, "mb_my_restaurants");
         Ok(self.restaurants.lock().unwrap().clone())
     }
-    // The account's own row answers with the mobile from the signup; a brand-new shop has
-    // nothing else in the cloud, so every table comes back empty.
-    fn rest(&self, path: &str, token: &str, _: usize, _: usize) -> Result<Page, LinkError> {
-        if path.starts_with("accounts?") {
-            assert_eq!(
-                token, "owner-token",
-                "the account is read under the owner's login"
-            );
-            return Ok(Page {
-                rows: vec![json!({ "phone": "+919840011223" })],
-                total: Some(1),
-            });
-        }
+    // A brand-new shop has nothing in the cloud, so every table comes back empty.
+    fn rest(&self, _: &str, _: &str, _: usize, _: usize) -> Result<Page, LinkError> {
         Ok(Page {
             rows: Vec::new(),
             total: Some(0),
@@ -74,16 +63,26 @@ impl Link for OwnerCloud {
     fn refresh_session(&self, _: &str) -> Result<Session, LinkError> {
         Err(LinkError::Unreachable)
     }
-    fn download(&self, _: &str, _: &Path) -> Result<String, LinkError> {
+    fn download(
+        &self,
+        _: &str,
+        _: &Path,
+        _: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<String, LinkError> {
         Err(LinkError::Unreachable)
     }
+}
+
+/// The shop's owner as the cloud's account row has them, the same on every door in.
+fn owner_row() -> Value {
+    json!({ "name": "Meena", "phone": "+919840011223" })
 }
 
 fn owned(id: &str, name: &str) -> Value {
     json!({
         "id": id, "name": name, "short_code": "ABC123",
         "address": "14 Kamaraj Street, Chennai", "gstin": "33AAAAA0000A1Z5",
-        "role": "owner", "staff": null, "permissions": ["reports.view"],
+        "role": "owner", "owner": owner_row(), "staff": null, "permissions": ["reports.view"],
         "licence": { "status": "active", "plan": "starter", "plan_name": "Starter",
                      "features": [], "key": KEY, "bound": false, "bound_device": null }
     })
@@ -386,7 +385,7 @@ fn counters_own(id: &str, name: &str) -> Value {
     json!({
         "id": id, "name": name, "short_code": "STUB01",
         "address": "2 Temple Road, Madurai", "gstin": "33BBBBB0000B1Z6",
-        "role": "counter", "staff": null, "permissions": [],
+        "role": "counter", "owner": owner_row(), "staff": null, "permissions": [],
         "licence": { "status": "active", "plan": "starter", "plan_name": "Starter",
                      "features": [], "key": null, "bound": true, "bound_device": null }
     })
@@ -427,8 +426,14 @@ fn a_pasted_licence_key_opens_the_shop_it_names_with_no_password() {
     assert_eq!(opened.shop.address, "2 Temple Road, Madurai");
     assert_eq!(opened.shop.gstin, "33BBBBB0000B1Z6");
     assert_eq!(opened.shop.licence, "active");
-    // Nobody signed in, so the owner's row has the plain name until the PIN step edits it.
-    assert_eq!(owners_in(&app), vec!["Owner".to_owned()]);
+    // Nobody signed in, and the owner's name and mobile still came with the shop: the row is
+    // theirs, and the details step starts with their number.
+    assert_eq!(opened.shop.phone, "9840011223");
+    assert_eq!(owners_in(&app), vec!["Meena".to_owned()]);
+    assert_eq!(
+        opened.first_run.owner.map(|o| o.name).as_deref(),
+        Some("Meena")
+    );
     assert!(opened.first_run.needed);
 }
 

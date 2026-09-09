@@ -6,8 +6,6 @@ pub mod delivery;
 pub mod kitchen;
 /// The payslip.
 pub mod payslip;
-/// The shop's recovery code, on paper.
-pub mod recovery;
 
 pub use bill::{BillContext, BillCustomer, Copy, EInvoice, Store, bill_document};
 pub use dayclose::{CountedNote, DayCloseContext, SlipLine, day_close_document};
@@ -16,7 +14,6 @@ pub use kitchen::{
     KitchenContext, LabelContext, TicketKind, TicketLine, kitchen_document, label_document,
 };
 pub use payslip::{PaySlipLine, PayslipContext, payslip_document};
-pub use recovery::{RecoveryContext, recovery_document};
 
 /// What the paper calls an order type — the bill and the kitchen ticket say the same word.
 #[must_use]

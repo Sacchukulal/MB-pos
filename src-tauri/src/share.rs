@@ -122,16 +122,22 @@ fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
     }
 }
 
+/// A `cmd.exe` that never shows a console box: the one way this program runs a Windows
+/// command, whether it is opening a link or handing over to an installer.
+#[cfg(windows)]
+pub(crate) fn hidden_cmd() -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = std::process::Command::new("cmd.exe");
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
 /// Hand a URL or a folder to Windows, which opens it with whatever is set up for it.
 #[cfg(windows)]
 pub(crate) fn launch(target: &str) -> std::io::Result<()> {
-    use std::os::windows::process::CommandExt;
-    // CREATE_NO_WINDOW: without it a black console box flashes on the counter every time
-    // somebody shares anything.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("cmd")
+    hidden_cmd()
         .args(["/C", "start", "", target])
-        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map(|_| ())
 }

@@ -51,8 +51,7 @@ pub fn short_code() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     const LENGTH: usize = 6;
     let mut code = String::with_capacity(LENGTH + 1);
-    // Rejection sampling, so every character is equally likely — the same reasoning as
-    // `recovery::new_recovery_code`, and cheap.
+    // Rejection sampling, so every character is equally likely.
     let limit = 256 - (256 % ALPHABET.len());
     while code.chars().filter(char::is_ascii_alphanumeric).count() < LENGTH {
         let mut one = [0u8; 1];

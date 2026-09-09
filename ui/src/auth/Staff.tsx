@@ -285,7 +285,6 @@ function SetPin({
   const [pin, setPin] = useState('');
   const [again, setAgain] = useState('');
   const [problem, setProblem] = useState('');
-  const [recovery, setRecovery] = useState<string | null>(null);
   const toast = useToast();
 
   const setIt = () => {
@@ -304,36 +303,13 @@ function SetPin({
 
   const save = async (value: string | null) => {
     try {
-      const code = await call('set_staff_pin', { staffId: person.id, pin: value });
-      if (code) {
-        // Shown once, and printed.
-        setRecovery(code);
-        return;
-      }
+      await call('set_staff_pin', { staffId: person.id, pin: value });
       onDone();
       onClose();
     } catch (cause) {
       if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
     }
   };
-
-  if (recovery) {
-    return (
-      <Modal open title="Write this down" onClose={() => { onDone(); onClose(); }}>
-        {/* It says "and printed" because it now is. */}
-        <p>
-          This is the shop&rsquo;s recovery code. It is the way back in if the
-          owner forgets their PIN. It is shown here <strong>once</strong> and
-          printed on your printer, and it cannot be looked up afterwards — so
-          keep the slip somewhere only you can reach.
-        </p>
-        <p className="mb-lock__code">{recovery}</p>
-        <Button variant="primary" wide onClick={() => { onDone(); onClose(); }}>
-          I have written it down
-        </Button>
-      </Modal>
-    );
-  }
 
   return (
     <Modal open title={`${person.name}'s PIN`} onClose={onClose}>

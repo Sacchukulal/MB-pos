@@ -75,7 +75,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     daily: true,
     label: "Billing",
     icon: 'receipt',
-    render: () => <Billing />,
+    // `go` so an empty shop's counter can open the menu, the floor and the printers.
+    render: (go) => <Billing onGoTo={go} />,
   },
   {
     // The floor answers a different question from the billing grid: not "which table am I
@@ -669,9 +670,7 @@ export function Shell() {
       {locked ? (
         <Lock
           people={lock?.people ?? []}
-          // Two lists, because they are two questions.
-          recoverable={lock?.recoverable ?? []}
-          canRecover={lock?.canRecover ?? false}
+          owner={lock?.owner ?? null}
           lastSignedIn={lock?.lastSignedIn ?? null}
           onSignedIn={reloadLock}
         />

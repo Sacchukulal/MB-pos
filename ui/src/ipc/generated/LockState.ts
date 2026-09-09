@@ -22,15 +22,10 @@ nobodyHasAPin: boolean,
  */
 people: Array<PersonView>, 
 /**
- * Whether this shop has a recovery code at all, so the lock screen only offers "forgotten
- * your PIN?" when there is something to offer.
+ * The owner's name, when the shop has an owner row: whose PIN "forgotten your PIN?" resets.
+ * The owner need not be in `people` — an owner with no PIN is exactly who needs it.
  */
-canRecover: boolean, 
-/**
- * Who the recovery code may set a PIN for, which is not a subset of `Self::people` — and
- * the difference is a way to be locked out of your own shop for good.
- */
-recoverable: Array<PersonView>, 
+owner: string | null, 
 /**
  * Who signed in last at this counter, so the lock screen starts on them.
  */

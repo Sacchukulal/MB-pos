@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PIN_DIGITS,
   initial,
+  proofOf,
   reduce,
   shown,
   take,
@@ -30,7 +31,6 @@ function person(id: string, name: string, extra: Partial<PersonView> = {}): Pers
 
 const REKHA = person('staff_1', 'Rekha');
 const RAVI = person('staff_2', 'Ravi');
-/** Somebody the recovery code is actually allowed to touch. */
 const MEENA = person('staff_3', 'Meena', {
   role: 'Owner',
   permissions: ['bill.create', 'staff.manage'],
@@ -40,19 +40,16 @@ function drive(events: readonly Event[], from?: State): State {
   return events.reduce(reduce, from ?? withPeople());
 }
 
-/** The shop as Rust hands it over: two lists, not one filtered twice. */
+/** The shop as Rust hands it over: who can sign in, and the owner's name. */
 function withPeople(
   people: readonly PersonView[] = [REKHA, RAVI, MEENA],
-  recoverable: readonly PersonView[] = people.filter((p) =>
-    p.permissions.includes('staff.manage'),
-  ),
+  owner: string | null = 'Meena',
   lastSignedIn: string | null = null,
 ): State {
   return reduce(initial(), {
     kind: 'people',
     people,
-    recoverable,
-    canRecover: true,
+    owner,
     lastSignedIn,
   });
 }
@@ -67,6 +64,14 @@ function marked(state: State): string | null {
 
 function digits(state: State): string {
   return state.mode.kind === 'pin' ? state.mode.digits : '';
+}
+
+function step(state: State): string | null {
+  return state.mode.kind === 'reset' ? state.mode.step : null;
+}
+
+function newPin(state: State): string | null {
+  return state.mode.kind === 'reset' ? state.mode.newPin : null;
 }
 
 describe('the mark: who the pad is for', () => {
@@ -106,7 +111,7 @@ describe('the mark: who the pad is for', () => {
   it('stays where it is when Rust re-sends the list', () => {
     const state = drive([
       { kind: 'choose', person: RAVI },
-      { kind: 'people', people: [REKHA, RAVI, MEENA], recoverable: [MEENA], canRecover: true, lastSignedIn: 'staff_1' },
+      { kind: 'people', people: [REKHA, RAVI, MEENA], owner: 'Meena', lastSignedIn: 'staff_1' },
     ]);
     expect(marked(state)).toBe('staff_2');
   });
@@ -114,13 +119,13 @@ describe('the mark: who the pad is for', () => {
   it('falls back when the marked person is suspended', () => {
     const state = drive([
       { kind: 'choose', person: RAVI },
-      { kind: 'people', people: [REKHA, MEENA], recoverable: [MEENA], canRecover: true, lastSignedIn: null },
+      { kind: 'people', people: [REKHA, MEENA], owner: 'Meena', lastSignedIn: null },
     ]);
     expect(marked(state)).toBe('staff_1');
   });
 
   it('narrows the list by name and moves the mark onto what is left', () => {
-    const state = drive([{ kind: 'typed', text: 'ra' }]);
+    const state = drive([{ kind: 'typed', field: 'name', text: 'ra' }]);
     expect(shown(state.people, 'ra').map((p) => p.id)).toEqual(['staff_2']);
     expect(marked(state)).toBe('staff_2');
   });
@@ -214,186 +219,172 @@ describe('Backspace rubs out; Escape clears', () => {
     expect(take(state)[1]).toEqual([]);
   });
 
-  it('the C key on a recovery pad empties that pad without stepping back', () => {
-    const state = drive([
-      { kind: 'start-recovery' },
-      { kind: 'typed', text: 'ABCDE-FGHJK' },
-      { kind: 'submit' },
-      { kind: 'choose', person: MEENA },
-      ...type('12'),
-      { kind: 'clear' },
-    ]);
-    expect(state.mode.kind).toBe('recover');
-    if (state.mode.kind !== 'recover') return;
-    expect(state.mode.step).toBe('pin');
-    expect(state.mode.newPin).toBe('');
-    expect(state.mode.person?.id).toBe('staff_3');
+  it('the C key on a reset pad empties that pad without stepping back', () => {
+    const state = drive([...proved(), ...type('12'), { kind: 'clear' }]);
+    expect(step(state)).toBe('pin');
+    expect(newPin(state)).toBe('');
   });
 
   it('Escape abandons a half-finished reset rather than stepping back through it', () => {
-    const state = drive([
-      { kind: 'start-recovery' },
-      { kind: 'typed', text: 'ABCDE-FGHJK' },
-      { kind: 'submit' },
-      { kind: 'choose', person: MEENA },
-      ...type('12'),
-      { kind: 'key', key: 'Escape' },
-    ]);
+    const state = drive([...proved(), ...type('12'), { kind: 'key', key: 'Escape' }]);
     expect(state.mode.kind).toBe('pin');
   });
 });
 
-/** The way back in. */
+/** The proof step filled in with the key, and Next pressed. */
+function proved(): Event[] {
+  return [
+    { kind: 'start-reset' },
+    { kind: 'typed', field: 'key', text: 'MB-STUB-0001' },
+    { kind: 'submit' },
+  ];
+}
+
+/** The owner's way back in. */
 describe('the way back in', () => {
-  const startedWithACode = (): State =>
-    drive([
-      { kind: 'start-recovery' },
-      { kind: 'typed', text: 'ABCDE-FGHJK' },
+  it('starts by asking for the proof, and nothing else', () => {
+    const state = drive([{ kind: 'start-reset' }]);
+    expect(step(state)).toBe('prove');
+  });
+
+  it('is not offered in a shop with no owner row', () => {
+    const state = drive([{ kind: 'start-reset' }], withPeople([REKHA], null));
+    expect(state.mode.kind).toBe('pin');
+  });
+
+  it('will not move on with nothing typed', () => {
+    const state = drive([{ kind: 'start-reset' }, { kind: 'submit' }]);
+    expect(step(state)).toBe('prove');
+    expect(state.problem).toContain('licence key');
+  });
+
+  it('will not move on with a password and no email', () => {
+    const state = drive([
+      { kind: 'start-reset' },
+      { kind: 'typed', field: 'password', text: 'correct-horse' },
       { kind: 'submit' },
     ]);
-
-  it('starts by asking for the code, and nothing else', () => {
-    const state = drive([{ kind: 'start-recovery' }]);
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('code');
+    expect(step(state)).toBe('prove');
   });
 
-  it('will not move on without a code', () => {
-    const state = drive([{ kind: 'start-recovery' }, { kind: 'submit' }]);
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('code');
-    expect(state.problem).toContain('recovery code');
-  });
-
-  it('never decides whether the code itself is right', () => {
-    // Only Rust holds the hash.
-    const state = startedWithACode();
+  it('never decides whether the proof itself is right', () => {
+    // Only Rust asks the cloud, and only Rust holds the key.
+    const state = drive(proved());
     expect(state.problem).toBeNull();
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('who');
+    expect(step(state)).toBe('pin');
   });
 
-  it('offers only the people Rust will accept', () => {
-    const state = drive([{ kind: 'choose', person: MEENA }], startedWithACode());
-    expect(state.recoverable.map((p) => p.id)).toEqual(['staff_3']);
-  });
-
-  /** The lockout this list exists to prevent. */
-  it('offers a manager who has no PIN — they are who the code is FOR', () => {
-    const pinless = person('staff_4', 'Nadia', {
-      role: 'Owner',
-      hasPin: false,
-      permissions: ['bill.create', 'staff.manage'],
+  it('reads the key as the proof when one was pasted, else the account', () => {
+    const byKey = drive([
+      { kind: 'start-reset' },
+      { kind: 'typed', field: 'email', text: 'meena@example.in' },
+      { kind: 'typed', field: 'password', text: 'correct-horse' },
+      { kind: 'typed', field: 'key', text: ' mb-stub-0001 ' },
+    ]);
+    expect(byKey.mode.kind === 'reset' && proofOf(byKey.mode)).toEqual({
+      by: 'key',
+      key: 'mb-stub-0001',
     });
-    // Rekha can sign in and cannot be recovered; Nadia is the other way round.
-    const shop = withPeople([REKHA], [pinless]);
-    const state = drive(
-      [{ kind: 'start-recovery' }, { kind: 'typed', text: 'ABCDE-FGHJK' }, { kind: 'submit' }],
-      shop,
-    );
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('who');
-    expect(state.recoverable.map((p) => p.name)).toEqual(['Nadia']);
+    const byPassword = drive([
+      { kind: 'start-reset' },
+      { kind: 'typed', field: 'email', text: ' meena@example.in ' },
+      { kind: 'typed', field: 'password', text: 'correct-horse' },
+    ]);
+    expect(byPassword.mode.kind === 'reset' && proofOf(byPassword.mode)).toEqual({
+      by: 'password',
+      email: 'meena@example.in',
+      password: 'correct-horse',
+    });
   });
 
-  it('says so when there is nobody this code could help', () => {
-    const state = drive(
-      [{ kind: 'start-recovery' }, { kind: 'typed', text: 'ABCDE-FGHJK' }, { kind: 'submit' }],
-      withPeople([REKHA, RAVI], []),
-    );
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('code');
-    expect(state.problem).toContain('manages staff');
+  it('takes a new PIN from the keypad once the proof is in', () => {
+    const state = drive([...proved(), ...type('24')]);
+    expect(step(state)).toBe('pin');
+    expect(newPin(state)).toBe('24');
   });
 
-  it('takes a new PIN from the keypad once a person is chosen', () => {
-    const state = drive([{ kind: 'choose', person: MEENA }, ...type('24')], startedWithACode());
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('pin');
-    expect(state.mode.kind === 'recover' && state.mode.newPin).toBe('24');
+  it('ignores loose digits on the proof step, where the boxes are the browser’s', () => {
+    const state = drive([{ kind: 'start-reset' }, ...type('24')]);
+    expect(step(state)).toBe('prove');
+    expect(newPin(state)).toBe('');
   });
 
   it('holds the new PIN to four digits too', () => {
-    const state = drive([{ kind: 'choose', person: MEENA }, ...type('24681357')], startedWithACode());
-    expect(state.mode.kind === 'recover' && state.mode.newPin).toBe('2468');
+    const state = drive([...proved(), ...type('24681357')]);
+    expect(newPin(state)).toBe('2468');
   });
 
   it('will not move on from a short PIN', () => {
-    const state = drive(
-      [{ kind: 'choose', person: MEENA }, ...type('246'), { kind: 'submit' }],
-      startedWithACode(),
-    );
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('pin');
+    const state = drive([...proved(), ...type('246'), { kind: 'submit' }]);
+    expect(step(state)).toBe('pin');
     expect(state.problem).toBe('A PIN is 4 digits.');
   });
 
   it('asks for it a second time, and sends nothing until the two agree', () => {
-    let state = drive(
-      [{ kind: 'choose', person: MEENA }, ...type('2468'), { kind: 'submit' }],
-      startedWithACode(),
-    );
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('again');
+    let state = drive([...proved(), ...type('2468'), { kind: 'submit' }]);
+    expect(step(state)).toBe('again');
 
     state = drive([...type('2469'), { kind: 'submit' }], state);
     expect(state.pending).toHaveLength(0);
     expect(state.problem).toContain('not the same');
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('pin');
-    expect(state.mode.kind === 'recover' && state.mode.newPin).toBe('');
+    expect(step(state)).toBe('pin');
+    expect(newPin(state)).toBe('');
   });
 
-  it('sends the code, the person and the new PIN together', () => {
-    const state = drive(
-      [
-        { kind: 'choose', person: MEENA },
-        ...type('2468'),
-        { kind: 'submit' },
-        ...type('2468'),
-        { kind: 'submit' },
-      ],
-      startedWithACode(),
-    );
+  it('sends the proof and the new PIN together', () => {
+    const state = drive([
+      ...proved(),
+      ...type('2468'),
+      { kind: 'submit' },
+      ...type('2468'),
+      { kind: 'submit' },
+    ]);
     expect(take(state)[1]).toEqual([
-      { do: 'recover', code: 'ABCDE-FGHJK', staffId: 'staff_3', newPin: '2468' },
+      { do: 'reset', proof: { by: 'key', key: 'MB-STUB-0001' }, newPin: '2468' },
     ]);
     expect(state.busy).toBe(true);
   });
 
   it('walks back one step at a time, and out', () => {
-    let state = drive([{ kind: 'choose', person: MEENA }, ...type('2468')], startedWithACode());
+    let state = drive([...proved(), ...type('2468'), { kind: 'submit' }, ...type('24')]);
     state = reduce(state, { kind: 'cancel' });
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('who');
-    expect(state.mode.kind === 'recover' && state.mode.newPin).toBe('');
+    expect(step(state)).toBe('pin');
+    expect(newPin(state)).toBe('');
     state = reduce(state, { kind: 'cancel' });
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('code');
-    // The code is still there — walking back to it is how somebody fixes a mistyped character.
-    expect(state.mode.kind === 'recover' && state.mode.code).toBe('ABCDE-FGHJK');
+    expect(step(state)).toBe('prove');
+    // The key is still there — walking back to it is how somebody fixes a mistyped character.
+    expect(state.mode.kind === 'reset' && state.mode.key).toBe('MB-STUB-0001');
     state = reduce(state, { kind: 'cancel' });
     expect(state.mode.kind).toBe('pin');
     expect(marked(state)).toBe('staff_1');
   });
 
-  it('sends a refusal back to the code box, where the mistake usually is', () => {
-    const state = drive(
-      [
-        { kind: 'choose', person: MEENA },
-        ...type('2468'),
-        { kind: 'submit' },
-        ...type('2468'),
-        { kind: 'submit' },
-        { kind: 'failed', message: 'That is not this shop’s recovery code.' },
-      ],
-      startedWithACode(),
-    );
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('code');
-    expect(state.mode.kind === 'recover' && state.mode.newPin).toBe('');
+  it('sends a refusal back to the proof, where the mistake usually is', () => {
+    const state = drive([
+      ...proved(),
+      ...type('2468'),
+      { kind: 'submit' },
+      ...type('2468'),
+      { kind: 'submit' },
+      { kind: 'failed', message: 'That is not this shop’s licence key.' },
+    ]);
+    expect(step(state)).toBe('prove');
+    expect(newPin(state)).toBe('');
     expect(state.busy).toBe(false);
-    expect(state.problem).toContain('recovery code');
+    expect(state.problem).toContain('licence key');
   });
 
-  it('does not write a PIN to somebody suspended halfway through', () => {
-    const state = drive(
-      [
-        { kind: 'choose', person: MEENA },
-        ...type('2468'),
-        { kind: 'people', people: [REKHA, RAVI], recoverable: [], canRecover: true, lastSignedIn: null },
-      ],
-      startedWithACode(),
-    );
-    expect(state.mode.kind === 'recover' && state.mode.step).toBe('who');
-    expect(state.mode.kind === 'recover' && state.mode.person).toBeNull();
+  it('goes back to the sign-in screen once Rust has signed the owner in', () => {
+    const state = drive([
+      ...proved(),
+      ...type('2468'),
+      { kind: 'submit' },
+      ...type('2468'),
+      { kind: 'submit' },
+      { kind: 'done' },
+    ]);
+    expect(state.mode.kind).toBe('pin');
+    expect(state.busy).toBe(false);
+    expect(state.pending).toHaveLength(0);
   });
 });

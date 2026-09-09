@@ -79,6 +79,14 @@
   min-height: 0;
 }
 
+/* An empty shop: the three doors, side by side, under the words. */
+.mb-billing__setup {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gap-field);
+}
+
 /* THE CART IS PERMANENT: it never moves, never hides. */
 
 /*

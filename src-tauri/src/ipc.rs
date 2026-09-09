@@ -21,12 +21,6 @@ pub struct MoneyView {
     pub text: String,
 }
 
-/// A rate from whole percent, for the demo shop's fixed menu.
-#[cfg(debug_assertions)]
-fn demo_rate(percent: u32) -> mb_core::TaxRate {
-    mb_core::TaxRate::from_percent(percent).unwrap_or(mb_core::TaxRate::ZERO)
-}
-
 /// A stored count, made sendable.
 #[must_use]
 pub fn count(n: i64) -> u32 {
@@ -345,9 +339,6 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             K::Drawer => "Cash drawer",
             K::DayClose => "Closing slip",
             K::Delivery => "Delivery slip",
-            // Named plainly, because this is the job a shopkeeper must notice if it fails: the
-            // code on it is on screen for one dialog and nowhere else afterwards.
-            K::Recovery => "Recovery code",
         }
         .to_owned(),
         state: match status.state {
@@ -448,7 +439,7 @@ macro_rules! commands {
             $crate::ipc::lock_state,
             $crate::ipc::login,
             $crate::ipc::lock_now,
-            $crate::ipc::recover_with_code,
+            $crate::ipc::reset_owner_pin,
             $crate::ipc::list_staff,
             $crate::ipc::save_staff_member,
             $crate::ipc::set_staff_pin,
@@ -690,9 +681,6 @@ macro_rules! commands {
             $crate::kitchen::kitchen_recall,
             $crate::kitchen::kitchen_acknowledge,
             $crate::kitchen::kitchen_fire,
-            // Development only — see its own documentation.
-            #[cfg(debug_assertions)]
-            $crate::ipc::seed_demo_shop,
         ]
     };
 }
@@ -1218,174 +1206,6 @@ pub fn menu_items(app: tauri::State<'_, App>) -> UiResult<Vec<MenuItemView>> {
     })
 }
 
-/// Put a small shop in the database so the billing screen has something to render — development
-/// only, and it cannot ship.
-#[cfg(debug_assertions)]
-#[tauri::command]
-pub fn seed_demo_shop(app: tauri::State<'_, App>) -> UiResult<String> {
-    guard::require(&app, Permission::StaffManage)?;
-    use mb_core::{CategoryId, ItemId, Money, TableId, TaxRate, TaxSpec};
-    use mb_db::repo::floor::{DiningTable, Section};
-    use mb_db::repo::menu::MenuItem;
-
-    let at = crate::flows::now();
-
-    if !app.has_shop() {
-        let dir = crate::config::AppConfig::directory();
-        let path = dir.join("demo-shop.db");
-        let db = mb_db::Db::open(&mb_db::DbConfig::new(&path)).map_err(|e| words::from_db(&e))?;
-        mb_db::locate::write_config(&dir, &path).map_err(|e| words::from_db(&e))?;
-        crate::log_info!("dev: made a demo shop at {}", path.display());
-        app.open_shop(db, path);
-    }
-
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-
-                for (index, name) in ["Main Hall", "AC Section", "Terrace"].iter().enumerate() {
-                    repos.floor().save_section(
-                        OUTLET,
-                        &Section {
-                            id: format!("sec_{index}"),
-                            name: (*name).to_owned(),
-                            sort_order: index as i64,
-                            is_active: true,
-                        },
-                        at,
-                    )?;
-                }
-
-                // Twenty-two tables across three sections: enough that density is a real
-                // question at 1366x768 rather than a theoretical one.
-                let mut n = 0;
-                for (section, count) in [("sec_0", 10), ("sec_1", 8), ("sec_2", 4)] {
-                    for seat in 1..=count {
-                        n += 1;
-                        repos.floor().save_table(
-                            OUTLET,
-                            &DiningTable {
-                                id: TableId::new(format!("tbl_{n}")),
-                                section_id: Some(section.to_owned()),
-                                label: format!("{n}"),
-                                seats: if seat % 3 == 0 { 6 } else { 4 },
-                                pos: None,
-                                sort_order: n,
-                                is_active: true,
-                            },
-                            at,
-                        )?;
-                    }
-                }
-
-                // The category has to exist before an item can point at it —
-                // `items.category_id` references `categories(id)`, and the first run of this
-                // seeder hit that constraint.
-                repos.menu().save_category(
-                    OUTLET,
-                    &mb_db::repo::menu::Category {
-                        id: CategoryId::new("cat_food"),
-                        name: "Food".to_owned(),
-                        sort_order: 0,
-                        is_active: true,
-                        // The demo shop has one kitchen screen, which is what a real small shop
-                        // has.
-                        station: None,
-                        default_tax_class_id: None,
-                    },
-                    at,
-                )?;
-
-                // One `TaxSpec` per item, not a rate and a treatment side by side.
-                let menu: [(&str, &str, i64, TaxSpec); 8] = [
-                    (
-                        "itm_dosa",
-                        "Masala Dosa",
-                        12_000,
-                        mb_core::TaxSpec::gst(demo_rate(5)),
-                    ),
-                    (
-                        "itm_idli",
-                        "Idli Vada",
-                        8_000,
-                        mb_core::TaxSpec::gst(demo_rate(5)),
-                    ),
-                    (
-                        "itm_pbm",
-                        "Paneer Butter Masala (Half) - Extra Spicy",
-                        31_500,
-                        mb_core::TaxSpec::gst(demo_rate(5)),
-                    ),
-                    (
-                        "itm_water",
-                        "Water 1L",
-                        2_000,
-                        mb_core::TaxSpec::gst_inclusive(demo_rate(18)),
-                    ),
-                    (
-                        "itm_cola",
-                        "Cola 300ml",
-                        4_000,
-                        mb_core::TaxSpec::gst(demo_rate(18)),
-                    ),
-                    // The demo bar line.
-                    (
-                        "itm_beer",
-                        "Beer 650ml",
-                        22_000,
-                        mb_core::TaxSpec::liquor(TaxRate::ZERO),
-                    ),
-                    (
-                        "itm_rice",
-                        "Curd Rice",
-                        9_000,
-                        mb_core::TaxSpec::gst(demo_rate(5)),
-                    ),
-                    (
-                        "itm_sweet",
-                        "Gulab Jamun (2 pc)",
-                        6_000,
-                        mb_core::TaxSpec::gst(demo_rate(5)),
-                    ),
-                ];
-                for (index, (id, name, paise, tax)) in menu.iter().enumerate() {
-                    repos.menu().save_item(
-                        OUTLET,
-                        &MenuItem {
-                            id: ItemId::new(*id),
-                            category_id: Some(CategoryId::new("cat_food")),
-                            name: (*name).to_owned(),
-                            unit_price: Money::from_paise(*paise),
-                            // The demo shop points its items at the seeded slabs, so a rate
-                            // change on the slab moves them — which is what a real shop does.
-                            tax_class_id: mb_core::seeded_slab_for(tax.kind, tax.rate)
-                                .unwrap_or_else(|| mb_core::TaxClassId::new("tax_food_5")),
-                            // Only a tax-in item says so; the rest follow the slab and the shop.
-                            price_basis: tax.basis.is_inclusive().then_some(tax.basis),
-                            hsn: Some("2106".to_owned()),
-                            cost_price: None,
-                            short_code: None,
-                            // The demo shop gets real prep times and courses, so the kitchen
-                            // screen has something to show the first time somebody opens it.
-                            prep_minutes: Some(if *paise > 8_000 { 12 } else { 4 }),
-                            course: Some(
-                                if *paise > 8_000 { "Main" } else { "Starter" }.to_owned(),
-                            ),
-                            is_open_price: false,
-                            is_available: true,
-                            sort_order: index as i64,
-                        },
-                        at,
-                    )?;
-                }
-                Ok(())
-            })
-            .map_err(|e| words::from_db(&e))?;
-        Ok("a demo shop is in place".to_owned())
-    })
-}
-
 /// Ranked item search.
 pub fn search_items_on(
     app: &App,
@@ -1587,12 +1407,9 @@ pub struct LockState {
     pub nobody_has_a_pin: bool,
     /// Everybody who could sign in.
     pub people: Vec<PersonView>,
-    /// Whether this shop has a recovery code at all, so the lock screen only offers "forgotten
-    /// your PIN?" when there is something to offer.
-    pub can_recover: bool,
-    /// Who the recovery code may set a PIN for, which is not a subset of `Self::people` — and
-    /// the difference is a way to be locked out of your own shop for good.
-    pub recoverable: Vec<PersonView>,
+    /// The owner's name, when the shop has an owner row: whose PIN "forgotten your PIN?" resets.
+    /// The owner need not be in `people` — an owner with no PIN is exactly who needs it.
+    pub owner: Option<String>,
     /// Who signed in last at this counter, so the lock screen starts on them.
     pub last_signed_in: Option<String>,
 }
@@ -1614,14 +1431,23 @@ pub struct PersonView {
     pub max_discount: Option<MoneyView>,
 }
 
-/// The key the shop's recovery code hash is stored under.
-const RECOVERY_KEY: &str = "auth.recovery_hash";
 /// The key the last successful sign-in's staff id is stored under.
 const LAST_SIGNED_IN_KEY: &str = "auth.last_signed_in";
 
+/// The shop's owner row: the one person the account, or the licence key, can vouch for.
+fn owner_row(
+    repos: &mb_db::Repos<'_>,
+) -> Result<Option<mb_db::repo::people::StaffMember>, mb_db::DbError> {
+    let owner_role = mb_auth::RolePreset::Owner.id();
+    Ok(repos.people().list_staff(OUTLET)?.into_iter().find(|p| {
+        p.role_id.as_deref() == Some(owner_role)
+            && p.status == mb_db::repo::people::StaffStatus::Active
+    }))
+}
+
 pub fn lock_state_on(app: &App) -> UiResult<LockState> {
     let current = app.sessions().current();
-    let (people, can_recover, last_signed_in) = app
+    let (people, owner, last_signed_in) = app
         .with_shop(|shop| {
             shop.db
                 .transaction(|tx| {
@@ -1632,13 +1458,13 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
                         let locked_out = lockout_message(&repos, &member)?;
                         people.push(person_view(&member, locked_out));
                     }
-                    let recovery: Option<String> = repos.settings().get(OUTLET, RECOVERY_KEY)?;
+                    let owner = owner_row(&repos)?.map(|o| o.name);
                     let last: Option<String> = repos.settings().get(OUTLET, LAST_SIGNED_IN_KEY)?;
-                    Ok((people, recovery.is_some(), last))
+                    Ok((people, owner, last))
                 })
                 .map_err(|e| words::from_db(&e))
         })
-        .unwrap_or_else(|_| (Vec::new(), false, None));
+        .unwrap_or_else(|_| (Vec::new(), None, None));
 
     Ok(LockState {
         signed_in_as: current.as_ref().map(|s| s.actor.name.clone()),
@@ -1651,23 +1477,12 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
                 .collect()
         }),
         nobody_has_a_pin: people.iter().all(|p| !p.has_pin),
-        // Two lists off one read, and they are deliberately different.
-        recoverable: people
-            .iter()
-            .filter(|p| {
-                p.status == "active"
-                    && p.permissions
-                        .iter()
-                        .any(|code| code == Permission::StaffManage.code())
-            })
-            .cloned()
-            .collect(),
         // Only people who can actually sign in.
         people: people
             .into_iter()
             .filter(|p| p.has_pin && p.status == "active")
             .collect(),
-        can_recover,
+        owner,
         last_signed_in,
     })
 }
@@ -1805,7 +1620,18 @@ pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState>
         ));
     }
 
-    app.sessions().begin(actor_for(&member), at, false);
+    admit(app, &member, at)
+}
+
+/// Somebody whose PIN, or whose account, has just been checked: their session starts, the
+/// history says so, and the next lock screen starts on them.
+fn admit(
+    app: &App,
+    member: &mb_db::repo::people::StaffMember,
+    at: Timestamp,
+) -> UiResult<LockState> {
+    let day = crate::flows::today(at);
+    app.sessions().begin(actor_for(member), at, false);
     app.record(
         &AuditEntry::new(at, day, Some(member.id.clone()), action::LOGIN_OK, "staff")
             .about(member.id.as_str()),
@@ -1866,113 +1692,6 @@ pub fn lock_now_on(app: &App) -> UiResult<LockState> {
         log_info!("{} locked the counter", who.name);
     }
     lock_state_on(app)
-}
-
-/// The way back in when the PIN is gone.
-pub fn recover_with_code_on(
-    app: &App,
-    code: String,
-    staff_id: String,
-    new_pin: String,
-) -> UiResult<String> {
-    let at = crate::flows::now();
-    let day = crate::flows::today(at);
-    let pin = Pin::parse(&new_pin)
-        .map_err(|e| UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string()))?;
-
-    let stored: Option<String> = app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).settings().get(OUTLET, RECOVERY_KEY))
-            .map_err(|e| words::from_db(&e))
-    })?;
-
-    let Some(stored) = stored else {
-        return Err(UiError::new(
-            "auth.no_recovery",
-            "This shop has no recovery code. Ring support, with your licence key to hand.",
-        ));
-    };
-    let stored = PinHash::from_stored(&stored).map_err(|e| {
-        UiError::new(
-            "auth.recovery_unreadable",
-            "This shop's recovery code could not be read. Ring support.",
-        )
-        .with_detail(e.to_string())
-    })?;
-
-    if !mb_auth::verify_recovery_code(&code, &stored) {
-        return Err(UiError::new(
-            "auth.recovery_wrong",
-            "That is not this shop's recovery code. Check the slip it was printed on.",
-        ));
-    }
-
-    let (fresh, fresh_hash) = mb_auth::new_recovery_code().map_err(|e| {
-        UiError::new(
-            "auth.recovery_failed",
-            "A new recovery code could not be made.",
-        )
-        .with_detail(e.to_string())
-    })?;
-    let hashed = mb_auth::hash_pin(&pin).map_err(|e| {
-        UiError::new("auth.pin_failed", "That PIN could not be saved.").with_detail(e.to_string())
-    })?;
-
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let Some(mut member) = repos.people().find_staff(OUTLET, &staff_id)? else {
-                    return Err(mb_db::DbError::invariant(
-                        "that person is not on the staff list",
-                    ));
-                };
-                // Only somebody who manages staff.
-                if !member.permissions.has(Permission::StaffManage) {
-                    return Err(mb_db::DbError::invariant(
-                        "the recovery code can only set a PIN for somebody who manages staff",
-                    ));
-                }
-                member.pin_hash = Some(hashed.as_str().to_owned());
-                repos.people().save_staff(OUTLET, &member, at)?;
-                repos.settings().set(
-                    OUTLET,
-                    RECOVERY_KEY,
-                    &fresh_hash.as_str().to_owned(),
-                    at,
-                    None,
-                )?;
-                repos.audit().append(
-                    OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(member.id.clone()),
-                        action::RECOVERY_USED,
-                        "staff",
-                    )
-                    .about(member.id.as_str()),
-                )?;
-                repos.audit().append(
-                    OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(member.id.clone()),
-                        action::RECOVERY_ISSUED,
-                        "shop",
-                    ),
-                )?;
-                Ok(())
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-
-    log_warn!("the recovery code was used, and a new one was issued");
-    // On paper as well as on screen — see `print_the_recovery_slip`.
-    print_the_recovery_slip(app, &fresh.to_print(), day, true);
-    // Returned so the screen can show it once as well.
-    Ok(fresh.to_print())
 }
 
 // The people screen.
@@ -2220,44 +1939,36 @@ fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
     })
 }
 
-/// Set or clear a PIN.
-pub fn set_staff_pin_on(
-    app: &App,
-    staff_id: String,
-    pin: Option<String>,
-) -> UiResult<Option<String>> {
-    let who = guard::require(app, Permission::StaffManage)?;
-    let at = crate::flows::now();
-    let day = crate::flows::today(at);
-    // What the shop looked like BEFORE.
-    let had_a_pin = app.shop_has_a_pin();
-
-    let hashed = match pin.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+/// A typed PIN, hashed; `None` when the PIN is being cleared.
+fn hashed_pin(pin: Option<&str>) -> UiResult<Option<PinHash>> {
+    match pin.map(str::trim).filter(|p| !p.is_empty()) {
         Some(typed) => {
             let parsed = Pin::parse(typed).map_err(|e| {
                 UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string())
             })?;
-            Some(mb_auth::hash_pin(&parsed).map_err(|e| {
+            Ok(Some(mb_auth::hash_pin(&parsed).map_err(|e| {
                 UiError::new("auth.pin_failed", "That PIN could not be saved.")
                     .with_detail(e.to_string())
-            })?)
+            })?))
         }
-        None => None,
-    };
+        None => Ok(None),
+    }
+}
 
-    let generated = match hashed {
-        Some(_) => Some(mb_auth::new_recovery_code().map_err(|e| {
-            UiError::new("auth.recovery_failed", "A recovery code could not be made.")
-                .with_detail(e.to_string())
-        })?),
-        None => None,
-    };
-
-    let issued = app.with_shop(|shop| {
+/// Write a person's PIN, or clear it, and say so in the history. `by` is whoever did it.
+fn write_pin(
+    app: &App,
+    staff_id: &str,
+    hashed: Option<&PinHash>,
+    by: &mb_core::StaffId,
+    at: Timestamp,
+) -> UiResult<()> {
+    let day = crate::flows::today(at);
+    app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                let Some(mut member) = repos.people().find_staff(OUTLET, &staff_id)? else {
+                let Some(mut member) = repos.people().find_staff(OUTLET, staff_id)? else {
                     return Err(mb_db::DbError::invariant(
                         "that person is not on the staff list",
                     ));
@@ -2269,126 +1980,63 @@ pub fn set_staff_pin_on(
                         "give this person a role before setting their PIN",
                     ));
                 }
-                member.pin_hash = hashed.as_ref().map(|h| h.as_str().to_owned());
+                member.pin_hash = hashed.map(|h| h.as_str().to_owned());
                 repos.people().save_staff(OUTLET, &member, at)?;
-
-                // The shop's first recovery code, the first time somebody who manages staff
-                // gets a PIN.
-                let existing: Option<String> = repos.settings().get(OUTLET, RECOVERY_KEY)?;
-                let mut issued = None;
-                if existing.is_none()
-                    && member.permissions.has(Permission::StaffManage)
-                    && let Some((code, hash)) = generated.as_ref()
-                {
-                    {
-                        repos.settings().set(
-                            OUTLET,
-                            RECOVERY_KEY,
-                            &hash.as_str().to_owned(),
-                            at,
-                            None,
-                        )?;
-                        repos.audit().append(
-                            OUTLET,
-                            &AuditEntry::new(
-                                at,
-                                day,
-                                Some(who.staff_id.clone()),
-                                action::RECOVERY_ISSUED,
-                                "shop",
-                            ),
-                        )?;
-                        issued = Some(code.to_print());
-                    }
-                }
-
                 repos.audit().append(
                     OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(who.staff_id.clone()),
-                        action::PIN_SET,
-                        "staff",
-                    )
-                    .about(&staff_id)
-                    .with_after(serde_json::json!({ "has_pin": hashed.is_some() })),
+                    &AuditEntry::new(at, day, Some(by.clone()), action::PIN_SET, "staff")
+                        .about(staff_id)
+                        .with_after(serde_json::json!({ "has_pin": hashed.is_some() })),
                 )?;
-                Ok(issued)
+                Ok(())
             })
             .map_err(|e| words::from_db(&e))
-    })?;
+    })
+}
 
-    // On paper as well as on screen, and BEFORE the relock below — a shop whose first PIN has
-    // just been set is about to be looking at a lock screen, and the slip should already be
-    // coming out of the printer by then.
-    if let Some(code) = issued.as_deref() {
-        print_the_recovery_slip(app, code, day, false);
-    }
-
+/// Set or clear a PIN.
+pub fn set_staff_pin_on(app: &App, staff_id: String, pin: Option<String>) -> UiResult<()> {
+    let who = guard::require(app, Permission::StaffManage)?;
+    let at = crate::flows::now();
+    // What the shop looked like BEFORE.
+    let had_a_pin = app.shop_has_a_pin();
+    let hashed = hashed_pin(pin.as_deref())?;
+    write_pin(app, &staff_id, hashed.as_ref(), &who.staff_id, at)?;
     // Setting the first PIN locks the app, here and now.
     app.relock_if_this_was_the_first_pin(had_a_pin);
-
-    Ok(issued)
+    Ok(())
 }
 
-/// Put the shop's recovery code on paper.
-fn print_the_recovery_slip(app: &App, code: &str, day: BusinessDay, replaces_an_older: bool) {
-    let printed = crate::flows::default_printer(app).and_then(|printer| {
-        let config = app.shop_config();
-        let store = config.store.to_print_store();
-        let document = mb_print::template::recovery_document(
-            printer.paper,
-            &mb_print::template::RecoveryContext {
-                code,
-                // A PIN can be set before the shop profile is finished, and a slip with no name
-                // on it is better than no slip.
-                store: (!store.name.trim().is_empty()).then_some(&store),
-                issued_on: &day_in_words(day),
-                replaces_an_older_code: replaces_an_older,
-            },
-        );
-        app.print(
-            Job::new(JobKind::Recovery, &printer.id, document, day)
-                .because("recovery code".to_owned()),
-        )
-    });
-
-    if let Err(cause) = printed {
-        // Loud, because the shop is now one closed dialog away from having no way back in — and
-        // this is the line a support call starts from.
-        log_warn!(
-            "the recovery slip could not be printed ({}) — the code is on screen only",
-            cause.message
-        );
-    }
-}
-
-fn day_in_words(day: BusinessDay) -> String {
-    const MONTHS: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
-    let (year, month, d) = day.to_ymd();
-    // `month` is 1..=12 from `to_ymd`; this arrives at the right name without a cast that D7
-    // would have to argue about, and at "" if it ever does not.
-    let name = usize::try_from(month)
-        .ok()
-        .and_then(|month| month.checked_sub(1))
-        .and_then(|index| MONTHS.get(index))
-        .copied()
-        .unwrap_or_default();
-    format!("{d} {name} {year}")
+/// The way back in when the owner's PIN is gone: the account's email and password, or the
+/// licence key, prove who they are — the same two doors the first run has — and the owner is
+/// signed in with the new PIN. Staff PINs are the owner's to reset, from the Staff screen.
+pub fn reset_owner_pin_on(
+    app: &App,
+    proof: crate::firstrun::OwnerProof,
+    new_pin: String,
+) -> UiResult<LockState> {
+    let at = crate::flows::now();
+    // The shape first, so a bad PIN costs no round trip to the cloud.
+    let Some(hashed) = hashed_pin(Some(&new_pin))? else {
+        return Err(UiError::new("auth.pin_shape", "Type the new PIN."));
+    };
+    let owner = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| owner_row(&mb_db::Repos::new(tx)))
+            .map_err(|e| words::from_db(&e))
+    })?;
+    let Some(owner) = owner else {
+        return Err(UiError::new(
+            "auth.no_owner",
+            "This shop has no owner on its staff list, so there is no PIN to reset.",
+        ));
+    };
+    crate::firstrun::prove_owner(app, &proof)?;
+    write_pin(app, owner.id.as_str(), Some(&hashed), &owner.id, at)?;
+    log_warn!("{} reset their PIN by proving the account", owner.name);
+    // Straight in: the cloud has just vouched for them, so a lockout from guessed PINs does not
+    // stand in the way.
+    admit(app, &owner, at)
 }
 
 // The history.
@@ -2569,16 +2217,6 @@ pub fn lock_now(app: tauri::State<'_, App>) -> UiResult<LockState> {
 }
 
 #[tauri::command]
-pub fn recover_with_code(
-    app: tauri::State<'_, App>,
-    code: String,
-    staff_id: String,
-    new_pin: String,
-) -> UiResult<String> {
-    recover_with_code_on(&app, code, staff_id, new_pin)
-}
-
-#[tauri::command]
 pub fn list_staff(app: tauri::State<'_, App>) -> UiResult<Vec<PersonView>> {
     list_staff_on(&app)
 }
@@ -2611,8 +2249,17 @@ pub fn set_staff_pin(
     app: tauri::State<'_, App>,
     staff_id: String,
     pin: Option<String>,
-) -> UiResult<Option<String>> {
+) -> UiResult<()> {
     set_staff_pin_on(&app, staff_id, pin)
+}
+
+#[tauri::command]
+pub fn reset_owner_pin(
+    app: tauri::State<'_, App>,
+    proof: crate::firstrun::OwnerProof,
+    new_pin: String,
+) -> UiResult<LockState> {
+    reset_owner_pin_on(&app, proof, new_pin)
 }
 
 #[tauri::command]

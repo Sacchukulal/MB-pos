@@ -459,6 +459,17 @@ fn manifest_for(app: &crate::state::App) -> Option<Manifest> {
     manifest.rollout.includes(&machine, &shop).then_some(manifest)
 }
 
+/// How far a download has got, 0 to 100; nought until the size is known.
+#[allow(clippy::integer_division, reason = "a percentage for a progress bar, not money")]
+fn percent_of(bytes: u64, total: u64) -> u32 {
+    bytes
+        .saturating_mul(100)
+        .checked_div(total)
+        .and_then(|p| u32::try_from(p).ok())
+        .unwrap_or(0)
+        .min(100)
+}
+
 /// Where a downloaded installer waits.
 fn incoming(dir: &Path, manifest: &Manifest) -> PathBuf {
     dir.join("updates")
@@ -487,10 +498,38 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
         .quietly());
     }
     let to = incoming(&dir, &manifest);
-    let sha = app
-        .link()
-        .download(&manifest.url, &to)
-        .map_err(|e| crate::words::from_link(&e))?;
+    let version = manifest.version.to_string();
+    let tell = |stage: &str, bytes: u64, total: u64| {
+        app.push(crate::state::Pushed::Update {
+            version: version.clone(),
+            stage: stage.to_owned(),
+            percent: percent_of(bytes, total),
+            bytes,
+            total,
+        });
+    };
+    // A downloaded installer that already matched is not fetched twice.
+    let already = to.is_file()
+        && std::fs::read(&to)
+            .map(|bytes| crate::cloud::sha256_hex(&bytes).eq_ignore_ascii_case(&manifest.sha256))
+            .unwrap_or(false);
+    let sha = if already {
+        manifest.sha256.clone()
+    } else {
+        let mut last_told = 0u64;
+        app.link()
+            .download(&manifest.url, &to, &mut |bytes, total| {
+                // The screen hears every step of one percent, not every packet.
+                let total = total.unwrap_or(0);
+                let a_step_on = bytes.saturating_sub(last_told).saturating_mul(100) >= total;
+                if total == 0 || bytes == total || a_step_on {
+                    last_told = bytes;
+                    tell("downloading", bytes, total);
+                }
+            })
+            .map_err(|e| crate::words::from_link(&e))?
+    };
+    tell("checking", 1, 1);
     if !sha.eq_ignore_ascii_case(&manifest.sha256) {
         let _ = std::fs::remove_file(&to);
         return Err(UiError::new(
@@ -528,6 +567,7 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
     let mut state = app.updates();
     state.downloaded = true;
     app.set_updates(state);
+    tell("installing", 1, 1);
     run_installer(&to, handle)?;
     Ok(format!(
         "Version {} is installing. Magic Bill will close and open again on the new version — your \
@@ -558,7 +598,7 @@ fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::
     Ok(())
 }
 
-/// One `cmd` line, handed to Windows exactly as written.
+/// One `cmd` line, handed to Windows exactly as written, with no console box on the screen.
 ///
 /// `raw_arg` and not `arg`: Rust quotes an argument the way a normal Windows program reads one,
 /// which escapes the quotes already inside the line as `\"` — and cmd.exe does not read `\"` as
@@ -568,7 +608,7 @@ fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::
 pub(crate) fn cmd_line(line: &str) -> std::process::Command {
     use std::os::windows::process::CommandExt as _;
 
-    let mut command = std::process::Command::new("cmd.exe");
+    let mut command = crate::share::hidden_cmd();
     command.raw_arg("/C ").raw_arg(line);
     command
 }
@@ -608,7 +648,7 @@ impl GitHubReleases {
     fn fetch(&self, asset: &str) -> Result<String, String> {
         let to = self.dir.join("updates").join(asset);
         self.link
-            .download(&GitHubReleases::asset_url(asset), &to)
+            .download(&GitHubReleases::asset_url(asset), &to, &mut |_, _| {})
             .map_err(|e| format!("GitHub did not answer for {asset}: {e:?}"))?;
         std::fs::read_to_string(&to).map_err(|e| format!("{asset} could not be read: {e}"))
     }

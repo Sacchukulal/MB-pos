@@ -687,6 +687,25 @@
   margin: 0;
 }
 
+/* Inside the update dialog: a spinner beside its sentence, or the bar and its numbers. */
+.mb-updates__wait {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mb-updates__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mb-updates__stage {
+  display: flex;
+  justify-content: space-between;
+  font-weight: var(--weight-medium);
+}
+
 /* Settings › Tax — the slabs and the tick list. */
 
 .mb-tax {

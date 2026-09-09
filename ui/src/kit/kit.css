@@ -1074,8 +1074,40 @@ textarea.mb-input {
   }
 }
 
+/* Progress: a track and a bar. With no width to give it, the bar sweeps to say "still going". */
+.mb-progress {
+  position: relative;
+  overflow: hidden;
+  height: var(--space-2);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-pill);
+}
+
+.mb-progress__bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--motion-normal) var(--ease);
+}
+
+.mb-progress__bar--busy {
+  position: absolute;
+  width: 30%;
+  animation: mb-sweep 1200ms ease-in-out infinite alternate;
+}
+
+@keyframes mb-sweep {
+  from {
+    left: 0;
+  }
+  to {
+    left: 70%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .mb-spinner {
+  .mb-spinner,
+  .mb-progress__bar--busy {
     animation: none;
   }
 }

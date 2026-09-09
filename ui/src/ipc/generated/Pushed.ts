@@ -47,4 +47,21 @@ qr: string,
  * True when there is nothing on the bill, so the display shows the shop's name instead
  * of an empty table.
  */
-idle: boolean, };
+idle: boolean, } | { "kind": "update", 
+/**
+ * The version coming in.
+ */
+version: string, 
+/**
+ * downloading · checking · installing.
+ */
+stage: string, 
+/**
+ * Of the download, 0 to 100.
+ */
+percent: number, 
+/**
+ * Bytes so far and the whole size, for the screen to say "12 of 60 MB". Plain numbers
+ * on the wire: an installer is nowhere near what a JavaScript number cannot hold.
+ */
+bytes: number, total: number, };

@@ -14,6 +14,7 @@ import type { TableView } from './generated/TableView';
 import type { Pushed } from './generated/Pushed';
 import type { UiError } from './generated/UiError';
 import type { LockState } from './generated/LockState';
+import type { OwnerProof } from './generated/OwnerProof';
 import type { PersonView } from './generated/PersonView';
 import type { RoleView } from './generated/RoleView';
 import type { StaffEdit } from './generated/StaffEdit';
@@ -188,8 +189,6 @@ export interface Commands {
   settle_from_floor: { args: { orderId: string; mode: string }; returns: string };
   /** The cashier said no: the request leaves the desk. */
   decline_settle: { args: { orderId: string }; returns: null };
-  /** Development only — the command does not exist in a release build. */
-  seed_demo_shop: { args: void; returns: string };
   dismiss_print_job: { args: { id: string }; returns: void };
   retry_parked_print_jobs: { args: void; returns: number };
   dismiss_all_print_jobs: { args: void; returns: number };
@@ -198,17 +197,20 @@ export interface Commands {
   lock_state: { args: void; returns: LockState };
   login: { args: { staffId: string; pin: string }; returns: LockState };
   lock_now: { args: void; returns: LockState };
-  /** Returns the NEW recovery code, to be shown once and printed. */
-  recover_with_code: {
-    args: { code: string; staffId: string; newPin: string };
-    returns: string;
+  /**
+   * The owner's forgotten PIN: the account's email and password, or the licence key, prove
+   * who they are; the new PIN is set and they are signed in with it.
+   */
+  reset_owner_pin: {
+    args: { proof: OwnerProof; newPin: string };
+    returns: LockState;
   };
   list_staff: { args: void; returns: PersonView[] };
   save_staff_member: { args: { staff: StaffEdit }; returns: PersonView[] };
   /** `null` clears the PIN. */
   set_staff_pin: {
     args: { staffId: string; pin: string | null };
-    returns: string | null;
+    returns: void;
   };
   list_roles: { args: void; returns: RoleView[] };
   save_role: { args: { role: RoleView }; returns: RoleView[] };

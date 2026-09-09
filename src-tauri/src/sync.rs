@@ -884,7 +884,12 @@ mod tests {
                 expires_at: Timestamp::from_millis(1),
             })
         }
-        fn download(&self, _: &str, _: &Path) -> Result<String, LinkError> {
+        fn download(
+            &self,
+            _: &str,
+            _: &Path,
+            _: &mut dyn FnMut(u64, Option<u64>),
+        ) -> Result<String, LinkError> {
             Err(LinkError::Unreachable)
         }
     }

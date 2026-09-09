@@ -5,7 +5,7 @@
 //! and the licence on that account is what opens the shop: nothing here makes a shop out of
 //! thin air, and nothing here picks a folder for them.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ts_rs::TS;
 
@@ -112,6 +112,8 @@ pub struct OwnerShop {
     pub status: String,
     /// The licence key, which the cloud gives only to an owner.
     pub key: Option<String>,
+    /// The name on the account that owns the shop: the owner's row in the staff list.
+    pub owner_name: String,
 }
 
 /// The owner who signed in, until they open a folder.
@@ -193,14 +195,16 @@ fn local_phone(cloud_says: &str) -> String {
         .unwrap_or_default()
 }
 
-/// One row of a `mb_my_restaurants` answer.
-fn shop_in(row: &Value, phone: &str) -> OwnerShop {
+/// One row of a `mb_my_restaurants` answer. The owner's name and mobile ride on the row, so a
+/// counter opened by the licence key knows them as well as one opened by the password.
+fn shop_in(row: &Value) -> OwnerShop {
     let licence = row.get("licence").cloned().unwrap_or(Value::Null);
+    let owner = row.get("owner").cloned().unwrap_or(Value::Null);
     OwnerShop {
         id: text(row, "id"),
         name: text(row, "name"),
         address: text(row, "address"),
-        phone: phone.to_owned(),
+        phone: local_phone(&text(&owner, "phone")),
         gstin: text(row, "gstin"),
         short_code: text(row, "short_code"),
         status: text(&licence, "status"),
@@ -210,17 +214,18 @@ fn shop_in(row: &Value, phone: &str) -> OwnerShop {
             .map(str::trim)
             .filter(|k| !k.is_empty())
             .map(str::to_owned),
+        owner_name: text(&owner, "name"),
     }
 }
 
 /// The shops in a `mb_my_restaurants` answer that the caller owns, and whether any of them is
 /// the caller's as staff rather than as owner.
-fn shops_in(answer: &Value, phone: &str) -> (Vec<OwnerShop>, bool) {
+fn shops_in(answer: &Value) -> (Vec<OwnerShop>, bool) {
     let mut owned = Vec::new();
     let mut staff_at_one = false;
     for row in answer.as_array().into_iter().flatten() {
         if OWNER_ROLES.contains(&text(row, "role").as_str()) {
-            owned.push(shop_in(row, phone));
+            owned.push(shop_in(row));
         } else {
             staff_at_one = true;
         }
@@ -228,17 +233,87 @@ fn shops_in(answer: &Value, phone: &str) -> (Vec<OwnerShop>, bool) {
     (owned, staff_at_one)
 }
 
-/// The mobile on the signed-in account, or nothing: the details step is not held up by it.
-fn account_phone(link: &dyn crate::cloud::Link, token: &str) -> String {
-    match link.rest("accounts?select=phone&limit=1", token, 0, 0) {
-        Ok(page) => page
-            .rows
-            .first()
-            .map(|row| local_phone(&text(row, "phone")))
-            .unwrap_or_default(),
-        Err(e) => {
-            crate::log_info!("the account's mobile could not be read: {e:?}");
-            String::new()
+/// The shops an account owns, by its email and password: the one question the cloud is asked
+/// on the first run, and again when the owner has to prove who they are.
+fn owned_shops(
+    link: &dyn crate::cloud::Link,
+    email: &str,
+    password: &str,
+) -> UiResult<(crate::cloud::OwnerLogin, Vec<OwnerShop>, bool)> {
+    let login = link
+        .password_login(email, password)
+        .map_err(|e| crate::words::from_link(&e))?;
+    let answer = link
+        .rpc("mb_my_restaurants", &json!({}), &login.access_token)
+        .map_err(|e| crate::words::from_link(&e))?;
+    let (shops, staff_at_one) = shops_in(&answer);
+    Ok((login, shops, staff_at_one))
+}
+
+/// How the owner proves it is them, once the shop is open: the same two doors the first run
+/// has, and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(tag = "by", rename_all = "camelCase")]
+pub enum OwnerProof {
+    /// The email and password of the magicbill.in account that owns this shop.
+    Password { email: String, password: String },
+    /// The licence key on this counter, from the dashboard.
+    Key { key: String },
+}
+
+/// Refuse unless the proof names the account, or the key, that this shop runs on.
+pub fn prove_owner(app: &App, proof: &OwnerProof) -> UiResult<()> {
+    let (this_shop, this_key) = app.with_licence(|l| {
+        (
+            l.snapshot().and_then(|s| s.licence.restaurant_id),
+            l.key().map(|k| k.trim().to_uppercase()),
+        )
+    });
+    match proof {
+        OwnerProof::Password { email, password } => {
+            let email = email.trim();
+            if email.is_empty() || password.is_empty() {
+                return Err(UiError::new(
+                    "owner.blank",
+                    "Type the email and the password of your Magic Bill account.",
+                ));
+            }
+            let (login, shops, _) = owned_shops(app.link().as_ref(), email, password)?;
+            let owns_this = shops.iter().any(|shop| {
+                this_shop.as_deref() == Some(shop.id.as_str())
+                    || (this_key.is_some() && shop.key.as_deref() == this_key.as_deref())
+            });
+            if !owns_this {
+                return Err(UiError::new(
+                    "owner.not_this_shop",
+                    format!("{} does not own this shop.", login.email),
+                ));
+            }
+            Ok(())
+        }
+        OwnerProof::Key { key } => {
+            let typed = key.trim().to_uppercase();
+            if typed.is_empty() {
+                return Err(UiError::new(
+                    "licence.blank",
+                    "Paste the licence key from your magicbill.in dashboard, or sign in.",
+                ));
+            }
+            let Some(this_key) = this_key else {
+                return Err(UiError::new(
+                    "licence.none",
+                    "This counter has no licence key to check against. Sign in with the \
+                     account's email and password instead.",
+                ));
+            };
+            if typed != this_key {
+                return Err(UiError::new(
+                    "licence.wrong",
+                    "That is not this shop's licence key. It is on your magicbill.in dashboard.",
+                ));
+            }
+            Ok(())
         }
     }
 }
@@ -255,15 +330,7 @@ pub fn sign_in_owner_on(app: &App, email: String, password: String) -> UiResult<
         ));
     }
 
-    let link = app.link();
-    let login = link
-        .password_login(&email, &password)
-        .map_err(|e| crate::words::from_link(&e))?;
-    let answer = link
-        .rpc("mb_my_restaurants", &json!({}), &login.access_token)
-        .map_err(|e| crate::words::from_link(&e))?;
-    let phone = account_phone(link.as_ref(), &login.access_token);
-    let (shops, staff_at_one) = shops_in(&answer, &phone);
+    let (login, shops, staff_at_one) = owned_shops(app.link().as_ref(), &email, &password)?;
     let licensed: Vec<OwnerShop> = shops.into_iter().filter(|s| s.key.is_some()).collect();
     if licensed.is_empty() {
         return Err(UiError::new(
@@ -542,7 +609,16 @@ pub fn open_as_owner_on(
                 .shops
                 .iter()
                 .find(|s| s.id == restaurant_id)
-                .map(|s| (signed.name.clone(), s.clone()))
+                .map(|s| {
+                    // The shop's owner by the cloud's account row; the login's own name when
+                    // the row has none.
+                    let name = if s.owner_name.is_empty() {
+                        signed.name.clone()
+                    } else {
+                        s.owner_name.clone()
+                    };
+                    (name, s.clone())
+                })
         })
     }) else {
         return Err(UiError::new("owner.sign_in", "Sign in first."));
@@ -600,7 +676,7 @@ fn shop_of_licence(app: &App) -> UiResult<OwnerShop> {
                 .into_iter()
                 .flatten()
                 .find(|row| text(row, "id") == login.restaurant_id)
-                .map(|row| shop_in(row, ""))
+                .map(shop_in)
         });
     Ok(match from_cloud {
         Some(mut shop) => {
@@ -619,6 +695,7 @@ fn shop_of_licence(app: &App) -> UiResult<OwnerShop> {
             short_code: String::new(),
             status,
             key,
+            owner_name: String::new(),
         },
     })
 }
@@ -646,7 +723,8 @@ pub fn open_with_key_on(
     take_licence(app, &key, move_here)?;
     let shop = shop_of_licence(app)?;
     crate::log_info!("first run: the licence key opened {}", shop.name);
-    bring_down_and_open(app, config_dir, &folder, holds, &shop, "")
+    let owner_name = shop.owner_name.clone();
+    bring_down_and_open(app, config_dir, &folder, holds, &shop, &owner_name)
 }
 
 /// The data file inside a folder, when the folder holds exactly one shop.

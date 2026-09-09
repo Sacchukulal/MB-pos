@@ -220,8 +220,6 @@
   --firstrun-width: 35rem;
   --firstrun-lede: 48ch;
   --firstrun-dot: 1.5rem;
-  /* How wide the licence key box wants to be on the sign-in step, before the row wraps. */
-  --firstrun-item: 12rem;
   /* How much of a device's raw output the device screen shows before it scrolls. */
   --raw-output-height: 12rem;
   /* How little of the cart may ever be on screen. */

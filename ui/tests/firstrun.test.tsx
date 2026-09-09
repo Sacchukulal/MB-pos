@@ -46,6 +46,7 @@ function opened(over: Partial<FirstRunView> = {}): OwnerOpenedView {
     firstRun: {
       ...fresh,
       hasShop: true,
+      shopPath: 'D:\\Anand Bhavan\\magicbill.db',
       owner: { id: 'staff_meena', name: 'Meena', hasPin: false },
       ...over,
     },
@@ -76,7 +77,7 @@ function wire(over: Partial<FirstRunView> = {}, answers: Record<string, unknown>
       case 'save_staff_member':
         return Promise.resolve([]);
       case 'set_staff_pin':
-        return Promise.resolve('H8BVY-QGXWV');
+        return Promise.resolve(undefined);
       case 'login':
         return Promise.resolve({ signedIn: true });
       case 'open_magicbill':
@@ -91,6 +92,21 @@ function wire(over: Partial<FirstRunView> = {}, answers: Record<string, unknown>
 /** A refusal in Rust's shape. */
 function refusal(code: string, message: string) {
   return Object.assign(new Error(message), { code, message, detail: null, tone: 'danger' });
+}
+
+/** The folder chosen and Next pressed: the sign-in step, with its two doors. */
+async function atSignIn() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
+  await screen.findByText('D:\\Anand Bhavan');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByRole('heading', { name: 'Sign in' });
+}
+
+/** The account typed in and Next pressed. */
+async function signInAs(email: string, password: string) {
+  fireEvent.change(await screen.findByLabelText('Email'), { target: { value: email } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: password } });
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 }
 
 beforeEach(() => call.mockReset());
@@ -117,6 +133,38 @@ it('opens on the folder step with nothing chosen, and Next waits for a folder', 
   expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
 });
 
+/** Back and Next are on every step; the first step's Back has nowhere to go. */
+it('has Back and Next on every step, and Back walks the steps in reverse', async () => {
+  wire();
+  render(<FirstRun onDone={vi.fn()} />);
+
+  await screen.findByText('Welcome to Magic Bill');
+  expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(true);
+  await atSignIn();
+  expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByRole('button', { name: 'Next' })).toBeTruthy();
+  await signInAs('meena@example.in', 'correct-horse');
+
+  // The shop is open: the details step, and Back from it shows where the counter stands.
+  expect(await screen.findByRole('heading', { name: 'Your shop' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
+  expect(screen.getByText('Meena · meena@example.in')).toBeTruthy();
+  expect(screen.queryByLabelText('Email')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  expect(await screen.findByText('Welcome to Magic Bill')).toBeTruthy();
+  expect(screen.getByText('D:\\Anand Bhavan\\magicbill.db')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Choose/ })).toBeNull();
+
+  // And Next walks forward again without opening anything twice.
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByRole('heading', { name: 'Sign in' });
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  expect(await screen.findByRole('heading', { name: 'Your shop' })).toBeTruthy();
+  expect(call.mock.calls.filter((c) => c[0] === 'open_as_owner')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
+});
+
 /** The explanation is there for whoever asks, not in the way of whoever does not. */
 it('keeps the explanations behind a tip on the heading', async () => {
   wire();
@@ -130,15 +178,8 @@ it('keeps the explanations behind a tip on the heading', async () => {
 it('signs the owner in and opens the one shop the account owns, in the chosen folder', async () => {
   wire();
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-
-  fireEvent.change(await screen.findByLabelText('Email'), {
-    target: { value: 'meena@example.in' },
-  });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct-horse' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await atSignIn();
+  await signInAs('meena@example.in', 'correct-horse');
 
   await waitFor(() =>
     expect(call).toHaveBeenCalledWith('open_as_owner', {
@@ -156,21 +197,23 @@ it('signs the owner in and opens the one shop the account owns, in the chosen fo
   expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('9840011223');
 });
 
-/** The other door: the key from the dashboard, with no password asked for. */
+/** The other door: the key from the dashboard, with no password asked for, behind the same Next. */
 it('opens the shop a pasted licence key names, without signing in', async () => {
   wire({}, { open_with_key: opened() });
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await atSignIn();
 
-  const go = (await screen.findByRole('button', { name: 'Continue' })) as HTMLButtonElement;
-  expect(go.disabled).toBe(true);
+  // Nothing typed: Next says what it needs, and opens nothing.
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  expect(
+    await screen.findByText(/Type the email and the password of your Magic Bill account, or paste/),
+  ).toBeTruthy();
+  expect(call).not.toHaveBeenCalledWith('open_with_key', expect.anything());
+
   fireEvent.change(screen.getByLabelText('Licence key'), {
     target: { value: ' mb-qyf8-xbgj-vxcq ' },
   });
-  expect(go.disabled).toBe(false);
-  fireEvent.click(go);
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
   await waitFor(() =>
     expect(call).toHaveBeenCalledWith('open_with_key', {
@@ -182,15 +225,14 @@ it('opens the shop a pasted licence key names, without signing in', async () => 
   expect(call).not.toHaveBeenCalledWith('sign_in_owner', expect.anything());
   expect(await screen.findByRole('heading', { name: 'Your shop' })).toBeTruthy();
   expect((screen.getByLabelText('Shop name') as HTMLInputElement).value).toBe('Anand Bhavan');
+  expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('9840011223');
 });
 
 /** Sign up happens on the website: the browser opens on it, and the screen says where to. */
 it('opens magicbill.in sign-up in the browser behind Sign up, and says so', async () => {
   wire();
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await atSignIn();
   expect(call).not.toHaveBeenCalledWith('open_magicbill', expect.anything());
 
   fireEvent.click(await screen.findByRole('button', { name: 'Sign up' }));
@@ -217,9 +259,7 @@ it('says so when the browser could not be opened for sign-up', async () => {
     },
   );
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await atSignIn();
   fireEvent.click(await screen.findByRole('button', { name: 'Sign up' }));
   expect(await screen.findByText(/browser could not be opened/)).toBeTruthy();
 });
@@ -228,15 +268,16 @@ it('says so when the browser could not be opened for sign-up', async () => {
 it('asks which shop when the account owns more than one', async () => {
   wire({}, { sign_in_owner: { ...meena, shops: [anand, saravana] } });
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'm@x.in' } });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await atSignIn();
+  await signInAs('m@x.in', 'pw');
 
   expect(await screen.findByText('Which shop is this counter for?')).toBeTruthy();
   expect(call).not.toHaveBeenCalledWith('open_as_owner', expect.anything());
+  // Next without a choice says so, rather than signing in again.
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  expect(await screen.findByText('Choose which shop this counter is for.')).toBeTruthy();
+  expect(call.mock.calls.filter((c) => c[0] === 'sign_in_owner')).toHaveLength(1);
+
   fireEvent.click(screen.getByRole('button', { name: 'Saravana' }));
   await waitFor(() =>
     expect(call).toHaveBeenCalledWith(
@@ -258,12 +299,8 @@ it('says so when the email and password do not match, and opens nothing', async 
     },
   );
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'm@x.in' } });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrong' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await atSignIn();
+  await signInAs('m@x.in', 'wrong');
 
   expect(await screen.findByText(/do not match a Magic Bill account/)).toBeTruthy();
   expect(call).not.toHaveBeenCalledWith('open_as_owner', expect.anything());
@@ -292,13 +329,9 @@ it('offers to move the licence only when it is bound elsewhere', async () => {
     return Promise.resolve(null);
   });
   render(<FirstRun onDone={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await atSignIn();
   expect(screen.queryByLabelText(/move the licence here/)).toBeNull();
-  fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'm@x.in' } });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await signInAs('m@x.in', 'pw');
 
   expect(await screen.findByText(/another computer/)).toBeTruthy();
   const move = await screen.findByLabelText(/move the licence here/);
@@ -330,12 +363,8 @@ it('goes straight to the counter when the folder held a shop that was already se
     },
   );
   render(<FirstRun onDone={done} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Choose the folder' }));
-  await screen.findByText('D:\\Anand Bhavan');
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'm@x.in' } });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await atSignIn();
+  await signInAs('m@x.in', 'pw');
   await waitFor(() => expect(done).toHaveBeenCalled());
 });
 
@@ -348,7 +377,7 @@ it('asks for the PIN rule Rust actually holds', async () => {
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
   fireEvent.change(pin, { target: { value: '123' } });
   fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '123' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start billing' }));
 
   expect(await screen.findByText('A PIN is 4 digits.')).toBeTruthy();
   // And it refused BEFORE creating anybody — a retry must not leave the shop with two owners in
@@ -356,57 +385,34 @@ it('asks for the PIN rule Rust actually holds', async () => {
   expect(call).not.toHaveBeenCalledWith('save_staff_member', expect.anything());
 });
 
-/** The PIN goes on the owner's row, the one Rust made from the account — never on a second one. */
-it('gives the PIN to the owner row that already exists, with the name filled in', async () => {
+/**
+ * The PIN goes on the owner's row, the one Rust made from the account — never on a second one —
+ * and the PIN step is the LAST page: the owner is signed in and the counter opens.
+ */
+it('gives the PIN to the owner row that already exists, signs in with it and opens the counter', async () => {
+  const done = vi.fn();
   wire({
     hasShop: true,
     hasDetails: true,
     owner: { id: 'staff_meena', name: 'Meena', hasPin: false },
   });
-  render(<FirstRun onDone={vi.fn()} />);
+  render(<FirstRun onDone={done} />);
 
   const who = (await screen.findByLabelText('Your name')) as HTMLInputElement;
   expect(who.value).toBe('Meena');
   fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), { target: { value: '4829' } });
   fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '4829' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start billing' }));
 
-  await screen.findByText('Write this down');
+  await waitFor(() => expect(done).toHaveBeenCalled());
   const saved = call.mock.calls.filter((c) => c[0] === 'save_staff_member');
   expect(saved).toHaveLength(1);
   expect((saved[0]?.[1] as { staff: { id: string } }).staff.id).toBe('staff_meena');
   expect(call).toHaveBeenCalledWith('set_staff_pin', { staffId: 'staff_meena', pin: '4829' });
   expect(call).toHaveBeenCalledWith('login', expect.objectContaining({ pin: '4829' }));
-});
-
-/**
- * The recovery code gets a page to itself, it is a door you cannot walk past, and it is the
- * LAST page: the counter opens straight after it.
- */
-it('will not move on until the recovery code is written down, then opens the counter', async () => {
-  const done = vi.fn();
-  wire({ hasShop: true, hasDetails: true });
-  render(<FirstRun onDone={done} />);
-
-  await screen.findByLabelText('Your name');
-  fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
-  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), {
-    target: { value: '4829' },
-  });
-  fireEvent.change(screen.getByLabelText('The same PIN again'), {
-    target: { value: '4829' },
-  });
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-
-  expect(await screen.findByText('H8BVY-QGXWV')).toBeTruthy();
-  const out = screen.getByRole('button', { name: 'Start billing' }) as HTMLButtonElement;
-  expect(out.disabled).toBe(true);
-  expect(done).not.toHaveBeenCalled();
-
-  fireEvent.click(screen.getByLabelText('I have written it down'));
-  expect(out.disabled).toBe(false);
-  fireEvent.click(out);
-  expect(done).toHaveBeenCalled();
+  // No code to write down, and nothing after the PIN.
+  expect(screen.queryByText(/Write this down/)).toBeNull();
+  expect(screen.queryByText(/recovery/i)).toBeNull();
 });
 
 /**
@@ -429,21 +435,6 @@ it('asks for the folder, the account, the shop and the PIN, and nothing else', a
     expect(call).not.toHaveBeenCalledWith(name, expect.anything());
     expect(call).not.toHaveBeenCalledWith(name);
   }
-});
-
-/** A shop that already had its recovery code goes straight from the PIN to the counter. */
-it('opens the counter from the PIN step when there is no recovery code to show', async () => {
-  const done = vi.fn();
-  wire({ hasShop: true, hasDetails: true }, { set_staff_pin: null });
-  render(<FirstRun onDone={done} />);
-
-  await screen.findByLabelText('Your name');
-  fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
-  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), { target: { value: '4829' } });
-  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '4829' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  await waitFor(() => expect(done).toHaveBeenCalled());
-  expect(screen.queryByText('Write this down')).toBeNull();
 });
 
 /** Somebody who stopped halfway comes back where they stopped. */

@@ -55,7 +55,7 @@ function answer(command: string): Promise<unknown> {
             maxDiscount: null,
           },
         ],
-        canRecover: true,
+        owner: 'Meena',
       });
     case 'first_run':
       return Promise.resolve({

@@ -124,19 +124,6 @@ pub fn verify_pin(pin: &Pin, hash: &PinHash) -> bool {
     verify_secret(pin.expose(), hash)
 }
 
-// The recovery code borrows this machinery, and only this machinery.
-
-/// The recovery code is hashed exactly like a PIN — same algorithm, same cost, same per-shop
-/// salt — and these two functions exist so that `crate::recovery` never has to reach for
-/// `argon2` itself.
-pub(crate) fn hash_recovery(code: &crate::recovery::RecoveryCode) -> Result<PinHash, AuthError> {
-    hash_secret(code.as_typed().as_bytes())
-}
-
-pub(crate) fn verify_recovery(code: &crate::recovery::RecoveryCode, hash: &PinHash) -> bool {
-    verify_secret(code.as_typed().as_bytes(), hash)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,7 +166,7 @@ mod tests {
     /// A PIN that is longer than four cannot be verified either, because it cannot be parsed,
     /// and parsing is the only door into `verify_pin`.
     #[test]
-    fn a_longer_pin_that_already_exists_is_now_a_recovery_job() {
+    fn a_longer_pin_cannot_be_parsed() {
         assert!(
             Pin::parse("482913").is_err(),
             "six digits is not a PIN any more"

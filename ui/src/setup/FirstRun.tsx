@@ -35,8 +35,7 @@ const STEPS = [
   { id: 'pin', label: 'Your PIN' },
 ] as const;
 
-/** `code` is a screen without a dot, and that is deliberate. */
-type StepId = (typeof STEPS)[number]['id'] | 'code';
+type StepId = (typeof STEPS)[number]['id'];
 
 /** Where a shop that is already open picks up. */
 function stepFor(view: FirstRunView): StepId {
@@ -79,6 +78,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [keyText, setKeyText] = useState('');
   /** Where Sign up sent them, once the browser has been asked to open it. */
   const [signupSaid, setSignupSaid] = useState('');
+  /** The shop that opened, named on the sign-in step once it is behind them. */
+  const [shopName, setShopName] = useState('');
 
   // The shop's details.
   const [name, setName] = useState('');
@@ -90,9 +91,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [person, setPerson] = useState('');
   const [pin, setPin] = useState('');
   const [pinAgain, setPinAgain] = useState('');
-  const [recovery, setRecovery] = useState('');
-  /** The recovery code is shown once and never again. */
-  const [wroteItDown, setWroteItDown] = useState(false);
   /**
    * The owner's row: the one Rust made from the account, or the one a second press of Next
    * edits rather than hiring another one.
@@ -134,8 +132,9 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
   if (!view) return <div className="mb-firstrun" />;
 
-  // `code` has no dot of its own — it is the back half of the PIN step.
-  const index = STEPS.findIndex((s) => s.id === (step === 'code' ? 'pin' : step));
+  const index = STEPS.findIndex((s) => s.id === step);
+  /** Once the shop is open in its folder, the first two steps only show what was chosen. */
+  const opened = view.hasShop;
 
   const go = (to: StepId) => {
     clear();
@@ -155,13 +154,14 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   };
 
   /** A shop Rust opened, whichever way in: the details step starts with what the cloud knows. */
-  const opened = (opening: Promise<OwnerOpenedView>) => {
+  const openedShop = (opening: Promise<OwnerOpenedView>) => {
     setBusy(true);
     clear();
     opening
       .then((shop) => {
         take(shop.firstRun);
         if (shop.cameDown) setCameDown(shop.cameDown);
+        setShopName(shop.shop.name);
         setName((was) => (was === '' ? shop.shop.name : was));
         setAddress((was) => (was === '' ? shop.shop.address : was));
         setPhone((was) => (was === '' ? shop.shop.phone : was));
@@ -180,13 +180,13 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   /** Open one of the account's shops in the chosen folder. */
   const openShop = (restaurantId: string) => {
     setOpening(restaurantId);
-    opened(call('open_as_owner', { restaurantId, folder, moveHere }));
+    openedShop(call('open_as_owner', { restaurantId, folder, moveHere }));
   };
 
   /** Open the shop the pasted licence key names. */
   const openWithKey = () => {
     setOpening('');
-    opened(call('open_with_key', { key: keyText.trim(), folder, moveHere }));
+    openedShop(call('open_with_key', { key: keyText.trim(), folder, moveHere }));
   };
 
   /** The way back in after "move the licence here": whichever door was tried. */
@@ -213,10 +213,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
   /** The owner's account: which shops it owns is the answer. */
   const signIn = () => {
-    if (email.trim() === '' || password === '') {
-      setProblem('Type the email and the password of your Magic Bill account.');
-      return;
-    }
     setBusy(true);
     clear();
     call('sign_in_owner', { email: email.trim(), password })
@@ -229,6 +225,32 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       })
       .catch(complain)
       .finally(() => setBusy(false));
+  };
+
+  /**
+   * The sign-in step's Next: whichever door has been filled in. A shop already open goes on to
+   * its details; a pasted key opens by the key; an email and password sign in.
+   */
+  const nextFromSignIn = () => {
+    if (opened) {
+      go('details');
+      return;
+    }
+    if (keyText.trim() !== '') {
+      openWithKey();
+      return;
+    }
+    if (signedIn !== null && signedIn.shops.length > 1) {
+      setProblem('Choose which shop this counter is for.');
+      return;
+    }
+    if (email.trim() === '' || password === '') {
+      setProblem(
+        'Type the email and the password of your Magic Bill account, or paste the licence key.',
+      );
+      return;
+    }
+    signIn();
   };
 
   const saveDetails = () => {
@@ -285,27 +307,31 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
       },
     })
       .then(() => call('set_staff_pin', { staffId: id, pin }))
-      .then((code) => {
-        if (code) setRecovery(code);
-        // Sign them in with the PIN they just chose. The recovery code is the last screen; a
-        // shop that already had one goes straight to the counter.
-        return call('login', { staffId: id, pin })
-          .catch(() => undefined)
-          .then(() => {
-            if (code) setStep('code');
-            else onDone();
-          });
-      })
+      // Signed in with the PIN they just chose, and the counter is theirs.
+      .then(() => call('login', { staffId: id, pin }).catch(() => undefined))
+      .then(() => onDone())
       .catch(complain)
       .finally(() => setBusy(false));
   };
 
-  /** The way back, on the left of every step that has one. */
-  const back = (to: StepId) => (
-    <Button variant="quiet" className="mb-firstrun__back" disabled={busy} onClick={() => go(to)}>
-      <Icon name="chevron-left" size="sm" />
-      Back
-    </Button>
+  /** Back on the left and the way forward on the right, on every step. */
+  const actions = (previous: StepId | null, next: () => void, label = 'Next', can = true) => (
+    <div className="mb-firstrun__actions">
+      <Button
+        variant="quiet"
+        className="mb-firstrun__back"
+        disabled={busy || previous === null}
+        onClick={() => {
+          if (previous !== null) go(previous);
+        }}
+      >
+        <Icon name="chevron-left" size="sm" />
+        Back
+      </Button>
+      <Button variant="primary" disabled={busy || !can} onClick={next}>
+        {label}
+      </Button>
+    </div>
   );
 
   const shopsToPick = signedIn && signedIn.shops.length > 1 ? signedIn.shops : [];
@@ -356,25 +382,19 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             <div className="mb-firstrun__where">
               <span className="mb-firstrun__label">Where your shop&rsquo;s data will be kept</span>
               <code className="mb-firstrun__path">
-                {folder === '' ? 'No folder chosen yet' : folder}
+                {opened ? view.shopPath : folder === '' ? 'No folder chosen yet' : folder}
               </code>
-              <div className="mb-row">
-                <Button variant="secondary" disabled={busy} onClick={browseForFolder}>
-                  <Icon name="folder" size="sm" />
-                  {folder === '' ? 'Choose the folder' : 'Choose a different folder'}
-                </Button>
-              </div>
+              {opened ? null : (
+                <div className="mb-row">
+                  <Button variant="secondary" disabled={busy} onClick={browseForFolder}>
+                    <Icon name="folder" size="sm" />
+                    {folder === '' ? 'Choose the folder' : 'Choose a different folder'}
+                  </Button>
+                </div>
+              )}
             </div>
 
-            <div className="mb-firstrun__actions">
-              <Button
-                variant="primary"
-                disabled={busy || folder === ''}
-                onClick={() => go('signin')}
-              >
-                Next
-              </Button>
-            </div>
+            {actions(null, () => go('signin'), 'Next', opened || folder !== '')}
           </section>
         ) : null}
 
@@ -396,10 +416,19 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
             <div className="mb-firstrun__where">
               <span className="mb-firstrun__label">Shop folder</span>
-              <code className="mb-firstrun__path">{folder}</code>
+              <code className="mb-firstrun__path">{opened ? view.shopPath : folder}</code>
             </div>
 
-            {signedIn === null ? (
+            {opened ? (
+              <div className="mb-firstrun__where">
+                <span className="mb-firstrun__label">
+                  {signedIn === null ? 'Opened with the licence key' : 'Signed in as'}
+                </span>
+                <code className="mb-firstrun__path">
+                  {signedIn === null ? shopName : `${signedIn.name} · ${signedIn.email}`}
+                </code>
+              </div>
+            ) : (
               <>
                 <div className="mb-firstrun__fields">
                   <Input
@@ -418,23 +447,9 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') signIn();
+                      if (e.key === 'Enter') nextFromSignIn();
                     }}
                   />
-                </div>
-
-                <div className="mb-firstrun__actions">
-                  {back('folder')}
-                  <Button variant="secondary" disabled={busy} onClick={openSignup}>
-                    Sign up
-                  </Button>
-                  <Button
-                    variant="primary"
-                    disabled={busy || email.trim() === '' || password === ''}
-                    onClick={signIn}
-                  >
-                    Sign in
-                  </Button>
                 </div>
 
                 {signupSaid !== '' ? <Notice tone="info">{signupSaid}</Notice> : null}
@@ -443,35 +458,19 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 <p className="mb-firstrun__or" role="separator">
                   or paste the licence key from your magicbill.in dashboard
                 </p>
-                <div className="mb-firstrun__row">
-                  <Input
-                    label="Licence key"
-                    value={keyText}
-                    placeholder="MB-XXXX-XXXX-XXXX"
-                    onChange={(e) => setKeyText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && keyText.trim() !== '') openWithKey();
-                    }}
-                  />
-                  <Button
-                    variant="secondary"
-                    disabled={busy || keyText.trim() === ''}
-                    onClick={openWithKey}
-                  >
-                    Continue
-                  </Button>
-                </div>
+                <Input
+                  label="Licence key"
+                  value={keyText}
+                  placeholder="MB-XXXX-XXXX-XXXX"
+                  onChange={(e) => setKeyText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') nextFromSignIn();
+                  }}
+                />
               </>
-            ) : (
-              <div className="mb-firstrun__where">
-                <span className="mb-firstrun__label">Signed in as</span>
-                <code className="mb-firstrun__path">
-                  {signedIn.name} · {signedIn.email}
-                </code>
-              </div>
             )}
 
-            {shopsToPick.length > 0 ? (
+            {shopsToPick.length > 0 && !opened ? (
               <div className="mb-firstrun__shops">
                 <span className="mb-firstrun__label">Which shop is this counter for?</span>
                 {shopsToPick.map((shop: OwnerShopView) => (
@@ -489,23 +488,39 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             ) : null}
 
             {problemCode === 'licence.bound_elsewhere' ? (
-              <Checkbox
-                label="The old computer is gone — move the licence here"
-                checked={moveHere}
-                onChange={(e) => setMoveHere(e.target.checked)}
-              />
-            ) : null}
-
-            {signedIn !== null || problemCode === 'licence.bound_elsewhere' ? (
-              <div className="mb-firstrun__actions">
-                {signedIn === null ? null : back('folder')}
-                {problemCode === 'licence.bound_elsewhere' ? (
-                  <Button variant="primary" disabled={busy || !moveHere} onClick={openAgain}>
+              <>
+                <Checkbox
+                  label="The old computer is gone — move the licence here"
+                  checked={moveHere}
+                  onChange={(e) => setMoveHere(e.target.checked)}
+                />
+                <div className="mb-row mb-row--end">
+                  <Button variant="secondary" disabled={busy || !moveHere} onClick={openAgain}>
                     Open it here
                   </Button>
-                ) : null}
-              </div>
+                </div>
+              </>
             ) : null}
+
+            <div className="mb-firstrun__actions">
+              <Button
+                variant="quiet"
+                className="mb-firstrun__back"
+                disabled={busy}
+                onClick={() => go('folder')}
+              >
+                <Icon name="chevron-left" size="sm" />
+                Back
+              </Button>
+              {opened ? null : (
+                <Button variant="secondary" disabled={busy} onClick={openSignup}>
+                  Sign up
+                </Button>
+              )}
+              <Button variant="primary" disabled={busy} onClick={nextFromSignIn}>
+                Next
+              </Button>
+            </div>
           </section>
         ) : null}
 
@@ -554,11 +569,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
             </div>
 
-            <div className="mb-firstrun__actions">
-              <Button variant="primary" disabled={busy} onClick={saveDetails}>
-                Next
-              </Button>
-            </div>
+            {actions('signin', saveDetails)}
           </section>
         ) : null}
 
@@ -570,8 +581,9 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 <>
                   Until somebody has a PIN, anybody who walks behind the counter can open your
                   reports and change your prices. This is you, the owner — four digits you
-                  type at the counter every day. Your staff get their own PINs later, from the
-                  Staff screen.
+                  type at the counter every day. Forgotten it one day? Your account&rsquo;s
+                  email and password, or the licence key, set a new one from the lock screen.
+                  Your staff get their own PINs later, from the Staff screen.
                 </>
               }
             />
@@ -605,47 +617,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               />
             </div>
 
-            <div className="mb-firstrun__actions">
-              {back('details')}
-              <Button variant="primary" disabled={busy} onClick={savePin}>
-                Next
-              </Button>
-            </div>
-          </section>
-        ) : null}
-
-        {step === 'code' ? (
-          <section className="mb-firstrun__body">
-            <Heading
-              title="Write this down"
-              tip={
-                <>
-                  If the PIN is ever forgotten, this code is the only way back into your shop.
-                  It is not shown again. It is printing on your printer now as well — but write
-                  it down, because a first run often has no printer set up yet.
-                </>
-              }
-            />
-
-            <p className="mb-firstrun__code">{recovery}</p>
-
-            <Notice tone="warn" icon="lock">
-              Keep it somewhere that is not this computer — a diary, or the back
-              of the licence certificate. Nobody at Magic Bill can look it up
-              for you, because it was never sent anywhere.
-            </Notice>
-
-            <Checkbox
-              label="I have written it down"
-              checked={wroteItDown}
-              onChange={(e) => setWroteItDown(e.target.checked)}
-            />
-
-            <div className="mb-firstrun__actions">
-              <Button variant="primary" disabled={!wroteItDown} onClick={onDone}>
-                Start billing
-              </Button>
-            </div>
+            {actions('details', savePin, 'Start billing')}
           </section>
         ) : null}
       </div>
