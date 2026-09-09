@@ -96,6 +96,8 @@ mod look_demo;
 mod menu;
 #[cfg(test)]
 mod menu_tests;
+#[cfg(test)]
+mod tax_tests;
 /// Where a new row's id comes from.
 mod newid;
 #[cfg(test)]

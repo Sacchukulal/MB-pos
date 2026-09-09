@@ -64,7 +64,9 @@ pub(crate) fn kitchen_routing(repos: &mb_db::Repos<'_>) -> Result<KitchenRouting
     };
     Ok(KitchenRouting {
         separate_printers,
-        per_category: style.as_deref() == Some("category"),
+        // A cut per category is a choice for one printer; with separate printers each roll
+        // carries its own categories.
+        per_category: !separate_printers && style.as_deref() == Some("category"),
     })
 }
 
@@ -761,15 +763,6 @@ pub fn route_category_to(
 #[tauri::command]
 pub fn set_paper_size(app: tauri::State<'_, App>, mm: u32) -> UiResult<PrintersView> {
     set_paper_on(&app, mm)
-}
-
-#[tauri::command]
-pub fn route_category(
-    app: tauri::State<'_, App>,
-    category_id: String,
-    printer_id: String,
-) -> UiResult<PrintersView> {
-    route_category_on(&app, category_id, printer_id)
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-/* The menu screen — two panes. */
+/* The menu screen: categories down the left, items on the right. */
 
 .mb-menu {
   /* The page margin is the SHELL's. */
@@ -7,17 +7,35 @@
   overflow: hidden;
 }
 
-.mb-menu__categories {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+/* The two panes, under the tabs. The rail gives way first. */
+.mb-menu__body {
+  display: grid;
+  grid-template-columns: minmax(0, var(--menu-categories-width)) minmax(0, 1fr);
+  gap: var(--gap-group);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* A pane: the add row stays, the list under it scrolls. */
+.mb-menu__pane {
   min-height: 0;
 }
 
-/*
- * The item pane scrolls; the search row above it does not, because looking for an item is what
- * you do when the list is too long to see.
- */
+.mb-menu__pane > .mb-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-field);
+  flex: 1;
+  min-height: 0;
+}
+
+.mb-menu__list {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The choices and combos tabs: one scrolling column. */
 .mb-menu__items {
   display: flex;
   flex-direction: column;
@@ -25,45 +43,126 @@
   min-height: 0;
 }
 
-.mb-menu__classes {
+.mb-menu__find {
+  width: var(--find-width);
+}
+
+/* The add row: the boxes and the button, on one line. */
+.mb-menu__add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.mb-menu__add--item {
+  grid-template-columns: minmax(0, 2fr) minmax(0, var(--field-sm)) minmax(0, 1fr) auto;
+}
+
+/* The category list. */
+.mb-menu__categories {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-4);
-  border-top: var(--border-width) solid var(--border);
+  gap: var(--space-1);
 }
 
-.mb-menu__classlist {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--class-min), 1fr));
-  gap: var(--space-2);
-}
-
-.mb-menu__class {
+.mb-menu__catrow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--surface);
-  border: var(--border-width) solid var(--border);
+  gap: var(--space-1);
   border-radius: var(--radius-md);
+}
+
+.mb-menu__catrow:hover,
+.mb-menu__catrow[aria-current='page'] {
+  background: var(--surface-2);
+}
+
+/* The rename and delete marks show for the row under the hand, and for the row you are on. */
+.mb-menu__catdo {
+  display: flex;
+  flex-shrink: 0;
+  padding-right: var(--space-1);
+  opacity: 0;
+}
+
+.mb-menu__catrow:hover .mb-menu__catdo,
+.mb-menu__catrow[aria-current='page'] .mb-menu__catdo,
+.mb-menu__catrow:focus-within .mb-menu__catdo {
+  opacity: 1;
+}
+
+.mb-menu__category {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-menu__category:hover {
+  background: var(--surface-2);
+}
+
+.mb-menu__category[aria-current='page'] {
+  font-weight: var(--weight-bold);
+  box-shadow: inset var(--tile-stripe) 0 0 0 var(--accent);
+}
+
+.mb-menu__catname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mb-menu__catcount {
+  flex-shrink: 0;
+  font-family: var(--font-num);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* Renaming a category, in its own row. */
+.mb-menu__rename {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-1);
+  align-items: end;
+  padding: var(--space-1);
+}
+
+/* The item dialog. */
+.mb-menu__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mb-menu__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.mb-menu__tax {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 /* Importing a spreadsheet. */
-
-.mb-import__box {
-  width: 100%;
-  min-height: var(--import-box-height);
-  padding: var(--space-3);
-  font-family: var(--font-num);
-  font-size: var(--text-sm);
-  color: var(--text);
-  background: var(--surface-sunk);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  resize: vertical;
-}
 
 .mb-import__plan {
   display: flex;
@@ -131,113 +230,29 @@
   text-overflow: ellipsis;
 }
 
-/* The two columns, under the page header. */
-/* The rail gives way first. */
-.mb-menu__body {
-  display: grid;
-  grid-template-columns: minmax(0, var(--menu-categories-width)) minmax(0, 1fr);
-  gap: var(--gap-group);
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
+/* The choices and combos: a heading, then a grid of cards. */
 
-/*
- * With no groups there is no rail, and without this the first column is still reserved — the
- * items would start a quarter of the way across the screen with nothing to their left.
- */
-.mb-menu__body--nogroups {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.mb-menu__find {
-  width: var(--find-width);
-}
-
-/* Groups: what the menu is arranged into, and where each one is cooked. */
-
-.mb-groups__add {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: var(--space-2);
-  align-items: end;
-  margin-bottom: var(--gap-group);
-}
-
-/* The category field inside the item dialog. */
-.mb-catadd {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: var(--space-2);
-  align-items: end;
-}
-
-.mb-groups {
+.mb-menu__classes {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin: 0 0 var(--gap-group);
-  padding: 0;
-  list-style: none;
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--border);
 }
 
-.mb-groups__row {
+.mb-menu__classlist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--class-min), 1fr));
+  gap: var(--space-2);
+}
+
+.mb-menu__class {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
-  align-items: flex-end;
   padding: var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-}
-
-/* The name takes what is left and never less than it can read. */
-.mb-groups__what {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  align-items: flex-start;
-  flex: 1 1 var(--group-name-min);
-  min-width: 0;
-}
-
-.mb-groups__what strong {
-  overflow-wrap: anywhere;
-}
-
-/*
- * Wants its own width, gives way before the name does, and drops to its own line before either
- * of them is unreadable.
- */
-.mb-groups__route {
-  flex: 0 1 var(--group-route-width);
-  min-width: 0;
-}
-
-/*
- * The two buttons are the one part that must never wrap onto its own line: they are what the
- * row is FOR, and a row three lines tall for two words is how a list of six groups stops
- * fitting on the screen.
- */
-.mb-groups__row .mb-row {
-  flex: 0 0 auto;
-}
-
-/* The item form, in the folding side panel. */
-.mb-menu__form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-/* The category rail: a list, not a stack of buttons. The one you are on is a soft fill. */
-.mb-menu__categories .mb-button {
-  justify-content: flex-start;
-  height: var(--control-md);
-}
-
-.mb-menu__categories .mb-button[aria-current='true'] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: var(--weight-bold);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
 }

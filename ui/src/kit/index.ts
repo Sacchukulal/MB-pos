@@ -11,6 +11,8 @@ export {
   Page,
   PageHeader,
   Panel,
+  Rail,
+  RailItem,
   Row,
   Scroller,
   Sections,
@@ -33,6 +35,7 @@ export type { LogoProps } from './Logo';
 export {
   Button,
   Checkbox,
+  Choice,
   Input,
   Keypad,
   /** The two fields that have a shape. */

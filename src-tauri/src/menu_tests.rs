@@ -133,7 +133,7 @@ fn changing_a_slab_moves_every_item_on_it_and_nothing_else() {
 
     // The NAME moves too, and the counter's own book followed without a restart.
     let food = slab_of(&app, "tax_food_5");
-    assert_eq!(food.name, "GST 12%");
+    assert_eq!(food.name, "12%", "named by its rate on the page");
     assert_eq!(food.rate, "12%");
     assert_eq!(
         app.shop_config()

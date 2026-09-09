@@ -120,6 +120,7 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
     // The margin is a separate permission from the menu.
     let may_see_cost = who.can(Permission::ReportsView);
 
+    let registration = crate::settings::registration_from(&app.shop_config().store.registration);
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -141,9 +142,12 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
                         price: MoneyView::from(item.unit_price),
                         tax_class_id: item.tax_class_id.as_str().to_owned(),
                         price_basis: crate::tax::basis_word(item.price_basis).to_owned(),
-                        rate: book
-                            .spec_for(&item.tax_class_id, item.price_basis)
-                            .map_or_else(|_| "No tax slab".to_owned(), crate::tax::tax_words),
+                        rate: crate::tax::item_words(
+                            &book,
+                            registration,
+                            &item.tax_class_id,
+                            item.price_basis,
+                        ),
                         hsn: item.hsn.clone(),
                         short_code: item.short_code.clone(),
                         margin: cost.and_then(|cost| margin_label(item.unit_price, cost)),
@@ -210,8 +214,9 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                 let repos = mb_db::Repos::new(tx);
                 let before = repos.menu().find_item(&ItemId::new(edit.id.clone()))?;
 
-                // The slab: the one chosen, else the one the item has, else the category's
-                // starting slab. An item cannot exist without one — it could not be billed.
+                // The slab: the one chosen; else, for an item that was on its category's or
+                // the shop's rate, the rate of the category it is in now; else the item's own.
+                let category_now = edit.category_id.clone().map(CategoryId::new);
                 let chosen = edit
                     .tax_class_id
                     .as_deref()
@@ -231,25 +236,20 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                         class.id
                     }
                     None => {
-                        let from_category = edit.category_id.as_ref().and_then(|wanted| {
-                            repos
-                                .menu()
-                                .list_categories(OUTLET)
-                                .ok()?
-                                .into_iter()
-                                .find(|c| c.id.as_str() == wanted)
-                                .and_then(|c| c.default_tax_class_id)
-                        });
-                        match before
-                            .as_ref()
-                            .map(|b| b.tax_class_id.clone())
-                            .or(from_category)
-                        {
-                            Some(id) => id,
-                            None => {
-                                return Err(mb_db::DbError::invariant(
-                                    "Pick a tax slab for this item.",
-                                ));
+                        let follows_now = repos
+                            .tax_classes()
+                            .rate_for(OUTLET, category_now.as_ref())?;
+                        match before.as_ref() {
+                            None => follows_now,
+                            Some(was) => {
+                                let followed = repos
+                                    .tax_classes()
+                                    .rate_for(OUTLET, was.category_id.as_ref())?;
+                                if was.tax_class_id == followed {
+                                    follows_now
+                                } else {
+                                    was.tax_class_id.clone()
+                                }
                             }
                         }
                     }
@@ -374,6 +374,88 @@ pub fn set_available_on(app: &App, item_id: String, available: bool) -> UiResult
     })?;
 
     menu_rows_on(app)
+}
+
+/// Delete an item. One that has been sold is refused: old bills and reports still point at it,
+/// so it is taken off the menu instead.
+pub fn delete_item_on(app: &App, item_id: String) -> UiResult<Vec<MenuRowView>> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let day = today(at);
+    let id = ItemId::new(item_id.clone());
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let before = repos
+                    .menu()
+                    .find_item(&id)?
+                    .ok_or_else(|| mb_db::DbError::invariant("that item is already gone"))?;
+                repos.menu().delete_item(OUTLET, &id, at)?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::PRICE_CHANGED,
+                        "menu_item",
+                    )
+                    .about(item_id.clone())
+                    .changed(item_json(&before), serde_json::Value::Null),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| {
+                if e.to_string().contains("cannot be deleted") {
+                    UiError::new(
+                        "menu.sold",
+                        "This item has been sold, so old bills need it. Mark it sold out instead.",
+                    )
+                } else {
+                    words::from_db(&e)
+                }
+            })
+    })?;
+
+    log_info!("{} deleted the menu item {item_id}", who.name);
+    menu_rows_on(app)
+}
+
+/// Delete a category. The items in it stay on the menu with no category; their tax does not
+/// move.
+pub fn delete_category_on(app: &App, category_id: String) -> UiResult<Vec<CategoryView>> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    let category = CategoryId::new(category_id.clone());
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let mut found = repos
+                    .menu()
+                    .list_categories(OUTLET)?
+                    .into_iter()
+                    .find(|c| c.id == category)
+                    .ok_or_else(|| mb_db::DbError::invariant("that category is already gone"))?;
+                for mut item in repos.menu().list_items(OUTLET, false)? {
+                    if item.category_id.as_ref() == Some(&category) {
+                        item.category_id = None;
+                        repos.menu().save_item(OUTLET, &item, at)?;
+                    }
+                }
+                found.is_active = false;
+                found.default_tax_class_id = None;
+                repos.menu().save_category(OUTLET, &found, at)?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    log_info!("{} deleted the category {category_id}", who.name);
+    categories_on(app)
 }
 
 /// Save a category. A category with items cannot be retired.
@@ -550,6 +632,19 @@ pub fn set_item_available(
     available: bool,
 ) -> UiResult<Vec<MenuRowView>> {
     set_available_on(&app, item_id, available)
+}
+
+#[tauri::command]
+pub fn delete_menu_item(app: tauri::State<'_, App>, item_id: String) -> UiResult<Vec<MenuRowView>> {
+    delete_item_on(&app, item_id)
+}
+
+#[tauri::command]
+pub fn delete_menu_category(
+    app: tauri::State<'_, App>,
+    category_id: String,
+) -> UiResult<Vec<CategoryView>> {
+    delete_category_on(&app, category_id)
 }
 
 #[tauri::command]

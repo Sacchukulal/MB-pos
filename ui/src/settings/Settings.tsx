@@ -16,6 +16,8 @@ import {
   Panel,
   PhoneInput,
   plural,
+  Rail,
+  RailItem,
   SaveBar,
   Scroller,
   SectionHeader,
@@ -52,6 +54,9 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   appearance: () => <Appearance />,
   tills: () => <Tills />,
 };
+
+/** Sections whose own screen draws their settings, so the generic form stays away. */
+const DRAWS_OWN_SETTINGS = new Set(['tax']);
 
 /** Sections that are not settings. */
 const EXTRA_SECTIONS = [
@@ -251,7 +256,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
 
   return (
     <div className="mb-settings">
-      <nav className="mb-settings__rail" aria-label="Settings sections">
+      <div className="mb-settings__rail">
         <SearchField
           what="settings"
           value={query}
@@ -260,25 +265,20 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
         />
         {/* Only the sections scroll. */}
         <Scroller inset className="mb-settings__sections">
-          {groups.map((section) => (
-            <button
-              key={section.code}
-              type="button"
-              className="mb-settings__section"
-              aria-current={section.code === active?.code ? 'page' : undefined}
-              onClick={() => go(section.code)}
-            >
-              <span>{section.label}</span>
-              {section.canEdit ? null : (
-                <span className="mb-settings__locked" title="You may look but not change this">
-                  read only
-                </span>
-              )}
-            </button>
-          ))}
+          <Rail label="Settings sections">
+            {groups.map((section) => (
+              <RailItem
+                key={section.code}
+                current={section.code === active?.code}
+                onClick={() => go(section.code)}
+                end={section.canEdit ? null : 'read only'}
+              >
+                {section.label}
+              </RailItem>
+            ))}
+          </Rail>
         </Scroller>
-
-      </nav>
+      </div>
 
       {/* Two columns, two scrollbars. */}
       <div className={cx('mb-settings__panes', showsPaper && 'mb-settings__panes--paper')}>
@@ -315,7 +315,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
                     }}
                   />
                 ) : null}
-                {active.settings.length > 0 ? (
+                {active.settings.length > 0 && !DRAWS_OWN_SETTINGS.has(active.code) ? (
                   <Section
                     section={active}
                     edits={edits}

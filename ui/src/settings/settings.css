@@ -34,40 +34,6 @@
   min-height: 0;
 }
 
-.mb-settings__section {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: var(--control-md);
-  padding: var(--space-2) var(--space-3);
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--text-md);
-  text-align: left;
-  cursor: pointer;
-}
-
-.mb-settings__section:hover {
-  background: var(--surface-2);
-}
-
-/* The section you are on: bold, a grey fill, a black bar — the same mark as every rail. */
-.mb-settings__section[aria-current='page'] {
-  background: var(--surface-2);
-  font-weight: var(--weight-bold);
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--accent);
-}
-
-.mb-settings__locked {
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
 .mb-settings__body {
   min-width: 0;
   min-height: 0;
@@ -293,7 +259,7 @@
   min-width: 0;
 }
 
-/* The paper and the drawer, side by side under the printer. */
+/* The printer and its paper, side by side. */
 .mb-printers__fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
@@ -301,11 +267,20 @@
   align-items: end;
 }
 
-/* One printer box per category. */
-.mb-printers__routes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
-  gap: var(--space-3);
+/* The sample, the slip and the nudge, on one line. */
+.mb-printers__test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mb-printers__nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
 }
 
 /* Numbering, appearance, and moving a configuration. */
@@ -442,7 +417,7 @@
   border-top: var(--border-width) solid var(--border);
 }
 
-/* Settings › Tax — the slabs and the tick list. */
+/* Settings › Tax — GST, the shop rate, and the tick list. */
 
 .mb-tax {
   display: flex;
@@ -450,33 +425,11 @@
   gap: var(--gap-section);
 }
 
-.mb-tax__group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-bottom: var(--gap-group);
-}
-
-.mb-tax__grouphead {
-  display: flex;
-  align-items: center;
+.mb-tax__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
   gap: var(--space-3);
-  min-height: var(--control-md);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-}
-
-.mb-tax__groupname {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.mb-tax__groupdefault {
-  margin-left: auto;
-  flex: 0 1 var(--settings-field);
-  min-width: 0;
+  align-items: end;
 }
 
 .mb-tax__apply {

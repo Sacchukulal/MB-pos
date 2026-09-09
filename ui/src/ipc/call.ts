@@ -28,8 +28,6 @@ import type { MenuRowView } from './generated/MenuRowView';
 import type { MenuEdit } from './generated/MenuEdit';
 import type { CategoryView } from './generated/CategoryView';
 import type { TaxPageView } from './generated/TaxPageView';
-import type { TaxSlabEdit } from './generated/TaxSlabEdit';
-import type { TaxSlabView } from './generated/TaxSlabView';
 import type { ImportPlanView } from './generated/ImportPlanView';
 import type { ItemComposition } from './generated/ItemComposition';
 import type { ModifierGroupView } from './generated/ModifierGroupView';
@@ -276,12 +274,12 @@ export interface Commands {
     args: { id: string; name: string; isActive: boolean };
     returns: CategoryView[];
   };
-  // Settings › Tax — the one screen for tax. The kind and the basis are the machine values
-  // Rust sent, never words read back off the screen.
-  tax_slabs: { args: void; returns: TaxSlabView[] };
+  delete_menu_item: { args: { itemId: string }; returns: MenuRowView[] };
+  delete_menu_category: { args: { categoryId: string }; returns: CategoryView[] };
+  // Settings › Tax — the one screen for tax. The shop rate is typed as a percentage; a
+  // category or a ticked item picks a slab by id, or "follow" to go back up the ladder.
   tax_page: { args: void; returns: TaxPageView };
-  save_tax_slab: { args: { edit: TaxSlabEdit }; returns: TaxSlabView[] };
-  remove_tax_slab: { args: { id: string }; returns: TaxSlabView[] };
+  set_shop_tax_rate: { args: { percent: string }; returns: TaxPageView };
   set_items_tax: {
     args: { itemIds: string[]; slabId: string | null; basis: string | null };
     returns: TaxPageView;
@@ -600,11 +598,6 @@ export interface Commands {
   set_kitchen_mode: { args: { mode: string }; returns: PrintersView };
   set_ticket_style: { args: { style: string }; returns: PrintersView };
   route_category_to: { args: { categoryId: string; windowsName: string }; returns: PrintersView };
-  /** An empty printerId means "the default kitchen printer". */
-  route_category: {
-    args: { categoryId: string; printerId: string };
-    returns: PrintersView;
-  };
   /**
    * A whole sample BILL, not a slip — a slip cannot show whether a bill is centred, and that is
    * what somebody at the printer is asking.

@@ -4,7 +4,7 @@ import type { MoneyView } from "./MoneyView";
 /**
  * One item in the tick list.
  */
-export type TaxItemView = { id: string, name: string, price: MoneyView, slabId: string, slabName: string, 
+export type TaxItemView = { id: string, name: string, price: MoneyView, slabId: string, 
 /**
  * `shop`, `inclusive` or `exclusive` — the item's own say.
  */
@@ -12,4 +12,8 @@ basis: string,
 /**
  * "5% · added on top" — what this item is actually taxed at today.
  */
-words: string, isAvailable: boolean, };
+words: string, 
+/**
+ * `shop`, `category` or `item` — which rung the rate comes from.
+ */
+from: string, isAvailable: boolean, };

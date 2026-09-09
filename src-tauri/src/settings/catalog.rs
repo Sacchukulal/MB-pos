@@ -371,7 +371,7 @@ const PRICE_BASES: &[Choice] = &[
 ];
 
 /// The GST state codes, which are also the first two characters of every GSTIN.
-const STATES: &[Choice] = &[
+pub(crate) const STATES: &[Choice] = &[
     Choice {
         value: NOT_CHOSEN,
         label: "Not chosen yet",
@@ -970,14 +970,14 @@ pub const CATALOG: &[Entry] = &[
         PRICE_BASES,
         store.price_basis
     ),
-    number!("billing.service_charge_bp", Tax, Row, "Service charge",
+    number!("billing.service_charge_bp", Billing, Row, "Service charge",
         "In hundredths of a percent, so 500 is 5%. 0 means you do not charge it. \
          Added to dine-in bills only.",
         ["service", "charge", "percent", "tip"], 0..=2500 "hundredths of a percent",
         u32, billing.service_charge_bp),
     slab!(
         "billing.service_charge_tax",
-        Tax,
+        Billing,
         "Tax on the service charge",
         "",
         ["service", "gst", "tax"],
@@ -985,7 +985,7 @@ pub const CATALOG: &[Entry] = &[
     ),
     cash!(
         "billing.packing_charge",
-        Tax,
+        Billing,
         Row,
         "Packing charge",
         "Added to parcel and self-service bills. Zero means you do not charge it.",
@@ -995,7 +995,7 @@ pub const CATALOG: &[Entry] = &[
     ),
     slab!(
         "billing.packing_charge_tax",
-        Tax,
+        Billing,
         "Tax on the packing charge",
         "",
         ["packing", "gst", "tax"],
@@ -1003,7 +1003,7 @@ pub const CATALOG: &[Entry] = &[
     ),
     cash!(
         "billing.delivery_charge",
-        Tax,
+        Billing,
         Row,
         "Delivery charge",
         "Added to delivery bills. Zero means you do not charge it.",
@@ -1013,7 +1013,7 @@ pub const CATALOG: &[Entry] = &[
     ),
     slab!(
         "billing.delivery_charge_tax",
-        Tax,
+        Billing,
         "Tax on the delivery charge",
         "",
         ["delivery", "gst", "tax"],

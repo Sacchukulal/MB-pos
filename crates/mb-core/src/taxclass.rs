@@ -92,9 +92,24 @@ pub fn starting_classes() -> Vec<TaxClass> {
     vec![
         TaxClass::new(TaxClassId::new("tax_gst_0"), "GST 0%", TaxKind::Gst, pc(0)),
         TaxClass::new(TaxClassId::new("tax_food_5"), "GST 5%", TaxKind::Gst, pc(5)),
-        TaxClass::new(TaxClassId::new("tax_packaged_18"), "GST 18%", TaxKind::Gst, pc(18)),
-        TaxClass::new(TaxClassId::new("tax_gst_40"), "GST 40%", TaxKind::Gst, pc(40)),
-        TaxClass::new(TaxClassId::new("tax_exempt"), "Exempt", TaxKind::Exempt, pc(0)),
+        TaxClass::new(
+            TaxClassId::new("tax_packaged_18"),
+            "GST 18%",
+            TaxKind::Gst,
+            pc(18),
+        ),
+        TaxClass::new(
+            TaxClassId::new("tax_gst_40"),
+            "GST 40%",
+            TaxKind::Gst,
+            pc(40),
+        ),
+        TaxClass::new(
+            TaxClassId::new("tax_exempt"),
+            "Exempt",
+            TaxKind::Exempt,
+            pc(0),
+        ),
         TaxClass::new(
             TaxClassId::new("tax_liquor"),
             "Liquor — state VAT",
@@ -146,6 +161,9 @@ pub struct TaxBook {
     pub classes: Vec<TaxClass>,
     /// What "price" means on this shop's menu unless a slab or an item says otherwise.
     pub shop_basis: PriceBasis,
+    /// The shop's own rate: what an item is taxed at unless its category or the item itself
+    /// says otherwise.
+    pub shop_class: Option<TaxClassId>,
 }
 
 impl TaxBook {
@@ -154,7 +172,29 @@ impl TaxBook {
         TaxBook {
             classes,
             shop_basis,
+            shop_class: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_shop_class(mut self, class: Option<TaxClassId>) -> Self {
+        self.shop_class = class;
+        self
+    }
+
+    /// The shop's rate as a live slab. A shop that has never chosen one is on the seeded 5%
+    /// slab while it still has it, else on its first live slab.
+    #[must_use]
+    pub fn shop_slab(&self) -> Option<&TaxClass> {
+        self.shop_class
+            .as_ref()
+            .and_then(|id| self.find(id))
+            .filter(|c| c.is_active)
+            .or_else(|| {
+                self.find(&TaxClassId::new("tax_food_5"))
+                    .filter(|c| c.is_active)
+            })
+            .or_else(|| self.active().next())
     }
 
     #[must_use]
@@ -213,10 +253,7 @@ mod tests {
         assert_eq!(food.basis, None, "a plain slab follows the shop");
         assert!(food.is_coherent());
         assert!(!food.is_alcohol());
-        assert_eq!(
-            food.spec(PriceBasis::Exclusive, None),
-            TaxSpec::gst(pc(5))
-        );
+        assert_eq!(food.spec(PriceBasis::Exclusive, None), TaxSpec::gst(pc(5)));
         assert_eq!(
             food.spec(PriceBasis::Inclusive, None),
             TaxSpec::gst_inclusive(pc(5))
@@ -278,7 +315,10 @@ mod tests {
         );
         b.classes[1].is_active = false;
         let id = b.classes[1].id.clone();
-        assert!(b.spec_for(&id, None).is_ok(), "an old item may still read it");
+        assert!(
+            b.spec_for(&id, None).is_ok(),
+            "an old item may still read it"
+        );
         assert_eq!(
             b.spec_for_live(&id, None),
             Err(TaxBookError::Retired(id.as_str().to_owned())),
@@ -295,7 +335,11 @@ mod tests {
             .find(|c| c.id == TaxClassId::new("tax_liquor"))
             .expect("a shop must be able to sell liquor");
         assert!(liquor.is_alcohol());
-        assert_eq!(liquor.basis, Some(PriceBasis::Inclusive), "a bar quotes the price paid");
+        assert_eq!(
+            liquor.basis,
+            Some(PriceBasis::Inclusive),
+            "a bar quotes the price paid"
+        );
         assert!(liquor.rate.is_zero(), "the shop sets its own state's VAT");
         assert!(classes.iter().any(|c| c.kind == TaxKind::Exempt));
     }

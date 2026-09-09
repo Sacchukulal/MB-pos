@@ -127,33 +127,23 @@
   text-overflow: ellipsis;
 }
 
-/* More: the screens a shop opens sitting down. */
+/* More: the screens a shop opens sitting down, as a page with a rail down the left. */
 
-.mb-nav__more {
-  position: relative;
-  display: flex;
-  align-items: center;
+.mb-more {
+  display: grid;
+  grid-template-columns: var(--settings-rail) minmax(0, 1fr);
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
 }
 
-/* The More sheet is the kit's sheet (`.mb-sheet`); this only says where it lies in the bar. */
-.mb-nav__scrim {
-  z-index: var(--layer-chrome);
+.mb-more__rail {
+  overflow-y: auto;
 }
 
-.mb-nav__sheet {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
-  z-index: var(--layer-chrome);
-  min-width: var(--rail-sheet-width);
-}
-
-.mb-nav__sheetitem .mb-icon {
-  color: var(--text-muted);
-}
-
-.mb-nav__sheetitem[aria-current='page'] .mb-icon {
-  color: var(--text);
+.mb-more__body {
+  min-width: 0;
+  min-height: 0;
 }
 
 /* On the set-up screen there is no navigation to fill the middle, so something has to. */

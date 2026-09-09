@@ -297,3 +297,50 @@ export function Notice({
     </div>
   );
 }
+
+/** A list of places down the side of a screen; the one you are on is marked. */
+export function Rail({
+  children,
+  label,
+  className,
+}: {
+  children: ReactNode;
+  /** What the list is, for the screen reader. */
+  label: string;
+  className?: string;
+}) {
+  return (
+    <nav className={cx('mb-rail', className)} aria-label={label}>
+      {children}
+    </nav>
+  );
+}
+
+/** One place on a rail. */
+export function RailItem({
+  current = false,
+  icon,
+  onClick,
+  children,
+  end,
+}: {
+  current?: boolean;
+  icon?: IconName;
+  onClick: () => void;
+  children: ReactNode;
+  /** A small mark at the far end — a count, "read only". */
+  end?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="mb-rail__item"
+      aria-current={current ? 'page' : undefined}
+      onClick={onClick}
+    >
+      {icon ? <Icon name={icon} size="md" className="mb-rail__icon" /> : null}
+      <span className="mb-rail__label">{children}</span>
+      {end ? <span className="mb-rail__end">{end}</span> : null}
+    </button>
+  );
+}

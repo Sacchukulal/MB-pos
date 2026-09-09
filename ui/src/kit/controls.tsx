@@ -641,3 +641,34 @@ export function Keypad({ onPress, disabled, dot = true }: KeypadProps) {
     </div>
   );
 }
+
+/** A choice of a few, as buttons: the one in force is filled. */
+export function Choice({
+  label,
+  value,
+  options,
+  onPick,
+}: {
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onPick: (value: string) => void;
+}) {
+  return (
+    <div className="mb-field">
+      <span className="mb-field__label">{label}</span>
+      <div className="mb-row mb-row--gap-inline mb-row--wrap" role="group" aria-label={label}>
+        {options.map((option) => (
+          <Button
+            key={option.value}
+            variant={option.value === value ? 'primary' : 'secondary'}
+            aria-pressed={option.value === value}
+            onClick={() => option.value !== value && onPick(option.value)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}

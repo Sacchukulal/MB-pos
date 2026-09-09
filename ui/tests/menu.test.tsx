@@ -17,7 +17,7 @@ import type { ComboView } from '../src/ipc/generated/ComboView';
 import type { ItemComposition } from '../src/ipc/generated/ItemComposition';
 import type { MenuRowView } from '../src/ipc/generated/MenuRowView';
 import type { MoneyView } from '../src/ipc/generated/MoneyView';
-import type { TaxSlabView } from '../src/ipc/generated/TaxSlabView';
+import type { CategoryView } from '../src/ipc/generated/CategoryView';
 
 function money(paise: number, text: string): MoneyView {
   return { paise: BigInt(paise), text };
@@ -196,111 +196,28 @@ describe('a combo (scope 6.3)', () => {
   });
 });
 
-/** The item form sends a slab and a price rule, never a rate. */
-describe('the item form and the tax book', () => {
-  const slabs: TaxSlabView[] = [
-    {
-      id: 'tax_food_5',
-      name: 'GST 5%',
-      rate: '5%',
-      rateBp: 500,
-      kind: 'gst',
-      basis: 'shop',
-      priceWords: 'Shop default (added on top)',
-      isActive: true,
-      itemsUsing: 1,
-    },
-    {
-      id: 'tax_packaged_18',
-      name: 'GST 18%',
-      rate: '18%',
-      rateBp: 1800,
-      kind: 'gst',
-      basis: 'shop',
-      priceWords: 'Shop default (added on top)',
-      isActive: true,
-      itemsUsing: 0,
-    },
-  ];
+/** The menu screen: categories down the left, items on the right, both typed in a run. */
+describe('the menu screen', () => {
+  const tiffin: CategoryView = {
+    id: 'cat_tiffin',
+    name: 'Tiffin',
+    sortOrder: 0n,
+    isActive: true,
+    itemCount: 1n,
+    defaultSlabId: null,
+  };
 
-  it('sends the chosen slab and price rule back with the item', async () => {
+  function open(rows: MenuRowView[] = [dosa]) {
     call.mockImplementation((name: string) => {
       switch (name) {
-        case 'tax_slabs':
-          return Promise.resolve(slabs);
+        case 'menu_categories':
+        case 'save_menu_category':
+        case 'delete_menu_category':
+          return Promise.resolve([tiffin]);
         case 'menu_rows':
-          return Promise.resolve([dosa]);
         case 'save_menu_item':
-          return Promise.resolve([dosa]);
-        default:
-          return Promise.resolve([]);
-      }
-    });
-    render(
-      <ToastProvider>
-        <Menu />
-      </ToastProvider>,
-    );
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]!);
-    const panel = screen.getByRole('complementary', { name: dosa.name });
-
-    fireEvent.change(within(panel).getByLabelText('Tax slab'), {
-      target: { value: 'tax_packaged_18' },
-    });
-    fireEvent.change(within(panel).getByLabelText('Tax in the price'), {
-      target: { value: 'inclusive' },
-    });
-    fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
-
-    await waitFor(() =>
-      expect(call).toHaveBeenCalledWith(
-        'save_menu_item',
-        expect.objectContaining({
-          edit: expect.objectContaining({ taxClassId: 'tax_packaged_18', priceBasis: 'inclusive' }),
-        }),
-      ),
-    );
-  });
-
-  it('does not define slabs here — that is Settings › Tax', async () => {
-    call.mockImplementation((name: string) =>
-      Promise.resolve(name === 'tax_slabs' ? slabs : []),
-    );
-    render(
-      <ToastProvider>
-        <Menu />
-      </ToastProvider>,
-    );
-    await screen.findByRole('button', { name: 'Add an item' });
-    expect(screen.queryByText('Tax classes')).toBeNull();
-  });
-});
-
-/** Typing a menu is a run, not a dialog reopened per dish. */
-describe('adding items (2026-08-24)', () => {
-  const classes: TaxSlabView[] = [
-    {
-      id: 'tax_food_5',
-      name: 'GST 5%',
-      rate: '5%',
-      rateBp: 500,
-      kind: 'gst',
-      basis: 'shop',
-      priceWords: 'Shop default (added on top)',
-      isActive: true,
-      itemsUsing: 1,
-    },
-  ];
-
-  function open() {
-    call.mockImplementation((name: string) => {
-      switch (name) {
-        case 'tax_slabs':
-          return Promise.resolve(classes);
-        case 'menu_rows':
-          return Promise.resolve([]);
-        case 'save_menu_item':
-          return Promise.resolve([]);
+        case 'delete_menu_item':
+          return Promise.resolve(rows);
         default:
           return Promise.resolve([]);
       }
@@ -312,68 +229,109 @@ describe('adding items (2026-08-24)', () => {
     );
   }
 
-  it('keeps the panel open and empties it after each item', async () => {
-    open();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add an item' }));
-    expect(screen.getByRole('complementary', { name: 'Add an item' })).toBeTruthy();
-
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Idli' } });
+  it('adds an item from the row at the top, with Enter, and never asks about tax', async () => {
+    open([]);
+    const name = await screen.findByLabelText('Item name');
+    fireEvent.change(name, { target: { value: 'Idli' } });
     fireEvent.change(screen.getByLabelText('Price'), { target: { value: '40' } });
-    // Enter saves, which is how a menu is typed: name, price, Enter.
-    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter' });
+    fireEvent.submit(name.closest('form')!);
 
     await waitFor(() =>
-      expect(
-        call.mock.calls.filter(([name]) => name === 'save_menu_item'),
-      ).toHaveLength(1),
+      expect(call.mock.calls.filter(([n]) => n === 'save_menu_item')).toHaveLength(1),
     );
-    const first = call.mock.calls.find(([name]) => name === 'save_menu_item')!;
-    expect((first[1] as { edit: { name: string } }).edit.name).toBe('Idli');
+    const sent = (call.mock.calls.find(([n]) => n === 'save_menu_item')![1] as {
+      edit: { name: string; price: string; taxClassId: string | null; categoryId: string | null };
+    }).edit;
+    expect(sent.name).toBe('Idli');
+    expect(sent.price).toBe('40');
+    // Rust decides the tax from the category and the shop.
+    expect(sent.taxClassId).toBeNull();
+    expect(screen.queryByLabelText('Tax slab')).toBeNull();
 
-    // Still open, and empty, ready for the next one.
-    expect(screen.getByRole('complementary', { name: 'Add an item' })).toBeTruthy();
+    // Empty and ready for the next one; the second item is a NEW item.
+    await waitFor(() => expect((name as HTMLInputElement).value).toBe(''));
+    fireEvent.change(name, { target: { value: 'Vada' } });
+    fireEvent.submit(name.closest('form')!);
     await waitFor(() =>
-      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(''),
+      expect(call.mock.calls.filter(([n]) => n === 'save_menu_item')).toHaveLength(2),
     );
-    expect((screen.getByLabelText('Price') as HTMLInputElement).value).toBe('');
-
-    // And the second item is a NEW item, not an edit of the first.
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Vada' } });
-    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter' });
-    await waitFor(() =>
-      expect(
-        call.mock.calls.filter(([name]) => name === 'save_menu_item'),
-      ).toHaveLength(2),
-    );
-    const saves = call.mock.calls.filter(([name]) => name === 'save_menu_item');
-    const ids = saves.map(([, args]) => (args as { edit: { id: string } }).edit.id);
-    expect(ids[0], 'the second item overwrote the first').not.toBe(ids[1]);
+    const ids = call.mock.calls
+      .filter(([n]) => n === 'save_menu_item')
+      .map(([, args]) => (args as { edit: { id: string } }).edit.id);
+    expect(ids[0]).not.toBe(ids[1]);
   });
 
-  it('closes when an existing item is saved, because there is nothing to type next', async () => {
-    call.mockImplementation((name: string) => {
-      switch (name) {
-        case 'tax_slabs':
-          return Promise.resolve(classes);
-        case 'menu_rows':
-          return Promise.resolve([dosa]);
-        default:
-          return Promise.resolve([]);
-      }
-    });
-    render(
-      <ToastProvider>
-        <Menu />
-      </ToastProvider>,
+  it('puts a new item in the category chosen on the left', async () => {
+    open([]);
+    const tiffin = (await screen.findAllByText('Tiffin')).find((el) =>
+      el.classList.contains('mb-menu__catname'),
+    )!;
+    fireEvent.click(tiffin.closest('button')!);
+    const name = screen.getByLabelText('Item name');
+    fireEvent.change(name, { target: { value: 'Upma' } });
+    fireEvent.submit(name.closest('form')!);
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith(
+        'save_menu_item',
+        expect.objectContaining({ edit: expect.objectContaining({ categoryId: 'cat_tiffin' }) }),
+      ),
+    );
+  });
+
+  it('adds a category from its own row', async () => {
+    open([]);
+    const box = await screen.findByLabelText('New category');
+    fireEvent.change(box, { target: { value: 'Drinks' } });
+    fireEvent.submit(box.closest('form')!);
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith(
+        'save_menu_category',
+        expect.objectContaining({ name: 'Drinks', isActive: true }),
+      ),
+    );
+  });
+
+  it('renames and deletes a category in place', async () => {
+    open([]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Tiffin' }));
+    const box = screen.getByLabelText('Category name');
+    fireEvent.change(box, { target: { value: 'Breakfast' } });
+    fireEvent.submit(box.closest('form')!);
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith('save_menu_category', {
+        id: 'cat_tiffin',
+        name: 'Breakfast',
+        isActive: true,
+      }),
     );
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]!);
-    // Editing names the panel after what is in it; adding names it "Add an item".
-    const panel = screen.getByRole('complementary', { name: dosa.name });
-    fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
-
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Tiffin' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() =>
-      expect(screen.queryByRole('complementary', { name: dosa.name })).toBeNull(),
+      expect(call).toHaveBeenCalledWith('delete_menu_category', { categoryId: 'cat_tiffin' }),
+    );
+  });
+
+  it('edits the rare fields in a dialog, and deletes with a confirmation', async () => {
+    open();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]!);
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Minutes to cook'), { target: { value: '12' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith(
+        'save_menu_item',
+        expect.objectContaining({
+          edit: expect.objectContaining({ id: 'itm_dosa', prepMinutes: '12', taxClassId: null }),
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    const ask = screen.getByRole('dialog');
+    fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }));
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith('delete_menu_item', { itemId: 'itm_dosa' }),
     );
   });
 });

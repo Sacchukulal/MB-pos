@@ -2,7 +2,7 @@
 import type { TaxItemView } from "./TaxItemView";
 
 /**
- * A category and its items, for ticking a whole group at once.
+ * A category and its items.
  */
 export type TaxCategoryView = { 
 /**
@@ -10,6 +10,10 @@ export type TaxCategoryView = {
  */
 id: string | null, name: string, 
 /**
- * The slab a new item in this category starts on.
+ * The category's own rate, when it has one.
  */
-defaultSlabId: string | null, items: Array<TaxItemView>, };
+ownSlabId: string | null, 
+/**
+ * "Shop rate" or "18%".
+ */
+rateWords: string, items: Array<TaxItemView>, };

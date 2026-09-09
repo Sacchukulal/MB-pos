@@ -101,6 +101,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0013_bill_reverts",
         sql: include_str!("migrations/0013_bill_reverts.sql"),
     },
+    // The shop's own GST rate, beside its pricing default.
+    Migration {
+        version: 14,
+        name: "0014_shop_rate",
+        sql: include_str!("migrations/0014_shop_rate.sql"),
+    },
 ];
 
 /// The highest version this build understands.

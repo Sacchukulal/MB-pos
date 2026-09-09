@@ -1,23 +1,26 @@
 //! Settings › Tax — the one screen for tax.
 //!
-//! The slabs live here, the charges' slabs are catalogue settings in the same group, and this
-//! is where an owner ticks items (or a whole category) and puts them on a slab. The Menu screen
-//! only picks a slab for one item at a time; it does not define any.
+//! Three rungs decide what an item is taxed at: the item's own rate, else its category's rate,
+//! else the shop's rate. The shop's rate is a typed percentage; a category or a ticked item
+//! picks a slab. The Menu screen never asks about tax.
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
-use mb_core::{CategoryId, ItemId, PriceBasis, TaxClass, TaxClassId, TaxRate, TaxSpec};
-use serde::{Deserialize, Serialize};
+use mb_core::{
+    CategoryId, ItemId, PriceBasis, TaxBook, TaxClass, TaxClassId, TaxKind, TaxRate, TaxSpec,
+};
+use serde::Serialize;
 use ts_rs::TS;
 
 use crate::flows::{now, today};
 use crate::guard;
 use crate::ipc::MoneyView;
 use crate::log_info;
+use crate::settings::ipc::ChoiceView;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
-/// One slab, as the Tax page lists it.
+/// One slab, as the Tax page offers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +31,7 @@ pub struct TaxSlabView {
     pub rate: String,
     pub rate_bp: u32,
     #[ts(type = "\"gst\" | \"exempt\" | \"outside_gst\" | \"untaxed\"")]
-    pub kind: mb_core::TaxKind,
+    pub kind: TaxKind,
     /// `shop`, `inclusive` or `exclusive` — the slab's own say on pricing.
     pub basis: String,
     /// "Added on top" / "In the price" / "Shop default (added on top)".
@@ -46,15 +49,16 @@ pub struct TaxItemView {
     pub name: String,
     pub price: MoneyView,
     pub slab_id: String,
-    pub slab_name: String,
     /// `shop`, `inclusive` or `exclusive` — the item's own say.
     pub basis: String,
     /// "5% · added on top" — what this item is actually taxed at today.
     pub words: String,
+    /// `shop`, `category` or `item` — which rung the rate comes from.
+    pub from: String,
     pub is_available: bool,
 }
 
-/// A category and its items, for ticking a whole group at once.
+/// A category and its items.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -62,8 +66,10 @@ pub struct TaxCategoryView {
     /// None for the items in no category.
     pub id: Option<String>,
     pub name: String,
-    /// The slab a new item in this category starts on.
-    pub default_slab_id: Option<String>,
+    /// The category's own rate, when it has one.
+    pub own_slab_id: Option<String>,
+    /// "Shop rate" or "18%".
+    pub rate_words: String,
     pub items: Vec<TaxItemView>,
 }
 
@@ -72,10 +78,21 @@ pub struct TaxCategoryView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct TaxPageView {
+    /// `unregistered`, `composition` or `regular`.
+    pub registration: String,
+    pub gstin: String,
+    pub state_code: String,
+    pub states: Vec<ChoiceView>,
     /// `inclusive` or `exclusive` — the shop's own default.
     pub shop_basis: String,
+    /// The shop's rate as typed: "5".
+    pub shop_rate: String,
+    pub shop_slab_id: String,
+    /// Whether bills carry GST at all.
+    pub charges_gst: bool,
     /// Why bills are not what the registration box says — no GST number, no state.
     pub registration_note: Option<String>,
+    /// The live slabs, for picking.
     pub slabs: Vec<TaxSlabView>,
     pub categories: Vec<TaxCategoryView>,
 }
@@ -112,10 +129,36 @@ pub fn tax_words(tax: TaxSpec) -> String {
         PriceBasis::Inclusive => "in the price",
     };
     match tax.kind {
-        mb_core::TaxKind::Exempt => "Exempt".to_owned(),
-        mb_core::TaxKind::Untaxed => "No tax".to_owned(),
-        mb_core::TaxKind::OutsideGst => format!("VAT {} · {priced}", tax.rate.label()),
-        mb_core::TaxKind::Gst => format!("{} · {priced}", tax.rate.label()),
+        TaxKind::Exempt => "Exempt".to_owned(),
+        TaxKind::Untaxed => "No tax".to_owned(),
+        TaxKind::OutsideGst => format!("VAT {} · {priced}", tax.rate.label()),
+        TaxKind::Gst => format!("{} · {priced}", tax.rate.label()),
+    }
+}
+
+/// The same words for an item, allowing for a shop that may not charge GST at all.
+#[must_use]
+pub fn item_words(
+    book: &TaxBook,
+    registration: mb_core::Registration,
+    slab: &TaxClassId,
+    basis: Option<PriceBasis>,
+) -> String {
+    match book.spec_for(slab, basis) {
+        Err(_) => "No tax slab".to_owned(),
+        Ok(spec) if spec.kind == TaxKind::Gst && !registration.charges_gst() => "No GST".to_owned(),
+        Ok(spec) => tax_words(spec),
+    }
+}
+
+/// A rate's name on the page: "5%", "Exempt", "Liquor — state VAT".
+#[must_use]
+fn rate_name(class: &TaxClass) -> String {
+    match class.kind {
+        TaxKind::Gst => class.rate.label(),
+        TaxKind::Exempt => "Exempt".to_owned(),
+        TaxKind::Untaxed => "No tax".to_owned(),
+        TaxKind::OutsideGst => class.name.clone(),
     }
 }
 
@@ -130,7 +173,7 @@ fn slab_view(class: &TaxClass, shop: PriceBasis, items_using: i64) -> TaxSlabVie
     };
     TaxSlabView {
         id: class.id.as_str().to_owned(),
-        name: class.name.clone(),
+        name: rate_name(class),
         rate: class.rate.label(),
         rate_bp: class.rate.basis_points(),
         kind: class.kind,
@@ -151,6 +194,7 @@ fn slabs_in(repos: &mb_db::Repos<'_>) -> Result<Vec<TaxSlabView>, mb_db::DbError
     Ok(out)
 }
 
+#[cfg(test)]
 pub fn slabs_on(app: &App) -> UiResult<Vec<TaxSlabView>> {
     guard::require(app, Permission::MenuManage)?;
     app.with_shop(|shop| {
@@ -162,39 +206,64 @@ pub fn slabs_on(app: &App) -> UiResult<Vec<TaxSlabView>> {
 
 fn page_in(repos: &mb_db::Repos<'_>) -> Result<TaxPageView, mb_db::DbError> {
     let book = repos.tax_classes().book(OUTLET)?;
-    let slabs = slabs_in(repos)?;
+    let shop_slab = repos.tax_classes().shop_slab(OUTLET)?;
+    let slabs: Vec<TaxSlabView> = slabs_in(repos)?
+        .into_iter()
+        .filter(|s| s.is_active)
+        .collect();
     let items = repos.menu().list_items(OUTLET, false)?;
     let categories = repos.menu().list_categories(OUTLET)?;
+    let store = repos
+        .settings()
+        .store_profile(OUTLET)?
+        .map(|p| crate::settings::Store::from_profile(&p))
+        .unwrap_or_default();
+    // The rate the owner chose; a missing GST number is said in the note, not on every row.
+    let registration = crate::settings::registration_from(&store.registration);
 
-    let item_view = |item: &mb_db::repo::menu::MenuItem| TaxItemView {
-        id: item.id.as_str().to_owned(),
-        name: item.name.clone(),
-        price: MoneyView::from(item.unit_price),
-        slab_id: item.tax_class_id.as_str().to_owned(),
-        slab_name: book
-            .find(&item.tax_class_id)
-            .map_or_else(|| "—".to_owned(), |c| c.name.clone()),
-        basis: basis_word(item.price_basis).to_owned(),
-        words: book
-            .spec_for(&item.tax_class_id, item.price_basis)
-            .map_or_else(|_| "No tax slab".to_owned(), tax_words),
-        is_available: item.is_available,
-    };
+    let item_view =
+        |item: &mb_db::repo::menu::MenuItem, follows: &TaxClassId, category_has_own: bool| {
+            let from = if item.tax_class_id != *follows {
+                "item"
+            } else if category_has_own {
+                "category"
+            } else {
+                "shop"
+            };
+            TaxItemView {
+                id: item.id.as_str().to_owned(),
+                name: item.name.clone(),
+                price: MoneyView::from(item.unit_price),
+                slab_id: item.tax_class_id.as_str().to_owned(),
+                basis: basis_word(item.price_basis).to_owned(),
+                words: item_words(&book, registration, &item.tax_class_id, item.price_basis),
+                from: from.to_owned(),
+                is_available: item.is_available,
+            }
+        };
 
-    let mut out: Vec<TaxCategoryView> = categories
-        .iter()
-        .filter(|c| c.is_active)
-        .map(|c| TaxCategoryView {
+    let mut out: Vec<TaxCategoryView> = Vec::new();
+    for c in categories.iter().filter(|c| c.is_active) {
+        let follows = repos.tax_classes().rate_for(OUTLET, Some(&c.id))?;
+        let own = c
+            .default_tax_class_id
+            .as_ref()
+            .filter(|id| book.find(id).is_some_and(|s| s.is_active));
+        let rate_words = own
+            .and_then(|id| book.find(id))
+            .map_or_else(|| "Shop rate".to_owned(), rate_name);
+        out.push(TaxCategoryView {
             id: Some(c.id.as_str().to_owned()),
             name: c.name.clone(),
-            default_slab_id: c.default_tax_class_id.as_ref().map(|s| s.as_str().to_owned()),
+            own_slab_id: own.map(|id| id.as_str().to_owned()),
+            rate_words,
             items: items
                 .iter()
                 .filter(|i| i.category_id.as_ref() == Some(&c.id))
-                .map(item_view)
+                .map(|i| item_view(i, &follows, own.is_some()))
                 .collect(),
-        })
-        .collect();
+        });
+    }
     let loose: Vec<TaxItemView> = items
         .iter()
         .filter(|i| {
@@ -202,23 +271,37 @@ fn page_in(repos: &mb_db::Repos<'_>) -> Result<TaxPageView, mb_db::DbError> {
                 .as_ref()
                 .is_none_or(|id| !categories.iter().any(|c| &c.id == id && c.is_active))
         })
-        .map(item_view)
+        .map(|i| item_view(i, &shop_slab, false))
         .collect();
     if !loose.is_empty() {
         out.push(TaxCategoryView {
             id: None,
             name: "No category".to_owned(),
-            default_slab_id: None,
+            own_slab_id: None,
+            rate_words: "Shop rate".to_owned(),
             items: loose,
         });
     }
-    let registration_note = repos
-        .settings()
-        .store_profile(OUTLET)?
-        .and_then(|p| crate::settings::Store::from_profile(&p).registration_note());
+    let shop_rate = book
+        .find(&shop_slab)
+        .map(|c| c.rate.label().trim_end_matches('%').to_owned())
+        .unwrap_or_default();
     Ok(TaxPageView {
+        registration: store.registration.clone(),
+        gstin: store.gstin.clone(),
+        state_code: store.state_code.clone(),
+        states: crate::settings::catalog::STATES
+            .iter()
+            .map(|c| ChoiceView {
+                value: c.value.to_owned(),
+                label: c.label.to_owned(),
+            })
+            .collect(),
         shop_basis: crate::settings::price_basis_to(book.shop_basis).to_owned(),
-        registration_note,
+        shop_rate,
+        shop_slab_id: shop_slab.as_str().to_owned(),
+        charges_gst: store.registration().charges_gst(),
+        registration_note: store.registration_note(),
         slabs,
         categories: out,
     })
@@ -233,13 +316,94 @@ pub fn page_on(app: &App) -> UiResult<TaxPageView> {
     })
 }
 
+/// A GST rate typed as a percentage, as a live slab: the one the shop has at that rate, else a
+/// new one named after it.
+fn gst_slab_for(
+    repos: &mb_db::Repos<'_>,
+    rate: TaxRate,
+    at: mb_core::Timestamp,
+) -> Result<TaxClassId, mb_db::DbError> {
+    let classes = repos.tax_classes().list(OUTLET)?;
+    if let Some(live) = classes
+        .iter()
+        .find(|c| c.kind == TaxKind::Gst && c.rate == rate && c.is_active)
+    {
+        return Ok(live.id.clone());
+    }
+    let id = TaxClassId::new(format!("tax_gst_{}", rate.basis_points()));
+    let class = match classes.iter().find(|c| c.id == id) {
+        Some(retired) => TaxClass {
+            is_active: true,
+            ..retired.clone()
+        },
+        None => TaxClass::new(
+            id.clone(),
+            format!("GST {}", rate.label()),
+            TaxKind::Gst,
+            rate,
+        ),
+    };
+    repos.tax_classes().save(OUTLET, &class, at)?;
+    Ok(id)
+}
+
+/// A percentage typed by a person, as a rate.
+fn parse_rate(percent: &str) -> UiResult<TaxRate> {
+    let bp = mb_auth::RoleShape::parse_percent(percent)
+        .map_err(|e| UiError::new("tax.rate", e.to_string()))?
+        .ok_or_else(|| UiError::new("tax.rate", "Type the GST rate — 5, or 18."))?;
+    TaxRate::from_basis_points(bp)
+        .ok_or_else(|| UiError::new("tax.rate", "A tax rate is between 0% and 100%."))
+}
+
+/// The shop's rate. Every item on the old shop rate moves with it.
+pub fn set_shop_rate_on(app: &App, percent: String) -> UiResult<TaxPageView> {
+    let who = guard::require(app, Permission::SettingsTax)?;
+    let at = now();
+    let day = today(at);
+    let rate = parse_rate(&percent)?;
+    let (page, moved) = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let before = repos.tax_classes().shop_slab(OUTLET)?;
+                let slab = gst_slab_for(&repos, rate, at)?;
+                let moved = repos.tax_classes().set_shop_slab(OUTLET, &slab, at)?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::SETTING_CHANGED,
+                        "shop_tax_rate",
+                    )
+                    .changed(
+                        serde_json::json!({ "slab": before.as_str() }),
+                        serde_json::json!({ "slab": slab.as_str(), "items_moved": moved }),
+                    ),
+                )?;
+                Ok((page_in(&repos)?, moved))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    app.reload_shop_config();
+    log_info!(
+        "{} set the shop's GST rate to {} ({moved} item(s) followed)",
+        who.name,
+        rate.label()
+    );
+    Ok(page)
+}
+
 /// Add or change a slab. Items on it need nothing done — they read it.
+#[cfg(test)]
 pub fn save_slab_on(
     app: &App,
     id: String,
     name: String,
     rate: String,
-    kind: mb_core::TaxKind,
+    kind: TaxKind,
     basis: String,
 ) -> UiResult<Vec<TaxSlabView>> {
     let who = guard::require(app, Permission::SettingsTax)?;
@@ -247,7 +411,10 @@ pub fn save_slab_on(
     let day = today(at);
     let name = name.trim().to_owned();
     if name.is_empty() {
-        return Err(UiError::new("tax.name", "A slab needs a name — GST 5%, Liquor."));
+        return Err(UiError::new(
+            "tax.name",
+            "A slab needs a name — GST 5%, Liquor.",
+        ));
     }
     let bp = mb_auth::RoleShape::parse_percent(&rate)
         .map_err(|e| UiError::new("tax.rate", e.to_string()))?
@@ -257,7 +424,10 @@ pub fn save_slab_on(
     let basis = basis_from_word(&basis)?;
     let class_id = TaxClassId::new(id.trim().to_owned());
     if class_id.as_str().is_empty() {
-        return Err(UiError::new("tax.id", "This slab has no id. Reload and try again."));
+        return Err(UiError::new(
+            "tax.id",
+            "This slab has no id. Reload and try again.",
+        ));
     }
     let mut class = TaxClass::new(class_id.clone(), name.clone(), kind, rate);
     class.basis = basis;
@@ -299,44 +469,8 @@ pub fn save_slab_on(
     Ok(slabs)
 }
 
-/// Take a slab away. Refused with the count while items or a charge still use it.
-pub fn remove_slab_on(app: &App, id: String) -> UiResult<Vec<TaxSlabView>> {
-    let who = guard::require(app, Permission::SettingsTax)?;
-    let at = now();
-    let day = today(at);
-    let class_id = TaxClassId::new(id);
-    let slabs = app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let before = repos
-                    .tax_classes()
-                    .find(OUTLET, &class_id)?
-                    .ok_or_else(|| mb_db::DbError::invariant("that tax slab is already gone"))?;
-                repos.tax_classes().remove(OUTLET, &class_id, at)?;
-                repos.audit().append(
-                    OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(who.staff_id.clone()),
-                        action::SETTING_CHANGED,
-                        "tax_slab",
-                    )
-                    .about(class_id.as_str().to_owned())
-                    .changed(slab_json(&before), serde_json::Value::Null),
-                )?;
-                slabs_in(&repos)
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-    app.reload_shop_config();
-    log_info!("{} removed the tax slab {}", who.name, class_id.as_str());
-    Ok(slabs)
-}
-
-/// Put the ticked items on a slab and/or give them a pricing say. Either half may be left
-/// alone by sending nothing for it.
+/// Put the ticked items on a slab and/or give them a pricing say. An empty slab puts them back
+/// on their category's or the shop's rate. Either half may be left alone by sending nothing.
 pub fn set_items_on(
     app: &App,
     item_ids: Vec<String>,
@@ -349,25 +483,62 @@ pub fn set_items_on(
     if item_ids.is_empty() {
         return Err(UiError::new("tax.items", "Tick at least one item first."));
     }
-    let slab = slab_id
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .map(TaxClassId::new);
+    // `None` = leave the slab; `Some(None)` = follow the category or the shop; `Some(id)`.
+    let slab: Option<Option<TaxClassId>> = slab_id.map(|s| {
+        let s = s.trim();
+        if s.is_empty() || s == "follow" {
+            None
+        } else {
+            Some(TaxClassId::new(s.to_owned()))
+        }
+    });
     let basis = match basis.as_deref() {
         None => None,
         Some(word) => Some(basis_from_word(word)?),
     };
     if slab.is_none() && basis.is_none() {
-        return Err(UiError::new("tax.items", "Choose a slab or a price basis to apply."));
+        return Err(UiError::new(
+            "tax.items",
+            "Choose a rate or a price rule to apply.",
+        ));
     }
     let items: Vec<ItemId> = item_ids.iter().map(|id| ItemId::new(id.clone())).collect();
     let page = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                let changed = repos
-                    .tax_classes()
-                    .assign(OUTLET, &items, slab.as_ref(), basis, at)?;
+                let mut changed = 0;
+                match &slab {
+                    Some(Some(class)) => {
+                        changed += repos
+                            .tax_classes()
+                            .assign(OUTLET, &items, Some(class), basis, at)?;
+                    }
+                    Some(None) => {
+                        // Each item goes back to its own category's rung.
+                        let menu = repos.menu().list_items(OUTLET, false)?;
+                        for item in &items {
+                            let category = menu
+                                .iter()
+                                .find(|i| &i.id == item)
+                                .and_then(|i| i.category_id.clone());
+                            let follows =
+                                repos.tax_classes().rate_for(OUTLET, category.as_ref())?;
+                            changed += repos.tax_classes().assign(
+                                OUTLET,
+                                std::slice::from_ref(item),
+                                Some(&follows),
+                                basis,
+                                at,
+                            )?;
+                        }
+                    }
+                    None => {
+                        changed += repos
+                            .tax_classes()
+                            .assign(OUTLET, &items, None, basis, at)?;
+                    }
+                }
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -380,7 +551,7 @@ pub fn set_items_on(
                     .with_after(serde_json::json!({
                         "items": item_ids,
                         "changed": changed,
-                        "slab": slab.as_ref().map(|s| s.as_str()),
+                        "slab": slab.as_ref().map(|s| s.as_ref().map_or("follow", TaxClassId::as_str)),
                         "price_basis": basis.map(basis_word),
                     })),
                 )?;
@@ -393,7 +564,8 @@ pub fn set_items_on(
     Ok(page)
 }
 
-/// The slab a new item in this category starts on. Nothing already in it moves.
+/// The category's own rate. Everything in it on the old rate follows; an empty slab puts the
+/// category back on the shop's rate.
 pub fn set_category_on(
     app: &App,
     category_id: String,
@@ -401,42 +573,45 @@ pub fn set_category_on(
 ) -> UiResult<TaxPageView> {
     let who = guard::require(app, Permission::SettingsTax)?;
     let at = now();
-    let category = CategoryId::new(category_id);
+    let day = today(at);
+    let category = CategoryId::new(category_id.clone());
     let slab = slab_id
         .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty() && s != "follow")
         .map(TaxClassId::new);
     let page = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                if let Some(slab) = &slab {
-                    let live = repos
+                let moved =
+                    repos
                         .tax_classes()
-                        .find(OUTLET, slab)?
-                        .is_some_and(|c| c.is_active);
-                    if !live {
-                        return Err(mb_db::DbError::invariant(
-                            "that tax slab is not one this shop has",
-                        ));
-                    }
-                }
-                let mut found = repos
-                    .menu()
-                    .list_categories(OUTLET)?
-                    .into_iter()
-                    .find(|c| c.id == category)
-                    .ok_or_else(|| mb_db::DbError::invariant("that category is gone"))?;
-                found.default_tax_class_id = slab.clone();
-                repos.menu().save_category(OUTLET, &found, at)?;
+                        .set_category_slab(OUTLET, &category, slab.as_ref(), at)?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::SETTING_CHANGED,
+                        "category_tax_rate",
+                    )
+                    .about(category_id.clone())
+                    .with_after(serde_json::json!({
+                        "slab": slab.as_ref().map(TaxClassId::as_str),
+                        "items_moved": moved,
+                    })),
+                )?;
                 page_in(&repos)
             })
             .map_err(|e| words::from_db(&e))
     })?;
-    log_info!("{} set a category's starting tax slab", who.name);
+    app.reload_shop_config();
+    log_info!("{} set a category's tax rate", who.name);
     Ok(page)
 }
 
+#[cfg(test)]
 fn slab_json(class: &TaxClass) -> serde_json::Value {
     serde_json::json!({
         "name": class.name,
@@ -447,38 +622,14 @@ fn slab_json(class: &TaxClass) -> serde_json::Value {
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../ui/src/ipc/generated/")]
-#[serde(rename_all = "camelCase")]
-pub struct TaxSlabEdit {
-    pub id: String,
-    pub name: String,
-    /// Per cent, as typed: "5", "2.5".
-    pub rate: String,
-    #[ts(type = "\"gst\" | \"exempt\" | \"outside_gst\" | \"untaxed\"")]
-    pub kind: mb_core::TaxKind,
-    /// `shop`, `inclusive` or `exclusive`.
-    pub basis: String,
-}
-
-#[tauri::command]
-pub fn tax_slabs(app: tauri::State<'_, App>) -> UiResult<Vec<TaxSlabView>> {
-    slabs_on(&app)
-}
-
 #[tauri::command]
 pub fn tax_page(app: tauri::State<'_, App>) -> UiResult<TaxPageView> {
     page_on(&app)
 }
 
 #[tauri::command]
-pub fn save_tax_slab(app: tauri::State<'_, App>, edit: TaxSlabEdit) -> UiResult<Vec<TaxSlabView>> {
-    save_slab_on(&app, edit.id, edit.name, edit.rate, edit.kind, edit.basis)
-}
-
-#[tauri::command]
-pub fn remove_tax_slab(app: tauri::State<'_, App>, id: String) -> UiResult<Vec<TaxSlabView>> {
-    remove_slab_on(&app, id)
+pub fn set_shop_tax_rate(app: tauri::State<'_, App>, percent: String) -> UiResult<TaxPageView> {
+    set_shop_rate_on(&app, percent)
 }
 
 #[tauri::command]

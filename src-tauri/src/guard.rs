@@ -128,6 +128,8 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("menu_rows", Access::Needs(Permission::MenuManage)),
     ("save_menu_item", Access::Needs(Permission::MenuManage)),
     ("set_item_available", Access::Needs(Permission::MenuManage)),
+    ("delete_menu_item", Access::Needs(Permission::MenuManage)),
+    ("delete_menu_category", Access::Needs(Permission::MenuManage)),
     ("save_menu_category", Access::Needs(Permission::MenuManage)),
     ("change_menu_prices", Access::Needs(Permission::MenuManage)),
     ("plan_menu_import", Access::Needs(Permission::MenuManage)),
@@ -136,10 +138,8 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // Settings › Tax. Reading the slabs is a menu job (the item form picks one); defining a
     // slab or moving items between slabs is what the shop owes the government, and getting it
     // wrong is a notice rather than a bad price.
-    ("tax_slabs", Access::Needs(Permission::MenuManage)),
+    ("set_shop_tax_rate", Access::Needs(Permission::SettingsTax)),
     ("tax_page", Access::Needs(Permission::MenuManage)),
-    ("save_tax_slab", Access::Needs(Permission::SettingsTax)),
-    ("remove_tax_slab", Access::Needs(Permission::SettingsTax)),
     ("set_items_tax", Access::Needs(Permission::SettingsTax)),
     ("set_category_tax", Access::Needs(Permission::SettingsTax)),
     // What an item is made of.
@@ -328,7 +328,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         "route_category_to",
         Access::Needs(Permission::SettingsPrinter),
     ),
-    ("route_category", Access::Needs(Permission::SettingsPrinter)),
     ("set_paper_size", Access::Needs(Permission::SettingsPrinter)),
     (
         "print_sample_bill",

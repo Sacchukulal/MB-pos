@@ -16,6 +16,7 @@ import { Account } from '../account/Account';
 import { FirstRun } from '../setup/FirstRun';
 import { AlertsPanel, loudest, type Alert } from './Alerts';
 import { DayGate } from './DayGate';
+import { More } from './More';
 import { Billing } from '../billing/Billing';
 import { SettleDesk } from '../billing/SettleDesk';
 import { Health } from '../health/Health';
@@ -241,6 +242,8 @@ export function Shell() {
   const [screen, setScreenOnly] = useState<string>('billing');
   /** The part of a screen that was asked for: `settings/printers` → `printers`. */
   const [sub, setSub] = useState<string | null>(null);
+  /** The More screen last opened, which is where the More button goes back to. */
+  const [lastMore, setLastMore] = useState<string | null>(null);
   const setScreen = useCallback((id: string) => {
     const slash = id.indexOf('/');
     setSub(slash < 0 ? null : id.slice(slash + 1));
@@ -488,6 +491,11 @@ export function Shell() {
     return true;
   });
   const active = allowed.find((s) => s.id === screen) ?? allowed[0];
+  const { inMore } = splitScreens(allowed, screen);
+  const behindMore = active !== undefined && inMore.some((s) => s.id === active.id);
+  useEffect(() => {
+    if (behindMore && active) setLastMore(active.id);
+  }, [behindMore, active]);
 
   // Locked = there is nobody signed in.
   const locked = inApp() && lock !== null && lock.signedInAs === null;
@@ -592,6 +600,7 @@ export function Shell() {
         screens={locked ? [] : allowed}
         current={screen}
         onGo={setScreen}
+        lastMore={lastMore}
         themeIcon={theme.icon}
         themeName={theme.name}
         onToggleTheme={toggle}
@@ -613,7 +622,13 @@ export function Shell() {
       <div className="mb-body">
         <main className="mb-main">
           {/* Nothing is rendered behind the lock. */}
-          {locked ? null : active?.render(setScreen, active.id === screen ? sub : null)}
+          {locked || !active ? null : behindMore ? (
+            <More screens={inMore} current={active.id} onGo={setScreen}>
+              {active.render(setScreen, active.id === screen ? sub : null)}
+            </More>
+          ) : (
+            active.render(setScreen, active.id === screen ? sub : null)
+          )}
         </main>
       </div>
 
@@ -729,6 +744,7 @@ function TopBar({
   screens,
   current,
   onGo,
+  lastMore,
   themeIcon,
   themeName,
   onToggleTheme,
@@ -748,6 +764,8 @@ function TopBar({
   screens: readonly Screen[];
   current: string;
   onGo: (screen: string) => void;
+  /** The More screen last opened, so the More button goes back to it. */
+  lastMore: string | null;
   /** How many phones are live, and how many are asking to join. */
   phones: PhonesView;
   onOpenPhones: () => void;
@@ -767,26 +785,12 @@ function TopBar({
   onOpenAlerts: () => void;
 }) {
   const window = inApp() ? getCurrentWindow() : null;
-  const [moreOpen, setMoreOpen] = useState(false);
 
   const face: IconName = themeIcon === 'moon' ? 'moon' : 'sun';
 
   const { inBar, inMore, elsewhere } = splitScreens(screens, current);
 
-  // Close More on Escape and on going somewhere.
-  useEffect(() => {
-    if (!moreOpen) return undefined;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMoreOpen(false);
-    };
-    window_addEscape(onKey);
-    return () => window_removeEscape(onKey);
-  }, [moreOpen]);
-
-  const go = (id: string) => {
-    setMoreOpen(false);
-    onGo(id);
-  };
+  const go = (id: string) => onGo(id);
 
   return (
     <header className="mb-topbar" data-tauri-drag-region>
@@ -813,52 +817,16 @@ function TopBar({
         ))}
 
         {inMore.length > 0 ? (
-          <div className="mb-nav__more">
-            <button
-              type="button"
-              className="mb-nav__item mb-nav__item--more"
-              aria-expanded={moreOpen}
-              aria-haspopup="menu"
-              aria-current={elsewhere ? 'page' : undefined}
-              onClick={() => setMoreOpen((was) => !was)}
-            >
-              {/* Always "More": the current screen is named by its own page header, so the bar never reflows. */}
-              <Icon name="more" size="md" />
-              <span className="mb-nav__label">More</span>
-              <Icon name={moreOpen ? 'chevron-up' : 'chevron-down'} size="sm" />
-            </button>
-
-            {moreOpen ? (
-              <>
-                {/*
-                  Clicking anywhere else closes it, including on the screen behind — without
-                  this the only way out is the button, and that is the popover people learn to
-                  dread.
-                */}
-                <button
-                  type="button"
-                  className="mb-sheetscrim mb-nav__scrim"
-                  aria-label="Close"
-                  onClick={() => setMoreOpen(false)}
-                />
-                <div className="mb-sheet mb-nav__sheet" role="menu">
-                  {inMore.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="mb-sheet__item mb-nav__sheetitem"
-                      role="menuitem"
-                      aria-current={item.id === current ? 'page' : undefined}
-                      onClick={() => go(item.id)}
-                    >
-                      <Icon name={item.icon} size="md" />
-                      <span>{item.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            className="mb-nav__item mb-nav__item--more"
+            aria-current={elsewhere ? 'page' : undefined}
+            onClick={() => go(elsewhere?.id ?? lastMore ?? inMore[0]?.id ?? current)}
+          >
+            {/* Always "More": the page names itself, so the bar never reflows. */}
+            <Icon name="more" size="md" />
+            <span className="mb-nav__label">More</span>
+          </button>
         ) : null}
       </nav>
 
@@ -988,15 +956,6 @@ function TopBar({
       </div>
     </header>
   );
-}
-
-/** Escape, on the document. */
-function window_addEscape(handler: (event: KeyboardEvent) => void) {
-  document.addEventListener('keydown', handler);
-}
-
-function window_removeEscape(handler: (event: KeyboardEvent) => void) {
-  document.removeEventListener('keydown', handler);
 }
 
 export function PrintQueuePanel({

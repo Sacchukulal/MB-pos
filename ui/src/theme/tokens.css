@@ -289,7 +289,7 @@
   --dot-size: 0.625rem;
   --permission-min: 15rem;
   /* The menu screen. */
-  --menu-categories-width: 13rem;
+  --menu-categories-width: 17rem;
   --class-min: 18rem;
   --import-box-height: 12rem;
   /* How narrow a table may get before it scrolls sideways instead of wrapping. */

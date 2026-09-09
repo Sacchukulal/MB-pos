@@ -1,4 +1,4 @@
-/** Settings › Tax — the slabs, and ticking items onto them. */
+/** Settings › Tax — GST on or off, the shop rate, and the items on their own. */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,26 +16,36 @@ const { ToastProvider } = await import('../src/kit');
 import type { TaxPageView } from '../src/ipc/generated/TaxPageView';
 import type { TaxItemView } from '../src/ipc/generated/TaxItemView';
 
-function item(id: string, name: string, slab: string): TaxItemView {
+function item(id: string, name: string, slab: string, from: string): TaxItemView {
   return {
     id,
     name,
     price: { paise: 2_000n, text: '20.00' },
     slabId: slab,
-    slabName: slab === 'tax_food_5' ? 'GST 5%' : 'GST 18%',
     basis: 'shop',
     words: slab === 'tax_food_5' ? '5% · added on top' : '18% · added on top',
+    from,
     isAvailable: true,
   };
 }
 
 const page: TaxPageView = {
+  registration: 'regular',
+  gstin: '29ABCDE1234F1Z5',
+  stateCode: '29',
+  states: [
+    { value: '', label: 'Not chosen yet' },
+    { value: '29', label: 'Karnataka' },
+  ],
   shopBasis: 'exclusive',
+  shopRate: '5',
+  shopSlabId: 'tax_food_5',
+  chargesGst: true,
   registrationNote: null,
   slabs: [
     {
       id: 'tax_food_5',
-      name: 'GST 5%',
+      name: '5%',
       rate: '5%',
       rateBp: 500,
       kind: 'gst',
@@ -46,7 +56,7 @@ const page: TaxPageView = {
     },
     {
       id: 'tax_packaged_18',
-      name: 'GST 18%',
+      name: '18%',
       rate: '18%',
       rateBp: 1800,
       kind: 'gst',
@@ -58,151 +68,173 @@ const page: TaxPageView = {
   ],
   categories: [
     {
-      id: 'cat_chats',
-      name: 'Chats',
-      defaultSlabId: 'tax_food_5',
+      id: 'cat_tiffin',
+      name: 'Tiffin',
+      ownSlabId: null,
+      rateWords: 'Shop rate',
       items: [
-        item('itm_bhel', 'Bhel puri', 'tax_food_5'),
-        item('itm_pani', 'Pani puri', 'tax_food_5'),
-        item('itm_biscuit', 'Biscuit packet', 'tax_food_5'),
+        item('itm_idli', 'Idli', 'tax_food_5', 'shop'),
+        item('itm_dosa', 'Dosa', 'tax_food_5', 'shop'),
       ],
+    },
+    {
+      id: 'cat_drinks',
+      name: 'Drinks',
+      ownSlabId: 'tax_packaged_18',
+      rateWords: '18%',
+      items: [item('itm_water', 'Water', 'tax_packaged_18', 'category')],
     },
   ],
 };
 
-beforeEach(() => {
-  call.mockReset();
+function open(view: TaxPageView = page) {
   call.mockImplementation((name: string) => {
     switch (name) {
       case 'tax_page':
+      case 'set_shop_tax_rate':
       case 'set_items_tax':
       case 'set_category_tax':
-        return Promise.resolve(page);
-      case 'save_tax_slab':
-      case 'remove_tax_slab':
-        return Promise.resolve(page.slabs);
+        return Promise.resolve(view);
+      case 'save_settings':
+        return Promise.resolve({ changed: [], settings: { groups: [], hasShop: true, trouble: null } });
       default:
         return Promise.resolve([]);
     }
   });
-});
-
-afterEach(cleanup);
-
-async function open() {
-  render(
+  return render(
     <ToastProvider>
       <Tax />
     </ToastProvider>,
   );
-  await screen.findByText('Bhel puri');
 }
 
-describe('the tick list', () => {
-  it('ticks a whole category, lets one be unticked, and moves the rest to a slab', async () => {
-    await open();
+beforeEach(() => {
+  call.mockReset();
+});
+afterEach(cleanup);
 
-    // The biscuit is the counter-example: a 5% chats stall selling an 18% packet.
-    fireEvent.click(screen.getByLabelText('Tick every item in Chats'));
-    fireEvent.click(screen.getByLabelText('Tick Bhel puri'));
-    fireEvent.click(screen.getByLabelText('Tick Pani puri'));
-    expect(screen.getByText('1 item ticked')).toBeTruthy();
+describe('the GST card', () => {
+  it('saves the shop rate as a typed percentage, before the rest', async () => {
+    open();
+    const box = (await screen.findByLabelText('Shop GST rate %')) as HTMLInputElement;
+    expect(box.value).toBe('5');
+    fireEvent.change(box, { target: { value: '18' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    fireEvent.change(screen.getByLabelText('Move the ticked items to'), {
+    await waitFor(() => expect(call).toHaveBeenCalledWith('set_shop_tax_rate', { percent: '18' }));
+    // Nothing else changed, so the settings were not written.
+    expect(call.mock.calls.some(([name]) => name === 'save_settings')).toBe(false);
+  });
+
+  it('writes the registration, number, state and price rule as settings', async () => {
+    open();
+    await screen.findByLabelText('Shop GST rate %');
+    fireEvent.click(screen.getByRole('button', { name: 'Inside the price' }));
+    fireEvent.change(screen.getByLabelText('GST number'), { target: { value: '29XYZ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith('save_settings', {
+        edits: [
+          { key: 'store.gstin', value: '29XYZ' },
+          { key: 'store.price_basis', value: 'inclusive' },
+        ],
+      }),
+    );
+    expect(call.mock.calls.some(([name]) => name === 'set_shop_tax_rate')).toBe(false);
+  });
+
+  it('hides the number, the price rule and the rate when GST is off', async () => {
+    open();
+    await screen.findByLabelText('Shop GST rate %');
+    fireEvent.click(screen.getByRole('button', { name: 'No GST' }));
+    expect(screen.queryByLabelText('GST number')).toBeNull();
+    expect(screen.queryByLabelText('Shop GST rate %')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Inside the price' })).toBeNull();
+  });
+
+  it('keeps the number for a composition shop, which has one but charges nothing', async () => {
+    open();
+    await screen.findByLabelText('Shop GST rate %');
+    fireEvent.click(screen.getByRole('button', { name: 'Composition scheme' }));
+    expect(screen.getByLabelText('GST number')).toBeTruthy();
+    expect(screen.queryByLabelText('Shop GST rate %')).toBeNull();
+  });
+});
+
+describe('item GST', () => {
+  it('says which rung each item is on', async () => {
+    open();
+    await screen.findByText('Idli');
+    const water = screen.getByText('Water').closest('tr')!;
+    expect(within(water).getByText('Category')).toBeTruthy();
+    const idli = screen.getByText('Idli').closest('tr')!;
+    expect(within(idli).getByText('Shop')).toBeTruthy();
+  });
+
+  it('ticks items and puts them on a rate', async () => {
+    open();
+    await screen.findByText('Idli');
+    fireEvent.click(screen.getByLabelText('Tick Idli'));
+    fireEvent.click(screen.getByLabelText('Tick Dosa'));
+    fireEvent.change(screen.getByLabelText('Rate for the ticked items'), {
       target: { value: 'tax_packaged_18' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() =>
       expect(call).toHaveBeenCalledWith('set_items_tax', {
-        itemIds: ['itm_biscuit'],
+        itemIds: ['itm_idli', 'itm_dosa'],
         slabId: 'tax_packaged_18',
         basis: null,
       }),
     );
   });
 
-  it('applies a price rule on its own, leaving the slab alone', async () => {
-    await open();
-    fireEvent.click(screen.getByLabelText('Tick Pani puri'));
-    fireEvent.change(screen.getByLabelText('Price rule for the ticked items'), {
-      target: { value: 'inclusive' },
+  it('sends a ticked item back up the ladder with "follow"', async () => {
+    open();
+    await screen.findByText('Water');
+    fireEvent.click(screen.getByLabelText('Tick Water'));
+    fireEvent.change(screen.getByLabelText('Rate for the ticked items'), {
+      target: { value: 'follow' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
     await waitFor(() =>
       expect(call).toHaveBeenCalledWith('set_items_tax', {
-        itemIds: ['itm_pani'],
-        slabId: null,
-        basis: 'inclusive',
+        itemIds: ['itm_water'],
+        slabId: 'follow',
+        basis: null,
       }),
     );
   });
 
   it('will not apply nothing', async () => {
-    await open();
-    const apply = screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement;
-    expect(apply.disabled, 'nothing ticked').toBe(true);
-    fireEvent.click(screen.getByLabelText('Tick Pani puri'));
-    expect(apply.disabled, 'ticked, but no slab or rule chosen').toBe(true);
+    open();
+    await screen.findByText('Idli');
+    fireEvent.click(screen.getByLabelText('Tick Idli'));
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('sets what a new item in the category starts on', async () => {
-    await open();
-    fireEvent.change(screen.getByLabelText('New items in Chats start on'), {
-      target: { value: 'tax_packaged_18' },
-    });
+  it('sets a category rate once a category is chosen', async () => {
+    open();
+    await screen.findByText('Idli');
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'cat_drinks' } });
+    const rate = (await screen.findByLabelText('Rate for Drinks')) as HTMLSelectElement;
+    expect(rate.value).toBe('tax_packaged_18');
+    fireEvent.change(rate, { target: { value: 'follow' } });
+
     await waitFor(() =>
       expect(call).toHaveBeenCalledWith('set_category_tax', {
-        categoryId: 'cat_chats',
-        slabId: 'tax_packaged_18',
+        categoryId: 'cat_drinks',
+        slabId: null,
       }),
     );
   });
-});
 
-describe('the slabs', () => {
-  it('adds a custom slab with the machine values, never the words', async () => {
-    await open();
-    fireEvent.click(screen.getByRole('button', { name: 'Add a slab' }));
-    const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Name'), {
-      target: { value: 'Sweets 12%' },
-    });
-    fireEvent.change(within(dialog).getByLabelText('Rate %'), { target: { value: '12' } });
-    fireEvent.change(within(dialog).getByLabelText('Price'), {
-      target: { value: 'inclusive' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add it' }));
-
-    await waitFor(() =>
-      expect(call).toHaveBeenCalledWith(
-        'save_tax_slab',
-        expect.objectContaining({
-          edit: expect.objectContaining({
-            name: 'Sweets 12%',
-            rate: '12',
-            kind: 'gst',
-            basis: 'inclusive',
-          }),
-        }),
-      ),
-    );
-  });
-
-  it('shuts the rate box on a kind that cannot carry one', async () => {
-    await open();
-    fireEvent.click(screen.getByRole('button', { name: 'Add a slab' }));
-    const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Kind'), { target: { value: 'exempt' } });
-    const box = within(dialog).getByLabelText('Rate %') as HTMLInputElement;
-    expect(box.disabled).toBe(true);
-    expect(box.value).toBe('0');
-  });
-
-  it('will not remove a slab that items still use', async () => {
-    await open();
-    const removes = screen.getAllByRole('button', { name: 'Remove' }) as HTMLButtonElement[];
-    expect(removes[0]!.disabled, 'GST 5% has three items on it').toBe(true);
-    expect(removes[1]!.disabled, 'GST 18% has none').toBe(false);
+  it('is not drawn at all for a shop with no GST', async () => {
+    open({ ...page, registration: 'unregistered', chargesGst: false });
+    await screen.findByRole('button', { name: 'No GST' });
+    expect(screen.queryByText('Item GST')).toBeNull();
   });
 });

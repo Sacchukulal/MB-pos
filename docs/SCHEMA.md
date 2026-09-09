@@ -145,6 +145,7 @@ One row per outlet: everything a bill header and a GST return need. Read by P06
 | upi_reference | TEXT | yes | Audit Part 3's third UPI field. Rides in the QR payload as `tn`. |
 | registration | TEXT | no | **P33.** `unregistered` / `composition` / `regular`. Only a regular taxpayer may put GST on a bill; the boolean it replaced could not tell a shop below the threshold from a regular one. The shop-wide place of supply went with it — restaurant service is always intra-state (IGST Act s.12(4)), so that setting could only ever produce an illegal bill. |
 | price_basis | TEXT | no | **0008 — the tax book.** `exclusive` / `inclusive`: whether a menu price already contains its tax, unless a slab or an item says otherwise. The bottom layer of the three (item → slab → shop) that `mb_core::TaxBook::spec_for` reads. |
+| default_tax_class_id | TEXT | yes | **0014 — the shop rate.** The slab every item is taxed at unless its category or the item itself says otherwise. NULL means the seeded 5% slab while the shop still has it. Read into `TaxBook::shop_class`; changing it re-points every item that followed it. |
 | updated_at | INTEGER | no | |
 
 ### terminals
