@@ -37,8 +37,16 @@ pub(crate) fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
-                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
+                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
+                        ))
+                        .expect("a seeded slab")
+                        .0,
+                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
+                        ))
+                        .expect("a seeded slab")
+                        .1,
                         hsn: None,
                         cost_price: None,
                         short_code: None,
@@ -75,11 +83,7 @@ pub(crate) fn licence_in(
     ));
     let mut licensing = Licensing::new(dir, machine(), Arc::clone(&stub) as Arc<dyn Cloud>, "test");
     licensing
-        .activate(
-            "MB-STUB-0001",
-            at,
-            std::time::Duration::from_secs(2),
-        )
+        .activate("MB-STUB-0001", at, std::time::Duration::from_secs(2))
         .expect("the stub activates");
     if status != Status::Active {
         stub.set_status(status);
@@ -277,10 +281,10 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
             refusal.code, "licence.not_operating",
             "{command} refused for the wrong reason: {refusal:?}"
         );
-        // And the sentence says what still works.
+        // And the sentence is the banner's own: it says what to do, not just no.
         assert!(
-            refusal.message.contains("bill"),
-            "{command}'s refusal does not say billing is unaffected: {}",
+            refusal.message.contains("call us") || refusal.message.contains("magicbill.in"),
+            "{command}'s refusal does not say what to do next: {}",
             refusal.message
         );
     }
@@ -382,11 +386,7 @@ fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
     let stub = Arc::new(Stub::active(&machine(), crate::flows::today(at), at));
     let mut licensing = Licensing::new(dir, machine(), Arc::clone(&stub) as Arc<dyn Cloud>, "test");
     licensing
-        .activate(
-            "MB-STUB-0001",
-            at,
-            std::time::Duration::from_secs(2),
-        )
+        .activate("MB-STUB-0001", at, std::time::Duration::from_secs(2))
         .expect("activates");
     stub.behave(Behaviour::Unreachable);
     app.use_licensing(licensing);
@@ -428,6 +428,7 @@ fn an_offline_deactivate_tells_the_owner_the_licence_is_still_held() {
 #[test]
 fn the_account_screen_draws_on_a_first_run() {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
+    app.use_licensing(crate::licensing::for_tests_blank());
     let view = crate::licensing::view_on(&app);
     assert_eq!(view.standing, "never-activated");
     assert_eq!(view.chip, "Not activated");
@@ -493,4 +494,82 @@ fn l1_the_gate_is_cheap_enough_to_put_anywhere() {
         "the gate costs {each_ns} ns, past its 200 µs ceiling"
     );
     println!("L1: {each_ns} ns per gate check");
+}
+
+// THE DOOR.
+
+/// A shop whose plan is not running cannot sign in; the lock screen carries the door; a
+/// plan that is running again opens it. A plan that stops mid-shift ends the session.
+#[test]
+fn the_door_is_closed_without_a_running_plan_and_opens_with_one() {
+    let scratch = Scratch::new("door");
+    let app = a_trading_shop(&scratch, "door");
+    crate::signin_tests::hire(&app, "staff_boss", "Meena", mb_auth::RolePreset::Owner);
+    crate::ipc::set_staff_pin_on(&app, "staff_boss".to_owned(), Some("2468".to_owned()))
+        .expect("pin");
+
+    // Running: the door is open and the PIN gets in.
+    app.use_licensing(licence_in(&scratch, "door-open", Status::Active, 30));
+    let lock = crate::ipc::lock_state_on(&app).expect("the lock screen");
+    assert!(lock.door.is_none());
+    crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");
+    assert!(app.sessions().current().is_some());
+
+    // The plan runs out: the session ends and the door closes.
+    app.use_licensing(licence_in(&scratch, "door-expired", Status::Active, -100));
+    crate::licensing::after_licence_change(&app);
+    assert!(
+        app.sessions().current().is_none(),
+        "the session outlived the plan"
+    );
+    let lock = crate::ipc::lock_state_on(&app).expect("the lock screen");
+    let door = lock.door.expect("the door is drawn");
+    assert_eq!(door.standing, "expired");
+    assert!(door.may_renew);
+    assert!(door.says.contains("magicbill.in"), "{}", door.says);
+    let refused = crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned())
+        .expect_err("signed in through a closed door");
+    assert_eq!(refused.code, "licence.not_operating");
+    assert_eq!(refused.message, door.says);
+
+    // Cancelled and still inside the paid period: open, and it says so.
+    app.use_licensing(licence_in(&scratch, "door-ending", Status::Cancelled, 5));
+    assert_eq!(
+        app.entitlement().standing,
+        Standing::Ending { days_left: 5 }
+    );
+    assert!(
+        crate::ipc::lock_state_on(&app)
+            .expect("the lock screen")
+            .door
+            .is_none()
+    );
+    crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");
+
+    // Cancelled and past it: closed, with no grace.
+    app.use_licensing(licence_in(
+        &scratch,
+        "door-cancelled",
+        Status::Cancelled,
+        -1,
+    ));
+    crate::licensing::after_licence_change(&app);
+    let door = crate::ipc::lock_state_on(&app)
+        .expect("the lock screen")
+        .door
+        .expect("closed");
+    assert_eq!(door.standing, "cancelled");
+
+    // Suspended: closed, and no plan to buy — a call.
+    app.use_licensing(licence_in(
+        &scratch,
+        "door-suspended",
+        Status::Suspended,
+        365,
+    ));
+    let door = crate::ipc::lock_state_on(&app)
+        .expect("the lock screen")
+        .door
+        .expect("closed");
+    assert!(!door.may_renew);
 }

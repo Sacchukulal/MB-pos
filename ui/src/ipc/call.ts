@@ -198,6 +198,10 @@ export interface Commands {
   lock_state: { args: void; returns: LockState };
   login: { args: { staffId: string; pin: string }; returns: LockState };
   lock_now: { args: void; returns: LockState };
+  /** The door, while the plan is not running: check again, a key, an emergency code. */
+  knock: { args: void; returns: LockState };
+  knock_with_key: { args: { key: string }; returns: LockState };
+  knock_with_code: { args: { code: string }; returns: LockState };
   /** Returns the NEW recovery code, to be shown once and printed. */
   recover_with_code: {
     args: { code: string; staffId: string; newPin: string };

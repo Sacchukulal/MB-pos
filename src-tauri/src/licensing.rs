@@ -11,7 +11,7 @@ use ts_rs::TS;
 
 use crate::flows::{now, today};
 use crate::state::{App, Pushed};
-use crate::words::{self, UiResult};
+use crate::words::{self, UiError, UiResult};
 use crate::{guard, log_info, log_warn};
 
 /// The one outlet this counter is.
@@ -43,11 +43,32 @@ pub fn start() -> (Licensing, Arc<crate::cloud::Http>) {
 #[cfg(test)]
 #[must_use]
 pub fn for_tests() -> Licensing {
-    let dir = std::env::temp_dir().join(format!("mb-licence-blank-{}", std::process::id()));
+    let mut licensing = for_tests_blank();
+    // A test shop has a running plan unless a test says otherwise: the door is open.
+    let _ = licensing.activate("MB-STUB-0001", now(), mb_license::deadline::DEADLINE);
+    licensing
+}
+
+/// The same, with no licence on it at all: a first run.
+#[cfg(test)]
+#[must_use]
+pub fn for_tests_blank() -> Licensing {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NTH: AtomicU32 = AtomicU32::new(0);
+    // A folder of its own per app, so tests that run at once never share a licence file.
+    let dir = std::env::temp_dir().join(format!(
+        "mb-licence-test-{}-{}",
+        std::process::id(),
+        NTH.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::remove_file(mb_license::LicenceFile::path(&dir));
     let machine = MachineId::for_tests("test-machine-0001");
-    let cloud: Arc<dyn Cloud> = Arc::new(mb_license::cloud::Stub::active(&machine, today(now()), now()));
+    let cloud: Arc<dyn Cloud> = Arc::new(mb_license::cloud::Stub::active(
+        &machine,
+        today(now()),
+        now(),
+    ));
     Licensing::new(dir, machine, cloud, "test")
 }
 
@@ -141,6 +162,7 @@ pub const fn tone_for(standing: mb_license::Standing) -> &'static str {
     match standing {
         mb_license::Standing::Fine => "ok",
         mb_license::Standing::InGrace { .. }
+        | mb_license::Standing::Ending { .. }
         | mb_license::Standing::NeverActivated
         | mb_license::Standing::NeedsChecking
         | mb_license::Standing::Emergency { .. }
@@ -343,13 +365,151 @@ pub fn after_licence_change(app: &App) {
         s.next_try_at = None;
     });
     app.sender_wakeup().wake();
+    tell_the_window(app);
+    crate::updates::check_now(app);
+}
+
+/// The banner, and the door: a shop whose plan stopped running is locked out at once, so a
+/// day that runs out mid-shift ends at the lock screen and not at a quietly broken counter.
+fn tell_the_window(app: &App) {
     let at = now();
     let entitlement = app.entitlement();
     app.push(Pushed::Licence {
         says: words::licence_banner(&entitlement, today(at)).unwrap_or_default(),
         tone: tone_for(entitlement.standing).to_owned(),
     });
-    crate::updates::check_now(app);
+    if !entitlement.operating()
+        && app.has_shop()
+        && let Some(who) = app.sessions().end()
+    {
+        log_info!(
+            "{} signed out: the plan is not running ({})",
+            who.name,
+            entitlement.standing.code()
+        );
+        app.push(Pushed::Session {
+            who: None,
+            role: None,
+            stand_in: false,
+        });
+    }
+}
+
+/// The standing again from the copy on disk — a date may have passed — and the window told.
+pub fn re_decide_and_tell(app: &App) {
+    let before = app.entitlement().standing;
+    app.re_decide();
+    if app.entitlement().standing != before {
+        tell_the_window(app);
+    }
+}
+
+/// The lock screen's view of the licence when it is what keeps people out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct DoorView {
+    /// The standing's stable code.
+    pub standing: String,
+    pub chip: String,
+    pub says: String,
+    /// `warn` or `danger`.
+    pub tone: String,
+    /// The shop's name, when the licence knows it.
+    pub shop_name: String,
+    /// A plan can be bought or renewed at magicbill.in; false for a suspended or stopped licence.
+    pub may_renew: bool,
+    /// The last time the cloud answered, or "never".
+    pub checked: String,
+}
+
+/// `None` while the shop may sign in.
+#[must_use]
+pub fn door_on(app: &App) -> Option<DoorView> {
+    if !app.has_shop() {
+        return None;
+    }
+    let at = now();
+    let entitlement = app.entitlement();
+    if entitlement.operating() {
+        return None;
+    }
+    let standing = entitlement.standing;
+    Some(DoorView {
+        standing: standing.code().to_owned(),
+        chip: standing.chip().to_owned(),
+        says: words::licence_banner(&entitlement, today(at)).unwrap_or_default(),
+        tone: tone_for(standing).to_owned(),
+        shop_name: entitlement.shop_name.clone().unwrap_or_default(),
+        may_renew: !matches!(
+            standing,
+            mb_license::Standing::Suspended | mb_license::Standing::Revoked
+        ),
+        checked: if entitlement.last_checked == mb_core::Timestamp::EPOCH {
+            "never".to_owned()
+        } else {
+            words::when(entitlement.last_checked)
+        },
+    })
+}
+
+/// The refusal a closed door answers a sign-in with.
+#[must_use]
+pub fn door_closed(app: &App) -> Option<UiError> {
+    let door = door_on(app)?;
+    Some(
+        UiError::new("licence.not_operating", door.says)
+            .with_detail(format!("door · {}", door.standing)),
+    )
+}
+
+/// Check again, with nobody signed in: the cloud is asked once with the normal deadline.
+pub fn knock_on(app: &App) -> UiResult<crate::ipc::LockState> {
+    if app.with_licence(|l| l.key().is_some()) {
+        refresh_now(app, mb_license::deadline::DEADLINE);
+    }
+    re_decide_and_tell(app);
+    crate::ipc::lock_state_on(app)
+}
+
+/// A licence key at the door. The key is the credential, so no session is needed.
+pub fn knock_with_key_on(app: &App, key: String) -> UiResult<crate::ipc::LockState> {
+    let at = now();
+    let outcome = app.with_licensing(|licensing| {
+        licensing.activate(key.trim(), at, mb_license::deadline::DEADLINE)
+    });
+    match outcome {
+        Ok(()) => {
+            note(app, action::LICENCE_ACTIVATED, key.trim());
+            after_licence_change(app);
+            crate::ipc::lock_state_on(app)
+        }
+        Err(e) => {
+            note(app, action::LICENCE_REFUSED, &format!("door: {}", e.code()));
+            Err(words::from_licence(&e))
+        }
+    }
+}
+
+/// An emergency code at the door. The code is signed, so it is its own credential.
+pub fn knock_with_code_on(app: &App, code: String) -> UiResult<crate::ipc::LockState> {
+    let at = now();
+    let outcome = app.with_licensing(|licensing| licensing.use_emergency_code(code.trim(), at));
+    match outcome {
+        Ok(until) => {
+            note(app, action::LICENCE_EMERGENCY, &words::when(until));
+            after_licence_change(app);
+            crate::ipc::lock_state_on(app)
+        }
+        Err(e) => {
+            note(
+                app,
+                action::LICENCE_REFUSED,
+                &format!("door emergency: {}", e.code()),
+            );
+            Err(words::from_licence(&e))
+        }
+    }
 }
 
 pub fn account_on(app: &App) -> UiResult<LicenceView> {
@@ -507,19 +667,28 @@ pub fn start_refresher(handle: &tauri::AppHandle) {
                 };
                 // No key yet, or the last try failed: look again in an hour. Otherwise the
                 // rest of the day.
-                let wait = if last_try_failed || app.with_licence(|l| l.key().is_none()) {
+                let due_in = if last_try_failed || app.with_licence(|l| l.key().is_none()) {
                     RETRY_AFTER
                 } else {
-                    let age = now().millis().saturating_sub(app.entitlement().last_checked.millis());
+                    let age = now()
+                        .millis()
+                        .saturating_sub(app.entitlement().last_checked.millis());
                     let every = i64::try_from(CHECK_EVERY.as_millis()).unwrap_or(i64::MAX);
                     Duration::from_millis(u64::try_from(every.saturating_sub(age)).unwrap_or(0))
                 };
-                app.refresher_wakeup().wait_for(wait.max(Duration::from_secs(60)));
+                // Wake at least hourly so a plan that runs out at midnight is re-decided from
+                // the copy on disk; the cloud is asked only when the day's check is due.
+                let wait = due_in.min(RETRY_AFTER).max(Duration::from_secs(60));
+                let woken = app.refresher_wakeup().wait_for(wait);
                 let Some(app) = handle.try_state::<App>() else {
                     return;
                 };
                 if app.with_licence(|l| l.key().is_none()) {
                     last_try_failed = false;
+                    continue;
+                }
+                if !woken && due_in > wait {
+                    re_decide_and_tell(&app);
                     continue;
                 }
                 log_info!("checking the licence with the cloud");
@@ -561,4 +730,22 @@ pub fn use_emergency_code(app: tauri::State<'_, App>, code: String) -> UiResult<
 #[tauri::command]
 pub fn refresh_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
     refresh_on(&app)
+}
+
+#[tauri::command]
+pub fn knock(app: tauri::State<'_, App>) -> UiResult<crate::ipc::LockState> {
+    knock_on(&app)
+}
+
+#[tauri::command]
+pub fn knock_with_key(app: tauri::State<'_, App>, key: String) -> UiResult<crate::ipc::LockState> {
+    knock_with_key_on(&app, key)
+}
+
+#[tauri::command]
+pub fn knock_with_code(
+    app: tauri::State<'_, App>,
+    code: String,
+) -> UiResult<crate::ipc::LockState> {
+    knock_with_code_on(&app, code)
 }

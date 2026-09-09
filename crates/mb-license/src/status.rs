@@ -35,12 +35,13 @@ impl Status {
         }
     }
 
-    /// Does this status let the shop operate at all, before any date is considered?
+    /// Does this status let the shop operate at all, before any date is considered? A cancelled
+    /// plan is a date question: it runs to the day that was paid for.
     #[must_use]
     pub const fn lets_the_shop_work(self) -> bool {
         match self {
-            Status::Active | Status::Trial => true,
-            Status::Suspended | Status::Revoked | Status::Cancelled => false,
+            Status::Active | Status::Trial | Status::Cancelled => true,
+            Status::Suspended | Status::Revoked => false,
         }
     }
 }
@@ -59,6 +60,9 @@ pub struct Licence {
     /// The machine this licence is bound to, if any.
     pub bound_to: Option<MachineId>,
     pub trial_ends_on: Option<BusinessDay>,
+    /// Razorpay is still charging. Off after a cancellation.
+    #[serde(default)]
+    pub auto_renews: Option<bool>,
     /// Already masked by the cloud — `+91 98••••••10`.
     pub registered_contact: String,
     /// The cloud's id for this shop. What a release rollout names.
@@ -83,6 +87,11 @@ pub enum Standing {
     Expired,
     Suspended,
     Revoked,
+    /// Cancelled, and still inside the paid period: running, with an end in sight.
+    Ending {
+        days_left: u16,
+    },
+    /// Cancelled, and past the paid period.
     Cancelled,
     /// No licence on this machine at all: a first run, or after a deactivate.
     NeverActivated,
@@ -102,7 +111,10 @@ impl Standing {
     #[must_use]
     pub const fn operating(self) -> bool {
         match self {
-            Standing::Fine | Standing::InGrace { .. } | Standing::Emergency { .. } => true,
+            Standing::Fine
+            | Standing::InGrace { .. }
+            | Standing::Ending { .. }
+            | Standing::Emergency { .. } => true,
             Standing::Expired
             | Standing::Suspended
             | Standing::Revoked
@@ -123,6 +135,7 @@ impl Standing {
             Standing::Expired => "Expired",
             Standing::Suspended => "Suspended",
             Standing::Revoked => "Stopped",
+            Standing::Ending { .. } => "Ends soon",
             Standing::Cancelled => "Cancelled",
             Standing::NeverActivated => "Not activated",
             Standing::TrialEnded => "Trial ended",
@@ -141,6 +154,7 @@ impl Standing {
             Standing::Expired => "expired",
             Standing::Suspended => "suspended",
             Standing::Revoked => "revoked",
+            Standing::Ending { .. } => "ending",
             Standing::Cancelled => "cancelled",
             Standing::NeverActivated => "never-activated",
             Standing::TrialEnded => "trial-ended",
@@ -161,7 +175,15 @@ mod tests {
         assert!(Status::Trial.lets_the_shop_work());
         assert!(!Status::Suspended.lets_the_shop_work());
         assert!(!Status::Revoked.lets_the_shop_work());
-        assert!(!Status::Cancelled.lets_the_shop_work());
+        // A cancelled plan is a date question, answered by `decide`.
+        assert!(Status::Cancelled.lets_the_shop_work());
+    }
+
+    #[test]
+    fn a_plan_that_is_ending_still_works_and_a_cancelled_one_does_not() {
+        assert!(Standing::Ending { days_left: 3 }.operating());
+        assert!(!Standing::Cancelled.operating());
+        assert_eq!(Standing::Ending { days_left: 3 }.code(), "ending");
     }
 
     #[test]

@@ -148,6 +148,7 @@ impl Stub {
                 grace_days: None,
                 bound_to: Some(machine.clone()),
                 trial_ends_on: None,
+                auto_renews: Some(true),
                 registered_contact: "+91 98••••••10".to_owned(),
                 restaurant_id: Some("00000000-0000-0000-0000-00000000stub".to_owned()),
                 short_code: Some("STUB01".to_owned()),
@@ -277,11 +278,7 @@ impl Stub {
         let n = inner.logins;
         DeviceLogin {
             device_id: format!("stub-device-{n}"),
-            restaurant_id: inner
-                .licence
-                .restaurant_id
-                .clone()
-                .unwrap_or_default(),
+            restaurant_id: inner.licence.restaurant_id.clone().unwrap_or_default(),
             access_token: format!("stub-access-{n}"),
             refresh_token: format!("stub-refresh-{n}"),
             expires_at: Timestamp::from_millis(inner.issued_at.millis().saturating_add(3_600_000)),
@@ -402,7 +399,10 @@ mod tests {
         wrong.key = "MB-WRONG-0000".to_owned();
         assert_eq!(stub.activate(&wrong), Err(CloudError::NotRecognised));
         let answer = stub.activate(&an_ask(&machine)).expect("activates");
-        assert!(answer.device.is_some(), "an activation hands the counter its login");
+        assert!(
+            answer.device.is_some(),
+            "an activation hands the counter its login"
+        );
     }
 
     #[test]
@@ -420,8 +420,18 @@ mod tests {
     #[test]
     fn a_refresh_hands_out_a_login_only_when_asked() {
         let (stub, machine) = a_stub();
-        assert!(stub.refresh(&an_ask(&machine), false).expect("refreshes").device.is_none());
-        assert!(stub.refresh(&an_ask(&machine), true).expect("refreshes").device.is_some());
+        assert!(
+            stub.refresh(&an_ask(&machine), false)
+                .expect("refreshes")
+                .device
+                .is_none()
+        );
+        assert!(
+            stub.refresh(&an_ask(&machine), true)
+                .expect("refreshes")
+                .device
+                .is_some()
+        );
         assert_eq!(stub.logins(), 1);
     }
 

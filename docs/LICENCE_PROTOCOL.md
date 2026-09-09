@@ -17,13 +17,20 @@ document nobody trusts is worse than none.
 
 ## 0. The three things that are not negotiable
 
-### 0.1 Billing is never gated
+### 0.1 The plan is the door, and billing is never gated inside
 
-Not by this protocol, not by any answer the cloud can send, not by any failure
-of any call in it. The counter's `Feature` enum — the complete list of what a
-licence can refuse — has four values and none of them is billing. **A cloud
-response cannot stop a restaurant trading**, and any future field that tries to
-will be ignored by every counter already shipped.
+Since 1.6.6 (2026-09-09) a shop whose plan is not running cannot **sign in**: the
+lock screen shows the standing, the sentence, and the ways to open the door
+(renew at magicbill.in, check again, a licence key, an emergency code). A plan
+that stops running mid-shift ends the session at once.
+
+Inside the door nothing about billing is gated: not by this protocol, not by
+any answer the cloud can send, not by any failure of any call in it. The
+counter's `Feature` enum — the complete list of what a licence can refuse — has
+four values and none of them is billing, so the billing path never asks about
+the licence and a cloud answer cannot corrupt a bill in progress. A trial, a
+paid period and a grace period are all "running"; §3.3 says exactly when a plan
+stops.
 
 ### 0.2 One idea of "may this shop work", in both programs
 
@@ -256,20 +263,30 @@ in `crates/mb-license` except the one named constant — a test proves it.
 ### 3.3 Deciding, in order
 
 ```
-1.  status is suspended / revoked / cancelled  → not operating. TODAY.
+1.  status is suspended / revoked              → not operating. TODAY.
                                                   Whatever renews_on says.
-2.  status is trial and today > trial_ends_on  → trial ended.
+2.  status is trial and today > trial_ends_on  → trial ended. No grace.
 3.  status is trial                            → fine.
-4.  today <= renews_on                         → fine.
-5.  today <= renews_on + grace                 → in grace, everything works.
-6.  otherwise                                  → expired.
+4.  status is cancelled and today <= renews_on → ending: runs to the paid day.
+5.  status is cancelled                        → cancelled. No grace.
+6.  today <= renews_on                         → fine.
+7.  today <= renews_on + grace                 → in grace, everything works.
+8.  otherwise                                  → expired.
 ```
 
 **Step 1 is the finding.** It comes before every date comparison, in both
 programs. A suspended licence with a billing date a year away is not entitled,
 today.
 
-**Step 5 removes nothing.** A grace period that quietly withdrew features would
+**Steps 4 and 5 are the cancellation (2026-09-09).** Razorpay's
+`subscription.cancelled` moves the cloud's row to `cancelled` the minute it
+arrives, keeping `renews_on`; every reader shows "ends soon" from then on, the
+shop works to the last paid day, and the day after it is closed. Grace is for a
+payment that is late, never for a plan the shop chose to stop. The cloud's
+`mb_licence_standing` / `mb_licence_runs_until` (MB-backend 0021) are this table
+in SQL, and the website's `licence-state.ts` reads their answer.
+
+**Step 7 removes nothing.** A grace period that quietly withdrew features would
 be a lock nobody announced.
 
 ---

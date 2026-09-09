@@ -169,6 +169,7 @@ mod tests {
                 grace_days: None,
                 bound_to: Some(MachineId::for_tests("machine-a")),
                 trial_ends_on: None,
+                auto_renews: None,
                 registered_contact: "+91 98••••••10".to_owned(),
                 restaurant_id: None,
                 short_code: None,
@@ -289,7 +290,11 @@ mod tests {
         assert_eq!(keys_for(true), vec![production.to_vec()]);
         let debug = keys_for(false);
         assert_eq!(debug.len(), 2);
-        assert_eq!(debug[0], production.to_vec(), "the production key comes first");
+        assert_eq!(
+            debug[0],
+            production.to_vec(),
+            "the production key comes first"
+        );
 
         // What the stub signs is refused by a release build.
         let stub_signed = signed();

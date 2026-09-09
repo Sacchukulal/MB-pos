@@ -103,6 +103,20 @@ impl mb_lan::Counter for Bridge {
             .collect()
     }
 
+    /// A shop whose plan is not running answers every phone with the reason.
+    fn open_for_phones(&self) -> Result<(), String> {
+        let Some(handle) = self.app() else {
+            return Ok(());
+        };
+        let entitlement = handle.entitlement();
+        if entitlement.operating() {
+            return Ok(());
+        }
+        let at = now();
+        Err(words::licence_banner(&entitlement, crate::flows::today(at))
+            .unwrap_or_else(|| "This shop's plan is not running.".to_owned()))
+    }
+
     /// The licence counts tills at the door.
     fn till_room(&self) -> Result<(), String> {
         let Some(handle) = self.app() else {
@@ -201,8 +215,14 @@ impl mb_lan::Counter for Bridge {
                         if removed {
                             repos.audit().append(
                                 OUTLET,
-                                &AuditEntry::new(at, today(at), None, action::DEVICE_REVOKED, "device")
-                                    .about(id.clone()),
+                                &AuditEntry::new(
+                                    at,
+                                    today(at),
+                                    None,
+                                    action::DEVICE_REVOKED,
+                                    "device",
+                                )
+                                .about(id.clone()),
                             )?;
                         }
                         Ok(removed)
@@ -219,10 +239,7 @@ impl mb_lan::Counter for Bridge {
 
     /// The phone's cloud login, for the person this device belongs to: the one Edge Function
     /// the counter calls on a phone's behalf. A refusal is the cloud's own sentence.
-    fn cloud_login(
-        &self,
-        device: &mb_lan::Device,
-    ) -> Result<serde_json::Value, mb_lan::Refusal> {
+    fn cloud_login(&self, device: &mb_lan::Device) -> Result<serde_json::Value, mb_lan::Refusal> {
         let handle = self
             .app()
             .ok_or_else(|| mb_lan::Refusal::Refused("The counter is closing.".to_owned()))?;
@@ -281,7 +298,9 @@ impl mb_lan::Counter for Bridge {
             handle
                 .with_shop(|shop| {
                     shop.db
-                        .read_transaction(|tx| mb_db::Repos::new(tx).devices().by_install(OUTLET, i))
+                        .read_transaction(|tx| {
+                            mb_db::Repos::new(tx).devices().by_install(OUTLET, i)
+                        })
                         .map_err(|e| words::from_db(&e))
                 })
                 .ok()
@@ -611,9 +630,16 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         ),
         // "Listening" is not "reachable", and this sentence must not pretend otherwise.
         Some(n) if !firewall.lets_phones_in() => (
-            format!("This counter is at {} on port {}. {firewall_says}", n.address, n.port),
-            if firewall == crate::firewall::FirewallState::Blocked { "danger" } else { "warn" }
-                .to_owned(),
+            format!(
+                "This counter is at {} on port {}. {firewall_says}",
+                n.address, n.port
+            ),
+            if firewall == crate::firewall::FirewallState::Blocked {
+                "danger"
+            } else {
+                "warn"
+            }
+            .to_owned(),
         ),
         Some(n) => (
             format!(
@@ -674,7 +700,10 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                         name: w.name.clone(),
                         platform: w.platform.clone(),
                         ip: w.ip.clone(),
-                        says: format!("{} wants to join, from {}. Whose phone is it?", w.name, w.ip),
+                        says: format!(
+                            "{} wants to join, from {}. Whose phone is it?",
+                            w.name, w.ip
+                        ),
                     })
                     .collect()
             })
@@ -686,9 +715,9 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
         firewall,
         firewall_says,
         may_fix_firewall: may_fix_firewall && may_pair,
-        connected: network
-            .as_ref()
-            .map_or(0, |n| u32::try_from(n.shared.connected()).unwrap_or(u32::MAX)),
+        connected: network.as_ref().map_or(0, |n| {
+            u32::try_from(n.shared.connected()).unwrap_or(u32::MAX)
+        }),
     })
 }
 
@@ -757,7 +786,9 @@ pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiRe
     let network = app
         .network()
         .ok_or_else(|| UiError::new("lan.off", "The counter's network is switched off."))?;
-    let owner = staff_id.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    let owner = staff_id
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
     if let Some(id) = &owner
         && staff_name(app, id).is_none()
     {
@@ -852,7 +883,10 @@ pub fn revoke_on(app: &App, device_id: String) -> UiResult<NetworkView> {
 pub fn allow_firewall_on(app: &App) -> UiResult<NetworkView> {
     let who = guard::require(app, Permission::DevicesPair)?;
     let after = crate::firewall::allow();
-    crate::log_info!("{} asked Windows Firewall to allow this program: now {after:?}", who.name);
+    crate::log_info!(
+        "{} asked Windows Firewall to allow this program: now {after:?}",
+        who.name
+    );
     if !after.lets_phones_in() {
         return Err(UiError::new(
             "network.firewall",

@@ -1,9 +1,11 @@
 /** The lock screen. */
 
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import { Button, Input, Keypad, Logo, Scroller, cx } from '../kit';
+import { Badge, Button, Input, Keypad, Logo, Scroller, cx } from '../kit';
 import { call, isUiError } from '../ipc/call';
+import type { DoorView } from '../ipc/generated/DoorView';
+import type { LockState } from '../ipc/generated/LockState';
 import type { PersonView } from '../ipc/generated/PersonView';
 import {
   PIN_DIGITS,
@@ -28,6 +30,8 @@ export interface LockProps {
   canRecover: boolean;
   /** Who signed in last at this counter, so the mark starts on them. */
   lastSignedIn: string | null;
+  /** Set while the shop's plan is not running: the door, instead of the people. */
+  door: DoorView | null;
   /** Called when somebody got in. */
   onSignedIn: () => void;
 }
@@ -35,7 +39,89 @@ export interface LockProps {
 /** Keys the window takes even while a text box has focus. */
 const ALWAYS_OURS = new Set(['Enter', 'ArrowUp', 'ArrowDown']);
 
-export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn }: LockProps) {
+/** The plan is not running: what is wrong, and every way to open the door again. */
+function Door({ door, onChanged }: { door: DoorView; onChanged: (fresh: LockState) => void }) {
+  const [key, setKey] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState<'check' | 'key' | 'code' | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const run = async (what: 'check' | 'key' | 'code') => {
+    setBusy(what);
+    setProblem(null);
+    try {
+      const fresh =
+        what === 'check'
+          ? await call('knock')
+          : what === 'key'
+            ? await call('knock_with_key', { key })
+            : await call('knock_with_code', { code });
+      onChanged(fresh);
+      if (fresh.door) setProblem(what === 'check' ? fresh.door.says : null);
+    } catch (cause) {
+      setProblem(isUiError(cause) ? cause.message : 'That could not be done. Try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mb-lock" role="dialog" aria-modal="true" aria-label="Plan needed">
+      <div className="mb-lock__card mb-lock__door">
+        <Logo size="lg" />
+        <Badge tone={door.tone === 'danger' ? 'danger' : 'warn'}>{door.chip}</Badge>
+        {door.shopName ? <h1 className="mb-lock__title">{door.shopName}</h1> : null}
+        <p className="mb-lock__door-says">{door.says}</p>
+        <div className="mb-lock__door-actions">
+          {door.mayRenew ? (
+            <Button
+              variant="primary"
+              onClick={() => {
+                void call('open_magicbill', { page: 'renew' }).catch(() => undefined);
+              }}
+            >
+              Choose a plan at magicbill.in
+            </Button>
+          ) : null}
+          <Button variant="secondary" disabled={busy !== null} onClick={() => void run('check')}>
+            {busy === 'check' ? 'Checking…' : 'Check again'}
+          </Button>
+        </div>
+        <div className="mb-lock__door-row">
+          <Input
+            label="Licence key"
+            value={key}
+            onChange={(event) => setKey(event.target.value.toUpperCase())}
+            placeholder="MB-XXXX-XXXX-XXXX"
+            autoComplete="off"
+          />
+          <Button variant="secondary" disabled={busy !== null || !key.trim()} onClick={() => void run('key')}>
+            {busy === 'key' ? 'Checking…' : 'Use key'}
+          </Button>
+        </div>
+        <div className="mb-lock__door-row">
+          <Input
+            label="Emergency code from support"
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            autoComplete="off"
+          />
+          <Button variant="secondary" disabled={busy !== null || !code.trim()} onClick={() => void run('code')}>
+            {busy === 'code' ? 'Checking…' : 'Use code'}
+          </Button>
+        </div>
+        {problem ? (
+          <p className="mb-lock__problem" role="alert">
+            {problem}
+          </p>
+        ) : null}
+        <p className="mb-lock__hint">Last checked with Magic Bill: {door.checked}.</p>
+      </div>
+    </div>
+  );
+}
+
+export function Lock({ people, recoverable, canRecover, lastSignedIn, door, onSignedIn }: LockProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initial);
   const runningSeq = useRef(0);
 
@@ -111,6 +197,10 @@ export function Lock({ people, recoverable, canRecover, lastSignedIn, onSignedIn
         Forgotten your PIN?
       </Button>
     ) : null;
+
+  if (door) {
+    return <Door door={door} onChanged={onSignedIn} />;
+  }
 
   if (mode.kind === 'pin') {
     return (

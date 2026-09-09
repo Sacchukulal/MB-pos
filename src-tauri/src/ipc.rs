@@ -146,7 +146,9 @@ pub fn notices_seen_on(app: &App) -> UiResult<NoticesView> {
             .map_err(|e| crate::words::from_db(&e))
     })?;
     let view = notices_on(app)?;
-    app.push(crate::state::Pushed::Notices { unseen: view.unseen });
+    app.push(crate::state::Pushed::Notices {
+        unseen: view.unseen,
+    });
     Ok(view)
 }
 
@@ -664,6 +666,9 @@ macro_rules! commands {
             $crate::licensing::transfer_here,
             $crate::licensing::use_emergency_code,
             $crate::licensing::refresh_licence,
+            $crate::licensing::knock,
+            $crate::licensing::knock_with_key,
+            $crate::licensing::knock_with_code,
             // Is this counter healthy, and what can we send to support.
             $crate::health::health,
             $crate::diagnostics::diagnostics_plan,
@@ -766,13 +771,10 @@ pub fn cart_add_on(
     // The tax is resolved here, once, from the book — and frozen with the line.
     let snapshot = snapshot_for(&item, &app.shop_config().tax)?;
     app.with_cart_mut(|state| {
-        state
-            .cart
-            .add(snapshot, qty, note, vec![])
-            .map_err(|e| {
-                UiError::new("cart.add", "That item could not be added to the bill.")
-                    .with_detail(e.to_string())
-            })?;
+        state.cart.add(snapshot, qty, note, vec![]).map_err(|e| {
+            UiError::new("cart.add", "That item could not be added to the bill.")
+                .with_detail(e.to_string())
+        })?;
         cart_view(state, &app.shop_config())
     })
 }
@@ -1596,6 +1598,9 @@ pub struct LockState {
     pub recoverable: Vec<PersonView>,
     /// Who signed in last at this counter, so the lock screen starts on them.
     pub last_signed_in: Option<String>,
+    /// `Some` while the shop's plan is not running: nobody can sign in, and the lock screen
+    /// shows the way to open the door instead of the people.
+    pub door: Option<crate::licensing::DoorView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -1670,6 +1675,7 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
             .collect(),
         can_recover,
         last_signed_in,
+        door: crate::licensing::door_on(app),
     })
 }
 
@@ -1733,6 +1739,11 @@ fn lockout_message(
 pub fn login_on(app: &App, staff_id: String, pin: String) -> UiResult<LockState> {
     let at = crate::flows::now();
     let day = crate::flows::today(at);
+
+    // The door: no running plan, no sign-in. The sentence says how to open it.
+    if let Some(closed) = crate::licensing::door_closed(app) {
+        return Err(closed);
+    }
 
     let typed = Pin::parse(&pin).map_err(|e| {
         UiError::new("auth.pin_shape", format!("{e}. Try again.")).with_detail(e.to_string())

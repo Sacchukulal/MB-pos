@@ -38,11 +38,7 @@ fn licence(scratch: &Scratch, label: &str, status: Status, renews_in_days: i32) 
     ));
     let mut licensing = Licensing::new(dir, machine(), Arc::clone(&stub) as Arc<dyn Cloud>, "test");
     licensing
-        .activate(
-            "MB-STUB-0001",
-            at,
-            std::time::Duration::from_secs(2),
-        )
+        .activate("MB-STUB-0001", at, std::time::Duration::from_secs(2))
         .expect("activates");
     if status != Status::Active {
         stub.set_status(status);
@@ -102,8 +98,8 @@ fn breaking_the_licence_shows_in_health() {
         Some(licence_row.says.clone()),
         crate::words::licence_banner(&app.entitlement(), today)
     );
-    // And it still says what works, because every licensing sentence does.
-    assert!(licence_row.says.to_lowercase().contains("bill"));
+    // And it says what to do, because every licensing sentence does.
+    assert!(licence_row.says.to_lowercase().contains("call us"));
 }
 
 /// The version row, and ANDROID-G4.
@@ -260,6 +256,7 @@ fn the_bundle_holds_what_the_manifest_promised_and_no_secrets() {
 #[test]
 fn a_bundle_can_be_made_when_the_shop_will_not_open() {
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
+    app.use_licensing(crate::licensing::for_tests_blank());
     let plan = crate::diagnostics::plan_on(&app).expect("planned");
     assert!(plan.items.iter().any(|i| i.name == "database.txt"));
     let view = crate::health::look(&app);

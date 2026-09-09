@@ -119,6 +119,12 @@ pub trait Counter: Send + Sync + 'static {
 
     fn till_room(&self) -> Result<(), String>;
 
+    /// May phones use this counter today? `Err` carries the sentence the phone shows when the
+    /// shop's plan is not running. Asked on every request, after the credential.
+    fn open_for_phones(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     /// Find a live device and check its credential.
     fn authenticate(&self, device_id: &str, secret: &str) -> Option<Device>;
 

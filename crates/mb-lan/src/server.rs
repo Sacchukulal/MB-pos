@@ -593,6 +593,10 @@ fn authenticate(shared: &Shared, headers: &HeaderMap, from: Peer) -> Result<Devi
         return Err(refused(&Refusal::NotPaired));
     };
     shared.counter.seen(&device.id, &from.ip());
+    // A known phone, and a shop whose plan is not running: the sentence, not the data.
+    if let Err(says) = shared.counter.open_for_phones() {
+        return Err(refused(&Refusal::Refused(says)));
+    }
     Ok(device)
 }
 

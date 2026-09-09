@@ -117,16 +117,14 @@ pub fn decide(licence: &Licence, global_grace: Option<u16>, today: BusinessDay) 
         return match licence.status {
             Status::Suspended => Standing::Suspended,
             Status::Revoked => Standing::Revoked,
-            // The shop chose this.
-            Status::Cancelled => Standing::Cancelled,
             // Unreachable by `lets_the_shop_work`, and written as a value rather than an
             // `unreachable!()` because the workspace denies `panic` and because a wrong answer
             // here must still be a working shop rather than a crashed one.
-            Status::Active | Status::Trial => Standing::Fine,
+            Status::Active | Status::Trial | Status::Cancelled => Standing::Fine,
         };
     }
 
-    // A trial is its own end date, and it is not a billing date.
+    // A trial is its own end date, and it is not a billing date. It has no grace.
     if licence.status == Status::Trial {
         if let Some(ends) = licence.trial_ends_on
             && today.days_until(ends) < 0
@@ -138,6 +136,17 @@ pub fn decide(licence: &Licence, global_grace: Option<u16>, today: BusinessDay) 
 
     // The second question: the date, and the grace that follows it.
     let days_past_renewal = licence.renews_on.days_until(today);
+
+    // The shop chose to stop: the paid period runs out on its day, with no grace after it.
+    if licence.status == Status::Cancelled {
+        if days_past_renewal > 0 {
+            return Standing::Cancelled;
+        }
+        return Standing::Ending {
+            days_left: u16::try_from(days_past_renewal.saturating_neg()).unwrap_or(u16::MAX),
+        };
+    }
+
     if days_past_renewal <= 0 {
         return Standing::Fine;
     }
@@ -177,10 +186,31 @@ mod tests {
             grace_days: None,
             bound_to: Some(MachineId::for_tests("machine-a")),
             trial_ends_on: None,
+            auto_renews: None,
             registered_contact: "+91 98••••••10".to_owned(),
             restaurant_id: None,
             short_code: None,
         }
+    }
+
+    /// A cancelled plan runs to the day that was paid for, then stops — with no grace.
+    #[test]
+    fn a_cancelled_plan_runs_to_its_date_and_not_a_day_longer() {
+        let licence = a_licence(Status::Cancelled, day(2026, 8, 10));
+        assert_eq!(
+            decide(&licence, None, day(2026, 8, 1)),
+            Standing::Ending { days_left: 9 }
+        );
+        assert_eq!(
+            decide(&licence, None, day(2026, 8, 10)),
+            Standing::Ending { days_left: 0 }
+        );
+        assert!(Standing::Ending { days_left: 0 }.operating());
+        assert_eq!(
+            decide(&licence, Some(30), day(2026, 8, 11)),
+            Standing::Cancelled
+        );
+        assert!(!Standing::Cancelled.operating());
     }
 
     #[test]
@@ -191,7 +221,6 @@ mod tests {
         for (status, expected) in [
             (Status::Suspended, Standing::Suspended),
             (Status::Revoked, Standing::Revoked),
-            (Status::Cancelled, Standing::Cancelled),
         ] {
             let licence = a_licence(status, a_year_away);
             let standing = decide(&licence, None, today);
