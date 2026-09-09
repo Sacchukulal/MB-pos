@@ -117,6 +117,64 @@
   line-height: var(--line-normal);
 }
 
+/* The bills. */
+
+.mb-bills {
+  /* The page margin is the SHELL's; the height is the whole body, so the sheet can scroll. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  grid-row: 1 / -1;
+}
+
+/* The only thing on this screen that scrolls. */
+.mb-bills__sheet {
+  min-height: 0;
+}
+
+/* The line under a bill number or a state: what it replaced, why it was voided. */
+.mb-bills__second {
+  display: block;
+  font-size: var(--type-caption);
+  font-weight: var(--weight-normal);
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+/* The totals of an opened bill, on the right, the way the paper has them. */
+.mb-bills__totals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-self: flex-end;
+  width: var(--bill-totals);
+  max-width: 100%;
+}
+
+.mb-bills__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.mb-bills__line--strong {
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border-strong);
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+}
+
+.mb-bills__changes {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
 /* The days, and the drawer count beside them. */
 
 .mb-days {
@@ -347,3 +405,4 @@
 .mb-dayclose__tills .mb-dayclose__closed {
   margin: 0;
 }
+

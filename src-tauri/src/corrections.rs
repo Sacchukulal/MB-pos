@@ -1,12 +1,13 @@
-//! The four ways a shop takes something back.
+//! The ways a shop takes something back, and the bills list they hang off.
 
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
-use mb_core::{AnyOrder, Money, OrderId, StaffId};
-use mb_db::repo::corrections::{Reason, Refund};
-use serde::Serialize;
+use mb_core::{AnyOrder, Money, OrderId, Qty, StaffId};
+use mb_db::repo::corrections::{Reason, Refund, RevertLine, RevertPayment, RevertRow};
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::billing::{BillView, CartLineView, PaymentView};
 use crate::flows::{now, today};
 use crate::guard;
 use crate::ipc::MoneyView;
@@ -14,12 +15,12 @@ use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
-/// Above this, a void needs a second person (item 4).
+/// Above this, a void or a revert needs a second person.
 const APPROVAL_KEY: &str = "bill.void.approval_above_paise";
 
 // What the screens see.
 
-/// One of today's bills, as the Bills list shows it.
+/// One bill, as the Bills list shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +30,10 @@ pub struct BillRowView {
     pub at: String,
     pub table: Option<String>,
     pub order_type: String,
+    pub items: u32,
     pub total: MoneyView,
+    /// "Cash", "UPI", "Cash + Card".
+    pub paid_by: String,
     pub cashier: Option<String>,
     /// "settled", "voided", "cancelled".
     pub state: String,
@@ -38,6 +42,10 @@ pub struct BillRowView {
     pub refunded: Option<MoneyView>,
     /// How many pieces of paper this bill has produced beyond the first.
     pub reprints: u32,
+    /// The bill was taken back to the counter and billed again under this number.
+    pub edited: bool,
+    /// On an edited bill: "waiting" or "approved".
+    pub approval: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -48,7 +56,7 @@ pub struct ReasonView {
     pub text: String,
 }
 
-/// The three figures that must tie, for the screen's footer.
+/// The three figures that must tie, for the screen's header.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -62,38 +70,165 @@ pub struct DayTotalsView {
     pub cancelled_orders: i64,
 }
 
-// The list, and the reasons.
+/// What the Bills screen asks for. Everything optional; nothing means today, everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct BillFilter {
+    pub period: Option<crate::reports::PeriodArg>,
+    /// Bill number, table, item, amount or name — matched anywhere.
+    pub query: Option<String>,
+    /// A staff id.
+    pub cashier: Option<String>,
+    /// "settled", "edited", "voided", "cancelled".
+    pub state: Option<String>,
+    /// A payment mode label: "Cash", "Card", "UPI", "Credit".
+    pub mode: Option<String>,
+}
 
-/// Today's bills, newest first — the way in to every flow below.
+/// The Bills screen, in one value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct BillsView {
+    pub rows: Vec<BillRowView>,
+    /// The figures for what is listed.
+    pub totals: DayTotalsView,
+    pub periods: Vec<crate::reports::PeriodChoiceView>,
+    /// Everyone who took a bill in the period, for the filter.
+    pub cashiers: Vec<crate::lan::PersonPick>,
+    /// Everyone whose PIN can approve a big void or revert.
+    pub approvers: Vec<crate::lan::PersonPick>,
+    /// Edits nobody has signed off yet, in the whole shop.
+    pub waiting: u32,
+    pub can_revert: bool,
+    pub can_void: bool,
+    pub can_reprint: bool,
+    pub can_approve: bool,
+}
+
+/// One thing that happened to a bill.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryView {
+    pub when: String,
+    pub who: String,
+    pub what: String,
+}
+
+/// One line of a bill as it was before it was taken back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct BeforeLineView {
+    pub name: String,
+    pub qty: String,
+    pub unit_price: MoneyView,
+    pub amount: MoneyView,
+}
+
+/// One time a bill was taken back to the counter, from the register.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct RevertView {
+    pub id: String,
+    pub reason: String,
+    pub by: String,
+    pub at: String,
+    /// The bill as it was: its lines, what it came to, how and when it was paid.
+    pub before_lines: Vec<BeforeLineView>,
+    pub before_total: MoneyView,
+    pub before_paid_by: String,
+    pub before_paid_at: String,
+    /// What is different since, one line each.
+    pub changes: Vec<String>,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<String>,
+}
+
+/// One bill, opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct BillDetailView {
+    pub row: BillRowView,
+    pub taken_by: Option<String>,
+    pub covers: Option<u32>,
+    pub note: Option<String>,
+    pub lines: Vec<CartLineView>,
+    /// The totals block; absent on a cancelled order, which has no bill.
+    pub bill: Option<BillView>,
+    pub payments: Vec<PaymentView>,
+    pub tip: MoneyView,
+    pub change: MoneyView,
+    pub history: Vec<HistoryView>,
+    /// Every time this bill was taken back, oldest first.
+    pub edits: Vec<RevertView>,
+    pub can_approve: bool,
+}
+
+// The list.
+
+/// Today's bills, newest first — what a void or a refund hands back.
 pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
-    guard::require(app, Permission::ReportsView)?;
+    Ok(bills_on(app, BillFilter::default())?.rows)
+}
+
+/// The Bills screen: the rows that match, and everything the toolbar needs.
+pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
+    let who = guard::require(app, Permission::ReportsView)?;
     let day = today(now());
+    let period = match &filter.period {
+        Some(arg) => arg.parse()?,
+        None => mb_db::repo::reports::Period::one_day(day),
+    };
+    let query = filter
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(str::to_lowercase);
 
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let staff = repos.people().list_staff(OUTLET)?;
-                let name_of =
-                    |id: &StaffId| staff.iter().find(|s| s.id == *id).map(|s| s.name.clone());
-                // The table's LABEL — "Table 5" — never its id. A receipt resolves it the
-                // same way (`flows::table_name`); the list showed `tbl_15` until it did too.
+                let names = Names::new(&staff);
                 let tables = repos.floor().list_tables(OUTLET)?;
                 let label_of = |id: &mb_core::TableId| {
                     tables.iter().find(|t| &t.id == id).map(|t| t.label.clone())
                 };
 
-                let mut out = Vec::new();
-                for order in repos.orders().list_for_day(OUTLET, day)? {
-                    let Some(row) = bill_row(&order, &name_of, &label_of) else {
-                        // A draft or an open order: it is on the floor grid, not in the day's
-                        // bills.
+                let mut rows = Vec::new();
+                let mut cashiers: Vec<crate::lan::PersonPick> = Vec::new();
+                for order in repos
+                    .orders()
+                    .list_between(OUTLET, period.from, period.to)?
+                {
+                    let Some(row) = bill_row(&order, &names, &label_of) else {
                         continue;
                     };
                     let id = OrderId::new(row.order_id.clone());
+                    let row = with_the_register(&repos, &id, row)?;
+
+                    if let Some(by) = taken_by(&order)
+                        && !cashiers.iter().any(|c| c.id == by.as_str())
+                    {
+                        cashiers.push(crate::lan::PersonPick {
+                            id: by.as_str().to_owned(),
+                            name: names.of(by),
+                        });
+                    }
+                    if !row_matches(&order, &row, &filter, query.as_deref()) {
+                        continue;
+                    }
+
                     let reprints = repos.corrections().reprint_count(&id)?;
                     let refunded = repos.corrections().refunded_so_far(&id)?;
-                    out.push(BillRowView {
+                    rows.push(BillRowView {
                         reprints,
                         refunded: refunded.is_positive().then(|| MoneyView::from(refunded)),
                         ..row
@@ -101,32 +236,117 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
                 }
                 // Newest first: the bill somebody wants is nearly always the one that just
                 // printed.
-                out.reverse();
-                Ok(out)
+                rows.reverse();
+                cashiers.sort_by(|a, b| a.name.cmp(&b.name));
+
+                let totals = totals_of(&rows);
+                let waiting = repos.corrections().reverts_waiting(OUTLET)?;
+                let approvers = staff
+                    .iter()
+                    .filter(|s| s.permissions.has(Permission::BillVoid))
+                    .map(|s| crate::lan::PersonPick {
+                        id: s.id.as_str().to_owned(),
+                        name: s.name.clone(),
+                    })
+                    .collect();
+
+                Ok(BillsView {
+                    rows,
+                    totals,
+                    periods: crate::reports::choices(day),
+                    cashiers,
+                    approvers,
+                    waiting: crate::ipc::count(waiting),
+                    can_revert: who.must(Permission::BillRevert).is_ok(),
+                    can_void: who.must(Permission::BillVoid).is_ok(),
+                    can_reprint: who.must(Permission::BillReprint).is_ok(),
+                    can_approve: who.must(Permission::BillRevertApprove).is_ok(),
+                })
             })
             .map_err(|e| words::from_db(&e))
     })
 }
 
+/// Staff ids to names.
+struct Names<'a>(&'a [mb_db::repo::people::StaffMember]);
+
+impl Names<'_> {
+    fn new(staff: &[mb_db::repo::people::StaffMember]) -> Names<'_> {
+        Names(staff)
+    }
+
+    fn find(&self, id: &StaffId) -> Option<String> {
+        self.0.iter().find(|s| s.id == *id).map(|s| s.name.clone())
+    }
+
+    /// A name, or the id when the person is gone from the list.
+    fn of(&self, id: &StaffId) -> String {
+        self.find(id).unwrap_or_else(|| id.as_str().to_owned())
+    }
+
+    fn maybe(&self, id: Option<&StaffId>) -> String {
+        id.map_or_else(String::new, |id| self.of(id))
+    }
+}
+
+/// Who took the money, or who cancelled.
+fn taken_by(order: &AnyOrder) -> Option<&StaffId> {
+    match order {
+        AnyOrder::Settled(o) => Some(&o.settled_by),
+        AnyOrder::Voided(o) => Some(&o.settled_by),
+        AnyOrder::Cancelled(o) => Some(&o.cancelled_by),
+        AnyOrder::Draft(_) | AnyOrder::Open(_) => None,
+    }
+}
+
+/// "Cash", "Cash + UPI".
+fn paid_by<'a>(modes: impl Iterator<Item = &'a str>) -> String {
+    let mut labels: Vec<&str> = Vec::new();
+    for label in modes {
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    labels.join(" + ")
+}
+
 fn bill_row(
     order: &AnyOrder,
-    name_of: &impl Fn(&StaffId) -> Option<String>,
+    names: &Names<'_>,
     label_of: &impl Fn(&mb_core::TableId) -> Option<String>,
 ) -> Option<BillRowView> {
     let core = order.core();
-    let (state, total, cashier, void_reason) = match order {
-        AnyOrder::Settled(o) => ("settled", o.bill.grand_total, name_of(&o.settled_by), None),
+    let (state, total, cashier, void_reason, paid) = match order {
+        AnyOrder::Settled(o) => (
+            "settled",
+            o.bill.grand_total,
+            names.find(&o.settled_by),
+            None,
+            paid_by(
+                o.settlement
+                    .payments()
+                    .iter()
+                    .map(|p| p.mode.report_label()),
+            ),
+        ),
         AnyOrder::Voided(o) => (
             "voided",
             o.bill.grand_total,
-            name_of(&o.settled_by),
+            names.find(&o.settled_by),
             Some(o.reason.clone()),
+            paid_by(
+                o.settlement
+                    .payments()
+                    .iter()
+                    .map(|p| p.mode.report_label()),
+            ),
         ),
         AnyOrder::Cancelled(o) => (
             "cancelled",
             Money::ZERO,
-            name_of(&o.cancelled_by),
+            names.find(&o.cancelled_by),
             Some(o.reason.clone()),
+            String::new(),
         ),
         AnyOrder::Draft(_) | AnyOrder::Open(_) => return None,
     };
@@ -146,14 +366,442 @@ fn bill_row(
             }
         }),
         order_type: crate::billing::order_type_label(core.order_type()).to_owned(),
+        items: crate::ipc::count(i64::try_from(core.cart.len()).unwrap_or(i64::MAX)),
         total: MoneyView::from(total),
+        paid_by: paid,
         cashier,
         state: state.to_owned(),
         void_reason,
         refunded: None,
         reprints: 0,
+        edited: false,
+        approval: None,
     })
 }
+
+/// What the register says about this bill: taken back, and whether that was signed off.
+fn with_the_register(
+    repos: &mb_db::Repos<'_>,
+    id: &OrderId,
+    mut row: BillRowView,
+) -> Result<BillRowView, mb_db::DbError> {
+    let reverts = repos.corrections().reverts_of(id)?;
+    if !reverts.is_empty() {
+        row.edited = true;
+        row.approval = Some(if reverts.iter().all(|r| r.approved_at.is_some()) {
+            "approved".to_owned()
+        } else {
+            "waiting".to_owned()
+        });
+    }
+    Ok(row)
+}
+
+/// Does this bill pass the toolbar?
+fn row_matches(
+    order: &AnyOrder,
+    row: &BillRowView,
+    filter: &BillFilter,
+    query: Option<&str>,
+) -> bool {
+    match filter.state.as_deref().filter(|s| !s.is_empty()) {
+        Some("edited") if !(row.edited && row.state == "settled") => return false,
+        Some(state) if state != "edited" && row.state != state => return false,
+        _ => {}
+    }
+    if let Some(cashier) = filter.cashier.as_deref().filter(|c| !c.is_empty())
+        && taken_by(order).is_none_or(|by| by.as_str() != cashier)
+    {
+        return false;
+    }
+    if let Some(mode) = filter.mode.as_deref().filter(|m| !m.is_empty()) {
+        let settlement = match order {
+            AnyOrder::Settled(o) => Some(&o.settlement),
+            AnyOrder::Voided(o) => Some(&o.settlement),
+            _ => None,
+        };
+        let paid_that_way = settlement.is_some_and(|s| {
+            s.payments()
+                .iter()
+                .any(|p| p.mode.report_label().eq_ignore_ascii_case(mode))
+        });
+        if !paid_that_way {
+            return false;
+        }
+    }
+    if let Some(query) = query {
+        let mut haystack = vec![
+            row.number.to_lowercase(),
+            row.table.clone().unwrap_or_default().to_lowercase(),
+            row.order_type.to_lowercase(),
+            row.total.text.to_lowercase(),
+            row.cashier.clone().unwrap_or_default().to_lowercase(),
+            row.paid_by.to_lowercase(),
+        ];
+        if let Some(token) = order.token() {
+            haystack.push(token.formatted.to_lowercase());
+        }
+        for line in order.core().cart.lines() {
+            haystack.push(line.snapshot.name.to_lowercase());
+        }
+        if !haystack.iter().any(|h| h.contains(query)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Gross, voids and net, from the rows on screen — so the header describes the list.
+fn totals_of(rows: &[BillRowView]) -> DayTotalsView {
+    let mut gross = 0_i64;
+    let mut voids = 0_i64;
+    let mut refunded = 0_i64;
+    let mut bills = 0_i64;
+    let mut voided_bills = 0_i64;
+    let mut cancelled = 0_i64;
+    for row in rows {
+        match row.state.as_str() {
+            "settled" => {
+                gross = gross.saturating_add(row.total.paise);
+                bills += 1;
+            }
+            "voided" => {
+                gross = gross.saturating_add(row.total.paise);
+                voids = voids.saturating_add(row.total.paise);
+                bills += 1;
+                voided_bills += 1;
+            }
+            _ => cancelled += 1,
+        }
+        if let Some(back) = &row.refunded {
+            refunded = refunded.saturating_add(back.paise);
+        }
+    }
+    DayTotalsView {
+        gross: MoneyView::from(Money::from_paise(gross)),
+        voids: MoneyView::from(Money::from_paise(voids)),
+        net: MoneyView::from(Money::from_paise(gross.saturating_sub(voids))),
+        refunded: MoneyView::from(Money::from_paise(refunded)),
+        bills,
+        voided_bills,
+        cancelled_orders: cancelled,
+    }
+}
+
+// One bill, opened.
+
+pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
+    let who = guard::require(app, Permission::ReportsView)?;
+    let id = OrderId::new(order_id);
+    let config = app.shop_config();
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let Some(order) = repos.orders().find(&id)? else {
+                    return Err(mb_db::DbError::invariant("there is no such bill"));
+                };
+                let staff = repos.people().list_staff(OUTLET)?;
+                let names = Names::new(&staff);
+                let tables = repos.floor().list_tables(OUTLET)?;
+                let label_of = |id: &mb_core::TableId| {
+                    tables.iter().find(|t| &t.id == id).map(|t| t.label.clone())
+                };
+                let Some(row) = bill_row(&order, &names, &label_of) else {
+                    return Err(mb_db::DbError::invariant(
+                        "that order is still open, so it is on the floor and not in the bills",
+                    ));
+                };
+                let row = with_the_register(&repos, &id, row)?;
+                let reprints = repos.corrections().reprints_for(&id)?;
+                let refunds = repos.corrections().refunds_for(&id)?;
+                let refunded = refunds
+                    .iter()
+                    .fold(Money::ZERO, |sum, r| sum.add(r.amount).unwrap_or(sum));
+                let row = BillRowView {
+                    reprints: crate::ipc::count(i64::try_from(reprints.len()).unwrap_or(0)),
+                    refunded: refunded.is_positive().then(|| MoneyView::from(refunded)),
+                    ..row
+                };
+
+                let core = order.core();
+                let (bill, settlement) = match &order {
+                    AnyOrder::Settled(o) => (Some(&o.bill), Some(&o.settlement)),
+                    AnyOrder::Voided(o) => (Some(&o.bill), Some(&o.settlement)),
+                    _ => (None, None),
+                };
+                // A cancelled order never had a bill: its lines are priced now, only so the
+                // screen can list them.
+                let lines = match bill {
+                    Some(bill) => crate::billing::bill_lines(bill),
+                    None => crate::billing::bill_for(&core.cart, core.order_type(), None, &config)
+                        .map(|b| crate::billing::bill_lines(&b))
+                        .unwrap_or_default(),
+                };
+                let (tip, change) = settlement
+                    .zip(bill)
+                    .map(|(s, b)| (s.tip(), s.change_due(b.grand_total).unwrap_or(Money::ZERO)))
+                    .unwrap_or((Money::ZERO, Money::ZERO));
+
+                let mut history: Vec<(mb_core::Timestamp, HistoryView)> = Vec::new();
+                let mut note = |at: mb_core::Timestamp, who: String, what: String| {
+                    history.push((
+                        at,
+                        HistoryView {
+                            when: words::when(at),
+                            who,
+                            what,
+                        },
+                    ));
+                };
+                match &order {
+                    AnyOrder::Settled(o) => note(
+                        o.settled_at,
+                        names.of(&o.settled_by),
+                        format!(
+                            "Paid {} by {}",
+                            o.bill.grand_total.to_plain_string(),
+                            row.paid_by
+                        ),
+                    ),
+                    AnyOrder::Voided(o) => {
+                        note(
+                            o.settled_at,
+                            names.of(&o.settled_by),
+                            format!(
+                                "Paid {} by {}",
+                                o.bill.grand_total.to_plain_string(),
+                                row.paid_by
+                            ),
+                        );
+                        note(
+                            o.voided_at,
+                            names.of(&o.voided_by),
+                            format!("Voided: {}", o.reason),
+                        );
+                    }
+                    AnyOrder::Cancelled(o) => note(
+                        o.cancelled_at,
+                        names.of(&o.cancelled_by),
+                        format!("Cancelled: {}", o.reason),
+                    ),
+                    AnyOrder::Draft(_) | AnyOrder::Open(_) => {}
+                }
+                for refund in &refunds {
+                    note(
+                        refund.refunded_at,
+                        names.maybe(refund.refunded_by.as_ref()),
+                        format!(
+                            "{} given back by {}: {}",
+                            refund.amount.to_plain_string(),
+                            refund.mode,
+                            refund.reason
+                        ),
+                    );
+                }
+                for copy in &reprints {
+                    note(
+                        copy.printed_at,
+                        names.maybe(copy.printed_by.as_ref()),
+                        match &copy.reason {
+                            Some(reason) => format!("Copy {} printed: {reason}", copy.copy),
+                            None => format!("Copy {} printed", copy.copy),
+                        },
+                    );
+                }
+
+                let edits = edits_of(&repos, &order, &names, &config)?;
+                for (edit, row) in edits.iter().zip(repos.corrections().reverts_of(&id)?) {
+                    note(
+                        row.before_settled_at,
+                        names.maybe(row.before_settled_by.as_ref()),
+                        format!("Paid {} by {}", edit.before_total.text, edit.before_paid_by),
+                    );
+                    note(
+                        row.reverted_at,
+                        edit.by.clone(),
+                        format!("Taken back to the counter: {}", edit.reason),
+                    );
+                    if let (Some(at), Some(by)) = (row.approved_at, &row.approved_by) {
+                        note(at, names.of(by), "Edit approved".to_owned());
+                    }
+                }
+
+                history.sort_by_key(|(at, _)| at.millis());
+                Ok(BillDetailView {
+                    taken_by: Some(names.of(&core.created_by)),
+                    covers: core.covers,
+                    note: core.note.clone(),
+                    lines,
+                    bill: bill
+                        .map(crate::billing::bill_view)
+                        .transpose()
+                        .map_err(|e| mb_db::DbError::invariant(e.message))?,
+                    payments: settlement
+                        .map(crate::billing::payment_views)
+                        .unwrap_or_default(),
+                    tip: tip.into(),
+                    change: change.into(),
+                    history: history.into_iter().map(|(_, h)| h).collect(),
+                    can_approve: who.must(Permission::BillRevertApprove).is_ok()
+                        && edits.iter().any(|e| e.approved_at.is_none()),
+                    edits,
+                    row,
+                })
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// Every register entry for one bill, oldest first, each with what changed after it.
+fn edits_of(
+    repos: &mb_db::Repos<'_>,
+    order: &AnyOrder,
+    names: &Names<'_>,
+    config: &crate::settings::ShopConfig,
+) -> Result<Vec<RevertView>, mb_db::DbError> {
+    let reverts = repos.corrections().reverts_of(&order.core().id)?;
+    let mut befores: Vec<(Vec<RevertLine>, Vec<RevertPayment>)> = Vec::new();
+    for revert in &reverts {
+        befores.push((
+            repos.corrections().revert_lines(&revert.id)?,
+            repos.corrections().revert_payments(&revert.id)?,
+        ));
+    }
+
+    // What the bill is now, for the last edit to compare against.
+    let now_total = match order {
+        AnyOrder::Settled(o) => Some(o.bill.grand_total),
+        AnyOrder::Voided(o) => Some(o.bill.grand_total),
+        AnyOrder::Cancelled(o) => {
+            crate::billing::bill_for(&o.core.cart, o.core.order_type(), None, config)
+                .ok()
+                .map(|b| b.grand_total)
+        }
+        AnyOrder::Draft(_) | AnyOrder::Open(_) => None,
+    };
+    let now_lines: Vec<(String, Qty)> = tally(order.core().cart.lines().iter().map(|line| {
+        (
+            line_name(&line.snapshot.name, &line.modifiers, line.note.as_deref()),
+            line.qty,
+        )
+    }));
+
+    let mut out = Vec::new();
+    for (index, revert) in reverts.iter().enumerate() {
+        let (lines, payments) = &befores[index];
+        let was = tally(lines.iter().map(|l| (l.name.clone(), l.qty)));
+        // The next edit's "before" is this edit's "after"; the last edit's is the bill now.
+        let (is, after_total, billed_again) = match befores.get(index + 1) {
+            Some((next_lines, _)) => (
+                tally(next_lines.iter().map(|l| (l.name.clone(), l.qty))),
+                Some(reverts[index + 1].before_total),
+                true,
+            ),
+            None => (
+                now_lines.clone(),
+                now_total,
+                !matches!(order, AnyOrder::Open(_) | AnyOrder::Draft(_)),
+            ),
+        };
+        let changes = if billed_again {
+            changes_between(&was, &is, revert.before_total, after_total, order)
+        } else {
+            vec!["Not billed again yet".to_owned()]
+        };
+        out.push(RevertView {
+            id: revert.id.clone(),
+            reason: revert.reason.clone(),
+            by: names.maybe(revert.reverted_by.as_ref()),
+            at: words::when(revert.reverted_at),
+            before_lines: lines
+                .iter()
+                .map(|l| BeforeLineView {
+                    name: l.name.clone(),
+                    qty: l.qty.to_string(),
+                    unit_price: l.unit_price.into(),
+                    amount: l.amount.into(),
+                })
+                .collect(),
+            before_total: revert.before_total.into(),
+            before_paid_by: paid_by(payments.iter().map(|p| p.mode.as_str())),
+            before_paid_at: words::when(revert.before_settled_at),
+            changes,
+            approved_by: revert.approved_by.as_ref().map(|by| names.of(by)),
+            approved_at: revert.approved_at.map(words::when),
+        });
+    }
+    Ok(out)
+}
+
+/// What a line is called on the bill, with its extras and its note.
+fn line_name(name: &str, modifiers: &[mb_core::Modifier], note: Option<&str>) -> String {
+    let mut out = name.to_owned();
+    let extras: Vec<&str> = modifiers.iter().map(|m| m.name.as_str()).collect();
+    if !extras.is_empty() {
+        out = format!("{out} ({})", extras.join(", "));
+    }
+    if let Some(note) = note.map(str::trim).filter(|n| !n.is_empty()) {
+        out = format!("{out} \"{note}\"");
+    }
+    out
+}
+
+/// One entry per name, quantities added up.
+fn tally(lines: impl Iterator<Item = (String, Qty)>) -> Vec<(String, Qty)> {
+    let mut out: Vec<(String, Qty)> = Vec::new();
+    for (name, qty) in lines {
+        match out.iter_mut().find(|(known, _)| *known == name) {
+            Some((_, known)) => *known = known.add(qty).unwrap_or(*known),
+            None => out.push((name, qty)),
+        }
+    }
+    out
+}
+
+/// The difference between a bill as it was and as it became, in words.
+fn changes_between(
+    was: &[(String, Qty)],
+    is: &[(String, Qty)],
+    before_total: Money,
+    after_total: Option<Money>,
+    order: &AnyOrder,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for (name, qty) in was {
+        match is.iter().find(|(known, _)| known == name) {
+            None => out.push(format!("Removed {qty} {name}")),
+            Some((_, now)) if now != qty => out.push(format!("{name}: {qty} → {now}")),
+            Some(_) => {}
+        }
+    }
+    for (name, qty) in is {
+        if !was.iter().any(|(known, _)| known == name) {
+            out.push(format!("Added {qty} {name}"));
+        }
+    }
+    if let Some(after) = after_total
+        && after != before_total
+    {
+        out.push(format!(
+            "Total {} → {}",
+            before_total.to_plain_string(),
+            after.to_plain_string()
+        ));
+    }
+    match order {
+        AnyOrder::Cancelled(_) => out.push("Cancelled instead of billed again".to_owned()),
+        AnyOrder::Voided(_) => out.push("Voided since".to_owned()),
+        _ => {}
+    }
+    if out.is_empty() {
+        out.push("Billed again unchanged".to_owned());
+    }
+    out
+}
+
+// The reasons.
 
 /// The shop's own reasons for one flow.
 pub fn reasons_on(app: &App, kind: String) -> UiResult<Vec<ReasonView>> {
@@ -173,6 +821,7 @@ pub fn reasons_on(app: &App, kind: String) -> UiResult<Vec<ReasonView>> {
     })
 }
 
+#[cfg(test)]
 pub fn day_totals_on(app: &App) -> UiResult<DayTotalsView> {
     guard::require(app, Permission::ReportsView)?;
     let day = today(now());
@@ -364,6 +1013,197 @@ fn approve_if_needed(
             "That PIN is not right.",
         ));
     }
+    Ok(())
+}
+
+// Revert a bill: back to the counter under the same number, to be fixed and billed again.
+
+pub fn revert_bill_on(
+    app: &App,
+    order_id: String,
+    reason: String,
+    approver_staff_id: Option<String>,
+    approver_pin: Option<String>,
+) -> UiResult<String> {
+    // One counter action at a time — see `App::begin_action`.
+    let _one_at_a_time = app.begin_action();
+    let who = guard::require(app, Permission::BillRevert)?;
+    let at = now();
+    let day = today(at);
+    let id = OrderId::new(order_id);
+    let till = app.terminal_id().to_owned();
+    let reason = reason.trim().to_owned();
+    if reason.is_empty() {
+        return Err(UiError::new("revert.reason", "Give a reason."));
+    }
+
+    // The lines come back onto this counter, so it has to be free.
+    let busy = app.with_cart(|state| Ok(!state.cart.is_empty()))?;
+    if busy {
+        return Err(UiError::new(
+            "revert.counter_busy",
+            "There is a bill on the counter. Finish it or clear it first.",
+        ));
+    }
+
+    let Some(AnyOrder::Settled(settled)) = crate::flows::find_order(app, &id)? else {
+        return Err(UiError::new(
+            "revert.not_settled",
+            "Only a bill that has been paid can be reverted.",
+        ));
+    };
+    if let Some(refusal) = crate::dayclose::day_refusal_on(
+        app,
+        settled.core.business_day,
+        "revert.day_closed",
+        "revert this bill",
+    )? {
+        return Err(refusal);
+    }
+    let total = settled.bill.grand_total;
+    approve_if_needed(app, total, approver_staff_id, approver_pin)?;
+
+    // The bill as it is, for the register.
+    let before_lines: Vec<RevertLine> = settled
+        .bill
+        .lines
+        .iter()
+        .map(|line| RevertLine {
+            name: line_name(&line.snapshot.name, &line.modifiers, line.note.as_deref()),
+            qty: line.qty,
+            unit_price: line.snapshot.unit_price,
+            amount: line.net,
+        })
+        .collect();
+    let before_payments: Vec<RevertPayment> = settled
+        .settlement
+        .payments()
+        .iter()
+        .map(|p| RevertPayment {
+            mode: p.mode.report_label().to_owned(),
+            amount: p.amount,
+        })
+        .collect();
+    let number = settled.bill_number.formatted.clone();
+    let before_settled_at = settled.settled_at;
+    let before_settled_by = settled.settled_by.clone();
+    let open = settled.reopen();
+
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                // The stock the bill used goes back on the shelf; billing again takes it off.
+                repos.stock().reverse_for_bill(
+                    OUTLET,
+                    &open.core.id,
+                    at,
+                    day,
+                    Some(&who.staff_id),
+                )?;
+                repos
+                    .orders()
+                    .save(OUTLET, &till, &AnyOrder::Open(open.clone()))?;
+                repos.corrections().record_revert(
+                    OUTLET,
+                    &RevertRow {
+                        id: crate::newid::fresh_at("rvt", at),
+                        order_id: open.core.id.clone(),
+                        business_day: day,
+                        reason: reason.clone(),
+                        reverted_at: at,
+                        reverted_by: Some(who.staff_id.clone()),
+                        before_total: total,
+                        before_settled_at,
+                        before_settled_by: Some(before_settled_by.clone()),
+                        approved_at: None,
+                        approved_by: None,
+                    },
+                    &before_lines,
+                    &before_payments,
+                )?;
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::BILL_REVERTED,
+                        "bill",
+                    )
+                    .about(number.clone())
+                    .changed(
+                        serde_json::json!({
+                            "state": "settled",
+                            "total_paise": total.paise(),
+                        }),
+                        serde_json::json!({
+                            "state": "open",
+                            "reason": reason,
+                        }),
+                    ),
+                )?;
+                Ok(())
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    // Onto the counter, the way pressing its table would put it there.
+    let label = open
+        .core
+        .table()
+        .and_then(|t| crate::flows::table_name(app, t));
+    app.with_cart_mut(|state| {
+        *state = crate::billing::CartState::load(&AnyOrder::Open(open.clone()), label);
+        Ok(())
+    })?;
+
+    crate::log_bill!(
+        open.core.id,
+        "bill {number} taken back to the counter by {} — {reason}",
+        who.name
+    );
+    Ok(format!("Bill {number} is back on the counter."))
+}
+
+/// A manager signs an edit off.
+pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
+    let who = guard::require(app, Permission::BillRevertApprove)?;
+    let at = now();
+    let day = today(at);
+
+    let number = app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let row = repos
+                    .corrections()
+                    .approve_revert(&revert_id, &who.staff_id, at)?;
+                let number = repos
+                    .corrections()
+                    .bill_number_of(&row.order_id)?
+                    .unwrap_or_else(|| row.order_id.as_str().to_owned());
+                repos.audit().append(
+                    OUTLET,
+                    &AuditEntry::new(
+                        at,
+                        day,
+                        Some(who.staff_id.clone()),
+                        action::REVERT_APPROVED,
+                        "bill",
+                    )
+                    .about(number.clone())
+                    .with_after(serde_json::json!({
+                        "revert": revert_id,
+                        "reason": row.reason,
+                    })),
+                )?;
+                Ok(number)
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+
+    log_info!("the edit of bill {number} was approved by {}", who.name);
     Ok(())
 }
 
@@ -712,13 +1552,13 @@ pub fn refund_on(
 // The command seats.
 
 #[tauri::command]
-pub fn list_bills(app: tauri::State<'_, App>) -> UiResult<Vec<BillRowView>> {
-    list_bills_on(&app)
+pub fn bills(app: tauri::State<'_, App>, filter: BillFilter) -> UiResult<BillsView> {
+    bills_on(&app, filter)
 }
 
 #[tauri::command]
-pub fn day_totals(app: tauri::State<'_, App>) -> UiResult<DayTotalsView> {
-    day_totals_on(&app)
+pub fn bill_detail(app: tauri::State<'_, App>, order_id: String) -> UiResult<BillDetailView> {
+    bill_detail_on(&app, order_id)
 }
 
 #[tauri::command]
@@ -735,6 +1575,22 @@ pub fn void_bill(
     approver_pin: Option<String>,
 ) -> UiResult<Vec<BillRowView>> {
     void_bill_on(&app, order_id, reason, approver_staff_id, approver_pin)
+}
+
+#[tauri::command]
+pub fn revert_bill(
+    app: tauri::State<'_, App>,
+    order_id: String,
+    reason: String,
+    approver_staff_id: Option<String>,
+    approver_pin: Option<String>,
+) -> UiResult<String> {
+    revert_bill_on(&app, order_id, reason, approver_staff_id, approver_pin)
+}
+
+#[tauri::command]
+pub fn approve_revert(app: tauri::State<'_, App>, revert_id: String) -> UiResult<()> {
+    approve_revert_on(&app, revert_id)
 }
 
 #[tauri::command]

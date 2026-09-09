@@ -27,6 +27,10 @@ pub mod action {
     pub const CLOUD_RESTORED: AuditAction = "cloud.restored";
     pub const BILL_SETTLED: AuditAction = "bill.settled";
     pub const BILL_VOIDED: AuditAction = "bill.voided";
+    /// A paid bill taken back to the counter to be billed again.
+    pub const BILL_REVERTED: AuditAction = "bill.reverted";
+    /// A manager signed off a revert.
+    pub const REVERT_APPROVED: AuditAction = "bill.revert_approved";
     pub const BILL_REPRINTED: AuditAction = "bill.reprinted";
     pub const ORDER_CANCELLED: AuditAction = "order.cancelled";
     pub const ORDER_MOVED: AuditAction = "order.moved";
@@ -137,6 +141,8 @@ pub mod action {
         ROLE_SAVED,
         BILL_SETTLED,
         BILL_VOIDED,
+        BILL_REVERTED,
+        REVERT_APPROVED,
         BILL_REPRINTED,
         ORDER_CANCELLED,
         ORDER_MOVED,
@@ -221,6 +227,8 @@ pub mod action {
             ROLE_SAVED => "Changed a role",
             BILL_SETTLED => "Settled a bill",
             BILL_VOIDED => "Voided a bill",
+            BILL_REVERTED => "Reverted a bill",
+            REVERT_APPROVED => "Approved a revert",
             BILL_REPRINTED => "Reprinted a bill",
             ORDER_CANCELLED => "Cancelled an order",
             ORDER_MOVED => "Moved an order to another table",

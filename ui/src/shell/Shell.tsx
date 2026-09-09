@@ -24,7 +24,6 @@ import { Gallery } from '../gallery/Gallery';
 import { Lock } from '../auth/Lock';
 import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
-import { Bills } from '../corrections/Bills';
 import { Credit } from '../credit/Credit';
 import { Expenses } from '../expenses/Expenses';
 import { Stock } from '../stock/Stock';
@@ -145,16 +144,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     render: () => <Delivery />,
   },
   {
-    id: 'bills',
-    daily: true,
-    label: 'Bills',
-    icon: 'file',
-    render: () => <Bills />,
-    needs: 'reports.view',
-  },
-  {
-    // Directly under Bills, because the two answer the same person's questions: "what did that
-    // customer pay?" and "how did the month go?".
+    // Bills live inside Reports: "what did that customer pay?" and "how did the month go?" are
+    // the same person's questions.
     id: 'reports',
     daily: true,
     label: 'Reports',

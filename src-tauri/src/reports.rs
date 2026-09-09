@@ -334,7 +334,7 @@ pub struct PeriodChoiceView {
 }
 
 /// The presets, from the shop's own idea of today.
-fn choices(today: BusinessDay) -> Vec<PeriodChoiceView> {
+pub(crate) fn choices(today: BusinessDay) -> Vec<PeriodChoiceView> {
     let one = |label: &str, from: BusinessDay, to: BusinessDay| PeriodChoiceView {
         label: label.to_owned(),
         from: from.to_string(),
@@ -377,7 +377,7 @@ pub struct PeriodArg {
 }
 
 impl PeriodArg {
-    fn parse(&self) -> UiResult<Period> {
+    pub(crate) fn parse(&self) -> UiResult<Period> {
         let bad = |which: &str, text: &str| {
             UiError::new(
                 "report.period",
@@ -1551,6 +1551,44 @@ pub fn dashboard_on(app: &App) -> UiResult<DashboardView> {
                 "{} gave up after retrying. Open the print queue from the bar \
                  at the top and either try again or dismiss them.",
                 words::count(i64::try_from(parked).unwrap_or(i64::MAX), "job", "jobs")
+            ),
+        ));
+    }
+
+    // Bills taken back to the counter: not billed again yet, or not signed off.
+    let (unfinished, waiting) = app.with_shop(|shop| {
+        shop.db
+            .read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                Ok((
+                    repos.corrections().reverts_unfinished(OUTLET)?,
+                    repos.corrections().reverts_waiting(OUTLET)?,
+                ))
+            })
+            .map_err(|e| words::from_db(&e))
+    })?;
+    if !unfinished.is_empty() {
+        attention.push(needs_you(
+            "warn",
+            "Bills back on the counter",
+            format!(
+                "{} taken back and not billed again: {}.",
+                words::count(
+                    i64::try_from(unfinished.len()).unwrap_or(i64::MAX),
+                    "bill",
+                    "bills"
+                ),
+                unfinished.join(", ")
+            ),
+        ));
+    }
+    if waiting > 0 && who.must(Permission::BillRevertApprove).is_ok() {
+        attention.push(needs_you(
+            "warn",
+            "Edited bills",
+            format!(
+                "{} waiting for your approval, under Bills.",
+                words::count(waiting, "edit", "edits")
             ),
         ));
     }

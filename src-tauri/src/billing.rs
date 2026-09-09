@@ -443,21 +443,18 @@ pub struct MenuItemView {
 // Building the views.
 
 /// The whole cart region, from the cart and its freshly computed bill.
-pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiResult<CartView> {
-    let bill = state.bill(config)?;
-    let lines = state
-        .cart
-        .lines()
+/// The lines of a computed bill, as a screen lists them.
+pub(crate) fn bill_lines(bill: &Bill) -> Vec<CartLineView> {
+    bill.lines
         .iter()
-        .zip(bill.lines.iter())
         .enumerate()
-        .map(|(index, (line, billed))| CartLineView {
+        .map(|(index, billed)| CartLineView {
             index,
-            name: line.snapshot.name.clone(),
-            note: line.note.clone(),
-            qty: line.qty.to_string(),
+            name: billed.snapshot.name.clone(),
+            note: billed.note.clone(),
+            qty: billed.qty.to_string(),
             rate_label: rate_label(billed.tax),
-            unit_price: line.snapshot.unit_price.into(),
+            unit_price: billed.snapshot.unit_price.into(),
             gross: billed.gross.into(),
             discount: billed
                 .line_discount
@@ -467,9 +464,29 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
             // What the line adds before its tax, so the lines add up to the Subtotal on the
             // same screen — for a tax-in price this IS the price paid.
             amount: billed.net.into(),
-            modifiers: line.modifiers.iter().map(|m| m.name.clone()).collect(),
+            modifiers: billed.modifiers.iter().map(|m| m.name.clone()).collect(),
         })
-        .collect();
+        .collect()
+}
+
+/// Every payment on a settlement, as a screen lists them.
+pub(crate) fn payment_views(settlement: &Settlement) -> Vec<PaymentView> {
+    settlement
+        .payments()
+        .iter()
+        .enumerate()
+        .map(|(index, p)| PaymentView {
+            index,
+            mode: p.mode.report_label().to_owned(),
+            amount: p.amount.into(),
+            reference: p.reference.clone(),
+        })
+        .collect()
+}
+
+pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiResult<CartView> {
+    let bill = state.bill(config)?;
+    let lines = bill_lines(&bill);
 
     let paid = state.settlement.total_paid().map_err(money_error)?;
     // `balance`, not `amount_due`. `amount_due` is what the bill ASKS for (the total plus any
@@ -490,18 +507,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         table: state
             .table()
             .map(|t| format!("{}{}", t.label, t.seat.as_ref().map_or("", |s| s.as_str()))),
-        payments: state
-            .settlement
-            .payments()
-            .iter()
-            .enumerate()
-            .map(|(index, p)| PaymentView {
-                index,
-                mode: p.mode.report_label().to_owned(),
-                amount: p.amount.into(),
-                reference: p.reference.clone(),
-            })
-            .collect(),
+        payments: payment_views(&state.settlement),
         paid: paid.into(),
         balance: due.into(),
         change: change.into(),
@@ -534,7 +540,7 @@ pub fn starting_order_type(
     }
 }
 
-fn bill_view(bill: &Bill) -> UiResult<BillView> {
+pub(crate) fn bill_view(bill: &Bill) -> UiResult<BillView> {
     let tax_rows = bill
         .summary
         .rows()

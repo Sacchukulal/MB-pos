@@ -90,7 +90,7 @@ number and the grand total, and costs nothing because it is computed.
 
 ## Tables
 
-Forty-seven, including the migration ledger.
+Fifty, including the migration ledger.
 
 ### schema_version
 
@@ -826,6 +826,57 @@ live in the repository, because both need to read the order.
 | refunded_at | INTEGER | no | |
 | refunded_by | TEXT | yes | |
 | business_day | INTEGER | no | D5, denormalised like every other money row. |
+
+### bill_reverts
+
+Added at migration 0013. A paid bill taken back to the counter to be fixed and
+billed again **under the same number**: the bill book keeps no gap. The order
+goes back to `open`, its bill and payments are dropped, and it settles again.
+This is the register beside that: who took the bill back, why, what it came to
+before, and who signed it off afterwards. A bill may be taken back more than
+once; each time is a row.
+
+| column | type | null | notes |
+|---|---|---|---|
+| id | TEXT | no | |
+| outlet_id | TEXT | no | |
+| order_id | TEXT | no | The bill that was taken back. |
+| business_day | INTEGER | no | |
+| reason | TEXT | no | |
+| reverted_at | INTEGER | no | |
+| reverted_by | TEXT | yes | |
+| before_total | INTEGER | no | Paise: the grand total before it was taken back. |
+| before_settled_at | INTEGER | no | When it had been paid. |
+| before_settled_by | TEXT | yes | Who had taken the money. |
+| approved_at | INTEGER | yes | Null until a manager signs it off. |
+| approved_by | TEXT | yes | |
+
+### bill_revert_lines
+
+The bill's lines as they were before one revert, so the register can say what
+was removed or changed without keeping a second copy of the order.
+
+| column | type | null | notes |
+|---|---|---|---|
+| id | TEXT | no | |
+| revert_id | TEXT | no | |
+| seq | INTEGER | no | |
+| name | TEXT | no | |
+| qty | INTEGER | no | Thousandths, like `order_lines.qty`. |
+| unit_price | INTEGER | no | Paise. |
+| amount | INTEGER | no | Paise. |
+
+### bill_revert_payments
+
+How the bill had been paid before one revert.
+
+| column | type | null | notes |
+|---|---|---|---|
+| id | TEXT | no | |
+| revert_id | TEXT | no | |
+| seq | INTEGER | no | |
+| mode | TEXT | no | |
+| amount | INTEGER | no | Paise. |
 
 ---
 

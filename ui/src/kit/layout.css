@@ -104,6 +104,11 @@
   min-width: 0;
 }
 
+/* A field keeps its control's width; a squeezed toolbar wraps instead. */
+.mb-toolbar .mb-field {
+  flex-shrink: 0;
+}
+
 /* Panel: the ONE raised surface. A fill, not a border. */
 
 .mb-panel {
@@ -269,6 +274,8 @@
   align-items: center;
   gap: var(--gap-field);
   min-height: var(--control-md);
+  /* A flex column with a scroll may not squash it to that minimum. */
+  flex-shrink: 0;
   padding: var(--space-2) var(--space-3);
   border: var(--border-width) solid transparent;
   border-left: var(--tile-stripe) solid var(--border-strong);

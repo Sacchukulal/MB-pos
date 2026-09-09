@@ -52,7 +52,9 @@ pub use buying::{
     PurchaseLine, PurchaseOrder, Supplier, SupplierAdjustment, SupplierMaterial, SupplierPayment,
 };
 pub use composition::{Combo, ComboPart, CompositionRepo, Modifier, ModifierGroup, Variant};
-pub use corrections::{CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow};
+pub use corrections::{
+    CorrectionsRepo, DayTotals, Reason, Refund, ReprintRow, RevertLine, RevertPayment, RevertRow,
+};
 pub use counts::{CountLine, CountRepo, CountState, StockCount, Written};
 pub use days::{DayFigures, DayKind, DayRow, DaysRepo};
 pub use floor::FloorRepo;

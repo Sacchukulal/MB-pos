@@ -110,8 +110,11 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("list_permissions", Access::Needs(Permission::StaffManage)),
     ("audit_trail", Access::Needs(Permission::AuditView)),
     // Taking something back.
-    ("list_bills", Access::Needs(Permission::ReportsView)),
-    ("day_totals", Access::Needs(Permission::ReportsView)),
+    ("bills", Access::Needs(Permission::ReportsView)),
+    ("bill_detail", Access::Needs(Permission::ReportsView)),
+    // Taking a paid bill back to the counter; a manager signs it off afterwards.
+    ("revert_bill", Access::Needs(Permission::BillRevert)),
+    ("approve_revert", Access::Needs(Permission::BillRevertApprove)),
     // The reason list itself is not sensitive; being unable to read it would make every
     // correction dialog open empty.
     ("reasons", Access::Needs(Permission::BillCreate)),

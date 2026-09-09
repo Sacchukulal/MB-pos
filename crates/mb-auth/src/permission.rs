@@ -13,6 +13,10 @@ pub enum Permission {
     BillDiscountLine,
     BillDiscountBill,
     BillVoid,
+    /// Take a paid bill back to the counter, fix it and bill again under the same number.
+    BillRevert,
+    /// Sign off a bill that was taken back and billed again.
+    BillRevertApprove,
     BillReprint,
     OrderCancel,
     OrderItemVoid,
@@ -70,6 +74,8 @@ impl Permission {
         Permission::BillDiscountLine,
         Permission::BillDiscountBill,
         Permission::BillVoid,
+        Permission::BillRevert,
+        Permission::BillRevertApprove,
         Permission::BillReprint,
         Permission::OrderCancel,
         Permission::OrderItemVoid,
@@ -114,6 +120,8 @@ impl Permission {
             Permission::BillDiscountLine => "bill.discount.line",
             Permission::BillDiscountBill => "bill.discount.bill",
             Permission::BillVoid => "bill.void",
+            Permission::BillRevert => "bill.revert",
+            Permission::BillRevertApprove => "bill.revert.approve",
             Permission::BillReprint => "bill.reprint",
             Permission::OrderCancel => "order.cancel",
             Permission::OrderItemVoid => "order.item.void",
@@ -158,6 +166,8 @@ impl Permission {
             Permission::BillDiscountLine => "discount a line",
             Permission::BillDiscountBill => "discount a bill",
             Permission::BillVoid => "void a bill",
+            Permission::BillRevert => "revert a bill",
+            Permission::BillRevertApprove => "approve a corrected bill",
             Permission::BillReprint => "reprint a bill",
             Permission::OrderCancel => "cancel an order",
             Permission::OrderItemVoid => "void an item",
@@ -281,9 +291,9 @@ mod tests {
     #[test]
     fn every_variant_is_in_all() {
         // ALL is written by hand, so it is the thing that rots.
-        assert_eq!(Permission::ALL.len(), 37);
+        assert_eq!(Permission::ALL.len(), 39);
         let codes: BTreeSet<&str> = Permission::ALL.iter().map(|p| p.code()).collect();
-        assert_eq!(codes.len(), 37, "two permissions share a code");
+        assert_eq!(codes.len(), 39, "two permissions share a code");
     }
 
     #[test]

@@ -502,7 +502,11 @@ fn changing_a_tax_class_moves_the_menu_and_never_a_bill() {
 
     // An item on another slab is untouched by this one's change.
     let beer = rate_of(&db, "itm_beer");
-    assert_eq!(beer.kind, mb_core::TaxKind::OutsideGst, "the beer moved with the food");
+    assert_eq!(
+        beer.kind,
+        mb_core::TaxKind::OutsideGst,
+        "the beer moved with the food"
+    );
     assert_eq!(
         beer.basis,
         mb_core::PriceBasis::Inclusive,
@@ -555,3 +559,148 @@ fn the_seeded_classes_match_the_ones_mb_core_ships() {
 }
 
 // The per-order-type rate override test is GONE, with the feature.
+
+/// A bill taken back keeps its number, the register keeps what it was, and a manager signs
+/// it off once.
+#[test]
+fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
+    use mb_db::repo::corrections::{RevertLine, RevertPayment, RevertRow};
+
+    let scratch = Scratch::new("revert");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let wrong = settle_one(&db, "ord_wrong", 2);
+    let number = wrong.bill_number.formatted.clone();
+    let by = StaffId::new("staff_1");
+    let entry = RevertRow {
+        id: "rvt_1".to_owned(),
+        order_id: wrong.core.id.clone(),
+        business_day: day(),
+        reason: "Wrong quantity".to_owned(),
+        reverted_at: at(5),
+        reverted_by: Some(by.clone()),
+        before_total: wrong.bill.grand_total,
+        before_settled_at: wrong.settled_at,
+        before_settled_by: Some(by.clone()),
+        approved_at: None,
+        approved_by: None,
+    };
+    let lines = vec![RevertLine {
+        name: "Masala Dosa".to_owned(),
+        qty: Qty::from_whole(2).expect("in range"),
+        unit_price: Money::from_paise(10_000),
+        amount: wrong.bill.lines[0].net,
+    }];
+    let payments = vec![RevertPayment {
+        mode: "Cash".to_owned(),
+        amount: wrong.bill.grand_total,
+    }];
+
+    // Against a bill that is still paid: refused.
+    let refused = db.transaction(|tx| {
+        Repos::new(tx)
+            .corrections()
+            .record_revert(OUTLET, &entry, &lines, &payments)
+    });
+    assert!(
+        refused.is_err(),
+        "a revert was written against a bill that is still paid"
+    );
+
+    // Back to the counter: the same order, the same number, no bill and no payments.
+    let open = wrong.clone().reopen();
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos
+            .orders()
+            .save(OUTLET, TERMINAL, &AnyOrder::Open(open.clone()))?;
+        repos
+            .corrections()
+            .record_revert(OUTLET, &entry, &lines, &payments)
+    })
+    .expect("registered");
+
+    let (found, reverts, kept_lines, kept_payments, waiting, unfinished) = db
+        .transaction(|tx| {
+            let repos = Repos::new(tx);
+            Ok((
+                repos.orders().find(&wrong.core.id)?,
+                repos.corrections().reverts_of(&wrong.core.id)?,
+                repos.corrections().revert_lines("rvt_1")?,
+                repos.corrections().revert_payments("rvt_1")?,
+                repos.corrections().reverts_waiting(OUTLET)?,
+                repos.corrections().reverts_unfinished(OUTLET)?,
+            ))
+        })
+        .expect("read back");
+    match found {
+        Some(AnyOrder::Open(o)) => assert_eq!(o.bill_number.formatted, number),
+        other => panic!("the bill did not go back to open: {other:?}"),
+    }
+    assert_eq!(reverts.len(), 1);
+    assert_eq!(reverts[0].before_total, wrong.bill.grand_total);
+    assert_eq!(kept_lines, lines);
+    assert_eq!(kept_payments, payments);
+    assert_eq!(waiting, 1);
+    assert_eq!(unfinished, vec![number.clone()]);
+
+    // Billed again, fixed, under the same number.
+    let mut cart = Cart::new();
+    cart.add(tea(), Qty::from_whole(1).expect("in range"), None, vec![])
+        .expect("adds");
+    let bill = compute_bill(
+        BillInput::new(&cart, Registration::Regular)
+            .with_order_type(OrderType::Parcel)
+            .with_place_of_supply(PlaceOfSupply::Intra)
+            .with_rounding(RoundingMode::NearestRupee),
+    )
+    .expect("a bill");
+    let mut settlement = Settlement::new();
+    settlement
+        .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("a payment"))
+        .expect("paid");
+    let mut fixed = open;
+    fixed.core.cart = cart;
+    let till = mb_db::Till::new(OUTLET, TERMINAL);
+    let right = mb_db::settle(&db, till, fixed, bill, settlement, at(6), by.clone())
+        .expect("settled again");
+    assert_eq!(right.bill_number.formatted, number, "the number changed");
+
+    let unfinished = db
+        .transaction(|tx| Repos::new(tx).corrections().reverts_unfinished(OUTLET))
+        .expect("count");
+    assert!(
+        unfinished.is_empty(),
+        "billed again, yet still listed as unfinished"
+    );
+
+    // Signed off once; a second signature is refused.
+    let approved = db
+        .transaction(|tx| {
+            Repos::new(tx)
+                .corrections()
+                .approve_revert("rvt_1", &by, at(9))
+        })
+        .expect("approved");
+    assert_eq!(approved.approved_by, Some(by.clone()));
+    assert_eq!(approved.approved_at, Some(at(9)));
+    let again = db.transaction(|tx| {
+        Repos::new(tx)
+            .corrections()
+            .approve_revert("rvt_1", &by, at(10))
+    });
+    assert!(again.is_err(), "a revert was approved twice");
+    let waiting = db
+        .transaction(|tx| Repos::new(tx).corrections().reverts_waiting(OUTLET))
+        .expect("count");
+    assert_eq!(waiting, 0);
+
+    // And the day ties: one bill, no void, the fixed total.
+    let totals = db
+        .transaction(|tx| Repos::new(tx).corrections().day_totals(OUTLET, day()))
+        .expect("totals");
+    assert_eq!(totals.bills, 1);
+    assert_eq!(totals.voided_bills, 0);
+    assert_eq!(totals.net, right.bill.grand_total);
+}

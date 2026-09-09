@@ -350,6 +350,17 @@ impl OpenOrder {
 }
 
 impl SettledOrder {
+    /// Back to the counter to be fixed: the same order, the same numbers, the bill and the
+    /// payments dropped so it can be billed and paid again.
+    #[must_use]
+    pub fn reopen(self) -> OpenOrder {
+        OpenOrder {
+            core: self.core,
+            token: self.token,
+            bill_number: self.bill_number,
+        }
+    }
+
     /// Reverse a bill that should not have been made.
     pub fn void(self, reason: &str, by: StaffId, at: Timestamp) -> Result<VoidedOrder> {
         Ok(VoidedOrder {

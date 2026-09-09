@@ -20,7 +20,9 @@ import type { RoleView } from './generated/RoleView';
 import type { StaffEdit } from './generated/StaffEdit';
 import type { AuditView } from './generated/AuditView';
 import type { BillRowView } from './generated/BillRowView';
-import type { DayTotalsView } from './generated/DayTotalsView';
+import type { BillFilter } from './generated/BillFilter';
+import type { BillsView } from './generated/BillsView';
+import type { BillDetailView } from './generated/BillDetailView';
 import type { ReasonView } from './generated/ReasonView';
 import type { MenuRowView } from './generated/MenuRowView';
 import type { MenuEdit } from './generated/MenuEdit';
@@ -226,8 +228,18 @@ export interface Commands {
   };
 
   // The four ways a shop takes something back.
-  list_bills: { args: void; returns: BillRowView[] };
-  day_totals: { args: void; returns: DayTotalsView };
+  bills: { args: { filter: BillFilter }; returns: BillsView };
+  bill_detail: { args: { orderId: string }; returns: BillDetailView };
+  revert_bill: {
+    args: {
+      orderId: string;
+      reason: string;
+      approverStaffId: string | null;
+      approverPin: string | null;
+    };
+    returns: string;
+  };
+  approve_revert: { args: { revertId: string }; returns: void };
   reasons: { args: { kind: string }; returns: ReasonView[] };
   void_bill: {
     args: {

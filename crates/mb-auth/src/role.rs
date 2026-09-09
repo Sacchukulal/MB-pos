@@ -129,6 +129,7 @@ impl RolePreset {
             RolePreset::Cashier => [
                 Permission::BillCreate,
                 Permission::BillDiscountLine,
+                Permission::BillRevert,
                 Permission::BillReprint,
                 Permission::DrawerOpen,
                 Permission::CreditCollect,

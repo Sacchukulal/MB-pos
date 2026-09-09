@@ -2,6 +2,6 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * The three figures that must tie, for the screen's footer.
+ * The three figures that must tie, for the screen's header.
  */
 export type DayTotalsView = { gross: MoneyView, voids: MoneyView, net: MoneyView, refunded: MoneyView, bills: bigint, voidedBills: bigint, cancelledOrders: bigint, };

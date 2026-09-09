@@ -256,6 +256,12 @@ fn t8_every_named_index_exists() {
         "idx_payments_day_mode",
         "idx_payments_order",
         "idx_reprints_day",
+        // The register of bills taken back: read by day for the Bills screen, by order for
+        // one bill's history, and its lines and payments by revert.
+        "idx_bill_reverts_day",
+        "idx_bill_reverts_order",
+        "idx_bill_revert_lines_revert",
+        "idx_bill_revert_payments_revert",
         "idx_reservations_day",
         "idx_sync_outbox_pending",
         // The authentication path reads the live device register on EVERY request, because

@@ -701,8 +701,16 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
-                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
+                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
+                        ))
+                        .expect("a seeded slab")
+                        .0,
+                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
+                        ))
+                        .expect("a seeded slab")
+                        .1,
                         hsn: None,
                         cost_price: None,
                         short_code: None,
@@ -800,8 +808,8 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
 // The four ways a shop takes something back, driven end to end.
 
 use crate::corrections::{
-    cancel_order_on, day_totals_on, list_bills_on, refund_on, reprint_bill_on, void_bill_on,
-    void_line_on,
+    BillFilter, approve_revert_on, bill_detail_on, bills_on, cancel_order_on, day_totals_on,
+    list_bills_on, refund_on, reprint_bill_on, revert_bill_on, void_bill_on, void_line_on,
 };
 
 /// A shop with a menu and an owner, ready to trade.
@@ -818,8 +826,16 @@ fn a_trading_shop(scratch: &Scratch) -> App {
                         category_id: None,
                         name: "Masala Tea".to_owned(),
                         unit_price: mb_core::Money::from_paise(2_500),
-                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
-                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(mb_core::TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
+                        tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
+                        ))
+                        .expect("a seeded slab")
+                        .0,
+                        price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                            mb_core::TaxRate::from_percent(5).expect("5%"),
+                        ))
+                        .expect("a seeded slab")
+                        .1,
                         hsn: None,
                         cost_price: None,
                         short_code: None,
@@ -954,6 +970,137 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     let again = void_bill_on(&app, target, "Again".to_owned(), None, None)
         .expect_err("the same bill was voided twice");
     assert_eq!(again.code, "void.not_settled");
+}
+
+/// A wrong bill comes back to the counter under the SAME number, is fixed and billed again,
+/// and the register says who, why and what changed — signed off by a manager later.
+#[test]
+fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
+    let scratch = Scratch::new("revert_flow");
+    let app = a_trading_shop(&scratch);
+
+    order_teas(&app, 2);
+    let number = settle_the_cart(&app);
+    let order_id = list_bills_on(&app).expect("bills")[0].order_id.clone();
+
+    // Something on the counter: refused, and nothing changes.
+    order_teas(&app, 1);
+    let busy = revert_bill_on(
+        &app,
+        order_id.clone(),
+        "Wrong quantity".to_owned(),
+        None,
+        None,
+    )
+    .expect_err("a revert went ahead over a bill on the counter");
+    assert_eq!(busy.code, "revert.counter_busy");
+    app.with_cart_mut(|state| {
+        state.cart.clear();
+        Ok(())
+    })
+    .expect("cleared");
+
+    let said = revert_bill_on(
+        &app,
+        order_id.clone(),
+        "Wrong quantity".to_owned(),
+        None,
+        None,
+    )
+    .expect("reverted");
+    println!("\n  {said}");
+
+    // The same order and the same number are on the counter; the bill is off the list.
+    let (lines, on_counter, id_on_counter) = app
+        .with_cart(|state| {
+            Ok((
+                state.cart.len(),
+                state.bill_number.clone(),
+                state.order_id().map(str::to_owned),
+            ))
+        })
+        .expect("the cart");
+    assert_eq!(lines, 1);
+    assert_eq!(on_counter.as_deref(), Some(number.as_str()));
+    assert_eq!(id_on_counter.as_deref(), Some(order_id.as_str()));
+    assert!(
+        list_bills_on(&app).expect("bills").is_empty(),
+        "a bill on the counter is still listed as a bill"
+    );
+
+    // Fix it and bill it again.
+    app.with_cart_mut(|state| {
+        state
+            .cart
+            .set_qty(0, mb_core::Qty::from_whole(1).expect("in range"))
+            .map_err(|e| crate::words::UiError::new("test", e.to_string()))
+    })
+    .expect("fixed");
+    let again = settle_the_cart(&app);
+    assert_eq!(again, number, "the number changed on the way back");
+
+    // The list: one bill, paid, marked as edited and waiting.
+    let view = bills_on(&app, BillFilter::default()).expect("the list");
+    assert_eq!(view.rows.len(), 1);
+    let row = &view.rows[0];
+    assert_eq!(row.number, number);
+    assert_eq!(row.state, "settled");
+    assert!(row.edited);
+    assert_eq!(row.approval.as_deref(), Some("waiting"));
+    assert_eq!(row.paid_by, "Cash");
+    assert_eq!(view.waiting, 1);
+
+    // The register says what it was and what changed.
+    let detail = bill_detail_on(&app, order_id.clone()).expect("the detail");
+    assert_eq!(detail.edits.len(), 1);
+    let edit = &detail.edits[0];
+    assert_eq!(edit.reason, "Wrong quantity");
+    assert_eq!(edit.before_lines.len(), 1);
+    assert_eq!(edit.before_lines[0].qty, "2");
+    assert_eq!(edit.before_paid_by, "Cash");
+    println!("  changes: {:?}", edit.changes);
+    assert!(
+        edit.changes.iter().any(|c| c == "Masala Tea: 2 → 1"),
+        "the quantity change is not in the register: {:?}",
+        edit.changes
+    );
+    assert!(detail.can_approve, "the owner cannot approve");
+
+    // Filters are Rust's.
+    let only_edited = bills_on(
+        &app,
+        BillFilter {
+            state: Some("edited".to_owned()),
+            ..BillFilter::default()
+        },
+    )
+    .expect("filtered");
+    assert_eq!(only_edited.rows.len(), 1);
+    let by_number = bills_on(
+        &app,
+        BillFilter {
+            query: Some(number.clone()),
+            ..BillFilter::default()
+        },
+    )
+    .expect("searched");
+    assert_eq!(by_number.rows.len(), 1);
+
+    // Signed off, once.
+    approve_revert_on(&app, edit.id.clone()).expect("approved");
+    let after = bill_detail_on(&app, order_id).expect("the detail again");
+    assert_eq!(after.row.approval.as_deref(), Some("approved"));
+    assert!(!after.can_approve);
+    assert!(
+        approve_revert_on(&app, edit.id.clone()).is_err(),
+        "approved twice"
+    );
+
+    // And the day ties: one bill, no void, the fixed total.
+    let totals = day_totals_on(&app).expect("totals");
+    assert_eq!(totals.bills, 1);
+    assert_eq!(totals.voided_bills, 0);
+    assert_eq!(totals.net.paise, totals.gross.paise);
 }
 
 /// The manager PIN is enforced in Rust, four ways.
@@ -1236,7 +1383,11 @@ fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
     assert!(view.lines.is_empty(), "the line is still on the bill");
 
     // Exactly one slip, and it is a cancellation.
-    assert_eq!(slips.len(), 1, "expected exactly one cancellation slip: {slips:?}");
+    assert_eq!(
+        slips.len(),
+        1,
+        "expected exactly one cancellation slip: {slips:?}"
+    );
     assert!(a_slip_said(&slips, "cancellation"), "{slips:?}");
 
     // Nothing comes back.

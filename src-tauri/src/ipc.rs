@@ -448,8 +448,10 @@ macro_rules! commands {
             $crate::ipc::list_permissions,
             $crate::ipc::audit_trail,
             // The four ways a shop takes something back.
-            $crate::corrections::list_bills,
-            $crate::corrections::day_totals,
+            $crate::corrections::bills,
+            $crate::corrections::bill_detail,
+            $crate::corrections::revert_bill,
+            $crate::corrections::approve_revert,
             $crate::corrections::reasons,
             $crate::corrections::void_bill,
             $crate::corrections::cancel_order,

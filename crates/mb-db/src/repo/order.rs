@@ -248,6 +248,23 @@ impl<'a> OrderRepo<'a> {
         )
     }
 
+    /// A run of business days, every state, oldest first — the bills list.
+    pub fn list_between(
+        &self,
+        outlet: &str,
+        from: mb_core::BusinessDay,
+        to: mb_core::BusinessDay,
+    ) -> Result<Vec<AnyOrder>, DbError> {
+        self.list_where(
+            "outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3 ORDER BY created_at",
+            rusqlite::params![
+                outlet,
+                encode::business_day_to_sql(from),
+                encode::business_day_to_sql(to)
+            ],
+        )
+    }
+
     /// Every order, oldest first.
     pub fn list_all(&self) -> Result<Vec<AnyOrder>, DbError> {
         self.list_where("1 = 1 ORDER BY created_at, id", rusqlite::params![])

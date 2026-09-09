@@ -24,9 +24,3 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The four figures at the top of the Bills screen. */
-.mb-bills__stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--dash-stat), 1fr));
-  gap: var(--gap-field);
-}

@@ -95,6 +95,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0012_money_has_a_till",
         sql: include_str!("migrations/0012_money_has_a_till.sql"),
     },
+    // The register of bills taken back to the counter, and the permission to do it.
+    Migration {
+        version: 13,
+        name: "0013_bill_reverts",
+        sql: include_str!("migrations/0013_bill_reverts.sql"),
+    },
 ];
 
 /// The highest version this build understands.

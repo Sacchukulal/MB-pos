@@ -257,6 +257,8 @@
   --dayclose-box: 5rem;
   /* Four stat cards across at 1366. */
   --dash-stat: 12rem;
+  /* The totals column of an opened bill. */
+  --bill-totals: 20rem;
 
   /* A fact's column on a page of facts, and the label column of a folder row. */
   --fact-column: 12rem;

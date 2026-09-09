@@ -958,6 +958,15 @@ textarea.mb-input {
   border-bottom: none;
 }
 
+/* A row that opens something. */
+.mb-table__row--press {
+  cursor: pointer;
+}
+
+.mb-table__row--press:hover td {
+  background: var(--surface-2);
+}
+
 .mb-table td:first-child {
   white-space: normal;
   overflow-wrap: anywhere;

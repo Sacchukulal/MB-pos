@@ -163,6 +163,7 @@ export function Table<Row>({
   empty,
   footer,
   dense = false,
+  onRow,
 }: {
   columns: readonly Column<Row>[];
   rows: readonly Row[];
@@ -172,6 +173,8 @@ export function Table<Row>({
   footer?: readonly ReactNode[];
   /** Tighter rows, for a list that runs to hundreds — a menu. */
   dense?: boolean;
+  /** Pressing a row opens it. Buttons inside a cell stop the press themselves. */
+  onRow?: (row: Row) => void;
 }) {
   if (rows.length === 0 && empty) return <>{empty}</>;
 
@@ -203,7 +206,11 @@ export function Table<Row>({
       </thead>
       <tbody>
         {rows.map((row, rowIndex) => (
-          <tr key={rowKey(row)}>
+          <tr
+            key={rowKey(row)}
+            className={onRow ? 'mb-table__row--press' : undefined}
+            onClick={onRow ? () => onRow(row) : undefined}
+          >
             {columns.map((column, index) => {
               if (!keep[index]) return null;
               const cell = cells[rowIndex]?.[index];

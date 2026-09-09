@@ -17,6 +17,7 @@ import {
   type Column,
 } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
+import { Bills } from './Bills';
 import { Dashboard } from './Dashboard';
 import { Days } from './Days';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
@@ -74,8 +75,8 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   // One effect, one call: whenever the report or the period changes, ask again.
   useEffect(() => {
-    // Neither the dashboard nor the days screen is a report.
-    if (!from || !to || chosen === DAYS || chosen === TODAY) return;
+    // The dashboard, the bills and the days are not reports.
+    if (!from || !to || chosen === DAYS || chosen === TODAY || chosen === BILLS) return;
     setBusy(true);
     call('report', { id: chosen, period: { from, to } })
       .then(setReport)
@@ -102,10 +103,9 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       .catch(complain);
   };
 
-  if (locked) {
-    return <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />;
-  }
-  if (!list) return <Spinner label="Opening the reports" />;
+  // A licence refusal closes the reports, never the bills or the days: voiding, reprinting
+  // and closing the day are billing, and billing is never behind the plan.
+  if (!list && !locked) return <Spinner label="Opening the reports" />;
 
   const columns: readonly Column<Line>[] =
     report?.columns.map((spec, index) => ({
@@ -129,6 +129,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             // right, and two buttons saying the same word that do different things is how a
             // screen teaches somebody to distrust it.
             { id: TODAY, label: 'Today at a glance' },
+            { id: BILLS, label: 'Bills' },
             { id: DAYS, label: 'Days' },
           ].map((entry) => (
             <button
@@ -146,7 +147,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             </button>
           ))}
         </div>
-        {groups(list.reports).map(([group, entries]) => (
+        {groups(list?.reports ?? []).map(([group, entries]) => (
           <div className="mb-reports__group" key={group}>
             <h2 className="mb-reports__grouptitle">{group}</h2>
             {entries.map((entry) => (
@@ -169,10 +170,14 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       </Scroller>
 
       <div className="mb-reports__body">
-        {chosen === TODAY ? (
-          <Dashboard />
+        {chosen === BILLS ? (
+          <Bills onGoTo={onGoTo} />
         ) : chosen === DAYS ? (
           <Days />
+        ) : locked || !list ? (
+          <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
+        ) : chosen === TODAY ? (
+          <Dashboard />
         ) : (
           <>
         <div className="mb-reports__when">
@@ -298,6 +303,9 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
 /** Not a report id — the one entry on this screen that is a thing to DO. */
 const DAYS = 'days';
+
+/** Nor are the bills: one at a time, with the ways to take one back. */
+const BILLS = 'bills';
 
 /** Nor is the dashboard: it is the answer to a question, not a report. */
 const TODAY = 'today';

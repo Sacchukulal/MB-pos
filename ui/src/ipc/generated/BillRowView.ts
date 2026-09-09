@@ -2,9 +2,13 @@
 import type { MoneyView } from "./MoneyView";
 
 /**
- * One of today's bills, as the Bills list shows it.
+ * One bill, as the Bills list shows it.
  */
-export type BillRowView = { orderId: string, number: string, at: string, table: string | null, orderType: string, total: MoneyView, cashier: string | null, 
+export type BillRowView = { orderId: string, number: string, at: string, table: string | null, orderType: string, items: number, total: MoneyView, 
+/**
+ * "Cash", "UPI", "Cash + Card".
+ */
+paidBy: string, cashier: string | null, 
 /**
  * "settled", "voided", "cancelled".
  */
@@ -16,4 +20,12 @@ voidReason: string | null, refunded: MoneyView | null,
 /**
  * How many pieces of paper this bill has produced beyond the first.
  */
-reprints: number, };
+reprints: number, 
+/**
+ * The bill was taken back to the counter and billed again under this number.
+ */
+edited: boolean, 
+/**
+ * On an edited bill: "waiting" or "approved".
+ */
+approval: string | null, };
