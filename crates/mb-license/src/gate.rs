@@ -1,9 +1,9 @@
 //! What the gate is able to refuse — and the proof that billing is not on the list.
 //!
-//! Phones are not on it either. Every running plan lets phones in; how many is
-//! `Limits::devices`, a number the cloud resolves (this licence, else its plan, else the
-//! global default the admin panel sets). No feature code can switch phones off, so a plan made
-//! without one does not take a shop's phones away.
+//! Phones are on it as a switch the admin panel holds, on for every plan unless somebody turns
+//! it off; how many is `Limits::devices`, a number the cloud resolves (this licence, else its
+//! plan, else the global default the admin panel sets). A plan made without the code is a plan
+//! somebody chose to make that way, never an accident of an import.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 pub enum Feature {
     /// The reports screen and its exports.
     Reports,
+    /// Waiters taking orders on their phones. On by default; the admin panel may switch it off.
+    MobileOrdering,
     /// More than one till on the same shop.
     MultiTerminal,
     /// The stock book — materials, recipes, food cost and the variance report.
@@ -21,8 +23,12 @@ pub enum Feature {
 
 impl Feature {
     /// Every feature, for the tests and for the account screen's limits panel.
-    pub const ALL: &'static [Feature] =
-        &[Feature::Reports, Feature::MultiTerminal, Feature::Inventory];
+    pub const ALL: &'static [Feature] = &[
+        Feature::Reports,
+        Feature::MobileOrdering,
+        Feature::MultiTerminal,
+        Feature::Inventory,
+    ];
 
     /// Closing the day is not a report, and this constant is where that decision is written.
     pub const REPORTS_DOES_NOT_MEAN_THE_DAY_CLOSE: &'static [&'static str] = &[
@@ -43,6 +49,7 @@ impl Feature {
     pub const fn code(self) -> &'static str {
         match self {
             Feature::Reports => "reports",
+            Feature::MobileOrdering => "mobile-ordering",
             Feature::MultiTerminal => "multi-terminal",
             Feature::Inventory => "inventory",
         }
@@ -53,6 +60,7 @@ impl Feature {
     pub const fn in_words(self) -> &'static str {
         match self {
             Feature::Reports => "reports",
+            Feature::MobileOrdering => "phone ordering",
             Feature::MultiTerminal => "extra tills",
             Feature::Inventory => "stock and recipes",
         }
@@ -101,7 +109,7 @@ mod tests {
         let codes: Vec<&str> = Feature::ALL.iter().map(|f| f.code()).collect();
         assert_eq!(
             codes,
-            vec!["reports", "multi-terminal", "inventory"],
+            vec!["reports", "mobile-ordering", "multi-terminal", "inventory"],
             "the list of gateable features changed"
         );
         for banned in [
@@ -111,9 +119,6 @@ mod tests {
             "print",
             "local-backup",
             "drawer",
-            // Phones are counted by the plan's limit, never switched off by a code. A counter
-            // before 1.6.10 read this one, and the cloud still sends it for those.
-            "mobile-ordering",
         ] {
             assert!(
                 Feature::from_code(banned).is_none(),

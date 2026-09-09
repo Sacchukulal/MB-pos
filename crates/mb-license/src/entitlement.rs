@@ -252,7 +252,7 @@ mod tests {
             assert!(entitlement.may(*feature).is_err(), "{feature:?}");
         }
         // ...and billing is not one of the things it can be asked.
-        assert_eq!(Feature::ALL.len(), 3);
+        assert_eq!(Feature::ALL.len(), 4);
     }
 
     #[test]

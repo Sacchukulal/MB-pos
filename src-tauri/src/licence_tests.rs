@@ -293,7 +293,6 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
     let listed: Vec<&str> = crate::licensing::GATED
         .iter()
         .map(|(name, _)| *name)
-        .chain(crate::licensing::PHONES_GATED.iter().copied())
         .collect();
     for (command, _) in &refusals {
         assert!(
@@ -371,23 +370,16 @@ fn licence_with_plan(scratch: &Scratch, label: &str, features: &[&str], phones: 
     licensing
 }
 
-/// Phones are not a feature a plan can leave out. A plan made in the admin panel with no
-/// feature codes at all — which is what every plan imported from Razorpay looked like — still
-/// lets its phones in; only the phone count says how many.
+/// Phone ordering is a switch the admin panel holds, on for every plan unless somebody turns it
+/// off. A plan that has it, with phones to spare, lets a phone in; a plan without it refuses by
+/// name, whatever its phone count says.
 #[test]
-fn phones_do_not_depend_on_a_feature_code() {
-    let scratch = Scratch::new("phones_plan");
-    let app = a_trading_shop(&scratch, "phones_plan");
-    app.use_licensing(licence_with_plan(&scratch, "bare", &[], 10));
-
-    let entitlement = app.entitlement();
-    assert_eq!(entitlement.standing, Standing::Fine);
-    assert!(
-        entitlement.may(Feature::Reports).is_err(),
-        "reports IS a feature"
-    );
+fn phone_ordering_is_the_plans_switch() {
+    let scratch = Scratch::new("phones_switch");
+    let app = a_trading_shop(&scratch, "phones_switch");
+    app.use_licensing(licence_with_plan(&scratch, "on", &["mobile-ordering"], 10));
+    assert_eq!(app.entitlement().standing, Standing::Fine);
     assert!(crate::licensing::gate_phones(&app).is_ok());
-    assert_eq!(entitlement.limits.devices, 10);
     // The command itself: whatever else stops it in a test (no network is up), it is not the
     // plan.
     if let Err(e) = crate::lan::open_pairing_on(&app) {
@@ -396,18 +388,35 @@ fn phones_do_not_depend_on_a_feature_code() {
             "refused by the plan: {e:?}"
         );
     }
-    // And the old code, still sent by the cloud for counters before 1.6.10, changes nothing.
-    app.use_licensing(licence_with_plan(&scratch, "old", &["mobile-ordering"], 10));
-    assert!(crate::licensing::gate_phones(&app).is_ok());
+
+    app.use_licensing(licence_with_plan(&scratch, "off", &["reports"], 10));
+    let refusal = crate::licensing::gate_phones(&app).expect_err("phones were allowed");
+    assert_eq!(refusal.code, "licence.not_in_plan");
+    assert!(
+        refusal.message.contains("phone ordering"),
+        "{}",
+        refusal.message
+    );
+    assert_eq!(
+        crate::lan::open_pairing_on(&app)
+            .expect_err("pairing was allowed")
+            .code,
+        "licence.not_in_plan"
+    );
 }
 
-/// The count is the control: a plan with no phones refuses them, in its own words, with
-/// billing untouched.
+/// Past the switch, the count is the control: a plan with no phones refuses them, in its own
+/// words, with billing untouched.
 #[test]
 fn a_plan_with_no_phones_refuses_them_by_the_count() {
     let scratch = Scratch::new("phones_none");
     let app = a_trading_shop(&scratch, "phones_none");
-    app.use_licensing(licence_with_plan(&scratch, "none", &["reports"], 0));
+    app.use_licensing(licence_with_plan(
+        &scratch,
+        "none",
+        &["reports", "mobile-ordering"],
+        0,
+    ));
 
     let refusal = crate::licensing::gate_phones(&app).expect_err("phones were allowed");
     assert_eq!(refusal.code, "licence.no_phones");

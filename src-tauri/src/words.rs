@@ -376,8 +376,8 @@ pub fn licence_refusal(
     ))
 }
 
-/// Why a phone may not be added right now, or nothing when it may. Phones are not a plan
-/// feature: a running plan has them, and the plan's phone count is the only limit.
+/// Why a phone may not be added right now, past the plan's own switch: the plan is not running,
+/// or its phone count is zero.
 #[must_use]
 pub fn phones_refusal(
     entitlement: &mb_license::Entitlement,
